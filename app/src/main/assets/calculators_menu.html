@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Photometry Calculators</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; background: #1F2937; color: white; }
+        .top-nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            max-width: 28rem;
+            margin: 0 auto;
+            background: #1F2937;
+            border-bottom: 1px solid #374151;
+            padding: 8px 16px;  /* shorter vertical height */
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 56px;  /* fixed shorter height */
+        }
+        .nav-items {
+            display: flex;
+            gap: 24px;
+        }
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: #9CA3AF;
+            font-size: 10px;  /* smaller labels */
+            font-weight: 600;
+            transition: color 0.2s;
+            cursor: pointer;
+        }
+        .nav-item-active {
+            color: #FBBF24;
+            text-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+        }
+        .nav-icon {
+            font-size: 20px;  /* smaller icons */
+            margin-bottom: 2px;
+        }
+        .login-btn {
+            background: #FBBF24;
+            color: #111827;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 13px;
+            border: none;
+            cursor: pointer;
+        }
+        .avatar-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #1F2937;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            border: 2px solid #FBBF24;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        .content-area { flex: 1; overflow-y: auto; padding-top: 72px; padding-bottom: calc(20px + env(safe-area-inset-bottom, 0)); }
+    </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+    const App = () => {
+        const navigateTo = (file) => {
+            window.location.href = file;
+        };
+
+        return (
+            <div className="min-h-screen bg-gray-900">
+                <div className="top-nav">
+                    <div className="nav-items">
+                        <div className="nav-item" onClick={() => navigateTo('index.html')}>
+                            <div className="nav-icon">🏠</div>
+                            <div className="nav-label">Home</div>
+                        </div>
+                        <div className="nav-item" onClick={() => navigateTo('service_hub.html')}>
+                            <div className="nav-icon">🔧</div>
+                            <div className="nav-label">Service Hub</div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                        <div className="nav-item">
+                            <div className="nav-icon">⚙️</div>
+                            <div className="nav-label">Settings</div>
+                        </div>
+                        <button className="login-btn">Login</button>
+                    </div>
+                </div>
+
+                <div className="p-6 pt-16">
+                    <h1 className="text-4xl font-bold text-yellow-400 mb-8 text-center">Photometry Calculators</h1>
+                    <p className="text-gray-300 text-center mb-10">Select a tool</p>
+
+                    <div className="grid grid-cols-2 gap-4 max-w-md mx-auto">
+                        <button onClick={() => navigateTo('fluence.html')} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-xl shadow-lg transition-all text-center">
+                            <div className="text-6xl mb-4">⚡</div>
+                            <h2 className="text-2xl font-bold text-yellow-400">Fluence</h2>
+                            <p className="text-gray-400 mt-2">Energy Density</p>
+                        </button>
+
+                        <button onClick={() => navigateTo('irradiance.html')} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-xl shadow-lg transition-all text-center">
+                            <div className="text-6xl mb-4">💡</div>
+                            <h2 className="text-2xl font-bold text-yellow-400">Irradiance</h2>
+                            <p className="text-gray-400 mt-2">Power Density</p>
+                        </button>
+
+                        <button onClick={() => navigateTo('duty_cycle.html')} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-xl shadow-lg transition-all text-center">
+                            <div className="text-6xl mb-4">🔄</div>
+                            <h2 className="text-2xl font-bold text-yellow-400">Duty Cycle</h2>
+                            <p className="text-gray-400 mt-2">Pulse Cycle</p>
+                        </button>
+
+                        <button onClick={() => navigateTo('wavelength.html')} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-xl shadow-lg transition-all text-center">
+                            <div className="text-6xl mb-4">📏</div>
+                            <h2 className="text-2xl font-bold text-yellow-400">VBeam WL</h2>
+                            <p className="text-gray-400 mt-2">Wavelength</p>
+                        </button>
+
+                        <button onClick={() => navigateTo('avgpower.html')} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-xl shadow-lg transition-all text-center">
+                            <div className="text-6xl mb-4">⚡</div>
+                            <h2 className="text-2xl font-bold text-yellow-400">Average Power</h2>
+                            <p className="text-gray-400 mt-2">Energy × Frequency</p>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+</script>
+</body>
+</html>

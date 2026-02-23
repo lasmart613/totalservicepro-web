@@ -1,0 +1,636 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>VBeam Wavelength Calculator</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: #2b2b2b;
+            color: #ffffff;
+            min-height: 100vh;
+            padding: 20px;
+            padding-bottom: 100px;
+        }
+
+        .container {
+            max-width: 500px;
+            margin: 0 auto;
+        }
+
+        .card {
+            background: #3a3a3a;
+            border-radius: 15px;
+            padding: 25px;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.5);
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            color: #ffd700;
+            font-size: 24px;
+            margin-bottom: 8px;
+            text-align: center;
+        }
+
+        .subtitle {
+            color: #aaaaaa;
+            font-size: 13px;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .step-indicator {
+            display: flex;
+            justify-content: center;
+            gap: 10px;
+            margin-bottom: 20px;
+        }
+
+        .step-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: #555555;
+            transition: all 0.3s;
+        }
+
+        .step-dot.active {
+            background: #ffd700;
+            transform: scale(1.3);
+        }
+
+        .form-group {
+            margin-bottom: 18px;
+        }
+
+        label {
+            display: block;
+            color: #ffd700;
+            font-weight: 600;
+            margin-bottom: 8px;
+            font-size: 14px;
+        }
+
+        input, select {
+            width: 100%;
+            padding: 14px;
+            border: 2px solid #555555;
+            border-radius: 10px;
+            font-size: 16px;
+            transition: all 0.3s;
+            background: #2b2b2b;
+            color: #ffffff;
+        }
+
+        input:focus, select:focus {
+            outline: none;
+            border-color: #ffd700;
+            box-shadow: 0 0 0 3px rgba(255, 215, 0, 0.2);
+        }
+
+        select {
+            cursor: pointer;
+        }
+
+        select option {
+            background: #2b2b2b;
+            color: #ffffff;
+        }
+
+        .button-group {
+            display: flex;
+            gap: 10px;
+            margin-top: 20px;
+        }
+
+        button {
+            flex: 1;
+            padding: 15px;
+            border: none;
+            border-radius: 10px;
+            font-size: 15px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+
+        .btn-primary {
+            background: #ffd700;
+            color: #2b2b2b;
+        }
+
+        .btn-primary:hover {
+            background: #ffed4e;
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(255, 215, 0, 0.4);
+        }
+
+        .btn-secondary {
+            background: #555555;
+            color: #ffffff;
+        }
+
+        .btn-secondary:hover {
+            background: #666666;
+        }
+
+        .result-card {
+            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
+            color: #2b2b2b;
+            padding: 25px;
+            border-radius: 12px;
+            text-align: center;
+            margin-top: 20px;
+            display: none;
+        }
+
+        .result-card.show {
+            display: block;
+            animation: slideIn 0.3s ease-out;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .result-label {
+            font-size: 13px;
+            font-weight: 600;
+            opacity: 0.8;
+            margin-bottom: 5px;
+        }
+
+        .result-value {
+            font-size: 42px;
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+
+        .result-unit {
+            font-size: 16px;
+            font-weight: 600;
+            opacity: 0.8;
+        }
+
+        .screen {
+            display: none;
+        }
+
+        .screen.active {
+            display: block;
+        }
+
+        .info-box {
+            background: #4a4a4a;
+            border-left: 4px solid #ffd700;
+            padding: 14px;
+            border-radius: 8px;
+            margin-bottom: 18px;
+            font-size: 13px;
+            color: #dddddd;
+        }
+
+        .info-box strong {
+            color: #ffd700;
+        }
+
+        .calculation-details {
+            background: rgba(43, 43, 43, 0.5);
+            padding: 14px;
+            border-radius: 8px;
+            margin-top: 15px;
+            font-size: 12px;
+            text-align: left;
+        }
+
+        .calculation-details div {
+            margin-bottom: 4px;
+        }
+
+        .calculation-details strong {
+            font-weight: 700;
+        }
+
+        .correction-status {
+            text-align: center;
+            color: #ffd700;
+            font-size: 12px;
+            margin-top: 10px;
+            font-weight: 600;
+        }
+
+        input::placeholder {
+            color: #777777;
+        }
+    </style>
+</head>
+<body>
+<div class="container">
+    <div class="card">
+        <h1>VBeam Wavelength Calculator</h1>
+        <p class="subtitle">Candela VBeam Wavelength Determination</p>
+
+        <div class="step-indicator">
+            <div class="step-dot" id="dot1"></div>
+            <div class="step-dot" id="dot2"></div>
+            <div class="step-dot" id="dot3"></div>
+        </div>
+
+        <!-- Screen 1: Correction Factor Setup -->
+        <div class="screen active" id="screen1">
+            <div class="info-box">
+                Set the correction factor printed on your filter. This only needs to be set once.
+            </div>
+
+            <div class="form-group">
+                <label for="correctionFactor">Correction Factor (nm)</label>
+                <select id="correctionFactor">
+                    <option value="-0.5">-0.5 nm</option>
+                    <option value="-0.4">-0.4 nm</option>
+                    <option value="-0.3">-0.3 nm</option>
+                    <option value="-0.2">-0.2 nm</option>
+                    <option value="-0.1">-0.1 nm</option>
+                    <option value="0.0" selected>0.0 nm</option>
+                    <option value="0.1">+0.1 nm</option>
+                    <option value="0.2">+0.2 nm</option>
+                    <option value="0.3">+0.3 nm</option>
+                    <option value="0.4">+0.4 nm</option>
+                    <option value="0.5">+0.5 nm</option>
+                </select>
+            </div>
+
+            <div class="correction-status" id="correctionStatus"></div>
+
+            <div class="button-group">
+                <button class="btn-primary" onclick="goToScreen2()">Next: Readings Without Filter</button>
+            </div>
+        </div>
+
+        <!-- Screen 2: Readings WITHOUT Filter -->
+        <div class="screen" id="screen2">
+            <div class="info-box">
+                Take readings <strong>WITHOUT</strong> the filter installed.
+            </div>
+
+            <div class="form-group">
+                <label for="energyOut1">Energy out of fiber (mJ)</label>
+                <input type="number" id="energyOut1" step="0.01" placeholder="Enter energy">
+            </div>
+
+            <div class="form-group">
+                <label for="hd1_1">Head Detector 1 (HD1) (mJ)</label>
+                <input type="number" id="hd1_1" step="0.01" placeholder="Enter HD1 reading">
+            </div>
+
+            <div class="button-group">
+                <button class="btn-secondary" onclick="goToScreen1()">Back</button>
+                <button class="btn-primary" onclick="goToScreen3()">Next: With Filter</button>
+            </div>
+        </div>
+
+        <!-- Screen 3: Readings WITH Filter -->
+        <div class="screen" id="screen3">
+            <div class="info-box">
+                Take readings <strong>WITH</strong> the filter installed.
+            </div>
+
+            <div class="form-group">
+                <label for="energyOut2">Energy out of fiber (mJ)</label>
+                <input type="number" id="energyOut2" step="0.01" placeholder="Enter energy">
+            </div>
+
+            <div class="form-group">
+                <label for="hd1_2">Head Detector 1 (HD1) (mJ)</label>
+                <input type="number" id="hd1_2" step="0.01" placeholder="Enter HD1 reading">
+            </div>
+
+            <div class="button-group">
+                <button class="btn-secondary" onclick="goToScreen2()">Back</button>
+                <button class="btn-primary" onclick="calculateWavelength()">Calculate Wavelength</button>
+            </div>
+
+            <div class="result-card" id="resultCard">
+                <div class="result-label">Calculated Wavelength</div>
+                <div class="result-value" id="wavelengthResult">---</div>
+                <div class="result-unit">nm</div>
+
+                <div class="calculation-details" id="calcDetails"></div>
+            </div>
+
+            <div class="button-group" style="margin-top: 20px;">
+                <button class="btn-secondary" onclick="resetCalculator()">New Calculation</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    // Wavelength lookup table (Delta% → Wavelength in nm)
+    const lookupTable = [
+        {delta: 5.83, wavelength: 586.00},
+        {delta: 5.97, wavelength: 586.10},
+        {delta: 6.11, wavelength: 586.20},
+        {delta: 6.25, wavelength: 586.30},
+        {delta: 6.39, wavelength: 586.40},
+        {delta: 6.53, wavelength: 586.50},
+        {delta: 6.67, wavelength: 586.60},
+        {delta: 6.81, wavelength: 586.70},
+        {delta: 6.95, wavelength: 586.80},
+        {delta: 7.09, wavelength: 586.90},
+        {delta: 7.23, wavelength: 587.00},
+        {delta: 7.47, wavelength: 587.10},
+        {delta: 7.71, wavelength: 587.20},
+        {delta: 7.95, wavelength: 587.30},
+        {delta: 8.19, wavelength: 587.40},
+        {delta: 8.44, wavelength: 587.50},
+        {delta: 8.68, wavelength: 587.60},
+        {delta: 8.92, wavelength: 587.70},
+        {delta: 9.16, wavelength: 587.80},
+        {delta: 9.40, wavelength: 587.90},
+        {delta: 9.64, wavelength: 588.00},
+        {delta: 9.95, wavelength: 588.10},
+        {delta: 10.25, wavelength: 588.20},
+        {delta: 10.55, wavelength: 588.30},
+        {delta: 10.85, wavelength: 588.40},
+        {delta: 11.16, wavelength: 588.50},
+        {delta: 11.46, wavelength: 588.60},
+        {delta: 11.76, wavelength: 588.70},
+        {delta: 12.06, wavelength: 588.80},
+        {delta: 12.36, wavelength: 588.90},
+        {delta: 12.66, wavelength: 589.00},
+        {delta: 12.93, wavelength: 589.10},
+        {delta: 13.19, wavelength: 589.20},
+        {delta: 13.46, wavelength: 589.30},
+        {delta: 13.73, wavelength: 589.40},
+        {delta: 14.00, wavelength: 589.50},
+        {delta: 14.26, wavelength: 589.60},
+        {delta: 14.53, wavelength: 589.70},
+        {delta: 14.79, wavelength: 589.80},
+        {delta: 15.06, wavelength: 589.90},
+        {delta: 15.32, wavelength: 590.00},
+        {delta: 15.46, wavelength: 590.10},
+        {delta: 15.60, wavelength: 590.20},
+        {delta: 15.74, wavelength: 590.30},
+        {delta: 15.87, wavelength: 590.40},
+        {delta: 16.01, wavelength: 590.50},
+        {delta: 16.15, wavelength: 590.60},
+        {delta: 16.29, wavelength: 590.70},
+        {delta: 16.43, wavelength: 590.80},
+        {delta: 16.57, wavelength: 590.90},
+        {delta: 16.71, wavelength: 591.00},
+        {delta: 16.82, wavelength: 591.10},
+        {delta: 16.93, wavelength: 591.20},
+        {delta: 17.05, wavelength: 591.30},
+        {delta: 17.16, wavelength: 591.40},
+        {delta: 17.27, wavelength: 591.50},
+        {delta: 17.38, wavelength: 591.60},
+        {delta: 17.50, wavelength: 591.70},
+        {delta: 17.61, wavelength: 591.80},
+        {delta: 17.72, wavelength: 591.90},
+        {delta: 17.83, wavelength: 592.00},
+        {delta: 18.04, wavelength: 592.10},
+        {delta: 18.24, wavelength: 592.20},
+        {delta: 18.45, wavelength: 592.30},
+        {delta: 18.65, wavelength: 592.40},
+        {delta: 18.86, wavelength: 592.50},
+        {delta: 19.06, wavelength: 592.60},
+        {delta: 19.27, wavelength: 592.70},
+        {delta: 19.47, wavelength: 592.80},
+        {delta: 19.68, wavelength: 592.90},
+        {delta: 19.89, wavelength: 593.00},
+        {delta: 20.24, wavelength: 593.10},
+        {delta: 20.59, wavelength: 593.20},
+        {delta: 20.95, wavelength: 593.30},
+        {delta: 21.30, wavelength: 593.40},
+        {delta: 21.66, wavelength: 593.50},
+        {delta: 22.01, wavelength: 593.60},
+        {delta: 22.37, wavelength: 593.70},
+        {delta: 22.72, wavelength: 593.80},
+        {delta: 23.08, wavelength: 593.90},
+        {delta: 23.43, wavelength: 594.00},
+        {delta: 23.91, wavelength: 594.10},
+        {delta: 24.38, wavelength: 594.20},
+        {delta: 24.86, wavelength: 594.30},
+        {delta: 25.33, wavelength: 594.40},
+        {delta: 25.81, wavelength: 594.50},
+        {delta: 26.28, wavelength: 594.60},
+        {delta: 26.76, wavelength: 594.70},
+        {delta: 27.24, wavelength: 594.80},
+        {delta: 27.72, wavelength: 594.90},
+        {delta: 28.19, wavelength: 595.00},
+        {delta: 28.78, wavelength: 595.10},
+        {delta: 29.36, wavelength: 595.20},
+        {delta: 29.95, wavelength: 595.30},
+        {delta: 30.53, wavelength: 595.40},
+        {delta: 31.12, wavelength: 595.50},
+        {delta: 31.70, wavelength: 595.60},
+        {delta: 32.29, wavelength: 595.70},
+        {delta: 32.87, wavelength: 595.80},
+        {delta: 33.46, wavelength: 595.90},
+        {delta: 34.04, wavelength: 596.00},
+        {delta: 34.61, wavelength: 596.10},
+        {delta: 35.18, wavelength: 596.20},
+        {delta: 35.76, wavelength: 596.30},
+        {delta: 36.33, wavelength: 596.40},
+        {delta: 36.91, wavelength: 596.50},
+        {delta: 37.48, wavelength: 596.60},
+        {delta: 38.05, wavelength: 596.70},
+        {delta: 38.62, wavelength: 596.80},
+        {delta: 39.20, wavelength: 596.90},
+        {delta: 39.77, wavelength: 597.00},
+        {delta: 40.21, wavelength: 597.10},
+        {delta: 40.65, wavelength: 597.20},
+        {delta: 41.10, wavelength: 597.30},
+        {delta: 41.54, wavelength: 597.40},
+        {delta: 41.98, wavelength: 597.50},
+        {delta: 42.42, wavelength: 597.60},
+        {delta: 42.86, wavelength: 597.70},
+        {delta: 43.30, wavelength: 597.80},
+        {delta: 43.75, wavelength: 597.90},
+        {delta: 44.19, wavelength: 598.00},
+        {delta: 44.53, wavelength: 598.10},
+        {delta: 44.87, wavelength: 598.20},
+        {delta: 45.22, wavelength: 598.30},
+        {delta: 45.56, wavelength: 598.40},
+        {delta: 45.90, wavelength: 598.50},
+        {delta: 46.24, wavelength: 598.60},
+        {delta: 46.58, wavelength: 598.70},
+        {delta: 46.92, wavelength: 598.80},
+        {delta: 47.27, wavelength: 598.90},
+        {delta: 47.61, wavelength: 599.00},
+        {delta: 47.95, wavelength: 599.10},
+        {delta: 48.28, wavelength: 599.20},
+        {delta: 48.61, wavelength: 599.30},
+        {delta: 48.94, wavelength: 599.40},
+        {delta: 49.28, wavelength: 599.50},
+        {delta: 49.61, wavelength: 599.60},
+        {delta: 49.95, wavelength: 599.70},
+        {delta: 50.28, wavelength: 599.80},
+        {delta: 50.62, wavelength: 599.90},
+        {delta: 50.95, wavelength: 600.00}
+    ];
+
+    // Load correction factor from localStorage
+    window.onload = function() {
+        const savedFactor = localStorage.getItem('correctionFactor');
+        if (savedFactor !== null) {
+            document.getElementById('correctionFactor').value = savedFactor;
+            updateCorrectionStatus();
+        }
+        updateStepIndicator();
+    };
+
+    // Save correction factor when changed
+    document.getElementById('correctionFactor').addEventListener('change', function() {
+        localStorage.setItem('correctionFactor', this.value);
+        updateCorrectionStatus();
+    });
+
+    function updateCorrectionStatus() {
+        const factor = parseFloat(document.getElementById('correctionFactor').value);
+        const status = document.getElementById('correctionStatus');
+        if (factor === 0) {
+            status.textContent = 'No correction factor applied';
+        } else if (factor > 0) {
+            status.textContent = `Correction factor: +${factor.toFixed(1)} nm saved`;
+        } else {
+            status.textContent = `Correction factor: ${factor.toFixed(1)} nm saved`;
+        }
+    }
+
+    function goToScreen1() {
+        showScreen(1);
+    }
+
+    function goToScreen2() {
+        showScreen(2);
+    }
+
+    function goToScreen3() {
+        const energyOut1 = parseFloat(document.getElementById('energyOut1').value);
+        const hd1_1 = parseFloat(document.getElementById('hd1_1').value);
+
+        if (isNaN(energyOut1) || isNaN(hd1_1) || energyOut1 <= 0 || hd1_1 <= 0) {
+            alert('Please enter valid readings for both fields.');
+            return;
+        }
+
+        showScreen(3);
+    }
+
+    function showScreen(screenNum) {
+        document.querySelectorAll('.screen').forEach(s => s.classList.remove('active'));
+        document.getElementById('screen' + screenNum).classList.add('active');
+        updateStepIndicator();
+    }
+
+    function updateStepIndicator() {
+        const dots = document.querySelectorAll('.step-dot');
+        dots.forEach(d => d.classList.remove('active'));
+
+        const activeScreen = document.querySelector('.screen.active');
+        if (activeScreen.id === 'screen1') {
+            document.getElementById('dot1').classList.add('active');
+        } else if (activeScreen.id === 'screen2') {
+            document.getElementById('dot2').classList.add('active');
+        } else if (activeScreen.id === 'screen3') {
+            document.getElementById('dot3').classList.add('active');
+        }
+    }
+
+    function lookupWavelength(deltaPercent) {
+        // Find the closest match in the lookup table
+        let closest = lookupTable[0];
+        let minDiff = Math.abs(deltaPercent - closest.delta);
+
+        for (let i = 1; i < lookupTable.length; i++) {
+            const diff = Math.abs(deltaPercent - lookupTable[i].delta);
+            if (diff < minDiff) {
+                minDiff = diff;
+                closest = lookupTable[i];
+            }
+        }
+
+        // Linear interpolation for better accuracy
+        for (let i = 0; i < lookupTable.length - 1; i++) {
+            if (deltaPercent >= lookupTable[i].delta && deltaPercent <= lookupTable[i + 1].delta) {
+                const delta1 = lookupTable[i].delta;
+                const delta2 = lookupTable[i + 1].delta;
+                const wl1 = lookupTable[i].wavelength;
+                const wl2 = lookupTable[i + 1].wavelength;
+
+                const interpolated = wl1 + (wl2 - wl1) * (deltaPercent - delta1) / (delta2 - delta1);
+                return interpolated;
+            }
+        }
+
+        return closest.wavelength;
+    }
+
+    function calculateWavelength() {
+        const energyOut1 = parseFloat(document.getElementById('energyOut1').value);
+        const hd1_1 = parseFloat(document.getElementById('hd1_1').value);
+        const energyOut2 = parseFloat(document.getElementById('energyOut2').value);
+        const hd1_2 = parseFloat(document.getElementById('hd1_2').value);
+        const correctionFactor = parseFloat(document.getElementById('correctionFactor').value);
+
+        if (isNaN(energyOut2) || isNaN(hd1_2) || energyOut2 <= 0 || hd1_2 <= 0) {
+            alert('Please enter valid readings for both fields.');
+            return;
+        }
+
+        // Calculate transmissions
+        const transmission1 = energyOut1 / hd1_1;
+        const transmission2 = energyOut2 / hd1_2;
+
+        // Calculate Delta%
+        const deltaPercent = (transmission2 / transmission1) * 100;
+
+        // Lookup base wavelength
+        const baseWavelength = lookupWavelength(deltaPercent);
+
+        // Apply correction factor
+        const finalWavelength = baseWavelength + correctionFactor;
+
+        // Display results
+        document.getElementById('wavelengthResult').textContent = finalWavelength.toFixed(2);
+        document.getElementById('resultCard').classList.add('show');
+
+        // Show calculation details
+        const details = document.getElementById('calcDetails');
+        details.innerHTML = `
+            <div><strong>Calculation Details:</strong></div>
+            <div>Without filter: ${transmission1.toFixed(4)} (${energyOut1} / ${hd1_1})</div>
+            <div>With filter: ${transmission2.toFixed(4)} (${energyOut2} / ${hd1_2})</div>
+            <div>Delta%: ${deltaPercent.toFixed(2)}%</div>
+            <div>Base wavelength: ${baseWavelength.toFixed(2)} nm</div>
+            <div>Correction factor: ${correctionFactor >= 0 ? '+' : ''}${correctionFactor.toFixed(1)} nm</div>
+        `;
+    }
+
+    function resetCalculator() {
+        document.getElementById('energyOut1').value = '';
+        document.getElementById('hd1_1').value = '';
+        document.getElementById('energyOut2').value = '';
+        document.getElementById('hd1_2').value = '';
+        document.getElementById('resultCard').classList.remove('show');
+        showScreen(2);
+    }
+</script>
+</body>
+</html>

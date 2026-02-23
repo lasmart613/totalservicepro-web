@@ -1,0 +1,281 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Manual Library</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; background: #1F2937; color: white; font-family: Arial, sans-serif; }
+        .top-nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            max-width: 28rem;
+            margin: 0 auto;
+            background: #991B1B;
+            border-bottom: 1px solid #B91C1C;
+            padding: 8px 16px;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 70px;
+            color: white;
+        }
+        .nav-items { display: flex; gap: 24px; }
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .nav-item-active {
+            color: #FBBF24;
+            text-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
+        }
+        .nav-icon { font-size: 20px; margin-bottom: 2px; }
+        .login-btn {
+            background: #FBBF24;
+            color: #111827;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 13px;
+            border: none;
+            cursor: pointer;
+        }
+        .avatar-btn {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #1F2937;
+            color: white;
+            font-weight: bold;
+            font-size: 14px;
+            border: 2px solid #FBBF24;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+        }
+        .search-bar {
+            position: fixed;
+            top: 70px;
+            left: 0;
+            right: 0;
+            max-width: 28rem;
+            margin: 0 auto;
+            padding: 12px 16px;
+            background: #991B1B;
+            z-index: 999;
+        }
+        .search-input {
+            width: 100%;
+            padding: 10px;
+            border-radius: 8px;
+            border: none;
+            font-size: 16px;
+            background: white;
+            color: #111827;
+        }
+        .library-content {
+            padding-top: 140px; /* space for navbar + search bar */
+            padding-bottom: 40px;
+        }
+        .shelf {
+            margin: 40px 0;
+            padding: 0 16px;
+        }
+        .shelf-title {
+            font-size: 24px;
+            font-weight: bold;
+            color: #FBBF24;
+            margin-bottom: 16px;
+            text-shadow: 0 2px 4px rgba(0,0,0,0.5);
+        }
+        .shelf-row {
+            display: flex;
+            overflow-x: auto;
+            gap: 16px;
+            padding-bottom: 20px;
+            scroll-snap-type: x mandatory;
+            scrollbar-width: none; /* hide scrollbar Firefox */
+        }
+        .shelf-row::-webkit-scrollbar { display: none; } /* hide scrollbar Chrome/Safari */
+        .book {
+            flex: 0 0 auto;
+            width: 100px;
+            height: 240px;
+            background: linear-gradient(135deg, #444 0%, #222 100%);
+            border-radius: 6px 6px 6px 6px;
+            box-shadow: 0 10px 20px rgba(0,0,0,0.6);
+            transform: rotate(-5deg);
+            transition: all 0.3s ease;
+            cursor: pointer;
+            position: relative;
+            scroll-snap-align: center;
+            display: flex;
+            align-items: flex-end;
+            padding: 8px;
+            color: white;
+            font-weight: bold;
+            text-align: center;
+            overflow: hidden;
+        }
+        .book:hover, .book.selected {
+            transform: rotate(0deg) scale(1.1);
+            box-shadow: 0 15px 30px rgba(251, 191, 36, 0.5);
+            z-index: 10;
+        }
+        .book-title {
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            white-space: nowrap;
+            font-size: 14px;
+            line-height: 1.2;
+        }
+        .shelf-base {
+            height: 20px;
+            background: linear-gradient(to bottom, #8B4513, #5C3317);
+            border-radius: 8px;
+            box-shadow: inset 0 2px 10px rgba(0,0,0,0.6);
+            margin-top: -10px;
+        }
+    </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+    const { useState } = React;
+
+    const App = () => {
+        const [selectedBook, setSelectedBook] = useState(null);
+        const [searchQuery, setSearchQuery] = useState('');
+
+        const navigateTo = (file) => {
+            window.location.href = file;
+        };
+
+        const manuals = {
+            Candela: [
+                { title: 'GentleMax Pro', file: 'manuals/candela_gentlemaxpro.pdf' },
+                { title: 'VBeam Perfecta', file: 'manuals/candela_vbeam.pdf' },
+                { title: 'GentleLase', file: 'manuals/candela_gentlelase.pdf' },
+                { title: 'GentleYAG', file: 'manuals/candela_gentleyag.pdf' },
+                { title: 'Nordlys', file: 'manuals/candela_nordlys.pdf' },
+            ],
+            Lumenis: [
+                { title: 'AcuPulse', file: 'manuals/lumenis_acupulse.pdf' },
+                { title: 'VersaPulse PowerSuite', file: 'manuals/lumenis_versapulse.pdf' },
+                { title: 'M22', file: 'manuals/lumenis_m22.pdf' },
+                { title: 'LightSheer', file: 'manuals/lumenis_lightsheer.pdf' },
+                { title: 'UltraPulse', file: 'manuals/lumenis_ultrapulse.pdf' },
+            ],
+            Cynosure: [
+                { title: 'Icon', file: 'manuals/cynosure_icon.pdf' },
+                { title: 'Vectus', file: 'manuals/cynosure_vectus.pdf' },
+                { title: 'TempSure', file: 'manuals/cynosure_tempsure.pdf' },
+                { title: 'PicoSure', file: 'manuals/cynosure_picosure.pdf' },
+                { title: 'Elite iQ', file: 'manuals/cynosure_eliteiq.pdf' },
+            ]
+        };
+
+        const filteredManuals = {};
+        Object.keys(manuals).forEach(manufacturer => {
+            filteredManuals[manufacturer] = manuals[manufacturer].filter(manual =>
+                manual.title.toLowerCase().includes(searchQuery.toLowerCase())
+            );
+        });
+
+        const selectBook = (manufacturer, manual) => {
+            if (selectedBook?.title === manual.title) {
+                // Second tap - open viewer
+                navigateTo(`pdf_viewer.html?manual=${manufacturer}_${manual.title.toLowerCase().replace(/\s+/g, '_')}`);
+            } else {
+                // First tap - select/highlight
+                setSelectedBook(manual);
+            }
+        };
+
+        return (
+            <div className="min-h-screen bg-gray-900">
+                {/* Top Navbar */}
+                <div className="top-nav">
+                    <div className="nav-items">
+                        <div className="nav-item nav-back" onClick={() => navigateTo('service_hub.html')}>
+                            <div className="nav-icon">↩</div>
+                            <div className="nav-label">Back</div>
+                        </div>
+                        <div className="nav-item" onClick={() => navigateTo('index.html')}>
+                            <div className="nav-icon">🏠</div>
+                            <div className="nav-label">Home</div>
+                        </div>
+                        <div className="nav-item" onClick={() => navigateTo('service_hub.html')}>
+                            <div className="nav-icon">🔧</div>
+                            <div className="nav-label">Service Hub</div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                        <div className="nav-item">
+                            <div className="nav-icon">⚙️</div>
+                            <div className="nav-label">Settings</div>
+                        </div>
+                        <button className="login-btn">Login</button>
+                    </div>
+                </div>
+
+                {/* Search Bar */}
+                <div className="search-bar">
+                    <input
+                        type="text"
+                        className="search-input"
+                        placeholder="Search manuals..."
+                        value={searchQuery}
+                        onChange={(e) => setSearchQuery(e.target.value)}
+                    />
+                </div>
+
+                {/* Library Content */}
+                <div className="library-content p-6">
+                    <h1 className="text-4xl font-bold text-yellow-400 mb-8 text-center">Service Manual Library</h1>
+                    <p className="text-gray-300 text-center mb-10">Browse by manufacturer</p>
+
+                    {Object.keys(filteredManuals).map((manufacturer) => {
+                        const books = filteredManuals[manufacturer];
+                        if (books.length === 0) return null;
+
+                        return (
+                            <div key={manufacturer} className="shelf">
+                                <div className="shelf-title">{manufacturer}</div>
+                                <div className="shelf-row">
+                                    {books.map((manual, index) => (
+                                        <div
+                                            key={index}
+                                            className={`book ${selectedBook?.title === manual.title ? 'selected' : ''}`}
+                                            onClick={() => selectBook(manufacturer, manual)}
+                                        >
+                                            <div className="book-title">{manual.title}</div>
+                                        </div>
+                                    ))}
+                                </div>
+                                <div className="shelf-base"></div>
+                            </div>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    };
+
+    ReactDOM.render(<App />, document.getElementById('root'));
+</script>
+</body>
+</html>

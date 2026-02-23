@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Average Power Calculator</title>
+    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body { margin: 0; background: #1F2937; color: white; }
+        .top-nav {
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            max-width: 28rem;
+            margin: 0 auto;
+            background: #1F2937;
+            border-bottom: 1px solid #374151;
+            padding: 8px 16px;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 70px;
+        }
+        .nav-items { display: flex; gap: 24px; }
+        .nav-item {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            color: #9CA3AF;
+            font-size: 10px;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .nav-item-active { color: #FBBF24; text-shadow: 0 0 8px rgba(251, 191, 36, 0.6); }
+        .nav-icon { font-size: 20px; margin-bottom: 2px; }
+        .login-btn {
+            background: #FBBF24;
+            color: #111827;
+            padding: 6px 12px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 13px;
+            border: none;
+            cursor: pointer;
+        }
+        .content-area { padding-top: 90px; padding-bottom: calc(20px + env(safe-area-inset-bottom, 0)); }
+        .toggle-container {
+            display: flex;
+            gap: 4px;
+            margin: 16px 0 20px 0;
+            position: relative;
+            z-index: 20;
+        }
+        .toggle-btn {
+            flex: 1;
+            padding: 12px 8px;
+            border-radius: 8px;
+            font-weight: 600;
+            transition: all 0.2s;
+            min-height: 48px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+        }
+        .toggle-active { background: #FBBF24; color: #111827; }
+        .toggle-inactive { background: #374151; color: white; }
+        .disabled-input { opacity: 0.5; cursor: not-allowed; background: #2d3748; }
+    </style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+    const { useState, useEffect } = React;
+
+    const AveragePowerCalculator = () => {
+        const [mode, setMode] = useState('forward');
+        const [energy, setEnergy] = useState('');
+        const [frequency, setFrequency] = useState('');
+        const [power, setPower] = useState('');
+        const [energyUnit, setEnergyUnit] = useState('mJ');
+        const [result, setResult] = useState(null);
+        const [error, setError] = useState('');
+
+        const calculate = () => {
+            setError('');
+            setResult(null);
+
+            const freq = parseFloat(frequency || 0);
+            if (freq <= 0) {
+                setError("Frequency must be greater than 0 Hz");
+                return;
+            }
+
+            if (mode === 'forward') {
+                let e = parseFloat(energy || 0);
+                if (e <= 0) {
+                    setError("Energy per pulse must be greater than 0");
+                    return;
+                }
+                if (energyUnit === 'mJ') e /= 1000;
+                const avgPower = e * freq;
+                setResult(avgPower.toFixed(3) + ' W');
+            } else {
+                const p = parseFloat(power || 0);
+                if (p <= 0) {
+                    setError("Average Power must be greater than 0 W");
+                    return;
+                }
+                let e = p / freq;
+                if (energyUnit === 'mJ') e *= 1000;
+                setResult(e.toFixed(3) + ' ' + energyUnit);
+            }
+        };
+
+        useEffect(() => {
+            calculate();
+        }, [energy, frequency, power, energyUnit, mode]);
+
+        const navigateTo = (file) => {
+            window.location.href = file;
+        };
+
+        return (
+            <div className="min-h-screen bg-gray-800">
+                <div className="top-nav">
+                    <div className="nav-items">
+                        <div className="nav-item nav-back" onClick={() => navigateTo('calculators_menu.html')}>
+                            <div className="nav-icon">↩</div>
+                            <div className="nav-label">Back</div>
+                        </div>
+                        <div className="nav-item" onClick={() => navigateTo('index.html')}>
+                            <div className="nav-icon">🏠</div>
+                            <div className="nav-label">Home</div>
+                        </div>
+                        <div className="nav-item" onClick={() => navigateTo('service_hub.html')}>
+                            <div className="nav-icon">🔧</div>
+                            <div className="nav-label">Service Hub</div>
+                        </div>
+                    </div>
+                    <div className="flex items-center gap-6">
+                        <div className="nav-item">
+                            <div className="nav-icon">⚙️</div>
+                            <div className="nav-label">Settings</div>
+                        </div>
+                        <button className="login-btn">Login</button>
+                    </div>
+                </div>
+
+                <div className="p-4 space-y-4 pt-24">
+                    <div className="bg-gradient-to-r from-yellow-500 to-yellow-600 text-gray-900 p-6 rounded-lg shadow-lg">
+                        <h2 className="text-2xl font-bold mb-2">Average Power Calculator</h2>
+                        <p className="text-gray-800">Calculate average power from pulse energy and frequency</p>
+                    </div>
+
+                    <div className="bg-gray-700 rounded-lg shadow-lg p-6 space-y-6">
+                        <div className="toggle-container">
+                            <button
+                                onClick={() => { setMode('forward'); setResult(null); }}
+                                className={`toggle-btn ${mode === 'forward' ? 'toggle-active' : 'toggle-inactive'}`}
+                            >
+                                Energy + Frequency → Power
+                            </button>
+                            <button
+                                onClick={() => { setMode('reverse'); setResult(null); }}
+                                className={`toggle-btn ${mode === 'reverse' ? 'toggle-active' : 'toggle-inactive'}`}
+                            >
+                                Power + Frequency → Energy
+                            </button>
+                        </div>
+
+                        {mode === 'forward' ? (
+                            <>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1 text-gray-300">Energy per Pulse</label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="number"
+                                            value={energy}
+                                            onChange={e => setEnergy(e.target.value)}
+                                            className="flex-1 p-3 border-2 border-gray-600 bg-gray-800 text-white rounded-lg text-lg"
+                                            placeholder="Enter value"
+                                        />
+                                        <select
+                                            value={energyUnit}
+                                            onChange={e => setEnergyUnit(e.target.value)}
+                                            className="p-3 border-2 border-gray-600 bg-gray-800 text-white rounded-lg text-lg appearance-none"
+                                        >
+                                            <option value="mJ">mJ</option>
+                                            <option value="J">J</option>
+                                        </select>
+                                    </div>
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium mb-1 text-gray-300">Frequency (Hz)</label>
+                                    <input
+                                        type="number"
+                                        value={frequency}
+                                        onChange={e => setFrequency(e.target.value)}
+                                        className="w-full p-3 border-2 border-gray-600 bg-gray-800 text-white rounded-lg text-lg"
+                                        placeholder="Enter frequency"
+                                    />
+                                </div>
+
+                                {result && (
+                                    <div className="bg-gray-800 border-2 border-yellow-600 p-5 rounded-lg text-center">
+                                        <p className="text-4xl font-bold text-yellow-400">
+                                            Average Power: {result}
+                                        </p>
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <>
+                                <div>
+                                    <label className="block text-sm font-medium mb-1 text-gray-300">Average Power (W)</label>
+                                    <input
+                                        type="number"
+                                        value={power}
+                                        onChange={e => setPower(e.target.value)}
+                                        className="w-full p-3 border-2 border-gray-600 bg-gray-800 text-white rounded-lg text-lg"
+                                        placeholder="Enter average power"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium mb-1 text-gray-300">Frequency (Hz)</label>
+                                    <input
+                                        type="number"
+                                        value={frequency}
+                                        onChange={e => setFrequency(e.target.value)}
+                                        className="w-full p-3 border-2 border-gray-600 bg-gray-800 text-white rounded-lg text-lg"
+                                        placeholder="Enter frequency"
+                                    />
+                                </div>
+
+                                {result && (
+                                    <div className="bg-gray-800 border-2 border-yellow-600 p-5 rounded-lg text-center">
+                                        <p className="text-4xl font-bold text-yellow-400">
+                                            Energy per Pulse: {result}
+                                        </p>
+                                    </div>
+                                )}
+                            </>
+                        )}
+
+                        {error && (
+                            <div className="bg-red-900 border border-red-700 p-4 rounded-lg text-center text-white">
+                                {error}
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
+    ReactDOM.render(<AveragePowerCalculator />, document.getElementById('root'));
+</script>
+</body>
+</html>

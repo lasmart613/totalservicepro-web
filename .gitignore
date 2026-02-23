@@ -1,0 +1,39 @@
+# Gradle & build outputs
+.gradle/
+build/
+local.properties
+*.iml
+
+# Android Studio
+.idea/
+*.iws
+out/
+
+# Generated files
+*.class
+*.dex
+*.apk
+*.ap_
+*.aar
+intermediates/
+merged_res/
+merged_manifests/
+dex/
+incremental/
+packaged_manifests/
+resourceHashesCache/
+fileHashes/
+executionHistory/
+buildOutputCleanup/
+compatible_screen_manifest/
+compressed_assets/
+
+# pdf.js build junk
+pdfjs/build/
+assets/debug/
+
+# Misc
+.DS_Store
+Thumbs.db
+*.log
+*.tmp
