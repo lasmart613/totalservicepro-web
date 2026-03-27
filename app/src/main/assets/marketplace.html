@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        var _pendingSession=null,_sessionRestored=false;
+        (function(){try{const p=new URLSearchParams(window.location.search),enc=p.get('_s');if(enc){const s=JSON.parse(atob(enc));if(s&&s.access_token){_pendingSession=s;localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));const u=new URL(window.location.href);u.searchParams.delete('_s');window.history.replaceState({},'',u.toString());return}}const raw=localStorage.getItem('tsp-auth-token');if(raw){const p2=JSON.parse(raw),ss=(p2&&p2.currentSession)?p2.currentSession:(p2&&p2.access_token)?p2:null;if(ss&&ss.access_token)_pendingSession=ss;}}catch(e){}})();
+        function restoreSession(j){try{const p=typeof j==='string'?JSON.parse(j):j,s=(p&&p.currentSession)?p.currentSession:p;if(s&&s.access_token){localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));if(typeof supabaseClient!=='undefined'){_sessionRestored=true;supabaseClient.auth.setSession({access_token:s.access_token,refresh_token:s.refresh_token}).then(r=>{if(!r.error)updateAuthUI();});}else _pendingSession=s;}}catch(e){}}
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parts Marketplace — TSP</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        :root{--gold:#FBBF24;--bg:#000;--s1:#0d0d0d;--s2:#151515;--s3:#1a1a1a;--s4:#222;--bdr:#1f1f1f;--bdr-g:rgba(251,191,36,0.15);--txt:#fff;--txt2:#ccc;--txt3:#888;--red:#ef4444;--grn:#22c55e;--blu:#3b82f6}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh}
+
+        .header{background:var(--s1);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--gold);position:sticky;top:0;z-index:100}
+        .header-left{display:flex;align-items:center;gap:12px}
+        .back-btn{background:none;border:none;color:var(--gold);font-size:22px;cursor:pointer;padding:4px 8px;border-radius:8px}
+        .header-title{font-size:17px;font-weight:700}
+        .header-right{display:flex;align-items:center;gap:10px}
+        .hdr-btn{background:none;border:1px solid var(--bdr);border-radius:8px;padding:6px 10px;color:var(--txt3);font-size:18px;cursor:pointer}
+        .hdr-btn:hover{border-color:var(--gold);color:var(--gold)}
+        .hdr-btn.active{border-color:var(--gold);color:var(--gold);background:rgba(251,191,36,0.08)}
+
+        .login-button{background:var(--gold);border:none;border-radius:8px;padding:8px 16px;color:#111;font-weight:600;cursor:pointer;font-family:inherit}
+        .avatar-wrapper{position:relative;display:none}
+        .avatar-btn{background:none;border:none;padding:0;cursor:pointer;border-radius:50%;display:flex;align-items:center;justify-content:center}
+        .avatar-initials{width:36px;height:36px;border-radius:50%;background:var(--gold);color:#111;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;border:2px solid var(--gold)}
+        .avatar-img{width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--gold);display:none}
+        .avatar-dropdown{display:none;position:absolute;top:calc(100% + 8px);right:0;background:var(--s3);border:1px solid var(--gold);border-radius:10px;min-width:180px;overflow:hidden;box-shadow:0 8px 20px rgba(0,0,0,0.6);z-index:1000}
+        .avatar-dropdown.open{display:block}
+        .dropdown-user-info{padding:12px 14px 10px;border-bottom:1px solid #333}
+        .dropdown-user-name{font-weight:700;font-size:13px;color:var(--gold)}
+        .dropdown-user-email{font-size:10px;color:var(--txt3);margin-top:2px}
+        .dropdown-item{display:flex;align-items:center;gap:8px;width:100%;padding:11px 14px;background:none;border:none;color:#fff;font-size:13px;font-family:inherit;cursor:pointer;text-align:left}
+        .dropdown-item:hover{background:#2a2a2a}
+        .dropdown-item.danger{color:#f87171;border-top:1px solid #333}
+
+        .page{padding:12px 16px 80px;max-width:900px;margin:0 auto}
+
+        /* Search/Filter bar */
+        .search-bar{display:flex;gap:8px;margin-bottom:12px}
+        .search-input{flex:1;background:var(--s3);border:1px solid var(--bdr);border-radius:10px;padding:11px 14px;color:var(--txt);font-size:14px;font-family:inherit}
+        .search-input:focus{outline:none;border-color:var(--gold)}
+        .search-input::placeholder{color:var(--txt3)}
+
+        /* Filter pills */
+        .filters{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;margin-bottom:14px;-webkit-overflow-scrolling:touch}
+        .filters::-webkit-scrollbar{display:none}
+        .filter-pill{white-space:nowrap;padding:7px 14px;border-radius:20px;border:1px solid var(--bdr);background:var(--s3);color:var(--txt3);font-size:12px;font-weight:600;cursor:pointer;font-family:inherit;flex-shrink:0}
+        .filter-pill.active{border-color:var(--gold);color:var(--gold);background:rgba(251,191,36,0.08)}
+
+        /* Tabs */
+        .tabs{display:flex;gap:0;margin-bottom:14px;border-bottom:1px solid var(--bdr)}
+        .tab{flex:1;padding:10px;text-align:center;font-size:13px;font-weight:700;color:var(--txt3);cursor:pointer;border-bottom:2px solid transparent;font-family:inherit;background:none;border-top:none;border-left:none;border-right:none}
+        .tab.active{color:var(--gold);border-bottom-color:var(--gold)}
+
+        /* Listing grid */
+        .listings-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+        @media(min-width:600px){.listings-grid{grid-template-columns:repeat(3,1fr)}}
+
+        .listing-card{background:var(--s2);border:1px solid var(--bdr);border-radius:12px;overflow:hidden;cursor:pointer;transition:border-color 0.15s,transform 0.12s}
+        .listing-card:hover{border-color:var(--bdr-g);transform:translateY(-2px)}
+        .listing-img{width:100%;aspect-ratio:4/3;background:var(--s3);display:flex;align-items:center;justify-content:center;overflow:hidden}
+        .listing-img img{width:100%;height:100%;object-fit:cover}
+        .listing-img .no-img{font-size:32px;color:var(--txt3)}
+        .listing-body{padding:10px 12px}
+        .listing-price{font-size:16px;font-weight:800;color:var(--gold)}
+        .listing-title{font-size:13px;font-weight:600;color:var(--txt);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+        .listing-meta{font-size:11px;color:var(--txt3);margin-top:4px;display:flex;gap:6px;align-items:center}
+        .listing-badge{padding:2px 6px;border-radius:4px;font-size:10px;font-weight:700;text-transform:uppercase}
+        .badge-new{background:#166534;color:#22c55e}
+        .badge-refurbished{background:#1e3a5f;color:#60a5fa}
+        .badge-used{background:#4a3000;color:#fbbf24}
+        .badge-for_parts{background:#3b1414;color:#f87171}
+        .badge-system{background:#2e1065;color:#a78bfa}
+
+        .empty-state{text-align:center;padding:48px 20px;color:var(--txt3)}
+        .empty-state .icon{font-size:48px;margin-bottom:12px}
+        .empty-state .title{font-size:16px;font-weight:700;color:var(--txt2);margin-bottom:6px}
+
+        /* FAB */
+        .fab{position:fixed;bottom:24px;right:20px;width:56px;height:56px;border-radius:50%;background:var(--gold);border:none;color:#111;font-size:28px;font-weight:700;cursor:pointer;box-shadow:0 4px 16px rgba(251,191,36,0.3);display:flex;align-items:center;justify-content:center;z-index:90;transition:transform 0.12s}
+        .fab:hover{transform:scale(1.08)}
+
+        /* Modal */
+        .modal-overlay{position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.85);z-index:200;display:none;overflow-y:auto;-webkit-overflow-scrolling:touch}
+        .modal-overlay.open{display:block}
+        .modal{background:var(--s1);border:1px solid var(--gold);border-radius:16px;max-width:500px;margin:24px auto;padding:0;overflow:hidden}
+        .modal-hdr{padding:16px 20px;border-bottom:1px solid var(--bdr);display:flex;justify-content:space-between;align-items:center}
+        .modal-hdr h2{font-size:17px;color:var(--gold)}
+        .modal-close{background:none;border:none;color:var(--txt3);font-size:24px;cursor:pointer}
+        .modal-body{padding:16px 20px;max-height:70vh;overflow-y:auto}
+        .modal-footer{padding:12px 20px;border-top:1px solid var(--bdr);display:flex;gap:10px}
+        .modal-footer button{flex:1;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;border:none}
+        .btn-primary{background:var(--gold);color:#111}
+        .btn-primary:disabled{opacity:0.4;cursor:not-allowed}
+        .btn-cancel{background:var(--s4);color:var(--txt2)}
+
+        .form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+        .form-row.full{grid-template-columns:1fr}
+        .form-group{display:flex;flex-direction:column;gap:4px}
+        .form-group label{font-size:11px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:0.3px}
+        .form-group input,.form-group select,.form-group textarea{background:var(--s4);border:1px solid var(--bdr);border-radius:8px;padding:10px 12px;color:var(--txt);font-family:inherit;font-size:14px}
+        .form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:var(--gold)}
+        .form-group textarea{min-height:80px;resize:vertical}
+        select{-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23888' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+
+        /* Photo upload */
+        .photo-upload{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+        .photo-slot{width:80px;height:80px;border-radius:10px;border:2px dashed var(--bdr);display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden;position:relative;flex-shrink:0}
+        .photo-slot:hover{border-color:var(--gold)}
+        .photo-slot img{width:100%;height:100%;object-fit:cover}
+        .photo-slot .add{font-size:28px;color:var(--txt3)}
+        .photo-slot .remove{position:absolute;top:2px;right:2px;width:20px;height:20px;border-radius:50%;background:rgba(0,0,0,0.7);border:none;color:#fff;font-size:12px;cursor:pointer;display:flex;align-items:center;justify-content:center}
+        .photo-hint{font-size:11px;color:var(--txt3);margin-bottom:10px}
+
+        /* Toast */
+        .toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:10px;font-size:14px;font-weight:600;z-index:2000;opacity:0;transition:opacity 0.3s;pointer-events:none}
+        .toast.show{opacity:1}
+        .toast.success{background:#166534;color:#22c55e;border:1px solid #22c55e}
+        .toast.error{background:#7f1d1d;color:#f87171;border:1px solid #ef4444}
+
+        /* Unread badge on messages btn */
+        .msg-badge{position:absolute;top:-4px;right:-4px;width:18px;height:18px;border-radius:50%;background:var(--red);color:#fff;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center}
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <div class="header-left">
+        <button class="back-btn" onclick="goBack()">◀</button>
+        <div class="header-title">Parts Marketplace</div>
+    </div>
+    <div class="header-right">
+        <div style="position:relative">
+            <button class="hdr-btn" onclick="navTo('marketplace_messages.html')" title="Messages">💬<span class="msg-badge" id="msgBadge">0</span></button>
+        </div>
+        <button class="hdr-btn" id="myListingsBtn" onclick="toggleMyListings()" title="My Listings">📦</button>
+        <div id="authSection">
+            <button id="loginBtn" class="login-button" onclick="navTo('index.html')">Login</button>
+            <div class="avatar-wrapper" id="avatarWrapper">
+                <button class="avatar-btn" onclick="toggleDropdown(event)">
+                    <img id="avatarImg" class="avatar-img" src="" alt="" />
+                    <div id="avatarInitials" class="avatar-initials">U</div>
+                </button>
+                <div class="avatar-dropdown" id="avatarDropdown">
+                    <div class="dropdown-user-info">
+                        <div class="dropdown-user-name" id="dropdownName">User</div>
+                        <div class="dropdown-user-email" id="dropdownEmail"></div>
+                    </div>
+                    <button class="dropdown-item" onclick="navTo('user_profile.html')">👤 Profile</button>
+                    <button class="dropdown-item danger" onclick="logoutUser()">🚪 Log Out</button>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page">
+    <div class="search-bar">
+        <input class="search-input" id="searchInput" placeholder="Search parts, lasers, accessories..." oninput="debouncedSearch()">
+    </div>
+
+    <div class="filters" id="categoryFilters">
+        <button class="filter-pill active" data-cat="all" onclick="setCategory('all',this)">All</button>
+        <button class="filter-pill" data-cat="part" onclick="setCategory('part',this)">Parts</button>
+        <button class="filter-pill" data-cat="system" onclick="setCategory('system',this)">Full Systems</button>
+        <button class="filter-pill" data-cat="accessory" onclick="setCategory('accessory',this)">Accessories</button>
+        <button class="filter-pill" data-cat="consumable" onclick="setCategory('consumable',this)">Consumables</button>
+    </div>
+
+    <div class="filters" id="conditionFilters">
+        <button class="filter-pill active" data-cond="all" onclick="setCondition('all',this)">Any Condition</button>
+        <button class="filter-pill" data-cond="new" onclick="setCondition('new',this)">New</button>
+        <button class="filter-pill" data-cond="refurbished" onclick="setCondition('refurbished',this)">Refurbished</button>
+        <button class="filter-pill" data-cond="used" onclick="setCondition('used',this)">Used</button>
+        <button class="filter-pill" data-cond="for_parts" onclick="setCondition('for_parts',this)">For Parts</button>
+    </div>
+
+    <div id="listingsContainer" class="listings-grid"></div>
+    <div id="emptyState" class="empty-state" style="display:none">
+        <div class="icon">🔍</div>
+        <div class="title">No listings found</div>
+        <div>Try adjusting your search or filters</div>
+    </div>
+</div>
+
+<!-- FAB: Create listing -->
+<button class="fab" id="fabCreate" onclick="openCreate()" title="Create Listing">+</button>
+
+<!-- Create Listing Modal -->
+<div class="modal-overlay" id="createModal">
+    <div class="modal">
+        <div class="modal-hdr">
+            <h2>Create Listing</h2>
+            <button class="modal-close" onclick="closeCreate()">×</button>
+        </div>
+        <div class="modal-body">
+            <div class="form-row full">
+                <div class="form-group"><label>Title *</label><input id="c_title" placeholder="e.g. LightSheer Diode Handpiece 12mm"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Category *</label>
+                    <select id="c_category">
+                        <option value="part">Part</option>
+                        <option value="system">Full System</option>
+                        <option value="accessory">Accessory</option>
+                        <option value="consumable">Consumable</option>
+                        <option value="other">Other</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Condition *</label>
+                    <select id="c_condition">
+                        <option value="used">Used — Working</option>
+                        <option value="new">New / Sealed</option>
+                        <option value="refurbished">Refurbished</option>
+                        <option value="for_parts">For Parts Only</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Manufacturer</label><input id="c_mfg" placeholder="e.g. Lumenis"></div>
+                <div class="form-group"><label>Model</label><input id="c_model" placeholder="e.g. LightSheer ET"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>Part Number</label><input id="c_partnum" placeholder="OEM part #"></div>
+                <div class="form-group"><label>Serial Number</label><input id="c_serial"></div>
+            </div>
+            <div class="form-row">
+                <div class="form-group">
+                    <label>Price ($)</label>
+                    <input type="number" step="0.01" id="c_price" placeholder="0.00">
+                </div>
+                <div class="form-group">
+                    <label>Pricing</label>
+                    <select id="c_pricetype">
+                        <option value="fixed">Fixed Price</option>
+                        <option value="obo">Or Best Offer</option>
+                        <option value="contact">Contact for Price</option>
+                        <option value="trade">Open to Trade</option>
+                    </select>
+                </div>
+            </div>
+            <div class="form-row">
+                <div class="form-group"><label>City</label><input id="c_city"></div>
+                <div class="form-group"><label>State</label><input id="c_state" maxlength="2" placeholder="CA"></div>
+            </div>
+            <div class="form-row full">
+                <div class="form-group"><label>Description</label><textarea id="c_desc" placeholder="Condition details, what's included, reason for selling..."></textarea></div>
+            </div>
+
+            <label style="font-size:11px;font-weight:600;color:var(--txt3);text-transform:uppercase;margin-bottom:4px;display:block">Photos (up to 6)</label>
+            <div class="photo-hint">First photo is the cover image. Tap + to add.</div>
+            <div class="photo-upload" id="photoSlots"></div>
+            <input type="file" id="photoInput" accept="image/jpeg,image/png,image/webp" multiple style="display:none" onchange="handlePhotos(event)">
+        </div>
+        <div class="modal-footer">
+            <button class="btn-cancel" onclick="closeCreate()">Cancel</button>
+            <button class="btn-primary" id="btnPost" onclick="submitListing()">Post Listing</button>
+        </div>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+const SB_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
+const supabaseClient = supabase.createClient(SB_URL,
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+    { auth: { persistSession:true, storageKey:'tsp-auth-token', storage:window.localStorage, autoRefreshToken:true, detectSessionInUrl:false } }
+);
+
+let currentUser = null;
+let listings = [];
+let filterCat = 'all';
+let filterCond = 'all';
+let showingMine = false;
+let uploadedPhotos = []; // { file, preview }
+let searchTimer = null;
+
+/* ── LOAD LISTINGS ── */
+async function loadListings() {
+    let query = supabaseClient
+        .from('marketplace_listings')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+    if (showingMine && currentUser) {
+        query = query.eq('seller_id', currentUser.id);
+    } else {
+        query = query.eq('status', 'active');
+    }
+    if (filterCat !== 'all') query = query.eq('category', filterCat);
+    if (filterCond !== 'all') query = query.eq('condition', filterCond);
+
+    const searchVal = document.getElementById('searchInput').value.trim();
+    if (searchVal) {
+        query = query.or(`title.ilike.%${searchVal}%,manufacturer.ilike.%${searchVal}%,model.ilike.%${searchVal}%,part_number.ilike.%${searchVal}%,description.ilike.%${searchVal}%`);
+    }
+
+    const { data, error } = await query.limit(50);
+    if (error) { console.log('TSP: listings error:', error.message); return; }
+    listings = data || [];
+    renderListings();
+}
+
+function renderListings() {
+    const container = document.getElementById('listingsContainer');
+    const empty = document.getElementById('emptyState');
+    if (!listings.length) {
+        container.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+    }
+    empty.style.display = 'none';
+    container.innerHTML = listings.map(l => {
+        const photos = l.photos || [];
+        const firstPhoto = photos.length ? getPublicUrl(photos[0]) : '';
+        const price = l.price_type === 'contact' ? 'Contact' : l.price ? `$${Number(l.price).toLocaleString()}` : 'Free';
+        const obo = l.price_type === 'obo' ? ' OBO' : '';
+        const loc = [l.city, l.state].filter(Boolean).join(', ');
+        const age = timeAgo(l.created_at);
+        return `
+            <div class="listing-card" onclick="viewListing('${l.id}')">
+                <div class="listing-img">
+                    ${firstPhoto ? `<img src="${firstPhoto}" alt="" loading="lazy">` : '<div class="no-img">📦</div>'}
+                </div>
+                <div class="listing-body">
+                    <div class="listing-price">${price}${obo}</div>
+                    <div class="listing-title">${esc(l.title)}</div>
+                    <div class="listing-meta">
+                        <span class="listing-badge badge-${l.condition}">${l.condition.replace('_',' ')}</span>
+                        ${l.manufacturer ? `· ${esc(l.manufacturer)}` : ''}
+                    </div>
+                    <div class="listing-meta">${loc ? loc + ' · ' : ''}${age}</div>
+                </div>
+            </div>`;
+    }).join('');
+}
+
+function getPublicUrl(path) {
+    if (!path) return '';
+    if (path.startsWith('http')) return path;
+    return `${SB_URL}/storage/v1/object/public/marketplace-images/${path}`;
+}
+
+/* ── FILTERS ── */
+function setCategory(cat, btn) {
+    filterCat = cat;
+    document.querySelectorAll('#categoryFilters .filter-pill').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    loadListings();
+}
+function setCondition(cond, btn) {
+    filterCond = cond;
+    document.querySelectorAll('#conditionFilters .filter-pill').forEach(p => p.classList.remove('active'));
+    btn.classList.add('active');
+    loadListings();
+}
+function toggleMyListings() {
+    showingMine = !showingMine;
+    document.getElementById('myListingsBtn').classList.toggle('active', showingMine);
+    loadListings();
+}
+function debouncedSearch() {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(loadListings, 400);
+}
+
+/* ── VIEW LISTING ── */
+function viewListing(id) {
+    navTo('marketplace_listing.html?id=' + id);
+}
+
+/* ── CREATE LISTING ── */
+function openCreate() {
+    if (!currentUser) { showToast('Sign in to create a listing', 'error'); return; }
+    document.getElementById('createModal').classList.add('open');
+    uploadedPhotos = [];
+    renderPhotoSlots();
+}
+function closeCreate() {
+    document.getElementById('createModal').classList.remove('open');
+}
+
+function renderPhotoSlots() {
+    const container = document.getElementById('photoSlots');
+    let html = '';
+    uploadedPhotos.forEach((p, i) => {
+        html += `<div class="photo-slot">
+            <img src="${p.preview}">
+            <button class="remove" onclick="removePhoto(${i})" title="Remove">×</button>
+        </div>`;
+    });
+    if (uploadedPhotos.length < 6) {
+        html += `<div class="photo-slot" onclick="document.getElementById('photoInput').click()"><span class="add">+</span></div>`;
+    }
+    container.innerHTML = html;
+}
+function handlePhotos(e) {
+    const files = Array.from(e.target.files);
+    const remaining = 6 - uploadedPhotos.length;
+    files.slice(0, remaining).forEach(file => {
+        const reader = new FileReader();
+        reader.onload = ev => {
+            uploadedPhotos.push({ file, preview: ev.target.result });
+            renderPhotoSlots();
+        };
+        reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+}
+function removePhoto(i) {
+    uploadedPhotos.splice(i, 1);
+    renderPhotoSlots();
+}
+
+async function submitListing() {
+    const title = document.getElementById('c_title').value.trim();
+    if (!title) { showToast('Title is required', 'error'); return; }
+
+    const btn = document.getElementById('btnPost');
+    btn.disabled = true;
+    btn.textContent = 'Uploading...';
+
+    try {
+        // Upload photos
+        const photoPaths = [];
+        for (const p of uploadedPhotos) {
+            const ext = p.file.name.split('.').pop();
+            const path = `${currentUser.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+            const { error } = await supabaseClient.storage.from('marketplace-images').upload(path, p.file, { cacheControl: '3600', upsert: false });
+            if (error) { console.log('TSP: upload error:', error.message); continue; }
+            photoPaths.push(path);
+        }
+
+        btn.textContent = 'Posting...';
+
+        const listing = {
+            seller_id: currentUser.id,
+            title,
+            category: document.getElementById('c_category').value,
+            condition: document.getElementById('c_condition').value,
+            manufacturer: document.getElementById('c_mfg').value.trim() || null,
+            model: document.getElementById('c_model').value.trim() || null,
+            part_number: document.getElementById('c_partnum').value.trim() || null,
+            serial_number: document.getElementById('c_serial').value.trim() || null,
+            price: parseFloat(document.getElementById('c_price').value) || null,
+            price_type: document.getElementById('c_pricetype').value,
+            city: document.getElementById('c_city').value.trim() || null,
+            state: document.getElementById('c_state').value.trim().toUpperCase() || null,
+            description: document.getElementById('c_desc').value.trim() || null,
+            photos: photoPaths,
+            status: 'active'
+        };
+
+        const { error } = await supabaseClient.from('marketplace_listings').insert(listing);
+        if (error) throw error;
+
+        showToast('Listing posted!', 'success');
+        closeCreate();
+        // Clear form
+        ['c_title','c_mfg','c_model','c_partnum','c_serial','c_price','c_city','c_state','c_desc'].forEach(id => document.getElementById(id).value = '');
+        uploadedPhotos = [];
+        loadListings();
+    } catch (e) {
+        showToast('Error: ' + (e.message || 'Post failed'), 'error');
+    } finally {
+        btn.disabled = false;
+        btn.textContent = 'Post Listing';
+    }
+}
+
+/* ── UNREAD MESSAGES BADGE ── */
+async function checkUnread() {
+    if (!currentUser) return;
+    const { data } = await supabaseClient
+        .from('marketplace_conversations')
+        .select('buyer_unread, seller_unread, buyer_id, seller_id')
+        .or(`buyer_id.eq.${currentUser.id},seller_id.eq.${currentUser.id}`);
+    if (!data) return;
+    let total = 0;
+    data.forEach(c => {
+        if (c.buyer_id === currentUser.id) total += (c.buyer_unread || 0);
+        if (c.seller_id === currentUser.id) total += (c.seller_unread || 0);
+    });
+    const badge = document.getElementById('msgBadge');
+    if (total > 0) { badge.textContent = total > 9 ? '9+' : total; badge.style.display = 'flex'; }
+    else { badge.style.display = 'none'; }
+}
+
+/* ── HELPERS ── */
+function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+function timeAgo(iso) {
+    if (!iso) return '';
+    const d = Date.now() - new Date(iso).getTime();
+    const m = Math.floor(d/60000);
+    if (m < 1) return 'just now'; if (m < 60) return m + 'm ago';
+    const h = Math.floor(m/60); if (h < 24) return h + 'h ago';
+    const days = Math.floor(h/24);
+    if (days === 1) return 'yesterday'; if (days < 7) return days + 'd ago';
+    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+}
+function showToast(msg, type) {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'toast ' + type + ' show';
+    setTimeout(() => t.classList.remove('show'), 3000);
+}
+function goBack() {
+    try { if (typeof Android !== 'undefined') { Android.goBack(); return; } } catch(e) {}
+    if (document.referrer) window.history.back(); else navTo('index.html');
+}
+
+/* ── NAV & AUTH ── */
+async function navTo(page) {
+    try { const { data: { session } } = await supabaseClient.auth.getSession();
+        if (session && session.access_token) { window.location.href = page + (page.includes('?') ? '&' : '?') + '_s=' + btoa(JSON.stringify(session)); return; }
+    } catch(e) {}
+    window.location.href = page;
+}
+function toggleDropdown(e) { e.stopPropagation(); document.getElementById('avatarDropdown').classList.toggle('open'); }
+document.addEventListener('click', () => document.getElementById('avatarDropdown').classList.remove('open'));
+async function logoutUser() {
+    document.getElementById('avatarDropdown').classList.remove('open');
+    await supabaseClient.auth.signOut();
+    try { if (typeof Android !== 'undefined') Android.clearSession(); } catch(e) {}
+    currentUser = null; updateAuthUI();
+}
+
+supabaseClient.auth.onAuthStateChange(function(ev, session) {
+    if (_pendingSession) {
+        var _ps = _pendingSession; _pendingSession = null;
+        supabaseClient.auth.setSession({ access_token: _ps.access_token, refresh_token: _ps.refresh_token })
+            .then(r => { if (!r.error && typeof Android !== 'undefined' && r.data.session) try { Android.saveSession(JSON.stringify(r.data.session)); } catch(e) {} updateAuthUI(); loadListings(); checkUnread(); });
+        return;
+    }
+    if (_sessionRestored) { _sessionRestored = false; return; }
+    updateAuthUI(); loadListings(); checkUnread();
+    try { if (typeof Android !== 'undefined') { if (session?.access_token) Android.saveSession(JSON.stringify(session)); else if (ev === 'SIGNED_OUT') Android.clearSession(); } } catch(e) {}
+});
+
+async function updateAuthUI() {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    currentUser = user;
+    const loginBtn = document.getElementById('loginBtn');
+    const wrap = document.getElementById('avatarWrapper');
+    if (user) {
+        loginBtn.style.display = 'none'; wrap.style.display = 'block';
+        const meta = user.user_metadata || {};
+        const fn = meta.first_name || '', ln = meta.last_name || '';
+        const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || (user.email||'U')[0].toUpperCase();
+        document.getElementById('dropdownName').textContent = [fn, ln].filter(Boolean).join(' ') || 'User';
+        document.getElementById('dropdownEmail').textContent = user.email || '';
+        const photo = meta.avatar_url || meta.picture || '';
+        if (photo) { document.getElementById('avatarImg').src = photo; document.getElementById('avatarImg').style.display = 'block'; document.getElementById('avatarInitials').style.display = 'none'; }
+        else { document.getElementById('avatarImg').style.display = 'none'; document.getElementById('avatarInitials').style.display = 'flex'; document.getElementById('avatarInitials').textContent = initials; }
+    } else {
+        loginBtn.style.display = 'block'; wrap.style.display = 'none';
+    }
+}
+updateAuthUI();
+loadListings();
+</script>
+</body>
+</html>

@@ -1,0 +1,868 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Parts Catalog</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #2c2c2c 0%, #1a1a1a 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+            padding-top: 56px;
+            padding-bottom: 70px;
+        }
+
+        /* ── Top Nav ── */
+        .top-nav {
+            position: fixed;
+            top: 0; left: 0; right: 0;
+            background: #1F2937;
+            border-bottom: 1px solid #374151;
+            padding: 8px 16px;
+            z-index: 1000;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            height: 56px;
+        }
+        .nav-items { display: flex; gap: 24px; }
+        .nav-item {
+            display: flex; flex-direction: column; align-items: center;
+            color: #9CA3AF; font-size: 10px; font-weight: 600; cursor: pointer;
+        }
+        .nav-item:hover { color: #FBBF24; }
+        .nav-icon { font-size: 20px; margin-bottom: 2px; }
+        .login-btn {
+            background: #FBBF24; color: #111827; padding: 6px 12px;
+            border-radius: 8px; font-weight: 600; font-size: 13px;
+            border: none; cursor: pointer;
+        }
+        .login-btn:hover { background: #D97706; }
+
+        /* ── Avatar ── */
+        .avatar-wrapper { position: relative; display: none; }
+        .avatar-btn { background: none; border: none; padding: 0; cursor: pointer; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+        .avatar-img { width: 36px; height: 36px; border-radius: 50%; object-fit: cover; border: 2px solid #FBBF24; display: none; }
+        .avatar-initials { width: 36px; height: 36px; border-radius: 50%; background: #FBBF24; color: #111827; font-weight: 700; font-size: 14px; display: flex; align-items: center; justify-content: center; border: 2px solid #FBBF24; }
+        .avatar-dropdown { display: none; position: absolute; top: calc(100% + 10px); right: 0; background: #1a1a1a; border: 1px solid #FBBF24; border-radius: 12px; min-width: 200px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,0.6); z-index: 1000; }
+        .avatar-dropdown.open { display: block; }
+        .dropdown-user-info { padding: 14px 16px 12px; border-bottom: 1px solid #333; }
+        .dropdown-user-name { font-weight: 700; font-size: 14px; color: #FBBF24; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .dropdown-user-email { font-size: 11px; color: #888; margin-top: 3px; }
+        .dropdown-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 13px 16px; background: none; border: none; color: #fff; font-size: 14px; font-family: inherit; cursor: pointer; text-align: left; transition: background 0.15s; }
+        .dropdown-item:hover { background: #2a2a2a; }
+        .dropdown-item.danger { color: #f87171; border-top: 1px solid #333; }
+        .dropdown-item.danger:hover { background: #2a1a1a; }
+        .dropdown-icon { font-size: 16px; width: 20px; text-align: center; }
+
+        /* ── Content ── */
+        .content { flex: 1; padding: 20px 16px; max-width: 900px; margin: 0 auto; width: 100%; }
+
+        /* ── Page Header ── */
+        .page-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px;
+        }
+        .page-title { font-size: 22px; font-weight: 700; color: #FBBF24; }
+        .page-subtitle { font-size: 13px; color: #9CA3AF; margin-top: 2px; }
+        .add-part-btn {
+            background-image:
+                repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.018) 3px, rgba(0,0,0,0.018) 6px),
+                linear-gradient(170deg, #FFE066 0%, #FBBF24 35%, #E8A800 70%, #C78F00 100%);
+            color: #1a0e00; border: none; border-radius: 10px;
+            padding: 10px 16px; font-size: 14px; font-weight: 800;
+            cursor: pointer; font-family: inherit; letter-spacing: 0.2px;
+            text-shadow: 0 1px 0 rgba(255,255,255,0.4);
+            box-shadow: 0 1px 0 rgba(255,255,255,0.6) inset, 0 -2px 0 rgba(0,0,0,0.2) inset,
+                        0 5px 0 #7a5500, 0 7px 6px rgba(0,0,0,0.4);
+            transition: all 0.08s ease; white-space: nowrap;
+        }
+        .add-part-btn:active { transform: translateY(4px); box-shadow: 0 1px 0 rgba(0,0,0,0.2) inset, 0 2px 0 #7a5500, 0 3px 4px rgba(0,0,0,0.4); }
+
+        /* ── Search & Filters ── */
+        .search-bar {
+            display: flex; gap: 10px; margin-bottom: 12px;
+        }
+        .search-input {
+            flex: 1; padding: 12px 16px; background: #1F2937;
+            border: 1px solid #374151; border-radius: 10px; color: #fff;
+            font-size: 15px; font-family: inherit;
+        }
+        .search-input:focus { outline: none; border-color: #FBBF24; }
+        .search-input::placeholder { color: #6B7280; }
+
+        .filter-row {
+            display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;
+        }
+        .filter-select {
+            padding: 8px 12px; background: #1F2937; border: 1px solid #374151;
+            border-radius: 8px; color: #fff; font-size: 13px; font-family: inherit;
+            cursor: pointer; flex: 1; min-width: 120px;
+        }
+        .filter-select:focus { outline: none; border-color: #FBBF24; }
+
+        /* ── Stats Bar ── */
+        .stats-bar {
+            display: flex; gap: 16px; margin-bottom: 16px;
+            padding: 12px 16px; background: #1F2937; border-radius: 10px;
+            border: 1px solid #374151; font-size: 13px; color: #9CA3AF;
+            flex-wrap: wrap;
+        }
+        .stat-item { display: flex; align-items: center; gap: 6px; }
+        .stat-value { color: #FBBF24; font-weight: 700; }
+
+        /* ── Parts List ── */
+        .parts-list { display: flex; flex-direction: column; gap: 10px; }
+
+        .part-card {
+            background: #1F2937; border: 1px solid #374151; border-radius: 12px;
+            padding: 14px 16px; cursor: pointer;
+            transition: all 0.15s ease;
+        }
+        .part-card:hover { border-color: #FBBF24; background: #242f40; }
+        .part-card.expanded { border-color: #FBBF24; }
+
+        .part-card-header {
+            display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
+        }
+        .part-main { flex: 1; min-width: 0; }
+        .part-number {
+            font-size: 13px; font-weight: 700; color: #FBBF24;
+            font-family: 'Courier New', monospace; letter-spacing: 0.5px;
+        }
+        .part-name {
+            font-size: 15px; font-weight: 600; color: #fff;
+            margin-top: 2px; line-height: 1.3;
+        }
+        .part-desc {
+            font-size: 12px; color: #9CA3AF; margin-top: 3px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .part-meta {
+            display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
+        }
+        .badge {
+            padding: 3px 8px; border-radius: 6px; font-size: 11px; font-weight: 600;
+            white-space: nowrap;
+        }
+        .badge-cat { background: rgba(251,191,36,0.15); color: #FBBF24; border: 1px solid rgba(251,191,36,0.3); }
+        .badge-brand { background: rgba(96,165,250,0.15); color: #60A5FA; border: 1px solid rgba(96,165,250,0.3); }
+        .badge-model { background: rgba(52,211,153,0.1); color: #34D399; border: 1px solid rgba(52,211,153,0.25); font-size: 10px; }
+
+        .part-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+        .expand-icon { color: #6B7280; font-size: 18px; transition: transform 0.2s; }
+        .part-card.expanded .expand-icon { transform: rotate(180deg); }
+        .vendor-count {
+            font-size: 11px; color: #6B7280;
+        }
+        .vendor-count.has-vendors { color: #34D399; }
+
+        /* ── Expanded Detail ── */
+        .part-detail {
+            display: none; margin-top: 14px; padding-top: 14px;
+            border-top: 1px solid #374151;
+        }
+        .part-card.expanded .part-detail { display: block; }
+
+        .detail-section { margin-bottom: 16px; }
+        .detail-label { font-size: 11px; font-weight: 700; color: #6B7280; text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 8px; }
+
+        .models-list { display: flex; flex-wrap: wrap; gap: 6px; }
+
+        /* Vendors */
+        .vendor-list { display: flex; flex-direction: column; gap: 8px; }
+        .vendor-row {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 10px 12px; background: #111827; border-radius: 8px;
+            border: 1px solid #1F2937;
+            flex-wrap: wrap; gap: 8px;
+        }
+        .vendor-row.preferred { border-color: rgba(251,191,36,0.4); }
+        .vendor-name { font-size: 14px; font-weight: 600; color: #fff; }
+        .vendor-pn { font-size: 12px; color: #9CA3AF; font-family: monospace; }
+        .vendor-price { font-size: 15px; font-weight: 700; color: #34D399; }
+        .vendor-lead { font-size: 12px; color: #9CA3AF; }
+        .preferred-star { color: #FBBF24; font-size: 14px; }
+
+        .add-vendor-btn {
+            display: flex; align-items: center; gap: 6px;
+            padding: 8px 12px; background: transparent;
+            border: 1px dashed #374151; border-radius: 8px;
+            color: #6B7280; font-size: 13px; font-family: inherit;
+            cursor: pointer; transition: all 0.15s; width: 100%;
+            justify-content: center;
+        }
+        .add-vendor-btn:hover { border-color: #FBBF24; color: #FBBF24; }
+
+        .detail-actions {
+            display: flex; gap: 8px; margin-top: 12px;
+        }
+        .action-btn {
+            flex: 1; padding: 9px; border-radius: 8px; font-size: 13px;
+            font-family: inherit; font-weight: 600; cursor: pointer;
+            border: 1px solid #374151; background: #111827; color: #9CA3AF;
+            transition: all 0.15s;
+        }
+        .action-btn:hover { border-color: #FBBF24; color: #FBBF24; }
+        .action-btn.primary { background: #FBBF24; color: #111827; border-color: #FBBF24; }
+        .action-btn.primary:hover { background: #D97706; }
+
+        /* ── Loading / Empty ── */
+        .loading { text-align: center; padding: 60px 20px; color: #6B7280; }
+        .spinner { font-size: 32px; animation: spin 1s linear infinite; display: inline-block; margin-bottom: 12px; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .empty-state { text-align: center; padding: 60px 20px; color: #6B7280; }
+        .empty-icon { font-size: 48px; margin-bottom: 12px; }
+
+        /* ── Modal (Add Part / Add Vendor) ── */
+        .modal-overlay {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); display: none;
+            align-items: flex-start; justify-content: center;
+            z-index: 2000; padding: 20px; overflow-y: auto;
+        }
+        .modal-overlay.open { display: flex; }
+        .modal {
+            background: #1F2937; border: 1px solid #374151; border-radius: 16px;
+            padding: 24px; width: 100%; max-width: 500px;
+            position: relative; margin: auto;
+        }
+        .modal-title { font-size: 18px; font-weight: 700; color: #FBBF24; margin-bottom: 20px; }
+        .modal-close { position: absolute; top: 16px; right: 16px; font-size: 24px; cursor: pointer; color: #6B7280; background: none; border: none; }
+        .modal-close:hover { color: #fff; }
+
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 12px; font-weight: 700; color: #9CA3AF; text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 6px; }
+        .form-input, .form-select, .form-textarea {
+            width: 100%; padding: 10px 14px; background: #111827;
+            border: 1px solid #374151; border-radius: 8px; color: #fff;
+            font-size: 14px; font-family: inherit;
+        }
+        .form-input:focus, .form-select:focus, .form-textarea:focus { outline: none; border-color: #FBBF24; }
+        .form-textarea { min-height: 80px; resize: vertical; }
+        .form-row { display: flex; gap: 12px; }
+        .form-row .form-group { flex: 1; }
+        .form-error { color: #f87171; font-size: 13px; margin-top: 4px; }
+
+        .modal-actions { display: flex; gap: 10px; margin-top: 20px; }
+        .modal-btn {
+            flex: 1; padding: 12px; border-radius: 8px; font-size: 15px;
+            font-family: inherit; font-weight: 700; cursor: pointer; border: none;
+        }
+        .modal-btn.cancel { background: #374151; color: #9CA3AF; }
+        .modal-btn.cancel:hover { background: #4B5563; }
+        .modal-btn.save {
+            background-image:
+                repeating-linear-gradient(0deg, transparent, transparent 3px, rgba(0,0,0,0.018) 3px, rgba(0,0,0,0.018) 6px),
+                linear-gradient(170deg, #FFE066 0%, #FBBF24 35%, #E8A800 70%, #C78F00 100%);
+            color: #1a0e00;
+            text-shadow: 0 1px 0 rgba(255,255,255,0.4);
+            box-shadow: 0 1px 0 rgba(255,255,255,0.6) inset, 0 -2px 0 rgba(0,0,0,0.2) inset,
+                        0 5px 0 #7a5500, 0 7px 6px rgba(0,0,0,0.4);
+            transition: all 0.08s ease;
+        }
+        .modal-btn.save:active { transform: translateY(4px); box-shadow: 0 1px 0 rgba(0,0,0,0.2) inset, 0 2px 0 #7a5500, 0 3px 4px rgba(0,0,0,0.3); }
+
+        /* ── Bottom Nav ── */
+        .bottom-nav {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: #1F2937; border-top: 1px solid #374151;
+            display: flex; justify-content: space-around; padding: 8px 0; z-index: 999;
+        }
+        .bottom-nav-item {
+            display: flex; flex-direction: column; align-items: center;
+            color: #9CA3AF; font-size: 10px; font-weight: 600;
+            cursor: pointer; padding: 4px 16px;
+        }
+        .bottom-nav-item:hover { color: #FBBF24; }
+        .bottom-nav-icon { font-size: 22px; margin-bottom: 2px; }
+
+        @media (min-width: 640px) {
+            .content { padding: 24px 24px; }
+            .filter-row { flex-wrap: nowrap; }
+        }
+    </style>
+</head>
+<body>
+
+<!-- ── Top Nav ── -->
+<div class="top-nav">
+    <div class="nav-items">
+        <div class="nav-item" onclick="goBack()">
+            <div class="nav-icon">◀</div>
+            <div>Back</div>
+        </div>
+        <div class="nav-item" onclick="window.location.href='index.html'">
+            <div class="nav-icon">🏠</div>
+            <div>Home</div>
+        </div>
+        <div class="nav-item" onclick="window.location.href='service_hub.html'">
+            <div class="nav-icon">🔧</div>
+            <div>Service Hub</div>
+        </div>
+    </div>
+    <div id="authSection" style="display:flex;align-items:center;">
+        <button id="loginBtn" class="login-btn" onclick="showLoginPopup()" style="display:block;">Login</button>
+        <div class="avatar-wrapper" id="avatarWrapper">
+            <button class="avatar-btn" id="avatarBtn" onclick="toggleDropdown(event)" aria-label="Account menu">
+                <img id="avatarImg" class="avatar-img" src="" alt="Profile" />
+                <div id="avatarInitials" class="avatar-initials">U</div>
+            </button>
+            <div class="avatar-dropdown" id="avatarDropdown">
+                <div class="dropdown-user-info">
+                    <div class="dropdown-user-name" id="dropdownName">User</div>
+                    <div class="dropdown-user-email" id="dropdownEmail"></div>
+                </div>
+                <button class="dropdown-item" onclick="window.location.href='user_profile.html'"><span class="dropdown-icon">👤</span> Profile</button>
+                <button class="dropdown-item" onclick="window.location.href='settings.html'"><span class="dropdown-icon">⚙️</span> Settings</button>
+                <button class="dropdown-item danger" onclick="logoutUser()"><span class="dropdown-icon">🚪</span> Log Out</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Main Content ── -->
+<div class="content">
+
+    <div class="page-header">
+        <div>
+            <div class="page-title">🔩 Parts Catalog</div>
+            <div class="page-subtitle">Global parts library</div>
+        </div>
+        <button class="add-part-btn" onclick="openAddPartModal()">+ Add Part</button>
+    </div>
+
+    <!-- Search -->
+    <div class="search-bar">
+        <input class="search-input" id="searchInput" type="text"
+               placeholder="Search part number, name, description..."
+               oninput="handleSearch()">
+    </div>
+
+    <!-- Filters -->
+    <div class="filter-row">
+        <select class="filter-select" id="filterBrand" onchange="applyFilters()">
+            <option value="">All Brands</option>
+            <option>Candela</option>
+            <option>Lumenis</option>
+            <option>Cynosure</option>
+            <option>Cutera</option>
+            <option>Syneron/Candela</option>
+            <option>Alma</option>
+            <option>Generic/Other</option>
+        </select>
+        <select class="filter-select" id="filterCategory" onchange="applyFilters()">
+            <option value="">All Categories</option>
+            <option>Optical Components</option>
+            <option>Handpiece Components</option>
+            <option>Cooling System</option>
+            <option>Electronics/Boards</option>
+            <option>Power Supplies</option>
+            <option>Mechanical/Frame</option>
+            <option>Other</option>
+        </select>
+        <select class="filter-select" id="filterVendors" onchange="applyFilters()" style="max-width:140px;">
+            <option value="">All Parts</option>
+            <option value="has_vendors">Has Vendors</option>
+            <option value="no_vendors">No Vendors</option>
+        </select>
+    </div>
+
+    <!-- Stats -->
+    <div class="stats-bar" id="statsBar">
+        <div class="stat-item">📦 <span class="stat-value" id="statTotal">—</span> parts</div>
+        <div class="stat-item">🏷️ <span class="stat-value" id="statShowing">—</span> showing</div>
+        <div class="stat-item">✅ <span class="stat-value" id="statWithVendors">—</span> with vendors</div>
+    </div>
+
+    <!-- Parts list -->
+    <div id="partsContainer">
+        <div class="loading">
+            <div class="spinner">⚙️</div>
+            <div>Loading parts catalog...</div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ── Bottom Nav ── -->
+<div class="bottom-nav">
+    <div class="bottom-nav-item" onclick="window.location.href='index.html'">
+        <div class="bottom-nav-icon">🏠</div>
+        <div>Home</div>
+    </div>
+    <div class="bottom-nav-item" onclick="goBack()">
+        <div class="bottom-nav-icon">◀</div>
+        <div>Back</div>
+    </div>
+    <div class="bottom-nav-item" onclick="window.location.href='service_hub.html'">
+        <div class="bottom-nav-icon">🔧</div>
+        <div>Hub</div>
+    </div>
+</div>
+
+<!-- ── Add Part Modal ── -->
+<div class="modal-overlay" id="addPartModal">
+    <div class="modal">
+        <button class="modal-close" onclick="closeAddPartModal()">×</button>
+        <div class="modal-title">Add New Part</div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Part Number *</label>
+                <input class="form-input" id="newPartNumber" placeholder="e.g. CAN-GEN-003">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Brand *</label>
+                <select class="form-select" id="newPartBrand">
+                    <option value="">Select...</option>
+                    <option>Candela</option>
+                    <option>Lumenis</option>
+                    <option>Cynosure</option>
+                    <option>Cutera</option>
+                    <option>Syneron/Candela</option>
+                    <option>Alma</option>
+                    <option>Generic/Other</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Name *</label>
+            <input class="form-input" id="newPartName" placeholder="Short descriptive name">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Description</label>
+            <textarea class="form-textarea" id="newPartDesc" placeholder="Full description of the part"></textarea>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Category *</label>
+                <select class="form-select" id="newPartCategory">
+                    <option value="">Select...</option>
+                    <option>Optical Components</option>
+                    <option>Handpiece Components</option>
+                    <option>Cooling System</option>
+                    <option>Electronics/Boards</option>
+                    <option>Power Supplies</option>
+                    <option>Mechanical/Frame</option>
+                    <option>Other</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label class="form-label">Unit</label>
+                <select class="form-select" id="newPartUnit">
+                    <option>Each</option>
+                    <option>Pair</option>
+                    <option>Set</option>
+                    <option>Box</option>
+                    <option>Foot</option>
+                    <option>Roll</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Compatible Models (comma separated)</label>
+            <input class="form-input" id="newPartModels" placeholder="e.g. GentleMax Pro, GentleLASE">
+        </div>
+        <div id="addPartError" class="form-error"></div>
+        <div class="modal-actions">
+            <button class="modal-btn cancel" onclick="closeAddPartModal()">Cancel</button>
+            <button class="modal-btn save" onclick="savePart()">Save Part</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Add Vendor Modal ── -->
+<div class="modal-overlay" id="addVendorModal">
+    <div class="modal">
+        <button class="modal-close" onclick="closeAddVendorModal()">×</button>
+        <div class="modal-title">Add Vendor</div>
+        <div id="vendorPartInfo" style="font-size:13px;color:#9CA3AF;margin-bottom:16px;padding:10px;background:#111827;border-radius:8px;"></div>
+        <div class="form-group">
+            <label class="form-label">Vendor Name *</label>
+            <input class="form-input" id="vendorName" placeholder="e.g. Candela Direct, MedX Parts">
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Vendor Part #</label>
+                <input class="form-input" id="vendorPartNum" placeholder="Vendor's own P/N">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Unit Cost (USD)</label>
+                <input class="form-input" id="vendorCost" type="number" step="0.01" placeholder="0.00">
+            </div>
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Lead Time (days)</label>
+                <input class="form-input" id="vendorLeadTime" type="number" placeholder="e.g. 7">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Preferred Vendor?</label>
+                <select class="form-select" id="vendorPreferred">
+                    <option value="false">No</option>
+                    <option value="true">Yes ⭐</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">URL / Website</label>
+            <input class="form-input" id="vendorUrl" placeholder="https://...">
+        </div>
+        <div class="form-group">
+            <label class="form-label">Notes</label>
+            <input class="form-input" id="vendorNotes" placeholder="Any notes about this vendor">
+        </div>
+        <div id="addVendorError" class="form-error"></div>
+        <div class="modal-actions">
+            <button class="modal-btn cancel" onclick="closeAddVendorModal()">Cancel</button>
+            <button class="modal-btn save" onclick="saveVendor()">Save Vendor</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Login Popup ── -->
+<div id="loginPopup" style="position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.85);display:none;align-items:center;justify-content:center;z-index:3000;">
+    <div style="background:#1a1a1a;border:2px solid #FBBF24;border-radius:16px;padding:32px;width:85%;max-width:420px;position:relative;color:#fff;">
+        <span onclick="closeLoginPopup()" style="position:absolute;top:12px;right:16px;font-size:32px;cursor:pointer;color:#FBBF24;">×</span>
+        <h2 id="popupTitle" style="margin-bottom:20px;">Sign In</h2>
+        <div id="formMessage" style="color:#ff6b6b;text-align:center;margin-bottom:16px;"></div>
+        <form id="authForm">
+            <div style="margin-bottom:16px;"><label style="display:block;color:#FBBF24;margin-bottom:6px;">Email</label><input type="email" id="email" required style="width:100%;padding:12px;border:1px solid #FBBF24;border-radius:8px;background:#2c2c2c;color:#fff;"></div>
+            <div id="passwordGroup" style="margin-bottom:16px;"><label style="display:block;color:#FBBF24;margin-bottom:6px;">Password</label><input type="password" id="password" style="width:100%;padding:12px;border:1px solid #FBBF24;border-radius:8px;background:#2c2c2c;color:#fff;"></div>
+            <button type="submit" id="submitBtn" style="width:100%;padding:14px;background:#FBBF24;border:none;border-radius:8px;color:#111827;font-weight:700;cursor:pointer;">Sign In</button>
+        </form>
+        <div style="text-align:center;margin-top:14px;"><a href="#" onclick="forgotPassword()" style="color:#FBBF24;">Forgot password?</a></div>
+    </div>
+</div>
+
+<script>
+    const SUPABASE_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_xWTiWV-DkS4Hp3MZHxpNOw_ASp3p8fy';
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+    let allParts = [];
+    let vendorsMap = {};   // part_id -> [vendors]
+    let filteredParts = [];
+    let currentVendorPartId = null;
+    let searchTimeout = null;
+
+    // ── Init ─────────────────────────────────────────────────
+    supabaseClient.auth.onAuthStateChange(() => updateAuthUI());
+
+    async function init() {
+        await loadParts();
+        updateAuthUI();
+    }
+
+    // ── Load Parts ───────────────────────────────────────────
+    async function loadParts() {
+        const container = document.getElementById('partsContainer');
+        container.innerHTML = '<div class="loading"><div class="spinner">⚙️</div><div>Loading parts catalog...</div></div>';
+
+        const { data: parts, error } = await supabaseClient
+            .from('parts_catalog')
+            .select('*')
+            .eq('is_active', true)
+            .order('brand')
+            .order('part_number');
+
+        if (error) {
+            container.innerHTML = '<div class="empty-state"><div class="empty-icon">⚠️</div><div>Error loading parts: ' + error.message + '</div></div>';
+            return;
+        }
+
+        // Load all vendors at once
+        const { data: vendors } = await supabaseClient
+            .from('part_vendors')
+            .select('*')
+            .eq('is_active', true)
+            .order('is_preferred', { ascending: false });
+
+        vendorsMap = {};
+        if (vendors) {
+            vendors.forEach(v => {
+                if (!vendorsMap[v.part_id]) vendorsMap[v.part_id] = [];
+                vendorsMap[v.part_id].push(v);
+            });
+        }
+
+        allParts = parts || [];
+        updateStats();
+        applyFilters();
+    }
+
+    // ── Stats ────────────────────────────────────────────────
+    function updateStats() {
+        document.getElementById('statTotal').textContent = allParts.length;
+        const withVendors = allParts.filter(p => vendorsMap[p.id] && vendorsMap[p.id].length > 0).length;
+        document.getElementById('statWithVendors').textContent = withVendors;
+    }
+
+    // ── Search & Filter ──────────────────────────────────────
+    function handleSearch() {
+        clearTimeout(searchTimeout);
+        searchTimeout = setTimeout(applyFilters, 200);
+    }
+
+    function applyFilters() {
+        const search = document.getElementById('searchInput').value.trim().toLowerCase();
+        const brand = document.getElementById('filterBrand').value;
+        const category = document.getElementById('filterCategory').value;
+        const vendorFilter = document.getElementById('filterVendors').value;
+
+        filteredParts = allParts.filter(p => {
+            if (brand && p.brand !== brand) return false;
+            if (category && p.category !== category) return false;
+            if (vendorFilter === 'has_vendors' && (!vendorsMap[p.id] || vendorsMap[p.id].length === 0)) return false;
+            if (vendorFilter === 'no_vendors' && vendorsMap[p.id] && vendorsMap[p.id].length > 0) return false;
+            if (search) {
+                const searchable = [p.part_number, p.name, p.description, p.brand, p.category,
+                    ...(p.compatible_models || [])].join(' ').toLowerCase();
+                if (!searchable.includes(search)) return false;
+            }
+            return true;
+        });
+
+        document.getElementById('statShowing').textContent = filteredParts.length;
+        renderParts();
+    }
+
+    // ── Render ───────────────────────────────────────────────
+    function renderParts() {
+        const container = document.getElementById('partsContainer');
+
+        if (filteredParts.length === 0) {
+            container.innerHTML = '<div class="empty-state"><div class="empty-icon">🔍</div><div>No parts found</div><div style="font-size:13px;margin-top:8px;color:#6B7280;">Try adjusting your search or filters</div></div>';
+            return;
+        }
+
+        const html = filteredParts.map(part => {
+            const vendors = vendorsMap[part.id] || [];
+            const preferred = vendors.find(v => v.is_preferred);
+            const models = (part.compatible_models || []).slice(0, 3);
+            const moreModels = (part.compatible_models || []).length - 3;
+
+            return `
+            <div class="part-card" id="card-${part.id}" onclick="toggleCard(${part.id})">
+                <div class="part-card-header">
+                    <div class="part-main">
+                        <div class="part-number">${part.part_number}</div>
+                        <div class="part-name">${part.name}</div>
+                        ${part.description && part.description !== part.name ? `<div class="part-desc">${part.description}</div>` : ''}
+                        <div class="part-meta">
+                            <span class="badge badge-cat">${part.category}</span>
+                            <span class="badge badge-brand">${part.brand}</span>
+                            ${models.map(m => `<span class="badge badge-model">${m}</span>`).join('')}
+                            ${moreModels > 0 ? `<span class="badge badge-model">+${moreModels} more</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="part-right">
+                        <div class="expand-icon">▼</div>
+                        <div class="vendor-count ${vendors.length > 0 ? 'has-vendors' : ''}">
+                            ${vendors.length > 0 ? '✓ ' + vendors.length + ' vendor' + (vendors.length > 1 ? 's' : '') : 'No vendors'}
+                        </div>
+                        ${preferred && preferred.unit_cost ? `<div style="font-size:13px;color:#34D399;font-weight:700;">$${parseFloat(preferred.unit_cost).toLocaleString('en-US',{minimumFractionDigits:2})}</div>` : ''}
+                    </div>
+                </div>
+
+                <div class="part-detail">
+                    ${(part.compatible_models || []).length > 0 ? `
+                    <div class="detail-section">
+                        <div class="detail-label">Compatible Models</div>
+                        <div class="models-list">
+                            ${(part.compatible_models || []).map(m => `<span class="badge badge-model">${m}</span>`).join('')}
+                        </div>
+                    </div>` : ''}
+
+                    <div class="detail-section">
+                        <div class="detail-label">Vendors (${vendors.length})</div>
+                        <div class="vendor-list">
+                            ${vendors.map(v => `
+                            <div class="vendor-row ${v.is_preferred ? 'preferred' : ''}">
+                                <div>
+                                    <div class="vendor-name">${v.is_preferred ? '⭐ ' : ''}${v.vendor_name}</div>
+                                    ${v.vendor_part_number ? `<div class="vendor-pn">P/N: ${v.vendor_part_number}</div>` : ''}
+                                    ${v.notes ? `<div style="font-size:11px;color:#6B7280;margin-top:2px;">${v.notes}</div>` : ''}
+                                </div>
+                                <div style="text-align:right;">
+                                    ${v.unit_cost ? `<div class="vendor-price">$${parseFloat(v.unit_cost).toLocaleString('en-US',{minimumFractionDigits:2})}</div>` : '<div class="vendor-price" style="color:#6B7280;">—</div>'}
+                                    ${v.lead_time_days ? `<div class="vendor-lead">${v.lead_time_days}d lead</div>` : ''}
+                                    ${v.url ? `<a href="${v.url}" target="_blank" style="font-size:11px;color:#60A5FA;text-decoration:none;" onclick="event.stopPropagation()">🔗 Website</a>` : ''}
+                                </div>
+                            </div>`).join('')}
+                            <button class="add-vendor-btn" onclick="event.stopPropagation(); openAddVendorModal(${part.id}, '${part.part_number.replace(/'/g,"\\'")}', '${part.name.replace(/'/g,"\\'")}')">
+                                + Add Vendor
+                            </button>
+                        </div>
+                    </div>
+
+                    <div class="detail-actions">
+                        <button class="action-btn" onclick="event.stopPropagation(); editPart(${part.id})">✏️ Edit</button>
+                        <button class="action-btn primary" onclick="event.stopPropagation(); addToInventory(${part.id}, '${part.name.replace(/'/g,"\\'")}')">📦 Add to Inventory</button>
+                    </div>
+                </div>
+            </div>`;
+        }).join('');
+
+        container.innerHTML = '<div class="parts-list">' + html + '</div>';
+    }
+
+    function toggleCard(partId) {
+        const card = document.getElementById('card-' + partId);
+        card.classList.toggle('expanded');
+    }
+
+    // ── Add Part ─────────────────────────────────────────────
+    function openAddPartModal() {
+        document.getElementById('addPartModal').classList.add('open');
+        document.getElementById('addPartError').textContent = '';
+        ['newPartNumber','newPartName','newPartDesc','newPartModels'].forEach(id => document.getElementById(id).value = '');
+        document.getElementById('newPartBrand').value = '';
+        document.getElementById('newPartCategory').value = '';
+        document.getElementById('newPartUnit').value = 'Each';
+    }
+    function closeAddPartModal() { document.getElementById('addPartModal').classList.remove('open'); }
+
+    async function savePart() {
+        const pn = document.getElementById('newPartNumber').value.trim();
+        const brand = document.getElementById('newPartBrand').value;
+        const name = document.getElementById('newPartName').value.trim();
+        const category = document.getElementById('newPartCategory').value;
+        const errEl = document.getElementById('addPartError');
+
+        if (!pn || !brand || !name || !category) {
+            errEl.textContent = 'Part number, brand, name, and category are required.';
+            return;
+        }
+
+        const desc = document.getElementById('newPartDesc').value.trim();
+        const unit = document.getElementById('newPartUnit').value;
+        const modelsRaw = document.getElementById('newPartModels').value.trim();
+        const models = modelsRaw ? modelsRaw.split(',').map(m => m.trim()).filter(Boolean) : null;
+
+        const { data: user } = await supabaseClient.auth.getUser();
+
+        const { error } = await supabaseClient.from('parts_catalog').insert({
+            part_number: pn, brand, name, description: desc || name,
+            category, unit_of_measure: unit,
+            compatible_models: models,
+            created_by: user?.user?.id || null
+        });
+
+        if (error) { errEl.textContent = error.message; return; }
+        closeAddPartModal();
+        await loadParts();
+    }
+
+    // ── Add Vendor ───────────────────────────────────────────
+    function openAddVendorModal(partId, partNumber, partName) {
+        currentVendorPartId = partId;
+        document.getElementById('vendorPartInfo').textContent = partNumber + ' — ' + partName;
+        document.getElementById('addVendorModal').classList.add('open');
+        document.getElementById('addVendorError').textContent = '';
+        ['vendorName','vendorPartNum','vendorCost','vendorLeadTime','vendorUrl','vendorNotes'].forEach(id => document.getElementById(id).value = '');
+        document.getElementById('vendorPreferred').value = 'false';
+    }
+    function closeAddVendorModal() { document.getElementById('addVendorModal').classList.remove('open'); currentVendorPartId = null; }
+
+    async function saveVendor() {
+        const name = document.getElementById('vendorName').value.trim();
+        const errEl = document.getElementById('addVendorError');
+        if (!name) { errEl.textContent = 'Vendor name is required.'; return; }
+
+        const cost = document.getElementById('vendorCost').value;
+        const lead = document.getElementById('vendorLeadTime').value;
+
+        const { error } = await supabaseClient.from('part_vendors').insert({
+            part_id: currentVendorPartId,
+            vendor_name: name,
+            vendor_part_number: document.getElementById('vendorPartNum').value.trim() || null,
+            unit_cost: cost ? parseFloat(cost) : null,
+            lead_time_days: lead ? parseInt(lead) : null,
+            url: document.getElementById('vendorUrl').value.trim() || null,
+            notes: document.getElementById('vendorNotes').value.trim() || null,
+            is_preferred: document.getElementById('vendorPreferred').value === 'true'
+        });
+
+        if (error) { errEl.textContent = error.message; return; }
+        closeAddVendorModal();
+        await loadParts();
+    }
+
+    // ── Edit / Inventory (stubs for now) ─────────────────────
+    function editPart(partId) {
+        // TODO: populate and open edit modal
+        alert('Edit functionality coming soon!');
+    }
+    function addToInventory(partId, partName) {
+        window.location.href = 'my_inventory.html?part_id=' + partId;
+    }
+
+    // ── Auth ─────────────────────────────────────────────────
+    function goBack() {
+        if (typeof Android !== 'undefined' && Android.goBack) Android.goBack();
+        else window.history.back();
+    }
+    function toggleDropdown(e) {
+        e.stopPropagation();
+        document.getElementById('avatarDropdown').classList.toggle('open');
+    }
+    document.addEventListener('click', () => {
+        const dd = document.getElementById('avatarDropdown');
+        if (dd) dd.classList.remove('open');
+    });
+    function showLoginPopup() { document.getElementById('loginPopup').style.display = 'flex'; }
+    function closeLoginPopup() { document.getElementById('loginPopup').style.display = 'none'; }
+    async function forgotPassword() {
+        const email = document.getElementById('email').value.trim();
+        if (!email) return document.getElementById('formMessage').textContent = 'Enter your email first';
+        const { error } = await supabaseClient.auth.resetPasswordForEmail(email);
+        document.getElementById('formMessage').textContent = error ? error.message : 'Password reset link sent!';
+    }
+    document.getElementById('authForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value.trim();
+        const { error } = await supabaseClient.auth.signInWithPassword({ email, password });
+        if (error) { document.getElementById('formMessage').textContent = error.message; }
+        else { closeLoginPopup(); }
+    });
+    async function logoutUser() {
+        document.getElementById('avatarDropdown').classList.remove('open');
+        await supabaseClient.auth.signOut();
+    }
+    async function updateAuthUI() {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const loginBtn = document.getElementById('loginBtn');
+        const avatarWrapper = document.getElementById('avatarWrapper');
+        const avatarImg = document.getElementById('avatarImg');
+        const avatarInitials = document.getElementById('avatarInitials');
+        if (user) {
+            if (loginBtn) loginBtn.style.display = 'none';
+            if (avatarWrapper) avatarWrapper.style.display = 'block';
+            const meta = user.user_metadata || {};
+            const firstName = meta.first_name || '';
+            const lastName = meta.last_name || '';
+            const initials = ((firstName[0]||'')+(lastName[0]||'')).toUpperCase() || user.email[0].toUpperCase();
+            const photoUrl = meta.avatar_url || meta.picture || '';
+            document.getElementById('dropdownName').textContent = [firstName, lastName].filter(Boolean).join(' ') || 'User';
+            document.getElementById('dropdownEmail').textContent = user.email || '';
+            if (photoUrl) { avatarImg.src = photoUrl; avatarImg.style.display = 'block'; avatarInitials.style.display = 'none'; }
+            else { avatarImg.style.display = 'none'; avatarInitials.style.display = 'flex'; avatarInitials.textContent = initials; }
+        } else {
+            if (loginBtn) loginBtn.style.display = 'block';
+            if (avatarWrapper) avatarWrapper.style.display = 'none';
+        }
+    }
+
+    init();
+</script>
+</body>
+</html>

@@ -1,0 +1,847 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Settings</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --gold:      #FBBF24;
+            --gold-dk:   #D97706;
+            --bg:        #111;
+            --surface:   #111;
+            --surface2:  #1a1a1a;
+            --surface3:  #222;
+            --border:    #2a2a2a;
+            --border-gold: #FBBF2444;
+            --text:      #fff;
+            --text-muted:#888;
+            --red:       #ef4444;
+            --green:     #22c55e;
+            --blue:      #3b82f6;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding-bottom: 60px;
+            transition: background 0.3s, color 0.3s;
+        }
+
+        /* Light theme override */
+        body.light {
+            --bg:       #f5f5f5;
+            --surface:  #fff;
+            --surface2: #f0f0f0;
+            --surface3: #e8e8e8;
+            --border:   #ddd;
+            --text:     #111;
+            --text-muted: #666;
+        }
+
+        /* ── Header ── */
+        .header {
+            background: var(--surface);
+            padding: 14px 16px;
+            display: flex; align-items: center; gap: 12px;
+            border-bottom: 1px solid var(--gold);
+            position: sticky; top: 0; z-index: 100;
+        }
+        .back-btn {
+            background: none; border: none; color: var(--gold);
+            font-size: 22px; cursor: pointer; padding: 4px 8px;
+            border-radius: 8px; line-height: 1;
+        }
+        .back-btn:hover { background: var(--surface2); }
+        .header-title { font-size: 18px; font-weight: 700; flex: 1; }
+
+        /* ── Sections ── */
+        .section {
+            margin: 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            overflow: hidden;
+        }
+        .section-header {
+            padding: 14px 16px 10px;
+            border-bottom: 1px solid var(--border);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .section-icon  { font-size: 16px; }
+        .section-title {
+            font-size: 13px; font-weight: 700; color: var(--gold);
+            text-transform: uppercase; letter-spacing: 0.8px;
+        }
+
+        /* ── Setting rows ── */
+        .setting-row {
+            display: flex; align-items: center;
+            padding: 14px 16px;
+            border-bottom: 1px solid var(--border);
+            gap: 12px;
+        }
+        .setting-row:last-child { border-bottom: none; }
+        .setting-info { flex: 1; }
+        .setting-label { font-size: 14px; font-weight: 600; }
+        .setting-sub   { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+        /* Toggle switch */
+        .toggle-switch { position: relative; width: 48px; height: 28px; flex-shrink: 0; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-track {
+            position: absolute; inset: 0;
+            background: var(--surface3); border-radius: 14px;
+            cursor: pointer; transition: background 0.2s;
+            border: 1px solid var(--border);
+        }
+        .toggle-track::before {
+            content: '';
+            position: absolute; left: 3px; top: 3px;
+            width: 20px; height: 20px; border-radius: 50%;
+            background: var(--text-muted);
+            transition: transform 0.2s, background 0.2s;
+        }
+        .toggle-switch input:checked + .toggle-track { background: var(--gold); border-color: var(--gold); }
+        .toggle-switch input:checked + .toggle-track::before { transform: translateX(20px); background: #111; }
+
+        /* Segmented control */
+        .segmented {
+            display: flex;
+            background: var(--surface3);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            overflow: hidden;
+            flex-shrink: 0;
+        }
+        .seg-btn {
+            flex: 1; padding: 7px 12px;
+            background: none; border: none;
+            color: var(--text-muted); font-size: 12px; font-weight: 600;
+            cursor: pointer; white-space: nowrap;
+            transition: background 0.15s, color 0.15s;
+        }
+        .seg-btn.active { background: var(--gold); color: #111; }
+        .seg-btn:not(.active):hover { background: var(--surface2); color: var(--text); }
+
+        /* Select dropdown */
+        .setting-select {
+            padding: 8px 12px;
+            background: var(--surface2); border: 1px solid var(--border);
+            border-radius: 9px; color: var(--text);
+            font-size: 13px; font-family: inherit; outline: none;
+            cursor: pointer; flex-shrink: 0;
+            transition: border-color 0.15s;
+        }
+        .setting-select:focus { border-color: var(--gold); }
+        .setting-select option { background: var(--surface2); }
+
+        /* Theme cards */
+        .theme-cards {
+            display: flex; gap: 10px;
+            padding: 14px 16px;
+        }
+        .theme-card {
+            flex: 1; padding: 14px 10px;
+            border-radius: 12px; border: 2px solid var(--border);
+            cursor: pointer; text-align: center;
+            transition: border-color 0.15s, transform 0.15s;
+        }
+        .theme-card:hover { transform: translateY(-2px); }
+        .theme-card.active { border-color: var(--gold); }
+        .theme-card.dark-card  { background: #111; color: #fff; }
+        .theme-card.light-card { background: #f5f5f5; color: #111; }
+        .theme-card-icon   { font-size: 24px; margin-bottom: 6px; }
+        .theme-card-label  { font-size: 12px; font-weight: 700; }
+        .theme-card-check  { font-size: 16px; color: var(--gold); height: 20px; }
+
+        /* About section */
+        .about-row {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 13px 16px; border-bottom: 1px solid var(--border);
+        }
+        .about-row:last-child { border-bottom: none; }
+        .about-key   { font-size: 13px; color: var(--text-muted); }
+        .about-val   { font-size: 13px; font-weight: 600; }
+        .about-val.gold { color: var(--gold); }
+
+        /* Action rows */
+        .action-row {
+            display: flex; align-items: center; gap: 12px;
+            padding: 14px 16px; border-bottom: 1px solid var(--border);
+            cursor: pointer; transition: background 0.1s;
+        }
+        .action-row:last-child { border-bottom: none; }
+        .action-row:hover { background: var(--surface2); }
+        .action-icon  { font-size: 18px; width: 24px; text-align: center; }
+        .action-label { font-size: 14px; font-weight: 600; flex: 1; }
+        .action-arrow { color: var(--text-muted); font-size: 16px; }
+        .action-row.danger .action-label { color: var(--red); }
+
+        /* Save bar */
+        .save-bar {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: var(--surface);
+            border-top: 1px solid var(--border);
+            padding: 12px 16px;
+            display: flex; gap: 10px;
+            z-index: 50;
+        }
+        .save-bar-btn {
+            flex: 1; padding: 13px;
+            border-radius: 10px; border: none;
+            font-size: 15px; font-weight: 700; cursor: pointer;
+        }
+        .save-bar-btn.primary { background: var(--gold); color: #111827; }
+        .save-bar-btn.primary:hover { background: var(--gold-dk); }
+        .save-bar-btn.secondary {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed; bottom: 80px; left: 50%;
+            transform: translateX(-50%) translateY(80px);
+            background: var(--surface2); border: 1px solid var(--gold);
+            border-radius: 10px; padding: 12px 20px;
+            font-size: 14px; font-weight: 600; z-index: 9999;
+            transition: transform 0.3s ease, opacity 0.3s ease;
+            white-space: nowrap;
+            opacity: 0; pointer-events: none;
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; pointer-events: auto; }
+        .toast.success { border-color: var(--green); color: var(--green); }
+        .toast.error   { border-color: var(--red);   color: var(--red); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
+</head>
+<body>
+
+<!-- ── Header ── -->
+<div class="header">
+    <button class="back-btn" onclick="navigateTo('index.html')">←</button>
+    <div class="header-title">Settings</div>
+</div>
+
+<!-- ════════════════════════════════
+     APPEARANCE
+════════════════════════════════ -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">🎨</span>
+        <span class="section-title">Appearance</span>
+    </div>
+
+    <!-- Theme cards -->
+    <div style="padding:12px 16px 4px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">
+        Theme
+    </div>
+    <div class="theme-cards">
+        <div class="theme-card dark-card active" id="themeDark" onclick="setTheme('dark')">
+            <div class="theme-card-icon">🌙</div>
+            <div class="theme-card-label">Dark</div>
+            <div class="theme-card-check" id="darkCheck">✓</div>
+        </div>
+        <div class="theme-card light-card" id="themeLight" onclick="setTheme('light')">
+            <div class="theme-card-icon">☀️</div>
+            <div class="theme-card-label">Light</div>
+            <div class="theme-card-check" id="lightCheck"></div>
+        </div>
+    </div>
+</div>
+
+<!-- ════════════════════════════════
+     CALENDAR
+════════════════════════════════ -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">📅</span>
+        <span class="section-title">Calendar</span>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Default View</div>
+            <div class="setting-sub">Which view opens when you launch the calendar</div>
+        </div>
+        <div class="segmented" id="calViewSeg">
+            <button class="seg-btn active" data-val="month"  onclick="setCalView('month')">Month</button>
+            <button class="seg-btn"        data-val="week"   onclick="setCalView('week')">Week</button>
+            <button class="seg-btn"        data-val="day"    onclick="setCalView('day')">Day</button>
+            <button class="seg-btn"        data-val="agenda" onclick="setCalView('agenda')">Agenda</button>
+        </div>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Week Starts On</div>
+            <div class="setting-sub">First day of the week in calendar views</div>
+        </div>
+        <select class="setting-select" id="weekStart">
+            <option value="0">Sunday</option>
+            <option value="1">Monday</option>
+        </select>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Show Completed Tickets</div>
+            <div class="setting-sub">Include completed tickets on the calendar</div>
+        </div>
+        <label class="toggle-switch">
+            <input type="checkbox" id="showCompleted">
+            <span class="toggle-track"></span>
+        </label>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Show Cancelled Tickets</div>
+            <div class="setting-sub">Include cancelled tickets on the calendar</div>
+        </div>
+        <label class="toggle-switch">
+            <input type="checkbox" id="showCancelled">
+            <span class="toggle-track"></span>
+        </label>
+    </div>
+</div>
+
+<!-- ════════════════════════════════
+     DATE & TIME FORMAT
+════════════════════════════════ -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">🕐</span>
+        <span class="section-title">Date & Time Format</span>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Date Format</div>
+            <div class="setting-sub" id="dateFormatPreview">Preview: March 1, 2026</div>
+        </div>
+        <select class="setting-select" id="dateFormat" onchange="updateDatePreview()">
+            <option value="long">Month D, YYYY</option>
+            <option value="short">MM/DD/YYYY</option>
+            <option value="iso">YYYY-MM-DD</option>
+            <option value="eu">DD/MM/YYYY</option>
+        </select>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Time Format</div>
+            <div class="setting-sub" id="timeFormatPreview">Preview: 2:30 PM</div>
+        </div>
+        <div class="segmented">
+            <button class="seg-btn active" id="time12Btn" onclick="setTimeFormat('12')">12h</button>
+            <button class="seg-btn"        id="time24Btn" onclick="setTimeFormat('24')">24h</button>
+        </div>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Timezone</div>
+            <div class="setting-sub">Detected from your device</div>
+        </div>
+        <div style="font-size:13px;color:var(--gold);font-weight:600;" id="tzDisplay">—</div>
+    </div>
+</div>
+
+<!-- ════════════════════════════════
+     NOTIFICATIONS
+════════════════════════════════ -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">🔔</span>
+        <span class="section-title">Notifications</span>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Push Notifications</div>
+            <div class="setting-sub">In-app alerts for tickets and forum activity</div>
+        </div>
+        <label class="toggle-switch">
+            <input type="checkbox" id="pushNotif" checked>
+            <span class="toggle-track"></span>
+        </label>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Sound</div>
+            <div class="setting-sub">Play sound with notifications</div>
+        </div>
+        <label class="toggle-switch">
+            <input type="checkbox" id="notifSound">
+            <span class="toggle-track"></span>
+        </label>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Notification Dot</div>
+            <div class="setting-sub">Show red badge on bell icon</div>
+        </div>
+        <label class="toggle-switch">
+            <input type="checkbox" id="notifDot" checked>
+            <span class="toggle-track"></span>
+        </label>
+    </div>
+
+    <div class="action-row" onclick="navigateTo('user_profile.html')">
+        <span class="action-icon">🎛</span>
+        <span class="action-label">Manage notification types</span>
+        <span style="font-size:12px;color:var(--text-muted);margin-right:6px;">in Profile</span>
+        <span class="action-arrow">›</span>
+    </div>
+</div>
+
+<!-- ════════════════════════════════
+     BEHAVIOR
+════════════════════════════════ -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">🧭</span>
+        <span class="section-title">Behavior</span>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Confirm on exit</div>
+            <div class="setting-sub">Show an exit confirmation when pressing back on the home screen</div>
+        </div>
+        <label class="toggle-switch">
+            <input type="checkbox" id="exitConfirm">
+            <span class="toggle-track"></span>
+        </label>
+    </div>
+</div>
+
+<!-- ════════════════════════════════
+     APP INFO
+════════════════════════════════ -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">ℹ️</span>
+        <span class="section-title">About Total Service Pro</span>
+    </div>
+
+    <div class="about-row">
+        <span class="about-key">App Name</span>
+        <span class="about-val">Total Service Pro</span>
+    </div>
+    <div class="about-row">
+        <span class="about-key">Version</span>
+        <span class="about-val gold">0.9.091 (Beta)</span>
+    </div>
+    <div class="about-row">
+        <span class="about-key">Build</span>
+        <span class="about-val">2026.03.01</span>
+    </div>
+    <div class="about-row">
+        <span class="about-key">Platform</span>
+        <span class="about-val" id="platformVal">—</span>
+    </div>
+    <div class="about-row">
+        <span class="about-key">Supported Equipment</span>
+        <span class="about-val">Lumenis · Candela · Cynosure</span>
+    </div>
+
+    <div class="action-row" onclick="openPrivacyPolicy()">
+        <span class="action-icon">🔒</span>
+        <span class="action-label">Privacy Policy</span>
+        <span class="action-arrow">›</span>
+    </div>
+    <div class="action-row" onclick="openTerms()">
+        <span class="action-icon">📄</span>
+        <span class="action-label">Terms of Service</span>
+        <span class="action-arrow">›</span>
+    </div>
+    <div class="action-row" onclick="sendFeedback()">
+        <span class="action-icon">💬</span>
+        <span class="action-label">Send Feedback</span>
+        <span class="action-arrow">›</span>
+    </div>
+    <div class="action-row" onclick="checkForUpdates()">
+        <span class="action-icon">🔄</span>
+        <span class="action-label">Check for Updates</span>
+        <span class="action-arrow">›</span>
+    </div>
+</div>
+
+<!-- ════════════════════════════════
+     ACCOUNT ACTIONS
+════════════════════════════════ -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">👤</span>
+        <span class="section-title">Account</span>
+    </div>
+    <div class="action-row" onclick="window.location.href='user_profile.html'">
+        <span class="action-icon">✏️</span>
+        <span class="action-label">Edit My Profile</span>
+        <span class="action-arrow">›</span>
+    </div>
+    <div class="action-row" onclick="navigateTo('company_profile.html')">
+        <span class="action-icon">🏢</span>
+        <span class="action-label">Company Profile</span>
+        <span class="action-arrow">›</span>
+    </div>
+    <div class="action-row" onclick="navigateTo('test_equipment.html')">
+        <span class="action-icon">🔧</span>
+        <span class="action-label">My Test Equipment</span>
+        <span class="action-arrow">›</span>
+    </div>
+    <div class="action-row" onclick="clearCache()">
+        <span class="action-icon">🗑</span>
+        <span class="action-label">Clear Local Cache</span>
+        <span class="action-arrow">›</span>
+    </div>
+    <div class="action-row danger" onclick="signOut()">
+        <span class="action-icon">🚪</span>
+        <span class="action-label">Log Out</span>
+        <span class="action-arrow">›</span>
+    </div>
+</div>
+
+<!-- Save bar -->
+<div class="save-bar">
+    <button class="save-bar-btn secondary" onclick="resetDefaults()">Reset</button>
+    <button class="save-bar-btn primary"   onclick="saveSettings()">Save Settings</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+    // ═══════════════════════════════════════════════════
+    //  SUPABASE
+    // ═══════════════════════════════════════════════════
+    // ── Extract _s param ──
+    var _pendingSession = null;
+    try {
+        var _purl = new URL(window.location.href);
+        var _sp = _purl.searchParams.get('_s');
+        if (_sp) {
+            _pendingSession = JSON.parse(atob(_sp));
+            _purl.searchParams.delete('_s');
+            history.replaceState(null, '', _purl.toString());
+        }
+    } catch(e) {}
+
+    const supabaseClient = supabase.createClient(
+        'https://yljztfajyvjzqikxdddf.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+        {
+            auth: {
+                persistSession: true,
+                storageKey: 'tsp-auth-token',
+                storage: window.localStorage,
+                autoRefreshToken: true,
+                detectSessionInUrl: false
+            }
+        }
+    );
+
+    function navigateTo(page) {
+        try {
+            var sess = JSON.parse(localStorage.getItem('tsp-auth-token') || 'null');
+            var raw  = sess && (sess.access_token ? sess : (sess.currentSession || null));
+            if (raw && raw.access_token) {
+                var encoded = btoa(JSON.stringify({
+                    access_token:  raw.access_token,
+                    refresh_token: raw.refresh_token,
+                    user: raw.user
+                }));
+                const _sep = page.includes('?') ? '&' : '?';
+                window.location.href = page + _sep + '_s=' + encoded;
+                return;
+            }
+        } catch(e) {}
+        window.location.href = page;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  STATE
+    // ═══════════════════════════════════════════════════
+    const SETTINGS_KEY = 'tsp_settings';
+
+    const DEFAULTS = {
+        theme:          'dark',
+        calView:        'month',
+        weekStart:      '0',
+        showCompleted:  false,
+        showCancelled:  false,
+        dateFormat:     'long',
+        timeFormat:     '12',
+        pushNotif:      true,
+        notifSound:     false,
+        notifDot:       true,
+    };
+
+    let settings = { ...DEFAULTS };
+
+    // ═══════════════════════════════════════════════════
+    //  INIT
+    // ═══════════════════════════════════════════════════
+    function init() {
+        // Load saved settings
+        const saved = localStorage.getItem(SETTINGS_KEY);
+        if (saved) {
+            try { settings = { ...DEFAULTS, ...JSON.parse(saved) }; }
+            catch(e) { settings = { ...DEFAULTS }; }
+        }
+
+        applySettings();
+        populateForm();
+
+        // Detect platform
+        const isAndroid = typeof Android !== 'undefined' || /Android/.test(navigator.userAgent);
+        const isIOS     = /iPhone|iPad/.test(navigator.userAgent);
+        document.getElementById('platformVal').textContent =
+            isAndroid ? 'Android' : isIOS ? 'iOS' : 'Web Browser';
+
+        // Timezone
+        document.getElementById('tzDisplay').textContent =
+            Intl.DateTimeFormat().resolvedOptions().timeZone || 'Unknown';
+    }
+
+    function populateForm() {
+        // Theme
+        setTheme(settings.theme, false);
+
+        // Calendar view
+        setCalView(settings.calView, false);
+
+        // Week start
+        document.getElementById('weekStart').value = settings.weekStart;
+
+        // Show completed/cancelled
+        document.getElementById('showCompleted').checked = settings.showCompleted;
+        document.getElementById('showCancelled').checked = settings.showCancelled;
+
+        // Date format
+        document.getElementById('dateFormat').value = settings.dateFormat;
+        updateDatePreview();
+
+        // Time format
+        setTimeFormat(settings.timeFormat, false);
+
+        // Notifications
+        document.getElementById('pushNotif').checked  = settings.pushNotif;
+        document.getElementById('notifSound').checked = settings.notifSound;
+        document.getElementById('notifDot').checked   = settings.notifDot;
+
+        // Native-backed settings
+        try {
+            if (typeof Android !== 'undefined' && Android.getExitConfirmEnabled) {
+                document.getElementById('exitConfirm').checked = !!Android.getExitConfirmEnabled();
+            } else {
+                document.getElementById('exitConfirm').checked = true;
+            }
+        } catch(e) {
+            document.getElementById('exitConfirm').checked = true;
+        }
+    }
+
+    function applySettings() {
+        // Apply theme to body
+        document.body.classList.toggle('light', settings.theme === 'light');
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  THEME
+    // ═══════════════════════════════════════════════════
+    function setTheme(theme, updateState = true) {
+        if (updateState) settings.theme = theme;
+
+        document.body.classList.toggle('light', theme === 'light');
+
+        document.getElementById('themeDark').classList.toggle('active',  theme === 'dark');
+        document.getElementById('themeLight').classList.toggle('active', theme === 'light');
+        document.getElementById('darkCheck').textContent  = theme === 'dark'  ? '✓' : '';
+        document.getElementById('lightCheck').textContent = theme === 'light' ? '✓' : '';
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  CALENDAR VIEW
+    // ═══════════════════════════════════════════════════
+    function setCalView(view, updateState = true) {
+        if (updateState) settings.calView = view;
+
+        document.querySelectorAll('#calViewSeg .seg-btn').forEach(btn => {
+            btn.classList.toggle('active', btn.dataset.val === view);
+        });
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  DATE / TIME FORMAT
+    // ═══════════════════════════════════════════════════
+    function updateDatePreview() {
+        const fmt  = document.getElementById('dateFormat').value;
+        const now  = new Date();
+        const preview = formatDate(now, fmt);
+        document.getElementById('dateFormatPreview').textContent = 'Preview: ' + preview;
+        settings.dateFormat = fmt;
+    }
+
+    function formatDate(date, fmt) {
+        const d  = date.getDate();
+        const m  = date.getMonth() + 1;
+        const y  = date.getFullYear();
+        const mn = date.toLocaleString('default', { month: 'long' });
+        switch(fmt) {
+            case 'long':  return mn + ' ' + d + ', ' + y;
+            case 'short': return String(m).padStart(2,'0') + '/' + String(d).padStart(2,'0') + '/' + y;
+            case 'iso':   return y + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0');
+            case 'eu':    return String(d).padStart(2,'0') + '/' + String(m).padStart(2,'0') + '/' + y;
+            default:      return mn + ' ' + d + ', ' + y;
+        }
+    }
+
+    function setTimeFormat(fmt, updateState = true) {
+        if (updateState) settings.timeFormat = fmt;
+
+        document.getElementById('time12Btn').classList.toggle('active', fmt === '12');
+        document.getElementById('time24Btn').classList.toggle('active', fmt === '24');
+
+        const now    = new Date();
+        const h      = now.getHours();
+        const m      = String(now.getMinutes()).padStart(2,'0');
+        const preview = fmt === '12'
+            ? (h % 12 || 12) + ':' + m + ' ' + (h >= 12 ? 'PM' : 'AM')
+            : String(h).padStart(2,'0') + ':' + m;
+
+        document.getElementById('timeFormatPreview').textContent = 'Preview: ' + preview;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  SAVE / RESET
+    // ═══════════════════════════════════════════════════
+    function saveSettings() {
+        // Collect all current values
+        settings.weekStart     = document.getElementById('weekStart').value;
+        settings.showCompleted = document.getElementById('showCompleted').checked;
+        settings.showCancelled = document.getElementById('showCancelled').checked;
+        settings.pushNotif     = document.getElementById('pushNotif').checked;
+        settings.notifSound    = document.getElementById('notifSound').checked;
+        settings.notifDot      = document.getElementById('notifDot').checked;
+
+        localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+        applySettings();
+        showToast('Settings saved!', 'success');
+
+        // Save native-backed settings
+        try {
+            if (typeof Android !== 'undefined' && Android.setExitConfirmEnabled) {
+                Android.setExitConfirmEnabled(!!document.getElementById('exitConfirm').checked);
+            }
+        } catch(e) {}
+    }
+
+    function resetDefaults() {
+        if (!confirm('Reset all settings to defaults?')) return;
+        settings = { ...DEFAULTS };
+        localStorage.removeItem(SETTINGS_KEY);
+        populateForm();
+        applySettings();
+        showToast('Settings reset to defaults', '');
+
+        // Reset native-backed settings
+        try {
+            if (typeof Android !== 'undefined' && Android.setExitConfirmEnabled) {
+                Android.setExitConfirmEnabled(true);
+            }
+        } catch(e) {}
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  ACCOUNT ACTIONS
+    // ═══════════════════════════════════════════════════
+    async function signOut() {
+        await supabaseClient.auth.signOut();
+        navigateTo('index.html');
+    }
+
+    function clearCache() {
+        const keys = Object.keys(localStorage).filter(k => k !== SETTINGS_KEY);
+        keys.forEach(k => localStorage.removeItem(k));
+        showToast('Local cache cleared', 'success');
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  ABOUT ACTIONS
+    // ═══════════════════════════════════════════════════
+    function openPrivacyPolicy() {
+        showToast('Privacy policy coming soon', '');
+    }
+
+    function openTerms() {
+        showToast('Terms of service coming soon', '');
+    }
+
+    function sendFeedback() {
+        const email = 'feedback@totalservicepro.com';
+        window.open('mailto:' + email + '?subject=TSP Feedback', '_blank');
+    }
+
+    function checkForUpdates() {
+        showToast('You\'re on the latest version (1.0.0)', 'success');
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  TOAST
+    // ═══════════════════════════════════════════════════
+    function showToast(msg, type = '') {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className   = 'toast ' + type + ' show';
+        setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+
+supabaseClient.auth.onAuthStateChange(function(event, session) {
+    try {
+        if (typeof Android !== 'undefined') {
+            if (session && session.access_token) Android.saveSession(JSON.stringify(session));
+            else if (event === 'SIGNED_OUT' && !session) Android.clearSession();
+        }
+    } catch(e) {}
+});
+
+if (_pendingSession) {
+    var _ps = _pendingSession;
+    _pendingSession = null;
+    supabaseClient.auth.setSession({
+        access_token:  _ps.access_token,
+        refresh_token: _ps.refresh_token
+    }).then(function(result) {
+        if (result.error) console.log('TSP: setSession error:', result.error.message);
+        else {
+            try {
+                if (typeof Android !== 'undefined' && result.data.session)
+                    Android.saveSession(JSON.stringify(result.data.session));
+            } catch(e) {}
+        }
+        init();
+    });
+} else {
+    init();
+}
+</script>
+</body>
+</html>

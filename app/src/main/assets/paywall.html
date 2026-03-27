@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Upgrade — Total Service Pro</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --gold:      #FBBF24;
+            --gold-dim:  #D97706;
+            --gold-glow: rgba(251,191,36,0.18);
+            --bg:        #080e18;
+            --bg2:       #0f1923;
+            --bg3:       #1a2535;
+            --border:    rgba(251,191,36,0.2);
+            --text:      #E5E7EB;
+            --muted:     #6B7280;
+            --danger:    #f87171;
+        }
+
+        body {
+            font-family: 'DM Sans', sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden;
+            position: relative;
+        }
+
+        /* ── Animated background ── */
+        .bg-grid {
+            position: fixed; inset: 0; z-index: 0;
+            background-image:
+                linear-gradient(rgba(251,191,36,0.04) 1px, transparent 1px),
+                linear-gradient(90deg, rgba(251,191,36,0.04) 1px, transparent 1px);
+            background-size: 40px 40px;
+            pointer-events: none;
+        }
+        .bg-glow {
+            position: fixed; top: -120px; left: 50%;
+            transform: translateX(-50%);
+            width: 600px; height: 400px;
+            background: radial-gradient(ellipse, rgba(251,191,36,0.12) 0%, transparent 70%);
+            pointer-events: none; z-index: 0;
+        }
+
+        /* ── Layout ── */
+        .page {
+            position: relative; z-index: 1;
+            min-height: 100vh;
+            display: flex; flex-direction: column;
+            padding: 0 0 40px;
+        }
+
+        /* ── Header ── */
+        .header {
+            display: flex; align-items: center; justify-content: space-between;
+            padding: 14px 20px;
+            border-bottom: 1px solid var(--border);
+            background: rgba(8,14,24,0.8);
+            backdrop-filter: blur(8px);
+            position: sticky; top: 0; z-index: 100;
+        }
+        .back-btn {
+            background: rgba(251,191,36,0.08); border: 1px solid var(--border);
+            border-radius: 8px; padding: 8px 14px; color: var(--gold);
+            font-size: 13px; font-weight: 600; cursor: pointer;
+            font-family: inherit; transition: all 0.2s;
+        }
+        .back-btn:active { background: rgba(251,191,36,0.2); transform: scale(0.95); }
+        .header-logo {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 20px; letter-spacing: 2px; color: var(--gold);
+        }
+        .header-badge {
+            background: var(--gold); color: #111; font-size: 10px;
+            font-weight: 700; padding: 4px 8px; border-radius: 20px;
+            letter-spacing: 0.5px;
+        }
+
+        /* ── Hero ── */
+        .hero {
+            text-align: center; padding: 36px 24px 24px;
+            animation: fadeUp 0.5s ease both;
+        }
+        .hero-icon {
+            font-size: 52px; display: block; margin-bottom: 16px;
+            filter: drop-shadow(0 0 20px rgba(251,191,36,0.5));
+            animation: pulse 3s ease-in-out infinite;
+        }
+        @keyframes pulse {
+            0%, 100% { filter: drop-shadow(0 0 20px rgba(251,191,36,0.4)); }
+            50%       { filter: drop-shadow(0 0 36px rgba(251,191,36,0.8)); }
+        }
+        .hero-eyebrow {
+            font-size: 11px; font-weight: 600; letter-spacing: 3px;
+            color: var(--gold); text-transform: uppercase; margin-bottom: 10px;
+        }
+        .hero-title {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 42px; line-height: 1; letter-spacing: 2px;
+            color: #fff; margin-bottom: 12px;
+        }
+        .hero-title span { color: var(--gold); }
+        .hero-sub {
+            font-size: 14px; color: var(--muted); line-height: 1.6;
+            max-width: 300px; margin: 0 auto;
+        }
+
+        /* ── Feature banner ── */
+        .feature-strip {
+            display: flex; gap: 0; overflow-x: auto; padding: 0 20px 20px;
+            scrollbar-width: none;
+            animation: fadeUp 0.5s 0.1s ease both;
+        }
+        .feature-strip::-webkit-scrollbar { display: none; }
+        .feature-chip {
+            flex-shrink: 0; display: flex; align-items: center; gap: 6px;
+            background: var(--bg3); border: 1px solid var(--border);
+            border-radius: 20px; padding: 8px 14px; margin-right: 8px;
+            font-size: 12px; font-weight: 500; color: var(--text);
+            white-space: nowrap;
+        }
+        .feature-chip-icon { font-size: 14px; }
+
+        /* ── Billing toggle ── */
+        .billing-toggle {
+            display: flex; align-items: center; justify-content: center;
+            gap: 12px; padding: 0 20px 20px;
+            animation: fadeUp 0.5s 0.15s ease both;
+        }
+        .toggle-label {
+            font-size: 13px; font-weight: 500; color: var(--muted);
+            cursor: pointer; transition: color 0.2s;
+        }
+        .toggle-label.active { color: var(--gold); }
+        .toggle-track {
+            width: 48px; height: 26px; background: var(--bg3);
+            border: 1px solid var(--border); border-radius: 13px;
+            position: relative; cursor: pointer; transition: background 0.2s;
+        }
+        .toggle-track.annual { background: rgba(251,191,36,0.15); border-color: var(--gold); }
+        .toggle-thumb {
+            position: absolute; top: 3px; left: 3px;
+            width: 18px; height: 18px; border-radius: 50%;
+            background: var(--muted); transition: all 0.25s cubic-bezier(0.4,0,0.2,1);
+        }
+        .toggle-track.annual .toggle-thumb {
+            left: 25px; background: var(--gold);
+        }
+        .save-badge {
+            background: rgba(251,191,36,0.15); border: 1px solid var(--gold);
+            color: var(--gold); font-size: 10px; font-weight: 700;
+            padding: 3px 8px; border-radius: 10px; letter-spacing: 0.5px;
+        }
+
+        /* ── Plan cards ── */
+        .plans {
+            padding: 0 16px; display: flex; flex-direction: column;
+            gap: 12px; animation: fadeUp 0.5s 0.2s ease both;
+        }
+        .plan-card {
+            background: var(--bg2); border: 1px solid var(--border);
+            border-radius: 16px; padding: 20px; position: relative;
+            overflow: hidden; transition: border-color 0.2s, transform 0.15s;
+            cursor: pointer;
+        }
+        .plan-card:active { transform: scale(0.98); }
+        .plan-card.featured {
+            border-color: var(--gold);
+            background: linear-gradient(135deg, rgba(251,191,36,0.06) 0%, var(--bg2) 60%);
+        }
+        .plan-card.featured::before {
+            content: ''; position: absolute; top: 0; left: 0; right: 0; height: 2px;
+            background: linear-gradient(90deg, transparent, var(--gold), transparent);
+        }
+        .plan-badge {
+            position: absolute; top: 14px; right: 14px;
+            background: var(--gold); color: #111; font-size: 9px;
+            font-weight: 800; padding: 3px 8px; border-radius: 10px;
+            letter-spacing: 1px; text-transform: uppercase;
+        }
+        .plan-name {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 22px; letter-spacing: 1.5px; color: #fff;
+            margin-bottom: 4px;
+        }
+        .plan-card.featured .plan-name { color: var(--gold); }
+        .plan-desc {
+            font-size: 12px; color: var(--muted); margin-bottom: 14px;
+        }
+        .plan-price {
+            display: flex; align-items: baseline; gap: 4px; margin-bottom: 16px;
+        }
+        .plan-amount {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 38px; line-height: 1; color: #fff;
+        }
+        .plan-card.featured .plan-amount { color: var(--gold); }
+        .plan-period { font-size: 13px; color: var(--muted); }
+        .plan-orig {
+            font-size: 12px; color: var(--muted);
+            text-decoration: line-through; margin-left: 4px;
+        }
+        .plan-features {
+            list-style: none; display: flex; flex-direction: column; gap: 8px;
+            margin-bottom: 18px;
+        }
+        .plan-features li {
+            font-size: 13px; color: var(--text);
+            display: flex; align-items: center; gap: 8px;
+        }
+        .plan-features li .check { color: var(--gold); font-size: 14px; flex-shrink: 0; }
+        .plan-features li .cross { color: var(--muted); font-size: 14px; flex-shrink: 0; }
+        .plan-btn {
+            width: 100%; padding: 13px; border: none; border-radius: 10px;
+            font-family: 'Bebas Neue', sans-serif; font-size: 16px;
+            letter-spacing: 1.5px; cursor: pointer; transition: all 0.2s;
+        }
+        .plan-btn.primary {
+            background: var(--gold); color: #111;
+        }
+        .plan-btn.primary:hover { background: #fcd34d; }
+        .plan-btn.primary:active { transform: scale(0.97); }
+        .plan-btn.secondary {
+            background: transparent; border: 1px solid var(--border);
+            color: var(--text);
+        }
+        .plan-btn.secondary:active { background: var(--bg3); transform: scale(0.97); }
+        .plan-btn:disabled {
+            opacity: 0.5; cursor: not-allowed; transform: none;
+        }
+
+        /* ── Enterprise CTA ── */
+        .enterprise-card {
+            margin: 12px 16px 0;
+            background: linear-gradient(135deg, rgba(251,191,36,0.05), var(--bg2));
+            border: 1px solid var(--border); border-radius: 16px;
+            padding: 20px; display: flex; align-items: center; gap: 14px;
+            animation: fadeUp 0.5s 0.25s ease both; cursor: pointer;
+            transition: border-color 0.2s;
+        }
+        .enterprise-card:hover { border-color: var(--gold); }
+        .enterprise-icon { font-size: 32px; flex-shrink: 0; }
+        .enterprise-text { flex: 1; }
+        .enterprise-name {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 20px; letter-spacing: 1.5px; color: var(--gold);
+            margin-bottom: 3px;
+        }
+        .enterprise-desc { font-size: 12px; color: var(--muted); line-height: 1.5; }
+        .enterprise-arrow { font-size: 20px; color: var(--gold); flex-shrink: 0; }
+
+        /* ── Footer note ── */
+        .footer-note {
+            text-align: center; padding: 24px 20px 8px;
+            font-size: 11px; color: var(--muted); line-height: 1.7;
+            animation: fadeUp 0.5s 0.3s ease both;
+        }
+        .footer-note a { color: var(--gold); text-decoration: none; }
+
+        /* ── Loading overlay ── */
+        .loading-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(8,14,24,0.85); backdrop-filter: blur(4px);
+            z-index: 999; align-items: center; justify-content: center;
+            flex-direction: column; gap: 16px;
+        }
+        .loading-overlay.show { display: flex; }
+        .loading-spinner {
+            width: 44px; height: 44px; border: 3px solid var(--border);
+            border-top-color: var(--gold); border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        .loading-text { font-size: 14px; color: var(--muted); }
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* ── Success overlay ── */
+        .success-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(8,14,24,0.95); backdrop-filter: blur(8px);
+            z-index: 1000; align-items: center; justify-content: center;
+            flex-direction: column; gap: 16px; text-align: center; padding: 40px;
+        }
+        .success-overlay.show { display: flex; }
+        .success-icon {
+            font-size: 64px;
+            filter: drop-shadow(0 0 30px rgba(251,191,36,0.7));
+            animation: popIn 0.4s cubic-bezier(0.175,0.885,0.32,1.275) both;
+        }
+        @keyframes popIn {
+            from { transform: scale(0); opacity: 0; }
+            to   { transform: scale(1); opacity: 1; }
+        }
+        .success-title {
+            font-family: 'Bebas Neue', sans-serif;
+            font-size: 36px; letter-spacing: 2px; color: var(--gold);
+        }
+        .success-sub { font-size: 14px; color: var(--muted); line-height: 1.6; }
+        .success-btn {
+            margin-top: 8px; background: var(--gold); color: #111;
+            border: none; border-radius: 12px; padding: 14px 40px;
+            font-family: 'Bebas Neue', sans-serif; font-size: 18px;
+            letter-spacing: 1.5px; cursor: pointer;
+        }
+
+        /* ── Toast ── */
+        .toast {
+            position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%);
+            background: var(--bg3); border: 1px solid var(--border);
+            border-radius: 10px; padding: 10px 18px; font-size: 13px;
+            color: var(--text); opacity: 0; transition: opacity 0.3s;
+            pointer-events: none; white-space: nowrap; z-index: 500;
+        }
+        .toast.show { opacity: 1; }
+        .toast.error { border-color: var(--danger); color: var(--danger); }
+
+        @keyframes fadeUp {
+            from { opacity: 0; transform: translateY(16px); }
+            to   { opacity: 1; transform: translateY(0); }
+        }
+    </style>
+</head>
+<body>
+
+<div class="bg-grid"></div>
+<div class="bg-glow"></div>
+
+<div class="page">
+
+    <!-- Header -->
+    <div class="header">
+        <button class="back-btn" onclick="goBack()">← Back</button>
+        <div class="header-logo">TOTAL SERVICE PRO</div>
+        <div class="header-badge">UPGRADE</div>
+    </div>
+
+    <!-- Hero -->
+    <div class="hero">
+        <span class="hero-icon">⚡</span>
+        <div class="hero-eyebrow">Unlock Full Access</div>
+        <div class="hero-title">LEVEL UP YOUR<br><span>SERVICE GAME</span></div>
+        <div class="hero-sub">AI-powered diagnostics, full manual library, and zero ads — built for professional laser technicians.</div>
+    </div>
+
+    <!-- Feature chips -->
+    <div class="feature-strip">
+        <div class="feature-chip"><span class="feature-chip-icon">🤖</span> AI Assistant</div>
+        <div class="feature-chip"><span class="feature-chip-icon">📚</span> Full Manual Library</div>
+        <div class="feature-chip"><span class="feature-chip-icon">🚫</span> No Ads</div>
+        <div class="feature-chip"><span class="feature-chip-icon">👥</span> Team Seats</div>
+        <div class="feature-chip"><span class="feature-chip-icon">🔧</span> Priority Support</div>
+    </div>
+
+    <!-- Billing toggle -->
+    <div class="billing-toggle">
+        <span class="toggle-label active" id="labelMonthly" onclick="setBilling('monthly')">Monthly</span>
+        <div class="toggle-track" id="billingToggle" onclick="toggleBilling()">
+            <div class="toggle-thumb"></div>
+        </div>
+        <span class="toggle-label" id="labelAnnual" onclick="setBilling('annual')">Annual</span>
+        <span class="save-badge">SAVE 33%</span>
+    </div>
+
+    <!-- Plan Cards -->
+    <div class="plans" id="plansContainer">
+
+        <!-- Premium -->
+        <div class="plan-card featured" id="cardPremium">
+            <div class="plan-badge">MOST POPULAR</div>
+            <div class="plan-name">Premium</div>
+            <div class="plan-desc">Everything a solo technician needs</div>
+            <div class="plan-price">
+                <span class="plan-amount" id="premiumPrice">$9.99</span>
+                <span class="plan-period" id="premiumPeriod">/ month</span>
+                <span class="plan-orig" id="premiumOrig" style="display:none;">$119.88</span>
+            </div>
+            <ul class="plan-features">
+                <li><span class="check">✦</span> AI troubleshooting assistant</li>
+                <li><span class="check">✦</span> Full manual library access</li>
+                <li><span class="check">✦</span> No advertisements</li>
+                <li><span class="check">✦</span> All photometry calculators</li>
+                <li><span class="cross">–</span> <span style="color:var(--muted)">Team seats</span></li>
+            </ul>
+            <button class="plan-btn primary" id="btnPremium" onclick="purchase('premium')">
+                GET PREMIUM
+            </button>
+        </div>
+
+        <!-- Team -->
+        <div class="plan-card" id="cardTeam">
+            <div class="plan-name">Team</div>
+            <div class="plan-desc">For small service departments (up to 10 techs)</div>
+            <div class="plan-price">
+                <span class="plan-amount" id="teamPrice">$39.99</span>
+                <span class="plan-period" id="teamPeriod">/ month</span>
+                <span class="plan-orig" id="teamOrig" style="display:none;">$479.88</span>
+            </div>
+            <ul class="plan-features">
+                <li><span class="check">✦</span> Everything in Premium</li>
+                <li><span class="check">✦</span> Up to 10 user seats</li>
+                <li><span class="check">✦</span> Shared service call history</li>
+                <li><span class="check">✦</span> Team manual library</li>
+                <li><span class="cross">–</span> <span style="color:var(--muted)">Admin dashboard</span></li>
+            </ul>
+            <button class="plan-btn secondary" id="btnTeam" onclick="purchase('team')">
+                GET TEAM
+            </button>
+        </div>
+
+    </div>
+
+    <!-- Enterprise CTA -->
+    <div class="enterprise-card" onclick="contactEnterprise()">
+        <div class="enterprise-icon">🏢</div>
+        <div class="enterprise-text">
+            <div class="enterprise-name">Enterprise</div>
+            <div class="enterprise-desc">Unlimited seats · Admin dashboard · Custom manual uploads · Priority support · Custom pricing</div>
+        </div>
+        <div class="enterprise-arrow">›</div>
+    </div>
+
+    <!-- Footer -->
+    <div class="footer-note">
+        Subscriptions auto-renew. Cancel anytime in Google Play.<br>
+        By subscribing you agree to our <a href="#" onclick="openTerms()">Terms of Service</a>.
+    </div>
+
+</div><!-- end .page -->
+
+<!-- Loading overlay -->
+<div class="loading-overlay" id="loadingOverlay">
+    <div class="loading-spinner"></div>
+    <div class="loading-text" id="loadingText">Processing...</div>
+</div>
+
+<!-- Success overlay -->
+<div class="success-overlay" id="successOverlay">
+    <div class="success-icon">🏆</div>
+    <div class="success-title">YOU'RE PREMIUM</div>
+    <div class="success-sub" id="successSub">Your subscription is active. All premium features are now unlocked.</div>
+    <button class="success-btn" onclick="onSuccessContinue()">LET'S GO →</button>
+</div>
+
+<!-- Toast -->
+<div class="toast" id="toast"></div>
+
+<script>
+    // ── Config ────────────────────────────────────────────────────
+    const SUPABASE_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM';
+
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: { persistSession: true, storageKey: 'tsp-auth-token', storage: window.localStorage, autoRefreshToken: true, detectSessionInUrl: false }
+    });
+
+    // Session restore
+    const rawSessionEnc = new URLSearchParams(window.location.search).get('_s') || '';
+    (function() {
+        try {
+            if (rawSessionEnc) {
+                const session = JSON.parse(atob(rawSessionEnc));
+                if (session?.access_token) {
+                    localStorage.setItem('tsp-auth-token', JSON.stringify({ currentSession: session, expiresAt: session.expires_at }));
+                    const url = new URL(window.location.href); url.searchParams.delete('_s');
+                    window.history.replaceState({}, '', url.toString());
+                }
+            }
+        } catch(e) {}
+    })();
+
+    // ── State ─────────────────────────────────────────────────────
+    let billingCycle  = 'monthly'; // 'monthly' | 'annual'
+    let returnPage    = new URLSearchParams(window.location.search).get('from') || 'index.html';
+    let purchasing    = false;
+
+    // ── Pricing ───────────────────────────────────────────────────
+    const PRICES = {
+        premium: { monthly: { amount: '$9.99',  period: '/ month', orig: null,      sku: 'premium_monthly' },
+                   annual:  { amount: '$6.66',  period: '/ month', orig: '$119.88', sku: 'premium_annual'  } },
+        team:    { monthly: { amount: '$39.99', period: '/ month', orig: null,      sku: 'team_monthly'    },
+                   annual:  { amount: '$24.99', period: '/ month', orig: '$479.88', sku: 'team_annual'     } },
+    };
+
+    // ── Billing toggle ────────────────────────────────────────────
+    function toggleBilling() {
+        setBilling(billingCycle === 'monthly' ? 'annual' : 'monthly');
+    }
+
+    function setBilling(cycle) {
+        billingCycle = cycle;
+        const isAnnual = cycle === 'annual';
+
+        document.getElementById('billingToggle').classList.toggle('annual', isAnnual);
+        document.getElementById('labelMonthly').classList.toggle('active', !isAnnual);
+        document.getElementById('labelAnnual').classList.toggle('active', isAnnual);
+
+        // Update premium card
+        const pp = PRICES.premium[cycle];
+        document.getElementById('premiumPrice').textContent  = pp.amount;
+        document.getElementById('premiumPeriod').textContent = pp.period;
+        const premOrig = document.getElementById('premiumOrig');
+        if (pp.orig) { premOrig.textContent = pp.orig; premOrig.style.display = 'inline'; }
+        else          { premOrig.style.display = 'none'; }
+
+        // Update team card
+        const tp = PRICES.team[cycle];
+        document.getElementById('teamPrice').textContent  = tp.amount;
+        document.getElementById('teamPeriod').textContent = tp.period;
+        const teamOrig = document.getElementById('teamOrig');
+        if (tp.orig) { teamOrig.textContent = tp.orig; teamOrig.style.display = 'inline'; }
+        else          { teamOrig.style.display = 'none'; }
+
+        // Update button labels
+        document.getElementById('btnPremium').textContent = isAnnual ? 'GET PREMIUM ANNUAL' : 'GET PREMIUM';
+        document.getElementById('btnTeam').textContent    = isAnnual ? 'GET TEAM ANNUAL'    : 'GET TEAM';
+    }
+
+    // ── Purchase flow ─────────────────────────────────────────────
+    function purchase(plan) {
+        if (purchasing) return;
+        const sku = PRICES[plan][billingCycle].sku;
+
+        if (typeof Android !== 'undefined' && Android.launchBillingFlow) {
+            purchasing = true;
+            showLoading('Opening Google Play...');
+            Android.launchBillingFlow(sku);
+        } else {
+            // Dev/browser fallback
+            showToast('Billing only available on device', false);
+        }
+    }
+
+    // ── Called by Android after successful purchase ───────────────
+    window.onPurchaseSuccess = function(tier, sku) {
+        purchasing = false;
+        hideLoading();
+        const tierName = tier.charAt(0).toUpperCase() + tier.slice(1);
+        document.getElementById('successSub').textContent =
+            'Your ' + tierName + ' subscription is active. All features are now unlocked.';
+        document.getElementById('successOverlay').classList.add('show');
+    };
+
+    // ── Called by Android if purchase fails ───────────────────────
+    window.onPurchaseFailed = function(message) {
+        purchasing = false;
+        hideLoading();
+        showToast(message || 'Purchase failed. Please try again.', true);
+    };
+
+    // ── After success, go back to where user came from ────────────
+    function onSuccessContinue() {
+        navTo(returnPage);
+    }
+
+    // ── Enterprise contact ────────────────────────────────────────
+    function contactEnterprise() {
+        if (typeof Android !== 'undefined' && Android.openUrl) {
+            Android.openUrl('mailto:enterprise@totalservicepro.com?subject=Enterprise%20Inquiry');
+        } else {
+            window.open('mailto:enterprise@totalservicepro.com?subject=Enterprise%20Inquiry');
+        }
+    }
+
+    function openTerms() {
+        if (typeof Android !== 'undefined' && Android.openUrl) {
+            Android.openUrl('https://totalservicepro.com/terms');
+        }
+    }
+
+    // ── Loading helpers ───────────────────────────────────────────
+    function showLoading(msg) {
+        document.getElementById('loadingText').textContent = msg || 'Processing...';
+        document.getElementById('loadingOverlay').classList.add('show');
+    }
+    function hideLoading() {
+        document.getElementById('loadingOverlay').classList.remove('show');
+    }
+
+    // ── Toast ─────────────────────────────────────────────────────
+    let toastTimeout;
+    function showToast(msg, isError = false) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = 'toast show' + (isError ? ' error' : '');
+        clearTimeout(toastTimeout);
+        toastTimeout = setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    // ── Navigation ────────────────────────────────────────────────
+    function goBack() {
+        navTo(returnPage);
+    }
+
+    async function navTo(page) {
+        try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session?.access_token) {
+                window.location.href = page + (page.includes('?') ? '&' : '?') + '_s=' + btoa(JSON.stringify(session));
+                return;
+            }
+        } catch(e) {}
+        window.location.href = page;
+    }
+
+    // ── Check if user is already subscribed ───────────────────────
+    async function checkAlreadySubscribed() {
+        try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (!session) return;
+
+            const { data, error } = await supabaseClient
+                .from('subscriptions')
+                .select('tier, status, expires_at')
+                .eq('user_id', session.user.id)
+                .single();
+
+            if (data && data.tier !== 'free' && data.status === 'active') {
+                // Already subscribed — show success and redirect
+                window.onPurchaseSuccess(data.tier, '');
+            }
+        } catch(e) { /* no subscription found — show paywall normally */ }
+    }
+
+    // ── Init ──────────────────────────────────────────────────────
+    (async () => {
+        try {
+            if (rawSessionEnc) {
+                const s = JSON.parse(atob(rawSessionEnc));
+                if (s?.access_token && s?.refresh_token) {
+                    await supabaseClient.auth.setSession({
+                        access_token:  s.access_token,
+                        refresh_token: s.refresh_token
+                    });
+                }
+            }
+        } catch(e) {}
+        checkAlreadySubscribed();
+    })();
+</script>
+</body>
+</html>
