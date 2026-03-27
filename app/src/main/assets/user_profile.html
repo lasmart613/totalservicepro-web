@@ -1,0 +1,1046 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>My Profile · Total Service Pro</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        :root {
+            --gold:      #FBBF24;
+            --gold-dk:   #D97706;
+            --bg:        #000;
+            --surface:   #111;
+            --surface2:  #1a1a1a;
+            --surface3:  #222;
+            --border:    #2a2a2a;
+            --border-gold: #FBBF2444;
+            --text:      #fff;
+            --text-muted:#888;
+            --red:       #ef4444;
+            --green:     #22c55e;
+            --blue:      #3b82f6;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            padding-bottom: 60px;
+        }
+
+        /* ── Header ── */
+        .header {
+            background: var(--surface);
+            padding: 14px 16px;
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            border-bottom: 1px solid var(--gold);
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+        .back-btn {
+            background: none; border: none; color: var(--gold);
+            font-size: 22px; cursor: pointer; padding: 4px 8px;
+            border-radius: 8px; line-height: 1;
+        }
+        .back-btn:hover { background: var(--surface2); }
+        .header-title { font-size: 18px; font-weight: 700; flex: 1; }
+        .save-btn {
+            background: var(--gold); color: #111827; border: none;
+            border-radius: 10px; padding: 9px 18px;
+            font-weight: 700; font-size: 14px; cursor: pointer;
+        }
+        .save-btn:hover { background: var(--gold-dk); }
+        .save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* ── Avatar hero ── */
+        .avatar-hero {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: 32px 20px 24px;
+            background: linear-gradient(180deg, #1a1500 0%, var(--bg) 100%);
+            border-bottom: 1px solid var(--border);
+        }
+        .avatar-wrap {
+            position: relative;
+            width: 100px; height: 100px;
+            margin-bottom: 16px;
+        }
+        .avatar-img-large {
+            width: 100px; height: 100px;
+            border-radius: 50%;
+            object-fit: cover;
+            border: 3px solid var(--gold);
+            display: none;
+        }
+        .avatar-initials-large {
+            width: 100px; height: 100px;
+            border-radius: 50%;
+            background: var(--gold);
+            color: #111827;
+            font-size: 36px;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            border: 3px solid var(--gold);
+            letter-spacing: 1px;
+        }
+        .avatar-edit-btn {
+            position: absolute;
+            bottom: 0; right: 0;
+            width: 32px; height: 32px;
+            border-radius: 50%;
+            background: var(--gold);
+            color: #111;
+            border: 2px solid var(--bg);
+            font-size: 14px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer;
+        }
+        .avatar-edit-btn:hover { background: var(--gold-dk); }
+        #avatarFileInput {
+            position: absolute;
+            width: 32px; height: 32px;
+            bottom: 0; right: 0;
+            opacity: 0;
+            cursor: pointer;
+            z-index: 10;
+        }
+
+        .hero-name  { font-size: 22px; font-weight: 700; margin-bottom: 4px; }
+        .hero-role  { font-size: 13px; color: var(--gold); font-weight: 600; }
+        .hero-org   { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+
+        /* ── Sections ── */
+        .section {
+            margin: 16px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            overflow: hidden;
+        }
+        .section-header {
+            padding: 14px 16px 10px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .section-icon  { font-size: 16px; }
+        .section-title { font-size: 13px; font-weight: 700; color: var(--gold); text-transform: uppercase; letter-spacing: 0.8px; }
+        .section-body  { padding: 16px; }
+
+        /* ── Form fields ── */
+        .field-row { display: flex; gap: 10px; margin-bottom: 14px; }
+        .field-row:last-child { margin-bottom: 0; }
+        .field { flex: 1; }
+        .field label {
+            display: block;
+            font-size: 11px;
+            font-weight: 700;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 6px;
+        }
+        .field input,
+        .field select,
+        .field textarea {
+            width: 100%;
+            padding: 11px 13px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 9px;
+            color: var(--text);
+            font-size: 14px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color 0.15s;
+        }
+        .field input:focus,
+        .field select:focus,
+        .field textarea:focus { border-color: var(--gold); }
+        .field select option { background: var(--surface2); }
+        .field textarea { resize: vertical; min-height: 80px; }
+        .field input[type="tel"] { letter-spacing: 0.5px; }
+
+        /* Read-only field */
+        .field input[readonly] {
+            color: var(--text-muted);
+            cursor: not-allowed;
+        }
+
+        /* ── Password section ── */
+        .pw-toggle {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 14px 16px;
+            cursor: pointer;
+        }
+        .pw-toggle-label { font-size: 14px; }
+        .pw-toggle-arrow { color: var(--text-muted); font-size: 14px; transition: transform 0.2s; }
+        .pw-toggle-arrow.open { transform: rotate(90deg); }
+        .pw-form { display: none; padding: 0 16px 16px; border-top: 1px solid var(--border); }
+        .pw-form.open { display: block; padding-top: 14px; }
+        .pw-strength {
+            height: 4px;
+            border-radius: 2px;
+            background: var(--border);
+            margin-top: 6px;
+            overflow: hidden;
+        }
+        .pw-strength-bar {
+            height: 100%;
+            border-radius: 2px;
+            width: 0;
+            transition: width 0.3s, background 0.3s;
+        }
+        .pw-strength-label { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
+
+        /* ── Certifications ── */
+        .cert-list { display: flex; flex-direction: column; gap: 8px; }
+        .cert-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px 12px;
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+        }
+        .cert-icon { font-size: 18px; }
+        .cert-name { font-size: 13px; font-weight: 600; flex: 1; }
+        .cert-remove {
+            background: none; border: none; color: var(--text-muted);
+            font-size: 18px; cursor: pointer; padding: 2px 6px;
+            border-radius: 6px; line-height: 1;
+        }
+        .cert-remove:hover { color: var(--red); background: #ef444422; }
+        .cert-add-row {
+            display: flex; gap: 8px; margin-top: 8px;
+        }
+        .cert-add-input {
+            flex: 1; padding: 10px 12px;
+            background: var(--surface2); border: 1px solid var(--border);
+            border-radius: 9px; color: var(--text); font-size: 14px;
+            font-family: inherit; outline: none;
+        }
+        .cert-add-input:focus { border-color: var(--gold); }
+        .cert-add-btn {
+            padding: 10px 16px; background: var(--surface3);
+            border: 1px solid var(--border); border-radius: 9px;
+            color: var(--gold); font-size: 14px; font-weight: 700; cursor: pointer;
+        }
+        .cert-add-btn:hover { border-color: var(--gold); }
+
+        /* ── Notification toggles ── */
+        .toggle-row {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 13px 0;
+            border-bottom: 1px solid var(--border);
+        }
+        .toggle-row:last-child { border-bottom: none; }
+        .toggle-info { flex: 1; }
+        .toggle-label { font-size: 14px; font-weight: 600; }
+        .toggle-sub   { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+
+        /* iOS-style toggle switch */
+        .toggle-switch { position: relative; width: 48px; height: 28px; flex-shrink: 0; }
+        .toggle-switch input { opacity: 0; width: 0; height: 0; }
+        .toggle-track {
+            position: absolute; inset: 0;
+            background: var(--surface3); border-radius: 14px;
+            cursor: pointer; transition: background 0.2s;
+            border: 1px solid var(--border);
+        }
+        .toggle-track::before {
+            content: '';
+            position: absolute;
+            left: 3px; top: 3px;
+            width: 20px; height: 20px;
+            border-radius: 50%;
+            background: var(--text-muted);
+            transition: transform 0.2s, background 0.2s;
+        }
+        .toggle-switch input:checked + .toggle-track { background: var(--gold); border-color: var(--gold); }
+        .toggle-switch input:checked + .toggle-track::before { transform: translateX(20px); background: #111; }
+
+        /* ── Org section ── */
+        .org-badge {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 12px 14px;
+            background: var(--surface2);
+            border: 1px solid var(--border-gold);
+            border-radius: 10px;
+            margin-bottom: 14px;
+        }
+        .org-badge-icon {
+            width: 40px; height: 40px; border-radius: 10px;
+            background: var(--gold); color: #111;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 18px; font-weight: 700; flex-shrink: 0;
+        }
+        .org-badge-name { font-size: 15px; font-weight: 700; }
+        .org-badge-type { font-size: 11px; color: var(--gold); margin-top: 2px; }
+
+        /* ── Danger zone ── */
+        .danger-btn {
+            width: 100%;
+            padding: 13px;
+            background: none;
+            border: 1px solid #ef444466;
+            border-radius: 10px;
+            color: var(--red);
+            font-size: 14px;
+            font-weight: 600;
+            cursor: pointer;
+            margin-bottom: 10px;
+            text-align: left;
+            padding-left: 16px;
+        }
+        .danger-btn:hover { background: #ef444411; border-color: var(--red); }
+
+        /* ── Toast ── */
+        .toast {
+            position: fixed; bottom: 24px; left: 50%;
+            transform: translateX(-50%) translateY(80px);
+            background: var(--surface2); border: 1px solid var(--gold);
+            border-radius: 10px; padding: 12px 20px;
+            font-size: 14px; font-weight: 600; z-index: 9999;
+            transition: transform 0.3s ease; white-space: nowrap;
+        }
+        .toast.show { transform: translateX(-50%) translateY(0); }
+        .toast.success { border-color: var(--green); color: var(--green); }
+        .toast.error   { border-color: var(--red);   color: var(--red); }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
+</head>
+<body>
+
+<!-- ── Header ── -->
+<div class="header">
+    <button class="back-btn" onclick="navigateTo('index.html')">←</button>
+    <div class="header-title">My Profile</div>
+    <button class="save-btn" id="saveBtn" onclick="saveProfile()">Save</button>
+</div>
+
+<!-- ── Avatar Hero ── -->
+<div class="avatar-hero">
+    <div class="avatar-wrap">
+        <img id="avatarImgLarge" class="avatar-img-large" src="" alt="Profile">
+        <div id="avatarInitialsLarge" class="avatar-initials-large">?</div>
+        <label class="avatar-edit-btn" for="avatarFileInput" title="Change photo" style="cursor:pointer;">✏️</label>
+        <input type="file" id="avatarFileInput" accept="image/*" onchange="handleAvatarUpload(event)">
+    </div>
+    <div class="hero-name" id="heroName">Loading...</div>
+    <div class="hero-role" id="heroRole"></div>
+    <div class="hero-org"  id="heroOrg"></div>
+</div>
+
+<!-- ── Personal Info ── -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">👤</span>
+        <span class="section-title">Personal Info</span>
+    </div>
+    <div class="section-body">
+        <div class="field-row">
+            <div class="field">
+                <label>First Name</label>
+                <input type="text" id="firstName" placeholder="Jane">
+            </div>
+            <div class="field">
+                <label>Last Name</label>
+                <input type="text" id="lastName" placeholder="Smith">
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Email (read-only)</label>
+                <input type="email" id="email" readonly>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Phone</label>
+                <input type="tel" id="phone" placeholder="+1 (555) 000-0000">
+            </div>
+            <div class="field">
+                <label>Role</label>
+                <select id="role">
+                    <option value="engineer">Field Engineer</option>
+                    <option value="dispatcher">Dispatcher</option>
+                    <option value="admin">Admin</option>
+                    <option value="viewer">Viewer</option>
+                </select>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Employee ID</label>
+                <input type="text" id="employeeId" placeholder="EMP-001">
+            </div>
+            <div class="field">
+                <label>Website / LinkedIn URL</label>
+                <input type="url" id="website" placeholder="https://linkedin.com/in/...">
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Bio / About</label>
+                <textarea id="bio" placeholder="Brief description of your background and specializations..."></textarea>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- ── Change Password ── -->
+<div class="section">
+    <div class="pw-toggle" onclick="togglePwForm()">
+        <div style="display:flex;align-items:center;gap:8px;">
+            <span style="font-size:16px;">🔒</span>
+            <span class="pw-toggle-label">Change Password</span>
+        </div>
+        <span class="pw-toggle-arrow" id="pwArrow">›</span>
+    </div>
+    <div class="pw-form" id="pwForm">
+        <div class="field-row">
+            <div class="field">
+                <label>Current Password</label>
+                <input type="password" id="currentPw" placeholder="Enter current password">
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>New Password</label>
+                <input type="password" id="newPw" placeholder="Min. 8 characters" oninput="checkPwStrength(this.value)">
+                <div class="pw-strength"><div class="pw-strength-bar" id="pwStrengthBar"></div></div>
+                <div class="pw-strength-label" id="pwStrengthLabel"></div>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Confirm New Password</label>
+                <input type="password" id="confirmPw" placeholder="Repeat new password">
+            </div>
+        </div>
+        <button onclick="changePassword()"
+                style="width:100%;padding:12px;background:var(--surface3);border:1px solid var(--border);
+                   border-radius:10px;color:var(--gold);font-size:14px;font-weight:700;cursor:pointer;margin-top:4px;">
+            🔒 Update Password
+        </button>
+    </div>
+</div>
+
+<!-- ── Certifications & Specializations ── -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">🏅</span>
+        <span class="section-title">Certifications & Specializations</span>
+    </div>
+    <div class="section-body">
+        <div class="cert-list" id="certList"></div>
+        <div class="cert-add-row">
+            <input type="text" class="cert-add-input" id="certInput"
+                   placeholder="e.g. Lumenis Certified, Candela Trained..."
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();addCert();}">
+            <button class="cert-add-btn" onclick="addCert()">+ Add</button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Notification Preferences ── -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">🔔</span>
+        <span class="section-title">Notification Preferences</span>
+    </div>
+    <div class="section-body" style="padding:0 16px;">
+        <div class="toggle-row">
+            <div class="toggle-info">
+                <div class="toggle-label">Ticket Assigned</div>
+                <div class="toggle-sub">Notify when a ticket is assigned to me</div>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" id="notif_ticket_assigned" checked>
+                <span class="toggle-track"></span>
+            </label>
+        </div>
+        <div class="toggle-row">
+            <div class="toggle-info">
+                <div class="toggle-label">Ticket Updated</div>
+                <div class="toggle-sub">Notify when a ticket I'm on changes status</div>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" id="notif_ticket_updated" checked>
+                <span class="toggle-track"></span>
+            </label>
+        </div>
+        <div class="toggle-row">
+            <div class="toggle-info">
+                <div class="toggle-label">Ticket Scheduled</div>
+                <div class="toggle-sub">Notify when an unscheduled ticket gets a date</div>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" id="notif_ticket_scheduled" checked>
+                <span class="toggle-track"></span>
+            </label>
+        </div>
+        <div class="toggle-row">
+            <div class="toggle-info">
+                <div class="toggle-label">Forum Replies</div>
+                <div class="toggle-sub">Notify when someone replies to my thread</div>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" id="notif_thread_reply" checked>
+                <span class="toggle-track"></span>
+            </label>
+        </div>
+        <div class="toggle-row">
+            <div class="toggle-info">
+                <div class="toggle-label">Answer Accepted</div>
+                <div class="toggle-sub">Notify when my forum post is marked as solution</div>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" id="notif_answer_accepted" checked>
+                <span class="toggle-track"></span>
+            </label>
+        </div>
+        <div class="toggle-row">
+            <div class="toggle-info">
+                <div class="toggle-label">Reactions</div>
+                <div class="toggle-sub">Notify when someone likes my post</div>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" id="notif_reaction">
+                <span class="toggle-track"></span>
+            </label>
+        </div>
+        <div class="toggle-row">
+            <div class="toggle-info">
+                <div class="toggle-label">Email Notifications</div>
+                <div class="toggle-sub">Also send notifications to my email</div>
+            </div>
+            <label class="toggle-switch">
+                <input type="checkbox" id="notif_email" checked>
+                <span class="toggle-track"></span>
+            </label>
+        </div>
+    </div>
+</div>
+
+<!-- ── Organization Info ── -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">🏢</span>
+        <span class="section-title">Organization</span>
+    </div>
+    <div class="section-body">
+        <div class="org-badge" id="orgBadge" style="display:none;">
+            <div class="org-badge-icon" id="orgBadgeIcon">?</div>
+            <div>
+                <div class="org-badge-name" id="orgBadgeName"></div>
+                <div class="org-badge-type" id="orgBadgeType"></div>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Job Title</label>
+                <input type="text" id="jobTitle" placeholder="e.g. Senior Field Service Engineer">
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Territory / Region</label>
+                <input type="text" id="territory" placeholder="e.g. Southern California">
+            </div>
+        </div>
+        <div id="orgNotLinked" style="display:none;padding:14px;background:var(--surface2);border-radius:10px;border:1px solid var(--border);">
+            <div style="font-size:13px;color:var(--text-muted);margin-bottom:10px;">
+                You're not linked to an organization yet. Contact your admin to be added, or create one.
+            </div>
+            <button onclick="navigateTo('index.html')"
+                    style="background:var(--gold);border:none;border-radius:8px;padding:10px 16px;color:#111;font-weight:700;cursor:pointer;font-size:13px;">
+                Go to Dashboard
+            </button>
+        </div>
+    </div>
+</div>
+
+<!-- ── Danger Zone ── -->
+<div class="section" style="margin-top:8px;">
+    <div class="section-header">
+        <span class="section-icon">⚠️</span>
+        <span class="section-title" style="color:var(--red);">Danger Zone</span>
+    </div>
+    <div class="section-body">
+        <button class="danger-btn" onclick="confirmDeleteAccount()">
+            🗑 Delete My Account
+        </button>
+        <div style="font-size:11px;color:var(--text-muted);">
+            Deleting your account is permanent and cannot be undone. All your data will be removed.
+        </div>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+    // ═══════════════════════════════════════════════════
+    //  SUPABASE
+    // ═══════════════════════════════════════════════════
+    // ── Extract _s param ──
+    var _pendingSession = null;
+    try {
+        var _purl = new URL(window.location.href);
+        var _sp = _purl.searchParams.get('_s');
+        if (_sp) {
+            _pendingSession = JSON.parse(atob(_sp));
+            _purl.searchParams.delete('_s');
+            history.replaceState(null, '', _purl.toString());
+        }
+    } catch(e) {}
+
+    const supabaseClient = supabase.createClient(
+        'https://yljztfajyvjzqikxdddf.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+        {
+            auth: {
+                persistSession: true,
+                storageKey: 'tsp-auth-token',
+                storage: window.localStorage,
+                autoRefreshToken: true,
+                detectSessionInUrl: false
+            }
+        }
+    );
+
+    function navigateTo(page) {
+        try {
+            var sess = JSON.parse(localStorage.getItem('tsp-auth-token') || 'null');
+            var raw  = sess && (sess.access_token ? sess : (sess.currentSession || null));
+            if (raw && raw.access_token) {
+                var encoded = btoa(JSON.stringify({
+                    access_token:  raw.access_token,
+                    refresh_token: raw.refresh_token,
+                    user: raw.user
+                }));
+                const _sep = page.includes('?') ? '&' : '?';
+                window.location.href = page + _sep + '_s=' + encoded;
+                return;
+            }
+        } catch(e) {}
+        window.location.href = page;
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  STATE
+    // ═══════════════════════════════════════════════════
+    let currentUser    = null;
+    let currentProfile = null;
+    let certifications = [];
+    let avatarUrl      = null;
+    let notifPrefs     = {};
+
+    // ═══════════════════════════════════════════════════
+    //  INIT
+    // ═══════════════════════════════════════════════════
+    async function init() {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) { navigateTo('index.html'); return; }
+        currentUser = user;
+
+        const { data: profile } = await supabaseClient
+            .from('user_profiles')
+            .select('*, organizations(id, name, type, ticket_prefix)')
+            .eq('id', user.id)
+            .single();
+
+        currentProfile = profile;
+        populateForm(user, profile);
+    }
+
+    function populateForm(user, profile) {
+        const meta      = user.user_metadata || {};
+        const firstName = profile?.first_name || meta.first_name || '';
+        const lastName  = profile?.last_name  || meta.last_name  || '';
+        const fullName  = [firstName, lastName].filter(Boolean).join(' ') || 'User';
+
+        // Hero
+        document.getElementById('heroName').textContent = fullName;
+        document.getElementById('heroRole').textContent = capitalize(profile?.role || 'engineer');
+        document.getElementById('heroOrg').textContent  = profile?.organizations?.name || '';
+
+        // Avatar
+        avatarUrl = profile?.avatar_url || meta.avatar_url || meta.picture || '';
+        renderAvatar(firstName, lastName);
+
+        // Personal info
+        document.getElementById('firstName').value   = firstName;
+        document.getElementById('lastName').value    = lastName;
+        document.getElementById('email').value       = user.email || '';
+        document.getElementById('phone').value       = profile?.phone || '';
+        document.getElementById('role').value        = profile?.role || 'engineer';
+        document.getElementById('employeeId').value  = profile?.employee_id || '';
+        document.getElementById('website').value     = profile?.website || meta.website || '';
+        document.getElementById('bio').value         = profile?.bio || '';
+        document.getElementById('jobTitle').value    = profile?.job_title || '';
+        document.getElementById('territory').value   = profile?.territory || '';
+
+        // Certifications
+        certifications = profile?.certifications || [];
+        renderCertifications();
+
+        // Notification prefs (stored as JSONB in user_profiles.notification_prefs)
+        notifPrefs = profile?.notification_prefs || {};
+        const NOTIF_KEYS = [
+            'notif_ticket_assigned','notif_ticket_updated','notif_ticket_scheduled',
+            'notif_thread_reply','notif_answer_accepted','notif_reaction','notif_email'
+        ];
+        NOTIF_KEYS.forEach(key => {
+            const el = document.getElementById(key);
+            if (el) {
+                // Default true for most except reactions
+                const defaultVal = key !== 'notif_reaction';
+                el.checked = notifPrefs[key] !== undefined ? notifPrefs[key] : defaultVal;
+            }
+        });
+
+        // Organization
+        if (profile?.organizations) {
+            const org = profile.organizations;
+            document.getElementById('orgBadge').style.display = 'flex';
+            document.getElementById('orgNotLinked').style.display = 'none';
+            document.getElementById('orgBadgeIcon').textContent = (org.ticket_prefix || org.name.slice(0,1)).toUpperCase();
+            document.getElementById('orgBadgeName').textContent = org.name;
+            document.getElementById('orgBadgeType').textContent = capitalize(org.type || 'service_company');
+        } else {
+            document.getElementById('orgBadge').style.display = 'none';
+            document.getElementById('orgNotLinked').style.display = 'block';
+        }
+    }
+
+    function renderAvatar(firstName, lastName) {
+        const imgEl      = document.getElementById('avatarImgLarge');
+        const initialsEl = document.getElementById('avatarInitialsLarge');
+        const initials   = ((firstName[0]||'') + (lastName[0]||'')).toUpperCase() || '?';
+
+        if (avatarUrl) {
+            imgEl.src = avatarUrl;
+            imgEl.style.display      = 'block';
+            initialsEl.style.display = 'none';
+        } else {
+            imgEl.style.display      = 'none';
+            initialsEl.style.display = 'flex';
+            initialsEl.textContent   = initials;
+        }
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  AVATAR UPLOAD
+    // ═══════════════════════════════════════════════════
+    async function handleAvatarUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+
+        // Validate size (max 2MB)
+        if (file.size > 2 * 1024 * 1024) {
+            showToast('Image must be under 2MB', 'error');
+            return;
+        }
+
+        showToast('Uploading photo...', '');
+
+        try {
+            const ext      = file.name.split('.').pop();
+            const path     = `avatars/${currentUser.id}.${ext}`;
+
+            const { error: upErr } = await supabaseClient.storage
+                .from('user-avatars')
+                .upload(path, file, { upsert: true });
+
+            if (upErr) throw upErr;
+
+            const { data: urlData } = supabaseClient.storage
+                .from('user-avatars')
+                .getPublicUrl(path);
+
+            avatarUrl = urlData.publicUrl + '?t=' + Date.now();
+
+            // Update profile
+            await supabaseClient.from('user_profiles')
+                .update({ avatar_url: avatarUrl })
+                .eq('id', currentUser.id);
+
+            const fn = document.getElementById('firstName').value;
+            const ln = document.getElementById('lastName').value;
+            renderAvatar(fn, ln);
+            showToast('Photo updated!', 'success');
+        } catch (e) {
+            showToast('Upload failed: ' + e.message, 'error');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  CERTIFICATIONS
+    // ═══════════════════════════════════════════════════
+    const CERT_ICONS = {
+        'lumenis': '🔬', 'candela': '⚡', 'cynosure': '💡',
+        'cutera': '🌟', 'solta': '✨', 'laser': '🔴',
+        'default': '🏅'
+    };
+
+    function getCertIcon(name) {
+        const lower = name.toLowerCase();
+        for (const [key, icon] of Object.entries(CERT_ICONS)) {
+            if (lower.includes(key)) return icon;
+        }
+        return CERT_ICONS.default;
+    }
+
+    function renderCertifications() {
+        const list = document.getElementById('certList');
+        list.innerHTML = '';
+        if (certifications.length === 0) {
+            list.innerHTML = '<div style="font-size:13px;color:var(--text-muted);padding:4px 0;">No certifications added yet.</div>';
+            return;
+        }
+        certifications.forEach((cert, i) => {
+            const item = document.createElement('div');
+            item.className = 'cert-item';
+            item.innerHTML = `
+                <span class="cert-icon">${getCertIcon(cert)}</span>
+                <span class="cert-name">${cert}</span>
+                <button type="button" class="cert-remove" onclick="removeCert(${i})">×</button>
+            `;
+            list.appendChild(item);
+        });
+    }
+
+    function addCert() {
+        const input = document.getElementById('certInput');
+        const val   = input.value.trim();
+        if (!val) return;
+        if (certifications.includes(val)) {
+            showToast('Already added', 'error'); return;
+        }
+        certifications.push(val);
+        input.value = '';
+        renderCertifications();
+    }
+
+    function removeCert(index) {
+        certifications.splice(index, 1);
+        renderCertifications();
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  PASSWORD
+    // ═══════════════════════════════════════════════════
+    function togglePwForm() {
+        const form  = document.getElementById('pwForm');
+        const arrow = document.getElementById('pwArrow');
+        const open  = form.classList.toggle('open');
+        arrow.classList.toggle('open', open);
+    }
+
+    function checkPwStrength(pw) {
+        const bar   = document.getElementById('pwStrengthBar');
+        const label = document.getElementById('pwStrengthLabel');
+        let score   = 0;
+        if (pw.length >= 8)  score++;
+        if (/[A-Z]/.test(pw)) score++;
+        if (/[0-9]/.test(pw)) score++;
+        if (/[^A-Za-z0-9]/.test(pw)) score++;
+
+        const levels = [
+            { w:'0%',   bg:'transparent', text:'' },
+            { w:'25%',  bg:'#ef4444',     text:'Weak' },
+            { w:'50%',  bg:'#f59e0b',     text:'Fair' },
+            { w:'75%',  bg:'#3b82f6',     text:'Good' },
+            { w:'100%', bg:'#22c55e',     text:'Strong' },
+        ];
+        const lvl   = levels[score] || levels[0];
+        bar.style.width      = lvl.w;
+        bar.style.background = lvl.bg;
+        label.textContent    = lvl.text;
+        label.style.color    = lvl.bg;
+    }
+
+    async function changePassword() {
+        const current  = document.getElementById('currentPw').value;
+        const newPw    = document.getElementById('newPw').value;
+        const confirm  = document.getElementById('confirmPw').value;
+
+        if (!newPw || newPw.length < 8) { showToast('Password must be at least 8 characters', 'error'); return; }
+        if (newPw !== confirm) { showToast('Passwords do not match', 'error'); return; }
+
+        try {
+            const { error } = await supabaseClient.auth.updateUser({ password: newPw });
+            if (error) throw error;
+            showToast('Password updated successfully!', 'success');
+            document.getElementById('currentPw').value = '';
+            document.getElementById('newPw').value     = '';
+            document.getElementById('confirmPw').value = '';
+            togglePwForm();
+        } catch (e) {
+            showToast('Error: ' + e.message, 'error');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  SAVE PROFILE
+    // ═══════════════════════════════════════════════════
+    async function saveProfile() {
+        const btn = document.getElementById('saveBtn');
+        btn.disabled = true;
+        btn.textContent = 'Saving...';
+
+        try {
+            const firstName = document.getElementById('firstName').value.trim();
+            const lastName  = document.getElementById('lastName').value.trim();
+
+            // Collect notification prefs
+            const notifKeys = [
+                'notif_ticket_assigned','notif_ticket_updated','notif_ticket_scheduled',
+                'notif_thread_reply','notif_answer_accepted','notif_reaction','notif_email'
+            ];
+            const notifPrefsOut = {};
+            notifKeys.forEach(k => {
+                const el = document.getElementById(k);
+                if (el) notifPrefsOut[k] = el.checked;
+            });
+
+            const updates = {
+                first_name:         firstName,
+                last_name:          lastName,
+                phone:              document.getElementById('phone').value.trim(),
+                role:               document.getElementById('role').value,
+                employee_id:        document.getElementById('employeeId').value.trim(),
+                website:            document.getElementById('website').value.trim(),
+                bio:                document.getElementById('bio').value.trim(),
+                job_title:          document.getElementById('jobTitle').value.trim(),
+                territory:          document.getElementById('territory').value.trim(),
+                certifications:     certifications,
+                notification_prefs: notifPrefsOut,
+                updated_at:         new Date().toISOString()
+            };
+
+            const { error } = await supabaseClient
+                .from('user_profiles')
+                .update(updates)
+                .eq('id', currentUser.id);
+
+            if (error) throw error;
+
+            // Also update Supabase auth metadata so other parts of app see the name
+            await supabaseClient.auth.updateUser({
+                data: { first_name: firstName, last_name: lastName }
+            });
+
+            // Refresh hero
+            document.getElementById('heroName').textContent = [firstName, lastName].filter(Boolean).join(' ');
+            document.getElementById('heroRole').textContent = capitalize(document.getElementById('role').value);
+            renderAvatar(firstName, lastName);
+
+            showToast('Profile saved!', 'success');
+        } catch (e) {
+            showToast('Save failed: ' + e.message, 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Save';
+        }
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  DANGER ZONE
+    // ═══════════════════════════════════════════════════
+    async function confirmDeleteAccount() {
+        const confirmed = confirm(
+            'Are you absolutely sure?\n\n' +
+            'This will permanently delete your account and all associated data. ' +
+            'This cannot be undone.'
+        );
+        if (!confirmed) return;
+
+        const double = confirm('Last chance — delete account permanently?');
+        if (!double) return;
+
+        try {
+            // Soft-delete: mark inactive rather than hard delete
+            await supabaseClient.from('user_profiles')
+                .update({ is_active: false })
+                .eq('id', currentUser.id);
+
+            await supabaseClient.auth.signOut();
+            navigateTo('index.html');
+        } catch (e) {
+            showToast('Error: ' + e.message, 'error');
+        }
+    }
+
+    // ═══════════════════════════════════════════════════
+    //  HELPERS
+    // ═══════════════════════════════════════════════════
+    function capitalize(str) {
+        return str ? str.charAt(0).toUpperCase() + str.slice(1).replace('_', ' ') : '';
+    }
+
+    function showToast(msg, type = '') {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className   = 'toast ' + type + ' show';
+        setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+
+supabaseClient.auth.onAuthStateChange(function(event, session) {
+    try {
+        if (typeof Android !== 'undefined') {
+            if (session && session.access_token) Android.saveSession(JSON.stringify(session));
+            else if (event === 'SIGNED_OUT' && !session) Android.clearSession();
+        }
+    } catch(e) {}
+});
+
+if (_pendingSession) {
+    var _ps = _pendingSession;
+    _pendingSession = null;
+    supabaseClient.auth.setSession({
+        access_token:  _ps.access_token,
+        refresh_token: _ps.refresh_token
+    }).then(function(result) {
+        if (result.error) console.log('TSP: setSession error:', result.error.message);
+        else {
+            try {
+                if (typeof Android !== 'undefined' && result.data.session)
+                    Android.saveSession(JSON.stringify(result.data.session));
+            } catch(e) {}
+        }
+        init();
+    });
+} else {
+    init();
+}
+</script>
+</body>
+</html>

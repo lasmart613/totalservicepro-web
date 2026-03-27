@@ -1,153 +1,126 @@
 <!DOCTYPE html>
-<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Photometry Calculators</title>
-    <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
-    <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
-    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <title>Calculators · TSP</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const enc = new URLSearchParams(window.location.search).get('_s');
+                if (enc) {
+                    const s = JSON.parse(atob(enc));
+                    if (s && s.access_token) {
+                        _pendingSession = s;
+                        localStorage.setItem('tsp-auth-token', JSON.stringify({ currentSession: s, expiresAt: s.expires_at }));
+                        const u = new URL(window.location.href); u.searchParams.delete('_s');
+                        window.history.replaceState({}, '', u.toString());
+                        return;
+                    }
+                }
+                const raw = localStorage.getItem('tsp-auth-token');
+                if (raw) { const p = JSON.parse(raw); const sess = p?.currentSession || (p?.access_token ? p : null); if (sess?.access_token) _pendingSession = sess; }
+            } catch(e) {}
+        })();
+        const supabaseClient = supabase.createClient(
+            'https://yljztfajyvjzqikxdddf.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+            { auth: { persistSession: true, storageKey: 'tsp-auth-token', storage: window.localStorage, autoRefreshToken: true, detectSessionInUrl: false } }
+        );
+        if (_pendingSession) {
+            supabaseClient.auth.setSession({ access_token: _pendingSession.access_token, refresh_token: _pendingSession.refresh_token })
+                .then(() => { _pendingSession = null; if (typeof updateAuthUI === 'function') updateAuthUI(); });
+        }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
     <style>
-        body { margin: 0; background: #1F2937; color: white; }
-        .top-nav {
-            position: fixed;
-            top: 0;
-            left: 0;
-            right: 0;
-            max-width: 28rem;
-            margin: 0 auto;
-            background: #1F2937;
-            border-bottom: 1px solid #374151;
-            padding: 8px 16px;  /* shorter vertical height */
-            z-index: 1000;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            height: 56px;  /* fixed shorter height */
-        }
-        .nav-items {
-            display: flex;
-            gap: 24px;
-        }
-        .nav-item {
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            color: #9CA3AF;
-            font-size: 10px;  /* smaller labels */
-            font-weight: 600;
-            transition: color 0.2s;
-            cursor: pointer;
-        }
-        .nav-item-active {
-            color: #FBBF24;
-            text-shadow: 0 0 8px rgba(251, 191, 36, 0.6);
-        }
-        .nav-icon {
-            font-size: 20px;  /* smaller icons */
-            margin-bottom: 2px;
-        }
-        .login-btn {
-            background: #FBBF24;
-            color: #111827;
-            padding: 6px 12px;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 13px;
-            border: none;
-            cursor: pointer;
-        }
-        .avatar-btn {
-            width: 32px;
-            height: 32px;
-            border-radius: 50%;
-            background: #1F2937;
-            color: white;
-            font-weight: bold;
-            font-size: 14px;
-            border: 2px solid #FBBF24;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            cursor: pointer;
-        }
-        .content-area { flex: 1; overflow-y: auto; padding-top: 72px; padding-bottom: calc(20px + env(safe-area-inset-bottom, 0)); }
+        .calc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+        @media(min-width:480px) { .calc-grid { grid-template-columns: repeat(3, 1fr); } }
+        .bottom-nav { position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border2);display:flex;justify-content:space-around;padding:8px 0 max(8px,env(safe-area-inset-bottom));z-index:100; }
+        .bottom-nav-item { display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;color:var(--text3);cursor:pointer;font-family:inherit;min-width:56px;padding:4px;transition:color 0.15s; }
+        .bottom-nav-item:hover,.bottom-nav-item.active { color:var(--gold); }
+        .bottom-nav-item span:first-child { font-size:20px; }
+        .bottom-nav-item span:last-child { font-size:9px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase; }
     </style>
 </head>
 <body>
-<div id="root"></div>
 
-<script type="text/babel">
-    const App = () => {
-        const navigateTo = (file) => {
-            window.location.href = file;
-        };
-
-        return (
-            <div className="min-h-screen bg-gray-900">
-                <div className="top-nav">
-                    <div className="nav-items">
-                        <div className="nav-item" onClick={() => navigateTo('index.html')}>
-                            <div className="nav-icon">🏠</div>
-                            <div className="nav-label">Home</div>
-                        </div>
-                        <div className="nav-item" onClick={() => navigateTo('service_hub.html')}>
-                            <div className="nav-icon">🔧</div>
-                            <div className="nav-label">Service Hub</div>
-                        </div>
-                    </div>
-                    <div className="flex items-center gap-6">
-                        <div className="nav-item">
-                            <div className="nav-icon">⚙️</div>
-                            <div className="nav-label">Settings</div>
-                        </div>
-                        <button className="login-btn">Login</button>
-                    </div>
-                </div>
-
-                <div className="p-6 pt-16">
-                    <h1 className="text-4xl font-bold text-yellow-400 mb-8 text-center">Photometry Calculators</h1>
-                    <p className="text-gray-300 text-center mb-10">Select a tool</p>
-
-                    <div className="grid grid-cols-2 gap-4 max-w-md mx-auto">
-                        <button onClick={() => navigateTo('fluence.html')} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-xl shadow-lg transition-all text-center">
-                            <div className="text-6xl mb-4">⚡</div>
-                            <h2 className="text-2xl font-bold text-yellow-400">Fluence</h2>
-                            <p className="text-gray-400 mt-2">Energy Density</p>
-                        </button>
-
-                        <button onClick={() => navigateTo('irradiance.html')} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-xl shadow-lg transition-all text-center">
-                            <div className="text-6xl mb-4">💡</div>
-                            <h2 className="text-2xl font-bold text-yellow-400">Irradiance</h2>
-                            <p className="text-gray-400 mt-2">Power Density</p>
-                        </button>
-
-                        <button onClick={() => navigateTo('duty_cycle.html')} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-xl shadow-lg transition-all text-center">
-                            <div className="text-6xl mb-4">🔄</div>
-                            <h2 className="text-2xl font-bold text-yellow-400">Duty Cycle</h2>
-                            <p className="text-gray-400 mt-2">Pulse Cycle</p>
-                        </button>
-
-                        <button onClick={() => navigateTo('wavelength.html')} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-xl shadow-lg transition-all text-center">
-                            <div className="text-6xl mb-4">📏</div>
-                            <h2 className="text-2xl font-bold text-yellow-400">VBeam WL</h2>
-                            <p className="text-gray-400 mt-2">Wavelength</p>
-                        </button>
-
-                        <button onClick={() => navigateTo('avgpower.html')} className="bg-gray-800 hover:bg-gray-700 p-4 rounded-xl shadow-lg transition-all text-center">
-                            <div className="text-6xl mb-4">⚡</div>
-                            <h2 className="text-2xl font-bold text-yellow-400">Average Power</h2>
-                            <p className="text-gray-400 mt-2">Energy × Frequency</p>
-                        </button>
-                    </div>
-                </div>
+<div class="header">
+    <button class="header-back" onclick="navTo('index.html')">‹</button>
+    <div class="header-title">Calculators</div>
+    <div class="avatar-wrapper" id="avatarWrapper">
+        <button class="avatar-btn" onclick="toggleDropdown(event)">
+            <img id="avatarImg" class="avatar-img" src="" alt=""/>
+            <div id="avatarInitials" class="avatar-initials">U</div>
+        </button>
+        <div class="avatar-dropdown" id="avatarDropdown">
+            <div class="dropdown-user-info">
+                <div class="dropdown-user-name" id="dropdownName">User</div>
+                <div class="dropdown-user-email" id="dropdownEmail"></div>
             </div>
-        );
-    };
+            <button class="dropdown-item" onclick="navTo('user_profile.html')"><span class="dropdown-icon">👤</span> Profile</button>
+            <button class="dropdown-item" onclick="navTo('settings.html')"><span class="dropdown-icon">⚙️</span> Settings</button>
+            <button class="dropdown-item" id="upgradeBtn" onclick="navTo('paywall.html')" style="display:none;color:var(--gold);"><span class="dropdown-icon">⭐</span> Upgrade</button>
+            <button class="dropdown-item danger" onclick="logoutUser()"><span class="dropdown-icon">🚪</span> Log Out</button>
+        </div>
+    </div>
+</div>
 
-    ReactDOM.render(<App />, document.getElementById('root'));
+<div class="page">
+    <div style="margin-bottom:20px;">
+        <div style="font-size:22px;font-weight:800;color:var(--text);">Photometry Tools</div>
+        <div style="font-size:13px;color:var(--text3);margin-top:4px;">Select a calculator</div>
+    </div>
+    <div class="calc-grid">
+        <button class="nav-card" onclick="navTo('fluence.html')"><div class="nav-icon">⚡</div><div class="nav-label">Fluence<br><span style="font-weight:500;color:var(--text3)">Energy Density</span></div></button>
+        <button class="nav-card" onclick="navTo('irradiance.html')"><div class="nav-icon">💡</div><div class="nav-label">Irradiance<br><span style="font-weight:500;color:var(--text3)">Power Density</span></div></button>
+        <button class="nav-card" onclick="navTo('duty_cycle.html')"><div class="nav-icon">🔄</div><div class="nav-label">Duty Cycle<br><span style="font-weight:500;color:var(--text3)">Pulse Cycle</span></div></button>
+        <button class="nav-card" onclick="navTo('wavelength.html')"><div class="nav-icon">📏</div><div class="nav-label">Wavelength<br><span style="font-weight:500;color:var(--text3)">VBeam WL</span></div></button>
+        <button class="nav-card" onclick="navTo('avgpower.html')"><div class="nav-icon">📊</div><div class="nav-label">Avg Power<br><span style="font-weight:500;color:var(--text3)">Energy × Freq</span></div></button>
+    </div>
+</div>
+
+<div class="bottom-nav">
+    <button class="bottom-nav-item" onclick="navTo('index.html')"><span>🏠</span><span>Home</span></button>
+    <button class="bottom-nav-item" onclick="navTo('manual_library.html')"><span>📚</span><span>Manuals</span></button>
+    <button class="bottom-nav-item active"><span>🔬</span><span>Calc</span></button>
+    <button class="bottom-nav-item" onclick="navTo('service_schedule.html')"><span>📅</span><span>Schedule</span></button>
+    <button class="bottom-nav-item" onclick="navTo('settings.html')"><span>⚙️</span><span>Settings</span></button>
+</div>
+
+<script>
+    async function navTo(page) {
+        try { const { data: { session } } = await supabaseClient.auth.getSession(); if (session?.access_token) { const sep = page.includes('?')?'&':'?'; window.location.href = page+sep+'_s='+btoa(JSON.stringify(session)); return; } } catch(e) {}
+        window.location.href = page;
+    }
+    function toggleDropdown(e) { e.stopPropagation(); document.getElementById('avatarDropdown').classList.toggle('open'); }
+    document.addEventListener('click', () => document.getElementById('avatarDropdown')?.classList.remove('open'));
+    async function logoutUser() { document.getElementById('avatarDropdown').classList.remove('open'); await supabaseClient.auth.signOut(); updateAuthUI(); try { if (typeof Android !== 'undefined') Android.clearSession(); } catch(e) {} }
+    async function updateAuthUI() {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const aw = document.getElementById('avatarWrapper');
+        if (user) {
+            if (aw) aw.style.display = 'block';
+            const meta = user.user_metadata || {}, fn = meta.first_name||'', ln = meta.last_name||'';
+            document.getElementById('dropdownName').textContent = [fn,ln].filter(Boolean).join(' ')||'User';
+            document.getElementById('dropdownEmail').textContent = user.email||'';
+            const img = document.getElementById('avatarImg'), ini = document.getElementById('avatarInitials');
+            const photo = meta.avatar_url||meta.picture||'';
+            if (photo) { img.src=photo; img.style.display='block'; ini.style.display='none'; }
+            else { img.style.display='none'; ini.style.display='flex'; ini.textContent=((fn[0]||'')+(ln[0]||'')).toUpperCase()||user.email[0].toUpperCase(); }
+        } else { if (aw) aw.style.display='none'; }
+    }
+    async function checkTierAndShowUpgrade() {
+        try { const { data: { user } } = await supabaseClient.auth.getUser(); if (!user) return; const { data: sub } = await supabaseClient.from('subscriptions').select('tier,status').eq('user_id',user.id).single(); const isPaid = sub&&['premium','team','enterprise'].includes(sub.tier)&&sub.status==='active'; const btn=document.getElementById('upgradeBtn'); if(btn) btn.style.display=isPaid?'none':'flex'; } catch(e) {}
+    }
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+        updateAuthUI();
+        try { if (typeof Android !== 'undefined') { if (session?.access_token) Android.saveSession(JSON.stringify(session)); else if (event==='SIGNED_OUT'&&!session) Android.clearSession(); } } catch(e) {}
+    });
+    updateAuthUI(); checkTierAndShowUpgrade();
 </script>
 </body>
 </html>

@@ -3,1216 +3,417 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI Assistant</title>
-    <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
+    <title>AI Assistant · TSP</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const p = new URLSearchParams(window.location.search);
+                const enc = p.get('_s');
+                if (enc) {
+                    const session = JSON.parse(atob(enc));
+                    if (session && session.access_token) {
+                        _pendingSession = session;
+                        const stored = { currentSession: session, expiresAt: session.expires_at };
+                        localStorage.setItem('tsp-auth-token', JSON.stringify(stored));
+                        const url = new URL(window.location.href);
+                        url.searchParams.delete('_s');
+                        window.history.replaceState({}, '', url.toString());
+                        return;
+                    }
+                }
+                const raw = localStorage.getItem('tsp-auth-token');
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    const sess = parsed?.currentSession || (parsed?.access_token ? parsed : null);
+                    if (sess?.access_token) _pendingSession = sess;
+                }
+            } catch(e) {}
+        })();
 
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #2c2c2c 0%, #1a1a1a 100%);
-            color: #ffffff;
-            height: 100vh;
+        function restoreSession(jsonStr) {
+            try {
+                const parsed = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+                const session = parsed?.currentSession || parsed;
+                if (session?.access_token) {
+                    const stored = { currentSession: session, expiresAt: session.expires_at };
+                    localStorage.setItem('tsp-auth-token', JSON.stringify(stored));
+                    if (typeof supabaseClient !== 'undefined') {
+                        supabaseClient.auth.setSession({
+                            access_token: session.access_token,
+                            refresh_token: session.refresh_token
+                        }).then(() => initPage());
+                    } else {
+                        _pendingSession = session;
+                    }
+                }
+            } catch(e) {}
+        }
+    </script>
+    <style>
+        .chat-outer {
             display: flex;
             flex-direction: column;
-            overflow: hidden;
+            height: calc(100vh - 57px);
         }
-
-        .header {
-            background: rgba(255, 215, 0, 0.1);
-            padding: 15px 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 2px solid #ffd700;
-        }
-
-        .back-button {
-            background: #ffd700;
-            border: none;
-            border-radius: 8px;
-            padding: 10px 20px;
-            color: #1a1a1a;
-            font-weight: 600;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .back-button:active {
-            transform: scale(0.95);
-        }
-
-        .manual-selector {
-            background: rgba(255, 215, 0, 0.1);
-            border: 1px solid #ffd700;
-            color: #ffd700;
-            padding: 6px 10px;
-            border-radius: 6px;
-            font-size: 12px;
-            font-weight: 500;
-            cursor: pointer;
-            outline: none;
-            flex-shrink: 0;
-            min-width: 150px;
-            max-width: 180px;
-        }
-
-        .manual-selector option {
-            background: #1a1a1a;
-            color: #ffd700;
-        }
-
-        .manual-selector:hover {
-            background: rgba(255, 215, 0, 0.2);
-        }
-
-        .speaker-button {
-            background: rgba(255, 215, 0, 0.2);
-            border: 1px solid #ffd700;
-            border-radius: 8px;
-            padding: 8px 12px;
-            color: #ffd700;
-            font-size: 18px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-        }
-
-        .speaker-button:active {
-            transform: scale(0.95);
-        }
-
-        .speaker-button.muted {
-            background: rgba(255, 68, 68, 0.2);
-            border-color: #ff4444;
-            color: #ff4444;
-        }
-
-        .title {
-            color: #ffd700;
-            font-size: 20px;
-            font-weight: 600;
-            flex: 1;
-            text-align: center;
-        }
-
-        .usage-badge {
-            background: rgba(255, 215, 0, 0.2);
-            border: 1px solid #ffd700;
-            border-radius: 15px;
-            padding: 5px 12px;
-            font-size: 12px;
-            color: #ffd700;
-            white-space: nowrap;
-        }
-
-        .chat-container {
+        .chat-messages {
             flex: 1;
             overflow-y: auto;
-            padding: 20px;
+            padding: 16px;
             display: flex;
             flex-direction: column;
-            gap: 15px;
+            gap: 14px;
         }
+        .msg { max-width: 85%; display: flex; flex-direction: column; gap: 3px; }
+        .msg.user  { align-self: flex-end; align-items: flex-end; }
+        .msg.assistant { align-self: flex-start; align-items: flex-start; }
+        .msg-bubble { padding: 11px 15px; border-radius: 16px; font-size: 14px; line-height: 1.55; }
+        .msg.user .msg-bubble { background: var(--gold); color: #111827; border-radius: 16px 16px 4px 16px; font-weight: 500; }
+        .msg.assistant .msg-bubble { background: var(--surface3); color: var(--text2); border: 1px solid var(--border2); border-radius: 16px 16px 16px 4px; }
+        .msg-time { font-size: 10px; color: var(--text3); padding: 0 4px; }
 
-        .message {
-            max-width: 80%;
-            padding: 15px 18px;
-            border-radius: 18px;
-            line-height: 1.4;
-            animation: slideIn 0.3s ease;
-        }
+        .typing-indicator { display: flex; gap: 5px; align-items: center; padding: 4px 0; }
+        .typing-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text3); animation: tdot 1.2s infinite; }
+        .typing-dot:nth-child(2) { animation-delay: 0.2s; }
+        .typing-dot:nth-child(3) { animation-delay: 0.4s; }
+        @keyframes tdot { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
 
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(10px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .user-message {
-            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
-            color: #1a1a1a;
-            align-self: flex-end;
-            border-bottom-right-radius: 5px;
-        }
-
-        .assistant-message {
-            background: rgba(255, 255, 255, 0.1);
-            color: #ffffff;
-            align-self: flex-start;
-            border-bottom-left-radius: 5px;
-            border: 1px solid rgba(255, 215, 0, 0.3);
-        }
-
-        .error-message {
-            background: rgba(255, 68, 68, 0.2);
-            color: #ff9999;
-            align-self: flex-start;
-            border-bottom-left-radius: 5px;
-            border: 1px solid rgba(255, 68, 68, 0.5);
-            font-size: 12px;
-        }
-
-        .thinking {
-            background: rgba(255, 255, 255, 0.1);
-            color: #aaaaaa;
-            align-self: flex-start;
-            border-bottom-left-radius: 5px;
-            font-style: italic;
-            border: 1px solid rgba(255, 215, 0, 0.3);
-        }
-
-        .context-indicator {
-            background: rgba(0, 255, 0, 0.1);
-            color: #88ff88;
-            align-self: flex-start;
-            border-bottom-left-radius: 5px;
-            font-size: 11px;
-            border: 1px solid rgba(0, 255, 0, 0.3);
-            padding: 8px 12px;
-        }
-
-        .input-area {
-            padding: 15px 20px;
-            background: rgba(0, 0, 0, 0.3);
-            border-top: 2px solid #ffd700;
-            display: flex;
-            gap: 10px;
-            align-items: center;
-        }
-
-        .text-input {
-            flex: 1;
-            background: rgba(255, 255, 255, 0.1);
-            border: 1px solid rgba(255, 215, 0, 0.3);
-            border-radius: 25px;
-            padding: 12px 18px;
-            color: #ffffff;
-            font-size: 15px;
-            outline: none;
-        }
-
-        .text-input::placeholder {
-            color: #888888;
-        }
-
-        .text-input:focus {
-            border-color: #ffd700;
-            background: rgba(255, 255, 255, 0.15);
-        }
-
-        .send-button {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            border: none;
-            background: linear-gradient(135deg, #4CAF50 0%, #45a049 100%);
-            color: #ffffff;
-            font-size: 20px;
-            cursor: pointer;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-            transition: all 0.3s ease;
-            flex-shrink: 0;
-        }
-
-        .send-button:active {
-            transform: scale(0.95);
-        }
-
-        .mic-button {
-            width: 50px;
-            height: 50px;
-            border-radius: 50%;
-            border: none;
-            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
-            color: #1a1a1a;
-            font-size: 24px;
-            cursor: pointer;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
-            transition: all 0.3s ease;
-            flex-shrink: 0;
-        }
-
-        .mic-button:active {
-            transform: scale(0.95);
-        }
-
-        .mic-button.listening {
-            background: #ff4444;
-            animation: pulse 1.5s infinite;
-        }
-
-        @keyframes pulse {
-            0%, 100% {
-                box-shadow: 0 0 0 0 rgba(255, 68, 68, 0.7);
-            }
-            50% {
-                box-shadow: 0 0 0 15px rgba(255, 68, 68, 0);
-            }
-        }
-
-        .status-text {
-            flex: 1;
-            color: #aaaaaa;
-            font-size: 14px;
-            text-align: center;
-        }
-
-        .status-text.listening {
-            color: #ff4444;
-            font-weight: 600;
-        }
-
-        .welcome-message {
-            text-align: center;
-            padding: 40px 20px;
-            color: #aaaaaa;
-        }
-
-        .welcome-icon {
-            font-size: 64px;
-            margin-bottom: 20px;
-        }
-
-        .welcome-title {
-            color: #ffd700;
-            font-size: 24px;
-            margin-bottom: 10px;
-        }
-
-        .welcome-subtitle {
-            font-size: 16px;
-            margin-bottom: 30px;
-        }
-
-        .sample-questions {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 10px;
-            padding: 20px;
-            margin-top: 20px;
-            text-align: left;
-        }
-
-        .sample-title {
-            color: #ffd700;
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-
-        .sample-question {
-            background: rgba(255, 215, 0, 0.1);
-            border: 1px solid rgba(255, 215, 0, 0.3);
-            border-radius: 8px;
+        .chat-input-area {
             padding: 10px 12px;
-            margin-bottom: 8px;
-            font-size: 13px;
-            cursor: pointer;
-            transition: all 0.2s ease;
+            background: var(--surface);
+            border-top: 1px solid var(--border2);
+            display: flex;
+            gap: 8px;
+            align-items: flex-end;
         }
+        .chat-input-area textarea {
+            flex: 1; background: var(--surface3); border: 1px solid var(--border2);
+            border-radius: 20px; padding: 10px 16px; color: var(--text);
+            font-family: inherit; font-size: 14px; outline: none; resize: none;
+            height: 42px; max-height: 110px; line-height: 1.4; transition: border-color 0.15s;
+        }
+        .chat-input-area textarea:focus { border-color: var(--gold); }
+        .chat-input-area textarea::placeholder { color: var(--text3); }
 
-        .sample-question:active {
-            background: rgba(255, 215, 0, 0.2);
-            transform: scale(0.98);
+        .mic-btn {
+            width: 42px; height: 42px; border-radius: 50%;
+            background: var(--surface3); border: 1px solid var(--border2);
+            color: var(--text3); font-size: 18px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; flex-shrink: 0; transition: all 0.2s;
         }
+        .mic-btn.listening { background: rgba(239,68,68,0.15); border-color: var(--red); color: var(--red); animation: mic-pulse 1s ease-in-out infinite; }
+        @keyframes mic-pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1)} }
 
-        .upgrade-prompt {
-            background: linear-gradient(135deg, #ff6b35 0%, #ff8c42 100%);
-            color: white;
-            padding: 15px;
-            text-align: center;
-            border-radius: 10px;
-            margin: 10px;
-            cursor: pointer;
-            box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+        .send-btn {
+            width: 42px; height: 42px; border-radius: 50%;
+            background: var(--gold); border: none; color: #111827; font-size: 18px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; flex-shrink: 0; transition: all 0.15s;
         }
+        .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
+        .send-btn:active { transform: scale(0.94); }
 
-        .upgrade-prompt:active {
-            transform: scale(0.98);
+        .context-bar {
+            display: flex; flex-direction: column; gap: 8px;
+            padding: 10px 14px; background: var(--surface2); border-bottom: 1px solid var(--border);
         }
+        .context-row { display: flex; align-items: center; gap: 8px; }
+        .context-label { font-size: 11px; font-weight: 700; color: var(--gold); text-transform: uppercase; letter-spacing: 0.8px; white-space: nowrap; width: 80px; flex-shrink: 0; }
+        .context-select {
+            flex: 1; background: var(--surface3); border: 1px solid var(--border2);
+            border-radius: 8px; color: var(--text); font-family: inherit; font-size: 13px;
+            padding: 8px 10px; outline: none; transition: border-color 0.15s;
+        }
+        .context-select:focus { border-color: var(--gold); }
+        .context-select.has-value { border-color: rgba(251,191,36,0.4); color: var(--text); }
+        #modelRow { opacity: 0.4; pointer-events: none; transition: opacity 0.2s; }
+        #modelRow.enabled { opacity: 1; pointer-events: auto; }
+
+        .quick-row {
+            display: flex; gap: 8px; overflow-x: auto;
+            padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--border);
+            scrollbar-width: none;
+        }
+        .quick-row::-webkit-scrollbar { display: none; }
+        .quick-chip {
+            flex-shrink: 0; padding: 6px 13px; background: var(--surface3);
+            border: 1px solid var(--border2); border-radius: 20px;
+            font-size: 12px; font-weight: 600; color: var(--text2);
+            cursor: pointer; font-family: inherit; white-space: nowrap; transition: all 0.15s;
+        }
+        .quick-chip:active { background: var(--gold-glow); border-color: var(--gold-border); color: var(--gold); }
+
+        .premium-gate {
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: center; flex: 1; text-align: center; padding: 40px 24px;
+        }
+        .premium-gate-icon { font-size: 52px; margin-bottom: 16px; }
+        .premium-gate-title { font-size: 20px; font-weight: 800; color: var(--gold); margin-bottom: 10px; }
+        .premium-gate-sub { font-size: 14px; color: var(--text3); line-height: 1.6; margin-bottom: 24px; max-width: 280px; }
     </style>
 </head>
 <body>
+
 <div class="header">
-    <button class="back-button" onclick="goBack()">← Back</button>
-    <div class="title">🤖 AI Assistant</div>
-    <select class="manual-selector" id="manual-selector" onchange="changeManual()">
-        <option value="">Select Manual...</option>
-        <option value="lumenis_acupulse">Lumenis AcuPulse</option>
-        <option value="lumenis_versapulse">Lumenis VersaPulse PowerSuite</option>
-        <option value="candela_gentlelase">Candela GentleLASE</option>
-        <option value="candela_gentleyag">Candela GentleYAG</option>
-        <option value="candela_vbeam">Candela VBeam</option>
-    </select>
-    <button class="speaker-button" id="hands-free-button" onclick="toggleHandsFree()" style="margin-right: 8px;">🔄</button>
-    <button class="speaker-button" id="speaker-button" onclick="toggleSpeaker()">🔊</button>
-    <div class="usage-badge" id="usage-badge">5/5 free today</div>
+    <button class="header-back" onclick="navigateTo('index.html')">‹</button>
+    <div class="header-title">AI Assistant</div>
+    <span class="tag tag-gold" style="font-size:10px;">Premium</span>
 </div>
 
-<div class="chat-container" id="chat-container">
-    <div class="welcome-message">
-        <div class="welcome-icon">🎤</div>
-        <div class="welcome-title">Voice-Powered Service Assistant</div>
-        <div class="welcome-subtitle">Type or tap the microphone to ask your question</div>
-
-        <div class="sample-questions">
-            <div class="sample-title">Try asking:</div>
-            <div class="sample-question" onclick="askQuestion(this.textContent)">
-                "What does fault code 15.1 mean on a Candela GentleYAG?"
-            </div>
-            <div class="sample-question" onclick="askQuestion(this.textContent)">
-                "How do I calibrate the spot size on a Lumenis AcuPulse?"
-            </div>
-            <div class="sample-question" onclick="askQuestion(this.textContent)">
-                "What's the procedure for replacing the flashlamp?"
-            </div>
-            <div class="sample-question" onclick="testTTS()" style="background: rgba(76, 175, 80, 0.2); border-color: rgba(76, 175, 80, 0.5);">
-                🔊 Test Speaker (Tap to test audio)
-            </div>
-        </div>
+<div class="chat-outer" id="chatOuter">
+    <div style="display:flex;align-items:center;justify-content:center;flex:1;">
+        <div class="spinner"></div>
     </div>
 </div>
 
-<div class="input-area">
-    <input type="text"
-           class="text-input"
-           id="text-input"
-           placeholder="Type your question here..."
-           onkeypress="if(event.key==='Enter') sendTextQuestion()">
-    <button class="send-button" id="send-button" onclick="sendTextQuestion()">📤</button>
-    <button class="mic-button" id="mic-button" onclick="toggleListening()">🎤</button>
-    <div class="status-text" id="status-text">Type or speak your question</div>
-</div>
+<div class="toast" id="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-    // Configuration
-    const GROK_API_KEY = 'xai-B9z0BCI6Vdc2AtyiYJ2NbRAMPmkntMvXEdi6kH1PdHpNeRb5quWYBaJbICL0LBPZaABaOa4QMRXE8LsM';
-    const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
+    const supabaseClient = supabase.createClient(
+        'https://yljztfajyvjzqikxdddf.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+        { auth: { persistSession: true, storageKey: 'tsp-auth-token', storage: window.localStorage, autoRefreshToken: true, detectSessionInUrl: false } }
+    );
 
-    // State management
-    let conversationHistory = [];
-    let isListening = false;
-    let dailyQuestions = 0;
-    const MAX_FREE_QUESTIONS = 5;
-    const isPremium = true; // Set to true for unlimited testing
-    let ttsEnabled = true; // Text-to-speech enabled by default
-    let handsFreeMode = false; // Hands-free conversation mode
+    const GROK_URL = 'https://yljztfajyvjzqikxdddf.supabase.co/functions/v1/grok-assistant';
+    let messages = [], selectedManualPath = '', isTyping = false, currentUserId = null, isListening = false;
 
-    // Manual text storage
-    let manualText = '';
-    let manualLoaded = false;
-    let currentManual = '';
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+        if (event === 'SIGNED_OUT' && !session && typeof Android !== 'undefined') Android.clearSession();
+    });
 
-    // Available manuals
-    const availableManuals = {
-        'lumenis_acupulse': {
-            name: 'Lumenis AcuPulse',
-            file: 'txt/lumenis_acupulse.txt',
-            manufacturer: 'Lumenis'
-        },
-        'lumenis_versapulse': {
-            name: 'Lumenis VersaPulse PowerSuite',
-            file: 'txt/lumenis_versapulse.txt',
-            manufacturer: 'Lumenis'
-        },
-        'candela_gentlelase': {
-            name: 'Candela GentleLASE',
-            file: 'txt/candela_gentlelase.txt',
-            manufacturer: 'Candela'
-        },
-        'candela_gentleyag': {
-            name: 'Candela GentleYAG',
-            file: 'txt/candela_gentleyag.txt',
-            manufacturer: 'Candela'
-        },
-        'candela_vbeam': {
-            name: 'Candela VBeam',
-            file: 'txt/candela_vbeam.txt',
-            manufacturer: 'Candela'
-        }
-    };
-
-    // Change manual when user selects from dropdown
-    function changeManual() {
-        const selector = document.getElementById('manual-selector');
-        const manualId = selector.value;
-
-        if (!manualId) {
-            currentManual = '';
-            manualLoaded = false;
-            manualText = '';
-            updateStatus('No manual selected');
-            return;
-        }
-
-        loadManual(manualId);
-    }
-
-    // Load the manual on startup or when changed
-    function loadManual(manualId = null) {
+    function saveState() {
         try {
-            // If no manual ID provided, don't auto-load from localStorage
-            if (!manualId) {
-                console.log('No manual selected - waiting for user selection');
-                return;
-            }
-
-            const manual = availableManuals[manualId];
-            if (!manual) {
-                console.error('Unknown manual ID:', manualId);
-                if (typeof Android !== 'undefined' && Android.showToast) {
-                    Android.showToast('⚠️ Unknown manual');
-                }
-                return;
-            }
-
-            console.log('📖 Loading manual:', manual.name);
-            console.log('📂 File path:', manual.file);
-            console.log('🔍 Full path: ./manuals/' + manual.file);
-            updateStatus('Loading ' + manual.name + '...');
-
-            // Use XMLHttpRequest instead of fetch for better Android WebView compatibility
-            const xhr = new XMLHttpRequest();
-            const filePath = './manuals/' + manual.file;
-
-            xhr.open('GET', filePath, true);
-
-            xhr.onload = function() {
-                if (xhr.status === 200) {
-                    manualText = xhr.responseText;
-                    manualLoaded = true;
-                    currentManual = manualId;
-
-                    // Save preference
-                    localStorage.setItem('selectedManual', manualId);
-
-                    const sizeKB = Math.round(manualText.length / 1024);
-                    console.log('✅ Manual loaded successfully:', sizeKB, 'KB,', manualText.split('\n').length, 'lines');
-
-                    // Show success indicator to user
-                    if (typeof Android !== 'undefined' && Android.showToast) {
-                        Android.showToast('📖 ' + manual.name + ' loaded (' + sizeKB + 'KB)');
-                    }
-                    updateStatus('✅ ' + manual.name + ' ready');
-                } else {
-                    console.error('❌ Failed to load manual:', xhr.status);
-                    console.error('❌ Status text:', xhr.statusText);
-                    console.error('❌ Attempted path:', filePath);
-                    manualLoaded = false;
-                    currentManual = '';
-
-                    // Show error to user
-                    if (typeof Android !== 'undefined' && Android.showToast) {
-                        Android.showToast('⚠️ ' + manual.name + ' not found (Error ' + xhr.status + ')');
-                    }
-                    updateStatus('⚠️ Manual not found');
-                }
-            };
-
-            xhr.onerror = function() {
-                console.error('❌ XMLHttpRequest error loading manual');
-                console.error('❌ Attempted file:', manual.file);
-                manualLoaded = false;
-                currentManual = '';
-
-                // Show error to user
-                if (typeof Android !== 'undefined' && Android.showToast) {
-                    Android.showToast('⚠️ Could not load manual');
-                }
-                updateStatus('⚠️ Error loading manual');
-            };
-
-            xhr.send();
-        } catch (error) {
-            console.error('❌ Exception in loadManual:', error);
-            manualLoaded = false;
-            currentManual = '';
-            if (typeof Android !== 'undefined' && Android.showToast) {
-                Android.showToast('⚠️ Error: ' + error.message);
-            }
-        }
+            sessionStorage.setItem('tsp_ai_msgs', JSON.stringify(messages));
+            sessionStorage.setItem('tsp_ai_manual', selectedManualPath);
+            const mfr = document.getElementById('mfrSelect')?.value || '';
+            sessionStorage.setItem('tsp_ai_mfr', mfr);
+        } catch(e) {}
     }
-
-    // Search the manual for relevant context
-    function searchManual(query) {
-        if (!manualLoaded || !manualText) {
-            console.log('❌ Cannot search: manual not loaded');
-            return null;
-        }
-
-        console.log('🔍 Searching manual for:', query);
-
-        // Split text into lines first (needed for all search methods)
-        const lines = manualText.split('\n');
-        const relevantSections = [];
-        let uniqueSections = [];
-
-        // Extract keywords from the query (improved)
-        const keywords = query.toLowerCase()
-            .replace(/[^\w\s]/g, ' ')
-            .split(/\s+/)
-            .filter(word => word.length > 2); // Include 3-letter words like "fan", "CO2", etc
-
-        // Special handling for error/fault codes - IMPROVED
-        const errorCodeMatch = query.match(/(?:error|fault|code)\s*#?\s*(\d+)/i);
-        if (errorCodeMatch) {
-            const codeNum = errorCodeMatch[1];
-
-            // For fault codes, do a SPECIFIC search first
-            const faultPattern = new RegExp(`(fault|error)\\s*#?\\s*${codeNum}\\b`, 'i');
-            let foundSpecificMatch = false;
-
-            for (let i = 0; i < lines.length; i++) {
-                if (faultPattern.test(lines[i])) {
-                    foundSpecificMatch = true;
-                    // Get large context around this specific match
-                    const start = Math.max(0, i - 40);
-                    const end = Math.min(lines.length, i + 41);
-                    const context = lines.slice(start, end).join('\n');
-
-                    relevantSections.push({
-                        score: 100, // High score for exact match
-                        context: context,
-                        line: i,
-                        matchedKeywords: [`fault ${codeNum}`]
-                    });
-                }
-            }
-
-            if (foundSpecificMatch) {
-                console.log('🚨 Found EXACT match for fault/error code:', codeNum);
-                // Skip the general keyword search
-                uniqueSections = relevantSections;
-                uniqueSections.sort((a, b) => b.score - a.score);
-
-                if (uniqueSections.length > 0) {
-                    const topSections = uniqueSections.slice(0, 3)
-                        .map(s => s.context)
-                        .join('\n\n---\n\n');
-
-                    console.log('✅ Using exact fault code match');
-                    console.log('📄 Context preview:', topSections.substring(0, 300) + '...');
-                    return topSections;
-                }
-            } else {
-                console.log('⚠️ Fault code', codeNum, 'not found in manual');
-                return null;
-            }
-        }
-
-        // Regular keyword search for non-fault-code queries
-        console.log('🔑 Keywords:', keywords);
-
-
-        for (let i = 0; i < lines.length; i++) {
-            const line = lines[i].toLowerCase();
-
-            // Check if any keyword matches
-            const matches = keywords.filter(kw => line.includes(kw));
-
-            if (matches.length > 0) {
-                // For error/fault codes, get MUCH more context (40 lines) because
-                // table data in PDFs often has each cell on a separate line
-                const isErrorCode = errorCodeMatch !== null;
-                const contextLines = isErrorCode ? 40 : 15;
-
-                // Get more context
-                const start = Math.max(0, i - contextLines);
-                const end = Math.min(lines.length, i + contextLines + 1);
-                const context = lines.slice(start, end).join('\n');
-
-                relevantSections.push({
-                    score: matches.length,
-                    context: context,
-                    line: i,
-                    matchedKeywords: matches
-                });
-            }
-        }
-
-        // Remove duplicates (sections that overlap)
-        uniqueSections = [];
-        for (const section of relevantSections) {
-            const isDuplicate = uniqueSections.some(existing =>
-                Math.abs(existing.line - section.line) < 15
-            );
-            if (!isDuplicate) {
-                uniqueSections.push(section);
-            }
-        }
-
-        // Sort by relevance (number of keyword matches)
-        uniqueSections.sort((a, b) => b.score - a.score);
-
-        // Return top 5 most relevant sections (increased from 3)
-        if (uniqueSections.length > 0) {
-            const topSections = uniqueSections.slice(0, 5)
-                .map(s => s.context)
-                .join('\n\n---\n\n');
-
-            console.log('✅ Found', uniqueSections.length, 'relevant sections, using top 5');
-            console.log('📄 Context preview:', topSections.substring(0, 300) + '...');
-            return topSections;
-        }
-
-        console.log('⚠️ No relevant sections found');
-        return null;
-    }
-
-    // Callbacks for Android native speech recognition
-    window.onSpeechReady = function() {
-        console.log('Android speech recognition ready');
-    };
-
-    window.onSpeechResult = function(text) {
-        console.log('Android speech result:', text);
-        stopListening();
-        handleUserQuestion(text);
-    };
-
-    window.onSpeechError = function(error) {
-        console.error('Android speech error:', error);
-        stopListening();
-        updateStatus('Error: ' + error);
-        setTimeout(() => {
-            if (handsFreeMode) {
-                updateStatus('Hands-free mode - Tap to speak');
-            } else {
-                updateStatus('Tap microphone to speak');
-            }
-        }, 3000);
-    };
-
-    // Callback for when TTS finishes speaking
-    window.onTTSComplete = function() {
-        console.log('TTS completed');
-        if (handsFreeMode && !isListening) {
-            console.log('Hands-free mode: auto-starting listening');
-            // Wait a brief moment, then start listening again
-            setTimeout(() => {
-                startListening();
-            }, 500);
-        }
-    };
-
-    function goBack() {
-        window.location.href = 'service_hub.html';
-    }
-
-    function toggleSpeaker() {
-        ttsEnabled = !ttsEnabled;
-        const button = document.getElementById('speaker-button');
-
-        if (ttsEnabled) {
-            button.textContent = '🔊';
-            button.classList.remove('muted');
-            // Speak a confirmation
-            speakText('Voice output enabled');
-        } else {
-            button.textContent = '🔇';
-            button.classList.add('muted');
-            // Stop any ongoing speech using Android native TTS
-            if (typeof Android !== 'undefined' && Android.stopSpeaking) {
-                Android.stopSpeaking();
-            }
-        }
-
-        // Save preference
-        localStorage.setItem('ttsEnabled', ttsEnabled.toString());
-    }
-
-    function toggleHandsFree() {
-        handsFreeMode = !handsFreeMode;
-        const button = document.getElementById('hands-free-button');
-
-        if (handsFreeMode) {
-            button.textContent = '🔄';
-            button.classList.remove('muted');
-            button.style.background = 'rgba(76, 175, 80, 0.2)';
-            button.style.borderColor = '#4caf50';
-            button.style.color = '#4caf50';
-            updateStatus('Hands-free mode ON - Will auto-listen after speaking');
-            if (typeof Android !== 'undefined' && Android.showToast) {
-                Android.showToast('🔄 Hands-free mode enabled');
-            }
-        } else {
-            button.textContent = '🔄';
-            button.classList.add('muted');
-            button.style.background = 'rgba(255, 215, 0, 0.2)';
-            button.style.borderColor = '#ffd700';
-            button.style.color = '#ffd700';
-            updateStatus('Hands-free mode OFF');
-            if (typeof Android !== 'undefined' && Android.showToast) {
-                Android.showToast('Hands-free mode disabled');
-            }
-        }
-
-        // Save preference
-        localStorage.setItem('handsFreeMode', handsFreeMode.toString());
-    }
-
-    function toggleListening() {
-        if (isListening) {
-            stopListening();
-        } else {
-            startListening();
-        }
-    }
-
-    function startListening() {
-        console.log('startListening called');
-        console.log('typeof Android:', typeof Android);
-
-        // Check if Android interface is available
-        if (typeof Android === 'undefined') {
-            console.error('Android interface is undefined');
-            alert('Voice recognition not available - Android interface missing');
-            return;
-        }
-
-        console.log('Android.startVoiceRecognition exists:', typeof Android.startVoiceRecognition !== 'undefined');
-        console.log('Android.isVoiceRecognitionAvailable exists:', typeof Android.isVoiceRecognitionAvailable !== 'undefined');
-
-        if (!Android.startVoiceRecognition) {
-            console.error('Android.startVoiceRecognition method not found');
-            alert('Voice recognition not available - method missing');
-            return;
-        }
-
-        // Check if voice recognition is available on device
-        if (!Android.isVoiceRecognitionAvailable()) {
-            console.error('Voice recognition not supported on device');
-            alert('Voice recognition not supported on this device');
-            return;
-        }
-
-        isListening = true;
-        document.getElementById('mic-button').classList.add('listening');
-        document.getElementById('mic-button').textContent = '🔴';
-        document.getElementById('status-text').classList.add('listening');
-        updateStatus('Listening... Speak now!');
-
+    function loadState() {
         try {
-            console.log('Calling Android.startVoiceRecognition()');
-            Android.startVoiceRecognition();
-        } catch (error) {
-            console.error('Failed to start recognition:', error);
-            stopListening();
-            alert('Could not start microphone. Error: ' + error.message);
-        }
+            const m = sessionStorage.getItem('tsp_ai_msgs');
+            const man = sessionStorage.getItem('tsp_ai_manual');
+            if (m) messages = JSON.parse(m);
+            if (man) selectedManualPath = man;
+        } catch(e) {}
     }
 
-    function stopListening() {
-        isListening = false;
-        document.getElementById('mic-button').classList.remove('listening');
-        document.getElementById('mic-button').textContent = '🎤';
-        document.getElementById('status-text').classList.remove('listening');
-        updateStatus('Type or speak your question');
-
-        if (typeof Android !== 'undefined' && Android.stopVoiceRecognition) {
-            Android.stopVoiceRecognition();
+    async function initPage() {
+        if (_pendingSession) {
+            try { await supabaseClient.auth.setSession({ access_token: _pendingSession.access_token, refresh_token: _pendingSession.refresh_token }); } catch(e) {}
         }
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) { navigateTo('index.html'); return; }
+        currentUserId = user.id;
+
+        const { data: sub } = await supabaseClient.from('subscriptions').select('tier,status').eq('user_id', user.id).single();
+        const isPremium = sub && ['premium','team','enterprise'].includes(sub.tier) && sub.status === 'active';
+
+        if (isPremium) { buildChatUI(); loadState(); await loadManuals(); renderSavedMessages(); }
+        else { buildGateUI(); }
     }
 
-    function updateStatus(message) {
-        document.getElementById('status-text').textContent = message;
-    }
+    let allManuals = [];
 
-    function updateUsageBadge() {
-        const remaining = Math.max(0, MAX_FREE_QUESTIONS - dailyQuestions);
-        const badge = document.getElementById('usage-badge');
+    async function loadManuals() {
+        const { data } = await supabaseClient.from('manuals').select('title,storage_path,brand').order('brand').order('title');
+        if (!data) return;
+        allManuals = data;
 
-        if (isPremium) {
-            badge.textContent = '∞ Premium';
-            badge.style.background = 'linear-gradient(135deg, #ffd700 0%, #ffed4e 100%)';
-            badge.style.color = '#1a1a1a';
-        } else {
-            badge.textContent = `${remaining}/${MAX_FREE_QUESTIONS} free today`;
-            if (remaining === 0) {
-                badge.style.background = 'rgba(255, 68, 68, 0.2)';
-                badge.style.borderColor = '#ff4444';
-                badge.style.color = '#ff4444';
-            }
-        }
-    }
-
-    function addMessage(text, isUser, isError = false, isContext = false) {
-        const container = document.getElementById('chat-container');
-
-        // Remove welcome message if present
-        const welcome = container.querySelector('.welcome-message');
-        if (welcome) {
-            welcome.remove();
-        }
-
-        const messageDiv = document.createElement('div');
-        if (isContext) {
-            messageDiv.className = 'message context-indicator';
-        } else if (isError) {
-            messageDiv.className = 'message error-message';
-        } else {
-            messageDiv.className = isUser ? 'message user-message' : 'message assistant-message';
-        }
-        messageDiv.textContent = text;
-
-        container.appendChild(messageDiv);
-        container.scrollTop = container.scrollHeight;
-
-        return messageDiv;
-    }
-
-    function addThinkingIndicator() {
-        const container = document.getElementById('chat-container');
-        const thinkingDiv = document.createElement('div');
-        thinkingDiv.className = 'message thinking';
-        thinkingDiv.id = 'thinking-indicator';
-        thinkingDiv.textContent = 'Searching manual and thinking...';
-        container.appendChild(thinkingDiv);
-        container.scrollTop = container.scrollHeight;
-    }
-
-    function removeThinkingIndicator() {
-        const thinking = document.getElementById('thinking-indicator');
-        if (thinking) {
-            thinking.remove();
-        }
-    }
-
-    function speakText(text) {
-        console.log('=== TTS Debug Start ===');
-        console.log('TTS Enabled:', ttsEnabled);
-        console.log('Android interface available:', typeof Android !== 'undefined');
-
-        if (!ttsEnabled) {
-            console.log('TTS disabled by user, not speaking');
-            return;
-        }
-
-        // Use native Android TTS
-        if (typeof Android !== 'undefined' && Android.speak) {
-            console.log('Using native Android TTS');
-            console.log('Text to speak:', text.substring(0, 50) + '...');
-
-            try {
-                // Stop any ongoing speech first
-                if (Android.stopSpeaking) {
-                    Android.stopSpeaking();
-                }
-
-                // Speak using native TTS
-                Android.speak(text);
-                console.log('Android.speak() called successfully');
-            } catch (error) {
-                console.error('Error calling Android.speak():', error);
-            }
-        } else {
-            console.error('Android TTS interface not available');
-            console.error('typeof Android:', typeof Android);
-
-            // Fallback to Web Speech API (probably won't work in WebView)
-            if ('speechSynthesis' in window) {
-                console.log('Falling back to Web Speech API');
-                window.speechSynthesis.cancel();
-                setTimeout(() => {
-                    const utterance = new SpeechSynthesisUtterance(text);
-                    utterance.rate = 0.9;
-                    utterance.pitch = 1.0;
-                    utterance.volume = 1.0;
-                    utterance.lang = 'en-US';
-
-                    utterance.onerror = function(event) {
-                        console.error('Web Speech API error:', event.error);
-                    };
-
-                    window.speechSynthesis.speak(utterance);
-                }, 100);
-            } else {
-                console.error('No TTS method available');
-            }
-        }
-        console.log('=== TTS Debug End ===');
-    }
-
-    function showUpgradePrompt() {
-        const container = document.getElementById('chat-container');
-        const promptDiv = document.createElement('div');
-        promptDiv.className = 'upgrade-prompt';
-        promptDiv.innerHTML = `
-            <div style="font-size: 20px; margin-bottom: 5px;">🚀 Out of Free Questions</div>
-            <div style="font-size: 14px;">Upgrade to Premium for unlimited AI assistance</div>
-            <div style="font-size: 12px; margin-top: 10px; opacity: 0.9;">Tap to learn more</div>
-        `;
-        promptDiv.onclick = function() {
-            alert('Premium upgrade coming soon! Contact support for early access.');
-        };
-        container.appendChild(promptDiv);
-        container.scrollTop = container.scrollHeight;
-    }
-
-    async function handleUserQuestion(question) {
-        // Check usage limits
-        if (!isPremium && dailyQuestions >= MAX_FREE_QUESTIONS) {
-            showUpgradePrompt();
-            return;
-        }
-
-        // Add user message
-        addMessage(question, true);
-        addThinkingIndicator();
-
-        // Increment usage
-        dailyQuestions++;
-        updateUsageBadge();
-
-        // Search the manual for relevant context
-        const manualContext = searchManual(question);
-
-        // Build the enhanced prompt with manual context
-        let systemPrompt = 'You are a direct, concise laser service assistant. The user is a qualified laser service engineer. Give SHORT, DIRECT answers. Skip explanations unless asked. Focus on the specific technical information requested.';
-
-        let userPrompt = question;
-
-        if (manualContext) {
-            const manualInfo = availableManuals[currentManual];
-            const manualName = manualInfo ? manualInfo.name : 'service manual';
-
-            // Check if this is a fault code query
-            const faultCodeMatch = question.match(/(?:error|fault|code)\s*#?\s*(\d+)/i);
-
-            if (faultCodeMatch) {
-                // Special handling for fault code queries
-                systemPrompt += '\n\nYou have the ' + manualName + ' fault code table extracted from PDF. Each table cell is on its own line. The pattern is:\n[code number]\nFault [number]\n[letter]\n[letter]\n[description]\n\nExample: "52\\nFault 52\\nR\\nN\\nMain panel failed to respond" means Fault 52 is "Main panel failed to respond". Parse carefully.';
-                userPrompt = `FAULT TABLE DATA:\n${manualContext}\n\nQUESTION: ${question}\n\nSTEP 1: Find the line containing "Fault ${faultCodeMatch[1]}"\nSTEP 2: Look 3-4 lines AFTER that line to find the description\nSTEP 3: Answer with: "Fault ${faultCodeMatch[1]}: [description]"\n\nDo NOT say "not found" - the data is in the table above. Parse it line by line.`;
-            } else {
-                // General query with manual context
-                userPrompt = `SERVICE MANUAL CONTEXT:\n${manualContext}\n\nQUESTION: ${question}\n\nProvide a direct, concise answer based on the manual context above.`;
-            }
-
-
-            // Show indicator that we found context
-            removeThinkingIndicator();
-            addMessage('📖 Found relevant information in ' + manualName, false, false, true);
-            addThinkingIndicator();
-
-            console.log('✅ Using manual context from', manualName);
-        } else {
-            if (manualLoaded) {
-                const manualInfo = availableManuals[currentManual];
-                const manualName = manualInfo ? manualInfo.name : 'the selected manual';
-                console.log('⚠️ No relevant context found in', manualName, 'for this query');
-                systemPrompt += '\n\nThe ' + manualName + ' was searched but no relevant information was found for this query. Provide general technical knowledge, but mention that this is not from the manual. Keep answer brief.';
-            } else {
-                console.log('❌ No manual loaded - refusing to answer');
-                // Don't call API - return immediately with error message
-                removeThinkingIndicator();
-                addMessage('❌ I need a service manual to help you. Please select a manual from the dropdown at the top of the screen, then ask your question again.', false, false, false);
-                return;
-            }
-        }
-
-        // Build conversation history
-        conversationHistory.push({
-            role: 'user',
-            content: userPrompt
+        // Populate manufacturer dropdown with unique brands
+        const brands = [...new Set(data.map(m => m.brand))].sort();
+        const mfrSel = document.getElementById('mfrSelect');
+        if (!mfrSel) return;
+        brands.forEach(b => {
+            const o = document.createElement('option');
+            o.value = b; o.textContent = b;
+            mfrSel.appendChild(o);
         });
 
+        // Restore saved state
+        if (selectedManualPath) {
+            const saved = allManuals.find(m => m.storage_path === selectedManualPath);
+            if (saved) {
+                mfrSel.value = saved.brand;
+                mfrSel.classList.add('has-value');
+                populateModels(saved.brand, selectedManualPath);
+            }
+        }
+    }
+
+    function populateModels(brand, selectPath = '') {
+        const modelSel = document.getElementById('manualSelect');
+        const modelRow = document.getElementById('modelRow');
+        if (!modelSel || !modelRow) return;
+        modelSel.innerHTML = '<option value="">Select model...</option>';
+        const models = allManuals.filter(m => m.brand === brand);
+        models.forEach(m => {
+            const o = document.createElement('option');
+            o.value = m.storage_path; o.textContent = m.title;
+            modelSel.appendChild(o);
+        });
+        modelRow.classList.add('enabled');
+        if (selectPath) {
+            modelSel.value = selectPath;
+            modelSel.classList.add('has-value');
+        }
+    }
+
+    function onMfrChange() {
+        const mfrSel = document.getElementById('mfrSelect');
+        const modelSel = document.getElementById('manualSelect');
+        const modelRow = document.getElementById('modelRow');
+        const brand = mfrSel.value;
+        mfrSel.classList.toggle('has-value', !!brand);
+        // Reset model selection
+        selectedManualPath = '';
+        if (modelSel) { modelSel.innerHTML = '<option value="">Select model...</option>'; modelSel.classList.remove('has-value'); }
+        if (!brand) { modelRow.classList.remove('enabled'); return; }
+        populateModels(brand);
+        saveState();
+    }
+
+    function buildChatUI() {
+        document.getElementById('chatOuter').innerHTML = `
+            <div class="context-bar">
+                <div class="context-row">
+                    <span class="context-label">Brand</span>
+                    <select class="context-select" id="mfrSelect" onchange="onMfrChange()">
+                        <option value="">Select manufacturer...</option>
+                    </select>
+                </div>
+                <div class="context-row" id="modelRow">
+                    <span class="context-label">Manual</span>
+                    <select class="context-select" id="manualSelect" onchange="onManualChange()">
+                        <option value="">Select model...</option>
+                    </select>
+                </div>
+            </div>
+            <div class="quick-row">
+                <button class="quick-chip" onclick="quickPrompt('What are the most common fault codes for this system?')">⚡ Fault codes</button>
+                <button class="quick-chip" onclick="quickPrompt('Walk me through the calibration procedure')">🔧 Calibration</button>
+                <button class="quick-chip" onclick="quickPrompt('What are the laser safety precautions?')">⚠️ Safety</button>
+                <button class="quick-chip" onclick="quickPrompt('What spare parts should I carry for this system?')">🔩 Spare parts</button>
+                <button class="quick-chip" onclick="quickPrompt('What preventive maintenance steps should I perform?')">📋 PM steps</button>
+            </div>
+            <div class="chat-messages" id="chatMessages">
+                <div data-welcome style="text-align:center;color:var(--text3);font-size:13px;padding:20px 0;">
+                    👋 Select a manual above and start asking questions.
+                </div>
+            </div>
+            <div class="chat-input-area">
+                <textarea id="chatInput" placeholder="Ask about any laser system..." rows="1"
+                    onkeydown="onKey(event)" oninput="autoResize(this)"></textarea>
+                <button class="mic-btn" id="micBtn" onclick="toggleMic()">🎤</button>
+                <button class="send-btn" id="sendBtn" onclick="sendMessage()">↑</button>
+            </div>
+        `;
+    }
+
+    function buildGateUI() {
+        document.getElementById('chatOuter').innerHTML = `
+            <div class="premium-gate">
+                <div class="premium-gate-icon">🤖</div>
+                <div class="premium-gate-title">Premium Feature</div>
+                <div class="premium-gate-sub">The AI troubleshooting assistant requires a Premium or Team subscription.</div>
+                <button class="btn btn-gold" onclick="navigateTo('paywall.html')">Upgrade to Premium</button>
+            </div>
+        `;
+    }
+
+    function renderSavedMessages() {
+        if (!messages.length) return;
+        const c = document.getElementById('chatMessages');
+        if (!c) return;
+        c.innerHTML = '';
+        messages.forEach(m => renderMessage(m.role, m.content, false));
+    }
+
+    function onManualChange() {
+        const sel = document.getElementById('manualSelect');
+        selectedManualPath = sel.value;
+        sel.classList.toggle('has-value', !!selectedManualPath);
+        saveState();
+    }
+
+    function renderMessage(role, content, scroll = true) {
+        const c = document.getElementById('chatMessages');
+        if (!c) return;
+        const welcome = c.querySelector('[data-welcome]'); if (welcome) welcome.remove();
+        const d = document.createElement('div');
+        d.className = 'msg ' + role;
+        const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+        const html = content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+        d.innerHTML = `<div class="msg-bubble">${html}</div><div class="msg-time">${time}</div>`;
+        c.appendChild(d);
+        if (scroll) c.scrollTop = c.scrollHeight;
+    }
+
+    function addMessage(role, content) { messages.push({role, content}); renderMessage(role, content); saveState(); }
+    function showTyping() { const c = document.getElementById('chatMessages'); if (!c) return; const d = document.createElement('div'); d.className='msg assistant'; d.id='typing'; d.innerHTML='<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>'; c.appendChild(d); c.scrollTop=c.scrollHeight; }
+    function hideTyping() { const t = document.getElementById('typing'); if (t) t.remove(); }
+
+    async function sendMessage() {
+        const inp = document.getElementById('chatInput'); if (!inp) return;
+        const text = inp.value.trim(); if (!text || isTyping) return;
+        inp.value = ''; inp.style.height = '42px';
+        addMessage('user', text);
+        isTyping = true;
+        const sb = document.getElementById('sendBtn'), mb = document.getElementById('micBtn');
+        if (sb) sb.disabled = true; if (mb) mb.disabled = true;
+        showTyping();
         try {
-            console.log('Making API request with manual context');
-            console.log('System prompt length:', systemPrompt.length);
-            console.log('User prompt length:', userPrompt.length);
-
-            // Create abort controller for timeout
-            const controller = new AbortController();
-            const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
-
-            // Call Grok API
-            const response = await fetch(GROK_API_URL, {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const token = session?.access_token || '';
+            const sysPrompt = selectedManualPath
+                ? `You are an expert medical laser service technician. The technician is referencing manual: ${selectedManualPath}. Answer field service questions concisely.`
+                : `You are an expert medical laser service technician specializing in Lumenis, Candela, Cynosure, Cutera, Coherent, Fotona. Answer field service questions concisely.`;
+            const resp = await fetch(GROK_URL, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'Authorization': `Bearer ${GROK_API_KEY}`
-                },
-                body: JSON.stringify({
-                    model: 'grok-3',
-                    messages: [
-                        {
-                            role: 'system',
-                            content: systemPrompt
-                        },
-                        ...conversationHistory
-                    ],
-                    temperature: 0.7,
-                    stream: false
-                }),
-                signal: controller.signal
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ action:'chat', userId:currentUserId, messages:[{role:'system',content:sysPrompt},...messages.slice(-10)], collectionId:null })
             });
-
-            clearTimeout(timeoutId);
-            removeThinkingIndicator();
-
-            if (!response.ok) {
-                const errorText = await response.text();
-                console.error('API Error Response:', errorText);
-                addMessage('⚠️ API Error: ' + response.status + ' - ' + errorText.substring(0, 100), false, false, false);
-                return;
-            }
-
-            const data = await response.json();
-            console.log('API Response received:', data);
-            const answer = data.choices[0].message.content;
-
-            // Add to conversation history
-            conversationHistory.push({
-                role: 'assistant',
-                content: answer
-            });
-
-            // Display and speak answer
-            addMessage(answer, false);
-            console.log('About to speak answer, ttsEnabled:', ttsEnabled);
-            console.log('Answer length:', answer.length);
-
-            if (ttsEnabled) {
-                console.log('TTS is enabled, calling speakText()');
-                if (typeof Android !== 'undefined' && Android.showToast) {
-                    Android.showToast('🔊 Speaking answer...');
-                }
-            } else {
-                console.log('TTS is disabled, skipping speech');
-            }
-
-            speakText(answer);
-
-        } catch (error) {
-            removeThinkingIndicator();
-            console.error('Full error details:', error);
-            console.error('Error name:', error.name);
-            console.error('Error message:', error.message);
-
-            let errorMessage;
-            if (error.name === 'AbortError') {
-                errorMessage = '⏱️ Request timed out after 30 seconds. The API may be slow or unavailable. Please try again.';
-            } else {
-                errorMessage = `⚠️ Error: ${error.message}`;
-            }
-
-            addMessage(errorMessage, false, false, false);
-
-            if (typeof Android !== 'undefined' && Android.showToast) {
-                Android.showToast('Error: ' + error.message.substring(0, 50));
-            }
-        }
+            const data = await resp.json();
+            hideTyping();
+            addMessage('assistant', !resp.ok ? '⚠️ '+(data.error||'Request failed.') : (data.choices?.[0]?.message?.content || 'Could not process that.'));
+        } catch(e) { hideTyping(); addMessage('assistant','⚠️ Connection error. Please try again.'); }
+        isTyping = false;
+        if (sb) sb.disabled = false; if (mb) mb.disabled = false;
     }
 
-    function askQuestion(question) {
-        handleUserQuestion(question);
+    function toggleMic() {
+        if (typeof Android === 'undefined' || !Android.startVoiceRecognition) { showToast('Voice input not available'); return; }
+        if (isListening) { Android.stopVoiceRecognition(); setMicState(false); }
+        else { Android.startVoiceRecognition(); setMicState(true); }
+    }
+    function setMicState(on) { isListening = on; const btn = document.getElementById('micBtn'); if (!btn) return; btn.classList.toggle('listening', on); btn.textContent = on ? '🔴' : '🎤'; }
+    window.onSpeechResult = function(text) { setMicState(false); if (text?.trim()) { const inp = document.getElementById('chatInput'); if (inp) { inp.value=text.trim(); autoResize(inp); } setTimeout(sendMessage,300); } };
+    window.onSpeechError = function(err) { setMicState(false); if (err && err !== 'cancelled') showToast('Voice error: '+err); };
+
+    function quickPrompt(text) { const inp = document.getElementById('chatInput'); if (inp) { inp.value=text; autoResize(inp); } sendMessage(); }
+    function onKey(e) { if (e.key==='Enter'&&!e.shiftKey) { e.preventDefault(); sendMessage(); } }
+    function autoResize(el) { el.style.height='42px'; el.style.height=Math.min(el.scrollHeight,110)+'px'; }
+
+    function navigateTo(page) {
+        try {
+            const s = JSON.parse(localStorage.getItem('tsp-auth-token'))?.currentSession;
+            if (s?.access_token) { const sep = page.includes('?')?'&':'?'; window.location.href = page+sep+'_s='+btoa(JSON.stringify(s)); return; }
+        } catch(e) {}
+        window.location.href = page;
     }
 
-    function testTTS() {
-        console.log('Testing TTS...');
-
-        // Test 1: Check if we can call Android
-        if (typeof Android !== 'undefined' && Android.showToast) {
-            Android.showToast('Test button clicked! Testing TTS...');
-        }
-
-        // Test 2: Try TTS
-        speakText('Hello! This is a test of the text to speech system. If you can hear this, audio is working correctly.');
+    function showToast(msg, type='') {
+        const t = document.getElementById('toast'); t.textContent=msg; t.className='toast show'+(type?' '+type:'');
+        clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),3000);
     }
 
-    function sendTextQuestion() {
-        const input = document.getElementById('text-input');
-        const question = input.value.trim();
-
-        console.log('sendTextQuestion called');
-        console.log('Question:', question);
-        console.log('Manual loaded:', manualLoaded);
-        console.log('Current manual:', currentManual);
-
-        if (question) {
-            handleUserQuestion(question);
-            input.value = ''; // Clear input
-        } else {
-            console.log('Empty question - not sending');
-        }
-    }
-
-    // Initialize
-    updateUsageBadge();
-
-    // DON'T auto-load manual on startup - wait for user selection
-    console.log('AI Assistant initialized - waiting for manual selection');
-
-    // Load TTS preference
-    const savedTTS = localStorage.getItem('ttsEnabled');
-    if (savedTTS !== null) {
-        ttsEnabled = (savedTTS === 'true');
-    } else {
-        // Default to enabled on first run
-        ttsEnabled = true;
-        localStorage.setItem('ttsEnabled', 'true');
-    }
-
-    // Update button to reflect current state
-    const button = document.getElementById('speaker-button');
-    if (!ttsEnabled) {
-        button.textContent = '🔇';
-        button.classList.add('muted');
-        console.log('TTS disabled by user preference');
-    } else {
-        button.textContent = '🔊';
-        button.classList.remove('muted');
-        console.log('TTS enabled');
-    }
-
-    // Load hands-free mode preference
-    const savedHandsFree = localStorage.getItem('handsFreeMode');
-    if (savedHandsFree !== null) {
-        handsFreeMode = (savedHandsFree === 'true');
-    } else {
-        handsFreeMode = false;
-        localStorage.setItem('handsFreeMode', 'false');
-    }
-
-    // Update hands-free button to reflect current state
-    const handsFreeButton = document.getElementById('hands-free-button');
-    if (handsFreeMode) {
-        handsFreeButton.textContent = '🔄';
-        handsFreeButton.classList.remove('muted');
-        handsFreeButton.style.background = 'rgba(76, 175, 80, 0.2)';
-        handsFreeButton.style.borderColor = '#4caf50';
-        handsFreeButton.style.color = '#4caf50';
-        console.log('Hands-free mode enabled');
-    } else {
-        handsFreeButton.textContent = '🔄';
-        handsFreeButton.classList.add('muted');
-        console.log('Hands-free mode disabled');
-    }
-
-    // Load daily usage from localStorage
-    const today = new Date().toDateString();
-    const savedDate = localStorage.getItem('aiAssistantDate');
-    const savedQuestions = parseInt(localStorage.getItem('aiAssistantQuestions') || '0');
-
-    if (savedDate === today) {
-        dailyQuestions = savedQuestions;
-        updateUsageBadge();
-    } else {
-        localStorage.setItem('aiAssistantDate', today);
-        localStorage.setItem('aiAssistantQuestions', '0');
-    }
-
-    // Save usage on page unload
-    window.addEventListener('beforeunload', function() {
-        localStorage.setItem('aiAssistantQuestions', dailyQuestions.toString());
-    });
+    if (_pendingSession) { initPage(); }
+    else { supabaseClient.auth.getSession().then(({data:{session}})=>{ if(session) initPage(); else navigateTo('index.html'); }); }
 </script>
 </body>
 </html>

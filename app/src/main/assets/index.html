@@ -1,138 +1,1043 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>
+        // Session recovery — runs BEFORE Supabase loads
+        var _pendingSession = null;
+        var _sessionRestored = false;
+        (function() {
+            try {
+                // 1) Try URL param (page-to-page navigation)
+                const p = new URLSearchParams(window.location.search);
+                const enc = p.get('_s');
+                if (enc) {
+                    const session = JSON.parse(atob(enc));
+                    if (session && session.access_token) {
+                        _pendingSession = session;
+                        const key = 'tsp-auth-token';
+                        const stored = { currentSession: session, expiresAt: session.expires_at };
+                        localStorage.setItem(key, JSON.stringify(stored));
+                        const url = new URL(window.location.href);
+                        url.searchParams.delete('_s');
+                        window.history.replaceState({}, '', url.toString());
+                        return; // Got session from URL, done
+                    }
+                }
+                // 2) Try localStorage (app reopen / Supabase persistence)
+                const raw = localStorage.getItem('tsp-auth-token');
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    // Handle both { currentSession: {...} } and raw session formats
+                    const sess = (parsed && parsed.currentSession) ? parsed.currentSession
+                               : (parsed && parsed.access_token) ? parsed
+                               : null;
+                    if (sess && sess.access_token) {
+                        _pendingSession = sess;
+                    }
+                }
+            } catch(e) { }
+        })();
+
+        // Global function for MainActivity.onPageFinished to call
+        function restoreSession(jsonStr) {
+            try {
+                const parsed = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+                // Handle both raw session and wrapped { currentSession: {...} } formats
+                const session = (parsed && parsed.currentSession) ? parsed.currentSession : parsed;
+                if (session && session.access_token) {
+                    // Write to localStorage in Supabase's expected format
+                    const key = 'tsp-auth-token';
+                    const stored = { currentSession: session, expiresAt: session.expires_at };
+                    localStorage.setItem(key, JSON.stringify(stored));
+                    // If Supabase is already initialized, call setSession directly
+                    if (typeof supabaseClient !== 'undefined') {
+                        _sessionRestored = true;
+                        supabaseClient.auth.setSession({
+                            access_token:  session.access_token,
+                            refresh_token: session.refresh_token
+                        }).then(function(result) {
+                            if (result.error)
+                            else
+                            updateAuthUI();
+                            loadDashboardData();
+                        });
+                    } else {
+                        // Supabase not ready yet — store as pending
+                        _pendingSession = session;
+                    }
+                }
+            } catch(e) { }
+        }
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Total Service Pro</title>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
     <style>
-        * { margin:0; padding:0; box-sizing:border-box; }
-        body {
-            background: #1F2937;
-            color: white;
-            font-family: system-ui, sans-serif;
-            min-height: 100vh;
-            display: flex;
-            flex-direction: column;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --gold:      #FBBF24;
+            --gold-dim:  #D4A017;
+            --gold-glow: rgba(251,191,36,0.08);
+            --bg:        #111;
+            --surface:   #0d0d0d;
+            --surface2:  #151515;
+            --surface3:  #1a1a1a;
+            --surface4:  #222;
+            --border:    #1f1f1f;
+            --border-g:  rgba(251,191,36,0.15);
+            --text:      #fff;
+            --text2:     #ccc;
+            --text3:     #888;
+            --red:       #ef4444;
+            --green:     #22c55e;
+            --blue:      #3b82f6;
+            --purple:    #7c3aed;
+            --orange:    #f59e0b;
         }
-        .top-nav {
-            position: fixed;
-            top: env(safe-area-inset-top, 0px);
-            left: 0; right: 0;
-            max-width: 28rem;
-            margin: 0 auto;
-            background: #1F2937;
-            border-bottom: 1px solid #374151;
-            padding: 12px 16px;
-            z-index: 1000;
+        body {
+            font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        /* ── Header ── */
+        .header {
+            background: var(--surface);
+            padding: 14px 20px;
             display: flex;
             justify-content: space-between;
             align-items: center;
-            height: 60px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.3);
+            border-bottom: 1px solid var(--gold);
+            position: sticky; top: 0; z-index: 100;
         }
-        .nav-item { color: #9CA3AF; font-size: 12px; font-weight: 600; cursor: pointer; }
-        .login-btn {
-            background: #FBBF24;
-            color: #111827;
-            padding: 6px 16px;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 14px;
-            border: none;
-            cursor: pointer;
+        .brand { display: flex; flex-direction: column; line-height: 1.15; }
+        .brand-name {
+            font-size: 19px; font-weight: 800; color: var(--gold);
+            letter-spacing: -0.3px;
         }
-        .hero {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            padding: 80px 24px 60px;
-            gap: 28px;
+        .brand-sub {
+            font-size: 10px; font-weight: 500; color: var(--text3);
+            letter-spacing: 1.5px; text-transform: uppercase; margin-top: 1px;
         }
-        .hero-title {
-            font-size: 3.4rem;
-            font-weight: 800;
-            color: #FBBF24;
-            line-height: 1.05;
-            margin-bottom: 8px;
+
+        .login-button {
+            background: var(--gold); border: none; border-radius: 8px;
+            padding: 8px 16px; color: #111827; font-weight: 600; cursor: pointer;
+            font-family: inherit;
         }
-        .hero-subtitle {
-            font-size: 1.3rem;
-            color: #D1D5DB;
-            max-width: 90%;
-            line-height: 1.4;
+
+        /* ── Avatar & Dropdown ── */
+        .avatar-wrapper { position: relative; display: none; }
+        .avatar-btn {
+            background: none; border: none; padding: 0; cursor: pointer;
+            border-radius: 50%; display: flex; align-items: center; justify-content: center;
         }
-        .main-buttons {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-            width: 100%;
-            max-width: 360px;
-            align-items: center;
+        .avatar-img {
+            width: 40px; height: 40px; border-radius: 50%;
+            object-fit: cover; border: 2px solid var(--gold); display: none;
         }
-        .btn {
-            width: 100%;
-            padding: 20px 32px;
-            font-size: 1.45rem;
-            font-weight: 700;
+        .avatar-initials {
+            width: 40px; height: 40px; border-radius: 50%;
+            background: var(--gold); color: #111827; font-weight: 700; font-size: 16px;
+            display: flex; align-items: center; justify-content: center;
+            border: 2px solid var(--gold); letter-spacing: 0.5px;
+        }
+        .avatar-dropdown {
+            display: none; position: absolute; top: calc(100% + 10px); right: 0;
+            background: var(--surface3); border: 1px solid var(--gold); border-radius: 12px;
+            min-width: 200px; overflow: hidden;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.6); z-index: 1000;
+        }
+        .avatar-dropdown.open { display: block; }
+        .dropdown-user-info { padding: 14px 16px 12px; border-bottom: 1px solid #333; }
+        .dropdown-user-name {
+            font-weight: 700; font-size: 14px; color: var(--gold);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .dropdown-user-email {
+            font-size: 11px; color: var(--text3); margin-top: 3px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .dropdown-item {
+            display: flex; align-items: center; gap: 10px; width: 100%;
+            padding: 13px 16px; background: none; border: none; color: #fff;
+            font-size: 14px; font-family: inherit; cursor: pointer;
+            text-align: left; transition: background 0.15s;
+        }
+        .dropdown-item:hover { background: #2a2a2a; }
+        .dropdown-item.danger { color: #f87171; border-top: 1px solid #333; }
+        .dropdown-item.danger:hover { background: #2a1a1a; }
+        .dropdown-icon { font-size: 16px; width: 20px; text-align: center; }
+
+        /* ── Page Content ── */
+        .page { padding: 16px 16px 40px; max-width: 900px; margin: 0 auto; }
+
+        /* ── Greeting ── */
+        .greeting {
+            margin-bottom: 20px;
+        }
+        .greeting-text {
+            font-size: 22px; font-weight: 800; color: var(--text);
+            line-height: 1.2;
+        }
+        .greeting-sub {
+            font-size: 13px; color: var(--text3); margin-top: 4px;
+        }
+
+        /* ── Stats Row ── */
+        .stats-row {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+            margin-bottom: 22px;
+        }
+        .stat-card {
+            background: var(--surface2);
+            border: 1px solid var(--border);
             border-radius: 12px;
-            cursor: pointer;
-            transition: all 0.18s;
-            box-shadow: 0 4px 10px rgba(0,0,0,0.25);
-        }
-        .btn-primary {
-            background: #FBBF24;
-            color: #111827;
-        }
-        .btn-primary:hover { background: #e6ac00; transform: translateY(-3px); }
-        .btn-secondary {
-            background: #374151;
-            color: white;
-            border: 1px solid #4B5563;
-        }
-        .btn-secondary:hover { background: #4B5563; transform: translateY(-3px); }
-        footer {
+            padding: 14px 12px;
             text-align: center;
-            padding: 40px 24px;
-            color: #6B7280;
-            font-size: 0.9rem;
+            transition: border-color 0.2s;
         }
-        /* keep popup styles if you still want login/settings */
+        .stat-card:hover { border-color: var(--border-g); }
+        .stat-num {
+            font-size: 26px; font-weight: 800; color: var(--gold);
+            line-height: 1;
+        }
+        .stat-num.red    { color: var(--red); }
+        .stat-num.green  { color: var(--green); }
+        .stat-num.blue   { color: var(--blue); }
+        .stat-num.purple { color: var(--purple); }
+        .stat-label {
+            font-size: 10px; font-weight: 600; color: var(--text3);
+            text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px;
+            line-height: 1.3;
+        }
+
+        /* ── Section ── */
+        .section { margin-bottom: 22px; }
+        .section-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 10px;
+        }
+        .section-title {
+            font-size: 15px; font-weight: 700; color: var(--text);
+            letter-spacing: -0.2px;
+        }
+        .section-link {
+            font-size: 12px; font-weight: 600; color: var(--gold);
+            cursor: pointer; border: none; background: none; font-family: inherit;
+        }
+        .section-link:hover { text-decoration: underline; }
+
+        /* ── Today's Schedule ── */
+        .sched-card {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: border-color 0.15s;
+        }
+        .sched-card:hover { border-color: var(--border-g); }
+        .sched-inner {
+            display: flex; align-items: stretch;
+        }
+        .sched-priority {
+            width: 5px; flex-shrink: 0;
+        }
+        .sched-priority.high      { background: var(--red); }
+        .sched-priority.medium    { background: var(--orange); }
+        .sched-priority.low       { background: var(--green); }
+        .sched-priority.emergency { background: var(--purple); }
+        .sched-body {
+            flex: 1; padding: 12px 14px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .sched-info { flex: 1; min-width: 0; }
+        .sched-customer {
+            font-size: 14px; font-weight: 700; color: var(--text);
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .sched-meta {
+            font-size: 11px; color: var(--text3); margin-top: 3px;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .sched-time {
+            font-size: 12px; font-weight: 700; color: var(--gold);
+            white-space: nowrap; margin-left: 12px; flex-shrink: 0;
+        }
+        .sched-empty {
+            padding: 28px 16px; text-align: center;
+            color: var(--text3); font-size: 13px;
+            background: var(--surface2); border: 1px solid var(--border);
+            border-radius: 12px;
+        }
+        .sched-empty-icon { font-size: 28px; margin-bottom: 8px; }
+
+        /* ── Recent Activity ── */
+        .activity-card {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px 14px;
+            margin-bottom: 8px;
+            display: flex; align-items: flex-start; gap: 12px;
+        }
+        .activity-dot {
+            width: 8px; height: 8px; border-radius: 50%;
+            margin-top: 5px; flex-shrink: 0;
+        }
+        .activity-dot.created   { background: var(--green); }
+        .activity-dot.updated   { background: var(--blue); }
+        .activity-dot.completed { background: var(--gold); }
+        .activity-content { flex: 1; min-width: 0; }
+        .activity-text {
+            font-size: 13px; color: var(--text2); line-height: 1.4;
+        }
+        .activity-text strong { color: var(--text); font-weight: 600; }
+        .activity-time { font-size: 11px; color: var(--text3); margin-top: 2px; }
+
+        /* ── Nav Grid ── */
+        .nav-grid {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 10px;
+        }
+        .nav-card {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 16px 8px;
+            text-align: center;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.12s ease;
+            position: relative;
+            overflow: hidden;
+        }
+        .nav-card::before {
+            content: '';
+            position: absolute; top: 0; left: 0; right: 0; height: 3px;
+            background: var(--gold);
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+        .nav-card:hover {
+            border-color: var(--gold);
+            background: var(--surface3);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+        }
+        .nav-card:hover::before { opacity: 1; }
+        .nav-card:active { transform: translateY(0); }
+        .nav-icon { font-size: 26px; margin-bottom: 6px; }
+        .nav-label {
+            font-size: 11px; font-weight: 700; color: var(--text2);
+            letter-spacing: 0.2px; line-height: 1.3;
+        }
+
+        /* ── Logged-out state ── */
+        .logged-out-msg {
+            background: var(--surface2);
+            border: 1px solid var(--border-g);
+            border-radius: 12px;
+            padding: 32px 20px;
+            text-align: center;
+            margin-bottom: 22px;
+        }
+        .logged-out-msg .icon { font-size: 36px; margin-bottom: 10px; }
+        .logged-out-msg .title { font-size: 16px; font-weight: 700; color: var(--gold); margin-bottom: 6px; }
+        .logged-out-msg .sub { font-size: 13px; color: var(--text3); line-height: 1.5; }
+        .logged-out-msg .login-cta {
+            display: inline-block; margin-top: 14px; padding: 10px 24px;
+            background: var(--gold); color: #111; font-weight: 700; font-size: 14px;
+            border: none; border-radius: 8px; cursor: pointer; font-family: inherit;
+        }
+
+        /* ── Skeleton loading ── */
+        .skeleton {
+            background: linear-gradient(90deg, var(--surface2) 25%, var(--surface3) 50%, var(--surface2) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 8px;
+        }
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
+        /* ── Login Popup ── */
+        .login-popup {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.85); display: none;
+            align-items: center; justify-content: center; z-index: 2000;
+        }
+        .popup-content {
+            background: var(--surface3); border: 2px solid var(--gold);
+            border-radius: 16px; padding: 32px; width: 85%; max-width: 420px;
+            position: relative; color: #fff;
+        }
+        .close-btn { position: absolute; top: 12px; right: 16px; font-size: 32px; cursor: pointer; color: var(--gold); }
+        .form-group { margin-bottom: 20px; }
+        .form-group label { display: block; margin-bottom: 8px; color: var(--gold); font-weight: 600; font-size: 14px; }
+        .form-group input { width: 100%; padding: 12px 16px; border: 1px solid var(--gold); border-radius: 8px; background: var(--surface4); color: #fff; font-family: inherit; font-size: 15px; }
+        #submitBtn {
+            width: 100%; padding: 14px; background: var(--gold); border: none; border-radius: 8px;
+            color: #111827; font-weight: 700; cursor: pointer; font-family: inherit; font-size: 15px;
+        }
+        .message { color: #ff6b6b; text-align: center; margin-bottom: 16px; }
+        .message.success { color: #22c55e; }
+        .toggle-auth, .magic-link, .forgot-pw { text-align: center; margin: 16px 0; color: #ccc; font-size: 14px; }
+        .toggle-auth a, .forgot-pw a { color: var(--gold); cursor: pointer; text-decoration: underline; }
     </style>
 </head>
 <body>
 
-<div class="top-nav">
-    <button id="back-btn" class="nav-item" style="display:none;" onclick="history.back()">← Back</button>
-    <div style="display:flex; align-items:center; gap:24px;">
-        <div class="nav-item" onclick="alert('Settings coming soon')">⚙️ Settings</div>
-        <button class="login-btn" onclick="alert('Login coming soon')">👤 Login</button>
+<!-- Header -->
+<div class="header">
+    <div class="brand">
+        <div class="brand-name">Total Service Pro</div>
+        <div class="brand-sub">Laser Equipment Service</div>
+    </div>
+    <div id="authSection">
+        <button id="loginBtn" class="login-button" onclick="showLoginPopup()">Login</button>
+        <div class="avatar-wrapper" id="avatarWrapper">
+            <button class="avatar-btn" id="avatarBtn" onclick="toggleDropdown(event)" aria-label="Account menu">
+                <img id="avatarImg" class="avatar-img" src="" alt="Profile photo" />
+                <div id="avatarInitials" class="avatar-initials">U</div>
+            </button>
+            <div class="avatar-dropdown" id="avatarDropdown">
+                <div class="dropdown-user-info">
+                    <div class="dropdown-user-name" id="dropdownName">User</div>
+                    <div class="dropdown-user-email" id="dropdownEmail"></div>
+                </div>
+                <button class="dropdown-item" onclick="goToProfile()">
+                    <span class="dropdown-icon">👤</span> Profile
+                </button>
+                <button class="dropdown-item" onclick="goToSettings()">
+                    <span class="dropdown-icon">⚙️</span> Settings
+                </button>
+                <button class="dropdown-item" onclick="goToCompany()" id="companyProfileBtn" style="display:none;">
+                    <span class="dropdown-icon">🏢</span> Company Profile
+                </button>
+                <button class="dropdown-item danger" onclick="logout()">
+                    <span class="dropdown-icon">🚪</span> Log Out
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 
-<div class="hero">
-    <h1 class="hero-title">Total Service Pro</h1>
-    <p class="hero-subtitle">Professional Tools for Medical Laser Service & Repair</p>
+<div class="page">
 
-    <div class="main-buttons">
-        <button class="btn btn-primary" onclick="loadPage('calculators_menu.html')">📐 Photometry Tools</button>
-        <button class="btn btn-secondary" onclick="loadPage('service_hub.html')">🔧 Tech Hub</button>
-        <button class="btn btn-secondary" onclick="loadPage('coming_soon.html')">📆 Service Schedule</button>
-        <button class="btn btn-secondary" onclick="loadPage('coming_soon.html')">📒 Service Reporting</button>
+    <!-- Greeting -->
+    <div class="greeting">
+        <div class="greeting-text" id="greetingText">Welcome back</div>
+        <div class="greeting-sub" id="greetingSub"></div>
+    </div>
+
+    <!-- Stats Row -->
+    <div class="stats-row" id="statsRow">
+        <div class="stat-card" onclick="navTo('service_schedule.html')" style="cursor:pointer">
+            <div class="stat-num" id="statOpen">–</div>
+            <div class="stat-label">Open Tickets</div>
+        </div>
+        <div class="stat-card" onclick="navTo('service_schedule.html')" style="cursor:pointer">
+            <div class="stat-num blue" id="statToday">–</div>
+            <div class="stat-label">Today's Calls</div>
+        </div>
+        <div class="stat-card" onclick="navTo('service_schedule.html')" style="cursor:pointer">
+            <div class="stat-num purple" id="statAwaiting">–</div>
+            <div class="stat-label">Awaiting Sched</div>
+        </div>
+        <div class="stat-card" onclick="navTo('service_schedule.html')" style="cursor:pointer">
+            <div class="stat-num green" id="statCompleted">–</div>
+            <div class="stat-label">Completed (30d)</div>
+        </div>
+    </div>
+
+    <!-- Logged-out prompt (hidden when logged in) -->
+    <div class="logged-out-msg" id="loggedOutMsg" style="display:none;">
+        <div class="icon">🔐</div>
+        <div class="title">Sign in to see your dashboard</div>
+        <div class="sub">View your schedule, ticket stats, and recent activity.</div>
+        <button class="login-cta" onclick="showLoginPopup()">Sign In</button>
+    </div>
+
+    <!-- Today's Schedule -->
+    <div class="section" id="scheduleSection" style="display:none;">
+        <div class="section-header">
+            <div class="section-title">📅 Today's Schedule</div>
+            <button class="section-link" onclick="navTo('service_schedule.html')">View All →</button>
+        </div>
+        <div id="scheduleList"></div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="section" id="activitySection" style="display:none;">
+        <div class="section-header">
+            <div class="section-title">🔄 Recent Activity</div>
+        </div>
+        <div id="activityList"></div>
+    </div>
+
+    <!-- Quick Nav -->
+    <div class="section">
+        <div class="section-header">
+            <div class="section-title">Quick Access</div>
+        </div>
+        <div class="nav-grid">
+            <button class="nav-card" onclick="navTo('calculators_menu.html')">
+                <div class="nav-icon">🔬</div>
+                <div class="nav-label">Photometry<br>Tools</div>
+            </button>
+            <button class="nav-card" onclick="navTo('service_hub.html')">
+                <div class="nav-icon">🛠️</div>
+                <div class="nav-label">Tech<br>Hub</div>
+            </button>
+            <button class="nav-card" onclick="navTo('service_schedule.html')">
+                <div class="nav-icon">📅</div>
+                <div class="nav-label">Service<br>Schedule</div>
+            </button>
+            <button class="nav-card" onclick="navTo('reports_list.html')">
+                <div class="nav-icon">📋</div>
+                <div class="nav-label">Service<br>Reports</div>
+            </button>
+            <button class="nav-card" onclick="navTo('marketplace.html')">
+                <div class="nav-icon">🏪</div>
+                <div class="nav-label">Parts<br>Market</div>
+            </button>
+        </div>
+    </div>
+
+</div><!-- .page -->
+
+<!-- Login Popup -->
+<div id="loginPopup" class="login-popup">
+    <div class="popup-content">
+        <span class="close-btn" onclick="closeLoginPopup()">×</span>
+        <h2 id="popupTitle" style="color:var(--gold);margin-bottom:20px;">Sign In</h2>
+        <div id="formMessage" class="message"></div>
+        <form id="authForm">
+            <div class="form-group" id="firstNameGroup" style="display:none;">
+                <label for="firstName">First Name</label>
+                <input type="text" id="firstName">
+            </div>
+            <div class="form-group" id="lastNameGroup" style="display:none;">
+                <label for="lastName">Last Name</label>
+                <input type="text" id="lastName">
+            </div>
+            <div class="form-group">
+                <label for="email">Email</label>
+                <input type="email" id="email" required>
+            </div>
+            <div class="form-group" id="passwordGroup">
+                <label for="password">Password</label>
+                <div style="position:relative;">
+                    <input type="password" id="password" required style="padding-right:44px;width:100%;">
+                    <span id="pwEye" onclick="togglePw()" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:20px;user-select:none;">👁️</span>
+                </div>
+            </div>
+            <button type="submit" id="submitBtn">Sign In</button>
+        </form>
+        <div class="toggle-auth">
+            <span id="toggleText">Don't have an account? <a href="#" onclick="toggleAuthMode()">Sign Up</a></span>
+        </div>
+        <div class="magic-link">
+            <button type="button" onclick="sendMagicLink()" style="background:transparent;border:1px solid var(--gold);color:var(--gold);padding:10px 20px;border-radius:8px;cursor:pointer;font-family:inherit;">Sign in with Magic Link</button>
+        </div>
+        <div class="forgot-pw">
+            <a href="#" onclick="forgotPassword()">Forgot password?</a>
+        </div>
     </div>
 </div>
 
-<footer>© 2026 Total Service Pro • All Rights Reserved</footer>
-
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-    function loadPage(url) {
-        window.location.href = url;
-    }
-    // add your other script logic here if needed
-    // add your other script logic here if needed
-</script>
+    const supabaseClient = supabase.createClient(
+        'https://yljztfajyvjzqikxdddf.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+        {
+            auth: {
+                persistSession: true,
+                storageKey: 'tsp-auth-token',
+                storage: window.localStorage,
+                autoRefreshToken: true,
+                detectSessionInUrl: false
+            }
+        }
+    );
 
+    let currentUser = null;
+    let isSignUpMode = false;
+    let _manualLoginInProgress = false;
+
+    /* ── Session-aware navigation ── */
+    function togglePw() {
+        var inp = document.getElementById('password');
+        var eye = document.getElementById('pwEye');
+        if (inp.type === 'password') { inp.type = 'text'; eye.textContent = '🙈'; }
+        else { inp.type = 'password'; eye.textContent = '👁️'; }
+    }
+
+    async function navTo(page) {
+        try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session && session.access_token) {
+                const sep = page.includes('?') ? '&' : '?';
+                window.location.href = page + sep + '_s=' + btoa(JSON.stringify(session));
+                return;
+            }
+        } catch(e) {}
+        window.location.href = page;
+    }
+
+    /* ── Auth state ── */
+    var _loggedOutTimer = null;
+    supabaseClient.auth.onAuthStateChange(function(event, session) {
+
+        // Clear any pending logged-out timer
+        if (_loggedOutTimer) { clearTimeout(_loggedOutTimer); _loggedOutTimer = null; }
+
+        if (_pendingSession) {
+            var _ps = _pendingSession;
+            _pendingSession = null;
+            supabaseClient.auth.setSession({
+                access_token:  _ps.access_token,
+                refresh_token: _ps.refresh_token
+            }).then(function(result) {
+                if (result.error) { }
+                else {
+                    try {
+                        if (typeof Android !== 'undefined' && result.data.session)
+                            Android.saveSession(JSON.stringify(result.data.session));
+                    } catch(e) {}
+                }
+                updateAuthUI();
+                loadDashboardData();
+            });
+            return;
+        }
+
+        // Skip if restoreSession already handled it
+        if (_sessionRestored) { _sessionRestored = false; return; }
+
+        if (_manualLoginInProgress) {
+            // Form handler is managing the flow — skip duplicate loadDashboardData
+            return;
+        }
+        updateAuthUI();
+        if (session?.user) {
+            loadDashboardData();
+        } else if (event === 'SIGNED_OUT') {
+            // Explicit sign-out — show immediately
+            showLoggedOutState();
+        } else {
+            // INITIAL_SESSION with no user — wait briefly for Android bridge injection
+            _loggedOutTimer = setTimeout(function() {
+                // Re-check: did a session arrive while we waited?
+                supabaseClient.auth.getUser().then(function(res) {
+                    if (res.data.user) {
+                        currentUser = res.data.user;
+                        updateAuthUI();
+                        loadDashboardData();
+                    } else {
+                        showLoggedOutState();
+                    }
+                });
+            }, 1200);
+        }
+
+        try {
+            if (typeof Android !== 'undefined') {
+                if (session?.access_token) {
+                    Android.saveSession(JSON.stringify(session));
+                } else if (event === 'SIGNED_OUT' && !session) {
+                    Android.clearSession();
+                }
+            }
+        } catch(e) {}
+    });
+
+    /* ── Dropdown ── */
+    function toggleDropdown(e) {
+        e.stopPropagation();
+        document.getElementById('avatarDropdown').classList.toggle('open');
+    }
+    document.addEventListener('click', () => {
+        document.getElementById('avatarDropdown').classList.remove('open');
+    });
+    function goToProfile() {
+        document.getElementById('avatarDropdown').classList.remove('open');
+        navTo('user_profile.html');
+    }
+    function goToSettings() {
+        document.getElementById('avatarDropdown').classList.remove('open');
+        navTo('settings.html');
+    }
+    function goToCompany() {
+        document.getElementById('avatarDropdown').classList.remove('open');
+        navTo('company_profile.html');
+    }
+
+    /* ── Login Popup ── */
+    function showLoginPopup() {
+        document.getElementById('loginPopup').style.display = 'flex';
+        document.getElementById('email').value    = '';
+        document.getElementById('password').value = '';
+        document.getElementById('formMessage').textContent = '';
+        try { document.getElementById('firstName').value = ''; } catch(e) {}
+        try { document.getElementById('lastName').value  = ''; } catch(e) {}
+        toggleAuthMode(false);
+        setTimeout(function() {
+            try { document.getElementById('email').focus(); } catch(e) {}
+        }, 100);
+    }
+    function closeLoginPopup() {
+        document.getElementById('loginPopup').style.display = 'none';
+        document.getElementById('formMessage').textContent = '';
+        // Reset form to sign-in mode and clear fields
+        document.getElementById('email').value    = '';
+        document.getElementById('password').value = '';
+        try { document.getElementById('firstName').value = ''; } catch(e) {}
+        try { document.getElementById('lastName').value  = ''; } catch(e) {}
+        isSignUpMode = false;
+        toggleAuthMode(false);
+    }
+    function toggleAuthMode(toSignUp = !isSignUpMode) {
+        isSignUpMode = toSignUp;
+        document.getElementById('popupTitle').textContent = isSignUpMode ? 'Sign Up' : 'Sign In';
+        document.getElementById('submitBtn').textContent  = isSignUpMode ? 'Create Account' : 'Sign In';
+        document.getElementById('firstNameGroup').style.display = isSignUpMode ? 'block' : 'none';
+        document.getElementById('lastNameGroup').style.display  = isSignUpMode ? 'block' : 'none';
+        document.getElementById('passwordGroup').style.display  = 'block';
+        document.getElementById('toggleText').innerHTML = isSignUpMode
+            ? 'Already have an account? <a href="#" onclick="toggleAuthMode(false)">Sign In</a>'
+            : 'Don\'t have an account? <a href="#" onclick="toggleAuthMode(true)">Sign Up</a>';
+    }
+    async function sendMagicLink() {
+        const email = document.getElementById('email').value.trim();
+        if (!email) return document.getElementById('formMessage').textContent = 'Please enter your email';
+        const { error } = await supabaseClient.auth.signInWithOtp({ email });
+        document.getElementById('formMessage').textContent = error ? error.message : 'Magic link sent! Check your email.';
+    }
+    async function forgotPassword() {
+        const email = document.getElementById('email').value.trim();
+        if (!email) return document.getElementById('formMessage').textContent = 'Enter your email first';
+        const { error } = await supabaseClient.auth.resetPasswordForEmail(email);
+        document.getElementById('formMessage').textContent = error ? error.message : 'Password reset link sent!';
+    }
+    document.getElementById('authForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const messageEl = document.getElementById('formMessage');
+        messageEl.textContent = '';
+        const email    = document.getElementById('email').value.trim();
+        const password = document.getElementById('password').value.trim();
+        if (!email || !password) return messageEl.textContent = 'Email and password required';
+        if (isSignUpMode) {
+            const firstName = document.getElementById('firstName').value.trim();
+            const lastName  = document.getElementById('lastName').value.trim();
+            if (!firstName || !lastName) return messageEl.textContent = 'First and last name required';
+            const { data: signUpData, error } = await supabaseClient.auth.signUp({
+                email, password,
+                options: { data: { first_name: firstName, last_name: lastName } }
+            });
+            if (error) {
+                messageEl.textContent = error.message;
+            } else if (signUpData.session) {
+                // Email confirmation is off — user is logged in immediately
+                try { if (typeof Android !== 'undefined') Android.saveSession(JSON.stringify(signUpData.session)); } catch(e) {}
+                // Create minimal user_profiles row so onboarding check works
+                try {
+                    await supabaseClient.from('user_profiles').upsert({
+                        id: signUpData.user.id,
+                        first_name: firstName,
+                        last_name: lastName,
+                        email: signUpData.user.email,
+                        onboarding_completed: false
+                    }, { onConflict: 'id' });
+                } catch(e) {}
+                messageEl.textContent = '';
+                closeLoginPopup();
+                await updateAuthUI();
+            } else {
+                // Email confirmation is on — tell user to check email
+                messageEl.textContent = 'Account created! Check your email to confirm before logging in.';
+            }
+        } else {
+            _manualLoginInProgress = true;
+            const submitBtn2 = document.getElementById('submitBtn');
+            if (submitBtn2) { submitBtn2.disabled = true; submitBtn2.textContent = 'Signing in...'; }
+            const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
+            if (error) {
+                _manualLoginInProgress = false;
+                if (submitBtn2) { submitBtn2.disabled = false; submitBtn2.textContent = 'Sign In'; }
+                messageEl.className = 'message';
+                messageEl.textContent = error.message;
+            } else {
+                // Show success state clearly
+                const submitBtn = document.getElementById('submitBtn');
+                if (submitBtn) { submitBtn.disabled = true; submitBtn.textContent = '✓ Signed In'; }
+                messageEl.className = 'message success';
+                messageEl.textContent = 'Welcome back! Loading your dashboard...';
+                try {
+                    if (typeof Android !== 'undefined') Android.saveSession(JSON.stringify(data.session));
+                } catch(e) {}
+                currentUser = data.user;
+                // Give user time to see the success state
+                await new Promise(function(res) { setTimeout(res, 800); });
+                closeLoginPopup();
+                if (submitBtn) { submitBtn.disabled = false; submitBtn.textContent = 'Sign In'; }
+                await updateAuthUI();
+                _manualLoginInProgress = false;
+                await loadDashboardData();
+            }
+        }
+    });
+    async function logout() {
+        document.getElementById('avatarDropdown').classList.remove('open');
+        try { await supabaseClient.auth.signOut(); } catch(e) {}
+        try { if (typeof Android !== 'undefined') Android.clearSession(); } catch(e) {}
+        currentUser = null;
+        await updateAuthUI();
+        showLoggedOutState();
+    }
+
+    /* ── Auth UI ── */
+    async function updateAuthUI() {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        currentUser = user;
+        const loginBtn       = document.getElementById('loginBtn');
+        const avatarWrapper  = document.getElementById('avatarWrapper');
+        const avatarImg      = document.getElementById('avatarImg');
+        const avatarInitials = document.getElementById('avatarInitials');
+        if (user) {
+            loginBtn.style.display      = 'none';
+            avatarWrapper.style.display = 'block';
+            const meta      = user.user_metadata || {};
+            const firstName = meta.first_name || '';
+            const lastName  = meta.last_name  || '';
+            const fullName  = [firstName, lastName].filter(Boolean).join(' ') || 'User';
+            const initials  = ((firstName[0] || '') + (lastName[0] || '')).toUpperCase() || user.email[0].toUpperCase();
+            const photoUrl  = meta.avatar_url || meta.picture || '';
+            document.getElementById('dropdownName').textContent  = fullName;
+            document.getElementById('dropdownEmail').textContent = user.email || '';
+
+            /* Greeting */
+            const hour = new Date().getHours();
+            const tod = hour < 12 ? 'Good morning' : hour < 17 ? 'Good afternoon' : 'Good evening';
+            document.getElementById('greetingText').textContent = tod + ', ' + (firstName || 'Tech');
+            const now = new Date();
+            document.getElementById('greetingSub').textContent = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+
+            const { data: profile } = await supabaseClient
+                .from('user_profiles').select('role').eq('id', user.id).maybeSingle();
+            const canAdmin = profile && ['admin','dispatcher'].includes(profile.role);
+            document.getElementById('companyProfileBtn').style.display = canAdmin ? 'flex' : 'none';
+
+            if (photoUrl) {
+                avatarImg.src = photoUrl;
+                avatarImg.style.display      = 'block';
+                avatarInitials.style.display = 'none';
+            } else {
+                avatarImg.style.display      = 'none';
+                avatarInitials.style.display = 'flex';
+                avatarInitials.textContent   = initials;
+            }
+        } else {
+            loginBtn.style.display      = 'block';
+            avatarWrapper.style.display = 'none';
+            document.getElementById('greetingText').textContent = 'Welcome to Total Service Pro';
+            document.getElementById('greetingSub').textContent  = 'Sign in to view your dashboard';
+        }
+    }
+
+    /* ── Logged-out state ── */
+    function showLoggedOutState() {
+        currentUser = null;
+        document.getElementById('loggedOutMsg').style.display    = 'block';
+        document.getElementById('scheduleSection').style.display = 'none';
+        document.getElementById('activitySection').style.display = 'none';
+        document.getElementById('statOpen').textContent     = '–';
+        document.getElementById('statToday').textContent    = '–';
+        document.getElementById('statAwaiting').textContent = '–';
+        document.getElementById('statCompleted').textContent= '–';
+        // Reset header UI
+        try {
+            document.getElementById('loginBtn').style.display     = 'block';
+            document.getElementById('avatarWrapper').style.display= 'none';
+            document.getElementById('greetingText').textContent   = 'Welcome to Total Service Pro';
+            document.getElementById('greetingSub').textContent    = 'Sign in to view your dashboard';
+        } catch(e) {}
+    }
+
+    /* ── Dashboard data ── */
+    async function loadDashboardData() {
+        if (!currentUser) { showLoggedOutState(); return; }
+
+        // Check if onboarding is needed (first time user)
+        // maybeSingle() returns null (not an error) when no row exists
+        const { data: obProfile, error: obError } = await supabaseClient
+            .from('user_profiles')
+            .select('onboarding_completed')
+            .eq('id', currentUser.id)
+            .maybeSingle();
+        // Redirect if: no row found, onboarding not completed, or query errored
+        if (!obProfile || !obProfile.onboarding_completed) {
+            try {
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                const sep = session?.access_token ? '?' : '';
+                const qs  = session?.access_token ? '_s=' + btoa(JSON.stringify(session)) : '';
+                window.location.href = 'onboarding.html' + sep + qs;
+            } catch(e) {
+                window.location.href = 'onboarding.html';
+            }
+            return;
+        }
+        document.getElementById('loggedOutMsg').style.display    = 'none';
+        document.getElementById('scheduleSection').style.display = 'block';
+        document.getElementById('activitySection').style.display = 'block';
+
+        try {
+            /* Fetch all tickets assigned to me */
+            const { data: tickets, error } = await supabaseClient
+                .from('service_tickets')
+                .select('*')
+                .eq('assigned_to', currentUser.id)
+                .order('service_date', { ascending: true });
+
+            if (error) { return; }
+            const allTickets = tickets || [];
+
+            /* ── Stats ── */
+            const today = new Date().toISOString().slice(0, 10);
+            const open      = allTickets.filter(t => t.status !== 'Completed' && t.status !== 'Cancelled');
+            const todayCalls= allTickets.filter(t => t.service_date === today && t.status !== 'Completed' && t.status !== 'Cancelled');
+            const awaiting  = allTickets.filter(t => t.status === 'Awaiting Scheduling');
+            const thirtyAgo = new Date(Date.now() - 30*86400000).toISOString().slice(0, 10);
+            const completed = allTickets.filter(t => t.status === 'Completed' && t.service_date >= thirtyAgo);
+
+            document.getElementById('statOpen').textContent     = open.length;
+            document.getElementById('statToday').textContent    = todayCalls.length;
+            document.getElementById('statAwaiting').textContent = awaiting.length;
+            document.getElementById('statCompleted').textContent= completed.length;
+
+            /* Color the open tickets stat if there are many */
+            const openEl = document.getElementById('statOpen');
+            openEl.className = 'stat-num';
+            if (open.length > 10) openEl.classList.add('red');
+            else if (open.length > 0) openEl.classList.add('');
+
+            /* ── Today's Schedule ── */
+            const schedList = document.getElementById('scheduleList');
+            // Show today + upcoming (next 3 days) tickets
+            const soonDate = new Date(Date.now() + 3*86400000).toISOString().slice(0,10);
+            const upcoming = allTickets.filter(t =>
+                t.service_date && t.service_date >= today && t.service_date <= soonDate
+                && t.status !== 'Completed' && t.status !== 'Cancelled'
+            ).sort((a,b) => {
+                if (a.service_date !== b.service_date) return a.service_date.localeCompare(b.service_date);
+                return (a.scheduled_time || '').localeCompare(b.scheduled_time || '');
+            }).slice(0, 6);
+
+            if (upcoming.length === 0) {
+                schedList.innerHTML = `
+                    <div class="sched-empty">
+                        <div class="sched-empty-icon">✅</div>
+                        No upcoming calls in the next 3 days
+                    </div>`;
+            } else {
+                schedList.innerHTML = upcoming.map(t => {
+                    const pri = (t.priority || 'medium').toLowerCase();
+                    const time = t.scheduled_time ? t.scheduled_time.slice(0,5) : '';
+                    const isToday = t.service_date === today;
+                    const dayLabel = isToday ? 'Today' : new Date(t.service_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
+                    const equipment = [t.equipment_make, t.equipment_model].filter(Boolean).join(' ') || '';
+                    return `
+                        <div class="sched-card" onclick="navTo('service_schedule.html')">
+                            <div class="sched-inner">
+                                <div class="sched-priority ${pri}"></div>
+                                <div class="sched-body">
+                                    <div class="sched-info">
+                                        <div class="sched-customer">${escHtml(t.customer_name || 'No customer')}</div>
+                                        <div class="sched-meta">${escHtml(equipment)}${equipment && dayLabel ? ' · ' : ''}${dayLabel}</div>
+                                    </div>
+                                    <div class="sched-time">${time || '—'}</div>
+                                </div>
+                            </div>
+                        </div>`;
+                }).join('');
+            }
+
+            /* ── Recent Activity ── */
+            const actList = document.getElementById('activityList');
+            // Show most recently created/updated tickets
+            const recent = [...allTickets]
+                .sort((a,b) => (b.created_at || '').localeCompare(a.created_at || ''))
+                .slice(0, 5);
+
+            if (recent.length === 0) {
+                actList.innerHTML = '<div class="sched-empty"><div class="sched-empty-icon">📭</div>No recent activity</div>';
+            } else {
+                actList.innerHTML = recent.map(t => {
+                    const isComplete = t.status === 'Completed';
+                    const dotClass = isComplete ? 'completed' : 'created';
+                    const ago = timeAgo(t.created_at);
+                    return `
+                        <div class="activity-card">
+                            <div class="activity-dot ${dotClass}"></div>
+                            <div class="activity-content">
+                                <div class="activity-text">
+                                    <strong>${escHtml(t.ticket_number || '—')}</strong> — ${escHtml(t.customer_name || 'Unknown')}
+                                    <span style="color:var(--text3);"> · ${escHtml(t.status || 'Open')}</span>
+                                </div>
+                                <div class="activity-time">${ago}</div>
+                            </div>
+                        </div>`;
+                }).join('');
+            }
+
+        } catch(e) {
+        }
+    }
+
+    /* ── Helpers ── */
+    function escHtml(str) {
+        const d = document.createElement('div');
+        d.textContent = str;
+        return d.innerHTML;
+    }
+    function timeAgo(iso) {
+        if (!iso) return '';
+        const diff = Date.now() - new Date(iso).getTime();
+        const mins = Math.floor(diff / 60000);
+        if (mins < 1) return 'just now';
+        if (mins < 60) return mins + 'm ago';
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return hrs + 'h ago';
+        const days = Math.floor(hrs / 24);
+        if (days === 1) return 'yesterday';
+        if (days < 7) return days + 'd ago';
+        return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    // Boot: apply pending session then update UI
+    (async function() {
+        let { data: { session: _bootSession } } = await supabaseClient.auth.getSession();
+        if (!_bootSession && _pendingSession) {
+            try {
+                await supabaseClient.auth.setSession({ access_token: _pendingSession.access_token, refresh_token: _pendingSession.refresh_token });
+            } catch(e) {}
+            _pendingSession = null;
+        }
+        updateAuthUI();
+    })();
+</script>
 </body>
 </html>

@@ -1,0 +1,1575 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        var _pendingSession = null;
+        var _sessionRestored = false;
+        (function() {
+            try {
+                const p = new URLSearchParams(window.location.search);
+                const enc = p.get('_s');
+                if (enc) {
+                    const session = JSON.parse(atob(enc));
+                    if (session && session.access_token) {
+                        _pendingSession = session;
+                        const key = 'tsp-auth-token';
+                        localStorage.setItem(key, JSON.stringify({ currentSession: session, expiresAt: session.expires_at }));
+                        const url = new URL(window.location.href);
+                        url.searchParams.delete('_s');
+                        window.history.replaceState({}, '', url.toString());
+                        return;
+                    }
+                }
+                const raw = localStorage.getItem('tsp-auth-token');
+                if (raw) {
+                    const parsed = JSON.parse(raw);
+                    const sess = (parsed && parsed.currentSession) ? parsed.currentSession : (parsed && parsed.access_token) ? parsed : null;
+                    if (sess && sess.access_token) { _pendingSession = sess; }
+                }
+            } catch(e) {}
+        })();
+        function restoreSession(jsonStr) {
+            try {
+                const parsed = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+                const session = (parsed && parsed.currentSession) ? parsed.currentSession : parsed;
+                if (session && session.access_token) {
+                    localStorage.setItem('tsp-auth-token', JSON.stringify({ currentSession: session, expiresAt: session.expires_at }));
+                    if (typeof supabaseClient !== 'undefined') {
+                        _sessionRestored = true;
+                        supabaseClient.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
+                    } else { _pendingSession = session; }
+                }
+            } catch(e) {}
+        }
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        // Create supabase client in head so session is ready before any body JS
+        var supabaseClient = supabase.createClient(
+            'https://yljztfajyvjzqikxdddf.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+            { auth: { persistSession: true, storageKey: 'tsp-auth-token', storage: window.localStorage, autoRefreshToken: true, detectSessionInUrl: false } }
+        );
+        // Apply pending session immediately so auth is ready by the time body JS runs
+        if (_pendingSession) {
+            var _ps = _pendingSession; _pendingSession = null;
+            supabaseClient.auth.setSession({ access_token: _ps.access_token, refresh_token: _ps.refresh_token });
+        }
+    </script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Report — TSP</title>
+    <style>
+        *{margin:0;padding:0;box-sizing:border-box}
+        :root{--gold:#FBBF24;--gold-dk:#D97706;--bg:#111;--s1:#0d0d0d;--s2:#151515;--s3:#1a1a1a;--s4:#222;--bdr:#1f1f1f;--bdr-g:rgba(251,191,36,0.15);--txt:#fff;--txt2:#ccc;--txt3:#888;--red:#ef4444;--grn:#22c55e;--blu:#3b82f6}
+        body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh;padding-bottom:80px}
+
+        /* Header */
+        .header{background:var(--s1);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--gold);position:sticky;top:0;z-index:100}
+        .header-left{display:flex;align-items:center;gap:12px}
+        .back-btn{background:none;border:none;color:var(--gold);font-size:22px;cursor:pointer;padding:4px 8px;border-radius:8px}
+        .header-title{font-size:17px;font-weight:700}
+        .login-button{background:var(--gold);border:none;border-radius:8px;padding:8px 16px;color:#111;font-weight:600;cursor:pointer;font-family:inherit}
+        .avatar-wrapper{position:relative;display:none}
+        .avatar-btn{background:none;border:none;padding:0;cursor:pointer;border-radius:50%;display:flex;align-items:center;justify-content:center}
+        .avatar-initials{width:36px;height:36px;border-radius:50%;background:var(--gold);color:#111;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;border:2px solid var(--gold)}
+        .avatar-img{width:36px;height:36px;border-radius:50%;object-fit:cover;border:2px solid var(--gold);display:none}
+        .avatar-dropdown{display:none;position:absolute;top:calc(100% + 8px);right:0;background:var(--s3);border:1px solid var(--gold);border-radius:10px;min-width:180px;overflow:hidden;box-shadow:0 8px 20px rgba(0,0,0,0.6);z-index:1000}
+        .avatar-dropdown.open{display:block}
+        .dropdown-user-info{padding:12px 14px 10px;border-bottom:1px solid #333}
+        .dropdown-user-name{font-weight:700;font-size:13px;color:var(--gold)}
+        .dropdown-user-email{font-size:10px;color:var(--txt3);margin-top:2px}
+        .dropdown-item{display:flex;align-items:center;gap:8px;width:100%;padding:11px 14px;background:none;border:none;color:#fff;font-size:13px;font-family:inherit;cursor:pointer;text-align:left}
+        .dropdown-item:hover{background:#2a2a2a}
+        .dropdown-item.danger{color:#f87171;border-top:1px solid #333}
+
+        /* Page */
+        .page{padding:16px;max-width:700px;margin:0 auto}
+
+        /* Sections */
+        .section{background:var(--s2);border:1px solid var(--bdr);border-radius:12px;margin-bottom:14px;overflow:hidden}
+        .section-hdr{padding:12px 16px;background:var(--s1);border-bottom:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;cursor:pointer;user-select:none}
+        .section-hdr h3{font-size:14px;font-weight:700;color:var(--gold)}
+        .section-hdr .chevron{color:var(--txt3);font-size:18px;transition:transform 0.2s}
+        .section-hdr.collapsed .chevron{transform:rotate(-90deg)}
+        .section-body{padding:14px 16px}
+        .section-body.hidden{display:none}
+
+        /* Form elements */
+        .form-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+        .form-row.full{grid-template-columns:1fr}
+        .form-group{display:flex;flex-direction:column;gap:4px}
+        .form-group label{font-size:11px;font-weight:600;color:var(--txt3);text-transform:uppercase;letter-spacing:0.3px}
+        .form-group input,.form-group select,.form-group textarea{background:var(--s4);border:1px solid var(--bdr);border-radius:8px;padding:10px 12px;color:var(--txt);font-family:inherit;font-size:14px}
+        .form-group input:focus,.form-group select:focus,.form-group textarea:focus{outline:none;border-color:var(--gold)}
+        .form-group textarea{min-height:80px;resize:vertical}
+        select{-webkit-appearance:none;appearance:none;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' fill='%23888' viewBox='0 0 16 16'%3E%3Cpath d='M8 11L3 6h10z'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 12px center}
+
+        /* Checklist */
+        .checklist-item{display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--bdr)}
+        .checklist-item:last-child{border:none}
+        .checklist-label{font-size:13px;color:var(--txt2);flex:1;padding-right:10px}
+        .checklist-btns{display:flex;gap:4px;flex-shrink:0}
+        .cl-btn{padding:5px 12px;border-radius:6px;border:1px solid var(--bdr);background:var(--s4);color:var(--txt3);font-size:11px;font-weight:700;cursor:pointer;font-family:inherit;transition:all 0.12s}
+        .cl-btn.pass.active{background:#166534;border-color:#22c55e;color:#22c55e}
+        .cl-btn.fail.active{background:#7f1d1d;border-color:#ef4444;color:#ef4444}
+        .cl-btn.na.active{background:#374151;border-color:#6b7280;color:#9ca3af}
+
+        /* Power measurement table */
+        .pwr-table{width:100%;border-collapse:collapse;margin-top:8px}
+        .pwr-table th{font-size:10px;text-transform:uppercase;color:var(--txt3);padding:6px 8px;text-align:left;border-bottom:1px solid var(--bdr);font-weight:600}
+        .pwr-table td{padding:4px 6px}
+        .pwr-table input{width:100%;background:var(--s4);border:1px solid var(--bdr);border-radius:6px;padding:8px;color:var(--txt);font-size:13px;font-family:inherit;text-align:center}
+        .pwr-table input:focus{outline:none;border-color:var(--gold)}
+        .tol-cell{font-size:12px;font-weight:700;text-align:center;padding:8px 6px !important}
+        .tol-pass{color:var(--grn)}
+        .tol-fail{color:var(--red)}
+
+        /* Param grid */
+        .param-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+        .param-item{display:flex;flex-direction:column;gap:3px}
+        .param-item label{font-size:11px;color:var(--txt3);font-weight:600}
+        .param-item input{background:var(--s4);border:1px solid var(--bdr);border-radius:6px;padding:8px;color:var(--txt);font-size:13px;font-family:inherit}
+        .param-item input:focus{outline:none;border-color:var(--gold)}
+
+        /* Service type toggles */
+        .svc-toggles{display:flex;gap:8px;margin-bottom:10px}
+        .svc-toggle{flex:1;padding:10px;border-radius:8px;border:1px solid var(--bdr);background:var(--s4);color:var(--txt3);font-size:13px;font-weight:700;text-align:center;cursor:pointer;font-family:inherit;transition:all 0.12s}
+        .svc-toggle.active{border-color:var(--gold);color:var(--gold);background:rgba(251,191,36,0.08)}
+
+        /* Submit bar */
+        .drafts-btn{background:none;border:1px solid var(--gold);border-radius:8px;padding:6px 12px;color:var(--gold);font-family:inherit;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;}
+        .drafts-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:500;}
+        .drafts-overlay.open{display:block;}
+        .drafts-drawer{position:fixed;bottom:0;left:0;right:0;max-height:70vh;background:var(--s2);border-radius:16px 16px 0 0;border-top:2px solid var(--gold);z-index:501;display:flex;flex-direction:column;transform:translateY(100%);transition:transform 0.3s ease;}
+        .drafts-drawer.open{transform:translateY(0);}
+        .drafts-header{padding:14px 16px;border-bottom:1px solid var(--bdr);display:flex;align-items:center;justify-content:space-between;}
+        .drafts-header-title{font-size:15px;font-weight:700;color:var(--gold);}
+        .drafts-close{background:none;border:none;color:var(--txt3);font-size:22px;cursor:pointer;}
+        .drafts-list{overflow-y:auto;flex:1;padding:8px 0;}
+        .draft-item{padding:14px 16px;border-bottom:1px solid var(--bdr);cursor:pointer;display:flex;align-items:center;gap:12px;transition:background 0.1s;}
+        .draft-item:hover{background:var(--s3);}
+        .draft-icon{font-size:24px;flex-shrink:0;}
+        .draft-info{flex:1;min-width:0;}
+        .draft-title{font-size:14px;font-weight:700;color:var(--txt);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+        .draft-sub{font-size:11px;color:var(--txt3);margin-top:2px;}
+        .draft-status{font-size:10px;font-weight:700;padding:3px 8px;border-radius:20px;flex-shrink:0;}
+        .draft-status.draft{background:rgba(251,191,36,0.1);color:var(--gold);border:1px solid rgba(251,191,36,0.3);}
+        .draft-status.complete{background:rgba(34,197,94,0.1);color:#22c55e;border:1px solid rgba(34,197,94,0.3);}
+        .drafts-empty{text-align:center;padding:40px 20px;color:var(--txt3);font-size:14px;}
+        /* Customer autocomplete */
+        .cust-search-wrap { position: relative; }
+        .cust-dropdown {
+            display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+            background: var(--s2); border: 1px solid var(--gold); border-radius: 10px;
+            max-height: 220px; overflow-y: auto; z-index: 300;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+        .cust-dropdown.open { display: block; }
+        .cust-option {
+            padding: 11px 14px; cursor: pointer; border-bottom: 1px solid var(--bdr);
+            transition: background 0.1s;
+        }
+        .cust-option:last-child { border-bottom: none; }
+        .cust-option:hover { background: var(--s3); }
+        .cust-option-name { font-size: 14px; font-weight: 700; color: var(--txt); }
+        .cust-option-sub  { font-size: 11px; color: var(--txt3); margin-top: 2px; }
+        .cust-option-new  { color: var(--gold); font-size: 13px; font-weight: 700; }
+        .submit-bar{position:fixed;bottom:0;left:0;right:0;background:var(--s1);border-top:1px solid var(--bdr);padding:12px 16px;display:flex;gap:10px;z-index:99}
+        .submit-bar button{flex:1;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;border:none;transition:all 0.12s}
+        .btn-save{background:var(--gold);color:#111}
+        .btn-save:disabled{opacity:0.4;cursor:not-allowed}
+        .btn-draft{background:var(--s4);color:var(--txt2);border:1px solid var(--bdr) !important}
+
+        /* Toast */
+        .toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:10px;font-size:14px;font-weight:600;z-index:2000;opacity:0;transition:opacity 0.3s;pointer-events:none}
+        .toast.show{opacity:1}
+        .toast.success{background:#166534;color:#22c55e;border:1px solid #22c55e}
+        .toast.error{background:#7f1d1d;color:#f87171;border:1px solid #ef4444}
+
+        /* Model selector highlight */
+        #modelSelect,#mfgSelect{font-size:16px;padding:14px 16px;border:2px solid var(--gold);background:var(--s3)}
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+</head>
+<body>
+
+<div class="header">
+    <div class="header-left">
+        <button class="back-btn" onclick="goBack()">◀</button>
+        <div>
+            <div class="header-title" id="headerTitle">Service Report</div>
+        </div>
+    </div>
+    <button class="drafts-btn" onclick="showDrafts()" title="My Drafts">📋 Drafts</button>
+    <div id="authSection">
+        <button id="loginBtn" class="login-button" onclick="navTo('index.html')">Login</button>
+        <div class="avatar-wrapper" id="avatarWrapper">
+            <button class="avatar-btn" onclick="toggleDropdown(event)">
+                <img id="avatarImg" class="avatar-img" src="" alt="" />
+                <div id="avatarInitials" class="avatar-initials">U</div>
+            </button>
+            <div class="avatar-dropdown" id="avatarDropdown">
+                <div class="dropdown-user-info">
+                    <div class="dropdown-user-name" id="dropdownName">User</div>
+                    <div class="dropdown-user-email" id="dropdownEmail"></div>
+                </div>
+                <button class="dropdown-item" onclick="navTo('user_profile.html')">👤 Profile</button>
+                <button class="dropdown-item" onclick="navTo('settings.html')">⚙️ Settings</button>
+                <button class="dropdown-item danger" onclick="logoutUser()">🚪 Log Out</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="page">
+
+    <!-- Model Selector -->
+    <div class="section">
+        <div class="section-body">
+            <div class="form-group" style="margin-bottom:10px">
+                <label>Manufacturer</label>
+                <select id="mfgSelect" onchange="onMfgChange()">
+                    <option value="">— Select Manufacturer —</option>
+                </select>
+            </div>
+            <div class="form-group" id="modelGroup" style="display:none">
+                <label>Model</label>
+                <select id="modelSelect" onchange="onModelChange()">
+                    <option value="">— Select Model —</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <!-- Dynamic form container -->
+    <div id="reportForm" style="display:none;">
+
+        <!-- Customer Info -->
+        <div class="section">
+            <div class="section-hdr" onclick="toggleSection(this)"><h3>🏥 Customer Info</h3><span class="chevron">▼</span></div>
+            <div class="section-body">
+                <div class="form-row full">
+                    <div class="form-group">
+                        <label>Customer / Clinic Name</label>
+                        <div class="cust-search-wrap" id="custSearchWrap">
+                            <input id="custName" placeholder="Search or type clinic name..." autocomplete="off" oninput="onCustSearch()" onfocus="onCustSearch()">
+                            <div class="cust-dropdown" id="custDropdown"></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="form-row full">
+                    <div class="form-group"><label>Address</label><input id="custAddress" placeholder="123 Main St"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>City</label><input id="custCity" placeholder="City"></div>
+                    <div class="form-group"><label>State</label><input id="custState" placeholder="CA" maxlength="2"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Contact Phone</label><input id="custPhone" type="tel" placeholder="+1 555-000-0000"></div>
+                    <div class="form-group"><label>Contact Email</label><input id="custEmail" type="email" placeholder="contact@clinic.com"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Header Info -->
+        <div class="section">
+            <div class="section-hdr" onclick="toggleSection(this)"><h3>📋 Report Info</h3><span class="chevron">▼</span></div>
+            <div class="section-body">
+                <div class="form-row">
+                    <div class="form-group"><label>Equipment Name</label><input id="equipName" placeholder="Auto-filled from model"></div>
+                    <div class="form-group"><label>SKU #</label><input id="sku"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Serial #</label><input id="serialNum"></div>
+                    <div class="form-group"><label>Report #</label><input id="reportNum" readonly style="color:var(--gold)"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Ticket #</label><input id="ticketNum" placeholder="Auto-filled from ticket"></div>
+                    <div class="form-group"></div>
+                </div>
+                <div class="form-row">
+                    <div class="form-group"><label>Date Out</label><input type="date" id="dateOut"></div>
+                    <div class="form-group"><label>Next PM Due</label><input type="date" id="nextPm"></div>
+                </div>
+                <div class="form-row full">
+                    <div class="form-group"><label>Service Engineer</label><input id="engineer" readonly></div>
+                </div>
+                <label style="font-size:11px;font-weight:600;color:var(--txt3);margin-bottom:4px;display:block">SERVICE TYPE</label>
+                <div class="svc-toggles">
+                    <button class="svc-toggle active" data-val="PM" onclick="setSvcType(this)">PM</button>
+                    <button class="svc-toggle" data-val="Repair" onclick="setSvcType(this)">Repair</button>
+                    <button class="svc-toggle" data-val="PM+Repair" onclick="setSvcType(this)">PM + Repair</button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Electrical Checklist -->
+        <div class="section">
+            <div class="section-hdr" onclick="toggleSection(this)"><h3>⚡ Electrical Checklist</h3><span class="chevron">▼</span></div>
+            <div class="section-body" id="checkElectrical"></div>
+        </div>
+
+        <!-- Mechanical & Optical Checklist -->
+        <div class="section">
+            <div class="section-hdr" onclick="toggleSection(this)"><h3>🔧 Mechanical & Optical</h3><span class="chevron">▼</span></div>
+            <div class="section-body" id="checkMechanical"></div>
+        </div>
+
+        <!-- Aesthetic Checklist -->
+        <div class="section">
+            <div class="section-hdr" onclick="toggleSection(this)"><h3>🎨 Aesthetic Condition</h3><span class="chevron">▼</span></div>
+            <div class="section-body" id="checkAesthetic"></div>
+        </div>
+
+        <!-- Performance Testing (model-specific) -->
+        <div class="section" id="perfSection">
+            <div class="section-hdr" onclick="toggleSection(this)"><h3>📊 Performance Testing</h3><span class="chevron">▼</span></div>
+            <div class="section-body" id="perfBody"></div>
+        </div>
+
+        <!-- Model-Specific Parameters -->
+        <div class="section" id="paramSection" style="display:none;">
+            <div class="section-hdr" onclick="toggleSection(this)"><h3>🔬 System Parameters</h3><span class="chevron">▼</span></div>
+            <div class="section-body" id="paramBody"></div>
+        </div>
+
+        <!-- Electrical Safety -->
+        <div class="section">
+            <div class="section-hdr" onclick="toggleSection(this)"><h3>🛡️ Electrical Safety</h3><span class="chevron">▼</span></div>
+            <div class="section-body">
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>Ground Resistance (Ω) — spec ≤ 0.2Ω</label>
+                        <input type="number" step="0.001" id="groundRes" oninput="checkSafety()">
+                    </div>
+                    <div class="form-group">
+                        <label>Leakage Current (µA) — spec ≤ 300µA</label>
+                        <input type="number" step="0.1" id="leakageCur" oninput="checkSafety()">
+                    </div>
+                </div>
+                <div class="form-row">
+                    <div id="groundResResult" style="font-size:13px;font-weight:700;padding:4px 0"></div>
+                    <div id="leakageCurResult" style="font-size:13px;font-weight:700;padding:4px 0"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Test Equipment -->
+        <div class="section">
+            <div class="section-hdr" onclick="toggleSection(this)"><h3>🧰 Test Equipment</h3><span style="display:flex;align-items:center;gap:12px"><a onclick="goToTestEquip(event)" style="font-size:11px;color:var(--gold);font-weight:700;text-decoration:none;">Manage ›</a><span class="chevron">▼</span></span></div>
+            <div class="section-body" id="testEquipBody"></div>
+        </div>
+
+        <!-- Comments -->
+        <div class="section">
+            <div class="section-hdr" onclick="toggleSection(this)"><h3>💬 Comments</h3><span class="chevron">▼</span></div>
+            <div class="section-body">
+                <div class="form-group"><textarea id="comments" placeholder="Parts needed, notes, observations..."></textarea></div>
+            </div>
+        </div>
+
+    </div><!-- #reportForm -->
+</div><!-- .page -->
+
+<!-- Submit bar -->
+<div class="submit-bar" id="submitBar" style="display:none;">
+    <button class="btn-draft" onclick="saveReport('draft')">Save Draft</button>
+    <button class="btn-save" id="btnSubmit" onclick="saveReport('complete')">Submit Report</button>
+</div>
+<div class="submit-bar" id="pdfBar" style="display:none;">
+    <button class="btn-draft" onclick="unlockForEdit()">✏️ Re-edit</button>
+    <button class="btn-save" onclick="exportPDF()">📄 Export PDF</button>
+</div>
+
+<!-- Drafts Drawer -->
+<div class="drafts-overlay" id="draftsOverlay" onclick="hideDrafts()"></div>
+<div class="drafts-drawer" id="draftsDrawer">
+    <div class="drafts-header">
+        <span class="drafts-header-title">📋 My Reports</span>
+        <button class="drafts-close" onclick="hideDrafts()">×</button>
+    </div>
+    <div class="drafts-list" id="draftsList">
+        <div class="drafts-empty">Loading...</div>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+    // supabaseClient defined in <head>
+
+    let currentUser = null;
+    let serviceType = 'PM';
+    let currentReportId = null; // null = new report, uuid = editing existing
+    let techCompanyCache = {}; // cached tech/company info for report snapshots
+    let custSearchTimeout = null;
+    let allCustomers = []; // cached customer list
+
+    async function loadCustomers() {
+        if (!currentUser) return;
+        try {
+            const { data } = await supabaseClient
+                .from('organizations')
+                .select('id, name, address, city, state, phone, email')
+                .eq('type', 'customer')
+                .eq('is_active', true)
+                .order('name');
+            allCustomers = data || [];
+        } catch(e) {}
+    }
+
+    function onCustSearch() {
+        clearTimeout(custSearchTimeout);
+        custSearchTimeout = setTimeout(showCustDropdown, 150);
+    }
+
+    function showCustDropdown() {
+        const input = document.getElementById('custName');
+        const dropdown = document.getElementById('custDropdown');
+        const q = input.value.trim().toLowerCase();
+
+        const matches = q
+            ? allCustomers.filter(c => c.name.toLowerCase().includes(q) || (c.city||'').toLowerCase().includes(q))
+            : allCustomers.slice(0, 8);
+
+        if (!matches.length && !q) { dropdown.classList.remove('open'); return; }
+
+        dropdown.innerHTML = '';
+
+        matches.slice(0, 8).forEach(org => {
+            const div = document.createElement('div');
+            div.className = 'cust-option';
+            const loc = [org.city, org.state].filter(Boolean).join(', ');
+            div.innerHTML = '<div class="cust-option-name">' + org.name + '</div>' +
+                (loc ? '<div class="cust-option-sub">📍 ' + loc + '</div>' : '');
+            div.onclick = () => selectCustomer(org);
+            dropdown.appendChild(div);
+        });
+
+        // "Use what I typed" option if no exact match
+        if (q && !matches.find(m => m.name.toLowerCase() === q)) {
+            const div = document.createElement('div');
+            div.className = 'cust-option';
+            div.innerHTML = '<div class="cust-option-new">＋ Use "' + input.value.trim() + '"</div>';
+            div.onclick = () => { dropdown.classList.remove('open'); };
+            dropdown.appendChild(div);
+        }
+
+        dropdown.classList.add('open');
+    }
+
+    function selectCustomer(org) {
+        document.getElementById('custName').value    = org.name;
+        document.getElementById('custAddress').value = org.address || '';
+        document.getElementById('custCity').value    = org.city    || '';
+        document.getElementById('custState').value   = org.state   || '';
+        document.getElementById('custPhone').value   = org.phone   || '';
+        document.getElementById('custEmail').value   = org.email   || '';
+        document.getElementById('custDropdown').classList.remove('open');
+    }
+
+    // Close dropdown when tapping outside
+    document.addEventListener('click', function(e) {
+        if (!document.getElementById('custSearchWrap')?.contains(e.target)) {
+            document.getElementById('custDropdown')?.classList.remove('open');
+        }
+    });
+
+    async function loadTechCompanyInfo() {
+        if (!currentUser) return;
+        try {
+            const { data: profile } = await supabaseClient
+                .from('user_profiles')
+                .select('first_name, last_name, phone, email, job_title, organizations(name, address, city, state, phone, logo_url)')
+                .eq('id', currentUser.id)
+                .single();
+            if (profile) {
+                const org = profile.organizations || {};
+                techCompanyCache = {
+                    tech_name:        [profile.first_name, profile.last_name].filter(Boolean).join(' '),
+                    tech_phone:       profile.phone || '',
+                    tech_email:       currentUser.email || '',
+                    company_name:     org.name || '',
+                    company_address:  org.address || '',
+                    company_city:     org.city || '',
+                    company_state:    org.state || '',
+                    company_phone:    org.phone || '',
+                    company_logo_url: org.logo_url || ''
+                };
+            }
+        } catch(e) {}
+    }
+
+    /* ── MODEL DEFINITIONS ── */
+    const MODELS = {
+        PowerSuite: {
+            mfg: 'Coherent / Lumenis',
+            label: 'PowerSuite 100W Holmium',
+            wavelengths: [
+                { name: '755 nm', mode: 'PR', sets: [6], unit: 'W' },
+                { name: '2100 nm', mode: 'PR', sets: [10, 20, 28, 60, 80, 100], unit: 'W' },
+                { name: '1064 nm', mode: 'PR', sets: [6, 10, 20, 30, 44], unit: 'W' }
+            ],
+            params: ['Brick Values 3.5J', 'Brick Values 2.0J']
+        },
+        'MedLite C6': {
+            mfg: 'ConBio / Hoya',
+            label: 'MedLite C6 / IV',
+            wavelengths: [
+                { name: '1064 nm', mode: 'SP', sets: [0.3, 0.6, 1, 1.5, 2, 2.4], unit: 'J/cm²', spotMm: 8 },
+                { name: '532 nm', mode: 'SP', sets: [0.1, 0.4, 0.7, 1, 1.3, 1.6], unit: 'J/cm²', spotMm: 6 }
+            ],
+            params: []
+        },
+        'AcuPulse Duo': {
+            mfg: 'Lumenis',
+            label: 'AcuPulse Duo CO₂',
+            wavelengths: [
+                { name: '1064 nm', mode: 'PR', sets: [10, 35, 50, 90, 120], unit: 'W' },
+                { name: '2940 nm', mode: 'PR', sets: [5, 10, 20, 40, 60, 80], unit: 'W' },
+                { name: '980-1470 nm', mode: 'PR', sets: [20, 40, 60, 90], unit: 'W' }
+            ],
+            params: []
+        },
+        Aura: {
+            mfg: 'AMS / Laserscope',
+            label: 'AURA XP 15W KTP',
+            wavelengths: [
+                { name: '532 nm (PR)', mode: 'PR', sets: [1, 5, 10, 15], unit: 'W' },
+                { name: '532 nm (SP)', mode: 'SP', sets: [10, 20, 30], tolLabel: 'Tol 9-11%', unit: 'W' }
+            ],
+            params: []
+        },
+        Iridex: {
+            mfg: 'Iridex',
+            label: 'Oculight / Cyclo G6',
+            wavelengths: [
+                { name: '532 nm (CW)', mode: 'CW', sets: [0.05, 0.1, 0.2, 0.3, 0.4, 0.5], unit: 'W' },
+                { name: '532 nm (SP)', mode: 'SP', sets: [10, 20, 30], tolLabel: 'Tol 9-11%', unit: 'W' }
+            ],
+            params: []
+        },
+        'Sphinx Jr': {
+            mfg: 'Lisa Laser',
+            label: 'Sphinx Junior 30W',
+            wavelengths: [
+                { name: '2100 nm', mode: 'PR', sets: [1, 5, 10, 20, 30], unit: 'W' },
+                { name: '2100 nm (align)', mode: 'PR', sets: [10], unit: 'W' }
+            ],
+            params: [],
+            customChecklist: {
+                items: ['Visual Check', 'Clean Blastshield Installed', 'DI Bag Replaced', 'Cooling Fluid Full', 'Power in Spec (±10%)', 'Laser System Condition'],
+                interlocks: ['Emergency Off Interlock', 'Key Switch Interlock', 'Fiber Detection Interlock', 'External Interlock Plug', 'Foot Switch']
+            }
+        },
+        OmniGuide: {
+            mfg: 'OmniGuide',
+            label: 'InteliGuide CO₂ 25W',
+            wavelengths: [
+                { name: 'CO₂ CW', mode: 'CW', sets: [4, 10, 15, 20], unit: 'W' },
+                { name: 'CO₂ SP (4W)', mode: 'SP', sets: [4], unit: 'W' },
+                { name: 'CO₂ SP (10W)', mode: 'SP', sets: [10], unit: 'W' }
+            ],
+            params: ['Total Lasing Time', 'Laser Light Test Initial', 'Laser Light Test Final', 'High Level/IC11030', 'Low Level/IC11301', 'Error Log Recorded'],
+            gasTest: true,
+            fiberTest: true
+        },
+        Perfecta: {
+            mfg: 'Candela',
+            label: 'VBeam Perfecta (Pulsed Dye)',
+            wavelengths: [
+                { name: '593.5 nm', mode: 'SP', sets: [4, 6, 8, 10], unit: 'J/cm²', spotMm: 10 }
+            ],
+            dyeParams: true,
+            params: ['Total Pulses', 'Head Pulses', 'Lamp Pulses', 'Dye Pulses', 'Dye Kit S/N', 'WL Filter Correction',
+                     'Bubble Sense (HP Full)', 'Bubble Sense (HP Empty)', 'Bubble Sense (Can Full)', 'Bubble Sense (Can Empty)',
+                     'HV Final (VDC)', 'Fiber Transmission %', 'Wavelength'],
+            wlTest: true
+        },
+        V_Beam_1: {
+            mfg: 'Candela',
+            label: 'V-Beam 1 (Pulsed Dye)',
+            wavelengths: [
+                { name: '593.5 nm', mode: 'SP', sets: [4, 7, 9, 11, 13, 15], unit: 'J/cm²', spotMm: 7 }
+            ],
+            dyeParams: true,
+            params: ['Total Pulses', 'Head Pulses', 'Lamp Pulses', 'Dye Pulses', 'Dye Kit S/N', 'HV @ 7J @ HD', 'WL Filter Correction',
+                     'Bubble Sense (HP Full)', 'Bubble Sense (HP Empty)', 'Bubble Sense (Can Full)', 'Bubble Sense (Can Empty)',
+                     'V4 @ Max Fluence (7mm)', 'Fiber Transmission %', 'DI Temp (°C)', 'Wavelength'],
+            wlTest: true
+        },
+        BioLitec: {
+            mfg: 'BioLitec',
+            label: 'Diode D-15 15W 810nm',
+            wavelengths: [
+                { name: '980-1470 nm (CW)', mode: 'CW', sets: [5, 10, 15], unit: 'W' },
+                { name: '980-1470 nm (PR)', mode: 'PR', sets: [5, 10, 15], unit: 'W' },
+                { name: '980-1470 nm (CW hi)', mode: 'CW', sets: [120, 140, 160, 180], unit: 'W' }
+            ],
+            params: []
+        },
+        GentleLase: {
+            mfg: 'Candela',
+            label: 'GentleLASE Plus',
+            wavelengths: [
+                { name: '755 nm', mode: 'SP', sets: [10, 14, 20, 25, 30], unit: 'J/cm²', spotMm: 15 }
+            ],
+            params: ['Total Pulses', 'Head Pulses', 'Lamp Pulses',
+                     'Bubble Sense (HP Full)', 'Bubble Sense (HP Empty)', 'Bubble Sense (Can Full)', 'Bubble Sense (Can Empty)',
+                     'HV @ 60J', 'Fiber Transmission %', 'DI Temp (°C)']
+        },
+        'Sciton Profile': {
+            mfg: 'Sciton',
+            label: 'Profile Er:YAG / Nd:YAG',
+            wavelengths: [
+                { name: '2940 nm Er:YAG', mode: 'SP', sets: [0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 18, 20], unit: 'J/cm²' },
+                { name: '1064 nm Nd:YAG', mode: 'SP', sets: [10, 20, 30, 40, 50, 60, 80, 100], unit: 'mJ' }
+            ],
+            params: ['Total Pulses Er:YAG', 'Total Pulses Nd:YAG', 'Lamp Pulses Er:YAG', 'Lamp Pulses Nd:YAG',
+                     'Er:YAG Energy @ Cal Point', 'Nd:YAG Energy @ Cal Point', 'Water Flow (L/min)', 'DI Conductivity']
+        },
+        'Sciton Joule': {
+            mfg: 'Sciton',
+            label: 'Joule Platform',
+            wavelengths: [
+                { name: '2940 nm Er:YAG (Contour TRL)', mode: 'SP', sets: [0.5, 1, 2, 4, 6, 8, 10, 12, 15, 18, 20], unit: 'J/cm²' },
+                { name: '1064 nm Nd:YAG', mode: 'SP', sets: [10, 20, 40, 60, 80, 100, 150, 200], unit: 'mJ' },
+                { name: '755 nm Alex', mode: 'SP', sets: [10, 15, 20, 25, 30, 40, 50], unit: 'J/cm²' }
+            ],
+            params: ['Total Pulses Er:YAG', 'Total Pulses Nd:YAG', 'Lamp Pulses', 'Water Flow (L/min)', 'DI Conductivity',
+                     'Er:YAG Cal Energy', 'Nd:YAG Cal Energy']
+        },
+        'Sciton mJOULE': {
+            mfg: 'Sciton',
+            label: 'mJOULE Platform',
+            wavelengths: [
+                { name: '2940 nm Er:YAG', mode: 'SP', sets: [0.5, 1, 2, 4, 6, 8, 10, 12, 15], unit: 'J/cm²' },
+                { name: '1064 nm Nd:YAG', mode: 'SP', sets: [10, 20, 40, 60, 80, 100], unit: 'mJ' }
+            ],
+            params: ['Total Pulses Er:YAG', 'Total Pulses Nd:YAG', 'Water Flow (L/min)', 'DI Conductivity',
+                     'Er:YAG Cal Energy', 'Nd:YAG Cal Energy']
+        },
+        'Sciton HALO': {
+            mfg: 'Sciton',
+            label: 'HALO Hybrid Fractional',
+            wavelengths: [
+                { name: '2940 nm Ablative', mode: 'SP', sets: [5, 10, 15, 20, 25, 30, 35, 40], unit: 'mJ/spot' },
+                { name: '1470 nm Non-Ablative', mode: 'SP', sets: [5, 10, 15, 20, 25, 30, 35, 40], unit: 'mJ/spot' }
+            ],
+            params: ['Ablative Diode Output', 'Non-Ablative Diode Output', 'Spot Size Verification',
+                     'Cooling Temp (°C)', 'Firmware Version']
+        },
+        'Sciton BBL': {
+            mfg: 'Sciton',
+            label: 'BBL BroadBand Light',
+            wavelengths: [
+                { name: '515–1200 nm BBL', mode: 'SP', sets: [5, 8, 10, 12, 15, 18, 20, 22, 25], unit: 'J/cm²' }
+            ],
+            params: ['Lamp Pulses', 'Output @ Cal Point', 'Cooling Temp (°C)', 'Lamp S/N']
+        },
+        'Sciton Contour TRL': {
+            mfg: 'Sciton',
+            label: 'Contour TRL (standalone)',
+            wavelengths: [
+                { name: '2940 nm Er:YAG', mode: 'SP', sets: [0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 18, 20], unit: 'J/cm²' }
+            ],
+            params: ['Total Pulses', 'Lamp Pulses', 'Cal Energy Output', 'Water Flow (L/min)', 'DI Conductivity']
+        },
+        'Other-Non Laser': {
+            mfg: 'Other',
+            label: 'Non-Laser Equipment',
+            wavelengths: [],
+            params: []
+        }
+    };
+
+    /* Build manufacturer → models grouping */
+    const MANUFACTURERS = {};
+    Object.entries(MODELS).forEach(([key, m]) => {
+        if (!MANUFACTURERS[m.mfg]) MANUFACTURERS[m.mfg] = [];
+        MANUFACTURERS[m.mfg].push({ key, label: m.label });
+    });
+
+    /* ── SHARED CHECKLISTS ── */
+    const CL_ELECTRICAL = [
+        'Power Cord & Plug integrity',
+        'Foot Pedal & Strain Relief function',
+        'Circuit Breaker function',
+        'Key Switch test',
+        'E-Stop Button operates properly',
+        'Display functioning properly',
+        'High/Low Supplies correct voltage',
+        'Faults/Errors documented & cleared'
+    ];
+    const CL_MECHANICAL = [
+        'Aiming Beam brightness',
+        'Wheels & Castors integrity',
+        'Optics inspected & cleaned',
+        'Full Alignment Check',
+        'Coolant flushed & topped off',
+        'DI & Coolant Filters changed',
+        'Interior dust & pollutant free',
+        'Servos/Gears/Solenoids to spec'
+    ];
+    const CL_AESTHETIC = [
+        'Condition of Skins',
+        'Foot Pedal inspection',
+        'Screen condition',
+        'Control Panel condition',
+        'Accessory Cables',
+        'Accessories of the Unit'
+    ];
+    // TEST_EQUIPMENT is populated dynamically from user's test_equipment table
+    let TEST_EQUIPMENT = [];
+
+    async function loadTestEquipment() {
+        if (!currentUser) return;
+        try {
+            const { data } = await supabaseClient
+                .from('test_equipment')
+                .select('type, make, model, serial_number, cal_date, cal_due')
+                .eq('user_id', currentUser.id)
+                .eq('is_active', true)
+                .order('type');
+            if (data && data.length) {
+                TEST_EQUIPMENT = data.map(eq => ({
+                    type:   eq.type,
+                    model:  [eq.make, eq.model].filter(Boolean).join(' '),
+                    serial: eq.serial_number || '',
+                    calDue: eq.cal_due || ''
+                }));
+            } else {
+                // Fallback defaults if user has no equipment saved
+                TEST_EQUIPMENT = [
+                    { type: 'Electrical Safety Tester', model: '', serial: '', calDue: '' },
+                    { type: 'Energy Detector / Power Meter', model: '', serial: '', calDue: '' },
+                    { type: 'Digital Multimeter', model: '', serial: '', calDue: '' },
+                    { type: 'Oscilloscope', model: '', serial: '', calDue: '' }
+                ];
+            }
+            renderTestEquipment();
+        } catch(e) { console.log('Test equipment load error:', e); }
+    }
+
+    /* ── INIT ── */
+    (function populateManufacturers() {
+        const sel = document.getElementById('mfgSelect');
+        Object.keys(MANUFACTURERS).sort().forEach(mfg => {
+            const opt = document.createElement('option');
+            opt.value = mfg;
+            opt.textContent = mfg;
+            sel.appendChild(opt);
+        });
+    })();
+
+    function onMfgChange() {
+        const mfg = document.getElementById('mfgSelect').value;
+        const modelGroup = document.getElementById('modelGroup');
+        const modelSel = document.getElementById('modelSelect');
+        document.getElementById('reportForm').style.display = 'none';
+        document.getElementById('submitBar').style.display = 'none';
+
+        if (!mfg) { modelGroup.style.display = 'none'; return; }
+
+        const models = MANUFACTURERS[mfg];
+        modelSel.innerHTML = '<option value="">— Select Model —</option>';
+        models.forEach(m => {
+            const opt = document.createElement('option');
+            opt.value = m.key;
+            opt.textContent = m.label;
+            modelSel.appendChild(opt);
+        });
+        modelGroup.style.display = 'block';
+
+        // Auto-select if only one model for this manufacturer
+        if (models.length === 1) {
+            modelSel.value = models[0].key;
+            onModelChange();
+        }
+    }
+
+    function onModelChange() {
+        const key = document.getElementById('modelSelect').value;
+        if (!key) { document.getElementById('reportForm').style.display = 'none'; document.getElementById('submitBar').style.display = 'none'; return; }
+        const m = MODELS[key];
+        const mfg = document.getElementById('mfgSelect').value;
+        document.getElementById('reportForm').style.display = 'block';
+        document.getElementById('submitBar').style.display = 'flex';
+        document.getElementById('equipName').value = mfg + ' ' + m.label;
+        // Auto-generate report number: SR-YYYYMMDD-HHMM
+        const now = new Date();
+        const rn = 'SR-' + now.getFullYear()
+            + String(now.getMonth()+1).padStart(2,'0')
+            + String(now.getDate()).padStart(2,'0')
+            + '-' + String(now.getHours()).padStart(2,'0')
+            + String(now.getMinutes()).padStart(2,'0')
+            + String(now.getSeconds()).padStart(2,'0');
+        document.getElementById('reportNum').value = rn;
+        document.getElementById('dateOut').value = new Date().toISOString().slice(0, 10);
+        // 6 month PM
+        const pm = new Date(); pm.setMonth(pm.getMonth() + 6);
+        document.getElementById('nextPm').value = pm.toISOString().slice(0, 10);
+
+        renderChecklists(key);
+        renderPerformance(key);
+        renderParams(key);
+        renderTestEquipment();
+    }
+
+    /* ── RENDER CHECKLISTS ── */
+    function renderChecklists(modelKey) {
+        renderCL('checkElectrical', CL_ELECTRICAL);
+        renderCL('checkMechanical', CL_MECHANICAL);
+        renderCL('checkAesthetic', CL_AESTHETIC);
+    }
+    function renderCL(containerId, items) {
+        const c = document.getElementById(containerId);
+        c.innerHTML = items.map((item, i) => `
+            <div class="checklist-item">
+                <div class="checklist-label">${item}</div>
+                <div class="checklist-btns">
+                    <button class="cl-btn pass" onclick="setCL(this,'PASS')" data-section="${containerId}" data-item="${item}">PASS</button>
+                    <button class="cl-btn fail" onclick="setCL(this,'FAIL')" data-section="${containerId}" data-item="${item}">FAIL</button>
+                    <button class="cl-btn na" onclick="setCL(this,'N/A')" data-section="${containerId}" data-item="${item}">N/A</button>
+                </div>
+            </div>
+        `).join('');
+    }
+    function setCL(btn, val) {
+        const btns = btn.parentElement.querySelectorAll('.cl-btn');
+        btns.forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+    }
+    function markAllPass(containerId) {
+        document.querySelectorAll(`#${containerId} .cl-btn.pass`).forEach(b => {
+            b.parentElement.querySelectorAll('.cl-btn').forEach(x => x.classList.remove('active'));
+            b.classList.add('active');
+        });
+    }
+
+    /* ── RENDER PERFORMANCE ── */
+    function renderPerformance(modelKey) {
+        const m = MODELS[modelKey];
+        const body = document.getElementById('perfBody');
+        if (!m.wavelengths.length) {
+            body.innerHTML = '<p style="color:var(--txt3);font-size:13px;text-align:center;padding:12px 0">No power measurements for this model type.</p>';
+            return;
+        }
+        let html = '';
+        m.wavelengths.forEach((wl, wi) => {
+            const unit = wl.unit || '';
+            const isFluence = unit === 'J/cm²';
+            const defaultSpot = wl.spotMm || '';
+
+            html += `<div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--bdr)">
+                <div style="font-size:13px;font-weight:700;color:var(--gold);margin-bottom:4px">${wl.name} — ${wl.mode}</div>`;
+
+            if (isFluence) {
+                html += `<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+                    <label style="font-size:11px;color:var(--txt3);font-weight:600">Spot Size (mm):</label>
+                    <input type="number" step="0.1" value="${defaultSpot}" id="spot_${wi}"
+                        style="width:60px;background:var(--s4);border:1px solid var(--bdr);border-radius:6px;padding:6px 8px;color:var(--txt);font-size:13px;text-align:center"
+                        oninput="recalcGroup(${wi})">
+                    <label style="font-size:11px;color:var(--txt3);display:flex;align-items:center;gap:4px;cursor:pointer">
+                        <input type="checkbox" id="asJ_${wi}" onchange="recalcGroup(${wi})"> Enter as Joules
+                    </label>
+                </div>`;
+            }
+
+            const actualLabel = isFluence ? `Actual (J/cm²)` : `Actual (${unit})`;
+            html += `<table class="pwr-table">
+                    <tr><th>Set (${unit})</th><th>${actualLabel}</th><th>${wl.tolLabel || 'Tol ±10%'}</th><th>Result</th></tr>`;
+            wl.sets.forEach((s, si) => {
+                const id = `pwr_${wi}_${si}`;
+                html += `<tr>
+                    <td style="text-align:center;font-size:13px;color:var(--txt2);font-weight:600">${s} ${unit}</td>
+                    <td><input type="number" step="any" id="${id}_actual" data-wi="${wi}" data-set="${s}" oninput="calcTolUnit('${id}',${s},${wi})"></td>
+                    <td class="tol-cell" id="${id}_tol">—</td>
+                    <td class="tol-cell" id="${id}_result">—</td>
+                </tr>`;
+            });
+            html += '</table></div>';
+        });
+        body.innerHTML = html;
+    }
+
+    function calcTolUnit(id, setVal, wi) {
+        const custName    = document.getElementById('custName')?.value.trim() || '';
+        const custAddress = document.getElementById('custAddress')?.value.trim() || '';
+        const custCity    = document.getElementById('custCity')?.value.trim() || '';
+        const custState   = document.getElementById('custState')?.value.trim() || '';
+        const ticketNum   = document.getElementById('ticketNum')?.value.trim() || '';
+        const modelKey = document.getElementById('modelSelect').value;
+        const wl = MODELS[modelKey].wavelengths[wi];
+        const rawActual = parseFloat(document.getElementById(id + '_actual').value);
+        const tolEl = document.getElementById(id + '_tol');
+        const resEl = document.getElementById(id + '_result');
+
+        if (isNaN(rawActual) || setVal === 0) {
+            tolEl.textContent = '—'; resEl.textContent = '—';
+            tolEl.className = 'tol-cell'; resEl.className = 'tol-cell';
+            return;
+        }
+
+        let actual = rawActual;
+        // If fluence mode and "Enter as Joules" is checked, convert J → J/cm²
+        if (wl.unit === 'J/cm²') {
+            const asJ = document.getElementById('asJ_' + wi);
+            if (asJ && asJ.checked) {
+                const spotEl = document.getElementById('spot_' + wi);
+                const spotMm = parseFloat(spotEl?.value) || wl.spotMm || 10;
+                const spotCm = spotMm / 10;
+                const area = Math.PI * Math.pow(spotCm / 2, 2);
+                actual = rawActual / area; // Convert Joules to J/cm²
+            }
+        }
+
+        const ratio = actual / setVal;
+        tolEl.textContent = ratio.toFixed(3);
+        const pass = ratio >= 0.9 && ratio <= 1.1;
+        resEl.textContent = pass ? 'PASS' : 'FAIL';
+        resEl.className = 'tol-cell ' + (pass ? 'tol-pass' : 'tol-fail');
+        tolEl.className = 'tol-cell ' + (pass ? 'tol-pass' : 'tol-fail');
+    }
+
+    function recalcGroup(wi) {
+        // Recalculate all rows in this wavelength group
+        document.querySelectorAll(`input[data-wi="${wi}"]`).forEach(inp => {
+            const id = inp.id.replace('_actual', '');
+            const setVal = parseFloat(inp.dataset.set);
+            calcTolUnit(id, setVal, wi);
+        });
+    }
+
+    /* ── RENDER PARAMS ── */
+    function renderParams(modelKey) {
+        const m = MODELS[modelKey];
+        const section = document.getElementById('paramSection');
+        const body = document.getElementById('paramBody');
+        if (!m.params || !m.params.length) { section.style.display = 'none'; return; }
+        section.style.display = 'block';
+        let html = '<div class="param-grid">';
+        m.params.forEach((p, i) => {
+            html += `<div class="param-item"><label>${p}</label><input id="param_${i}" data-name="${p}"></div>`;
+        });
+        html += '</div>';
+        if (m.wlTest) {
+            html += `<div style="margin-top:14px;font-size:13px;font-weight:700;color:var(--gold);margin-bottom:8px">Wavelength Test</div>
+            <div class="param-grid">
+                <div class="param-item"><label>No Filter</label><input id="wlt_nofilter"></div>
+                <div class="param-item"><label>HD 1 (pre)</label><input id="wlt_hd1_pre"></div>
+                <div class="param-item"><label>Ophir (pre)</label><input id="wlt_ophir_pre"></div>
+                <div class="param-item"><label>Filter</label><input id="wlt_filter"></div>
+                <div class="param-item"><label>HD 1 (post)</label><input id="wlt_hd1_post"></div>
+                <div class="param-item"><label>Ophir (post)</label><input id="wlt_ophir_post"></div>
+            </div>`;
+        }
+        if (m.gasTest) {
+            html += `<div style="margin-top:14px;font-size:13px;font-weight:700;color:var(--gold);margin-bottom:8px">Gas PSI Values</div>
+            <div class="param-grid">
+                <div class="param-item"><label>0 PSI (spec ±0)</label><input id="gas_0"></div>
+                <div class="param-item"><label>10 PSI (spec ±5)</label><input id="gas_10"></div>
+                <div class="param-item"><label>50 PSI (spec ±5)</label><input id="gas_50"></div>
+                <div class="param-item"><label>70 PSI (spec ±5)</label><input id="gas_70"></div>
+                <div class="param-item"><label>120 PSI (spec ±5)</label><input id="gas_120"></div>
+            </div>`;
+        }
+        if (m.fiberTest) {
+            html += `<div style="margin-top:14px;font-size:13px;font-weight:700;color:var(--gold);margin-bottom:8px">Ferrule/Fiber Testing (4W CW)</div>
+            <div class="param-grid">
+                <div class="param-item"><label>Power No Ferrule (±0.4)</label><input id="fiber_nofer"></div>
+                <div class="param-item"><label>Power Out of Open</label><input id="fiber_open"></div>
+                <div class="param-item"><label>% Loss thru Open (≤15%)</label><input id="fiber_open_pct"></div>
+                <div class="param-item"><label>Power 280μm SS</label><input id="fiber_280"></div>
+                <div class="param-item"><label>% Loss 280μm (≤20%)</label><input id="fiber_280_pct"></div>
+                <div class="param-item"><label>Power 125μm SS</label><input id="fiber_125"></div>
+                <div class="param-item"><label>% Loss 125μm (≤70%)</label><input id="fiber_125_pct"></div>
+                <div class="param-item"><label>Power out of Fiber</label><input id="fiber_out"></div>
+                <div class="param-item"><label>% Loss thru Fiber (<60%)</label><input id="fiber_out_pct"></div>
+            </div>`;
+        }
+        body.innerHTML = html;
+    }
+
+    /* ── RENDER TEST EQUIPMENT ── */
+    function renderTestEquipment() {
+        const body = document.getElementById('testEquipBody');
+        if (!TEST_EQUIPMENT.length) {
+            body.innerHTML = '<div style="font-size:13px;color:var(--txt3);text-align:center;padding:16px;">No test equipment on file. <a href="test_equipment.html" style="color:var(--gold);">Add equipment →</a></div>';
+            return;
+        }
+        body.innerHTML = TEST_EQUIPMENT.map(function(te, i) {
+            return '<div style="margin-bottom:10px;padding-bottom:10px;border-bottom:1px solid var(--bdr)">' +
+                '<div style="font-size:12px;font-weight:700;color:var(--gold);margin-bottom:6px">' + te.type + '</div>' +
+                '<div class="form-row">' +
+                    '<div class="form-group"><label>Make / Model</label><input id="te_' + i + '_model" value="' + (te.model||'') + '"></div>' +
+                    '<div class="form-group"><label>Serial #</label><input id="te_' + i + '_serial" value="' + (te.serial||'') + '"></div>' +
+                '</div>' +
+                '<div class="form-row">' +
+                    '<div class="form-group"><label>Cal Due Date</label><input type="date" id="te_' + i + '_cal" value="' + (te.calDue||'') + '"></div>' +
+                    '<div class="form-group"></div>' +
+                '</div>' +
+            '</div>';
+        }).join('');
+    }
+
+    /* ── ELECTRICAL SAFETY ── */
+    function checkSafety() {
+        const gr = parseFloat(document.getElementById('groundRes').value);
+        const lc = parseFloat(document.getElementById('leakageCur').value);
+        const grEl = document.getElementById('groundResResult');
+        const lcEl = document.getElementById('leakageCurResult');
+        if (!isNaN(gr)) {
+            const p = gr <= 0.2;
+            grEl.innerHTML = `<span style="color:${p?'var(--grn)':'var(--red)'}">${p?'✓ PASS':'✗ FAIL'} — ${gr}Ω</span>`;
+        } else { grEl.innerHTML = ''; }
+        if (!isNaN(lc)) {
+            const p = lc <= 300;
+            lcEl.innerHTML = `<span style="color:${p?'var(--grn)':'var(--red)'}">${p?'✓ PASS':'✗ FAIL'} — ${lc}µA</span>`;
+        } else { lcEl.innerHTML = ''; }
+    }
+
+    /* ── COLLECT FORM DATA ── */
+    function collectData() {
+        const modelKey = document.getElementById('modelSelect').value;
+        const m = MODELS[modelKey];
+
+        // Checklists
+        const collectCL = (containerId) => {
+            const result = {};
+            document.querySelectorAll(`#${containerId} .checklist-item`).forEach(item => {
+                const label = item.querySelector('.checklist-label').textContent;
+                const active = item.querySelector('.cl-btn.active');
+                result[label] = active ? active.textContent : '';
+            });
+            return result;
+        };
+
+        // Power measurements
+        const measurements = [];
+        m.wavelengths.forEach((wl, wi) => {
+            wl.sets.forEach((s, si) => {
+                const id = `pwr_${wi}_${si}`;
+                const actualEl = document.getElementById(id + '_actual');
+                const actual = actualEl ? parseFloat(actualEl.value) : null;
+                const resEl = document.getElementById(id + '_result');
+                measurements.push({
+                    wavelength: wl.name, mode: wl.mode, set: s,
+                    actual: isNaN(actual) ? null : actual,
+                    result: resEl ? resEl.textContent : ''
+                });
+            });
+        });
+
+        // Model params
+        const params = {};
+        m.params.forEach((p, i) => {
+            const el = document.getElementById('param_' + i);
+            if (el) params[p] = el.value;
+        });
+        // Wavelength test
+        if (m.wlTest) {
+            ['wlt_nofilter','wlt_hd1_pre','wlt_ophir_pre','wlt_filter','wlt_hd1_post','wlt_ophir_post'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) params[id] = el.value;
+            });
+        }
+        // Gas test
+        if (m.gasTest) {
+            ['gas_0','gas_10','gas_50','gas_70','gas_120'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) params[id] = el.value;
+            });
+        }
+        // Fiber test
+        if (m.fiberTest) {
+            ['fiber_nofer','fiber_open','fiber_open_pct','fiber_280','fiber_280_pct','fiber_125','fiber_125_pct','fiber_out','fiber_out_pct'].forEach(id => {
+                const el = document.getElementById(id);
+                if (el) params[id] = el.value;
+            });
+        }
+
+        // Test equipment
+        const testEquip = TEST_EQUIPMENT.map((te, i) => ({
+            type: te.type,
+            model: document.getElementById(`te_${i}_model`)?.value || '',
+            serial: document.getElementById(`te_${i}_serial`)?.value || '',
+            calDue: document.getElementById(`te_${i}_cal`)?.value || ''
+        }));
+
+        const gr = parseFloat(document.getElementById('groundRes').value);
+        const lc = parseFloat(document.getElementById('leakageCur').value);
+
+        return {
+            model_type: modelKey,
+            equipment_name: document.getElementById('equipName').value,
+            sku: document.getElementById('sku').value,
+            serial_number: document.getElementById('serialNum').value,
+            service_type: serviceType,
+            date_out: document.getElementById('dateOut').value || null,
+            next_pm_due: document.getElementById('nextPm').value || null,
+            service_engineer: document.getElementById('engineer').value,
+            report_number: document.getElementById('reportNum').value,
+            checklist_electrical: collectCL('checkElectrical'),
+            checklist_mechanical: collectCL('checkMechanical'),
+            checklist_aesthetic: collectCL('checkAesthetic'),
+            power_measurements: measurements,
+            model_parameters: params,
+            ground_resistance: isNaN(gr) ? null : gr,
+            ground_resistance_pass: isNaN(gr) ? null : gr <= 0.2,
+            leakage_current: isNaN(lc) ? null : lc,
+            leakage_current_pass: isNaN(lc) ? null : lc <= 300,
+            test_equipment: testEquip,
+            comments: document.getElementById('comments').value,
+            created_by: currentUser?.id || null,
+            customer_name:    document.getElementById('custName')?.value.trim() || null,
+            customer_address: document.getElementById('custAddress')?.value.trim() || null,
+            customer_city:    document.getElementById('custCity')?.value.trim() || null,
+            customer_state:   document.getElementById('custState')?.value.trim() || null,
+            customer_phone:   document.getElementById('custPhone')?.value.trim() || null,
+            customer_email:   document.getElementById('custEmail')?.value.trim() || null,
+            ticket_number:    document.getElementById('ticketNum')?.value.trim() || null,
+            // Technician / company snapshot
+            tech_name:            techCompanyCache.tech_name || null,
+            tech_phone:           techCompanyCache.tech_phone || null,
+            tech_email:           techCompanyCache.tech_email || null,
+            tech_company_name:    techCompanyCache.company_name || null,
+            tech_company_address: techCompanyCache.company_address || null,
+            tech_company_city:    techCompanyCache.company_city || null,
+            tech_company_state:   techCompanyCache.company_state || null,
+            tech_company_phone:   techCompanyCache.company_phone || null,
+            tech_company_logo_url:techCompanyCache.company_logo_url || null
+        };
+    }
+
+    /* ── SAVE (upsert — insert new or update existing) ── */
+    async function saveReport(status) {
+        if (!currentUser) { showToast('Sign in to save reports', 'error'); return; }
+        const btn = document.getElementById('btnSubmit');
+        const draftBtn = document.querySelector('.btn-draft');
+        btn.disabled = true; if (draftBtn) draftBtn.disabled = true;
+        btn.textContent = 'Saving...';
+        try {
+            const data = { ...collectData(), status };
+            let error;
+            if (currentReportId) {
+                // Update existing report
+                ({ error } = await supabaseClient
+                    .from('service_reports')
+                    .update({ ...data, updated_at: new Date().toISOString() })
+                    .eq('id', currentReportId));
+            } else {
+                // Insert new report
+                const { data: inserted, error: insErr } = await supabaseClient
+                    .from('service_reports')
+                    .insert(data)
+                    .select('id')
+                    .single();
+                error = insErr;
+                if (inserted) currentReportId = inserted.id; // remember for future saves
+            }
+            if (error) throw error;
+            if (status === 'draft') {
+                showToast('Draft saved!', 'success');
+            } else {
+                showToast('Report submitted!', 'success');
+                setTimeout(() => navTo('index.html'), 1500);
+            }
+        } catch (e) {
+            showToast('Error: ' + (e.message || 'Save failed'), 'error');
+        } finally {
+            btn.disabled = false; if (draftBtn) draftBtn.disabled = false;
+            btn.textContent = 'Submit Report';
+        }
+    }
+
+    /* ── DRAFTS DRAWER ── */
+    async function showDrafts() {
+        document.getElementById('draftsOverlay').classList.add('open');
+        document.getElementById('draftsDrawer').classList.add('open');
+        const list = document.getElementById('draftsList');
+        list.innerHTML = '<div class="drafts-empty">Loading...</div>';
+        try {
+            const { data, error } = await supabaseClient
+                .from('service_reports')
+                .select('id, report_number, equipment_name, serial_number, customer_name, service_type, status, updated_at')
+                .eq('created_by', currentUser.id)
+                .order('updated_at', { ascending: false });
+            if (error) throw error;
+            if (!data || !data.length) {
+                list.innerHTML = '<div class="drafts-empty">No saved reports yet.</div>';
+                return;
+            }
+            list.innerHTML = '';
+            data.forEach(r => {
+                const item = document.createElement('div');
+                item.className = 'draft-item';
+                const d = new Date(r.updated_at);
+                const dateStr = d.toLocaleDateString([], { month:'short', day:'numeric', year:'numeric' });
+                const timeStr = d.toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
+                const icon = r.status === 'complete' ? '✅' : '📝';
+                const title = r.equipment_name || r.report_number || 'Untitled Report';
+                const sub = [r.customer_name, r.serial_number ? 'SN: '+r.serial_number : '', dateStr+' '+timeStr].filter(Boolean).join(' · ');
+                item.innerHTML =
+                    '<div class="draft-icon">' + icon + '</div>' +
+                    '<div class="draft-info">' +
+                        '<div class="draft-title">' + title + '</div>' +
+                        '<div class="draft-sub">' + sub + '</div>' +
+                    '</div>' +
+                    '<span class="draft-status ' + r.status + '">' + (r.status === 'complete' ? 'Complete' : 'Draft') + '</span>';
+                item.onclick = () => loadReport(r.id);
+                list.appendChild(item);
+            });
+        } catch(e) {
+            list.innerHTML = '<div class="drafts-empty">Failed to load reports: ' + e.message + '</div>';
+        }
+    }
+
+    function hideDrafts() {
+        document.getElementById('draftsOverlay').classList.remove('open');
+        document.getElementById('draftsDrawer').classList.remove('open');
+    }
+
+    async function loadReport(reportId) {
+        hideDrafts();
+        try {
+            const { data: r, error } = await supabaseClient
+                .from('service_reports')
+                .select('*')
+                .eq('id', reportId)
+                .single();
+            if (error || !r) throw error || new Error('Not found');
+            currentReportId = r.id;
+
+            // Select manufacturer + model first so the form renders
+            const mfgSel = document.getElementById('mfgSelect');
+            const m = MODELS[r.model_type];
+            if (m && mfgSel) {
+                mfgSel.value = m.mfg;
+                onMfgChange();
+                const modelSel = document.getElementById('modelSelect');
+                if (modelSel) { modelSel.value = r.model_type; onModelChange(); }
+            }
+
+            // Wait a tick for the form to render
+            await new Promise(res => setTimeout(res, 100));
+
+            // Fill all simple fields
+            const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
+            set('custName',    r.customer_name);
+            set('custAddress', r.customer_address);
+            set('custCity',    r.customer_city);
+            set('custState',   r.customer_state);
+            set('custPhone',   r.customer_phone);
+            set('custEmail',   r.customer_email);
+            set('equipName',   r.equipment_name);
+            set('sku',         r.sku);
+            set('serialNum',   r.serial_number);
+            set('reportNum',   r.report_number);
+            set('ticketNum',   r.ticket_number);
+            set('dateOut',     r.date_out);
+            set('nextPm',      r.next_pm_due);
+            set('comments',    r.comments);
+            if (r.ground_resistance != null) set('groundRes', r.ground_resistance);
+            if (r.leakage_current  != null) set('leakageCur', r.leakage_current);
+
+            // Service type
+            if (r.service_type) {
+                document.querySelectorAll('.svc-toggle').forEach(b => {
+                    b.classList.toggle('active', b.dataset.val === r.service_type);
+                });
+                serviceType = r.service_type;
+            }
+
+            // Restore checklists
+            const restoreCL = (containerId, data) => {
+                if (!data) return;
+                document.querySelectorAll('#' + containerId + ' .checklist-item').forEach(item => {
+                    const label = item.querySelector('.checklist-label').textContent;
+                    const val = data[label];
+                    if (val) {
+                        item.querySelectorAll('.cl-btn').forEach(btn => {
+                            btn.classList.toggle('active', btn.textContent === val);
+                        });
+                    }
+                });
+            };
+            restoreCL('checkElectrical', r.checklist_electrical);
+            restoreCL('checkMechanical', r.checklist_mechanical);
+            restoreCL('checkAesthetic',  r.checklist_aesthetic);
+
+            // Restore power measurements
+            if (r.power_measurements && m) {
+                r.power_measurements.forEach(pm => {
+                    m.wavelengths.forEach((wl, wi) => {
+                        if (wl.name !== pm.wavelength) return;
+                        wl.sets.forEach((s, si) => {
+                            if (s !== pm.set) return;
+                            const id = 'pwr_' + wi + '_' + si;
+                            const el = document.getElementById(id + '_actual');
+                            if (el && pm.actual != null) el.value = pm.actual;
+                        });
+                    });
+                });
+            }
+
+            // Restore model params
+            if (r.model_parameters && m) {
+                m.params.forEach((p, i) => {
+                    const el = document.getElementById('param_' + i);
+                    if (el && r.model_parameters[p] != null) el.value = r.model_parameters[p];
+                });
+            }
+
+            // Update header
+            document.getElementById('headerTitle').textContent = r.status === 'complete' ? 'Service Report' : 'Draft Report';
+            // Show appropriate action bar
+            document.getElementById('submitBar').style.display = r.status === 'complete' ? 'none' : 'flex';
+            document.getElementById('pdfBar').style.display    = r.status === 'complete' ? 'flex' : 'none';
+            showToast('Report loaded', 'success');
+        } catch(e) {
+            showToast('Failed to load: ' + e.message, 'error');
+        }
+    }
+
+    /* ── RE-EDIT ── */
+    async function unlockForEdit() {
+        if (!currentReportId) return;
+        try {
+            await supabaseClient.from('service_reports')
+                .update({ status: 'draft', updated_at: new Date().toISOString() })
+                .eq('id', currentReportId);
+            document.getElementById('submitBar').style.display = 'flex';
+            document.getElementById('pdfBar').style.display = 'none';
+            document.getElementById('headerTitle').textContent = 'Draft Report';
+            showToast('Report unlocked for editing', 'success');
+        } catch(e) { showToast('Failed to unlock: ' + e.message, 'error'); }
+    }
+
+    /* ── PDF EXPORT ── */
+    function exportPDF() {
+        // Build a printable HTML page and open it
+        const report = buildPrintHTML();
+        const win = window.open('', '_blank');
+        if (win) {
+            win.document.write(report);
+            win.document.close();
+            setTimeout(() => { win.print(); }, 500);
+        } else {
+            // Fallback for WebView: show instructions
+            showToast('Use browser print to save as PDF', 'success');
+        }
+    }
+
+    function buildPrintHTML() {
+        const cache = techCompanyCache;
+        const custName    = document.getElementById('custName')?.value || '';
+        const custAddress = document.getElementById('custAddress')?.value || '';
+        const custCity    = document.getElementById('custCity')?.value || '';
+        const custState   = document.getElementById('custState')?.value || '';
+        const equipName   = document.getElementById('equipName')?.value || '';
+        const serialNum   = document.getElementById('serialNum')?.value || '';
+        const reportNum   = document.getElementById('reportNum')?.value || '';
+        const dateOut     = document.getElementById('dateOut')?.value || '';
+        const nextPm      = document.getElementById('nextPm')?.value || '';
+        const engineer    = document.getElementById('engineer')?.value || '';
+        const comments    = document.getElementById('comments')?.value || '';
+
+        // Collect checklists
+        const collectCLHTML = (containerId, title) => {
+            const items = [];
+            document.querySelectorAll('#' + containerId + ' .checklist-item').forEach(item => {
+                const label = item.querySelector('.checklist-label')?.textContent || '';
+                const active = item.querySelector('.cl-btn.active');
+                const val = active ? active.textContent : '—';
+                items.push('<tr><td>' + label + '</td><td style="font-weight:700;color:' + (val === 'Pass' ? '#16a34a' : val === 'Fail' ? '#dc2626' : '#555') + '">' + val + '</td></tr>');
+            });
+            if (!items.length) return '';
+            return '<h3 style="margin:16px 0 8px;color:#111;border-bottom:1px solid #ddd;padding-bottom:4px">' + title + '</h3>' +
+                   '<table style="width:100%;border-collapse:collapse;font-size:13px">' + items.join('') + '</table>';
+        };
+
+        // Power measurements
+        const pwrRows = [];
+        document.querySelectorAll('.pwr-table tr').forEach(row => {
+            const cells = Array.from(row.cells).map(c => '<td style="padding:4px 8px;border:1px solid #ddd">' + c.textContent + '</td>');
+            pwrRows.push('<tr>' + cells.join('') + '</tr>');
+        });
+        const pwrHTML = pwrRows.length ? '<h3 style="margin:16px 0 8px;color:#111;border-bottom:1px solid #ddd;padding-bottom:4px">Power Measurements</h3><table style="width:100%;border-collapse:collapse;font-size:12px">' + pwrRows.join('') + '</table>' : '';
+
+        const logoHTML = cache.company_logo_url ?
+            '<img src="' + cache.company_logo_url + '" style="max-height:60px;max-width:180px;object-fit:contain">' : '';
+
+        return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Service Report ' + reportNum + '</title>' +
+            '<style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#111;font-size:13px}' +
+            '.header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #FBBF24;padding-bottom:16px;margin-bottom:20px}' +
+            '.company-info{flex:1}.company-name{font-size:18px;font-weight:800;color:#111}.company-address{font-size:12px;color:#555;margin-top:3px}' +
+            '.report-title{text-align:right}.report-title h1{font-size:22px;color:#111;margin:0}.report-title .report-num{font-size:14px;color:#FBBF24;font-weight:700}' +
+            '.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;background:#f9f9f9;padding:14px;border-radius:6px}' +
+            '.info-item label{font-size:10px;color:#666;text-transform:uppercase;font-weight:700;display:block;margin-bottom:2px}' +
+            '.info-item span{font-size:13px;font-weight:600;color:#111}' +
+            'table td{vertical-align:top;padding:5px 8px;border-bottom:1px solid #eee}' +
+            '@media print{body{padding:0}}</style></head><body>' +
+            '<div class="header">' +
+                '<div class="company-info">' + logoHTML +
+                    '<div class="company-name">' + (cache.company_name || 'Total Service Pro') + '</div>' +
+                    '<div class="company-address">' + [cache.company_address, cache.company_city, cache.company_state].filter(Boolean).join(', ') + '</div>' +
+                    '<div class="company-address">' + (cache.company_phone || '') + '</div>' +
+                '</div>' +
+                '<div class="report-title"><h1>Service Report</h1><div class="report-num">' + reportNum + '</div>' +
+                '<div style="font-size:12px;color:#555;margin-top:4px">Date: ' + dateOut + '</div></div>' +
+            '</div>' +
+            '<div class="info-grid">' +
+                '<div class="info-item"><label>Customer</label><span>' + custName + '</span></div>' +
+                '<div class="info-item"><label>Address</label><span>' + [custAddress, custCity, custState].filter(Boolean).join(', ') + '</span></div>' +
+                '<div class="info-item"><label>Equipment</label><span>' + equipName + '</span></div>' +
+                '<div class="info-item"><label>Serial #</label><span>' + serialNum + '</span></div>' +
+                '<div class="info-item"><label>Service Engineer</label><span>' + engineer + '</span></div>' +
+                '<div class="info-item"><label>Next PM Due</label><span>' + nextPm + '</span></div>' +
+            '</div>' +
+            collectCLHTML('checkElectrical', '⚡ Electrical Checklist') +
+            collectCLHTML('checkMechanical', '🔧 Mechanical & Optical') +
+            collectCLHTML('checkAesthetic',  '🎨 Aesthetic Condition') +
+            pwrHTML +
+            (comments ? '<h3 style="margin:16px 0 8px;color:#111;border-bottom:1px solid #ddd;padding-bottom:4px">Comments & Notes</h3><p style="font-size:13px;line-height:1.6">' + comments + '</p>' : '') +
+            '<div style="margin-top:32px;border-top:1px solid #ddd;padding-top:16px;display:flex;justify-content:space-between;font-size:12px;color:#555">' +
+                '<div>Technician: ' + engineer + '&nbsp;&nbsp;&nbsp;Signature: ____________________</div>' +
+                '<div>Customer: ____________________&nbsp;&nbsp;&nbsp;Date: ___________</div>' +
+            '</div>' +
+            '</body></html>';
+    }
+
+    /* ── UI HELPERS ── */
+    function toggleSection(hdr) {
+        hdr.classList.toggle('collapsed');
+        const body = hdr.nextElementSibling;
+        body.classList.toggle('hidden');
+    }
+    function setSvcType(btn) {
+        document.querySelectorAll('.svc-toggle').forEach(b => b.classList.remove('active'));
+        btn.classList.add('active');
+        serviceType = btn.dataset.val;
+    }
+    function showToast(msg, type) {
+        const t = document.getElementById('toast');
+        t.textContent = msg;
+        t.className = 'toast ' + type + ' show';
+        setTimeout(() => t.classList.remove('show'), 3000);
+    }
+    function goBack() {
+        try { if (typeof Android !== 'undefined') { Android.goBack(); return; } } catch(e) {}
+        if (document.referrer) window.history.back();
+        else navTo('index.html');
+    }
+
+    /* ── NAV & AUTH ── */
+    async function goToTestEquip(e) {
+        e.stopPropagation();
+        navTo('test_equipment.html');
+    }
+
+    async function navTo(page) {
+        try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session && session.access_token) {
+                const sep = page.includes('?') ? '&' : '?';
+                window.location.href = page + sep + '_s=' + btoa(JSON.stringify(session));
+                return;
+            }
+        } catch(e) {}
+        window.location.href = page;
+    }
+    function toggleDropdown(e) {
+        e.stopPropagation();
+        document.getElementById('avatarDropdown').classList.toggle('open');
+    }
+    document.addEventListener('click', () => document.getElementById('avatarDropdown').classList.remove('open'));
+    async function logoutUser() {
+        document.getElementById('avatarDropdown').classList.remove('open');
+        await supabaseClient.auth.signOut();
+        try { if (typeof Android !== 'undefined') Android.clearSession(); } catch(e) {}
+    }
+
+    supabaseClient.auth.onAuthStateChange(function(event, session) {
+        if (_sessionRestored) { _sessionRestored = false; return; }
+        updateAuthUI();
+        try {
+            if (typeof Android !== 'undefined') {
+                if (session?.access_token) Android.saveSession(JSON.stringify(session));
+                else if (event === 'SIGNED_OUT' && !session) Android.clearSession();
+            }
+        } catch(e) {}
+    });
+
+    // Session already applied in <head> — just update UI
+    // Android bridge: save session after auth state change handles it
+
+    async function updateAuthUI() {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        currentUser = user;
+        const loginBtn = document.getElementById('loginBtn');
+        const wrap = document.getElementById('avatarWrapper');
+        if (user) {
+            loginBtn.style.display = 'none';
+            wrap.style.display = 'block';
+            const meta = user.user_metadata || {};
+            const fn = meta.first_name || '';
+            const ln = meta.last_name || '';
+            const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || (user.email||'U')[0].toUpperCase();
+            document.getElementById('dropdownName').textContent = [fn, ln].filter(Boolean).join(' ') || 'User';
+            document.getElementById('dropdownEmail').textContent = user.email || '';
+            const photo = meta.avatar_url || meta.picture || '';
+            const img = document.getElementById('avatarImg');
+            const ini = document.getElementById('avatarInitials');
+            if (photo) { img.src = photo; img.style.display = 'block'; ini.style.display = 'none'; }
+            else { img.style.display = 'none'; ini.style.display = 'flex'; ini.textContent = initials; }
+            document.getElementById('engineer').value = [fn, ln].filter(Boolean).join(' ') || user.email;
+            loadTechCompanyInfo();
+            loadTestEquipment();
+            loadCustomers();
+        } else {
+            loginBtn.style.display = 'block';
+            wrap.style.display = 'none';
+        }
+    }
+    // Only call updateAuthUI immediately if no pending session —
+    // otherwise onAuthStateChange will call it after setSession resolves
+    if (!_pendingSession) {
+        updateAuthUI();
+    }
+
+    // Pre-populate from URL params passed by service_schedule.html
+    (function preFillFromParams() {
+        const p = new URLSearchParams(window.location.search);
+        const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+        set('custName',    p.get('cust_name'));
+        set('custAddress', p.get('cust_address'));
+        set('custCity',    p.get('cust_city'));
+        set('custState',   p.get('cust_state'));
+        set('serialNum',   p.get('serial'));
+        set('ticketNum',   p.get('ticket_num'));
+        // Pre-select manufacturer if provided
+        const mfg = p.get('mfg');
+        if (mfg) {
+            const mfgSel = document.getElementById('mfgSelect');
+            if (mfgSel) {
+                const match = Array.from(mfgSel.options).find(o =>
+                    o.value.toLowerCase() === mfg.toLowerCase() ||
+                    o.text.toLowerCase().includes(mfg.toLowerCase())
+                );
+                if (match) { mfgSel.value = match.value; onMfgChange(); }
+            }
+        }
+        // If report_id param present, load that specific report
+        const reportId = p.get('report_id');
+        if (reportId) {
+            // Wait for auth then load
+            supabaseClient.auth.getUser().then(({ data: { user } }) => {
+                if (user) loadReport(reportId);
+            });
+        }
+    })();
+</script>
+</body>
+</html>

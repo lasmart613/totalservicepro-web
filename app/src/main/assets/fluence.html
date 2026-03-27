@@ -3,195 +3,144 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fluence Calculator</title>
+    <title>Fluence Calculator · TSP</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const enc = new URLSearchParams(window.location.search).get('_s');
+                if (enc) { const s = JSON.parse(atob(enc)); if (s?.access_token) { _pendingSession = s; localStorage.setItem('tsp-auth-token', JSON.stringify({currentSession:s,expiresAt:s.expires_at})); const u=new URL(window.location.href); u.searchParams.delete('_s'); window.history.replaceState({},'',u.toString()); return; } }
+                const raw = localStorage.getItem('tsp-auth-token'); if (raw) { const p=JSON.parse(raw); const sess=p?.currentSession||(p?.access_token?p:null); if (sess?.access_token) _pendingSession=sess; }
+            } catch(e) {}
+        })();
+        const _sb = supabase.createClient('https://yljztfajyvjzqikxdddf.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',{auth:{persistSession:true,storageKey:'tsp-auth-token',storage:window.localStorage,autoRefreshToken:true,detectSessionInUrl:false}});
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #2c2c2c 0%, #1a1a1a 100%);
-            color: #ffffff;
-            padding: 20px;
-            min-height: 100vh;
-        }
-
-        .container {
-            max-width: 500px;
-            margin: 0 auto;
-        }
-
-        h1 {
-            color: #ffd700;
-            text-align: center;
-            margin-bottom: 10px;
-            font-size: 28px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .subtitle {
-            color: #aaaaaa;
-            text-align: center;
-            margin-bottom: 30px;
-            font-size: 14px;
-        }
-
-        .input-group {
-            background: rgba(255, 255, 255, 0.05);
-            border-radius: 15px;
-            padding: 20px;
-            margin-bottom: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
-
-        label {
-            display: block;
-            color: #ffd700;
-            font-weight: 600;
-            margin-bottom: 8px;
-            font-size: 14px;
-        }
-
-        input {
-            width: 100%;
-            padding: 15px;
-            background: rgba(255, 255, 255, 0.1);
-            border: 2px solid #ffd700;
-            border-radius: 10px;
-            color: #ffffff;
-            font-size: 16px;
-            transition: all 0.3s ease;
-        }
-
-        input:focus {
-            outline: none;
-            background: rgba(255, 255, 255, 0.15);
-            border-color: #ffed4e;
-            box-shadow: 0 0 10px rgba(255, 215, 0, 0.3);
-        }
-
-        button {
-            width: 100%;
-            padding: 18px;
-            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
-            border: none;
-            border-radius: 10px;
-            color: #1a1a1a;
-            font-size: 18px;
-            font-weight: 700;
-            cursor: pointer;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.2);
-            transition: all 0.3s ease;
-            margin-bottom: 20px;
-        }
-
-        button:active {
-            transform: translateY(2px);
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-        }
-
-        .result {
-            background: rgba(255, 215, 0, 0.1);
-            border: 2px solid #ffd700;
-            border-radius: 15px;
-            padding: 25px;
-            text-align: center;
-            margin-top: 20px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.3);
-        }
-
-        .result-label {
-            color: #ffd700;
-            font-size: 14px;
-            font-weight: 600;
-            margin-bottom: 10px;
-        }
-
-        .result-value {
-            color: #ffffff;
-            font-size: 32px;
-            font-weight: 700;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .unit {
-            color: #aaaaaa;
-            font-size: 18px;
-            margin-left: 8px;
-        }
-
-        .formula {
-            background: rgba(255, 255, 255, 0.05);
-            border-left: 4px solid #ffd700;
-            padding: 15px;
-            margin-top: 20px;
-            border-radius: 5px;
-            font-family: 'Courier New', monospace;
-            color: #aaaaaa;
-            font-size: 13px;
-        }
+        .calc-page { padding: 16px 16px 80px; max-width: 600px; margin: 0 auto; }
+        .result-card { background: var(--surface2); border: 2px solid var(--gold); border-radius: 16px; padding: 28px; text-align: center; margin: 20px 0; display: none; }
+        .result-label { font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px; }
+        .result-value { font-size: 56px; font-weight: 800; color: var(--gold); line-height: 1; }
+        .result-unit { font-size: 20px; color: var(--text3); margin-left: 4px; }
+        .result-detail { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; text-align: left; }
+        .result-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+        .result-row:last-child { border: none; }
+        .result-row-val { font-weight: 700; color: var(--text); }
+        .toggle-row { display: flex; gap: 8px; margin-bottom: 14px; }
+        .toggle-btn { flex: 1; padding: 9px; border-radius: 8px; border: 1px solid var(--border2); background: none; color: var(--text3); font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; transition: all 0.15s; }
+        .toggle-btn.active { background: rgba(251,191,36,0.1); border-color: var(--gold); color: var(--gold); }
+        .formula-box { background: var(--surface2); border-left: 3px solid var(--gold); border-radius: 0 8px 8px 0; padding: 14px 16px; margin-top: 20px; font-size: 12px; color: var(--text3); line-height: 1.8; font-family: 'Courier New', monospace; }
+        .bottom-nav { position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border2);display:flex;justify-content:space-around;padding:8px 0 max(8px,env(safe-area-inset-bottom));z-index:100; }
+        .bottom-nav-item { display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;color:var(--text3);cursor:pointer;font-family:inherit;min-width:56px;padding:4px;transition:color 0.15s; }
+        .bottom-nav-item:hover { color:var(--gold); }
+        .bottom-nav-item span:first-child { font-size:20px; }
+        .bottom-nav-item span:last-child { font-size:9px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <h1>⚡ Fluence Calculator</h1>
-        <p class="subtitle">Calculate energy density (J/cm²)</p>
-        
-        <div class="input-group">
-            <label for="energy">Energy (Joules):</label>
-            <input type="number" id="energy" step="0.01" placeholder="Enter energy in joules">
+
+<div class="header">
+    <button class="header-back" onclick="navTo('calculators_menu.html')">‹</button>
+    <div class="header-title">⚡ Fluence</div>
+    <div class="avatar-wrapper" id="avatarWrapper">
+        <button class="avatar-btn" onclick="toggleDropdown(event)"><img id="avatarImg" class="avatar-img" src="" alt=""/><div id="avatarInitials" class="avatar-initials">U</div></button>
+        <div class="avatar-dropdown" id="avatarDropdown">
+            <div class="dropdown-user-info"><div class="dropdown-user-name" id="dropdownName">User</div><div class="dropdown-user-email" id="dropdownEmail"></div></div>
+            <button class="dropdown-item" onclick="navTo('user_profile.html')"><span class="dropdown-icon">👤</span> Profile</button>
+            <button class="dropdown-item" onclick="navTo('settings.html')"><span class="dropdown-icon">⚙️</span> Settings</button>
+            <button class="dropdown-item" id="upgradeBtn" onclick="navTo('paywall.html')" style="display:none;color:var(--gold);"><span class="dropdown-icon">⭐</span> Upgrade</button>
+            <button class="dropdown-item danger" onclick="logoutUser()"><span class="dropdown-icon">🚪</span> Log Out</button>
         </div>
+    </div>
+</div>
 
-        <div class="input-group">
-            <label for="spotSize">Spot Size (mm):</label>
-            <input type="number" id="spotSize" step="0.1" placeholder="Enter spot size in mm">
+<div class="calc-page">
+    <div style="margin-bottom:20px;"><div style="font-size:20px;font-weight:800;">Fluence Calculator</div><div style="font-size:13px;color:var(--text3);margin-top:3px;">Energy density — J/cm²</div></div>
+
+    <div class="form-group">
+        <label>Beam Shape</label>
+        <div class="toggle-row">
+            <button class="toggle-btn active" id="btnCircular" onclick="setShape('circular')">Circular</button>
+            <button class="toggle-btn" id="btnRect" onclick="setShape('rectangular')">Rectangular</button>
         </div>
-
-        <button onclick="calculateFluence()">Calculate Fluence</button>
-
-        <div id="result" style="display: none;" class="result">
-            <div class="result-label">FLUENCE</div>
-            <div class="result-value">
-                <span id="fluenceValue">0</span>
-                <span class="unit">J/cm²</span>
+        <div id="circularInputs">
+            <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px;">Diameter (mm)</label>
+            <select class="form-select" id="diameter"></select>
+        </div>
+        <div id="rectInputs" style="display:none;">
+            <div class="toggle-row">
+                <button class="toggle-btn active" id="btnSquare" onclick="setRectType('square')">Square</button>
+                <button class="toggle-btn" id="btnRectType" onclick="setRectType('rectangular')">Rectangle</button>
             </div>
-        </div>
-
-        <div class="formula">
-            <strong style="color: #ffd700;">Formula:</strong><br>
-            Fluence (J/cm²) = Energy (J) / Area (cm²)<br>
-            Area = π × (spot_size/2)² / 100
+            <div id="squareInputs"><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px;">Side Length (mm)</label><select class="form-select" id="sideLength"></select></div>
+            <div id="rectDimInputs" style="display:none;">
+                <div class="form-row">
+                    <div><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px;">Length (mm)</label><select class="form-select" id="rectLength"></select></div>
+                    <div><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px;">Width (mm)</label><select class="form-select" id="rectWidth"></select></div>
+                </div>
+            </div>
         </div>
     </div>
 
-    <script>
-        function calculateFluence() {
-            const energy = parseFloat(document.getElementById('energy').value);
-            const spotSize = parseFloat(document.getElementById('spotSize').value);
+    <div class="form-group">
+        <label>Energy (Joules)</label>
+        <input type="number" class="form-input" id="energy" step="0.01" placeholder="e.g. 1.5" onkeypress="if(event.key==='Enter')calculateFluence()">
+    </div>
 
-            if (isNaN(energy) || isNaN(spotSize) || energy <= 0 || spotSize <= 0) {
-                alert('Please enter valid positive numbers for both fields');
-                return;
-            }
+    <button class="btn btn-gold" style="width:100%;padding:14px;font-size:16px;" onclick="calculateFluence()">Calculate Fluence</button>
 
-            const radiusCm = (spotSize / 2) / 10;
-            const areaCm2 = Math.PI * radiusCm * radiusCm;
-            const fluence = energy / areaCm2;
+    <div id="result" class="result-card">
+        <div class="result-label">Fluence</div>
+        <div><span class="result-value" id="fluenceValue">0</span><span class="result-unit">J/cm²</span></div>
+        <div class="result-detail" id="resultDetail"></div>
+    </div>
 
-            document.getElementById('fluenceValue').textContent = fluence.toFixed(2);
-            document.getElementById('result').style.display = 'block';
-        }
+    <div class="formula-box">
+        Fluence (J/cm²) = Energy (J) ÷ Area (cm²)<br>
+        Circular Area = π × (d÷2)² ÷ 100<br>
+        Square Area = s² ÷ 100<br>
+        Rect Area = L × W ÷ 100
+    </div>
+</div>
 
-        document.getElementById('energy').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') calculateFluence();
-        });
+<div class="bottom-nav">
+    <button class="bottom-nav-item" onclick="navTo('index.html')"><span>🏠</span><span>Home</span></button>
+    <button class="bottom-nav-item" onclick="navTo('calculators_menu.html')"><span>🔬</span><span>Calc</span></button>
+    <button class="bottom-nav-item" onclick="navTo('manual_library.html')"><span>📚</span><span>Manuals</span></button>
+    <button class="bottom-nav-item" onclick="navTo('ai_assistant.html')"><span>🤖</span><span>AI</span></button>
+</div>
 
-        document.getElementById('spotSize').addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') calculateFluence();
-        });
-    </script>
+<script>
+    // Populate dropdowns
+    const diamSel = document.getElementById('diameter');
+    for (let i=2;i<=30;i++){const o=document.createElement('option');o.value=i;o.textContent=i+' mm';if(i===15)o.selected=true;diamSel.appendChild(o);}
+    ['sideLength','rectLength','rectWidth'].forEach(id=>{const el=document.getElementById(id);if(!el)return;for(let i=2;i<=30;i++){const o=document.createElement('option');o.value=i;o.textContent=i+' mm';if(i===10)o.selected=true;el.appendChild(o);}});
+
+    let currentShape='circular', currentRectType='square';
+    function setShape(s){currentShape=s;document.getElementById('circularInputs').style.display=s==='circular'?'block':'none';document.getElementById('rectInputs').style.display=s==='rectangular'?'block':'none';document.getElementById('btnCircular').className='toggle-btn'+(s==='circular'?' active':'');document.getElementById('btnRect').className='toggle-btn'+(s==='rectangular'?' active':'');document.getElementById('result').style.display='none';}
+    function setRectType(t){currentRectType=t;document.getElementById('squareInputs').style.display=t==='square'?'block':'none';document.getElementById('rectDimInputs').style.display=t==='rectangular'?'block':'none';document.getElementById('btnSquare').className='toggle-btn'+(t==='square'?' active':'');document.getElementById('btnRectType').className='toggle-btn'+(t==='rectangular'?' active':'');document.getElementById('result').style.display='none';}
+    function getAreaCm2(){if(currentShape==='circular'){const d=parseFloat(document.getElementById('diameter').value||0);return Math.PI*Math.pow(d/2,2)/100;}else if(currentRectType==='square'){const s=parseFloat(document.getElementById('sideLength').value||0);return(s*s)/100;}else{const l=parseFloat(document.getElementById('rectLength').value||0),w=parseFloat(document.getElementById('rectWidth').value||0);return(l*w)/100;}}
+    function calculateFluence(){
+        const energy=parseFloat(document.getElementById('energy').value);
+        const area=getAreaCm2();
+        if(isNaN(energy)||energy<=0||area<=0){showToast('Enter valid positive values','error');return;}
+        const fluence=energy/area;
+        document.getElementById('fluenceValue').textContent=fluence.toFixed(2);
+        document.getElementById('resultDetail').innerHTML=`<div class="result-row"><span>Energy</span><span class="result-row-val">${energy} J</span></div><div class="result-row"><span>Spot Area</span><span class="result-row-val">${area.toFixed(4)} cm²</span></div><div class="result-row"><span>Fluence</span><span class="result-row-val">${fluence.toFixed(2)} J/cm²</span></div>`;
+        document.getElementById('result').style.display='block';
+    }
+
+    // Auth
+    async function navTo(page){try{const{data:{session}}=await _sb.auth.getSession();if(session?.access_token){const sep=page.includes('?')?'&':'?';window.location.href=page+sep+'_s='+btoa(JSON.stringify(session));return;}}catch(e){}window.location.href=page;}
+    function toggleDropdown(e){e.stopPropagation();document.getElementById('avatarDropdown').classList.toggle('open');}
+    document.addEventListener('click',()=>document.getElementById('avatarDropdown')?.classList.remove('open'));
+    async function logoutUser(){document.getElementById('avatarDropdown').classList.remove('open');await _sb.auth.signOut();updateAuthUI();try{if(typeof Android!=='undefined')Android.clearSession();}catch(e){}}
+    async function updateAuthUI(){const{data:{user}}=await _sb.auth.getUser();const aw=document.getElementById('avatarWrapper');if(user){if(aw)aw.style.display='block';const meta=user.user_metadata||{},fn=meta.first_name||'',ln=meta.last_name||'';document.getElementById('dropdownName').textContent=[fn,ln].filter(Boolean).join(' ')||'User';document.getElementById('dropdownEmail').textContent=user.email||'';const img=document.getElementById('avatarImg'),ini=document.getElementById('avatarInitials'),photo=meta.avatar_url||meta.picture||'';if(photo){img.src=photo;img.style.display='block';ini.style.display='none';}else{img.style.display='none';ini.style.display='flex';ini.textContent=((fn[0]||'')+(ln[0]||'')).toUpperCase()||user.email[0].toUpperCase();}}else{if(aw)aw.style.display='none';}}
+    function showToast(msg,type=''){let el=document.getElementById('_toast');if(!el){el=document.createElement('div');el.id='_toast';el.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:#1a1a1a;border:1px solid #FBBF24;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:600;z-index:9999;transition:all 0.3s;white-space:nowrap;opacity:0;';document.body.appendChild(el);}if(type==='error')el.style.borderColor='#ef4444';else el.style.borderColor='#FBBF24';el.textContent=msg;el.style.opacity='1';el.style.transform='translateX(-50%) translateY(0)';clearTimeout(el._t);el._t=setTimeout(()=>{el.style.opacity='0';el.style.transform='translateX(-50%) translateY(20px)';},3000);}
+    _sb.auth.onAuthStateChange((event,session)=>{updateAuthUI();try{if(typeof Android!=='undefined'){if(session?.access_token)Android.saveSession(JSON.stringify(session));else if(event==='SIGNED_OUT'&&!session)Android.clearSession();}}catch(e){}});
+    if(_pendingSession){const ps=_pendingSession;_pendingSession=null;_sb.auth.setSession({access_token:ps.access_token,refresh_token:ps.refresh_token}).then(({data})=>{updateAuthUI();try{if(typeof Android!=='undefined'&&data.session)Android.saveSession(JSON.stringify(data.session));}catch(e){}});}else{updateAuthUI();}
+</script>
 </body>
 </html>

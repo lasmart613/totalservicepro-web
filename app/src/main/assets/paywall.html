@@ -3,6 +3,19 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <!-- Session boot -->
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const enc = new URLSearchParams(window.location.search).get('_s');
+                if (enc) { const s=JSON.parse(atob(enc)); if(s?.access_token){_pendingSession=s;localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));return;} }
+                const raw=localStorage.getItem('tsp-auth-token'); if(raw){const p=JSON.parse(raw);const sess=p?.currentSession||(p?.access_token?p:null);if(sess?.access_token)_pendingSession=sess;}
+            } catch(e) {}
+        })();
+        function restoreSession(jsonStr){try{const parsed=typeof jsonStr==='string'?JSON.parse(jsonStr):jsonStr;const session=parsed?.currentSession||parsed;if(session?.access_token){localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:session,expiresAt:session.expires_at}));if(typeof supabaseClient!=='undefined'){supabaseClient.auth.setSession({access_token:session.access_token,refresh_token:session.refresh_token});}}}catch(e){}}
+    </script>
+
     <title>Upgrade — Total Service Pro</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet">
@@ -324,6 +337,8 @@
             to   { opacity: 1; transform: translateY(0); }
         }
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
 </head>
 <body>
 

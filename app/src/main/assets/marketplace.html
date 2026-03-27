@@ -11,7 +11,7 @@
     <title>Parts Marketplace — TSP</title>
     <style>
         *{margin:0;padding:0;box-sizing:border-box}
-        :root{--gold:#FBBF24;--bg:#000;--s1:#0d0d0d;--s2:#151515;--s3:#1a1a1a;--s4:#222;--bdr:#1f1f1f;--bdr-g:rgba(251,191,36,0.15);--txt:#fff;--txt2:#ccc;--txt3:#888;--red:#ef4444;--grn:#22c55e;--blu:#3b82f6}
+        :root{--gold:#FBBF24;--bg:#111;--s1:#0d0d0d;--s2:#151515;--s3:#1a1a1a;--s4:#222;--bdr:#1f1f1f;--bdr-g:rgba(251,191,36,0.15);--txt:#fff;--txt2:#ccc;--txt3:#888;--red:#ef4444;--grn:#22c55e;--blu:#3b82f6}
         body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--txt);min-height:100vh}
 
         .header{background:var(--s1);padding:14px 16px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid var(--gold);position:sticky;top:0;z-index:100}
@@ -125,6 +125,8 @@
         /* Unread badge on messages btn */
         .msg-badge{position:absolute;top:-4px;right:-4px;width:18px;height:18px;border-radius:50%;background:var(--red);color:#fff;font-size:10px;font-weight:700;display:none;align-items:center;justify-content:center}
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
 </head>
 <body>
 
@@ -269,302 +271,302 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-const SB_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
-const supabaseClient = supabase.createClient(SB_URL,
-    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
-    { auth: { persistSession:true, storageKey:'tsp-auth-token', storage:window.localStorage, autoRefreshToken:true, detectSessionInUrl:false } }
-);
+    const SB_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
+    const supabaseClient = supabase.createClient(SB_URL,
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+        { auth: { persistSession:true, storageKey:'tsp-auth-token', storage:window.localStorage, autoRefreshToken:true, detectSessionInUrl:false } }
+    );
 
-let currentUser = null;
-let listings = [];
-let filterCat = 'all';
-let filterCond = 'all';
-let showingMine = false;
-let uploadedPhotos = []; // { file, preview }
-let searchTimer = null;
+    let currentUser = null;
+    let listings = [];
+    let filterCat = 'all';
+    let filterCond = 'all';
+    let showingMine = false;
+    let uploadedPhotos = []; // { file, preview }
+    let searchTimer = null;
 
-/* ── LOAD LISTINGS ── */
-async function loadListings() {
-    let query = supabaseClient
-        .from('marketplace_listings')
-        .select('*')
-        .order('created_at', { ascending: false });
+    /* ── LOAD LISTINGS ── */
+    async function loadListings() {
+        let query = supabaseClient
+            .from('marketplace_listings')
+            .select('*')
+            .order('created_at', { ascending: false });
 
-    if (showingMine && currentUser) {
-        query = query.eq('seller_id', currentUser.id);
-    } else {
-        query = query.eq('status', 'active');
-    }
-    if (filterCat !== 'all') query = query.eq('category', filterCat);
-    if (filterCond !== 'all') query = query.eq('condition', filterCond);
+        if (showingMine && currentUser) {
+            query = query.eq('seller_id', currentUser.id);
+        } else {
+            query = query.eq('status', 'active');
+        }
+        if (filterCat !== 'all') query = query.eq('category', filterCat);
+        if (filterCond !== 'all') query = query.eq('condition', filterCond);
 
-    const searchVal = document.getElementById('searchInput').value.trim();
-    if (searchVal) {
-        query = query.or(`title.ilike.%${searchVal}%,manufacturer.ilike.%${searchVal}%,model.ilike.%${searchVal}%,part_number.ilike.%${searchVal}%,description.ilike.%${searchVal}%`);
-    }
-
-    const { data, error } = await query.limit(50);
-    if (error) { console.log('TSP: listings error:', error.message); return; }
-    listings = data || [];
-    renderListings();
-}
-
-function renderListings() {
-    const container = document.getElementById('listingsContainer');
-    const empty = document.getElementById('emptyState');
-    if (!listings.length) {
-        container.innerHTML = '';
-        empty.style.display = 'block';
-        return;
-    }
-    empty.style.display = 'none';
-    container.innerHTML = listings.map(l => {
-        const photos = l.photos || [];
-        const firstPhoto = photos.length ? getPublicUrl(photos[0]) : '';
-        const price = l.price_type === 'contact' ? 'Contact' : l.price ? `$${Number(l.price).toLocaleString()}` : 'Free';
-        const obo = l.price_type === 'obo' ? ' OBO' : '';
-        const loc = [l.city, l.state].filter(Boolean).join(', ');
-        const age = timeAgo(l.created_at);
-        return `
-            <div class="listing-card" onclick="viewListing('${l.id}')">
-                <div class="listing-img">
-                    ${firstPhoto ? `<img src="${firstPhoto}" alt="" loading="lazy">` : '<div class="no-img">📦</div>'}
-                </div>
-                <div class="listing-body">
-                    <div class="listing-price">${price}${obo}</div>
-                    <div class="listing-title">${esc(l.title)}</div>
-                    <div class="listing-meta">
-                        <span class="listing-badge badge-${l.condition}">${l.condition.replace('_',' ')}</span>
-                        ${l.manufacturer ? `· ${esc(l.manufacturer)}` : ''}
-                    </div>
-                    <div class="listing-meta">${loc ? loc + ' · ' : ''}${age}</div>
-                </div>
-            </div>`;
-    }).join('');
-}
-
-function getPublicUrl(path) {
-    if (!path) return '';
-    if (path.startsWith('http')) return path;
-    return `${SB_URL}/storage/v1/object/public/marketplace-images/${path}`;
-}
-
-/* ── FILTERS ── */
-function setCategory(cat, btn) {
-    filterCat = cat;
-    document.querySelectorAll('#categoryFilters .filter-pill').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    loadListings();
-}
-function setCondition(cond, btn) {
-    filterCond = cond;
-    document.querySelectorAll('#conditionFilters .filter-pill').forEach(p => p.classList.remove('active'));
-    btn.classList.add('active');
-    loadListings();
-}
-function toggleMyListings() {
-    showingMine = !showingMine;
-    document.getElementById('myListingsBtn').classList.toggle('active', showingMine);
-    loadListings();
-}
-function debouncedSearch() {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(loadListings, 400);
-}
-
-/* ── VIEW LISTING ── */
-function viewListing(id) {
-    navTo('marketplace_listing.html?id=' + id);
-}
-
-/* ── CREATE LISTING ── */
-function openCreate() {
-    if (!currentUser) { showToast('Sign in to create a listing', 'error'); return; }
-    document.getElementById('createModal').classList.add('open');
-    uploadedPhotos = [];
-    renderPhotoSlots();
-}
-function closeCreate() {
-    document.getElementById('createModal').classList.remove('open');
-}
-
-function renderPhotoSlots() {
-    const container = document.getElementById('photoSlots');
-    let html = '';
-    uploadedPhotos.forEach((p, i) => {
-        html += `<div class="photo-slot">
-            <img src="${p.preview}">
-            <button class="remove" onclick="removePhoto(${i})" title="Remove">×</button>
-        </div>`;
-    });
-    if (uploadedPhotos.length < 6) {
-        html += `<div class="photo-slot" onclick="document.getElementById('photoInput').click()"><span class="add">+</span></div>`;
-    }
-    container.innerHTML = html;
-}
-function handlePhotos(e) {
-    const files = Array.from(e.target.files);
-    const remaining = 6 - uploadedPhotos.length;
-    files.slice(0, remaining).forEach(file => {
-        const reader = new FileReader();
-        reader.onload = ev => {
-            uploadedPhotos.push({ file, preview: ev.target.result });
-            renderPhotoSlots();
-        };
-        reader.readAsDataURL(file);
-    });
-    e.target.value = '';
-}
-function removePhoto(i) {
-    uploadedPhotos.splice(i, 1);
-    renderPhotoSlots();
-}
-
-async function submitListing() {
-    const title = document.getElementById('c_title').value.trim();
-    if (!title) { showToast('Title is required', 'error'); return; }
-
-    const btn = document.getElementById('btnPost');
-    btn.disabled = true;
-    btn.textContent = 'Uploading...';
-
-    try {
-        // Upload photos
-        const photoPaths = [];
-        for (const p of uploadedPhotos) {
-            const ext = p.file.name.split('.').pop();
-            const path = `${currentUser.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
-            const { error } = await supabaseClient.storage.from('marketplace-images').upload(path, p.file, { cacheControl: '3600', upsert: false });
-            if (error) { console.log('TSP: upload error:', error.message); continue; }
-            photoPaths.push(path);
+        const searchVal = document.getElementById('searchInput').value.trim();
+        if (searchVal) {
+            query = query.or(`title.ilike.%${searchVal}%,manufacturer.ilike.%${searchVal}%,model.ilike.%${searchVal}%,part_number.ilike.%${searchVal}%,description.ilike.%${searchVal}%`);
         }
 
-        btn.textContent = 'Posting...';
+        const { data, error } = await query.limit(50);
+        if (error) { console.log('TSP: listings error:', error.message); return; }
+        listings = data || [];
+        renderListings();
+    }
 
-        const listing = {
-            seller_id: currentUser.id,
-            title,
-            category: document.getElementById('c_category').value,
-            condition: document.getElementById('c_condition').value,
-            manufacturer: document.getElementById('c_mfg').value.trim() || null,
-            model: document.getElementById('c_model').value.trim() || null,
-            part_number: document.getElementById('c_partnum').value.trim() || null,
-            serial_number: document.getElementById('c_serial').value.trim() || null,
-            price: parseFloat(document.getElementById('c_price').value) || null,
-            price_type: document.getElementById('c_pricetype').value,
-            city: document.getElementById('c_city').value.trim() || null,
-            state: document.getElementById('c_state').value.trim().toUpperCase() || null,
-            description: document.getElementById('c_desc').value.trim() || null,
-            photos: photoPaths,
-            status: 'active'
-        };
+    function renderListings() {
+        const container = document.getElementById('listingsContainer');
+        const empty = document.getElementById('emptyState');
+        if (!listings.length) {
+            container.innerHTML = '';
+            empty.style.display = 'block';
+            return;
+        }
+        empty.style.display = 'none';
+        container.innerHTML = listings.map(l => {
+            const photos = l.photos || [];
+            const firstPhoto = photos.length ? getPublicUrl(photos[0]) : '';
+            const price = l.price_type === 'contact' ? 'Contact' : l.price ? `$${Number(l.price).toLocaleString()}` : 'Free';
+            const obo = l.price_type === 'obo' ? ' OBO' : '';
+            const loc = [l.city, l.state].filter(Boolean).join(', ');
+            const age = timeAgo(l.created_at);
+            return `
+                <div class="listing-card" onclick="viewListing('${l.id}')">
+                    <div class="listing-img">
+                        ${firstPhoto ? `<img src="${firstPhoto}" alt="" loading="lazy">` : '<div class="no-img">📦</div>'}
+                    </div>
+                    <div class="listing-body">
+                        <div class="listing-price">${price}${obo}</div>
+                        <div class="listing-title">${esc(l.title)}</div>
+                        <div class="listing-meta">
+                            <span class="listing-badge badge-${l.condition}">${l.condition.replace('_',' ')}</span>
+                            ${l.manufacturer ? `· ${esc(l.manufacturer)}` : ''}
+                        </div>
+                        <div class="listing-meta">${loc ? loc + ' · ' : ''}${age}</div>
+                    </div>
+                </div>`;
+        }).join('');
+    }
 
-        const { error } = await supabaseClient.from('marketplace_listings').insert(listing);
-        if (error) throw error;
+    function getPublicUrl(path) {
+        if (!path) return '';
+        if (path.startsWith('http')) return path;
+        return `${SB_URL}/storage/v1/object/public/marketplace-images/${path}`;
+    }
 
-        showToast('Listing posted!', 'success');
-        closeCreate();
-        // Clear form
-        ['c_title','c_mfg','c_model','c_partnum','c_serial','c_price','c_city','c_state','c_desc'].forEach(id => document.getElementById(id).value = '');
-        uploadedPhotos = [];
+    /* ── FILTERS ── */
+    function setCategory(cat, btn) {
+        filterCat = cat;
+        document.querySelectorAll('#categoryFilters .filter-pill').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
         loadListings();
-    } catch (e) {
-        showToast('Error: ' + (e.message || 'Post failed'), 'error');
-    } finally {
-        btn.disabled = false;
-        btn.textContent = 'Post Listing';
     }
-}
+    function setCondition(cond, btn) {
+        filterCond = cond;
+        document.querySelectorAll('#conditionFilters .filter-pill').forEach(p => p.classList.remove('active'));
+        btn.classList.add('active');
+        loadListings();
+    }
+    function toggleMyListings() {
+        showingMine = !showingMine;
+        document.getElementById('myListingsBtn').classList.toggle('active', showingMine);
+        loadListings();
+    }
+    function debouncedSearch() {
+        clearTimeout(searchTimer);
+        searchTimer = setTimeout(loadListings, 400);
+    }
 
-/* ── UNREAD MESSAGES BADGE ── */
-async function checkUnread() {
-    if (!currentUser) return;
-    const { data } = await supabaseClient
-        .from('marketplace_conversations')
-        .select('buyer_unread, seller_unread, buyer_id, seller_id')
-        .or(`buyer_id.eq.${currentUser.id},seller_id.eq.${currentUser.id}`);
-    if (!data) return;
-    let total = 0;
-    data.forEach(c => {
-        if (c.buyer_id === currentUser.id) total += (c.buyer_unread || 0);
-        if (c.seller_id === currentUser.id) total += (c.seller_unread || 0);
+    /* ── VIEW LISTING ── */
+    function viewListing(id) {
+        navTo('marketplace_listing.html?id=' + id);
+    }
+
+    /* ── CREATE LISTING ── */
+    function openCreate() {
+        if (!currentUser) { showToast('Sign in to create a listing', 'error'); return; }
+        document.getElementById('createModal').classList.add('open');
+        uploadedPhotos = [];
+        renderPhotoSlots();
+    }
+    function closeCreate() {
+        document.getElementById('createModal').classList.remove('open');
+    }
+
+    function renderPhotoSlots() {
+        const container = document.getElementById('photoSlots');
+        let html = '';
+        uploadedPhotos.forEach((p, i) => {
+            html += `<div class="photo-slot">
+                <img src="${p.preview}">
+                <button class="remove" onclick="removePhoto(${i})" title="Remove">×</button>
+            </div>`;
+        });
+        if (uploadedPhotos.length < 6) {
+            html += `<div class="photo-slot" onclick="document.getElementById('photoInput').click()"><span class="add">+</span></div>`;
+        }
+        container.innerHTML = html;
+    }
+    function handlePhotos(e) {
+        const files = Array.from(e.target.files);
+        const remaining = 6 - uploadedPhotos.length;
+        files.slice(0, remaining).forEach(file => {
+            const reader = new FileReader();
+            reader.onload = ev => {
+                uploadedPhotos.push({ file, preview: ev.target.result });
+                renderPhotoSlots();
+            };
+            reader.readAsDataURL(file);
+        });
+        e.target.value = '';
+    }
+    function removePhoto(i) {
+        uploadedPhotos.splice(i, 1);
+        renderPhotoSlots();
+    }
+
+    async function submitListing() {
+        const title = document.getElementById('c_title').value.trim();
+        if (!title) { showToast('Title is required', 'error'); return; }
+
+        const btn = document.getElementById('btnPost');
+        btn.disabled = true;
+        btn.textContent = 'Uploading...';
+
+        try {
+            // Upload photos
+            const photoPaths = [];
+            for (const p of uploadedPhotos) {
+                const ext = p.file.name.split('.').pop();
+                const path = `${currentUser.id}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`;
+                const { error } = await supabaseClient.storage.from('marketplace-images').upload(path, p.file, { cacheControl: '3600', upsert: false });
+                if (error) { console.log('TSP: upload error:', error.message); continue; }
+                photoPaths.push(path);
+            }
+
+            btn.textContent = 'Posting...';
+
+            const listing = {
+                seller_id: currentUser.id,
+                title,
+                category: document.getElementById('c_category').value,
+                condition: document.getElementById('c_condition').value,
+                manufacturer: document.getElementById('c_mfg').value.trim() || null,
+                model: document.getElementById('c_model').value.trim() || null,
+                part_number: document.getElementById('c_partnum').value.trim() || null,
+                serial_number: document.getElementById('c_serial').value.trim() || null,
+                price: parseFloat(document.getElementById('c_price').value) || null,
+                price_type: document.getElementById('c_pricetype').value,
+                city: document.getElementById('c_city').value.trim() || null,
+                state: document.getElementById('c_state').value.trim().toUpperCase() || null,
+                description: document.getElementById('c_desc').value.trim() || null,
+                photos: photoPaths,
+                status: 'active'
+            };
+
+            const { error } = await supabaseClient.from('marketplace_listings').insert(listing);
+            if (error) throw error;
+
+            showToast('Listing posted!', 'success');
+            closeCreate();
+            // Clear form
+            ['c_title','c_mfg','c_model','c_partnum','c_serial','c_price','c_city','c_state','c_desc'].forEach(id => document.getElementById(id).value = '');
+            uploadedPhotos = [];
+            loadListings();
+        } catch (e) {
+            showToast('Error: ' + (e.message || 'Post failed'), 'error');
+        } finally {
+            btn.disabled = false;
+            btn.textContent = 'Post Listing';
+        }
+    }
+
+    /* ── UNREAD MESSAGES BADGE ── */
+    async function checkUnread() {
+        if (!currentUser) return;
+        const { data } = await supabaseClient
+            .from('marketplace_conversations')
+            .select('buyer_unread, seller_unread, buyer_id, seller_id')
+            .or(`buyer_id.eq.${currentUser.id},seller_id.eq.${currentUser.id}`);
+        if (!data) return;
+        let total = 0;
+        data.forEach(c => {
+            if (c.buyer_id === currentUser.id) total += (c.buyer_unread || 0);
+            if (c.seller_id === currentUser.id) total += (c.seller_unread || 0);
+        });
+        const badge = document.getElementById('msgBadge');
+        if (total > 0) { badge.textContent = total > 9 ? '9+' : total; badge.style.display = 'flex'; }
+        else { badge.style.display = 'none'; }
+    }
+
+    /* ── HELPERS ── */
+    function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
+    function timeAgo(iso) {
+        if (!iso) return '';
+        const d = Date.now() - new Date(iso).getTime();
+        const m = Math.floor(d/60000);
+        if (m < 1) return 'just now'; if (m < 60) return m + 'm ago';
+        const h = Math.floor(m/60); if (h < 24) return h + 'h ago';
+        const days = Math.floor(h/24);
+        if (days === 1) return 'yesterday'; if (days < 7) return days + 'd ago';
+        return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+    function showToast(msg, type) {
+        const t = document.getElementById('toast');
+        t.textContent = msg; t.className = 'toast ' + type + ' show';
+        setTimeout(() => t.classList.remove('show'), 3000);
+    }
+    function goBack() {
+        try { if (typeof Android !== 'undefined') { Android.goBack(); return; } } catch(e) {}
+        if (document.referrer) window.history.back(); else navTo('index.html');
+    }
+
+    /* ── NAV & AUTH ── */
+    async function navTo(page) {
+        try { const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session && session.access_token) { window.location.href = page + (page.includes('?') ? '&' : '?') + '_s=' + btoa(JSON.stringify(session)); return; }
+        } catch(e) {}
+        window.location.href = page;
+    }
+    function toggleDropdown(e) { e.stopPropagation(); document.getElementById('avatarDropdown').classList.toggle('open'); }
+    document.addEventListener('click', () => document.getElementById('avatarDropdown').classList.remove('open'));
+    async function logoutUser() {
+        document.getElementById('avatarDropdown').classList.remove('open');
+        await supabaseClient.auth.signOut();
+        try { if (typeof Android !== 'undefined') Android.clearSession(); } catch(e) {}
+        currentUser = null; updateAuthUI();
+    }
+
+    supabaseClient.auth.onAuthStateChange(function(ev, session) {
+        if (_pendingSession) {
+            var _ps = _pendingSession; _pendingSession = null;
+            supabaseClient.auth.setSession({ access_token: _ps.access_token, refresh_token: _ps.refresh_token })
+                .then(r => { if (!r.error && typeof Android !== 'undefined' && r.data.session) try { Android.saveSession(JSON.stringify(r.data.session)); } catch(e) {} updateAuthUI(); loadListings(); checkUnread(); });
+            return;
+        }
+        if (_sessionRestored) { _sessionRestored = false; return; }
+        updateAuthUI(); loadListings(); checkUnread();
+        try { if (typeof Android !== 'undefined') { if (session?.access_token) Android.saveSession(JSON.stringify(session)); else if (ev === 'SIGNED_OUT' && !session) Android.clearSession(); } } catch(e) {}
     });
-    const badge = document.getElementById('msgBadge');
-    if (total > 0) { badge.textContent = total > 9 ? '9+' : total; badge.style.display = 'flex'; }
-    else { badge.style.display = 'none'; }
-}
 
-/* ── HELPERS ── */
-function esc(s) { if (!s) return ''; const d = document.createElement('div'); d.textContent = s; return d.innerHTML; }
-function timeAgo(iso) {
-    if (!iso) return '';
-    const d = Date.now() - new Date(iso).getTime();
-    const m = Math.floor(d/60000);
-    if (m < 1) return 'just now'; if (m < 60) return m + 'm ago';
-    const h = Math.floor(m/60); if (h < 24) return h + 'h ago';
-    const days = Math.floor(h/24);
-    if (days === 1) return 'yesterday'; if (days < 7) return days + 'd ago';
-    return new Date(iso).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-}
-function showToast(msg, type) {
-    const t = document.getElementById('toast');
-    t.textContent = msg; t.className = 'toast ' + type + ' show';
-    setTimeout(() => t.classList.remove('show'), 3000);
-}
-function goBack() {
-    try { if (typeof Android !== 'undefined') { Android.goBack(); return; } } catch(e) {}
-    if (document.referrer) window.history.back(); else navTo('index.html');
-}
-
-/* ── NAV & AUTH ── */
-async function navTo(page) {
-    try { const { data: { session } } = await supabaseClient.auth.getSession();
-        if (session && session.access_token) { window.location.href = page + (page.includes('?') ? '&' : '?') + '_s=' + btoa(JSON.stringify(session)); return; }
-    } catch(e) {}
-    window.location.href = page;
-}
-function toggleDropdown(e) { e.stopPropagation(); document.getElementById('avatarDropdown').classList.toggle('open'); }
-document.addEventListener('click', () => document.getElementById('avatarDropdown').classList.remove('open'));
-async function logoutUser() {
-    document.getElementById('avatarDropdown').classList.remove('open');
-    await supabaseClient.auth.signOut();
-    try { if (typeof Android !== 'undefined') Android.clearSession(); } catch(e) {}
-    currentUser = null; updateAuthUI();
-}
-
-supabaseClient.auth.onAuthStateChange(function(ev, session) {
-    if (_pendingSession) {
-        var _ps = _pendingSession; _pendingSession = null;
-        supabaseClient.auth.setSession({ access_token: _ps.access_token, refresh_token: _ps.refresh_token })
-            .then(r => { if (!r.error && typeof Android !== 'undefined' && r.data.session) try { Android.saveSession(JSON.stringify(r.data.session)); } catch(e) {} updateAuthUI(); loadListings(); checkUnread(); });
-        return;
+    async function updateAuthUI() {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        currentUser = user;
+        const loginBtn = document.getElementById('loginBtn');
+        const wrap = document.getElementById('avatarWrapper');
+        if (user) {
+            loginBtn.style.display = 'none'; wrap.style.display = 'block';
+            const meta = user.user_metadata || {};
+            const fn = meta.first_name || '', ln = meta.last_name || '';
+            const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || (user.email||'U')[0].toUpperCase();
+            document.getElementById('dropdownName').textContent = [fn, ln].filter(Boolean).join(' ') || 'User';
+            document.getElementById('dropdownEmail').textContent = user.email || '';
+            const photo = meta.avatar_url || meta.picture || '';
+            if (photo) { document.getElementById('avatarImg').src = photo; document.getElementById('avatarImg').style.display = 'block'; document.getElementById('avatarInitials').style.display = 'none'; }
+            else { document.getElementById('avatarImg').style.display = 'none'; document.getElementById('avatarInitials').style.display = 'flex'; document.getElementById('avatarInitials').textContent = initials; }
+        } else {
+            loginBtn.style.display = 'block'; wrap.style.display = 'none';
+        }
     }
-    if (_sessionRestored) { _sessionRestored = false; return; }
-    updateAuthUI(); loadListings(); checkUnread();
-    try { if (typeof Android !== 'undefined') { if (session?.access_token) Android.saveSession(JSON.stringify(session)); else if (ev === 'SIGNED_OUT') Android.clearSession(); } } catch(e) {}
-});
-
-async function updateAuthUI() {
-    const { data: { user } } = await supabaseClient.auth.getUser();
-    currentUser = user;
-    const loginBtn = document.getElementById('loginBtn');
-    const wrap = document.getElementById('avatarWrapper');
-    if (user) {
-        loginBtn.style.display = 'none'; wrap.style.display = 'block';
-        const meta = user.user_metadata || {};
-        const fn = meta.first_name || '', ln = meta.last_name || '';
-        const initials = ((fn[0]||'') + (ln[0]||'')).toUpperCase() || (user.email||'U')[0].toUpperCase();
-        document.getElementById('dropdownName').textContent = [fn, ln].filter(Boolean).join(' ') || 'User';
-        document.getElementById('dropdownEmail').textContent = user.email || '';
-        const photo = meta.avatar_url || meta.picture || '';
-        if (photo) { document.getElementById('avatarImg').src = photo; document.getElementById('avatarImg').style.display = 'block'; document.getElementById('avatarInitials').style.display = 'none'; }
-        else { document.getElementById('avatarImg').style.display = 'none'; document.getElementById('avatarInitials').style.display = 'flex'; document.getElementById('avatarInitials').textContent = initials; }
-    } else {
-        loginBtn.style.display = 'block'; wrap.style.display = 'none';
-    }
-}
-updateAuthUI();
-loadListings();
+    updateAuthUI();
+    loadListings();
 </script>
 </body>
 </html>

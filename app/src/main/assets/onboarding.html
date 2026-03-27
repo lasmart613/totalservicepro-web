@@ -1,0 +1,439 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Welcome · Total Service Pro</title>
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const enc = new URLSearchParams(window.location.search).get('_s');
+                if (enc) { const s=JSON.parse(atob(enc)); if(s?.access_token){_pendingSession=s;localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));const u=new URL(window.location.href);u.searchParams.delete('_s');window.history.replaceState({},'',u.toString());return;} }
+                const raw=localStorage.getItem('tsp-auth-token'); if(raw){const p=JSON.parse(raw);const sess=p?.currentSession||(p?.access_token?p:null);if(sess?.access_token)_pendingSession=sess;}
+            } catch(e) {}
+        })();
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        var supabaseClient = supabase.createClient(
+            'https://yljztfajyvjzqikxdddf.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+            { auth: { persistSession:true, storageKey:'tsp-auth-token', storage:window.localStorage, autoRefreshToken:true, detectSessionInUrl:false } }
+        );
+        // _pendingSession will be applied in init() with proper await
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
+    <style>
+        body { min-height: 100vh; display: flex; flex-direction: column; }
+
+        .ob-header {
+            background: var(--surface); border-bottom: 1px solid var(--border2);
+            padding: 16px 20px; display: flex; align-items: center; justify-content: space-between;
+        }
+        .ob-logo { font-size: 18px; font-weight: 800; color: var(--gold); }
+        .ob-step-text { font-size: 12px; color: var(--text3); font-weight: 600; }
+
+        .progress-bar { height: 3px; background: var(--border2); }
+        .progress-fill { height: 100%; background: var(--gold); transition: width 0.4s ease; }
+
+        .ob-body { flex: 1; padding: 28px 20px 100px; max-width: 520px; margin: 0 auto; width: 100%; }
+
+        .step { display: none; }
+        .step.active { display: block; }
+
+        .step-icon { font-size: 48px; margin-bottom: 16px; }
+        .step-title { font-size: 24px; font-weight: 800; color: var(--text); margin-bottom: 8px; }
+        .step-sub { font-size: 14px; color: var(--text3); line-height: 1.6; margin-bottom: 28px; }
+
+        /* Logo upload */
+        .logo-upload-area {
+            border: 2px dashed var(--border2); border-radius: 12px;
+            padding: 32px 20px; text-align: center; cursor: pointer;
+            transition: all 0.2s; margin-bottom: 16px;
+        }
+        .logo-upload-area:hover { border-color: var(--gold-border); background: var(--gold-glow); }
+        .logo-upload-area.has-logo { border-color: var(--gold); border-style: solid; padding: 16px; }
+        .logo-preview { max-width: 200px; max-height: 80px; object-fit: contain; display: none; margin: 0 auto; }
+        .logo-placeholder { color: var(--text3); font-size: 13px; }
+        .logo-placeholder-icon { font-size: 32px; margin-bottom: 8px; }
+        .logo-hint { font-size: 11px; color: var(--text3); margin-top: 4px; }
+
+        /* Bottom action bar */
+        .ob-footer {
+            position: fixed; bottom: 0; left: 0; right: 0;
+            background: var(--surface); border-top: 1px solid var(--border2);
+            padding: 14px 20px max(14px, env(safe-area-inset-bottom));
+            display: flex; gap: 10px;
+        }
+        .ob-back { flex: 1; padding: 14px; border-radius: 10px; border: 1px solid var(--border2); background: none; color: var(--text2); font-family: inherit; font-size: 15px; font-weight: 700; cursor: pointer; }
+        .ob-next { flex: 2; padding: 14px; border-radius: 10px; border: none; background: var(--gold); color: #111; font-family: inherit; font-size: 15px; font-weight: 800; cursor: pointer; transition: background 0.15s; }
+        .ob-next:disabled { opacity: 0.4; cursor: not-allowed; }
+        .ob-next:active { background: var(--gold-dim); }
+
+        .skip-link { text-align: center; margin-top: 16px; }
+        .skip-link button { background: none; border: none; color: var(--text3); font-family: inherit; font-size: 13px; cursor: pointer; text-decoration: underline; }
+
+        /* Specialties chips */
+        .chips-wrap { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 4px; }
+        .spec-chip { padding: 8px 14px; background: var(--surface3); border: 1px solid var(--border2); border-radius: 20px; font-size: 13px; font-weight: 600; color: var(--text2); cursor: pointer; font-family: inherit; transition: all 0.15s; }
+        .spec-chip.selected { background: var(--gold-glow); border-color: var(--gold); color: var(--gold); }
+
+        /* Completion screen */
+        .complete-screen { text-align: center; padding: 40px 20px; }
+        .complete-icon { font-size: 80px; margin-bottom: 20px; }
+        .complete-title { font-size: 28px; font-weight: 800; color: var(--gold); margin-bottom: 12px; }
+        .complete-sub { font-size: 15px; color: var(--text2); line-height: 1.6; margin-bottom: 32px; }
+    </style>
+</head>
+<body>
+
+<div class="ob-header">
+    <div class="ob-logo">Total Service Pro</div>
+    <div class="ob-step-text" id="stepText">Step 1 of 5</div>
+</div>
+<div class="progress-bar"><div class="progress-fill" id="progressFill" style="width:20%"></div></div>
+
+<div class="ob-body">
+
+    <!-- Step 1: Welcome -->
+    <div class="step active" id="step1">
+        <div class="step-icon">👋</div>
+        <div class="step-title">Welcome to Total Service Pro</div>
+        <div class="step-sub">Let's get your account set up in just a few steps. This helps personalize the app and pre-fill your service reports.</div>
+        <div class="form-group"><label>First Name *</label><input type="text" class="form-input" id="firstName" placeholder="e.g. Larry" autocomplete="given-name"></div>
+        <div class="form-group"><label>Last Name *</label><input type="text" class="form-input" id="lastName" placeholder="e.g. Smart" autocomplete="family-name"></div>
+        <div class="form-group"><label>Job Title</label><input type="text" class="form-input" id="jobTitle" placeholder="e.g. Laser Service Engineer"></div>
+        <div class="form-group"><label>Mobile Phone</label><input type="tel" class="form-input" id="techPhone" placeholder="+1 555-000-0000" autocomplete="tel"></div>
+    </div>
+
+    <!-- Step 2: Company Info -->
+    <div class="step" id="step2">
+        <div class="step-icon">🏢</div>
+        <div class="step-title">Your Company</div>
+        <div class="step-sub">This appears on your service reports and customer-facing documents.</div>
+        <div class="form-group"><label>Company Name *</label><input type="text" class="form-input" id="companyName" placeholder="e.g. Luxor Photonix, Inc." autocomplete="organization"></div>
+        <div class="form-group"><label>Business Address</label><input type="text" class="form-input" id="companyAddress" placeholder="123 Main St" autocomplete="street-address"></div>
+        <div class="form-row">
+            <div class="form-group"><label>City</label><input type="text" class="form-input" id="companyCity" autocomplete="address-level2"></div>
+            <div class="form-group"><label>State</label><input type="text" class="form-input" id="companyState" maxlength="2" placeholder="CA" autocomplete="address-level1"></div>
+        </div>
+        <div class="form-group"><label>Company Phone</label><input type="tel" class="form-input" id="companyPhone" placeholder="+1 555-000-0000"></div>
+        <div class="form-group"><label>Company Website</label><input type="url" class="form-input" id="companyWebsite" placeholder="https://yourcompany.com" autocomplete="url"></div>
+    </div>
+
+    <!-- Step 3: Logo -->
+    <div class="step" id="step3">
+        <div class="step-icon">🎨</div>
+        <div class="step-title">Company Logo</div>
+        <div class="step-sub">Your logo will appear on service reports. PNG or JPG, ideally on a transparent or white background.</div>
+        <div class="logo-upload-area" id="logoDropArea" onclick="document.getElementById('logoFileInput').click()">
+            <img id="logoPreview" class="logo-preview" src="" alt="Logo preview">
+            <div class="logo-placeholder" id="logoPlaceholder">
+                <div class="logo-placeholder-icon">📷</div>
+                <div>Tap to upload your logo</div>
+                <div class="logo-hint">PNG, JPG or SVG · Max 5MB</div>
+            </div>
+        </div>
+        <input type="file" id="logoFileInput" accept="image/*" style="display:none" onchange="handleLogoUpload(event)">
+        <button class="btn btn-ghost" id="removeLogoBtn" style="display:none;width:100%;margin-top:8px;" onclick="removeLogo()">Remove Logo</button>
+        <div class="skip-link"><button onclick="nextStep()">Skip for now →</button></div>
+    </div>
+
+    <!-- Step 4: Specialties -->
+    <div class="step" id="step4">
+        <div class="step-icon">🔬</div>
+        <div class="step-title">Your Specialties</div>
+        <div class="step-sub">Which laser brands do you primarily service? This helps personalize your manual library and AI assistant.</div>
+        <div class="chips-wrap" id="brandChips"></div>
+    </div>
+
+    <!-- Step 5: Complete -->
+    <div class="step" id="step5">
+        <div class="complete-screen">
+            <div class="complete-icon">🚀</div>
+            <div class="complete-title">You're all set!</div>
+            <div class="complete-sub">Your profile is ready. You can update any of this information anytime from Settings or Company Profile.</div>
+            <button class="btn btn-gold" style="width:100%;padding:16px;font-size:17px;" onclick="finishOnboarding()">Go to Dashboard →</button>
+        </div>
+    </div>
+
+</div>
+
+<div class="ob-footer" id="obFooter">
+    <button class="ob-back" id="backBtn" onclick="prevStep()" style="display:none;">← Back</button>
+    <button class="ob-next" id="nextBtn" onclick="nextStep()">Get Started →</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+    const BRANDS = ['Candela','Lumenis','Cynosure','Cutera','Sciton','Syneron','Fotona','Alma','Quanta','HOYA ConBio','Iridex','Coherent','InMode','Lutronic'];
+    let currentStep = 1;
+    const TOTAL_STEPS = 5;
+    let logoFile = null;
+    let logoUrl = null;
+    let selectedBrands = [];
+    let currentUser = null;
+    let existingOrgId = null;
+
+    // Populate brand chips
+    const chipsWrap = document.getElementById('brandChips');
+    BRANDS.forEach(b => {
+        const chip = document.createElement('button');
+        chip.className = 'spec-chip';
+        chip.textContent = b;
+        chip.onclick = () => toggleBrand(b, chip);
+        chipsWrap.appendChild(chip);
+    });
+
+    function toggleBrand(brand, el) {
+        const idx = selectedBrands.indexOf(brand);
+        if (idx >= 0) { selectedBrands.splice(idx, 1); el.classList.remove('selected'); }
+        else { selectedBrands.push(brand); el.classList.add('selected'); }
+    }
+
+    function updateProgress() {
+        const pct = (currentStep / TOTAL_STEPS) * 100;
+        document.getElementById('progressFill').style.width = pct + '%';
+        document.getElementById('stepText').textContent = 'Step ' + currentStep + ' of ' + TOTAL_STEPS;
+        document.getElementById('backBtn').style.display = currentStep > 1 && currentStep < TOTAL_STEPS ? 'block' : 'none';
+        const nextBtn = document.getElementById('nextBtn');
+        const footer = document.getElementById('obFooter');
+        if (currentStep === TOTAL_STEPS) {
+            footer.style.display = 'none';
+        } else {
+            footer.style.display = 'flex';
+            nextBtn.textContent = currentStep === TOTAL_STEPS - 1 ? 'Finish ✓' : 'Continue →';
+        }
+    }
+
+    function nextStep() {
+        if (!validateStep()) return;
+        if (currentStep < TOTAL_STEPS) {
+            document.getElementById('step' + currentStep).classList.remove('active');
+            currentStep++;
+            document.getElementById('step' + currentStep).classList.add('active');
+            updateProgress();
+            window.scrollTo(0, 0);
+            // Save data when moving to completion step
+            if (currentStep === TOTAL_STEPS) saveOnboarding();
+        }
+    }
+
+    function prevStep() {
+        if (currentStep > 1) {
+            document.getElementById('step' + currentStep).classList.remove('active');
+            currentStep--;
+            document.getElementById('step' + currentStep).classList.add('active');
+            updateProgress();
+            window.scrollTo(0, 0);
+        }
+    }
+
+    function validateStep() {
+        if (currentStep === 1) {
+            const fn = document.getElementById('firstName').value.trim();
+            const ln = document.getElementById('lastName').value.trim();
+            if (!fn || !ln) { showToast('Please enter your first and last name', 'error'); return false; }
+        }
+        if (currentStep === 2) {
+            const cn = document.getElementById('companyName').value.trim();
+            if (!cn) { showToast('Please enter your company name', 'error'); return false; }
+        }
+        return true;
+    }
+
+    async function handleLogoUpload(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        if (file.size > 5 * 1024 * 1024) { showToast('File too large — max 5MB', 'error'); return; }
+        logoFile = file;
+        const reader = new FileReader();
+        reader.onload = e => {
+            document.getElementById('logoPreview').src = e.target.result;
+            document.getElementById('logoPreview').style.display = 'block';
+            document.getElementById('logoPlaceholder').style.display = 'none';
+            document.getElementById('logoDropArea').classList.add('has-logo');
+            document.getElementById('removeLogoBtn').style.display = 'block';
+        };
+        reader.readAsDataURL(file);
+    }
+
+    function removeLogo() {
+        logoFile = null; logoUrl = null;
+        document.getElementById('logoPreview').style.display = 'none';
+        document.getElementById('logoPlaceholder').style.display = 'block';
+        document.getElementById('logoDropArea').classList.remove('has-logo');
+        document.getElementById('removeLogoBtn').style.display = 'none';
+        document.getElementById('logoFileInput').value = '';
+    }
+
+    async function saveOnboarding() {
+        if (!currentUser) return;
+        try {
+            // Upload logo if provided
+            if (logoFile) {
+                const ext = logoFile.name.split('.').pop();
+                const path = 'logos/' + currentUser.id + '.' + ext;
+                const { data: uploadData, error: uploadError } = await supabaseClient.storage
+                    .from('company-assets')
+                    .upload(path, logoFile, { upsert: true, contentType: logoFile.type });
+                if (!uploadError) {
+                    const { data: { publicUrl } } = supabaseClient.storage.from('company-assets').getPublicUrl(path);
+                    logoUrl = publicUrl;
+                } else {
+                    console.error('Logo upload failed:', uploadError.message);
+                    // Continue without logo — user can re-upload from company profile
+                }
+            }
+
+            const fn = document.getElementById('firstName').value.trim();
+            const ln = document.getElementById('lastName').value.trim();
+            const companyName = document.getElementById('companyName').value.trim();
+
+            // Upsert organization (company profile)
+            let orgId = existingOrgId;
+            const orgData = {
+                name: companyName,
+                type: 'service_company',
+                address: document.getElementById('companyAddress').value.trim() || null,
+                city: document.getElementById('companyCity').value.trim() || null,
+                state: document.getElementById('companyState').value.trim().toUpperCase() || null,
+                phone: document.getElementById('companyPhone').value.trim() || null,
+                website: document.getElementById('companyWebsite').value.trim() || null,
+                supported_brands: selectedBrands.length ? selectedBrands : null,
+                logo_url: logoUrl || null,
+            };
+
+            if (orgId) {
+                await supabaseClient.from('organizations').update(orgData).eq('id', orgId);
+            } else {
+                orgData.created_by = currentUser.id;
+                const { data: org } = await supabaseClient.from('organizations').insert(orgData).select('id').single();
+                if (org) orgId = org.id;
+            }
+
+            // Update user profile
+            await supabaseClient.from('user_profiles').upsert({
+                id: currentUser.id,
+                first_name: fn,
+                last_name: ln,
+                email: currentUser.email,
+                phone: document.getElementById('techPhone').value.trim() || null,
+                job_title: document.getElementById('jobTitle').value.trim() || null,
+                organization_id: orgId || null,
+                onboarding_completed: true,
+                onboarding_completed_at: new Date().toISOString(),
+            }, { onConflict: 'id' });
+
+            // Update Supabase auth user metadata
+            await supabaseClient.auth.updateUser({
+                data: { first_name: fn, last_name: ln }
+            });
+
+        } catch(e) {
+            console.log('Onboarding save error:', e);
+        }
+    }
+
+    async function finishOnboarding() {
+        try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session?.access_token) {
+                window.location.href = 'index.html?_s=' + btoa(JSON.stringify(session));
+                return;
+            }
+        } catch(e) {}
+        window.location.href = 'index.html';
+    }
+
+    async function init() {
+        // Step 1: Try to restore session from localStorage or _pendingSession
+        let user = null;
+
+        // First try: getSession (reads localStorage automatically)
+        try {
+            const r1 = await supabaseClient.auth.getSession();
+            if (r1.data?.session?.user) user = r1.data.session.user;
+        } catch(e) {}
+
+        // Second try: apply _pendingSession explicitly
+        if (!user && _pendingSession) {
+            try {
+                const r2 = await supabaseClient.auth.setSession({
+                    access_token: _pendingSession.access_token,
+                    refresh_token: _pendingSession.refresh_token
+                });
+                if (r2.data?.session?.user) user = r2.data.session.user;
+            } catch(e) {}
+            _pendingSession = null;
+        }
+
+        // Third try: getUser directly (may work even if getSession seemed empty)
+        if (!user) {
+            try {
+                const r3 = await supabaseClient.auth.getUser();
+                if (r3.data?.user) user = r3.data.user;
+            } catch(e) {}
+        }
+
+        // If still no user after all attempts, show error but DON'T redirect
+        // (redirecting creates an invisible loop)
+        if (!user) {
+            showToast('Session expired. Please log in again.', 'error');
+            setTimeout(() => { window.location.href = 'index.html'; }, 2000);
+            return;
+        }
+
+        currentUser = user;
+
+        // Pre-fill name from auth metadata (always available, no DB needed)
+        const meta = user.user_metadata || {};
+        if (meta.first_name) document.getElementById('firstName').value = meta.first_name;
+        if (meta.last_name)  document.getElementById('lastName').value  = meta.last_name;
+
+        // Load existing company profile if any (maybeSingle — won't throw if missing)
+        const { data: profile } = await supabaseClient.from('user_profiles').select('*, organizations(*)').eq('id', user.id).maybeSingle();
+        if (profile) {
+            if (profile.phone)     document.getElementById('techPhone').value = profile.phone;
+            if (profile.job_title) document.getElementById('jobTitle').value  = profile.job_title;
+            if (profile.organizations) {
+                const org = profile.organizations;
+                existingOrgId = org.id;
+                if (org.name)    document.getElementById('companyName').value    = org.name;
+                if (org.address) document.getElementById('companyAddress').value = org.address;
+                if (org.city)    document.getElementById('companyCity').value    = org.city;
+                if (org.state)   document.getElementById('companyState').value   = org.state;
+                if (org.phone)   document.getElementById('companyPhone').value   = org.phone;
+                if (org.website) document.getElementById('companyWebsite').value = org.website;
+                if (org.logo_url) {
+                    logoUrl = org.logo_url;
+                    document.getElementById('logoPreview').src = org.logo_url;
+                    document.getElementById('logoPreview').style.display = 'block';
+                    document.getElementById('logoPlaceholder').style.display = 'none';
+                    document.getElementById('logoDropArea').classList.add('has-logo');
+                    document.getElementById('removeLogoBtn').style.display = 'block';
+                }
+                if (org.supported_brands?.length) {
+                    selectedBrands = [...org.supported_brands];
+                    document.querySelectorAll('.spec-chip').forEach(chip => {
+                        if (selectedBrands.includes(chip.textContent)) chip.classList.add('selected');
+                    });
+                }
+            }
+        }
+        updateProgress();
+    }
+
+    function showToast(msg, type='') {
+        const t = document.getElementById('toast'); t.textContent = msg;
+        t.className = 'toast show' + (type ? ' ' + type : '');
+        clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    init();
+</script>
+</body>
+</html>

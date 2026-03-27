@@ -1,6 +1,27 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>
+        // Restore session from URL param (passed during navigation between pages)
+        (function() {
+            try {
+                const p = new URLSearchParams(window.location.search);
+                const enc = p.get('_s');
+                if (enc) {
+                    const session = JSON.parse(atob(enc));
+                    if (session && session.access_token) {
+                        const key = 'tsp-auth-token';
+                        const stored = { currentSession: session, expiresAt: session.expires_at };
+                        localStorage.setItem(key, JSON.stringify(stored));
+                        // Clean URL without reloading
+                        const url = new URL(window.location.href);
+                        url.searchParams.delete('_s');
+                        window.history.replaceState({}, '', url.toString());
+                    }
+                }
+            } catch(e) {}
+        })();
+    </script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Parts Catalog</title>
@@ -132,6 +153,52 @@
         .part-card-header {
             display: flex; justify-content: space-between; align-items: flex-start; gap: 12px;
         }
+
+        /* ── Thumbnail (collapsed) ── */
+        .part-thumb {
+            width: 52px; height: 52px; border-radius: 8px;
+            object-fit: contain; background: #111827;
+            border: 1px solid #374151; flex-shrink: 0; align-self: center;
+        }
+        .part-thumb-placeholder {
+            width: 52px; height: 52px; border-radius: 8px;
+            background: #111827; border: 1px dashed #374151;
+            flex-shrink: 0; align-self: center;
+            display: flex; align-items: center; justify-content: center;
+            font-size: 22px; color: #374151;
+        }
+
+        /* ── Large image in expanded view ── */
+        .part-image-expanded {
+            width: 100%; max-height: 220px; object-fit: contain;
+            border-radius: 10px; background: #111827;
+            border: 1px solid #374151; margin-bottom: 16px;
+            display: block; cursor: zoom-in;
+        }
+
+        /* ── Lightbox ── */
+        .lightbox {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: rgba(0,0,0,0.95); display: none;
+            align-items: center; justify-content: center;
+            z-index: 4000; padding: 20px; cursor: zoom-out;
+        }
+        .lightbox.open { display: flex; }
+        .lightbox img {
+            max-width: 100%; max-height: 90vh; object-fit: contain;
+            border-radius: 8px; box-shadow: 0 0 60px rgba(251,191,36,0.15);
+        }
+        .lightbox-close {
+            position: absolute; top: 16px; right: 20px;
+            font-size: 36px; color: #FBBF24; cursor: pointer;
+            background: none; border: none; line-height: 1;
+        }
+        .lightbox-pn {
+            position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%);
+            font-family: 'Courier New', monospace; font-size: 13px; color: #9CA3AF;
+            background: rgba(0,0,0,0.6); padding: 6px 14px; border-radius: 20px;
+        }
+
         .part-main { flex: 1; min-width: 0; }
         .part-number {
             font-size: 13px; font-weight: 700; color: #FBBF24;
@@ -289,6 +356,8 @@
             .filter-row { flex-wrap: nowrap; }
         }
     </style>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
 </head>
 <body>
 
@@ -299,11 +368,11 @@
             <div class="nav-icon">◀</div>
             <div>Back</div>
         </div>
-        <div class="nav-item" onclick="window.location.href='index.html'">
+        <div class="nav-item" onclick="navTo('index.html')">
             <div class="nav-icon">🏠</div>
             <div>Home</div>
         </div>
-        <div class="nav-item" onclick="window.location.href='service_hub.html'">
+        <div class="nav-item" onclick="navTo('service_hub.html')">
             <div class="nav-icon">🔧</div>
             <div>Service Hub</div>
         </div>
@@ -320,8 +389,10 @@
                     <div class="dropdown-user-name" id="dropdownName">User</div>
                     <div class="dropdown-user-email" id="dropdownEmail"></div>
                 </div>
-                <button class="dropdown-item" onclick="window.location.href='user_profile.html'"><span class="dropdown-icon">👤</span> Profile</button>
-                <button class="dropdown-item" onclick="window.location.href='settings.html'"><span class="dropdown-icon">⚙️</span> Settings</button>
+                <button class="dropdown-item" onclick="navTo('user_profile.html')"><span class="dropdown-icon">👤</span> Profile</button>
+                <button class="dropdown-item" onclick="navTo('company_profile.html')"><span class="dropdown-icon">🏢</span> Company Profile</button>
+                <button class="dropdown-item" onclick="navTo('settings.html')"><span class="dropdown-icon">⚙️</span> Settings</button>
+                <button class="dropdown-item" id="upgradeBtn" onclick="navTo('paywall.html')" style="display:none;color:#FBBF24;"><span class="dropdown-icon">⭐</span> Upgrade</button>
                 <button class="dropdown-item danger" onclick="logoutUser()"><span class="dropdown-icon">🚪</span> Log Out</button>
             </div>
         </div>
@@ -394,7 +465,7 @@
 
 <!-- ── Bottom Nav ── -->
 <div class="bottom-nav">
-    <div class="bottom-nav-item" onclick="window.location.href='index.html'">
+    <div class="bottom-nav-item" onclick="navTo('index.html')">
         <div class="bottom-nav-icon">🏠</div>
         <div>Home</div>
     </div>
@@ -402,7 +473,7 @@
         <div class="bottom-nav-icon">◀</div>
         <div>Back</div>
     </div>
-    <div class="bottom-nav-item" onclick="window.location.href='service_hub.html'">
+    <div class="bottom-nav-item" onclick="navTo('service_hub.html')">
         <div class="bottom-nav-icon">🔧</div>
         <div>Hub</div>
     </div>
@@ -542,10 +613,38 @@
     </div>
 </div>
 
+<!-- ── Image Lightbox ── -->
+<div class="lightbox" id="lightbox" onclick="closeLightbox()">
+    <button class="lightbox-close" onclick="closeLightbox()">×</button>
+    <img id="lightboxImg" src="" alt="Part Image">
+    <div class="lightbox-pn" id="lightboxPn"></div>
+</div>
+
 <script>
     const SUPABASE_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
-    const SUPABASE_KEY = 'sb_publishable_xWTiWV-DkS4Hp3MZHxpNOw_ASp3p8fy';
-    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM';
+
+    // ── Extract _s param ──
+    var _pendingSession = null;
+    try {
+        var _purl = new URL(window.location.href);
+        var _sp = _purl.searchParams.get('_s');
+        if (_sp) {
+            _pendingSession = JSON.parse(atob(_sp));
+            _purl.searchParams.delete('_s');
+            history.replaceState(null, '', _purl.toString());
+        }
+    } catch(e) {}
+
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: {
+            persistSession: true,
+            storageKey: 'tsp-auth-token',
+            storage: window.localStorage,
+            autoRefreshToken: true,
+            detectSessionInUrl: false
+        }
+    });
 
     let allParts = [];
     let vendorsMap = {};   // part_id -> [vendors]
@@ -554,11 +653,53 @@
     let searchTimeout = null;
 
     // ── Init ─────────────────────────────────────────────────
-    supabaseClient.auth.onAuthStateChange(() => updateAuthUI());
+
+    // Session-aware navigation — encodes session into URL for WebView page transitions
+    async function navTo(page) {
+        try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (session && session.access_token) {
+                const sep = page.includes('?') ? '&' : '?';
+                window.location.href = page + sep + '_s=' + btoa(JSON.stringify(session));
+                return;
+            }
+        } catch(e) {}
+        window.location.href = page;
+    }
+
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+        updateAuthUI();
+        // Persist session to native Android storage so it survives page navigation
+        try {
+            if (typeof Android !== 'undefined') {
+                if (session && session.access_token) {
+                    Android.saveSession(JSON.stringify(session));
+                } else if (event === 'SIGNED_OUT' && !session) {
+                    Android.clearSession();
+                }
+            }
+        } catch(e) {}
+        // Reload parts when auth state changes so RLS-filtered data refreshes
+        if (event === 'SIGNED_IN' || event === 'SIGNED_OUT' || event === 'TOKEN_REFRESHED') {
+            loadParts();
+        }
+    });
 
     async function init() {
-        await loadParts();
+        // Wait for Supabase to restore session from localStorage before querying
+        // This fixes the race condition on web where loadParts() fires before
+        // the session is available, causing RLS auth failures.
+        await new Promise((resolve) => {
+            const { data: { subscription } } = supabaseClient.auth.onAuthStateChange((event, session) => {
+                subscription.unsubscribe();
+                resolve(session);
+            });
+            // Fallback in case onAuthStateChange never fires (e.g. no session at all)
+            setTimeout(resolve, 1500);
+        });
         updateAuthUI();
+    checkTierAndShowUpgrade();
+        await loadParts();
     }
 
     // ── Load Parts ───────────────────────────────────────────
@@ -648,10 +789,26 @@
             const preferred = vendors.find(v => v.is_preferred);
             const models = (part.compatible_models || []).slice(0, 3);
             const moreModels = (part.compatible_models || []).length - 3;
+            const hasImage = !!part.image_url;
+
+            const thumbHtml = hasImage
+                ? `<img class="part-thumb" src="${part.image_url}" alt="${part.part_number}"
+                       loading="lazy"
+                       onerror="this.style.display='none';this.nextElementSibling.style.display='flex'">
+                   <div class="part-thumb-placeholder" style="display:none;">🔩</div>`
+                : `<div class="part-thumb-placeholder">🔩</div>`;
+
+            const expandedImageHtml = hasImage
+                ? `<img class="part-image-expanded" src="${part.image_url}" alt="${part.part_number}"
+                       loading="lazy"
+                       onclick="event.stopPropagation(); openLightbox('${part.image_url}', '${part.part_number}')"
+                       onerror="this.style.display='none'">`
+                : '';
 
             return `
             <div class="part-card" id="card-${part.id}" onclick="toggleCard(${part.id})">
                 <div class="part-card-header">
+                    ${thumbHtml}
                     <div class="part-main">
                         <div class="part-number">${part.part_number}</div>
                         <div class="part-name">${part.name}</div>
@@ -673,6 +830,7 @@
                 </div>
 
                 <div class="part-detail">
+                    ${expandedImageHtml}
                     ${(part.compatible_models || []).length > 0 ? `
                     <div class="detail-section">
                         <div class="detail-label">Compatible Models</div>
@@ -718,6 +876,17 @@
         const card = document.getElementById('card-' + partId);
         card.classList.toggle('expanded');
     }
+
+    // ── Lightbox ─────────────────────────────────────────────
+    function openLightbox(url, partNumber) {
+        document.getElementById('lightboxImg').src = url;
+        document.getElementById('lightboxPn').textContent = partNumber;
+        document.getElementById('lightbox').classList.add('open');
+    }
+    function closeLightbox() {
+        document.getElementById('lightbox').classList.remove('open');
+    }
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
 
     // ── Add Part ─────────────────────────────────────────────
     function openAddPartModal() {
@@ -802,7 +971,7 @@
         alert('Edit functionality coming soon!');
     }
     function addToInventory(partId, partName) {
-        window.location.href = 'my_inventory.html?part_id=' + partId;
+        navTo('my_inventory.html?part_id=') + partId;
     }
 
     // ── Auth ─────────────────────────────────────────────────
@@ -837,6 +1006,7 @@
     async function logoutUser() {
         document.getElementById('avatarDropdown').classList.remove('open');
         await supabaseClient.auth.signOut();
+        try { if (typeof Android !== 'undefined') Android.clearSession(); } catch(e) {}
     }
     async function updateAuthUI() {
         const { data: { user } } = await supabaseClient.auth.getUser();
@@ -862,7 +1032,51 @@
         }
     }
 
+
+supabaseClient.auth.onAuthStateChange(function(event, session) {
+    try {
+        if (typeof Android !== 'undefined') {
+            if (session && session.access_token) Android.saveSession(JSON.stringify(session));
+            else if (event === 'SIGNED_OUT' && !session) Android.clearSession();
+        }
+    } catch(e) {}
+});
+
+if (_pendingSession) {
+    var _ps = _pendingSession;
+    _pendingSession = null;
+    supabaseClient.auth.setSession({
+        access_token:  _ps.access_token,
+        refresh_token: _ps.refresh_token
+    }).then(function(result) {
+        if (result.error) console.log('TSP: setSession error:', result.error.message);
+        else {
+            try {
+                if (typeof Android !== 'undefined' && result.data.session)
+                    Android.saveSession(JSON.stringify(result.data.session));
+            } catch(e) {}
+        }
+        init();
+    });
+} else {
     init();
+}
+
+    async function checkTierAndShowUpgrade() {
+        try {
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (!user) return;
+            const { data: sub } = await supabaseClient
+                .from('subscriptions')
+                .select('tier, status')
+                .eq('user_id', user.id)
+                .single();
+            const isPaid = sub && ['premium','team','enterprise'].includes(sub.tier) && sub.status === 'active';
+            const btn = document.getElementById('upgradeBtn');
+            if (btn) btn.style.display = isPaid ? 'none' : 'flex';
+        } catch(e) {}
+    }
+
 </script>
 </body>
 </html>

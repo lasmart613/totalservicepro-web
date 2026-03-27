@@ -3,508 +3,120 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Duty Cycle Calculator</title>
+    <title>Duty Cycle Calculator · TSP</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const enc = new URLSearchParams(window.location.search).get('_s');
+                if (enc) { const s = JSON.parse(atob(enc)); if (s?.access_token) { _pendingSession = s; localStorage.setItem('tsp-auth-token', JSON.stringify({currentSession:s,expiresAt:s.expires_at})); const u=new URL(window.location.href); u.searchParams.delete('_s'); window.history.replaceState({},'',u.toString()); return; } }
+                const raw = localStorage.getItem('tsp-auth-token'); if (raw) { const p=JSON.parse(raw); const sess=p?.currentSession||(p?.access_token?p:null); if (sess?.access_token) _pendingSession=sess; }
+            } catch(e) {}
+        })();
+        const _sb = supabase.createClient('https://yljztfajyvjzqikxdddf.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',{auth:{persistSession:true,storageKey:'tsp-auth-token',storage:window.localStorage,autoRefreshToken:true,detectSessionInUrl:false}});
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #2c2c2c 0%, #1a1a1a 100%);
-            color: #ffffff;
-            min-height: 100vh;
-            padding-bottom: 80px;
-        }
-
-        .header {
-            background: rgba(255, 215, 0, 0.1);
-            padding: 15px 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 2px solid #ffd700;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-        }
-
-        .back-button {
-            background: #ffd700;
-            border: none;
-            border-radius: 8px;
-            padding: 10px 20px;
-            color: #1a1a1a;
-            font-weight: 600;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .back-button:active {
-            transform: scale(0.95);
-        }
-
-        .title {
-            color: #ffd700;
-            font-size: 20px;
-            font-weight: 600;
-            flex: 1;
-            text-align: center;
-        }
-
-        .placeholder {
-            width: 80px;
-        }
-
-        .container {
-            max-width: 500px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .description {
-            text-align: center;
-            color: #aaa;
-            margin-bottom: 30px;
-            line-height: 1.6;
-        }
-
-        .input-section {
-            background: rgba(255, 215, 0, 0.05);
-            border: 1px solid rgba(255, 215, 0, 0.2);
-            border-radius: 12px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-
-        .input-group {
-            margin-bottom: 20px;
-        }
-
-        .input-group:last-child {
-            margin-bottom: 0;
-        }
-
-        .input-label {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            margin-bottom: 8px;
-            color: #ffd700;
-            font-weight: 500;
-        }
-
-        .required-badge {
-            background: rgba(255, 68, 68, 0.2);
-            border: 1px solid #ff4444;
-            color: #ff4444;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 10px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .optional-badge {
-            background: rgba(76, 175, 80, 0.2);
-            border: 1px solid #4caf50;
-            color: #4caf50;
-            padding: 2px 8px;
-            border-radius: 4px;
-            font-size: 10px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .input-wrapper {
-            position: relative;
-        }
-
-        .input-field {
-            width: 100%;
-            background: rgba(0, 0, 0, 0.3);
-            border: 2px solid rgba(255, 215, 0, 0.3);
-            border-radius: 8px;
-            padding: 12px 50px 12px 12px;
-            color: #ffffff;
-            font-size: 16px;
-            outline: none;
-            transition: all 0.3s ease;
-        }
-
-        .input-field:focus {
-            border-color: #ffd700;
-            background: rgba(0, 0, 0, 0.5);
-        }
-
-        .input-field.error {
-            border-color: #ff4444;
-        }
-
-        .input-unit {
-            position: absolute;
-            right: 12px;
-            top: 50%;
-            transform: translateY(-50%);
-            color: #999;
-            font-size: 14px;
-            pointer-events: none;
-        }
-
-        .input-hint {
-            color: #999;
-            font-size: 12px;
-            margin-top: 4px;
-        }
-
-        .divider {
-            text-align: center;
-            color: #666;
-            font-weight: 600;
-            margin: 20px 0;
-            position: relative;
-        }
-
-        .divider::before,
-        .divider::after {
-            content: '';
-            position: absolute;
-            top: 50%;
-            width: 40%;
-            height: 1px;
-            background: rgba(255, 215, 0, 0.2);
-        }
-
-        .divider::before {
-            left: 0;
-        }
-
-        .divider::after {
-            right: 0;
-        }
-
-        .calculate-button {
-            width: 100%;
-            background: linear-gradient(135deg, #ffd700 0%, #ffed4e 100%);
-            border: none;
-            border-radius: 12px;
-            padding: 16px;
-            color: #1a1a1a;
-            font-size: 18px;
-            font-weight: 700;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            box-shadow: 0 4px 15px rgba(255, 215, 0, 0.3);
-        }
-
-        .calculate-button:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(255, 215, 0, 0.4);
-        }
-
-        .calculate-button:active {
-            transform: translateY(0);
-        }
-
-        .calculate-button:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .result-section {
-            background: rgba(76, 175, 80, 0.1);
-            border: 2px solid #4caf50;
-            border-radius: 12px;
-            padding: 24px;
-            margin-top: 30px;
-            text-align: center;
-            display: none;
-        }
-
-        .result-section.visible {
-            display: block;
-            animation: slideIn 0.3s ease;
-        }
-
-        @keyframes slideIn {
-            from {
-                opacity: 0;
-                transform: translateY(20px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
-
-        .result-title {
-            color: #4caf50;
-            font-size: 14px;
-            font-weight: 600;
-            text-transform: uppercase;
-            margin-bottom: 12px;
-        }
-
-        .result-value {
-            color: #ffd700;
-            font-size: 48px;
-            font-weight: 700;
-            margin-bottom: 8px;
-        }
-
-        .result-label {
-            color: #aaa;
-            font-size: 14px;
-        }
-
-        .result-details {
-            margin-top: 20px;
-            padding-top: 20px;
-            border-top: 1px solid rgba(76, 175, 80, 0.3);
-        }
-
-        .result-detail-row {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 8px;
-            color: #ccc;
-            font-size: 14px;
-        }
-
-        .result-detail-value {
-            color: #ffd700;
-            font-weight: 600;
-        }
-
-        .error-message {
-            background: rgba(255, 68, 68, 0.1);
-            border: 1px solid #ff4444;
-            border-radius: 8px;
-            padding: 12px;
-            margin-top: 20px;
-            color: #ff4444;
-            font-size: 14px;
-            text-align: center;
-            display: none;
-        }
-
-        .error-message.visible {
-            display: block;
-            animation: shake 0.5s ease;
-        }
-
-        @keyframes shake {
-            0%, 100% { transform: translateX(0); }
-            25% { transform: translateX(-10px); }
-            75% { transform: translateX(10px); }
-        }
+        .calc-page{padding:16px 16px 80px;max-width:600px;margin:0 auto;}
+        .result-card{background:var(--surface2);border:2px solid var(--gold);border-radius:16px;padding:28px;text-align:center;margin:20px 0;display:none;}
+        .result-label{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;}
+        .result-value{font-size:56px;font-weight:800;color:var(--gold);line-height:1;}
+        .result-detail{margin-top:16px;display:flex;flex-direction:column;gap:6px;text-align:left;}
+        .result-row{display:flex;justify-content:space-between;font-size:13px;padding:6px 0;border-bottom:1px solid var(--border);}
+        .result-row:last-child{border:none;}
+        .result-row-val{font-weight:700;color:var(--text);}
+        .or-divider{text-align:center;color:var(--text3);font-size:12px;font-weight:700;margin:8px 0;letter-spacing:1px;}
+        .formula-box{background:var(--surface2);border-left:3px solid var(--gold);border-radius:0 8px 8px 0;padding:14px 16px;margin-top:20px;font-size:12px;color:var(--text3);line-height:1.8;font-family:'Courier New',monospace;}
+        .bottom-nav{position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border2);display:flex;justify-content:space-around;padding:8px 0 max(8px,env(safe-area-inset-bottom));z-index:100;}
+        .bottom-nav-item{display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;color:var(--text3);cursor:pointer;font-family:inherit;min-width:56px;padding:4px;transition:color 0.15s;}
+        .bottom-nav-item:hover{color:var(--gold);}
+        .bottom-nav-item span:first-child{font-size:20px;}
+        .bottom-nav-item span:last-child{font-size:9px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase;}
     </style>
 </head>
 <body>
 <div class="header">
-    <button class="back-button" onclick="goBack()">← Back</button>
-    <div class="title">⚡ Duty Cycle</div>
-    <div class="placeholder"></div>
-</div>
-
-<div class="container">
-    <div class="description">
-        Calculate duty cycle for pulsed laser systems. Enter pulse width and either off-time or pulses per second.
-    </div>
-
-    <div class="input-section">
-        <div class="input-group">
-            <div class="input-label">
-                <span>Pulse Width (On-Time)</span>
-                <span class="required-badge">Required</span>
-            </div>
-            <div class="input-wrapper">
-                <input type="number"
-                       id="pulse-width"
-                       class="input-field"
-                       placeholder="Enter pulse width"
-                       step="0.001"
-                       min="0">
-                <span class="input-unit">ms</span>
-            </div>
-            <div class="input-hint">Laser on-time per pulse (milliseconds)</div>
-        </div>
-
-        <div class="divider">ONE OF THESE REQUIRED</div>
-
-        <div class="input-group">
-            <div class="input-label">
-                <span>Off-Time</span>
-                <span class="optional-badge">Optional</span>
-            </div>
-            <div class="input-wrapper">
-                <input type="number"
-                       id="off-time"
-                       class="input-field"
-                       placeholder="Enter off-time"
-                       step="0.001"
-                       min="0">
-                <span class="input-unit">ms</span>
-            </div>
-            <div class="input-hint">Time between pulses (milliseconds)</div>
-        </div>
-
-        <div class="input-group">
-            <div class="input-label">
-                <span>Pulses Per Second (PPS)</span>
-                <span class="optional-badge">Optional</span>
-            </div>
-            <div class="input-wrapper">
-                <input type="number"
-                       id="pps"
-                       class="input-field"
-                       placeholder="Enter PPS"
-                       step="0.1"
-                       min="0">
-                <span class="input-unit">Hz</span>
-            </div>
-            <div class="input-hint">Repetition rate (pulses per second)</div>
-        </div>
-    </div>
-
-    <button class="calculate-button" onclick="calculateDutyCycle()">
-        Calculate Duty Cycle
-    </button>
-
-    <div class="error-message" id="error-message"></div>
-
-    <div class="result-section" id="result-section">
-        <div class="result-title">Duty Cycle</div>
-        <div class="result-value" id="duty-cycle-value">--</div>
-        <div class="result-label">Percentage</div>
-
-        <div class="result-details" id="result-details">
-            <!-- Populated dynamically -->
+    <button class="header-back" onclick="navTo('calculators_menu.html')">‹</button>
+    <div class="header-title">🔄 Duty Cycle</div>
+    <div class="avatar-wrapper" id="avatarWrapper">
+        <button class="avatar-btn" onclick="toggleDropdown(event)"><img id="avatarImg" class="avatar-img" src="" alt=""/><div id="avatarInitials" class="avatar-initials">U</div></button>
+        <div class="avatar-dropdown" id="avatarDropdown">
+            <div class="dropdown-user-info"><div class="dropdown-user-name" id="dropdownName">User</div><div class="dropdown-user-email" id="dropdownEmail"></div></div>
+            <button class="dropdown-item" onclick="navTo('user_profile.html')"><span class="dropdown-icon">👤</span> Profile</button>
+            <button class="dropdown-item" onclick="navTo('settings.html')"><span class="dropdown-icon">⚙️</span> Settings</button>
+            <button class="dropdown-item danger" onclick="logoutUser()"><span class="dropdown-icon">🚪</span> Log Out</button>
         </div>
     </div>
 </div>
+<div class="calc-page">
+    <div style="margin-bottom:20px;"><div style="font-size:20px;font-weight:800;">Duty Cycle Calculator</div><div style="font-size:13px;color:var(--text3);margin-top:3px;">Pulse duty cycle for pulsed laser systems</div></div>
 
+    <div class="form-group">
+        <label>Pulse Width / On-Time (ms)</label>
+        <input type="number" class="form-input" id="pulse-width" step="0.001" placeholder="e.g. 10">
+    </div>
+
+    <div style="font-size:13px;color:var(--text3);margin-bottom:12px;">Enter <strong style="color:var(--text);">one</strong> of the following:</div>
+
+    <div class="form-group">
+        <label>Off-Time (ms)</label>
+        <input type="number" class="form-input" id="off-time" step="0.001" placeholder="e.g. 90">
+    </div>
+
+    <div class="or-divider">— OR —</div>
+
+    <div class="form-group">
+        <label>Pulses Per Second (Hz)</label>
+        <input type="number" class="form-input" id="pps" step="0.01" placeholder="e.g. 10">
+    </div>
+
+    <button class="btn btn-gold" style="width:100%;padding:14px;font-size:16px;" onclick="calculateDutyCycle()">Calculate Duty Cycle</button>
+
+    <div id="result" class="result-card">
+        <div class="result-label">Duty Cycle</div>
+        <div class="result-value" id="duty-cycle-value">0%</div>
+        <div class="result-detail" id="result-details"></div>
+    </div>
+
+    <div class="formula-box">
+        Duty Cycle (%) = Pulse Width ÷ Period × 100<br>
+        Period = Pulse Width + Off-Time<br>
+        Period (ms) = 1000 ÷ PPS
+    </div>
+</div>
+<div class="bottom-nav">
+    <button class="bottom-nav-item" onclick="navTo('index.html')"><span>🏠</span><span>Home</span></button>
+    <button class="bottom-nav-item" onclick="navTo('calculators_menu.html')"><span>🔬</span><span>Calc</span></button>
+    <button class="bottom-nav-item" onclick="navTo('manual_library.html')"><span>📚</span><span>Manuals</span></button>
+    <button class="bottom-nav-item" onclick="navTo('ai_assistant.html')"><span>🤖</span><span>AI</span></button>
+</div>
 <script>
-    function goBack() {
-        if (typeof Android !== 'undefined' && Android.goBack) {
-            Android.goBack();
-        } else {
-            window.history.back();
-        }
-    }
-
-    // Clear other field when one is entered
-    document.getElementById('off-time').addEventListener('input', function() {
-        if (this.value) {
-            document.getElementById('pps').value = '';
-        }
-    });
-
-    document.getElementById('pps').addEventListener('input', function() {
-        if (this.value) {
-            document.getElementById('off-time').value = '';
-        }
-    });
-
-    function showError(message) {
-        const errorDiv = document.getElementById('error-message');
-        errorDiv.textContent = message;
-        errorDiv.classList.add('visible');
-        document.getElementById('result-section').classList.remove('visible');
-
-        setTimeout(() => {
-            errorDiv.classList.remove('visible');
-        }, 3000);
-    }
-
     function calculateDutyCycle() {
-        // Get inputs
-        const pulseWidth = parseFloat(document.getElementById('pulse-width').value);
-        const offTime = parseFloat(document.getElementById('off-time').value);
-        const pps = parseFloat(document.getElementById('pps').value);
-
-        // Validate pulse width (required)
-        if (!pulseWidth || pulseWidth <= 0) {
-            showError('Please enter a valid pulse width (on-time)');
-            return;
-        }
-
-        // Validate that either off-time OR pps is provided
-        const hasOffTime = offTime && offTime > 0;
-        const hasPPS = pps && pps > 0;
-
-        if (!hasOffTime && !hasPPS) {
-            showError('Please enter either Off-Time OR Pulses Per Second');
-            return;
-        }
-
-        if (hasOffTime && hasPPS) {
-            showError('Please enter only ONE: Off-Time OR Pulses Per Second (not both)');
-            return;
-        }
-
-        let dutyCycle;
-        let period;
-        let frequency;
-        let calculatedOffTime;
-
-        if (hasOffTime) {
-            // Calculate from off-time
-            period = pulseWidth + offTime;
-            frequency = 1000 / period; // Convert ms to Hz
-            dutyCycle = (pulseWidth / period) * 100;
-            calculatedOffTime = offTime;
-        } else {
-            // Calculate from PPS
-            frequency = pps;
-            period = 1000 / pps; // Convert Hz to ms
-            calculatedOffTime = period - pulseWidth;
-
-            if (calculatedOffTime < 0) {
-                showError('Pulse width cannot be greater than the period (1/PPS)');
-                return;
-            }
-
-            dutyCycle = (pulseWidth / period) * 100;
-        }
-
-        // Display results
-        document.getElementById('duty-cycle-value').textContent = dutyCycle.toFixed(2) + '%';
-
-        const detailsHTML = `
-            <div class="result-detail-row">
-                <span>Pulse Width:</span>
-                <span class="result-detail-value">${pulseWidth.toFixed(3)} ms</span>
-            </div>
-            <div class="result-detail-row">
-                <span>Off-Time:</span>
-                <span class="result-detail-value">${calculatedOffTime.toFixed(3)} ms</span>
-            </div>
-            <div class="result-detail-row">
-                <span>Period:</span>
-                <span class="result-detail-value">${period.toFixed(3)} ms</span>
-            </div>
-            <div class="result-detail-row">
-                <span>Frequency (PPS):</span>
-                <span class="result-detail-value">${frequency.toFixed(2)} Hz</span>
-            </div>
-        `;
-
-        document.getElementById('result-details').innerHTML = detailsHTML;
-        document.getElementById('result-section').classList.add('visible');
+        const pulseWidth=parseFloat(document.getElementById('pulse-width').value);
+        const offTime=parseFloat(document.getElementById('off-time').value);
+        const pps=parseFloat(document.getElementById('pps').value);
+        if(!pulseWidth||pulseWidth<=0){showToast('Enter a valid pulse width','error');return;}
+        const hasOff=offTime&&offTime>0, hasPPS=pps&&pps>0;
+        if(!hasOff&&!hasPPS){showToast('Enter either Off-Time or PPS','error');return;}
+        if(hasOff&&hasPPS){showToast('Enter only one: Off-Time OR PPS','error');return;}
+        let dutyCycle,period,frequency,calcOff;
+        if(hasOff){period=pulseWidth+offTime;frequency=1000/period;dutyCycle=(pulseWidth/period)*100;calcOff=offTime;}
+        else{frequency=pps;period=1000/pps;calcOff=period-pulseWidth;if(calcOff<0){showToast('Pulse width exceeds period (1/PPS)','error');return;}dutyCycle=(pulseWidth/period)*100;}
+        document.getElementById('duty-cycle-value').textContent=dutyCycle.toFixed(2)+'%';
+        document.getElementById('result-details').innerHTML=`<div class="result-row"><span>Pulse Width</span><span class="result-row-val">${pulseWidth.toFixed(3)} ms</span></div><div class="result-row"><span>Off-Time</span><span class="result-row-val">${calcOff.toFixed(3)} ms</span></div><div class="result-row"><span>Period</span><span class="result-row-val">${period.toFixed(3)} ms</span></div><div class="result-row"><span>Frequency</span><span class="result-row-val">${frequency.toFixed(2)} Hz</span></div><div class="result-row"><span>Duty Cycle</span><span class="result-row-val">${dutyCycle.toFixed(2)}%</span></div>`;
+        document.getElementById('result').style.display='block';
     }
-
-    // Allow Enter key to calculate
-    document.querySelectorAll('.input-field').forEach(input => {
-        input.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                calculateDutyCycle();
-            }
-        });
-    });
+    document.querySelectorAll('.form-input').forEach(inp=>inp.addEventListener('keypress',e=>{if(e.key==='Enter')calculateDutyCycle();}));
+    async function navTo(page){try{const{data:{session}}=await _sb.auth.getSession();if(session?.access_token){const sep=page.includes('?')?'&':'?';window.location.href=page+sep+'_s='+btoa(JSON.stringify(session));return;}}catch(e){}window.location.href=page;}
+    function toggleDropdown(e){e.stopPropagation();document.getElementById('avatarDropdown').classList.toggle('open');}
+    document.addEventListener('click',()=>document.getElementById('avatarDropdown')?.classList.remove('open'));
+    async function logoutUser(){document.getElementById('avatarDropdown').classList.remove('open');await _sb.auth.signOut();updateAuthUI();try{if(typeof Android!=='undefined')Android.clearSession();}catch(e){}}
+    async function updateAuthUI(){const{data:{user}}=await _sb.auth.getUser();const aw=document.getElementById('avatarWrapper');if(user){if(aw)aw.style.display='block';const meta=user.user_metadata||{},fn=meta.first_name||'',ln=meta.last_name||'';document.getElementById('dropdownName').textContent=[fn,ln].filter(Boolean).join(' ')||'User';document.getElementById('dropdownEmail').textContent=user.email||'';const img=document.getElementById('avatarImg'),ini=document.getElementById('avatarInitials'),photo=meta.avatar_url||meta.picture||'';if(photo){img.src=photo;img.style.display='block';ini.style.display='none';}else{img.style.display='none';ini.style.display='flex';ini.textContent=((fn[0]||'')+(ln[0]||'')).toUpperCase()||user.email[0].toUpperCase();}}else{if(aw)aw.style.display='none';}}
+    function showToast(msg,type=''){let el=document.getElementById('_toast');if(!el){el=document.createElement('div');el.id='_toast';el.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:#1a1a1a;border:1px solid #FBBF24;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:600;z-index:9999;transition:all 0.3s;white-space:nowrap;opacity:0;';document.body.appendChild(el);}el.style.borderColor=type==='error'?'#ef4444':'#FBBF24';el.textContent=msg;el.style.opacity='1';el.style.transform='translateX(-50%) translateY(0)';clearTimeout(el._t);el._t=setTimeout(()=>{el.style.opacity='0';el.style.transform='translateX(-50%) translateY(20px)';},3000);}
+    _sb.auth.onAuthStateChange((event,session)=>{updateAuthUI();try{if(typeof Android!=='undefined'){if(session?.access_token)Android.saveSession(JSON.stringify(session));else if(event==='SIGNED_OUT'&&!session)Android.clearSession();}}catch(e){}});
+    if(_pendingSession){const ps=_pendingSession;_pendingSession=null;_sb.auth.setSession({access_token:ps.access_token,refresh_token:ps.refresh_token}).then(({data})=>{updateAuthUI();try{if(typeof Android!=='undefined'&&data.session)Android.saveSession(JSON.stringify(data.session));}catch(e){}});}else{updateAuthUI();}
 </script>
 </body>
 </html>

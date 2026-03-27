@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Estimate Generator · Total Service Pro</title>
+    <!-- html2pdf.js for client-side PDF generation -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const enc = new URLSearchParams(window.location.search).get('_s');
+                if (enc) { const s=JSON.parse(atob(enc)); if(s?.access_token){_pendingSession=s;localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));const u=new URL(window.location.href);u.searchParams.delete('_s');window.history.replaceState({},'',u.toString());return;} }
+                const raw=localStorage.getItem('tsp-auth-token'); if(raw){const p=JSON.parse(raw);const sess=p?.currentSession||(p?.access_token?p:null);if(sess?.access_token)_pendingSession=sess;}
+            } catch(e) {}
+        })();
+        var supabaseClient = supabase.createClient(
+            'https://yljztfajyvjzqikxdddf.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+            { auth: { persistSession:true, storageKey:'tsp-auth-token', storage:window.localStorage, autoRefreshToken:true, detectSessionInUrl:false } }
+        );
+        // _pendingSession will be applied in init() with proper await
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script>const CURRENT_PAGE = 'estimate_generator.html';</script>
+    <style>
+        .estimate-form { max-width: 900px; margin: 0 auto; }
+        .section { background: var(--surface2); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 24px; }
+        .section h2 { color: var(--gold); margin-bottom: 16px; font-family: 'Barlow Condensed', sans-serif; font-size: 1.8rem; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+        .checkbox-group { display: flex; flex-wrap: wrap; gap: 16px; margin: 12px 0; }
+        .checkbox-group label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+        #preview { background: white; color: black; padding: 24px; border-radius: 8px; margin-top: 24px; min-height: 400px; }
+        #preview h1 { color: #1a1a1a; text-align: center; }
+        .totals { font-weight: bold; font-size: 1.2rem; margin-top: 20px; border-top: 2px solid #ccc; padding-top: 16px; }
+        @media print {
+            body * { visibility: hidden; }
+            #preview, #preview * { visibility: visible; }
+            #preview { position: absolute; left: 0; top: 0; width: 100%; }
+            .no-print { display: none !important; }
+        }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
+</head>
+<body>
+
+
+<div class="page" style="max-width:900px;margin:0 auto;">
+    <h1 style="font-size:22px;font-weight:800;color:var(--text);margin-bottom:4px;">Service Estimate Generator</h1>
+    <p style="font-size:13px;color:var(--text3);margin-bottom:20px;">Create quotes for PM, repairs, or full service calls</p>
+
+    <div class="section">
+        <h2>Customer & Device Info</h2>
+        <div class="grid-2">
+            <div>
+                <label>Customer/Clinic Name</label>
+                <input type="text" id="customer" placeholder="e.g. Desert Dermatology">
+            </div>
+            <div>
+                <label>Contact Phone/Email</label>
+                <input type="text" id="contact" placeholder="Optional">
+            </div>
+        </div>
+        <div class="grid-2" style="margin-top:16px;">
+            <div>
+                <label>Device Model</label>
+                <select id="model">
+                    <option value="">Select...</option>
+                    <option>GentleLASE</option>
+                    <option>GentleLASE PLUS</option>
+                    <option>GentleLASE Limited Edition</option>
+                    <option>GentleMax Pro</option>
+                    <option>Other</option>
+                </select>
+            </div>
+            <div>
+                <label>Serial # / Current Pulse Count</label>
+                <input type="text" id="serial" placeholder="e.g. GL12345 – 145,000 pulses">
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Service Type(s)</h2>
+        <div class="checkbox-group">
+            <label><input type="checkbox" class="service-type" value="Preventative Maintenance"> Routine PM Visit</label>
+            <label><input type="checkbox" class="service-type" value="Flashlamp Replacement"> Flashlamp(s) Replacement</label>
+            <label><input type="checkbox" class="service-type" value="Laser Head"> Laser Head Rebuild/Replacement</label>
+            <label><input type="checkbox" class="service-type" value="Focus Lens"> Focus Lens Replacement</label>
+            <label><input type="checkbox" class="service-type" value="DCD/Calibration"> DCD or Calport Calibration</label>
+            <label><input type="checkbox" class="service-type" value="Diagnostic"> Diagnostic / Troubleshooting</label>
+            <label><input type="checkbox" class="service-type" value="Other Repair"> Other Repair (specify below)</label>
+        </div>
+        <textarea id="other-service" placeholder="Describe other services or custom work..." rows="2" style="width:100%; margin-top:8px;"></textarea>
+    </div>
+
+    <div class="section">
+        <h2>Reported Issues / Notes</h2>
+        <textarea id="issues" rows="4" placeholder="e.g. Low energy output, error code E-12, bubbling in DCD, head >150k pulses..."></textarea>
+    </div>
+
+    <div class="section">
+        <h2>Travel & Urgency</h2>
+        <div class="grid-2">
+            <div>
+                <label>Travel Distance (miles round-trip)</label>
+                <input type="number" id="miles" min="0" value="0">
+            </div>
+            <div>
+                <label>Urgency Level</label>
+                <select id="urgency">
+                    <option value="standard">Standard (next available)</option>
+                    <option value="rush">Rush (within 48h)</option>
+                    <option value="emergency">Emergency (same/next day)</option>
+                </select>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <h2>Pricing (you enter these – saved locally)</h2>
+        <div class="grid-2">
+            <div>
+                <label>Labor Rate ($/hour)</label>
+                <input type="number" id="laborRate" value="185" step="5">
+            </div>
+            <div>
+                <label>Estimated Labor Hours</label>
+                <input type="number" id="laborHours" value="2" step="0.5">
+            </div>
+            <div>
+                <label>Travel Rate ($/mile)</label>
+                <input type="number" id="travelRate" value="1.25" step="0.1">
+            </div>
+            <div>
+                <label>Diagnostic Fee (if separate)</label>
+                <input type="number" id="diagFee" value="250">
+            </div>
+            <div>
+                <label>Tax Rate (%)</label>
+                <input type="number" id="taxRate" value="8.75" step="0.1">
+            </div>
+        </div>
+        <p style="margin-top:12px; font-size:0.9rem; color:var(--text-muted);">Parts prices: enter below per item (total parts cost summed)</p>
+        <textarea id="partsList" rows="5" placeholder="e.g. Flashlamps pair: 650\nLaser head: 4750\nCryogen bottle: 120\n..."></textarea>
+    </div>
+
+    <div class="no-print" style="text-align:center; margin:32px 0;">
+        <button onclick="calculateAndPreview()" style="padding:16px 40px; font-size:1.2rem;">Calculate & Preview Estimate</button>
+        <button onclick="generatePDF()" style="margin-left:16px; background:#22C55E; padding:16px 40px; font-size:1.2rem;">Download PDF</button>
+        <button onclick="saveToSupabase()" style="margin-left:16px; background:#3B82F6; padding:16px 40px; font-size:1.2rem;">Save to Records</button>
+    </div>
+
+    <div id="preview" class="section">
+        <h1 style="margin-bottom:8px;">Service Estimate</h1>
+        <div id="previewContent">Fill in the form and click Calculate to see preview here...</div>
+    </div>
+</div>
+
+<script>
+    const supabase = supabaseClient;
+
+    // Load saved pricing
+    window.addEventListener('load', () => {
+        const saved = JSON.parse(localStorage.getItem('tsp_estimate_pricing') || '{}');
+        if (saved.laborRate) document.getElementById('laborRate').value = saved.laborRate;
+        if (saved.travelRate) document.getElementById('travelRate').value = saved.travelRate;
+        if (saved.diagFee) document.getElementById('diagFee').value = saved.diagFee;
+        if (saved.taxRate) document.getElementById('taxRate').value = saved.taxRate;
+    });
+
+    function calculateAndPreview() {
+        // Save pricing for next time
+        const pricing = {
+            laborRate: parseFloat(document.getElementById('laborRate').value) || 0,
+            travelRate: parseFloat(document.getElementById('travelRate').value) || 0,
+            diagFee: parseFloat(document.getElementById('diagFee').value) || 0,
+            taxRate: parseFloat(document.getElementById('taxRate').value) || 0
+        };
+        localStorage.setItem('tsp_estimate_pricing', JSON.stringify(pricing));
+
+        // Gather data
+        const customer = document.getElementById('customer').value || '—';
+        const model = document.getElementById('model').value || '—';
+        const serial = document.getElementById('serial').value || '—';
+        const issues = document.getElementById('issues').value || 'No issues noted';
+        const miles = parseFloat(document.getElementById('miles').value) || 0;
+        const urgency = document.getElementById('urgency').value;
+
+        const services = Array.from(document.querySelectorAll('.service-type:checked')).map(cb => cb.value);
+        const other = document.getElementById('other-service').value.trim();
+        if (other) services.push(`Other: ${other}`);
+
+        // Parts total
+        const partsText = document.getElementById('partsList').value;
+        let partsTotal = 0;
+        let partsLines = '';
+        partsText.split('\n').forEach(line => {
+            const match = line.match(/:\s*(\d+(\.\d+)?)/);
+            if (match) {
+                const amt = parseFloat(match[1]);
+                partsTotal += amt;
+                partsLines += `<div>${line}</div>`;
+            }
+        });
+
+        const labor = pricing.laborRate * (parseFloat(document.getElementById('laborHours').value) || 0);
+        const travel = pricing.travelRate * miles;
+        const subtotal = pricing.diagFee + labor + travel + partsTotal;
+        const tax = subtotal * (pricing.taxRate / 100);
+        const grandTotal = subtotal + tax;
+
+        // Build preview
+        let html = `
+            <div style="font-family: Arial, sans-serif; max-width:800px; margin:auto;">
+                <div style="text-align:center; margin-bottom:20px;">
+                    <h2 style="color:#B45309;">Total Service Pro Estimate</h2>
+                    <div>Date: ${new Date().toLocaleDateString()}</div>
+                    <div>Prepared for: ${customer}</div>
+                </div>
+
+                <div style="margin:20px 0;">
+                    <strong>Device:</strong> ${model} – Serial/Pulses: ${serial}<br>
+                    <strong>Reported Issues:</strong><br><pre style="white-space:pre-wrap;">${issues}</pre>
+                </div>
+
+                <div style="margin:20px 0;">
+                    <strong>Services Included:</strong><br>
+                    ${services.length ? services.map(s => `• ${s}`).join('<br>') : '• Not specified'}
+                </div>
+
+                <div style="margin:20px 0;">
+                    <strong>Travel:</strong> ${miles} miles round-trip<br>
+                    <strong>Urgency:</strong> ${urgency.charAt(0).toUpperCase() + urgency.slice(1)}
+                </div>
+
+                <div style="margin:30px 0;">
+                    <h3>Cost Breakdown</h3>
+                    ${pricing.diagFee ? `<div>Diagnostic Fee: $${pricing.diagFee.toFixed(2)}</div>` : ''}
+                    <div>Labor: ${document.getElementById('laborHours').value || 0} hrs @ $${pricing.laborRate}/hr = $${labor.toFixed(2)}</div>
+                    <div>Travel: $${travel.toFixed(2)}</div>
+                    ${partsTotal ? `<div>Parts:<br>${partsLines}<strong>Parts Subtotal: $${partsTotal.toFixed(2)}</strong></div>` : ''}
+                    <div class="totals">
+                        Subtotal: $${subtotal.toFixed(2)}<br>
+                        Tax (${pricing.taxRate}%): $${tax.toFixed(2)}<br>
+                        <span style="font-size:1.4rem;">Grand Total: $${grandTotal.toFixed(2)}</span>
+                    </div>
+                </div>
+
+                <div style="margin-top:40px; font-size:0.9rem; color:#555; text-align:center;">
+                    Estimate valid for 30 days. Prices subject to on-site inspection.<br>
+                    Thank you for choosing Total Service Pro!
+                </div>
+            </div>
+        `;
+
+        document.getElementById('previewContent').innerHTML = html;
+    }
+
+    function generatePDF() {
+        const element = document.getElementById('preview');
+        if (!element.innerText.includes('Grand Total')) {
+            alert('Please calculate preview first!');
+            return;
+        }
+        html2pdf().from(element).set({
+            margin: 1,
+            filename: `TSP_Estimate_${document.getElementById('customer').value || 'Customer'}_${new Date().toISOString().slice(0,10)}.pdf`,
+            html2canvas: { scale: 2 },
+            jsPDF: { unit: 'in', format: 'letter', orientation: 'portrait' }
+        }).save();
+    }
+
+    async function goBack() {
+        try { const{data:{session}}=await supabaseClient.auth.getSession(); if(session?.access_token){window.location.href='index.html?_s='+btoa(JSON.stringify(session));return;} } catch(e) {}
+        window.location.href='index.html';
+    }
+
+    async function saveToSupabase() {
+        if (!confirm('Save this estimate to your records?')) return;
+
+        const data = {
+            customer_name: document.getElementById('customer').value || null,
+            device_model: document.getElementById('model').value || null,
+            serial_pulses: document.getElementById('serial').value || null,
+            services: Array.from(document.querySelectorAll('.service-type:checked')).map(cb => cb.value),
+            issues: document.getElementById('issues').value || null,
+            total: parseFloat(document.querySelector('.totals span')?.innerText.replace('$','') || 0),
+            estimate_data: {} // you can JSON.stringify full form if needed
+        };
+
+        const { error } = await supabase.from('service_estimates').insert([data]);
+        if (error) alert('Save failed: ' + error.message);
+        else alert('Estimate saved!');
+    }
+
+</script>
+</body>
+</html>

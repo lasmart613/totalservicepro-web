@@ -1,3 +1,12 @@
 <resources>
+    <!-- Bottom nav titles -->
+    <string name="nav_fluence">Fluence</string>
+    <string name="nav_irradiance">Irradiance</string>
+    <string name="nav_wavelength">Wavelength</string>
+    <string name="nav_duty_cycle">Duty Cycle</string>
+    <string name="nav_avg_power">Avg Power</string>
+    <string name="nav_service">Service</string>
+
+    <!-- App name and others (add if missing) -->
     <string name="app_name">Photometry Tools</string>
 </resources>

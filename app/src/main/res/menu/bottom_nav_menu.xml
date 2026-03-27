@@ -1,23 +1,29 @@
 <?xml version="1.0" encoding="utf-8"?>
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
+
     <item
         android:id="@+id/nav_fluence"
         android:icon="@drawable/ic_fluence"
-        android:title="Fluence" />
+        android:title="@string/nav_fluence" />
+
     <item
         android:id="@+id/nav_irradiance"
         android:icon="@drawable/ic_irradiance"
-        android:title="Irradiance" />
+        android:title="@string/nav_irradiance" />
+
     <item
         android:id="@+id/nav_wavelength"
         android:icon="@drawable/ic_wavelength"
-        android:title="Wavelength" />
+        android:title="@string/nav_wavelength" />
+
     <item
         android:id="@+id/nav_duty_cycle"
         android:icon="@drawable/ic_duty_cycle"
-        android:title="Duty Cycle" />
+        android:title="@string/nav_duty_cycle" />
+
     <item
-        android:id="@+id/nav_service"
-        android:icon="@drawable/ic_service"
-        android:title="Service" />
+        android:id="@+id/nav_avg_power"
+        android:icon="@drawable/ic_avg_power"
+        android:title="@string/nav_avg_power" />
+
 </menu>

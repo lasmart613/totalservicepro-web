@@ -1,0 +1,705 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Customer Profile · Total Service Pro</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        :root {
+            --gold: #FBBF24; --gold-dk: #D97706;
+            --bg: #000; --surface: #111; --surface2: #1a1a1a; --surface3: #222;
+            --border: #2a2a2a; --border-gold: #FBBF2444;
+            --text: #fff; --text-muted: #888;
+            --red: #ef4444; --green: #22c55e; --blue: #3b82f6;
+        }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: 80px; }
+
+        .header { background: var(--surface); padding: 14px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--gold); position: sticky; top: 0; z-index: 100; }
+        .back-btn { background: none; border: none; color: var(--gold); font-size: 22px; cursor: pointer; padding: 4px 8px; border-radius: 8px; }
+        .header-title { font-size: 18px; font-weight: 700; flex: 1; }
+
+        /* Hero */
+        .hero { display: flex; align-items: center; gap: 16px; padding: 20px 16px; background: linear-gradient(135deg, #1a1500 0%, var(--bg) 100%); border-bottom: 1px solid var(--border); }
+        .hero-logo { width: 72px; height: 72px; border-radius: 16px; background: var(--gold); color: #111; font-size: 26px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid var(--gold); flex-shrink: 0; overflow: hidden; }
+        .hero-logo img { width: 100%; height: 100%; object-fit: cover; }
+        .hero-info { flex: 1; }
+        .hero-name { font-size: 20px; font-weight: 700; }
+        .hero-type { font-size: 12px; color: var(--gold); margin-top: 2px; }
+        .hero-stats { display: flex; gap: 16px; margin-top: 8px; }
+        .hero-stat-val { font-size: 18px; font-weight: 700; color: var(--gold); }
+        .hero-stat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.4px; }
+
+        /* Tabs */
+        .tabs { display: flex; background: var(--surface); border-bottom: 1px solid var(--border); position: sticky; top: 57px; z-index: 90; }
+        .tab { flex: 1; padding: 10px 4px; background: none; border: none; color: var(--text-muted); font-size: 12px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; transition: color 0.15s, border-color 0.15s; }
+        .tab.active { color: var(--gold); border-bottom-color: var(--gold); }
+
+        /* Tab panels */
+        .tab-panel { display: none; }
+        .tab-panel.active { display: block; }
+
+        /* Sections */
+        .section { margin: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+        .section-header { padding: 13px 16px 9px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+        .section-icon { font-size: 16px; }
+        .section-title { font-size: 13px; font-weight: 700; color: var(--gold); text-transform: uppercase; letter-spacing: 0.8px; flex: 1; }
+        .section-action { font-size: 12px; color: var(--gold); cursor: pointer; font-weight: 600; background: none; border: none; }
+        .section-body { padding: 14px 16px; }
+
+        /* Fields */
+        .field-row { display: flex; gap: 10px; margin-bottom: 12px; }
+        .field-row:last-child { margin-bottom: 0; }
+        .field { flex: 1; }
+        .field label { display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
+        .field input, .field select, .field textarea { width: 100%; padding: 10px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 9px; color: var(--text); font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.15s; }
+        .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--gold); }
+        .field select option { background: var(--surface2); }
+        .field textarea { resize: vertical; min-height: 80px; }
+
+        /* Equipment cards */
+        .equip-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s; }
+        .equip-card:hover { border-color: var(--gold); }
+        .equip-icon { font-size: 22px; width: 36px; text-align: center; flex-shrink: 0; }
+        .equip-make-model { font-size: 14px; font-weight: 700; }
+        .equip-serial { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+        .equip-status { font-size: 11px; padding: 3px 8px; border-radius: 20px; font-weight: 600; margin-left: auto; flex-shrink: 0; }
+        .equip-status.active       { background: #22c55e22; color: var(--green); border: 1px solid #22c55e44; }
+        .equip-status.inactive     { background: #88888822; color: var(--text-muted); border: 1px solid #88888844; }
+        .equip-status.decommissioned { background: #ef444422; color: var(--red); border: 1px solid #ef444444; }
+        .add-card-btn { display: flex; align-items: center; justify-content: center; gap: 8px; padding: 12px; background: none; border: 1px dashed var(--gold); border-radius: 10px; color: var(--gold); font-size: 13px; font-weight: 700; cursor: pointer; width: 100%; margin-top: 4px; }
+        .add-card-btn:hover { background: #1a1500; }
+
+        /* Sites */
+        .site-card { padding: 12px 14px; background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s; }
+        .site-card:hover { border-color: var(--gold); }
+        .site-name { font-size: 14px; font-weight: 700; }
+        .site-addr { font-size: 12px; color: var(--text-muted); margin-top: 3px; }
+        .site-access { font-size: 11px; color: var(--gold); margin-top: 4px; }
+
+        /* Contacts */
+        .contact-row { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border); }
+        .contact-row:last-child { border-bottom: none; }
+        .contact-avatar { width: 36px; height: 36px; border-radius: 50%; background: var(--surface3); color: var(--text-muted); font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .contact-name  { font-size: 14px; font-weight: 600; }
+        .contact-title { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+        .contact-actions { margin-left: auto; display: flex; gap: 8px; }
+        .contact-action-btn { background: none; border: 1px solid var(--border); color: var(--text-muted); width: 30px; height: 30px; border-radius: 8px; font-size: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        .contact-action-btn:hover { border-color: var(--gold); color: var(--gold); }
+
+        /* Service history */
+        .ticket-row { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-bottom: 1px solid var(--border); cursor: pointer; }
+        .ticket-row:last-child { border-bottom: none; }
+        .ticket-priority { width: 4px; height: 36px; border-radius: 2px; flex-shrink: 0; }
+        .ticket-priority.high      { background: var(--red); }
+        .ticket-priority.medium    { background: #f59e0b; }
+        .ticket-priority.low       { background: var(--green); }
+        .ticket-priority.emergency { background: #7c3aed; }
+        .ticket-num    { font-size: 12px; color: var(--gold); font-weight: 700; margin-bottom: 2px; }
+        .ticket-desc   { font-size: 13px; font-weight: 600; }
+        .ticket-meta   { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+        .ticket-status-badge { margin-left: auto; font-size: 10px; font-weight: 700; padding: 4px 8px; border-radius: 20px; white-space: nowrap; flex-shrink: 0; }
+        .ticket-status-badge.completed { background: #22c55e22; color: var(--green); border: 1px solid #22c55e44; }
+        .ticket-status-badge.scheduled { background: #3b82f622; color: var(--blue);  border: 1px solid #3b82f644; }
+        .ticket-status-badge.other     { background: #88888822; color: var(--text-muted); border: 1px solid #88888844; }
+
+        /* Billing history */
+        .billing-row-item { display: flex; justify-content: space-between; align-items: center; padding: 11px 0; border-bottom: 1px solid var(--border); }
+        .billing-row-item:last-child { border-bottom: none; }
+        .billing-row-date { font-size: 12px; color: var(--text-muted); }
+        .billing-row-desc { font-size: 13px; font-weight: 600; flex: 1; margin: 0 12px; }
+        .billing-row-amount { font-size: 13px; font-weight: 700; color: var(--gold); }
+
+        /* Specialty chips */
+        .specialty-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+        .specialty-chip { padding: 6px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; font-size: 13px; color: var(--text-muted); cursor: pointer; transition: all 0.15s; }
+        .specialty-chip.active { border-color: var(--gold); background: #1a1500; color: var(--gold); font-weight: 600; }
+
+        /* Save bar */
+        .save-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--border); padding: 12px 16px; z-index: 50; }
+        .save-bar-btn { width: 100%; padding: 14px; border-radius: 10px; border: none; background: var(--gold); color: #111827; font-size: 15px; font-weight: 700; cursor: pointer; }
+        .save-bar-btn:hover { background: var(--gold-dk); }
+        .save-bar-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        /* Toast */
+        .toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--surface2); border: 1px solid var(--gold); border-radius: 10px; padding: 12px 20px; font-size: 14px; font-weight: 600; z-index: 9999; transition: transform 0.3s ease; white-space: nowrap; }
+        .toast.show { transform: translateX(-50%) translateY(0); }
+        .toast.success { border-color: var(--green); color: var(--green); }
+        .toast.error   { border-color: var(--red);   color: var(--red); }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    </style>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
+</head>
+<body>
+
+<div class="header">
+    <button class="back-btn" id="backBtn" onclick="goBack()">←</button>
+    <div class="header-title" id="headerTitle">Customer Profile</div>
+    <button class="save-bar-btn" style="width:auto;padding:9px 18px;font-size:14px;" onclick="saveCustomer()">Save</button>
+</div>
+
+<!-- Hero -->
+<div class="hero">
+    <div class="hero-logo" id="heroLogo">?</div>
+    <div class="hero-info">
+        <div class="hero-name" id="heroName">Loading...</div>
+        <div class="hero-type" id="heroType"></div>
+        <div class="hero-stats">
+            <div>
+                <div class="hero-stat-val" id="statEquip">—</div>
+                <div class="hero-stat-label">Equipment</div>
+            </div>
+            <div>
+                <div class="hero-stat-val" id="statTickets">—</div>
+                <div class="hero-stat-label">Tickets</div>
+            </div>
+            <div>
+                <div class="hero-stat-val" id="statSites">—</div>
+                <div class="hero-stat-label">Sites</div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+    <button class="tab active" data-panel="info"     onclick="switchTab('info')">Info</button>
+    <button class="tab"        data-panel="equipment" onclick="switchTab('equipment')">Equipment</button>
+    <button class="tab"        data-panel="sites"     onclick="switchTab('sites')">Sites</button>
+    <button class="tab"        data-panel="contacts"  onclick="switchTab('contacts')">Contacts</button>
+    <button class="tab"        data-panel="history"   onclick="switchTab('history')">History</button>
+    <button class="tab"        data-panel="billing"   onclick="switchTab('billing')">Billing</button>
+</div>
+
+<!-- ── INFO TAB ── -->
+<div class="tab-panel active" id="panel-info">
+    <div class="section">
+        <div class="section-header"><span class="section-icon">🏥</span><span class="section-title">Business Info</span></div>
+        <div class="section-body">
+            <div class="field-row">
+                <div class="field"><label>Business Name *</label><input type="text" id="custName" placeholder="City Medical Center"></div>
+            </div>
+            <div class="field-row">
+                <div class="field"><label>Business Type</label>
+                    <select id="custBizType">
+                        <option value="">Select...</option>
+                        <option>Medical Spa</option>
+                        <option>Dermatology Clinic</option>
+                        <option>Plastic Surgery Center</option>
+                        <option>Hair Removal Clinic</option>
+                        <option>Cosmetic Surgery Center</option>
+                        <option>Wellness Center</option>
+                        <option>Hospital / Health System</option>
+                        <option>Other</option>
+                    </select>
+                </div>
+                <div class="field"><label>Website</label><input type="url" id="custWebsite" placeholder="https://"></div>
+            </div>
+            <div class="field-row">
+                <div class="field"><label>Notes</label><textarea id="custNotes" placeholder="Account notes, preferences, access details..."></textarea></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="section">
+        <div class="section-header"><span class="section-icon">📞</span><span class="section-title">Contact Info</span></div>
+        <div class="section-body">
+            <div class="field-row">
+                <div class="field"><label>Phone</label><input type="tel" id="custPhone"></div>
+                <div class="field"><label>Email</label><input type="email" id="custEmail"></div>
+            </div>
+            <div class="field-row">
+                <div class="field"><label>Address</label><input type="text" id="custAddress"></div>
+            </div>
+            <div class="field-row">
+                <div class="field"><label>City</label><input type="text" id="custCity"></div>
+                <div class="field" style="max-width:70px;"><label>State</label><input type="text" id="custState" maxlength="2"></div>
+                <div class="field" style="max-width:90px;"><label>ZIP</label><input type="text" id="custZip" maxlength="10"></div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Specialties -->
+    <div class="section">
+        <div class="section-header"><span class="section-icon">💉</span><span class="section-title">Specialties</span></div>
+        <div class="section-body">
+            <div class="specialty-chips" id="specialtyChips"></div>
+            <div style="font-size:12px;color:var(--text-muted);">Tap to select the treatments this facility offers.</div>
+        </div>
+    </div>
+</div>
+
+<!-- ── EQUIPMENT TAB ── -->
+<div class="tab-panel" id="panel-equipment">
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">🔬</span>
+            <span class="section-title">Equipment Inventory</span>
+            <button class="section-action" onclick="openAddEquipment()">+ Add</button>
+        </div>
+        <div class="section-body" id="equipmentList" style="padding:8px 16px;">
+            <div style="color:var(--text-muted);font-size:13px;padding:8px 0;">Loading equipment...</div>
+        </div>
+    </div>
+</div>
+
+<!-- ── SITES TAB ── -->
+<div class="tab-panel" id="panel-sites">
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📍</span>
+            <span class="section-title">Locations / Sites</span>
+            <button class="section-action" onclick="openAddSite()">+ Add</button>
+        </div>
+        <div class="section-body" id="sitesList" style="padding:8px 16px;">
+            <div style="color:var(--text-muted);font-size:13px;padding:8px 0;">Loading sites...</div>
+        </div>
+    </div>
+</div>
+
+<!-- ── CONTACTS TAB ── -->
+<div class="tab-panel" id="panel-contacts">
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">👥</span>
+            <span class="section-title">Contacts</span>
+            <button class="section-action" onclick="openAddContact()">+ Add</button>
+        </div>
+        <div class="section-body" id="contactsList" style="padding:0 16px;">
+            <div style="color:var(--text-muted);font-size:13px;padding:12px 0;">Loading contacts...</div>
+        </div>
+    </div>
+</div>
+
+<!-- ── HISTORY TAB ── -->
+<div class="tab-panel" id="panel-history">
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📋</span>
+            <span class="section-title">Service History</span>
+        </div>
+        <div class="section-body" id="historyList" style="padding:0 16px;">
+            <div style="color:var(--text-muted);font-size:13px;padding:12px 0;">Loading service history...</div>
+        </div>
+    </div>
+</div>
+
+<!-- ── BILLING TAB ── -->
+<div class="tab-panel" id="panel-billing">
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">💰</span>
+            <span class="section-title">Billing Summary</span>
+        </div>
+        <div class="section-body">
+            <div style="display:flex;gap:16px;margin-bottom:16px;">
+                <div style="flex:1;background:var(--surface2);border:1px solid var(--border-gold);border-radius:10px;padding:14px;text-align:center;">
+                    <div style="font-size:22px;font-weight:700;color:var(--gold);" id="billingTotalAmt">—</div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Total Invoiced</div>
+                </div>
+                <div style="flex:1;background:var(--surface2);border:1px solid var(--border);border-radius:10px;padding:14px;text-align:center;">
+                    <div style="font-size:22px;font-weight:700;color:var(--green);" id="billingPaidAmt">—</div>
+                    <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Total Paid</div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <div class="section">
+        <div class="section-header">
+            <span class="section-icon">📄</span>
+            <span class="section-title">Billing History</span>
+        </div>
+        <div class="section-body" id="billingHistoryList" style="padding:0 16px;">
+            <div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No billing records yet.</div>
+        </div>
+    </div>
+</div>
+
+<div class="save-bar" id="saveBar" style="display:none;">
+    <button class="save-bar-btn" id="saveCustomerBtn" onclick="saveCustomer()">Save Customer Profile</button>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+    // ── Extract _s param ──
+    var _pendingSession = null;
+    try {
+        var _purl = new URL(window.location.href);
+        var _sp = _purl.searchParams.get('_s');
+        if (_sp) {
+            _pendingSession = JSON.parse(atob(_sp));
+            _purl.searchParams.delete('_s');
+            history.replaceState(null, '', _purl.toString());
+        }
+    } catch(e) {}
+
+    const supabaseClient = supabase.createClient(
+        'https://yljztfajyvjzqikxdddf.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+        {
+            auth: {
+                persistSession: true,
+                storageKey: 'tsp-auth-token',
+                storage: window.localStorage,
+                autoRefreshToken: true,
+                detectSessionInUrl: false
+            }
+        }
+    );
+    function navigateTo(page) {
+        try {
+            var sess = JSON.parse(localStorage.getItem('tsp-auth-token') || 'null');
+            var raw  = sess && (sess.access_token ? sess : (sess.currentSession || null));
+            if (raw && raw.access_token) {
+                var encoded = btoa(JSON.stringify({
+                    access_token:  raw.access_token,
+                    refresh_token: raw.refresh_token,
+                    user: raw.user
+                }));
+                const _sep = page.includes('?') ? '&' : '?';
+                window.location.href = page + _sep + '_s=' + encoded;
+                return;
+            }
+        } catch(e) {}
+        window.location.href = page;
+    }
+
+    const ALL_SPECIALTIES = [
+        'Hair Removal','Skin Resurfacing','Tattoo Removal','Vascular Lesions',
+        'Pigmentation','Body Contouring','Anti-aging / Wrinkles','Acne Treatment',
+        'Scar Revision','Nail Fungus','Photodynamic Therapy','Fractional Laser',
+        'RF Microneedling','IPL Photofacial','Laser Lipolysis'
+    ];
+    const BRAND_ICONS = { 'Lumenis':'🔬','Candela':'⚡','Cynosure':'💡','Cutera':'🌟','Solta Medical':'✨','Other':'⚙️' };
+
+    let orgId           = null;   // org ID from URL param or passed state
+    let orgData         = null;
+    let selectedSpecialties = [];
+    let currentTab      = 'info';
+
+    // ── Init ──
+    async function init() {
+        // Get org ID from URL params: customer_profile.html?id=123
+        const params = new URLSearchParams(window.location.search);
+        orgId = params.get('id');
+
+        if (!orgId) {
+            showToast('No customer ID provided', 'error');
+            setTimeout(() => goBack(), 1500);
+            return;
+        }
+
+        try {
+            const { data } = await supabaseClient
+                .from('organizations')
+                .select('*')
+                .eq('id', orgId)
+                .maybeSingle();
+            if (!data) { showToast('Customer not found or access denied', 'error'); return; }
+            orgData = data;
+            populateForm(data);
+            renderSpecialtyChips();
+            await Promise.all([loadEquipment(), loadSites(), loadContacts(), loadHistory(), loadBilling()]);
+        } catch(e) {
+            showToast('Load failed: ' + e.message, 'error');
+        }
+    }
+
+    function populateForm(org) {
+        document.getElementById('headerTitle').textContent = org.name;
+        document.getElementById('heroName').textContent    = org.name;
+        document.getElementById('heroType').textContent    = org.biz_type || 'Customer';
+        document.getElementById('heroLogo').textContent    = org.name.slice(0,2).toUpperCase();
+
+        document.getElementById('custName').value    = org.name || '';
+        document.getElementById('custBizType').value = org.biz_type || '';
+        document.getElementById('custWebsite').value = org.website || '';
+        document.getElementById('custNotes').value   = org.notes || '';
+        document.getElementById('custPhone').value   = org.phone || '';
+        document.getElementById('custEmail').value   = org.email || '';
+        document.getElementById('custAddress').value = org.address || '';
+        document.getElementById('custCity').value    = org.city || '';
+        document.getElementById('custState').value   = org.state || '';
+        document.getElementById('custZip').value     = org.zip || '';
+
+        selectedSpecialties = org.specialties || [];
+        renderSpecialtyChips();
+
+        document.getElementById('saveBar').style.display = 'block';
+    }
+
+    // ── Tabs ──
+    function switchTab(tab) {
+        currentTab = tab;
+        document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.panel === tab));
+        document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.id === 'panel-' + tab));
+    }
+
+    // ── Specialties ──
+    function renderSpecialtyChips() {
+        const container = document.getElementById('specialtyChips');
+        if (!container) return;
+        container.innerHTML = '';
+        ALL_SPECIALTIES.forEach(spec => {
+            const chip = document.createElement('div');
+            chip.className = 'specialty-chip' + (selectedSpecialties.includes(spec) ? ' active' : '');
+            chip.textContent = spec;
+            chip.onclick = () => {
+                const idx = selectedSpecialties.indexOf(spec);
+                if (idx > -1) selectedSpecialties.splice(idx, 1);
+                else selectedSpecialties.push(spec);
+                renderSpecialtyChips();
+            };
+            container.appendChild(chip);
+        });
+    }
+
+    // ── Equipment ──
+    async function loadEquipment() {
+        const container = document.getElementById('equipmentList');
+        try {
+            const { data } = await supabaseClient
+                .from('equipment')
+                .select('*')
+                .eq('organization_id', orgId)
+                .order('manufacturer');
+
+            container.innerHTML = '';
+            document.getElementById('statEquip').textContent = data?.length || 0;
+
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;">No equipment on record.</div>';
+            } else {
+                data.forEach(eq => {
+                    const card = document.createElement('div');
+                    card.className = 'equip-card';
+                    card.innerHTML = `
+                        <div class="equip-icon">${BRAND_ICONS[eq.manufacturer] || '⚙️'}</div>
+                        <div style="flex:1;">
+                            <div class="equip-make-model">${eq.manufacturer} ${eq.model}</div>
+                            <div class="equip-serial">SN: ${eq.serial_number || 'N/A'} · ${eq.equipment_type || ''}</div>
+                            ${eq.next_pm_due ? `<div style="font-size:11px;color:#f59e0b;margin-top:2px;">PM due: ${new Date(eq.next_pm_due).toLocaleDateString()}</div>` : ''}
+                        </div>
+                        <span class="equip-status ${(eq.status||'active').toLowerCase()}">${eq.status || 'Active'}</span>
+                    `;
+                    container.appendChild(card);
+                });
+            }
+            const addBtn = document.createElement('button');
+            addBtn.className = 'add-card-btn';
+            addBtn.innerHTML = '➕ Add Equipment';
+            addBtn.onclick = openAddEquipment;
+            container.appendChild(addBtn);
+        } catch(e) { container.innerHTML = '<div style="color:var(--red);font-size:13px;">Load failed</div>'; }
+    }
+
+    function openAddEquipment() { showToast('Add equipment via New Ticket form', ''); }
+
+    // ── Sites ──
+    async function loadSites() {
+        const container = document.getElementById('sitesList');
+        try {
+            const { data } = await supabaseClient
+                .from('sites')
+                .select('*')
+                .eq('organization_id', orgId);
+
+            container.innerHTML = '';
+            document.getElementById('statSites').textContent = data?.length || 0;
+
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:8px 0;">No sites on record.</div>';
+            } else {
+                data.forEach(site => {
+                    const card = document.createElement('div');
+                    card.className = 'site-card';
+                    card.innerHTML = `
+                        <div class="site-name">${site.name}</div>
+                        <div class="site-addr">${[site.address, site.city, site.state].filter(Boolean).join(', ')}</div>
+                        ${site.access_notes ? `<div class="site-access">🔑 ${site.access_notes}</div>` : ''}
+                    `;
+                    container.appendChild(card);
+                });
+            }
+            const addBtn = document.createElement('button');
+            addBtn.className = 'add-card-btn';
+            addBtn.innerHTML = '➕ Add Site';
+            addBtn.onclick = openAddSite;
+            container.appendChild(addBtn);
+        } catch(e) { container.innerHTML = '<div style="color:var(--red);font-size:13px;">Load failed</div>'; }
+    }
+
+    function openAddSite() { showToast('Add site via New Ticket form when creating a ticket', ''); }
+
+    // ── Contacts ──
+    async function loadContacts() {
+        const container = document.getElementById('contactsList');
+        try {
+            const { data } = await supabaseClient
+                .from('contacts')
+                .select('*')
+                .eq('organization_id', orgId)
+                .order('first_name');
+
+            container.innerHTML = '';
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No contacts on record.</div>';
+            } else {
+                data.forEach(c => {
+                    const initials = ((c.first_name||'')[0]||'') + ((c.last_name||'')[0]||'');
+                    const row = document.createElement('div');
+                    row.className = 'contact-row';
+                    row.innerHTML = `
+                        <div class="contact-avatar">${initials || '?'}</div>
+                        <div style="flex:1;">
+                            <div class="contact-name">${[c.first_name, c.last_name].filter(Boolean).join(' ')}${c.is_primary ? ' ⭐' : ''}</div>
+                            <div class="contact-title">${c.title || ''}${c.title && c.phone ? ' · ' : ''}${c.phone || ''}</div>
+                        </div>
+                        <div class="contact-actions">
+                            ${c.phone ? `<button class="contact-action-btn" onclick="callContact('${c.phone}')" title="Call">📞</button>` : ''}
+                            ${c.email ? `<button class="contact-action-btn" onclick="emailContact('${c.email}')" title="Email">✉️</button>` : ''}
+                        </div>
+                    `;
+                    container.appendChild(row);
+                });
+            }
+        } catch(e) { container.innerHTML = '<div style="color:var(--red);font-size:13px;">Load failed</div>'; }
+    }
+
+    function openAddContact() { showToast('Contact management coming soon', ''); }
+    function callContact(phone) { window.open('tel:' + phone); }
+    function emailContact(email) { window.open('mailto:' + email); }
+
+    // ── Service History ──
+    async function loadHistory() {
+        const container = document.getElementById('historyList');
+        try {
+            const { data, count } = await supabaseClient
+                .from('service_tickets')
+                .select('*', { count: 'exact' })
+                .eq('organization_id', orgId)
+                .order('created_at', { ascending: false })
+                .limit(20);
+
+            container.innerHTML = '';
+            document.getElementById('statTickets').textContent = count || 0;
+
+            if (!data || data.length === 0) {
+                container.innerHTML = '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">No service history yet.</div>';
+                return;
+            }
+
+            data.forEach(t => {
+                const statusClass = t.status === 'Completed' ? 'completed' : t.status === 'Scheduled' ? 'scheduled' : 'other';
+                const row = document.createElement('div');
+                row.className = 'ticket-row';
+                row.innerHTML = `
+                    <div class="ticket-priority ${(t.priority||'medium').toLowerCase()}"></div>
+                    <div style="flex:1;">
+                        <div class="ticket-num">${t.ticket_number}</div>
+                        <div class="ticket-desc">${t.service_type || 'Service Call'}</div>
+                        <div class="ticket-meta">${t.equipment_make || ''} ${t.equipment_model || ''} · ${t.service_date ? new Date(t.service_date+'T00:00:00').toLocaleDateString() : 'Unscheduled'}</div>
+                    </div>
+                    <span class="ticket-status-badge ${statusClass}">${t.status}</span>
+                `;
+                row.onclick = () => navigateTo('service_schedule.html');
+                container.appendChild(row);
+            });
+        } catch(e) { container.innerHTML = '<div style="color:var(--red);font-size:13px;">Load failed</div>'; }
+    }
+
+    // ── Billing ──
+    async function loadBilling() {
+        // Placeholder — wire to actual billing system when ready
+        document.getElementById('billingTotalAmt').textContent = '$0.00';
+        document.getElementById('billingPaidAmt').textContent  = '$0.00';
+        document.getElementById('billingHistoryList').innerHTML =
+            '<div style="color:var(--text-muted);font-size:13px;padding:12px 0;">Billing integration coming soon.</div>';
+    }
+
+    // ── Save ──
+    async function saveCustomer() {
+        const btn = document.getElementById('saveCustomerBtn');
+        if (btn) { btn.disabled = true; btn.textContent = 'Saving...'; }
+
+        try {
+            const updates = {
+                name:         document.getElementById('custName').value.trim(),
+                biz_type:     document.getElementById('custBizType').value,
+                website:      document.getElementById('custWebsite').value.trim(),
+                notes:        document.getElementById('custNotes').value.trim(),
+                phone:        document.getElementById('custPhone').value.trim(),
+                email:        document.getElementById('custEmail').value.trim(),
+                address:      document.getElementById('custAddress').value.trim(),
+                city:         document.getElementById('custCity').value.trim(),
+                state:        document.getElementById('custState').value.trim(),
+                zip:          document.getElementById('custZip').value.trim(),
+                specialties:  selectedSpecialties,
+                updated_at:   new Date().toISOString()
+            };
+
+            const { error } = await supabaseClient
+                .from('organizations')
+                .update(updates)
+                .eq('id', orgId);
+            if (error) throw error;
+
+            document.getElementById('heroName').textContent    = updates.name;
+            document.getElementById('headerTitle').textContent = updates.name;
+            showToast('Customer profile saved!', 'success');
+        } catch(e) {
+            showToast('Save failed: ' + e.message, 'error');
+        } finally {
+            if (btn) { btn.disabled = false; btn.textContent = 'Save Customer Profile'; }
+        }
+    }
+
+    function goBack() {
+        if (document.referrer) history.back();
+        else navigateTo('index.html');
+    }
+
+    function showToast(msg, type='') {
+        const t = document.getElementById('toast');
+        t.textContent = msg; t.className = 'toast '+type+' show';
+        setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    supabaseClient.auth.onAuthStateChange(function(event, session) {
+        console.log('AUTH EVENT:', event, session?.user?.email);
+        try {
+            if (typeof Android !== 'undefined') {
+                if (session?.access_token) Android.saveSession(JSON.stringify(session));
+                else if (event === 'SIGNED_OUT' && !session) Android.clearSession();
+            }
+        } catch(e) {}
+    });
+
+    if (_pendingSession) {
+        var _ps = _pendingSession;
+        _pendingSession = null;
+        supabaseClient.auth.setSession({
+            access_token:  _ps.access_token,
+            refresh_token: _ps.refresh_token
+        }).then(function(result) {
+            if (result.error) { console.log('TSP: setSession error:', result.error.message); }
+            else {
+                console.log('TSP: setSession success:', result.data.session?.user?.email);
+                try {
+                    if (typeof Android !== 'undefined' && result.data.session)
+                        Android.saveSession(JSON.stringify(result.data.session));
+                } catch(e) {}
+            }
+            init();
+        });
+    } else {
+        init();
+    }
+</script>
+</body>
+</html>

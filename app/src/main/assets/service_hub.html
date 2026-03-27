@@ -3,210 +3,115 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Service Hub</title>
+    <title>Service Hub · TSP</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        var _pendingSession = null;
+        try {
+            var _purl = new URL(window.location.href);
+            var _sp = _purl.searchParams.get('_s');
+            if (_sp) {
+                _pendingSession = JSON.parse(atob(_sp));
+                _purl.searchParams.delete('_s');
+                history.replaceState(null, '', _purl.toString());
+            } else {
+                var _raw = localStorage.getItem('tsp-auth-token');
+                if (_raw) { var _p = JSON.parse(_raw); var _s2 = _p?.currentSession||(_p?.access_token?_p:null); if (_s2?.access_token) _pendingSession = _s2; }
+            }
+        } catch(e) {}
+        const supabaseClient = supabase.createClient(
+            'https://yljztfajyvjzqikxdddf.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+            { auth: { persistSession:true, storageKey:'tsp-auth-token', storage:window.localStorage, autoRefreshToken:true, detectSessionInUrl:false } }
+        );
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
+        body { display: flex; flex-direction: column; min-height: 100vh; }
+        .hub-page { padding: 20px 16px 40px; max-width: 600px; margin: 0 auto; width: 100%; }
+        .hub-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+        .hub-card {
+            background: var(--surface2); border: 1px solid var(--border);
+            border-radius: 14px; padding: 24px 16px; text-align: center;
+            cursor: pointer; font-family: inherit; transition: all 0.15s;
+            position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center;
         }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #2c2c2c 0%, #1a1a1a 100%);
-            color: #ffffff;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .header {
-            background: rgba(255, 215, 0, 0.1);
-            padding: 15px 20px;
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            border-bottom: 2px solid #ffd700;
-        }
-
-        .back-button {
-            background: #ffd700;
-            border: none;
-            border-radius: 8px;
-            padding: 10px 20px;
-            color: #1a1a1a;
-            font-weight: 600;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .back-button:active {
-            transform: scale(0.95);
-        }
-
-        .title {
-            color: #ffd700;
-            font-size: 20px;
-            font-weight: 600;
-            flex: 1;
-            text-align: center;
-        }
-
-        .placeholder {
-            width: 80px;
-        }
-
-        .content {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            padding: 40px 20px;
-            gap: 30px;
-        }
-
-        .welcome-section {
-            text-align: center;
-            margin-bottom: 20px;
-        }
-
-        .welcome-icon {
-            font-size: 64px;
-            margin-bottom: 16px;
-        }
-
-        .welcome-title {
-            font-size: 28px;
-            font-weight: 700;
-            color: #ffd700;
-            margin-bottom: 8px;
-        }
-
-        .welcome-subtitle {
-            font-size: 16px;
-            color: #aaa;
-        }
-
-        .button-container {
-            display: flex;
-            flex-direction: column;
-            gap: 20px;
-            width: 100%;
-            max-width: 400px;
-        }
-
-        .service-button {
-            background: linear-gradient(135deg, rgba(255, 215, 0, 0.2) 0%, rgba(255, 215, 0, 0.1) 100%);
-            border: 2px solid #ffd700;
-            border-radius: 16px;
-            padding: 30px 24px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            gap: 12px;
-            box-shadow: 0 4px 20px rgba(255, 215, 0, 0.1);
-        }
-
-        .service-button:hover {
-            transform: translateY(-4px);
-            box-shadow: 0 8px 30px rgba(255, 215, 0, 0.2);
-            background: linear-gradient(135deg, rgba(255, 215, 0, 0.3) 0%, rgba(255, 215, 0, 0.15) 100%);
-        }
-
-        .service-button:active {
-            transform: translateY(-2px);
-        }
-
-        .button-icon {
-            font-size: 48px;
-        }
-
-        .button-title {
-            font-size: 22px;
-            font-weight: 700;
-            color: #ffd700;
-        }
-
-        .button-description {
-            font-size: 14px;
-            color: #ccc;
-            text-align: center;
-            line-height: 1.4;
-        }
-
-        .badge {
-            background: rgba(76, 175, 80, 0.2);
-            border: 1px solid #4caf50;
-            color: #4caf50;
-            padding: 4px 12px;
-            border-radius: 12px;
-            font-size: 11px;
-            font-weight: 600;
-            text-transform: uppercase;
-        }
-
-        .ai-badge {
-            background: rgba(33, 150, 243, 0.2);
-            border: 1px solid #2196f3;
-            color: #2196f3;
-        }
+        .hub-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:var(--gold); opacity:0; transition:opacity 0.15s; }
+        .hub-card:hover { border-color: var(--gold); background: var(--surface3); transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.4); }
+        .hub-card:hover::before { opacity: 1; }
+        .hub-card:active { transform: translateY(0); }
+        .hub-icon { font-size: 36px; margin-bottom: 10px; }
+        .hub-label { font-size: 13px; font-weight: 700; color: var(--text2); }
     </style>
 </head>
 <body>
 <div class="header">
-    <button class="back-button" onclick="goBack()">← Back</button>
-    <div class="title">🛠️ Service Hub</div>
-    <div class="placeholder"></div>
+    <button class="header-back" onclick="navigateTo('index.html')">‹</button>
+    <div class="header-title">Service Hub</div>
+    <div class="avatar-wrapper" id="avatarWrapper">
+        <button class="avatar-btn" onclick="toggleDropdown(event)"><img id="avatarImg" class="avatar-img" src="" alt=""/><div id="avatarInitials" class="avatar-initials">U</div></button>
+        <div class="avatar-dropdown" id="avatarDropdown">
+            <div class="dropdown-user-info"><div class="dropdown-user-name" id="dropdownName">User</div><div class="dropdown-user-email" id="dropdownEmail"></div></div>
+            <button class="dropdown-item" onclick="navigateTo('user_profile.html')"><span class="dropdown-icon">👤</span> Profile</button>
+            <button class="dropdown-item" onclick="navigateTo('company_profile.html')"><span class="dropdown-icon">🏢</span> Company Profile</button>
+            <button class="dropdown-item" onclick="navigateTo('settings.html')"><span class="dropdown-icon">⚙️</span> Settings</button>
+            <button class="dropdown-item" id="upgradeBtn" onclick="navigateTo('paywall.html')" style="display:none;color:var(--gold);"><span class="dropdown-icon">⭐</span> Upgrade</button>
+            <button class="dropdown-item danger" onclick="logoutUser()"><span class="dropdown-icon">🚪</span> Log Out</button>
+        </div>
+    </div>
 </div>
 
-<div class="content">
-    <div class="welcome-section">
-        <div class="welcome-icon">🔧</div>
-        <div class="welcome-title">Service Tools</div>
-        <div class="welcome-subtitle">Professional laser service resources</div>
+<div class="hub-page">
+    <div style="margin-bottom:24px;">
+        <div style="font-size:22px;font-weight:800;">Service Tools</div>
+        <div style="font-size:13px;color:var(--text3);margin-top:4px;">Professional laser service resources</div>
     </div>
+    <div class="hub-grid">
+        <button class="hub-card" onclick="navigateTo('service_schedule.html')"><div class="hub-icon">📅</div><div class="hub-label">Service Schedule</div></button>
+        <button class="hub-card" onclick="navigateTo('customer_directory.html')"><div class="hub-icon">👥</div><div class="hub-label">Customers</div></button>
+        <button class="hub-card" onclick="navigateTo('parts_catalog.html')"><div class="hub-icon">🔩</div><div class="hub-label">Parts Catalog</div></button>
+        <button class="hub-card" onclick="navigateTo('manual_library.html')"><div class="hub-icon">📚</div><div class="hub-label">Service Manuals</div></button>
+        <button class="hub-card" onclick="navigateTo('ai_assistant.html')"><div class="hub-icon">🤖</div><div class="hub-label">AI Assistant</div></button>
+        <button class="hub-card" onclick="navigateTo('reports_list.html')"><div class="hub-icon">📋</div><div class="hub-label">Service Reports</div></button>
+    </div>
+</div>
 
-    <div class="button-container">
-        <div class="service-button" onclick="openServiceManuals()">
-            <div class="button-icon">📚</div>
-            <div class="button-title">Service Manuals</div>
-            <div class="button-description">
-                View PDF service manuals organized by manufacturer
-            </div>
-            <div class="badge">PDF Viewer</div>
-        </div>
-
-        <div class="service-button" onclick="openAIAssistant()">
-            <div class="button-icon">🤖</div>
-            <div class="button-title">AI Assistant</div>
-            <div class="button-description">
-                Voice-powered troubleshooting with manual search
-            </div>
-            <div class="badge ai-badge">Voice Enabled</div>
-        </div>
+<!-- Login Popup -->
+<div id="loginPopup" class="modal-overlay">
+    <div class="modal-box">
+        <button class="modal-close" onclick="closeLoginPopup()">×</button>
+        <div class="modal-title">Sign In</div>
+        <div id="formMessage" style="color:var(--red);font-size:13px;margin-bottom:12px;min-height:18px;"></div>
+        <form id="authForm">
+            <div class="form-group"><label>Email</label><input type="email" id="email" class="form-input" required></div>
+            <div class="form-group"><label>Password</label><input type="password" id="password" class="form-input"></div>
+            <button type="submit" class="btn btn-gold btn-full">Sign In</button>
+        </form>
+        <div style="text-align:center;margin-top:14px;"><a href="#" onclick="forgotPassword()" style="color:var(--gold);font-size:13px;">Forgot password?</a></div>
     </div>
 </div>
 
 <script>
-    function goBack() {
-        if (typeof Android !== 'undefined' && Android.goBack) {
-            Android.goBack();
-        } else {
-            console.log('Back navigation not available');
-        }
+    function navigateTo(page) {
+        try { var sess=JSON.parse(localStorage.getItem('tsp-auth-token')||'null'); var raw=sess&&(sess.access_token?sess:(sess.currentSession||null)); if(raw&&raw.access_token){window.location.href=page+(page.includes('?')?'&':'?')+'_s='+btoa(JSON.stringify({access_token:raw.access_token,refresh_token:raw.refresh_token}));return;} } catch(e) {}
+        window.location.href = page;
     }
-
-    function openServiceManuals() {
-        window.location.href = 'manual_library.html';
-    }
-
-    function openAIAssistant() {
-        window.location.href = 'ai_assistant.html';
-    }
+    function toggleDropdown(e){e.stopPropagation();document.getElementById('avatarDropdown').classList.toggle('open');}
+    document.addEventListener('click',()=>document.getElementById('avatarDropdown')?.classList.remove('open'));
+    function showLoginPopup(){document.getElementById('loginPopup').classList.add('open');}
+    function closeLoginPopup(){document.getElementById('loginPopup').classList.remove('open');document.getElementById('formMessage').textContent='';}
+    async function forgotPassword(){const email=document.getElementById('email').value.trim();if(!email)return(document.getElementById('formMessage').textContent='Enter your email first');const{error}=await supabaseClient.auth.resetPasswordForEmail(email);document.getElementById('formMessage').textContent=error?error.message:'Reset link sent!';}
+    document.addEventListener('DOMContentLoaded',()=>{const form=document.getElementById('authForm');if(form)form.addEventListener('submit',async(e)=>{e.preventDefault();const{error}=await supabaseClient.auth.signInWithPassword({email:document.getElementById('email').value.trim(),password:document.getElementById('password').value.trim()});if(error)document.getElementById('formMessage').textContent=error.message;else closeLoginPopup();});});
+    async function logoutUser(){document.getElementById('avatarDropdown').classList.remove('open');await supabaseClient.auth.signOut();try{if(typeof Android!=='undefined')Android.clearSession();}catch(e){}}
+    async function updateAuthUI(){const{data:{user}}=await supabaseClient.auth.getUser();const aw=document.getElementById('avatarWrapper');if(user){if(aw)aw.style.display='block';const meta=user.user_metadata||{},fn=meta.first_name||'',ln=meta.last_name||'';document.getElementById('dropdownName').textContent=[fn,ln].filter(Boolean).join(' ')||'User';document.getElementById('dropdownEmail').textContent=user.email||'';const img=document.getElementById('avatarImg'),ini=document.getElementById('avatarInitials'),photo=meta.avatar_url||meta.picture||'';if(photo){img.src=photo;img.style.display='block';ini.style.display='none';}else{img.style.display='none';ini.style.display='flex';ini.textContent=((fn[0]||'')+(ln[0]||'')).toUpperCase()||user.email[0].toUpperCase();}}else{if(aw)aw.style.display='none';}}
+    async function checkTierAndShowUpgrade(){try{const{data:{user}}=await supabaseClient.auth.getUser();if(!user)return;const{data:sub}=await supabaseClient.from('subscriptions').select('tier,status').eq('user_id',user.id).single();const isPaid=sub&&['premium','team','enterprise'].includes(sub.tier)&&sub.status==='active';const btn=document.getElementById('upgradeBtn');if(btn)btn.style.display=isPaid?'none':'flex';}catch(e){}}
+    supabaseClient.auth.onAuthStateChange(function(event,session){
+        if(_pendingSession){var ps=_pendingSession;_pendingSession=null;supabaseClient.auth.setSession({access_token:ps.access_token,refresh_token:ps.refresh_token}).then(function(r){if(!r.error){try{if(typeof Android!=='undefined'&&r.data.session)Android.saveSession(JSON.stringify(r.data.session));}catch(e){}}updateAuthUI();checkTierAndShowUpgrade();});return;}
+        updateAuthUI();
+        try{if(typeof Android!=='undefined'){if(session?.access_token)Android.saveSession(JSON.stringify(session));else if(event==='SIGNED_OUT'&&!session)Android.clearSession();}}catch(e){}
+    });
+    updateAuthUI(); checkTierAndShowUpgrade();
 </script>
 </body>
 </html>

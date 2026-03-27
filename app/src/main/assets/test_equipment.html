@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Test Equipment · TSP</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const enc = new URLSearchParams(window.location.search).get('_s');
+                if (enc) { const s=JSON.parse(atob(enc)); if(s?.access_token){_pendingSession=s;localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));const u=new URL(window.location.href);u.searchParams.delete('_s');window.history.replaceState({},'',u.toString());return;} }
+                const raw=localStorage.getItem('tsp-auth-token'); if(raw){const p=JSON.parse(raw);const sess=p?.currentSession||(p?.access_token?p:null);if(sess?.access_token)_pendingSession=sess;}
+            } catch(e) {}
+        })();
+        var supabaseClient = supabase.createClient(
+            'https://yljztfajyvjzqikxdddf.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+            { auth: { persistSession:true, storageKey:'tsp-auth-token', storage:window.localStorage, autoRefreshToken:true, detectSessionInUrl:false } }
+        );
+        // _pendingSession will be applied in init() with proper await
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
+    <style>
+        .eq-card {
+            background: var(--surface2); border: 1px solid var(--border);
+            border-radius: 12px; padding: 14px 16px; margin-bottom: 10px;
+            cursor: pointer; transition: border-color 0.15s;
+        }
+        .eq-card:hover { border-color: var(--gold-border); }
+        .eq-card.cal-warning { border-left: 4px solid var(--orange); }
+        .eq-card.cal-overdue  { border-left: 4px solid var(--red); }
+        .eq-card.cal-ok       { border-left: 4px solid var(--green); }
+
+        .eq-header { display: flex; align-items: flex-start; gap: 10px; }
+        .eq-type-icon { font-size: 26px; flex-shrink: 0; width: 36px; text-align: center; }
+        .eq-info { flex: 1; min-width: 0; }
+        .eq-name { font-size: 15px; font-weight: 700; color: var(--text); }
+        .eq-sub  { font-size: 12px; color: var(--text3); margin-top: 2px; }
+        .eq-arrow { color: var(--text3); font-size: 18px; align-self: center; }
+
+        .eq-cal-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+        .cal-pill {
+            display: inline-flex; align-items: center; gap: 5px;
+            padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700;
+        }
+        .cal-pill.ok      { background: rgba(34,197,94,0.1);  color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
+        .cal-pill.warning { background: rgba(245,158,11,0.1); color: var(--orange); border: 1px solid rgba(245,158,11,0.3); }
+        .cal-pill.overdue { background: rgba(239,68,68,0.1);  color: var(--red);    border: 1px solid rgba(239,68,68,0.3); }
+        .cal-pill.none    { background: var(--surface3);      color: var(--text3);  border: 1px solid var(--border2); }
+
+        .fab { position:fixed;bottom:20px;right:20px;width:56px;height:56px;border-radius:50%;background:var(--gold);color:#111;font-size:28px;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:50;transition:transform 0.15s; }
+        .fab:active { transform:scale(0.93); }
+
+        .stats-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 18px; }
+
+        /* Edit / Add drawer */
+        .drawer-overlay { display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:200; }
+        .drawer-overlay.open { display:block; }
+        .drawer {
+            position:fixed;bottom:0;left:0;right:0;max-height:88vh;
+            background:var(--surface2);border-radius:16px 16px 0 0;
+            border-top:2px solid var(--gold);z-index:201;
+            display:flex;flex-direction:column;
+            transform:translateY(100%);transition:transform 0.3s ease;
+        }
+        .drawer.open { transform:translateY(0); }
+        .drawer-header { padding:16px 16px 12px;border-bottom:1px solid var(--border2);display:flex;align-items:center;justify-content:space-between;flex-shrink:0; }
+        .drawer-title { font-size:16px;font-weight:800;color:var(--gold); }
+        .drawer-close { background:none;border:none;color:var(--text3);font-size:24px;cursor:pointer; }
+        .drawer-body { flex:1;overflow-y:auto;padding:16px; }
+        .drawer-footer { padding:12px 16px max(12px,env(safe-area-inset-bottom));border-top:1px solid var(--border2);display:flex;gap:10px;flex-shrink:0; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <button class="header-back" onclick="navTo('settings.html')">‹</button>
+    <div class="header-title">🔧 Test Equipment</div>
+    <div style="width:40px;"></div>
+</div>
+
+<div class="page">
+
+    <div class="stats-3">
+        <div class="stat-card"><div class="stat-num" id="statTotal">—</div><div class="stat-label">Total Items</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:var(--orange);" id="statWarning">—</div><div class="stat-label">Due Soon</div></div>
+        <div class="stat-card"><div class="stat-num" style="color:var(--red);" id="statOverdue">—</div><div class="stat-label">Overdue</div></div>
+    </div>
+
+    <div id="eqList">
+        <div class="empty-state"><div class="spinner"></div></div>
+    </div>
+
+</div>
+
+<button class="fab" onclick="openDrawer(null)" title="Add Equipment">＋</button>
+
+<!-- Add / Edit Drawer -->
+<div class="drawer-overlay" id="drawerOverlay" onclick="closeDrawer()"></div>
+<div class="drawer" id="drawer">
+    <div class="drawer-header">
+        <span class="drawer-title" id="drawerTitle">Add Equipment</span>
+        <button class="drawer-close" onclick="closeDrawer()">×</button>
+    </div>
+    <div class="drawer-body">
+        <div class="form-group">
+            <label>Equipment Type *</label>
+            <select class="form-select" id="fType">
+                <option value="">— Select Type —</option>
+                <option value="Power Meter">Power Meter</option>
+                <option value="Energy Meter">Energy Meter</option>
+                <option value="Multimeter">Multimeter</option>
+                <option value="Oscilloscope">Oscilloscope</option>
+                <option value="Thermometer">Thermometer</option>
+                <option value="Beam Profiler">Beam Profiler</option>
+                <option value="Ophir Head">Ophir Head</option>
+                <option value="Flow Meter">Flow Meter</option>
+                <option value="Conductivity Meter">Conductivity Meter</option>
+                <option value="Laser Safety Glasses">Laser Safety Glasses</option>
+                <option value="Other">Other</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>Make</label><input type="text" class="form-input" id="fMake" placeholder="e.g. Ophir"></div>
+            <div class="form-group"><label>Model</label><input type="text" class="form-input" id="fModel" placeholder="e.g. Nova II"></div>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>Serial #</label><input type="text" class="form-input" id="fSerial" placeholder="SN12345"></div>
+            <div class="form-group"><label>Asset Tag</label><input type="text" class="form-input" id="fAssetTag" placeholder="Optional"></div>
+        </div>
+        <div class="divider"></div>
+        <div style="font-size:12px;font-weight:700;color:var(--gold);text-transform:uppercase;letter-spacing:0.8px;margin-bottom:12px;">📅 Calibration Info</div>
+        <div class="form-row">
+            <div class="form-group"><label>Last Cal Date</label><input type="date" class="form-input" id="fCalDate"></div>
+            <div class="form-group"><label>Cal Due Date</label><input type="date" class="form-input" id="fCalDue"></div>
+        </div>
+        <div class="form-group"><label>Calibration Lab</label><input type="text" class="form-input" id="fCalLab" placeholder="e.g. Accutek Calibration"></div>
+        <div class="form-group"><label>Notes</label><textarea class="form-textarea" id="fNotes" placeholder="Optional notes..." rows="2"></textarea></div>
+    </div>
+    <div class="drawer-footer">
+        <button class="btn btn-danger" id="deleteBtn" onclick="deleteEquipment()" style="display:none;">🗑 Delete</button>
+        <button class="btn btn-gold" style="flex:1;" onclick="saveEquipment()">Save</button>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+    let allEquipment = [];
+    let editingId = null;
+    let currentUser = null;
+
+    const TYPE_ICONS = {
+        'Power Meter':'⚡', 'Energy Meter':'💡', 'Multimeter':'🔌',
+        'Oscilloscope':'📈', 'Thermometer':'🌡️', 'Beam Profiler':'🎯',
+        'Ophir Head':'🔆', 'Flow Meter':'💧', 'Conductivity Meter':'🧪',
+        'Laser Safety Glasses':'🥽', 'Other':'🔧'
+    };
+
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+        try { if(typeof Android!=='undefined'){if(session?.access_token)Android.saveSession(JSON.stringify(session));else if(event==='SIGNED_OUT'&&!session)Android.clearSession();} } catch(e) {}
+    });
+
+    async function navTo(page) {
+        try { const{data:{session}}=await supabaseClient.auth.getSession(); if(session?.access_token){const sep=page.includes('?')?'&':'?';window.location.href=page+sep+'_s='+btoa(JSON.stringify(session));return;} } catch(e) {}
+        window.location.href = page;
+    }
+
+    async function init() {
+        // Try existing session first, then apply pending if needed
+        let { data: { session: _initSession } } = await supabaseClient.auth.getSession();
+        if (!_initSession && _pendingSession) {
+            try {
+                const r = await supabaseClient.auth.setSession({ access_token: _pendingSession.access_token, refresh_token: _pendingSession.refresh_token });
+                _initSession = r.data?.session;
+            } catch(e) {}
+            _pendingSession = null;
+        }
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) { navTo('index.html'); return; }
+        currentUser = user;
+        await loadEquipment();
+    }
+
+    async function loadEquipment() {
+        const { data, error } = await supabaseClient
+            .from('test_equipment')
+            .select('*')
+            .eq('user_id', currentUser.id)
+            .eq('is_active', true)
+            .order('type')
+            .order('make');
+        if (error) { showToast('Load failed: ' + error.message, 'error'); return; }
+        allEquipment = data || [];
+        renderList();
+    }
+
+    function renderList() {
+        const list = document.getElementById('eqList');
+        const today = new Date();
+        const soon  = new Date(today); soon.setDate(soon.getDate() + 60); // 60-day warning
+
+        let totalOk = 0, totalWarn = 0, totalOverdue = 0;
+
+        if (!allEquipment.length) {
+            list.innerHTML = '<div class="empty-state"><div class="empty-icon">🔧</div><div class="empty-title">No test equipment yet</div><div class="empty-sub">Tap ＋ to add your power meters, multimeters, and other calibrated equipment.</div></div>';
+            document.getElementById('statTotal').textContent = 0;
+            document.getElementById('statWarning').textContent = 0;
+            document.getElementById('statOverdue').textContent = 0;
+            return;
+        }
+
+        list.innerHTML = '';
+        allEquipment.forEach(eq => {
+            const card = document.createElement('div');
+            let calStatus = 'none', cardClass = '';
+
+            if (eq.cal_due) {
+                const due = new Date(eq.cal_due);
+                if (due < today)       { calStatus = 'overdue';  cardClass = 'cal-overdue';  totalOverdue++; }
+                else if (due <= soon)  { calStatus = 'warning';  cardClass = 'cal-warning';  totalWarn++; }
+                else                   { calStatus = 'ok';       cardClass = 'cal-ok';       totalOk++; }
+            }
+
+            card.className = 'eq-card ' + cardClass;
+            card.onclick = () => openDrawer(eq);
+
+            const icon = TYPE_ICONS[eq.type] || '🔧';
+            const nameStr = [eq.make, eq.model].filter(Boolean).join(' ') || eq.type;
+            const subStr  = [eq.serial_number ? 'SN: ' + eq.serial_number : '', eq.asset_tag ? 'Asset: ' + eq.asset_tag : ''].filter(Boolean).join(' · ');
+
+            let calHTML = '';
+            if (eq.cal_date) calHTML += '<span class="cal-pill ' + calStatus + '">Last cal: ' + formatDate(eq.cal_date) + '</span>';
+            if (eq.cal_due)  calHTML += '<span class="cal-pill ' + calStatus + '">' + (calStatus === 'overdue' ? '⚠️ Due: ' : calStatus === 'warning' ? '🕐 Due: ' : '✓ Due: ') + formatDate(eq.cal_due) + '</span>';
+            if (!eq.cal_date && !eq.cal_due) calHTML = '<span class="cal-pill none">No cal data</span>';
+
+            card.innerHTML =
+                '<div class="eq-header">' +
+                    '<div class="eq-type-icon">' + icon + '</div>' +
+                    '<div class="eq-info">' +
+                        '<div class="eq-name">' + nameStr + '</div>' +
+                        '<div class="eq-sub">' + eq.type + (subStr ? ' · ' + subStr : '') + '</div>' +
+                    '</div>' +
+                    '<div class="eq-arrow">›</div>' +
+                '</div>' +
+                '<div class="eq-cal-row">' + calHTML + '</div>';
+
+            list.appendChild(card);
+        });
+
+        document.getElementById('statTotal').textContent   = allEquipment.length;
+        document.getElementById('statWarning').textContent = totalWarn;
+        document.getElementById('statOverdue').textContent = totalOverdue;
+    }
+
+    function formatDate(d) {
+        if (!d) return '';
+        const dt = new Date(d + 'T00:00:00');
+        return dt.toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' });
+    }
+
+    function openDrawer(eq) {
+        editingId = eq ? eq.id : null;
+        document.getElementById('drawerTitle').textContent = eq ? 'Edit Equipment' : 'Add Equipment';
+        document.getElementById('deleteBtn').style.display = eq ? 'block' : 'none';
+        // Fill fields
+        document.getElementById('fType').value     = eq?.type        || '';
+        document.getElementById('fMake').value     = eq?.make        || '';
+        document.getElementById('fModel').value    = eq?.model       || '';
+        document.getElementById('fSerial').value   = eq?.serial_number || '';
+        document.getElementById('fAssetTag').value = eq?.asset_tag   || '';
+        document.getElementById('fCalDate').value  = eq?.cal_date    || '';
+        document.getElementById('fCalDue').value   = eq?.cal_due     || '';
+        document.getElementById('fCalLab').value   = eq?.cal_lab     || '';
+        document.getElementById('fNotes').value    = eq?.notes       || '';
+        document.getElementById('drawerOverlay').classList.add('open');
+        document.getElementById('drawer').classList.add('open');
+    }
+
+    function closeDrawer() {
+        document.getElementById('drawerOverlay').classList.remove('open');
+        document.getElementById('drawer').classList.remove('open');
+        editingId = null;
+    }
+
+    async function saveEquipment() {
+        const type = document.getElementById('fType').value;
+        if (!type) { showToast('Please select an equipment type', 'error'); return; }
+
+        const payload = {
+            user_id:       currentUser.id,
+            type,
+            make:          document.getElementById('fMake').value.trim()     || null,
+            model:         document.getElementById('fModel').value.trim()    || null,
+            serial_number: document.getElementById('fSerial').value.trim()   || null,
+            asset_tag:     document.getElementById('fAssetTag').value.trim() || null,
+            cal_date:      document.getElementById('fCalDate').value         || null,
+            cal_due:       document.getElementById('fCalDue').value          || null,
+            cal_lab:       document.getElementById('fCalLab').value.trim()   || null,
+            notes:         document.getElementById('fNotes').value.trim()    || null,
+            updated_at:    new Date().toISOString()
+        };
+
+        let error;
+        if (editingId) {
+            ({ error } = await supabaseClient.from('test_equipment').update(payload).eq('id', editingId));
+        } else {
+            ({ error } = await supabaseClient.from('test_equipment').insert(payload));
+        }
+
+        if (error) { showToast('Save failed: ' + error.message, 'error'); return; }
+        showToast(editingId ? 'Updated!' : 'Equipment added!', 'success');
+        closeDrawer();
+        await loadEquipment();
+    }
+
+    async function deleteEquipment() {
+        if (!editingId) return;
+        if (!confirm('Remove this equipment?')) return;
+        const { error } = await supabaseClient.from('test_equipment').update({ is_active: false }).eq('id', editingId);
+        if (error) { showToast('Delete failed: ' + error.message, 'error'); return; }
+        showToast('Removed', 'success');
+        closeDrawer();
+        await loadEquipment();
+    }
+
+    function showToast(msg, type='') {
+        const t = document.getElementById('toast'); t.textContent = msg;
+        t.className = 'toast show' + (type ? ' ' + type : '');
+        clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    init();
+</script>
+</body>
+</html>

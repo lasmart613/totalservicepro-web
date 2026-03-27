@@ -3,418 +3,118 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Service Manuals</title>
+    <title>Service Manuals · TSP</title>
+    <!-- Session boot before anything else -->
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const enc = new URLSearchParams(window.location.search).get('_s');
+                if (enc) { const s=JSON.parse(atob(enc)); if(s?.access_token){_pendingSession=s;localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));const u=new URL(window.location.href);u.searchParams.delete('_s');window.history.replaceState({},'',u.toString());return;} }
+                const raw=localStorage.getItem('tsp-auth-token'); if(raw){const p=JSON.parse(raw);const sess=p?.currentSession||(p?.access_token?p:null);if(sess?.access_token)_pendingSession=sess;}
+            } catch(e) {}
+        })();
+        function restoreSession(jsonStr){try{const parsed=typeof jsonStr==='string'?JSON.parse(jsonStr):jsonStr;const session=parsed?.currentSession||parsed;if(session?.access_token){localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:session,expiresAt:session.expires_at}));}}catch(e){}}
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: linear-gradient(135deg, #2c2c2c 0%, #1a1a1a 100%);
-            color: #ffffff;
-            height: 100vh;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .header {
-            background: #1a1a1a;
-            padding: 12px 16px;
-            display: flex;
-            align-items: center;
-            gap: 12px;
-            border-bottom: 1px solid #333;
-            position: sticky;
-            top: 0;
-            z-index: 100;
-            flex-shrink: 0;
-        }
-
-        .back-button {
-            background: #ffd700;
-            border: none;
-            border-radius: 8px;
-            padding: 10px 20px;
-            color: #1a1a1a;
-            font-weight: 600;
-            cursor: pointer;
-            font-size: 14px;
-        }
-
-        .back-button:active {
-            transform: scale(0.95);
-        }
-
-        .title {
-            color: #ffd700;
-            font-size: 20px;
-            font-weight: 600;
-            flex: 1;
-            text-align: center;
-        }
-
-        .placeholder {
-            width: 80px;
-        }
-
-        .manual-list-container {
-            background: #1e1e1e;
-            border-bottom: 1px solid #333;
-            padding: 12px 16px;
-            overflow-x: auto;
-            flex-shrink: 0;
-            display: none;
-        }
-
-        .manual-list-container.visible {
-            display: block;
-        }
-
-        .manual-chips {
-            display: flex;
-            gap: 8px;
-            flex-wrap: nowrap;
-            min-width: max-content;
-        }
-
-        .manual-chip {
-            background: rgba(255, 215, 0, 0.1);
-            border: 1px solid #ffd700;
-            color: #ffd700;
-            padding: 8px 16px;
-            border-radius: 20px;
-            font-size: 13px;
-            font-weight: 500;
-            cursor: pointer;
-            white-space: nowrap;
-            transition: all 0.2s ease;
-        }
-
-        .manual-chip:hover {
-            background: rgba(255, 215, 0, 0.2);
-            transform: translateY(-1px);
-        }
-
-        .manual-chip.active {
-            background: #ffd700;
-            color: #1a1a1a;
-        }
-
-        .manual-chip:active {
-            transform: translateY(0);
-        }
-
-        .pdf-container {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            overflow: hidden;
-        }
-
-        .welcome-screen {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            justify-content: center;
-            align-items: center;
-            padding: 40px 20px;
-            text-align: center;
-        }
-
-        .welcome-icon {
-            font-size: 80px;
-            margin-bottom: 20px;
-            opacity: 0.6;
-        }
-
-        .welcome-title {
-            font-size: 24px;
-            font-weight: 700;
-            color: #ffd700;
-            margin-bottom: 20px;
-        }
-
-        .manufacturer-selector-large {
-            background: linear-gradient(135deg, rgba(255, 215, 0, 0.2) 0%, rgba(255, 215, 0, 0.1) 100%);
-            border: 2px solid #ffd700;
-            color: #ffd700;
-            padding: 16px 24px;
-            border-radius: 12px;
-            font-size: 18px;
-            font-weight: 600;
-            cursor: pointer;
-            outline: none;
-            min-width: 300px;
-            max-width: 400px;
-            width: 100%;
-            text-align: center;
-            margin-bottom: 30px;
-            box-shadow: 0 4px 15px rgba(255, 215, 0, 0.2);
-            transition: all 0.3s ease;
-        }
-
-        .manufacturer-selector-large:hover {
-            background: linear-gradient(135deg, rgba(255, 215, 0, 0.3) 0%, rgba(255, 215, 0, 0.15) 100%);
-            transform: translateY(-2px);
-            box-shadow: 0 6px 20px rgba(255, 215, 0, 0.3);
-        }
-
-        .manufacturer-selector-large:active {
-            transform: translateY(0);
-        }
-
-        .manufacturer-selector-large option {
-            background: #1a1a1a;
-            color: #ffd700;
-            padding: 12px;
-        }
-
-        .welcome-subtitle {
-            font-size: 16px;
-            color: #999;
-            max-width: 400px;
-            line-height: 1.5;
-        }
-
-        #pdf-viewer {
-            width: 100%;
-            height: 100%;
-            border: none;
-            display: none;
-        }
-
-        #pdf-viewer.visible {
-            display: block;
-        }
-
-        .loading-indicator {
-            position: absolute;
-            top: 50%;
-            left: 50%;
-            transform: translate(-50%, -50%);
-            text-align: center;
-            display: none;
-        }
-
-        .loading-indicator.visible {
-            display: block;
-        }
-
-        .spinner {
-            border: 3px solid rgba(255, 215, 0, 0.3);
-            border-top: 3px solid #ffd700;
-            border-radius: 50%;
-            width: 50px;
-            height: 50px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 16px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .loading-text {
-            color: #ffd700;
-            font-size: 14px;
-            font-weight: 500;
-        }
+        body { display:flex; flex-direction:column; height:100vh; overflow:hidden; }
+        .manuals-page { display:flex; flex-direction:column; flex:1; overflow:hidden; }
+        .chip-bar { padding:10px 14px; background:var(--surface2); border-bottom:1px solid var(--border); overflow-x:auto; scrollbar-width:none; display:none; }
+        .chip-bar::-webkit-scrollbar { display:none; }
+        .chip-bar.visible { display:block; }
+        .chips { display:flex; gap:8px; flex-wrap:nowrap; min-width:max-content; }
+        .manual-chip { flex-shrink:0; padding:7px 16px; background:var(--surface3); border:1px solid var(--gold-border); border-radius:20px; font-size:13px; font-weight:600; color:var(--gold); cursor:pointer; font-family:inherit; white-space:nowrap; transition:all 0.15s; }
+        .manual-chip.active { background:var(--gold); color:#111; }
+        .manual-chip:active { transform:scale(0.96); }
+        .welcome-screen { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px 24px; text-align:center; }
+        .welcome-icon { font-size:64px; margin-bottom:16px; opacity:0.6; }
+        .mfr-select { background:var(--surface2); border:2px solid var(--gold); border-radius:12px; color:var(--gold); padding:14px 20px; font-size:16px; font-weight:600; font-family:inherit; outline:none; min-width:280px; cursor:pointer; margin-bottom:16px; }
+        .mfr-select option { background:var(--surface); }
+        .welcome-sub { font-size:14px; color:var(--text3); line-height:1.5; max-width:320px; }
+        .pdf-wrap { flex:1; display:none; position:relative; }
+        .pdf-wrap.visible { display:block; }
+        .pdf-wrap iframe { width:100%; height:100%; border:none; }
+        .loading-overlay { position:absolute; inset:0; display:none; align-items:center; justify-content:center; flex-direction:column; gap:12px; background:var(--bg); }
+        .loading-overlay.visible { display:flex; }
+        .loading-overlay span { font-size:13px; color:var(--text3); }
     </style>
 </head>
 <body>
 <div class="header">
-    <button class="back-button" onclick="goBack()">← Back</button>
-    <div class="title">📚 Service Manuals</div>
-    <div class="placeholder"></div>
+    <button class="header-back" onclick="goBack()">‹</button>
+    <div class="header-title">📚 Service Manuals</div>
+    <div style="width:40px;"></div>
 </div>
 
-<div class="manual-list-container" id="manual-list-container">
-    <div class="manual-chips" id="manual-chips"></div>
-</div>
+<div class="manuals-page">
+    <div class="chip-bar" id="chipBar">
+        <div class="chips" id="chips"></div>
+    </div>
 
-<div class="pdf-container">
-    <div class="welcome-screen" id="welcome-screen">
-        <div class="welcome-title">Select a Manufacturer</div>
-        <select class="manufacturer-selector-large" id="manufacturer-selector" onchange="selectManufacturer()">
+    <div class="welcome-screen" id="welcomeScreen">
+        <select class="mfr-select" id="mfrSelect" onchange="selectManufacturer()">
             <option value="">Choose Manufacturer...</option>
             <option value="lumenis">Lumenis</option>
             <option value="candela">Candela</option>
         </select>
         <div class="welcome-icon">📖</div>
-        <div class="welcome-subtitle">
-            Select a manufacturer above, then choose a specific manual to view
+        <div class="welcome-sub">Select a manufacturer then choose a manual to view</div>
+    </div>
+
+    <div class="pdf-wrap" id="pdfWrap">
+        <div class="loading-overlay" id="loadingOverlay">
+            <div class="spinner"></div>
+            <span>Loading manual...</span>
         </div>
+        <iframe id="pdfViewer"></iframe>
     </div>
-
-    <div class="loading-indicator" id="loading-indicator">
-        <div class="spinner"></div>
-        <div class="loading-text">Loading manual...</div>
-    </div>
-
-    <iframe id="pdf-viewer"></iframe>
 </div>
 
 <script>
-    // Available manuals organized by manufacturer
     const manuals = {
         lumenis: [
-            {
-                id: 'lumenis_acupulse',
-                name: 'AcuPulse',
-                file: 'manuals/pdfs/lumenis_acupulse.pdf'
-            },
-            {
-                id: 'lumenis_versapulse',
-                name: 'VersaPulse PowerSuite',
-                file: 'manuals/pdfs/LUMENIS_VERSAPULSE_POWERSUITE_SERVICE_MANUAL.pdf'
-            }
+            { id:'lumenis_acupulse', name:'AcuPulse', file:'manuals/pdfs/lumenis_acupulse.pdf' },
+            { id:'lumenis_versapulse', name:'VersaPulse PowerSuite', file:'manuals/pdfs/LUMENIS_VERSAPULSE_POWERSUITE_SERVICE_MANUAL.pdf' }
         ],
         candela: [
-            {
-                id: 'candela_gentlelase',
-                name: 'GentleLASE',
-                file: 'manuals/pdfs/candela_gentlelase.pdf'
-            },
-            {
-                id: 'candela_gentleyag',
-                name: 'GentleYAG',
-                file: 'manuals/pdfs/candela_gentleyag.pdf'
-            },
-            {
-                id: 'candela_vbeam',
-                name: 'VBeam',
-                file: 'manuals/pdfs/candela_vbeam.pdf'
-            }
+            { id:'candela_gentlelase', name:'GentleLASE', file:'manuals/pdfs/candela_gentlelase.pdf' },
+            { id:'candela_gentleyag', name:'GentleYAG', file:'manuals/pdfs/candela_gentleyag.pdf' },
+            { id:'candela_vbeam', name:'VBeam', file:'manuals/pdfs/candela_vbeam.pdf' }
         ]
     };
-
-    let currentManufacturer = '';
-    let currentManual = '';
+    let currentMfr='', currentManualId='';
 
     function goBack() {
-        window.location.href = 'service_hub.html';
+        try { var s=JSON.parse(localStorage.getItem('tsp-auth-token'));var raw=s&&(s.access_token?s:(s.currentSession||null));if(raw?.access_token){window.location.href='service_hub.html?_s='+btoa(JSON.stringify({access_token:raw.access_token,refresh_token:raw.refresh_token}));return;} } catch(e) {}
+        window.location.href='service_hub.html';
     }
 
     function selectManufacturer() {
-        const selector = document.getElementById('manufacturer-selector');
-        const manufacturer = selector.value;
-
-        if (!manufacturer) {
-            document.getElementById('manual-list-container').classList.remove('visible');
-            document.getElementById('welcome-screen').style.display = 'flex';
-            document.getElementById('pdf-viewer').classList.remove('visible');
-            currentManufacturer = '';
-            return;
-        }
-
-        currentManufacturer = manufacturer;
-        displayManuals(manufacturer);
-    }
-
-    function displayManuals(manufacturer) {
-        const container = document.getElementById('manual-list-container');
-        const chipsContainer = document.getElementById('manual-chips');
-
-        // Clear previous chips
-        chipsContainer.innerHTML = '';
-
-        // Get manuals for this manufacturer
-        const manufacturerManuals = manuals[manufacturer];
-
-        if (!manufacturerManuals || manufacturerManuals.length === 0) {
-            container.classList.remove('visible');
-            return;
-        }
-
-        // Create chips for each manual
-        manufacturerManuals.forEach(manual => {
-            const chip = document.createElement('div');
-            chip.className = 'manual-chip';
-            chip.textContent = manual.name;
-            chip.onclick = () => loadManual(manual);
-            chipsContainer.appendChild(chip);
-        });
-
-        container.classList.add('visible');
-        document.getElementById('welcome-screen').style.display = 'flex';
+        const mfr = document.getElementById('mfrSelect').value;
+        if (!mfr) { document.getElementById('chipBar').classList.remove('visible'); return; }
+        currentMfr = mfr;
+        const chips = document.getElementById('chips'); chips.innerHTML='';
+        (manuals[mfr]||[]).forEach(m => { const c=document.createElement('button'); c.className='manual-chip'; c.textContent=m.name; c.onclick=()=>loadManual(m); chips.appendChild(c); });
+        document.getElementById('chipBar').classList.add('visible');
     }
 
     function loadManual(manual) {
-        console.log('Loading manual:', manual.name);
-
-        // Update active chip
-        const chips = document.querySelectorAll('.manual-chip');
-        chips.forEach(chip => {
-            if (chip.textContent === manual.name) {
-                chip.classList.add('active');
-            } else {
-                chip.classList.remove('active');
-            }
-        });
-
-        // Show loading indicator
-        document.getElementById('welcome-screen').style.display = 'none';
-        document.getElementById('loading-indicator').classList.add('visible');
-        document.getElementById('pdf-viewer').classList.remove('visible');
-
-        // Load PDF using PDF.js for Android WebView compatibility
-        const viewer = document.getElementById('pdf-viewer');
-
-        // Use PDF.js viewer which works in Android WebView
-        // The path needs to navigate from pdfjs/web/viewer.html back to the PDF location
-        const pdfUrl = encodeURIComponent(manual.file);
-        viewer.src = './pdfjs/web/viewer.html?file=../../' + pdfUrl;
-
-        // When loaded, hide loading and show PDF
-        viewer.onload = () => {
-            document.getElementById('loading-indicator').classList.remove('visible');
-            document.getElementById('pdf-viewer').classList.add('visible');
-            currentManual = manual.id;
-
-            // Save state
-            localStorage.setItem('selectedManufacturer', currentManufacturer);
-            localStorage.setItem('selectedManual', manual.id);
-
-            // Show toast notification
-            if (typeof Android !== 'undefined' && Android.showToast) {
-                Android.showToast('📖 ' + manual.name + ' loaded');
-            }
-        };
-
-        // Handle errors
-        viewer.onerror = () => {
-            document.getElementById('loading-indicator').classList.remove('visible');
-            document.getElementById('welcome-screen').style.display = 'flex';
-
-            if (typeof Android !== 'undefined' && Android.showToast) {
-                Android.showToast('⚠️ Could not load ' + manual.name);
-            }
-
-            console.error('Error loading PDF:', manual.file);
-        };
+        document.querySelectorAll('.manual-chip').forEach(c=>c.classList.toggle('active', c.textContent===manual.name));
+        document.getElementById('welcomeScreen').style.display='none';
+        document.getElementById('pdfWrap').classList.add('visible');
+        document.getElementById('loadingOverlay').classList.add('visible');
+        const viewer=document.getElementById('pdfViewer');
+        viewer.src='./pdfjs/web/viewer.html?file=../../'+encodeURIComponent(manual.file);
+        viewer.onload=()=>{document.getElementById('loadingOverlay').classList.remove('visible');currentManualId=manual.id;localStorage.setItem('selectedManufacturer',currentMfr);localStorage.setItem('selectedManual',manual.id);try{if(typeof Android!=='undefined'&&Android.showToast)Android.showToast('📖 '+manual.name+' loaded');}catch(e){};};
+        viewer.onerror=()=>{document.getElementById('loadingOverlay').classList.remove('visible');document.getElementById('welcomeScreen').style.display='flex';document.getElementById('pdfWrap').classList.remove('visible');};
     }
 
-    // Load saved state if any
-    const savedManufacturer = localStorage.getItem('selectedManufacturer');
-    const savedManual = localStorage.getItem('selectedManual');
-
-    if (savedManufacturer) {
-        document.getElementById('manufacturer-selector').value = savedManufacturer;
-        selectManufacturer();
-
-        if (savedManual) {
-            const manufacturerManuals = manuals[savedManufacturer];
-            const manual = manufacturerManuals?.find(m => m.id === savedManual);
-            if (manual) {
-                setTimeout(() => loadManual(manual), 100);
-            }
-        }
-    }
+    // Restore last state
+    const savedMfr=localStorage.getItem('selectedManufacturer');
+    const savedManual=localStorage.getItem('selectedManual');
+    if (savedMfr) { document.getElementById('mfrSelect').value=savedMfr; selectManufacturer(); if(savedManual){const m=(manuals[savedMfr]||[]).find(x=>x.id===savedManual);if(m)setTimeout(()=>loadManual(m),100);} }
 </script>
 </body>
 </html>

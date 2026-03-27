@@ -1,0 +1,230 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Service Reports · TSP</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const enc = new URLSearchParams(window.location.search).get('_s');
+                if (enc) { const s=JSON.parse(atob(enc)); if(s?.access_token){_pendingSession=s;localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));const u=new URL(window.location.href);u.searchParams.delete('_s');window.history.replaceState({},'',u.toString());return;} }
+                const raw=localStorage.getItem('tsp-auth-token'); if(raw){const p=JSON.parse(raw);const sess=p?.currentSession||(p?.access_token?p:null);if(sess?.access_token)_pendingSession=sess;}
+            } catch(e) {}
+        })();
+        var supabaseClient = supabase.createClient(
+            'https://yljztfajyvjzqikxdddf.supabase.co',
+            'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+            { auth: { persistSession:true, storageKey:'tsp-auth-token', storage:window.localStorage, autoRefreshToken:true, detectSessionInUrl:false } }
+        );
+        // _pendingSession will be applied in init() with proper await
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
+    <style>
+        .filter-row { display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:16px; scrollbar-width:none; }
+        .filter-row::-webkit-scrollbar { display:none; }
+        .filter-chip { flex-shrink:0; padding:7px 16px; background:var(--surface3); border:1px solid var(--border2); border-radius:20px; font-size:13px; font-weight:600; color:var(--text3); cursor:pointer; font-family:inherit; white-space:nowrap; transition:all 0.15s; }
+        .filter-chip.active { background:var(--gold-glow); border-color:var(--gold-border); color:var(--gold); }
+
+        .report-card { background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:10px; cursor:pointer; transition:border-color 0.15s; display:flex; align-items:center; gap:12px; }
+        .report-card:hover { border-color:var(--gold-border); }
+        .report-card.draft  { border-left:4px solid var(--gold); }
+        .report-card.complete { border-left:4px solid var(--green); }
+
+        .report-icon { font-size:28px; flex-shrink:0; }
+        .report-info { flex:1; min-width:0; }
+        .report-title { font-size:14px; font-weight:700; color:var(--text); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .report-customer { font-size:12px; color:var(--text3); margin-top:2px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+        .report-meta { font-size:11px; color:var(--text3); margin-top:4px; display:flex; gap:10px; flex-wrap:wrap; }
+        .report-right { flex-shrink:0; text-align:right; }
+        .report-date { font-size:11px; color:var(--text3); }
+
+        .status-badge { display:inline-block; padding:3px 9px; border-radius:20px; font-size:10px; font-weight:700; margin-top:4px; }
+        .status-badge.draft    { background:rgba(251,191,36,0.1); color:var(--gold); border:1px solid var(--gold-border); }
+        .status-badge.complete { background:rgba(34,197,94,0.1);  color:var(--green); border:1px solid rgba(34,197,94,0.3); }
+
+        .search-bar { position:relative; margin-bottom:14px; }
+        .search-bar input { width:100%; padding:10px 36px 10px 14px; background:var(--surface3); border:1px solid var(--border2); border-radius:20px; color:var(--text); font-family:inherit; font-size:14px; outline:none; }
+        .search-bar input:focus { border-color:var(--gold); }
+        .search-bar input::placeholder { color:var(--text3); }
+
+        .fab { position:fixed;bottom:20px;right:20px;width:56px;height:56px;border-radius:50%;background:var(--gold);color:#111;font-size:28px;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:50;transition:transform 0.15s; }
+        .fab:active { transform:scale(0.93); }
+
+        .stats-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <button class="header-back" onclick="navTo('index.html')">‹</button>
+    <div class="header-title">📋 Service Reports</div>
+    <div style="width:40px;"></div>
+</div>
+
+<div class="page">
+
+    <div class="stats-2">
+        <div class="stat-card"><div class="stat-num" id="statDrafts">—</div><div class="stat-label">Drafts</div></div>
+        <div class="stat-card"><div class="stat-num green" id="statComplete">—</div><div class="stat-label">Completed</div></div>
+    </div>
+
+    <div class="search-bar">
+        <input type="text" id="searchInput" placeholder="Search by customer, equipment, report #..." oninput="applyFilters()">
+    </div>
+
+    <div class="filter-row">
+        <button class="filter-chip active" onclick="setFilter('all', this)">All</button>
+        <button class="filter-chip" onclick="setFilter('draft', this)">Drafts</button>
+        <button class="filter-chip" onclick="setFilter('complete', this)">Completed</button>
+    </div>
+
+    <div id="reportList">
+        <div class="empty-state"><div class="spinner"></div></div>
+    </div>
+
+</div>
+
+<button class="fab" onclick="navTo('service_report.html')" title="New Report">＋</button>
+
+<div class="toast" id="toast"></div>
+
+<script>
+    let allReports = [];
+    let activeFilter = 'all';
+    let currentUser = null;
+
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+        try { if(typeof Android!=='undefined'){if(session?.access_token)Android.saveSession(JSON.stringify(session));else if(event==='SIGNED_OUT'&&!session)Android.clearSession();} } catch(e) {}
+    });
+
+    async function navTo(page) {
+        try { const{data:{session}}=await supabaseClient.auth.getSession(); if(session?.access_token){const sep=page.includes('?')?'&':'?';window.location.href=page+sep+'_s='+btoa(JSON.stringify(session));return;} } catch(e) {}
+        window.location.href = page;
+    }
+
+    async function openReport(id) {
+        try {
+            const{data:{session}}=await supabaseClient.auth.getSession();
+            if(session?.access_token){
+                window.location.href='service_report.html?report_id='+id+'&_s='+btoa(JSON.stringify(session));
+                return;
+            }
+        } catch(e) {}
+        window.location.href = 'service_report.html?report_id=' + id;
+    }
+
+    async function init() {
+        // Try existing session first, then apply pending if needed
+        let { data: { session: _initSession } } = await supabaseClient.auth.getSession();
+        if (!_initSession && _pendingSession) {
+            try {
+                const r = await supabaseClient.auth.setSession({ access_token: _pendingSession.access_token, refresh_token: _pendingSession.refresh_token });
+                _initSession = r.data?.session;
+            } catch(e) {}
+            _pendingSession = null;
+        }
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) { navTo('index.html'); return; }
+        currentUser = user;
+        await loadReports();
+    }
+
+    async function loadReports() {
+        const { data, error } = await supabaseClient
+            .from('service_reports')
+            .select('id, report_number, equipment_name, serial_number, customer_name, service_type, status, date_out, updated_at, model_type')
+            .eq('created_by', currentUser.id)
+            .order('updated_at', { ascending: false });
+
+        if (error) { showToast('Load failed: ' + error.message, 'error'); return; }
+        allReports = data || [];
+        updateStats();
+        applyFilters();
+    }
+
+    function updateStats() {
+        document.getElementById('statDrafts').textContent   = allReports.filter(r => r.status === 'draft').length;
+        document.getElementById('statComplete').textContent = allReports.filter(r => r.status === 'complete').length;
+    }
+
+    function setFilter(f, el) {
+        activeFilter = f;
+        document.querySelectorAll('.filter-chip').forEach(c => c.classList.remove('active'));
+        el.classList.add('active');
+        applyFilters();
+    }
+
+    function applyFilters() {
+        const q = document.getElementById('searchInput').value.trim().toLowerCase();
+        let filtered = allReports;
+        if (activeFilter !== 'all') filtered = filtered.filter(r => r.status === activeFilter);
+        if (q) filtered = filtered.filter(r => {
+            return [r.report_number, r.equipment_name, r.customer_name, r.serial_number, r.model_type]
+                .filter(Boolean).join(' ').toLowerCase().includes(q);
+        });
+        renderList(filtered);
+    }
+
+    function renderList(reports) {
+        const list = document.getElementById('reportList');
+        if (!reports.length) {
+            const isSearch = document.getElementById('searchInput').value.trim();
+            list.innerHTML = '<div class="empty-state">' +
+                '<div class="empty-icon">' + (isSearch ? '🔍' : '📋') + '</div>' +
+                '<div class="empty-title">' + (isSearch ? 'No matching reports' : 'No reports yet') + '</div>' +
+                '<div class="empty-sub">' + (isSearch ? 'Try a different search term' : 'Tap ＋ to create your first service report') + '</div>' +
+                '</div>';
+            return;
+        }
+
+        list.innerHTML = '';
+        reports.forEach(r => {
+            const card = document.createElement('div');
+            card.className = 'report-card ' + (r.status || 'draft');
+            card.onclick = () => openReport(r.id);
+
+            const icon = r.status === 'complete' ? '✅' : '📝';
+            const title = r.equipment_name || r.model_type || r.report_number || 'Untitled Report';
+            const customer = r.customer_name || '—';
+            const dateStr = r.date_out
+                ? new Date(r.date_out + 'T00:00:00').toLocaleDateString([], { month:'short', day:'numeric', year:'numeric' })
+                : 'No date';
+            const updated = new Date(r.updated_at).toLocaleDateString([], { month:'short', day:'numeric' });
+            const sn = r.serial_number ? 'SN: ' + r.serial_number : '';
+            const svcType = r.service_type || '';
+
+            card.innerHTML =
+                '<div class="report-icon">' + icon + '</div>' +
+                '<div class="report-info">' +
+                    '<div class="report-title">' + title + '</div>' +
+                    '<div class="report-customer">🏥 ' + customer + '</div>' +
+                    '<div class="report-meta">' +
+                        (r.report_number ? '<span>' + r.report_number + '</span>' : '') +
+                        (sn ? '<span>' + sn + '</span>' : '') +
+                        (svcType ? '<span>' + svcType + '</span>' : '') +
+                    '</div>' +
+                '</div>' +
+                '<div class="report-right">' +
+                    '<div class="report-date">' + dateStr + '</div>' +
+                    '<div class="status-badge ' + (r.status || 'draft') + '">' + (r.status === 'complete' ? 'Complete' : 'Draft') + '</div>' +
+                    '<div class="report-date" style="margin-top:4px;">Saved ' + updated + '</div>' +
+                '</div>';
+
+            list.appendChild(card);
+        });
+    }
+
+    function showToast(msg, type='') {
+        const t = document.getElementById('toast'); t.textContent = msg;
+        t.className = 'toast show' + (type ? ' ' + type : '');
+        clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 3000);
+    }
+
+    init();
+</script>
+</body>
+</html>
