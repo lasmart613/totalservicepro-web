@@ -1,9 +1,9 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script src="theme.js"></script>
     <script>
         var _pendingSession = null;
-        var _sessionRestored = false;
         (function() {
             try {
                 const p = new URLSearchParams(window.location.search);
@@ -35,7 +35,6 @@
                 if (session && session.access_token) {
                     localStorage.setItem('tsp-auth-token', JSON.stringify({ currentSession: session, expiresAt: session.expires_at }));
                     if (typeof supabaseClient !== 'undefined') {
-                        _sessionRestored = true;
                         supabaseClient.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
                     } else { _pendingSession = session; }
                 }
@@ -177,9 +176,7 @@
         .cust-option-new  { color: var(--gold); font-size: 13px; font-weight: 700; }
         .submit-bar{position:fixed;bottom:0;left:0;right:0;background:var(--s1);border-top:1px solid var(--bdr);padding:12px 16px;display:flex;gap:10px;z-index:99}
         .submit-bar button{flex:1;padding:14px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:inherit;border:none;transition:all 0.12s}
-        .btn-save{background:var(--gold);color:#111}
-        .btn-save:disabled{opacity:0.4;cursor:not-allowed}
-        .btn-draft{background:var(--s4);color:var(--txt2);border:1px solid var(--bdr) !important}
+/* Buttons standardized to global .btn-primary / .btn-secondary in tsp.css */
 
         /* Toast */
         .toast{position:fixed;top:70px;left:50%;transform:translateX(-50%);padding:12px 24px;border-radius:10px;font-size:14px;font-weight:600;z-index:2000;opacity:0;transition:opacity 0.3s;pointer-events:none}
@@ -203,7 +200,7 @@
     </div>
     <button class="drafts-btn" onclick="showDrafts()" title="My Drafts">📋 Drafts</button>
     <div id="authSection">
-        <button id="loginBtn" class="login-button" onclick="navTo('index.html')">Login</button>
+        <button id="loginBtn" class="btn btn-primary" onclick="navTo('index.html')">Login</button>
         <div class="avatar-wrapper" id="avatarWrapper">
             <button class="avatar-btn" onclick="toggleDropdown(event)">
                 <img id="avatarImg" class="avatar-img" src="" alt="" />
@@ -374,12 +371,12 @@
 
 <!-- Submit bar -->
 <div class="submit-bar" id="submitBar" style="display:none;">
-    <button class="btn-draft" onclick="saveReport('draft')">Save Draft</button>
-    <button class="btn-save" id="btnSubmit" onclick="saveReport('complete')">Submit Report</button>
+    <button class="btn btn-secondary" onclick="saveReport('draft')">Save Draft</button>
+    <button class="btn btn-primary" id="btnSubmit" onclick="saveReport('complete')">Submit Report</button>
 </div>
 <div class="submit-bar" id="pdfBar" style="display:none;">
-    <button class="btn-draft" onclick="unlockForEdit()">✏️ Re-edit</button>
-    <button class="btn-save" onclick="exportPDF()">📄 Export PDF</button>
+    <button class="btn btn-secondary" onclick="unlockForEdit()">✏️ Re-edit</button>
+    <button class="btn btn-primary" onclick="exportPDF()">📄 Export PDF</button>
 </div>
 
 <!-- Drafts Drawer -->
@@ -400,7 +397,19 @@
     // supabaseClient defined in <head>
 
     let currentUser = null;
+    let currentUserOrgId = null;
     let serviceType = 'PM';
+
+    function isValidOrgId(val) {
+        if (val == null) return false;
+        if (typeof val === 'number' && Number.isFinite(val) && val > 0) return true;
+        if (typeof val === 'string') {
+            const s = val.trim();
+            if (s.includes('-') && s.length > 10) return true; // UUID style
+            if (/^\d+$/.test(s)) return true; // legacy integer id (e.g. 4 for Luxor Photonix)
+        }
+        return false;
+    }
     let currentReportId = null; // null = new report, uuid = editing existing
     let techCompanyCache = {}; // cached tech/company info for report snapshots
     let custSearchTimeout = null;
@@ -413,10 +422,94 @@
                 .from('organizations')
                 .select('id, name, address, city, state, phone, email')
                 .eq('type', 'customer')
-                .eq('is_active', true)
+                .or('is_active.is.null,is_active.eq.true')
                 .order('name');
             allCustomers = data || [];
         } catch(e) {}
+    }
+
+    // Helper to create (or ensure) a customer organization record when a new name is used.
+    // Called from the "＋ Use new customer" option and also defensively on saveReport.
+    // Uses the values currently in the customer address/contact fields on the form.
+    async function ensureCustomerOrganization(name) {
+        if (!name || !currentUser) return;
+        try {
+            const { data: existing } = await supabaseClient
+                .from('organizations')
+                .select('id')
+                .eq('name', name)
+                .eq('type', 'customer')
+                .maybeSingle();
+
+            if (!existing) {
+                const newOrg = {
+                    name: name,
+                    address: document.getElementById('custAddress')?.value.trim() || null,
+                    city: document.getElementById('custCity')?.value.trim() || null,
+                    state: document.getElementById('custState')?.value.trim() || null,
+                    phone: document.getElementById('custPhone')?.value.trim() || null,
+                    email: document.getElementById('custEmail')?.value.trim() || null,
+                    type: 'customer',
+                    is_active: true,
+                    created_by: currentUser.id   // Link to your user so RLS policies grant visibility to your service company
+                };
+                const { error: createErr } = await supabaseClient
+                    .from('organizations')
+                    .insert([newOrg]);
+                if (createErr) {
+                    console.warn('Could not create customer organization:', createErr);
+                } else {
+                    loadCustomers();
+                }
+            }
+        } catch (e) {
+            console.warn('ensureCustomerOrganization error (non-fatal):', e);
+        }
+    }
+
+    // Ensure the serviced equipment (laser etc.) from SR is in the canonical Equipment table.
+    // Called on saveReport. Matches by org + serial (preferred) or name.
+    // This fixes cases where lasers added to SRs or via ticket edit weren't persisted to equipment.
+    async function ensureEquipmentInTable(orgId, manufacturerOrName, model, serialNumber) {
+        if (!orgId || (!manufacturerOrName && !model && !serialNumber)) return null;
+        try {
+            // Try find existing
+            let matchQuery = supabaseClient
+                .from('equipment')
+                .select('id')
+                .eq('organization_id', orgId);
+            if (serialNumber) {
+                matchQuery = matchQuery.eq('serial_number', serialNumber);
+            } else if (manufacturerOrName && model) {
+                matchQuery = matchQuery.eq('manufacturer', manufacturerOrName).eq('model', model);
+            } else if (manufacturerOrName) {
+                matchQuery = matchQuery.eq('manufacturer', manufacturerOrName);
+            } else if (model) {
+                matchQuery = matchQuery.eq('model', model);
+            }
+            const { data: existing } = await matchQuery.maybeSingle();
+            if (existing && existing.id) return existing.id;
+
+            // Insert - ensure model is never null (table has NOT NULL constraint)
+            const safeModel = model || manufacturerOrName || serialNumber || 'Unknown Laser';
+            const { data: inserted, error } = await supabaseClient
+                .from('equipment')
+                .insert([{
+                    organization_id: orgId,
+                    manufacturer: manufacturerOrName || null,
+                    model: safeModel,
+                    serial_number: serialNumber || null,
+                    status: 'Active'
+                }])
+                .select('id')
+                .single();
+            if (error) throw error;
+            console.log('Auto-added missing equipment (laser) from SR:', manufacturerOrName, serialNumber);
+            return inserted ? inserted.id : null;
+        } catch (e) {
+            console.warn('ensureEquipmentInTable (SR) non-fatal:', e);
+            return null;
+        }
     }
 
     function onCustSearch() {
@@ -424,20 +517,24 @@
         custSearchTimeout = setTimeout(showCustDropdown, 150);
     }
 
-    function showCustDropdown() {
+    async function showCustDropdown() {
+        // Refresh from DB so that customers added manually in Supabase (or by other users/devices)
+        // appear immediately without requiring a full page reload.
+        await loadCustomers();
+
         const input = document.getElementById('custName');
         const dropdown = document.getElementById('custDropdown');
         const q = input.value.trim().toLowerCase();
 
         const matches = q
             ? allCustomers.filter(c => c.name.toLowerCase().includes(q) || (c.city||'').toLowerCase().includes(q))
-            : allCustomers.slice(0, 8);
+            : allCustomers.slice(0, 15);
 
         if (!matches.length && !q) { dropdown.classList.remove('open'); return; }
 
         dropdown.innerHTML = '';
 
-        matches.slice(0, 8).forEach(org => {
+        matches.slice(0, 15).forEach(org => {
             const div = document.createElement('div');
             div.className = 'cust-option';
             const loc = [org.city, org.state].filter(Boolean).join(', ');
@@ -451,8 +548,14 @@
         if (q && !matches.find(m => m.name.toLowerCase() === q)) {
             const div = document.createElement('div');
             div.className = 'cust-option';
-            div.innerHTML = '<div class="cust-option-new">＋ Use "' + input.value.trim() + '"</div>';
-            div.onclick = () => { dropdown.classList.remove('open'); };
+            const typedName = input.value.trim();
+            div.innerHTML = '<div class="cust-option-new">＋ Use "' + typedName + '"</div>';
+            div.onclick = async () => {
+                dropdown.classList.remove('open');
+                // Create the customer org immediately (using any address fields filled so far).
+                // This makes the new customer appear in the master list / future dropdowns right away.
+                await ensureCustomerOrganization(typedName);
+            };
             dropdown.appendChild(div);
         }
 
@@ -483,7 +586,7 @@
                 .from('user_profiles')
                 .select('first_name, last_name, phone, email, job_title, organizations(name, address, city, state, phone, logo_url)')
                 .eq('id', currentUser.id)
-                .single();
+                .maybeSingle();
             if (profile) {
                 const org = profile.organizations || {};
                 techCompanyCache = {
@@ -619,15 +722,103 @@
                      'Bubble Sense (HP Full)', 'Bubble Sense (HP Empty)', 'Bubble Sense (Can Full)', 'Bubble Sense (Can Empty)',
                      'HV @ 60J', 'Fiber Transmission %', 'DI Temp (°C)']
         },
+        'Candela MGL': {
+            mfg: 'Candela',
+            label: 'Mini GentleLASE (MGL)',
+            wavelengths: [
+                { name: '755 nm Alexandrite', mode: 'SP', sets: [5, 8, 10, 12, 15, 18, 20, 22, 25, 30], unit: 'J/cm²', spotMm: 8, tolLabel: 'Tol ±10%' }
+            ],
+            params: ['Total Pulses', 'Head Pulses', 'Lamp Pulses',
+                     'Bubble Sense (HP Full)', 'Bubble Sense (HP Empty)', 'Bubble Sense (Can Full)', 'Bubble Sense (Can Empty)',
+                     'HV @ 60J', 'Fiber Transmission %', 'DI Temp (°C)']
+        },
+        'Candela VPYag': {
+            mfg: 'Candela',
+            label: 'Mini GentleYAG (VPYag)',
+            wavelengths: [
+                // 1064nm Nd:YAG — spot sizes 3,6,10,12,15mm; max fluence varies by spot
+                // Test at the spot sizes installed on the unit; enter actual J/cm² read from power meter
+                { name: '1064 nm @ 3mm spot', mode: 'SP',
+                  sets: [10, 20, 30, 40, 50, 60, 70, 80, 90], unit: 'J/cm²', spotMm: 3, tolLabel: 'Tol ±10%' },
+                { name: '1064 nm @ 6mm spot', mode: 'SP',
+                  sets: [10, 20, 30, 40, 50, 60, 70, 80, 90], unit: 'J/cm²', spotMm: 6, tolLabel: 'Tol ±10%' },
+                { name: '1064 nm @ 10mm spot', mode: 'SP',
+                  sets: [5, 8, 10, 15, 20, 25, 30, 35, 40, 50], unit: 'J/cm²', spotMm: 10, tolLabel: 'Tol ±10%' },
+                { name: '1064 nm @ 12mm spot', mode: 'SP',
+                  sets: [5, 8, 10, 15, 20, 25, 30, 35, 40], unit: 'J/cm²', spotMm: 12, tolLabel: 'Tol ±10%' },
+                { name: '1064 nm @ 15mm spot', mode: 'SP',
+                  sets: [5, 8, 10, 15, 18, 20, 25, 30], unit: 'J/cm²', spotMm: 15, tolLabel: 'Tol ±10%' }
+            ],
+            // System counters
+            params: [
+                'Total System Shots', 'Handpiece Shots', 'Lamp Shots', 'DCD Canister Shots',
+                // DCD calibration
+                'DCD Delay Set (ms)', 'DCD Delay Measured (ms)', 'DCD Duration Set (ms)', 'DCD Duration Measured (ms)',
+                // Electrical / optical
+                'HV @ Reference Fluence (VDC)', 'Fiber Transmission %',
+                // Cooling
+                'DI Water Temp (°C)', 'DI Conductivity (µS/cm)', 'DI Flow Rate (L/min)',
+                // Cryogen
+                'Bubble Sense HP Full', 'Bubble Sense HP Empty', 'Bubble Sense Can Full', 'Bubble Sense Can Empty'
+            ]
+        },
+        'Candela GentleYAG': {
+            mfg: 'Candela',
+            label: 'GentleYAG (Larger Platform)',
+            wavelengths: [
+                // 1064nm Nd:YAG — spot sizes 6,8,10,12,14,16,18mm; max fluence ~600 J/cm² at small spots
+                { name: '1064 nm @ 6mm spot', mode: 'SP',
+                  sets: [20, 40, 60, 80, 100, 120, 150, 200, 250, 300], unit: 'J/cm²', spotMm: 6, tolLabel: 'Tol ±10%' },
+                { name: '1064 nm @ 10mm spot', mode: 'SP',
+                  sets: [10, 20, 30, 40, 50, 60, 70, 80, 100, 120], unit: 'J/cm²', spotMm: 10, tolLabel: 'Tol ±10%' },
+                { name: '1064 nm @ 14mm spot', mode: 'SP',
+                  sets: [5, 8, 10, 15, 20, 25, 30, 40, 50, 60], unit: 'J/cm²', spotMm: 14, tolLabel: 'Tol ±10%' },
+                { name: '1064 nm @ 18mm spot', mode: 'SP',
+                  sets: [5, 8, 10, 15, 18, 20, 25, 30, 35, 40], unit: 'J/cm²', spotMm: 18, tolLabel: 'Tol ±10%' }
+            ],
+            params: [
+                'Total System Shots', 'Handpiece Shots', 'Lamp Shots', 'DCD Canister Shots',
+                'DCD Delay Set (ms)', 'DCD Delay Measured (ms)', 'DCD Duration Set (ms)', 'DCD Duration Measured (ms)',
+                'HV @ Reference Fluence (VDC)', 'Fiber Transmission %',
+                'DI Water Temp (°C)', 'DI Conductivity (µS/cm)', 'DI Flow Rate (L/min)',
+                'Bubble Sense HP Full', 'Bubble Sense HP Empty', 'Bubble Sense Can Full', 'Bubble Sense Can Empty'
+            ]
+        },
         'Sciton Profile': {
             mfg: 'Sciton',
             label: 'Profile Er:YAG / Nd:YAG',
             wavelengths: [
-                { name: '2940 nm Er:YAG', mode: 'SP', sets: [0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12, 15, 18, 20], unit: 'J/cm²' },
-                { name: '1064 nm Nd:YAG', mode: 'SP', sets: [10, 20, 30, 40, 50, 60, 80, 100], unit: 'mJ' }
+                // Er:YAG 2940nm — MLP/Peel: 45W max, 100µs–50ms PW, 10–200µm ablation depth
+                // Measured as energy per pulse in mJ at the treatment head with a power meter
+                // Typical set points span the clinical range; "Enter as Joules" not applicable here
+                { name: '2940 nm Er:YAG (MLP/Peel)', mode: 'SP',
+                  sets: [50, 100, 150, 200, 300, 400, 500, 700, 1000, 1500, 2000], unit: 'mJ',
+                  tolLabel: 'Tol ±15%' },
+                // Nd:YAG 1064nm Hair Removal — up to 160 J/cm², 30mm×30mm scan (area=9 cm²)
+                // Enter Joules per pulse, system calculates fluence over scan area
+                { name: '1064 nm Nd:YAG (Hair Removal)', mode: 'SP',
+                  sets: [10, 20, 30, 40, 50, 60, 80, 100, 120, 140, 160], unit: 'J/cm²',
+                  spotMm: 30, bblRect: true, bblWidthMm: 30, bblLengthMm: 30,
+                  tolLabel: 'Tol ±10%' },
+                // Nd:YAG 1064nm ClearScan/Vascular — up to 480 J/cm², spot 3/6/8mm; test at 6mm
+                { name: '1064 nm Nd:YAG (ClearScan/Vascular)', mode: 'SP',
+                  sets: [40, 60, 80, 100, 120, 160, 200, 240, 300, 360, 480], unit: 'J/cm²',
+                  spotMm: 6, tolLabel: 'Tol ±10%' },
+                // ThermaScan 1319nm — up to 80 J/cm², 30mm×30mm scan (area=9 cm²)
+                { name: '1319 nm Nd:YAG (ThermaScan)', mode: 'SP',
+                  sets: [4, 8, 12, 16, 20, 24, 28, 32, 36, 40, 50, 60, 70, 80], unit: 'J/cm²',
+                  spotMm: 30, bblRect: true, bblWidthMm: 30, bblLengthMm: 30,
+                  tolLabel: 'Tol ±10%' },
+                // BBL module — optional, only if installed on this Profile unit
+                { name: '400–1400 nm BBL Module', mode: 'SP', sets: [5, 8, 10, 12, 15, 18, 20, 22, 25, 28, 30], unit: 'J/cm²',
+                  bblRect: true, bblWidthMm: 15, bblLengthMm: 45, tolLabel: 'Tol ±15%',
+                  optional: true, optionalLabel: 'BBL Module installed on this unit' }
             ],
             params: ['Total Pulses Er:YAG', 'Total Pulses Nd:YAG', 'Lamp Pulses Er:YAG', 'Lamp Pulses Nd:YAG',
-                     'Er:YAG Energy @ Cal Point', 'Nd:YAG Energy @ Cal Point', 'Water Flow (L/min)', 'DI Conductivity']
+                     'Er:YAG Energy @ Cal Point (J/cm²)', 'Nd:YAG Energy @ Cal Point (J/cm²)',
+                     'ThermaScan Skin Temp Set (°C)', 'Water Flow (L/min)', 'DI Conductivity (µS/cm)',
+                     'Cooling Plate Temp (°C)', 'BBL Lamp Pulses', 'BBL Output @ Cal Point (J/cm²)',
+                     'BBL Cooling Temp (°C)', 'BBL Lamp S/N', 'BBL Filter Used (nm)']
         },
         'Sciton Joule': {
             mfg: 'Sciton',
@@ -664,9 +855,14 @@
             mfg: 'Sciton',
             label: 'BBL BroadBand Light',
             wavelengths: [
-                { name: '515–1200 nm BBL', mode: 'SP', sets: [5, 8, 10, 12, 15, 18, 20, 22, 25], unit: 'J/cm²' }
+                // BBL fluence up to 30 J/cm²; rectangular crystal: 15mm × 30mm (std) or 15mm × 45mm
+                { name: '400–1400 nm BBL', mode: 'SP', sets: [5, 8, 10, 12, 15, 18, 20, 22, 25, 28, 30], unit: 'J/cm²',
+                  bblRect: true, bblWidthMm: 15, bblLengthMm: 45,
+                  tolLabel: 'Tol ±15%' }
             ],
-            params: ['Lamp Pulses', 'Output @ Cal Point', 'Cooling Temp (°C)', 'Lamp S/N']
+            params: ['Lamp Pulses', 'Output @ Cal Point (J/cm²)', 'Cooling Temp Set (°C)',
+                     'Cooling Temp Measured (°C)', 'Lamp S/N', 'Filter Used (nm)'],
+            bblTest: true
         },
         'Sciton Contour TRL': {
             mfg: 'Sciton',
@@ -862,19 +1058,50 @@
             const isFluence = unit === 'J/cm²';
             const defaultSpot = wl.spotMm || '';
 
-            html += `<div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--bdr)">
+            // Optional modules (e.g. BBL on Profile): show with enable checkbox
+            if (wl.optional) {
+                html += `<div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--bdr)">
+                    <label style="display:flex;align-items:center;gap:10px;cursor:pointer;margin-bottom:8px">
+                        <input type="checkbox" id="optEnable_${wi}" onchange="toggleOptional(${wi})"
+                            style="width:18px;height:18px;accent-color:var(--gold)">
+                        <span style="font-size:13px;font-weight:700;color:var(--gold)">${wl.optionalLabel || wl.name}</span>
+                    </label>
+                    <div id="optBody_${wi}" style="display:none">`;
+            } else {
+                html += `<div style="margin-bottom:20px;padding-bottom:16px;border-bottom:1px solid var(--bdr)">
                 <div style="font-size:13px;font-weight:700;color:var(--gold);margin-bottom:4px">${wl.name} — ${wl.mode}</div>`;
+            }
 
             if (isFluence) {
-                html += `<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
-                    <label style="font-size:11px;color:var(--txt3);font-weight:600">Spot Size (mm):</label>
-                    <input type="number" step="0.1" value="${defaultSpot}" id="spot_${wi}"
-                        style="width:60px;background:var(--s4);border:1px solid var(--bdr);border-radius:6px;padding:6px 8px;color:var(--txt);font-size:13px;text-align:center"
-                        oninput="recalcGroup(${wi})">
-                    <label style="font-size:11px;color:var(--txt3);display:flex;align-items:center;gap:4px;cursor:pointer">
-                        <input type="checkbox" id="asJ_${wi}" onchange="recalcGroup(${wi})"> Enter as Joules
-                    </label>
-                </div>`;
+                if (wl.bblRect) {
+                    // Rectangular crystal — width × length inputs
+                    const defW = wl.bblWidthMm || 15;
+                    const defL = wl.bblLengthMm || 30;
+                    html += `<div style="display:flex;gap:8px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+                        <span style="font-size:11px;color:var(--txt3);font-weight:600">Crystal (mm):</span>
+                        <input type="number" step="0.5" value="${defW}" id="bblW_${wi}"
+                            style="width:56px;background:var(--s4);border:1px solid var(--bdr);border-radius:6px;padding:6px 8px;color:var(--txt);font-size:13px;text-align:center"
+                            oninput="recalcGroup(${wi})">
+                        <span style="font-size:11px;color:var(--txt3)">×</span>
+                        <input type="number" step="0.5" value="${defL}" id="bblL_${wi}"
+                            style="width:56px;background:var(--s4);border:1px solid var(--bdr);border-radius:6px;padding:6px 8px;color:var(--txt);font-size:13px;text-align:center"
+                            oninput="recalcGroup(${wi})">
+                        <span style="font-size:11px;color:var(--txt3)">mm</span>
+                        <label style="font-size:11px;color:var(--txt3);display:flex;align-items:center;gap:4px;cursor:pointer">
+                            <input type="checkbox" id="asJ_${wi}" onchange="recalcGroup(${wi})"> Enter as Joules
+                        </label>
+                    </div>`;
+                } else {
+                    html += `<div style="display:flex;gap:10px;align-items:center;margin-bottom:8px;flex-wrap:wrap">
+                        <label style="font-size:11px;color:var(--txt3);font-weight:600">Spot Size (mm):</label>
+                        <input type="number" step="0.1" value="${defaultSpot}" id="spot_${wi}"
+                            style="width:60px;background:var(--s4);border:1px solid var(--bdr);border-radius:6px;padding:6px 8px;color:var(--txt);font-size:13px;text-align:center"
+                            oninput="recalcGroup(${wi})">
+                        <label style="font-size:11px;color:var(--txt3);display:flex;align-items:center;gap:4px;cursor:pointer">
+                            <input type="checkbox" id="asJ_${wi}" onchange="recalcGroup(${wi})"> Enter as Joules
+                        </label>
+                    </div>`;
+                }
             }
 
             const actualLabel = isFluence ? `Actual (J/cm²)` : `Actual (${unit})`;
@@ -889,9 +1116,19 @@
                     <td class="tol-cell" id="${id}_result">—</td>
                 </tr>`;
             });
-            html += '</table></div>';
+            html += '</table>';
+            if (wl.optional) {
+                html += '</div>'; // close optBody
+            }
+            html += '</div>'; // close wavelength container
         });
         body.innerHTML = html;
+    }
+
+    function toggleOptional(wi) {
+        const cb  = document.getElementById('optEnable_' + wi);
+        const div = document.getElementById('optBody_' + wi);
+        if (div) div.style.display = cb.checked ? 'block' : 'none';
     }
 
     function calcTolUnit(id, setVal, wi) {
@@ -917,10 +1154,18 @@
         if (wl.unit === 'J/cm²') {
             const asJ = document.getElementById('asJ_' + wi);
             if (asJ && asJ.checked) {
-                const spotEl = document.getElementById('spot_' + wi);
-                const spotMm = parseFloat(spotEl?.value) || wl.spotMm || 10;
-                const spotCm = spotMm / 10;
-                const area = Math.PI * Math.pow(spotCm / 2, 2);
+                let area;
+                if (wl.bblRect) {
+                    // Rectangular crystal: width × length (mm) → area (cm²)
+                    const wMm = parseFloat(document.getElementById('bblW_' + wi)?.value) || wl.bblWidthMm || 15;
+                    const lMm = parseFloat(document.getElementById('bblL_' + wi)?.value) || wl.bblLengthMm || 30;
+                    area = (wMm / 10) * (lMm / 10);
+                } else {
+                    const spotEl = document.getElementById('spot_' + wi);
+                    const spotMm = parseFloat(spotEl?.value) || wl.spotMm || 10;
+                    const spotCm = spotMm / 10;
+                    area = Math.PI * Math.pow(spotCm / 2, 2);
+                }
                 actual = rawActual / area; // Convert Joules to J/cm²
             }
         }
@@ -1090,6 +1335,28 @@
             });
         }
 
+        // Save asJ, optional enable, and spot/crystal size per wavelength group
+        m.wavelengths.forEach((wl, wi) => {
+            // Save optional module enable state
+            if (wl.optional) {
+                const optEl = document.getElementById('optEnable_' + wi);
+                params['__optEnable_' + wi] = optEl ? (optEl.checked ? '1' : '0') : '0';
+            }
+            if (wl.unit === 'J/cm²') {
+                const asJEl = document.getElementById('asJ_' + wi);
+                params['__asJ_' + wi] = asJEl ? (asJEl.checked ? '1' : '0') : '0';
+                if (wl.bblRect) {
+                    const wEl = document.getElementById('bblW_' + wi);
+                    const lEl = document.getElementById('bblL_' + wi);
+                    params['__bblW_' + wi] = wEl ? wEl.value : String(wl.bblWidthMm || 15);
+                    params['__bblL_' + wi] = lEl ? lEl.value : String(wl.bblLengthMm || 30);
+                } else {
+                    const spotEl = document.getElementById('spot_' + wi);
+                    params['__spot_' + wi] = spotEl ? spotEl.value : String(wl.spotMm || '');
+                }
+            }
+        });
+
         // Test equipment
         const testEquip = TEST_EQUIPMENT.map((te, i) => ({
             type: te.type,
@@ -1123,6 +1390,7 @@
             test_equipment: testEquip,
             comments: document.getElementById('comments').value,
             created_by: currentUser?.id || null,
+            organization_id: isValidOrgId(currentUserOrgId) ? currentUserOrgId : null,
             customer_name:    document.getElementById('custName')?.value.trim() || null,
             customer_address: document.getElementById('custAddress')?.value.trim() || null,
             customer_city:    document.getElementById('custCity')?.value.trim() || null,
@@ -1145,13 +1413,42 @@
 
     /* ── SAVE (upsert — insert new or update existing) ── */
     async function saveReport(status) {
+        if (!currentUser) {
+            // Last-resort fetch in case the auth bootstrap was still in flight
+            try {
+                const { data: { user } } = await supabaseClient.auth.getUser();
+                if (user) currentUser = user;
+            } catch (e) {}
+        }
         if (!currentUser) { showToast('Sign in to save reports', 'error'); return; }
         const btn = document.getElementById('btnSubmit');
         const draftBtn = document.querySelector('.btn-draft');
         btn.disabled = true; if (draftBtn) draftBtn.disabled = true;
         btn.textContent = 'Saving...';
         try {
+            // Ensure any (possibly new) customer name typed in the form gets saved to the
+            // organizations table as type='customer'. The helper also handles the case where
+            // the user chose the "＋ Use new" option (which already called it).
+            // We call it again here defensively for users who type a name and save without
+            // opening the dropdown, and to pick up any address/contact edits made after the
+            // "use new" click.
+            const customerName = document.getElementById('custName')?.value.trim() || null;
+            if (customerName) {
+                await ensureCustomerOrganization(customerName);
+            }
+
             const data = { ...collectData(), status };
+
+            // Auto-add the main equipment/laser from this SR to the Equipment table if not already present.
+            // This ensures lasers added via SR (or prefilled from tickets) end up in the canonical list.
+            if (data.equipment_name || data.serial_number) {
+                await ensureEquipmentInTable(
+                    data.organization_id || (isValidOrgId(currentUserOrgId) ? currentUserOrgId : null),
+                    data.equipment_name,
+                    data.model_type,
+                    data.serial_number
+                );
+            }
             let error;
             if (currentReportId) {
                 // Update existing report
@@ -1165,16 +1462,17 @@
                     .from('service_reports')
                     .insert(data)
                     .select('id')
-                    .single();
+                    .maybeSingle();
                 error = insErr;
                 if (inserted) currentReportId = inserted.id; // remember for future saves
             }
             if (error) throw error;
             if (status === 'draft') {
                 showToast('Draft saved!', 'success');
+                setTimeout(() => navTo('reports_list.html'), 1500);
             } else {
                 showToast('Report submitted!', 'success');
-                setTimeout(() => navTo('index.html'), 1500);
+                setTimeout(() => navTo('reports_list.html'), 1500);
             }
         } catch (e) {
             showToast('Error: ' + (e.message || 'Save failed'), 'error');
@@ -1186,16 +1484,35 @@
 
     /* ── DRAFTS DRAWER ── */
     async function showDrafts() {
+        if (!currentUser) {
+            try {
+                const { data: { user } } = await supabaseClient.auth.getUser();
+                if (user) currentUser = user;
+            } catch (e) {}
+        }
+        if (!currentUser) {
+            hideDrafts();
+            showToast('Sign in to view drafts', 'error');
+            return;
+        }
+
         document.getElementById('draftsOverlay').classList.add('open');
         document.getElementById('draftsDrawer').classList.add('open');
         const list = document.getElementById('draftsList');
         list.innerHTML = '<div class="drafts-empty">Loading...</div>';
         try {
-            const { data, error } = await supabaseClient
+            let reportQuery = supabaseClient
                 .from('service_reports')
                 .select('id, report_number, equipment_name, serial_number, customer_name, service_type, status, updated_at')
-                .eq('created_by', currentUser.id)
                 .order('updated_at', { ascending: false });
+
+            if (isValidOrgId(currentUserOrgId)) {
+                reportQuery = reportQuery.eq('organization_id', currentUserOrgId);
+            }
+            // No else created_by force here; RLS should allow the owner to see their drafts.
+            // (We still have the user check earlier.)
+
+            const { data, error } = await reportQuery;
             if (error) throw error;
             if (!data || !data.length) {
                 list.innerHTML = '<div class="drafts-empty">No saved reports yet.</div>';
@@ -1233,15 +1550,137 @@
 
     async function loadReport(reportId) {
         hideDrafts();
-        try {
-            const { data: r, error } = await supabaseClient
-                .from('service_reports')
-                .select('*')
-                .eq('id', reportId)
-                .single();
-            if (error || !r) throw error || new Error('Not found');
-            currentReportId = r.id;
 
+        if (!reportId || typeof reportId !== 'string' || !reportId.includes('-') || reportId.length < 10) {
+            showToast('Invalid report ID', 'error');
+            return;
+        }
+
+        // Check for pre-passed report data from the list (via _rd param in URL).
+        // This is the partial data the list was able to fetch (under RLS). We use it as fallback
+        // if the full DB load by ID fails (e.g. due to current profile org_id causing RLS to deny
+        // even though the list could surface the item).
+        let preloadedReport = null;
+        try {
+            const p = new URLSearchParams(window.location.search);
+            const rdEnc = p.get('_rd');
+            if (rdEnc) {
+                preloadedReport = JSON.parse(atob(rdEnc));
+            } else {
+                const pending = localStorage.getItem('tsp-pending-report');
+                if (pending) {
+                    preloadedReport = JSON.parse(pending);
+                    localStorage.removeItem('tsp-pending-report');
+                }
+            }
+        } catch(e) {}
+
+        // Ensure auth is settled (important for _s= nav from list; head setSession is async)
+        try {
+            let { data: { session: _sess } } = await supabaseClient.auth.getSession();
+            if (!_sess) {
+                let toSet = (typeof _pendingSession !== 'undefined' ? _pendingSession : null);
+                if (!toSet) {
+                    try {
+                        const raw = localStorage.getItem('tsp-auth-token');
+                        if (raw) {
+                            const p = JSON.parse(raw);
+                            const s = (p && p.currentSession) ? p.currentSession : (p && p.access_token ? p : null);
+                            if (s && s.access_token) toSet = s;
+                        }
+                    } catch(e) {}
+                }
+                if (toSet) {
+                    try {
+                        const r = await supabaseClient.auth.setSession({
+                            access_token: toSet.access_token,
+                            refresh_token: toSet.refresh_token || ''
+                        });
+                        _sess = r.data?.session;
+                        // Settle the client state before the data query (helps RLS see the authenticated user)
+                        try { await supabaseClient.auth.getSession(); } catch(e) {}
+                    } catch(e) {}
+                    if (typeof _pendingSession !== 'undefined') _pendingSession = null;
+                }
+            }
+        } catch(e) {}
+
+        // Make sure we have currentUser for any downstream logic
+        if (!currentUser) {
+            try {
+                const { data: { user } } = await supabaseClient.auth.getUser();
+                if (user) currentUser = user;
+            } catch (e) {}
+        }
+
+        let r = null;
+        let usedPreloaded = false;
+        // If we have preloaded data from the list (passed via _rd), use it as base so we *always* open
+        // something usable (the list query already succeeded under RLS and includes the rich fields).
+        // Then attempt a fresh DB load to get the absolute latest (may be denied by RLS in some cases,
+        // which is why the fallback exists).
+        if (preloadedReport) {
+            r = preloadedReport;
+            usedPreloaded = true;
+        }
+
+        // Use scoping consistent with how the list page was able to see this row (via its org or created_by filter + RLS).
+        // Prefer the org value that was actually on the preloaded row (from the list query that succeeded).
+        // This prevents "org mismatch" / permission denials when rows have null organization_id (common on older data)
+        // or when profile org type doesn't match the column type on the report.
+        let rowOrgId = null;
+        if (preloadedReport && preloadedReport.organization_id != null) {
+            const cand = preloadedReport.organization_id;
+            if (isValidOrgId(cand)) {
+                rowOrgId = cand;
+                currentUserOrgId = cand;
+            }
+        }
+
+        // For the detail load, just query by id and let RLS enforce visibility
+        // (org match or created_by, per the policies). This avoids any client-side
+        // org value (from profile or preloaded) potentially conflicting with the row's
+        // actual org in DB. Since the list already proved the row is visible under RLS,
+        // the by-id query should succeed for rows the user can see.
+        let reportQuery = supabaseClient
+            .from('service_reports')
+            .select('*')
+            .eq('id', reportId);
+
+        let dbLoadSucceeded = false;
+        try {
+            const { data: row, error } = await reportQuery.maybeSingle();
+            if (error) throw error;
+            if (row) {
+                r = row;
+                usedPreloaded = false;
+                dbLoadSucceeded = true;
+            }
+        } catch (e) {
+            // ignore - we have preloaded fallback if any
+        }
+
+        if (!r) {
+            showToast('Failed to load: Report not found or you do not have permission to view it. (Your user_profiles.organization_id should match one of your service_company rows, e.g. 4 for Luxor Photonix. Re-apply RLS policies after fixing the profile org values.)', 'error');
+            return;
+        }
+
+        if (usedPreloaded && !dbLoadSucceeded) {
+            showToast('Opened using list summary (full DB load by ID denied by RLS/permission, often org/profile mismatch). Some fields may be missing.');
+        } else if (!usedPreloaded) {
+            showToast('Report loaded');
+        }
+
+        // Debug version marker - remove after testing
+        try {
+            const title = document.getElementById('headerTitle');
+            if (title) title.textContent += ' [v3]';
+        } catch(e){}
+
+        currentReportId = r.id;
+
+        // Population - wrap in try so partial preloaded data doesn't cause fatal error + toast
+        try {
             // Select manufacturer + model first so the form renders
             const mfgSel = document.getElementById('mfgSelect');
             const m = MODELS[r.model_type];
@@ -1252,10 +1691,12 @@
                 if (modelSel) { modelSel.value = r.model_type; onModelChange(); }
             }
 
-            // Wait a tick for the form to render
-            await new Promise(res => setTimeout(res, 100));
+            // Wait a tick for the form to render (only needed for full dynamic UI)
+            if (!usedPreloaded) {
+                await new Promise(res => setTimeout(res, 100));
+            }
 
-            // Fill all simple fields
+            // Fill all simple fields (safe for partial data from list)
             const set = (id, val) => { const el = document.getElementById(id); if (el && val != null) el.value = val; };
             set('custName',    r.customer_name);
             set('custAddress', r.customer_address);
@@ -1282,7 +1723,7 @@
                 serviceType = r.service_type;
             }
 
-            // Restore checklists
+            // Restore checklists (safe if data missing)
             const restoreCL = (containerId, data) => {
                 if (!data) return;
                 document.querySelectorAll('#' + containerId + ' .checklist-item').forEach(item => {
@@ -1299,7 +1740,7 @@
             restoreCL('checkMechanical', r.checklist_mechanical);
             restoreCL('checkAesthetic',  r.checklist_aesthetic);
 
-            // Restore power measurements
+            // Restore power measurements (guarded)
             if (r.power_measurements && m) {
                 r.power_measurements.forEach(pm => {
                     m.wavelengths.forEach((wl, wi) => {
@@ -1314,22 +1755,68 @@
                 });
             }
 
-            // Restore model params
+            // Restore model params (guarded)
             if (r.model_parameters && m) {
                 m.params.forEach((p, i) => {
                     const el = document.getElementById('param_' + i);
                     if (el && r.model_parameters[p] != null) el.value = r.model_parameters[p];
                 });
+                m.wavelengths.forEach((wl, wi) => {
+                    if (wl.optional) {
+                        const optEl = document.getElementById('optEnable_' + wi);
+                        const optVal = r.model_parameters['__optEnable_' + wi];
+                        if (optEl && optVal != null) {
+                            optEl.checked = (optVal === '1');
+                            toggleOptional(wi);
+                        }
+                    }
+                    if (wl.unit !== 'J/cm²') return;
+                    const asJEl = document.getElementById('asJ_' + wi);
+                    const asJVal = r.model_parameters['__asJ_' + wi];
+                    if (asJEl && asJVal != null) asJEl.checked = (asJVal === '1');
+                    if (wl.bblRect) {
+                        const wEl = document.getElementById('bblW_' + wi);
+                        const lEl = document.getElementById('bblL_' + wi);
+                        if (wEl && r.model_parameters['__bblW_' + wi] != null) wEl.value = r.model_parameters['__bblW_' + wi];
+                        if (lEl && r.model_parameters['__bblL_' + wi] != null) lEl.value = r.model_parameters['__bblL_' + wi];
+                    } else {
+                        const spotEl = document.getElementById('spot_' + wi);
+                        if (spotEl && r.model_parameters['__spot_' + wi] != null) spotEl.value = r.model_parameters['__spot_' + wi];
+                    }
+                });
+                m.wavelengths.forEach((wl, wi) => {
+                    if (wl.optional) {
+                        const optEl = document.getElementById('optEnable_' + wi);
+                        if (!optEl || !optEl.checked) return;
+                    }
+                    wl.sets.forEach((s, si) => {
+                        const id = 'pwr_' + wi + '_' + si;
+                        const el = document.getElementById(id + '_actual');
+                        if (el && el.value) calcTolUnit(id, s, wi);
+                    });
+                });
             }
 
-            // Update header
+            // Update header and bars (works with partial)
             document.getElementById('headerTitle').textContent = r.status === 'complete' ? 'Service Report' : 'Draft Report';
-            // Show appropriate action bar
+
+        // Version marker to verify the installed assets have the latest loadReport logic (remove after testing)
+        try {
+            const titleEl = document.getElementById('headerTitle');
+            if (titleEl) titleEl.textContent += ' [v4]';
+        } catch(e){}
             document.getElementById('submitBar').style.display = r.status === 'complete' ? 'none' : 'flex';
             document.getElementById('pdfBar').style.display    = r.status === 'complete' ? 'flex' : 'none';
-            showToast('Report loaded', 'success');
-        } catch(e) {
-            showToast('Failed to load: ' + e.message, 'error');
+
+            if (!usedPreloaded) {
+                showToast('Report loaded', 'success');
+            }
+        } catch (e) {
+            if (usedPreloaded) {
+                console.warn('Partial report from list: continued despite population error (expected for missing full data)', e);
+            } else {
+                showToast('Failed to load: ' + e.message, 'error');
+            }
         }
     }
 
@@ -1348,17 +1835,157 @@
     }
 
     /* ── PDF EXPORT ── */
-    function exportPDF() {
-        // Build a printable HTML page and open it
-        const report = buildPrintHTML();
-        const win = window.open('', '_blank');
-        if (win) {
-            win.document.write(report);
-            win.document.close();
-            setTimeout(() => { win.print(); }, 500);
-        } else {
-            // Fallback for WebView: show instructions
-            showToast('Use browser print to save as PDF', 'success');
+    async function exportPDF() {
+        try {
+            const modelSel = document.getElementById('modelSelect');
+
+            // Snapshot current values from DOM before any re-render (to preserve loaded/edited data from preloaded or full load)
+            const valueSnapshot = {};
+            const clSnapshot = {};
+            if (modelSel && modelSel.value) {
+                const m = MODELS[modelSel.value];
+                if (m && m.params) {
+                    m.params.forEach((p, i) => {
+                        const el = document.getElementById('param_' + i);
+                        if (el) valueSnapshot['param_' + i] = el.value;
+                    });
+                }
+                if (m && m.wavelengths) {
+                    m.wavelengths.forEach((wl, wi) => {
+                        if (wl.optional) {
+                            const el = document.getElementById('optEnable_' + wi);
+                            if (el) valueSnapshot['optEnable_' + wi] = el.checked;
+                        }
+                        if (wl.unit === 'J/cm²') {
+                            const asJ = document.getElementById('asJ_' + wi);
+                            if (asJ) valueSnapshot['asJ_' + wi] = asJ.checked;
+                        }
+                        if (wl.bblRect) {
+                            const wEl = document.getElementById('bblW_' + wi);
+                            const lEl = document.getElementById('bblL_' + wi);
+                            if (wEl) valueSnapshot['bblW_' + wi] = wEl.value;
+                            if (lEl) valueSnapshot['bblL_' + wi] = lEl.value;
+                        } else {
+                            const spot = document.getElementById('spot_' + wi);
+                            if (spot) valueSnapshot['spot_' + wi] = spot.value;
+                        }
+                        wl.sets.forEach((s, si) => {
+                            const id = 'pwr_' + wi + '_' + si;
+                            const el = document.getElementById(id + '_actual');
+                            if (el) valueSnapshot[id + '_actual'] = el.value;
+                        });
+                    });
+                }
+            }
+            // Snapshot test equipment
+            const testEquipList = (typeof TEST_EQUIPMENT !== 'undefined' && TEST_EQUIPMENT) ? TEST_EQUIPMENT : [];
+            testEquipList.forEach((te, i) => {
+                ['model', 'serial', 'cal'].forEach(f => {
+                    const el = document.getElementById('te_' + i + '_' + f);
+                    if (el) valueSnapshot['te_' + i + '_' + f] = el.value;
+                });
+            });
+            // Snapshot checklist actives (in case re-render)
+            ['checkElectrical', 'checkMechanical', 'checkAesthetic'].forEach(cid => {
+                document.querySelectorAll('#' + cid + ' .checklist-item').forEach(item => {
+                    const label = item.querySelector('.checklist-label')?.textContent || '';
+                    const active = item.querySelector('.cl-btn.active');
+                    if (active) clSnapshot[cid + '|' + label] = active.textContent;
+                });
+            });
+
+            // Only force re-render of dynamic model sections if they are not already built
+            // (calling onModelChange again would reset all the restored values).
+            const perfBody = document.getElementById('perfBody');
+            const needsDynamicRender = perfBody && perfBody.querySelectorAll('input[id*="_actual"]').length === 0;
+
+            if (needsDynamicRender && modelSel && modelSel.value) {
+                onModelChange();
+            }
+
+            // Restore snapshot values after possible re-render
+            Object.keys(valueSnapshot).forEach(key => {
+                const el = document.getElementById(key);
+                if (el) {
+                    if (key.includes('optEnable') || key.includes('asJ')) {
+                        el.checked = !!valueSnapshot[key];
+                    } else {
+                        el.value = valueSnapshot[key] || '';
+                    }
+                }
+            });
+            // Restore checklist actives
+            Object.keys(clSnapshot).forEach(k => {
+                const [cid, label] = k.split('|');
+                const items = document.querySelectorAll('#' + cid + ' .checklist-item');
+                for (let item of items) {
+                    if (item.querySelector('.checklist-label')?.textContent === label) {
+                        const val = clSnapshot[k];
+                        item.querySelectorAll('.cl-btn').forEach(btn => {
+                            btn.classList.toggle('active', btn.textContent === val);
+                        });
+                        break;
+                    }
+                }
+            });
+            // Re-calc tols if needed
+            if (modelSel && modelSel.value) {
+                const m = MODELS[modelSel.value];
+                if (m && m.wavelengths) {
+                    m.wavelengths.forEach((wl, wi) => {
+                        if (wl.optional) {
+                            const opt = document.getElementById('optEnable_' + wi);
+                            if (opt && !opt.checked) return;
+                        }
+                        wl.sets.forEach((s, si) => {
+                            const id = 'pwr_' + wi + '_' + si;
+                            const el = document.getElementById(id + '_actual');
+                            if (el && el.value) calcTolUnit(id, s, wi);
+                        });
+                    });
+                }
+            }
+
+            // Ensure supporting data for the print header and test equipment table is loaded.
+            if (typeof loadTechCompanyInfo === 'function') loadTechCompanyInfo();
+            if (typeof loadTestEquipment === 'function') loadTestEquipment();
+
+            // Small delay for any late DOM updates.
+            await new Promise(r => setTimeout(r, 80));
+
+            const report = buildPrintHTML();
+            const reportNum = document.getElementById('reportNum')?.value || 'TSP';
+            const jobName = 'Service Report ' + reportNum;
+
+            // Android: Direct PDF save to Downloads folder (no print dialog)
+            // We treat the presence of the native bridge as "we will save" and show success immediately.
+            // The native side does the actual work (and may throw on the JS side even on success
+            // due to async file write / WebView print internals). Swallow and still show success.
+            if (typeof Android !== 'undefined' && Android.printReport) {
+                try {
+                    Android.printReport(report, jobName);
+                } catch(e) {
+                    console.warn('Native PDF export threw (but file was likely written):', e);
+                }
+                showToast('Saving PDF to Downloads folder...', 'success');
+                return;
+            }
+
+            // Web fallback: open in new window and print
+            try {
+                var win = window.open('', '_blank');
+                if (win) {
+                    win.document.write(report);
+                    win.document.close();
+                    setTimeout(function() { win.print(); }, 500);
+                    return;
+                }
+            } catch(e) {}
+
+            showToast('Export failed — try the web version at repairplanet.net', 'error');
+        } catch (e) {
+            console.error('Export PDF error in build or setup:', e);
+            showToast('Export failed — try the web version at repairplanet.net', 'error');
         }
     }
 
@@ -1375,49 +2002,197 @@
         const nextPm      = document.getElementById('nextPm')?.value || '';
         const engineer    = document.getElementById('engineer')?.value || '';
         const comments    = document.getElementById('comments')?.value || '';
+        const modelKey    = document.getElementById('modelSelect')?.value || '';
+        const m           = MODELS[modelKey];
 
-        // Collect checklists
+        // Checklists
         const collectCLHTML = (containerId, title) => {
             const items = [];
             document.querySelectorAll('#' + containerId + ' .checklist-item').forEach(item => {
                 const label = item.querySelector('.checklist-label')?.textContent || '';
                 const active = item.querySelector('.cl-btn.active');
                 const val = active ? active.textContent : '—';
-                items.push('<tr><td>' + label + '</td><td style="font-weight:700;color:' + (val === 'Pass' ? '#16a34a' : val === 'Fail' ? '#dc2626' : '#555') + '">' + val + '</td></tr>');
+                const color = val === 'Pass' ? '#16a34a' : val === 'Fail' ? '#dc2626' : '#555';
+                items.push('<tr><td style="padding:4px 8px;border-bottom:1px solid #eee">' + label + '</td>' +
+                    '<td style="padding:4px 8px;border-bottom:1px solid #eee;font-weight:700;color:' + color + '">' + val + '</td></tr>');
             });
             if (!items.length) return '';
-            return '<h3 style="margin:16px 0 8px;color:#111;border-bottom:1px solid #ddd;padding-bottom:4px">' + title + '</h3>' +
-                   '<table style="width:100%;border-collapse:collapse;font-size:13px">' + items.join('') + '</table>';
+            return '<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px">' + title + '</h3>' +
+                   '<table style="width:100%;border-collapse:collapse;font-size:12px">' + items.join('') + '</table>';
         };
 
-        // Power measurements
-        const pwrRows = [];
-        document.querySelectorAll('.pwr-table tr').forEach(row => {
-            const cells = Array.from(row.cells).map(c => '<td style="padding:4px 8px;border:1px solid #ddd">' + c.textContent + '</td>');
-            pwrRows.push('<tr>' + cells.join('') + '</tr>');
-        });
-        const pwrHTML = pwrRows.length ? '<h3 style="margin:16px 0 8px;color:#111;border-bottom:1px solid #ddd;padding-bottom:4px">Power Measurements</h3><table style="width:100%;border-collapse:collapse;font-size:12px">' + pwrRows.join('') + '</table>' : '';
+        // Performance Testing — read values directly from DOM inputs
+        let perfHTML = '';
+        if (m && m.wavelengths) {
+            let tables = '';
+            m.wavelengths.forEach((wl, wi) => {
+                // Skip optional modules that aren't enabled
+                if (wl.optional) {
+                    const optEl = document.getElementById('optEnable_' + wi);
+                    if (!optEl || !optEl.checked) return;
+                }
+                const isFluence = wl.unit === 'J/cm²';
+                const unit = wl.unit || '';
+                const spotMm = parseFloat(document.getElementById('spot_' + wi)?.value) || wl.spotMm || 10;
+                const asJEl  = document.getElementById('asJ_' + wi);
+                const asJ    = asJEl ? asJEl.checked : false;
 
-        const logoHTML = cache.company_logo_url ?
-            '<img src="' + cache.company_logo_url + '" style="max-height:60px;max-width:180px;object-fit:contain">' : '';
+                const entryMode = isFluence && asJ;
+                let headerCols, area, spotDesc;
+                if (entryMode) {
+                    if (wl.bblRect) {
+                        const wMm = parseFloat(document.getElementById('bblW_' + wi)?.value) || wl.bblWidthMm || 15;
+                        const lMm = parseFloat(document.getElementById('bblL_' + wi)?.value) || wl.bblLengthMm || 30;
+                        area = (wMm / 10) * (lMm / 10);
+                        spotDesc = wMm + 'mm × ' + lMm + 'mm rectangular crystal';
+                    } else {
+                        var spotCm = spotMm / 10;
+                        area = Math.PI * Math.pow(spotCm / 2, 2);
+                        spotDesc = spotMm + 'mm circular spot';
+                    }
+                    headerCols =
+                        '<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Set (J/cm²)</th>' +
+                        '<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Entered (J)</th>' +
+                        '<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Converted (J/cm²)</th>' +
+                        '<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">% Dev</th>' +
+                        '<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Result</th>';
+                } else {
+                    headerCols =
+                        '<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Set (' + unit + ')</th>' +
+                        '<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Actual (' + unit + ')</th>' +
+                        '<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">% Dev</th>' +
+                        '<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Result</th>';
+                }
+                let rows = '<tr style="background:#f5f5f5">' + headerCols + '</tr>';
+
+                wl.sets.forEach((s, si) => {
+                    const id = 'pwr_' + wi + '_' + si;
+                    const actualEl = document.getElementById(id + '_actual');
+                    const rawActual = actualEl ? parseFloat(actualEl.value) : NaN;
+                    let converted = rawActual;
+                    if (entryMode && !isNaN(rawActual)) converted = rawActual / area;
+                    let devStr = '—', resultStr = '—', resultColor = '#555';
+                    const compareVal = entryMode ? converted : rawActual;
+                    if (!isNaN(compareVal) && s !== 0) {
+                        const ratio = compareVal / s;
+                        const pct = ((ratio - 1) * 100).toFixed(1);
+                        devStr = pct + '%';
+                        const pass = ratio >= 0.9 && ratio <= 1.1;
+                        resultStr = pass ? 'PASS' : 'FAIL';
+                        resultColor = pass ? '#16a34a' : '#dc2626';
+                    }
+                    let dataCells;
+                    if (entryMode) {
+                        dataCells =
+                            '<td style="padding:5px 8px;border:1px solid #ddd;text-align:center;font-weight:600">' + s + ' J/cm²</td>' +
+                            '<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">' + (isNaN(rawActual) ? '—' : rawActual.toFixed(3) + ' J') + '</td>' +
+                            '<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">' + (isNaN(converted) ? '—' : converted.toFixed(3) + ' J/cm²') + '</td>' +
+                            '<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">' + devStr + '</td>' +
+                            '<td style="padding:5px 8px;border:1px solid #ddd;text-align:center;font-weight:700;color:' + resultColor + '">' + resultStr + '</td>';
+                    } else {
+                        dataCells =
+                            '<td style="padding:5px 8px;border:1px solid #ddd;text-align:center;font-weight:600">' + s + ' ' + unit + '</td>' +
+                            '<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">' + (isNaN(rawActual) ? '—' : rawActual.toFixed(3)) + '</td>' +
+                            '<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">' + devStr + '</td>' +
+                            '<td style="padding:5px 8px;border:1px solid #ddd;text-align:center;font-weight:700;color:' + resultColor + '">' + resultStr + '</td>';
+                    }
+                    rows += '<tr>' + dataCells + '</tr>';
+                });
+
+                const modeNote = entryMode
+                    ? ' — Entered as Joules, ' + spotDesc + ' (Area: ' + area.toFixed(3) + ' cm²)'
+                    : (isFluence ? (wl.bblRect
+                        ? ' — ' + (wl.bblWidthMm||15) + 'mm × ' + (wl.bblLengthMm||30) + 'mm crystal'
+                        : ' — ' + spotMm + 'mm spot') : '');
+                tables += '<p style="margin:8px 0 4px;font-size:12px;font-weight:700;color:#555">' +
+                    (wl.optional ? '📡 ' : '') + wl.name + modeNote + '</p>' +
+                    '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">' + rows + '</table>';
+            });
+            if (tables) {
+                perfHTML = '<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px">📊 Performance Testing</h3>' + tables;
+            }
+        }
+
+        // System Parameters
+        let paramsHTML = '';
+        if (m && m.params && m.params.length) {
+            const paramRows = m.params.map((p, i) => {
+                const el = document.getElementById('param_' + i);
+                const val = el ? el.value : '';
+                return '<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;font-weight:600;width:50%">' + p + '</td>' +
+                    '<td style="padding:4px 8px;border-bottom:1px solid #eee">' + (val || '—') + '</td></tr>';
+            }).join('');
+            paramsHTML = '<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px">⚙️ System Parameters</h3>' +
+                '<table style="width:100%;border-collapse:collapse;font-size:12px">' + paramRows + '</table>';
+        }
+
+        // Electrical Safety
+        const gr = parseFloat(document.getElementById('groundRes')?.value);
+        const lc = parseFloat(document.getElementById('leakageCur')?.value);
+        let safetyHTML = '';
+        if (!isNaN(gr) || !isNaN(lc)) {
+            const grPass = !isNaN(gr) && gr <= 0.2;
+            const lcPass = !isNaN(lc) && lc <= 300;
+            safetyHTML = '<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px">🔌 Electrical Safety</h3>' +
+                '<table style="width:100%;border-collapse:collapse;font-size:12px">' +
+                (!isNaN(gr) ? '<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;font-weight:600">Ground Resistance</td>' +
+                    '<td style="padding:5px 8px;border-bottom:1px solid #eee">' + gr.toFixed(3) + ' Ω</td>' +
+                    '<td style="padding:5px 8px;border-bottom:1px solid #eee;font-weight:700;color:' + (grPass ? '#16a34a' : '#dc2626') + '">' + (grPass ? 'PASS' : 'FAIL') + ' (≤0.2Ω)</td></tr>' : '') +
+                (!isNaN(lc) ? '<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;font-weight:600">Leakage Current</td>' +
+                    '<td style="padding:5px 8px;border-bottom:1px solid #eee">' + lc.toFixed(1) + ' μA</td>' +
+                    '<td style="padding:5px 8px;border-bottom:1px solid #eee;font-weight:700;color:' + (lcPass ? '#16a34a' : '#dc2626') + '">' + (lcPass ? 'PASS' : 'FAIL') + ' (≤300μA)</td></tr>' : '') +
+                '</table>';
+        }
+
+        // Test Equipment
+        let teHTML = '';
+        const testEquipList = (typeof TEST_EQUIPMENT !== 'undefined' && TEST_EQUIPMENT) ? TEST_EQUIPMENT : [];
+        if (testEquipList.length) {
+            const teRows = testEquipList.map((te, i) => {
+                const model  = document.getElementById('te_' + i + '_model')?.value || '';
+                const serial = document.getElementById('te_' + i + '_serial')?.value || '';
+                const cal    = document.getElementById('te_' + i + '_cal')?.value || '';
+                if (!model && !serial) return '';
+                return '<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;font-weight:600">' + te.type + '</td>' +
+                    '<td style="padding:4px 8px;border-bottom:1px solid #eee">' + model + '</td>' +
+                    '<td style="padding:4px 8px;border-bottom:1px solid #eee">' + serial + '</td>' +
+                    '<td style="padding:4px 8px;border-bottom:1px solid #eee">' + cal + '</td></tr>';
+            }).filter(Boolean).join('');
+            if (teRows) {
+                teHTML = '<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px">🔧 Test Equipment</h3>' +
+                    '<table style="width:100%;border-collapse:collapse;font-size:12px">' +
+                    '<tr style="background:#f5f5f5"><th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Type</th>' +
+                    '<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Model</th>' +
+                    '<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Serial</th>' +
+                    '<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Cal Due</th></tr>' +
+                    teRows + '</table>';
+            }
+        }
+
+        // For PDF export, use text-only header. External <img> (even if from cache) can cause the native
+        // print WebView / PDF renderer to throw on some devices (no network, CORS, scoped storage, etc.).
+        const logoHTML = '';  // text company name is already in the header below
+        // (previous: cache.company_logo_url ? '<img src=...>' : ''; )
 
         return '<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Service Report ' + reportNum + '</title>' +
             '<style>body{font-family:Arial,sans-serif;margin:0;padding:20px;color:#111;font-size:13px}' +
+            'h3{page-break-after:avoid}table{page-break-inside:avoid}' +
             '.header{display:flex;justify-content:space-between;align-items:flex-start;border-bottom:3px solid #FBBF24;padding-bottom:16px;margin-bottom:20px}' +
-            '.company-info{flex:1}.company-name{font-size:18px;font-weight:800;color:#111}.company-address{font-size:12px;color:#555;margin-top:3px}' +
-            '.report-title{text-align:right}.report-title h1{font-size:22px;color:#111;margin:0}.report-title .report-num{font-size:14px;color:#FBBF24;font-weight:700}' +
-            '.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:16px;background:#f9f9f9;padding:14px;border-radius:6px}' +
+            '.company-name{font-size:18px;font-weight:800;color:#111}.company-address{font-size:12px;color:#555;margin-top:3px}' +
+            '.report-title{text-align:right}.report-title h1{font-size:22px;color:#111;margin:0}' +
+            '.report-num{font-size:14px;color:#B45309;font-weight:700}' +
+            '.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:16px;background:#f9f9f9;padding:12px;border-radius:6px;border:1px solid #eee}' +
             '.info-item label{font-size:10px;color:#666;text-transform:uppercase;font-weight:700;display:block;margin-bottom:2px}' +
             '.info-item span{font-size:13px;font-weight:600;color:#111}' +
-            'table td{vertical-align:top;padding:5px 8px;border-bottom:1px solid #eee}' +
-            '@media print{body{padding:0}}</style></head><body>' +
+            '@media print{body{padding:10px}}</style></head><body>' +
             '<div class="header">' +
-                '<div class="company-info">' + logoHTML +
+                '<div>' + logoHTML +
                     '<div class="company-name">' + (cache.company_name || 'Total Service Pro') + '</div>' +
                     '<div class="company-address">' + [cache.company_address, cache.company_city, cache.company_state].filter(Boolean).join(', ') + '</div>' +
                     '<div class="company-address">' + (cache.company_phone || '') + '</div>' +
                 '</div>' +
-                '<div class="report-title"><h1>Service Report</h1><div class="report-num">' + reportNum + '</div>' +
+                '<div class="report-title"><h1>Service Report</h1>' +
+                '<div class="report-num">' + reportNum + '</div>' +
                 '<div style="font-size:12px;color:#555;margin-top:4px">Date: ' + dateOut + '</div></div>' +
             '</div>' +
             '<div class="info-grid">' +
@@ -1431,11 +2206,21 @@
             collectCLHTML('checkElectrical', '⚡ Electrical Checklist') +
             collectCLHTML('checkMechanical', '🔧 Mechanical & Optical') +
             collectCLHTML('checkAesthetic',  '🎨 Aesthetic Condition') +
-            pwrHTML +
-            (comments ? '<h3 style="margin:16px 0 8px;color:#111;border-bottom:1px solid #ddd;padding-bottom:4px">Comments & Notes</h3><p style="font-size:13px;line-height:1.6">' + comments + '</p>' : '') +
-            '<div style="margin-top:32px;border-top:1px solid #ddd;padding-top:16px;display:flex;justify-content:space-between;font-size:12px;color:#555">' +
-                '<div>Technician: ' + engineer + '&nbsp;&nbsp;&nbsp;Signature: ____________________</div>' +
-                '<div>Customer: ____________________&nbsp;&nbsp;&nbsp;Date: ___________</div>' +
+            perfHTML +
+            paramsHTML +
+            safetyHTML +
+            teHTML +
+            (comments ? '<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px">💬 Comments & Notes</h3>' +
+                '<p style="font-size:13px;line-height:1.6;background:#f9f9f9;padding:10px;border-radius:4px">' + comments + '</p>' : '') +
+            '<div style="margin-top:32px;border-top:2px solid #FBBF24;padding-top:16px">' +
+                '<div style="display:flex;justify-content:space-between;font-size:12px;color:#555;margin-bottom:24px">' +
+                    '<div>Technician: <strong>' + engineer + '</strong></div>' +
+                    '<div>Date of Service: ' + dateOut + '</div>' +
+                '</div>' +
+                '<div style="display:grid;grid-template-columns:1fr 1fr;gap:30px;font-size:12px">' +
+                    '<div style="border-top:1px solid #999;padding-top:8px;color:#555">Technician Signature</div>' +
+                    '<div style="border-top:1px solid #999;padding-top:8px;color:#555">Customer Signature &amp; Date</div>' +
+                '</div>' +
             '</div>' +
             '</body></html>';
     }
@@ -1492,7 +2277,8 @@
     }
 
     supabaseClient.auth.onAuthStateChange(function(event, session) {
-        if (_sessionRestored) { _sessionRestored = false; return; }
+        // Always ensure UI + currentUser are updated when auth state changes.
+        // The previous _sessionRestored guard was suppressing the user fetch on cross-page navigation.
         updateAuthUI();
         try {
             if (typeof Android !== 'undefined') {
@@ -1508,6 +2294,22 @@
     async function updateAuthUI() {
         const { data: { user } } = await supabaseClient.auth.getUser();
         currentUser = user;
+
+        if (user && !currentUserOrgId) {
+            try {
+                const { data: profile } = await supabaseClient
+                    .from('user_profiles')
+                    .select('organization_id')
+                    .eq('id', user.id)
+                    .maybeSingle();
+                const candidate = profile?.organization_id;
+                if (isValidOrgId(candidate)) {
+                    currentUserOrgId = candidate;
+                } else {
+                    currentUserOrgId = null;
+                }
+            } catch(e) {}
+        }
         const loginBtn = document.getElementById('loginBtn');
         const wrap = document.getElementById('avatarWrapper');
         if (user) {
@@ -1533,41 +2335,98 @@
             wrap.style.display = 'none';
         }
     }
-    // Only call updateAuthUI immediately if no pending session —
-    // otherwise onAuthStateChange will call it after setSession resolves
-    if (!_pendingSession) {
-        updateAuthUI();
-    }
+    // Always run updateAuthUI so currentUser is populated even when a session
+    // was injected via the _s= param from another page (Reports List, etc.).
+    // onAuthStateChange will also fire, but calling it here is safe and ensures
+    // currentUser is ready as early as possible for saveReport / loadReport.
+    updateAuthUI();
 
     // Pre-populate from URL params passed by service_schedule.html
     (function preFillFromParams() {
         const p = new URLSearchParams(window.location.search);
-        const set = (id, val) => { const el = document.getElementById(id); if (el && val) el.value = val; };
+
+        // If report_id param present, load that specific report (takes priority)
+        const reportId = p.get('report_id');
+        if (reportId) {
+            // Ensure we have a user before attempting to load (handles timing when
+            // arriving via _s= param from Reports List).
+            (async () => {
+                if (!currentUser) {
+                    try {
+                        const { data: { user } } = await supabaseClient.auth.getUser();
+                        if (user) currentUser = user;
+                    } catch (e) {}
+                }
+                if (currentUser) {
+                    loadReport(reportId);
+                } else {
+                    // As a last resort, still try — loadReport itself will show errors
+                    loadReport(reportId);
+                }
+            })();
+            return; // Don't pre-fill when loading an existing report
+        }
+
+        // Helper: set value if element exists and value is non-empty
+        const set = (id, val) => {
+            const el = document.getElementById(id);
+            if (el && val && val.trim()) el.value = val.trim();
+        };
+
+        // Customer fields
         set('custName',    p.get('cust_name'));
         set('custAddress', p.get('cust_address'));
         set('custCity',    p.get('cust_city'));
         set('custState',   p.get('cust_state'));
+        set('custZip',     p.get('cust_zip'));
+        set('custPhone',   p.get('cust_phone'));
+
+        // Equipment
         set('serialNum',   p.get('serial'));
         set('ticketNum',   p.get('ticket_num'));
-        // Pre-select manufacturer if provided
-        const mfg = p.get('mfg');
+
+        // equipName = make + model combined display
+        const equipMake  = p.get('equip_make')  || '';
+        const equipModel = p.get('equip_model') || '';
+        const equipName  = [equipMake, equipModel].filter(Boolean).join(' ');
+        set('equipName', equipName);
+
+        // Pre-select manufacturer dropdown by matching equip_make
+        const mfg = equipMake || p.get('mfg') || '';
         if (mfg) {
             const mfgSel = document.getElementById('mfgSelect');
             if (mfgSel) {
+                // Try exact match first, then partial
+                const mfgLower = mfg.toLowerCase();
                 const match = Array.from(mfgSel.options).find(o =>
-                    o.value.toLowerCase() === mfg.toLowerCase() ||
-                    o.text.toLowerCase().includes(mfg.toLowerCase())
+                    o.value.toLowerCase() === mfgLower
+                ) || Array.from(mfgSel.options).find(o =>
+                    o.value.toLowerCase().includes(mfgLower) ||
+                    mfgLower.includes(o.value.toLowerCase())
                 );
-                if (match) { mfgSel.value = match.value; onMfgChange(); }
+                if (match) {
+                    mfgSel.value = match.value;
+                    onMfgChange(); // populate model dropdown
+
+                    // Now try to select the correct model
+                    if (equipModel) {
+                        setTimeout(() => {
+                            const modelSel = document.getElementById('modelSelect');
+                            if (modelSel) {
+                                const modelLower = equipModel.toLowerCase();
+                                const modelMatch = Array.from(modelSel.options).find(o =>
+                                    o.text.toLowerCase().includes(modelLower) ||
+                                    modelLower.includes(o.text.toLowerCase().replace(/[™®]/g,''))
+                                );
+                                if (modelMatch) {
+                                    modelSel.value = modelMatch.value;
+                                    onModelChange(); // load performance section
+                                }
+                            }
+                        }, 50);
+                    }
+                }
             }
-        }
-        // If report_id param present, load that specific report
-        const reportId = p.get('report_id');
-        if (reportId) {
-            // Wait for auth then load
-            supabaseClient.auth.getUser().then(({ data: { user } }) => {
-                if (user) loadReport(reportId);
-            });
         }
     })();
 </script>

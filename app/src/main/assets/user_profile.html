@@ -1,27 +1,14 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Centralized theme system -->
+    <script src="theme.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>My Profile · Total Service Pro</title>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-
-        :root {
-            --gold:      #FBBF24;
-            --gold-dk:   #D97706;
-            --bg:        #000;
-            --surface:   #111;
-            --surface2:  #1a1a1a;
-            --surface3:  #222;
-            --border:    #2a2a2a;
-            --border-gold: #FBBF2444;
-            --text:      #fff;
-            --text-muted:#888;
-            --red:       #ef4444;
-            --green:     #22c55e;
-            --blue:      #3b82f6;
-        }
+        /* CSS variables defined in tsp.css */
 
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -50,13 +37,7 @@
         }
         .back-btn:hover { background: var(--surface2); }
         .header-title { font-size: 18px; font-weight: 700; flex: 1; }
-        .save-btn {
-            background: var(--gold); color: #111827; border: none;
-            border-radius: 10px; padding: 9px 18px;
-            font-weight: 700; font-size: 14px; cursor: pointer;
-        }
-        .save-btn:hover { background: var(--gold-dk); }
-        .save-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+/* .save-btn replaced by global .btn-primary */
 
         /* ── Avatar hero ── */
         .avatar-hero {
@@ -317,11 +298,12 @@
             position: fixed; bottom: 24px; left: 50%;
             transform: translateX(-50%) translateY(80px);
             background: var(--surface2); border: 1px solid var(--gold);
-            border-radius: 10px; padding: 12px 20px;
+            border-radius: 10px; padding: 12px 16px;
             font-size: 14px; font-weight: 600; z-index: 9999;
-            transition: transform 0.3s ease; white-space: nowrap;
+            transition: transform 0.3s ease; opacity: 0; pointer-events: none;
+            max-width: 92vw; text-align: center; white-space: normal; word-break: break-word; line-height: 1.3;
         }
-        .toast.show { transform: translateX(-50%) translateY(0); }
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; pointer-events: auto; }
         .toast.success { border-color: var(--green); color: var(--green); }
         .toast.error   { border-color: var(--red);   color: var(--red); }
 
@@ -339,7 +321,7 @@
 <div class="header">
     <button class="back-btn" onclick="navigateTo('index.html')">←</button>
     <div class="header-title">My Profile</div>
-    <button class="save-btn" id="saveBtn" onclick="saveProfile()">Save</button>
+    <button class="btn btn-primary" id="saveBtn" onclick="saveProfile()">Save</button>
 </div>
 
 <!-- ── Avatar Hero ── -->
@@ -385,12 +367,7 @@
             </div>
             <div class="field">
                 <label>Role</label>
-                <select id="role">
-                    <option value="engineer">Field Engineer</option>
-                    <option value="dispatcher">Dispatcher</option>
-                    <option value="admin">Admin</option>
-                    <option value="viewer">Viewer</option>
-                </select>
+                <input type="text" id="role" readonly style="background:var(--surface3);color:var(--text-muted);">
             </div>
         </div>
         <div class="field-row">
@@ -585,6 +562,52 @@
     </div>
 </div>
 
+<!-- ── Address & Emergency Contact ── -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">📍</span>
+        <span class="section-title">Address &amp; Emergency Contact</span>
+    </div>
+    <div class="section-body">
+        <div class="field-row">
+            <div class="field" style="flex: 2 1 100%;">
+                <label>Street Address</label>
+                <input type="text" id="addressLine1" placeholder="123 Main Street, Apt 4B">
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>City</label>
+                <input type="text" id="city" placeholder="Los Angeles">
+            </div>
+            <div class="field" style="max-width: 80px;">
+                <label>State</label>
+                <input type="text" id="state" placeholder="CA" maxlength="2" style="text-transform: uppercase; text-align: center;">
+            </div>
+            <div class="field" style="max-width: 110px;">
+                <label>ZIP Code</label>
+                <input type="text" id="postalCode" placeholder="90210">
+            </div>
+        </div>
+
+        <div style="height:1px; background: var(--border); margin: 14px 0 8px;"></div>
+
+        <div class="field-row">
+            <div class="field">
+                <label>Emergency Contact Name</label>
+                <input type="text" id="emergencyName" placeholder="Jane Doe (Spouse)">
+            </div>
+            <div class="field">
+                <label>Emergency Phone</label>
+                <input type="tel" id="emergencyPhone" placeholder="+1 (555) 987-6543">
+            </div>
+        </div>
+        <div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">
+            Used for dispatch emergencies and after-hours contact.
+        </div>
+    </div>
+</div>
+
 <!-- ── Danger Zone ── -->
 <div class="section" style="margin-top:8px;">
     <div class="section-header">
@@ -687,7 +710,16 @@
 
         // Hero
         document.getElementById('heroName').textContent = fullName;
-        document.getElementById('heroRole').textContent = capitalize(profile?.role || 'engineer');
+        const roleLabels = {
+            'engineer': 'Service Engineer',
+            'dispatcher': 'Dispatcher / Scheduler',
+            'service_manager': 'Service Manager',
+            'billing_manager': 'Billing Manager',
+            'crm': 'CRM / Marketing',
+            'admin': 'Business Owner / Admin'
+        };
+        const displayRole = roleLabels[profile?.role] || (profile?.role ? capitalize(profile.role) : 'Service Engineer');
+        document.getElementById('heroRole').textContent = displayRole;
         document.getElementById('heroOrg').textContent  = profile?.organizations?.name || '';
 
         // Avatar
@@ -698,13 +730,25 @@
         document.getElementById('firstName').value   = firstName;
         document.getElementById('lastName').value    = lastName;
         document.getElementById('email').value       = user.email || '';
-        document.getElementById('phone').value       = profile?.phone || '';
-        document.getElementById('role').value        = profile?.role || 'engineer';
+        // Phone fallback for different possible column names in the DB
+        const phoneVal = profile?.phone || profile?.phone_number || profile?.mobile || profile?.contact_phone || '';
+        document.getElementById('phone').value = phoneVal;
+        document.getElementById('role').value        = displayRole;
         document.getElementById('employeeId').value  = profile?.employee_id || '';
         document.getElementById('website').value     = profile?.website || meta.website || '';
         document.getElementById('bio').value         = profile?.bio || '';
-        document.getElementById('jobTitle').value    = profile?.job_title || '';
+        // Job title fallback
+        const titleVal = profile?.job_title || profile?.title || profile?.position || '';
+        document.getElementById('jobTitle').value = titleVal;
         document.getElementById('territory').value   = profile?.territory || '';
+
+        // Address & Emergency Contact (with fallbacks)
+        document.getElementById('addressLine1').value   = profile?.address_line1 || profile?.address || '';
+        document.getElementById('city').value           = profile?.city || '';
+        document.getElementById('state').value          = (profile?.state || '').toUpperCase();
+        document.getElementById('postalCode').value     = profile?.postal_code || profile?.zip || '';
+        document.getElementById('emergencyName').value  = profile?.emergency_contact_name || profile?.emergency_name || '';
+        document.getElementById('emergencyPhone').value = profile?.emergency_contact_phone || profile?.emergency_phone || '';
 
         // Certifications
         certifications = profile?.certifications || [];
@@ -934,13 +978,18 @@
                 first_name:         firstName,
                 last_name:          lastName,
                 phone:              document.getElementById('phone').value.trim(),
-                role:               document.getElementById('role').value,
                 employee_id:        document.getElementById('employeeId').value.trim(),
                 website:            document.getElementById('website').value.trim(),
                 bio:                document.getElementById('bio').value.trim(),
                 job_title:          document.getElementById('jobTitle').value.trim(),
-                territory:          document.getElementById('territory').value.trim(),
-                certifications:     certifications,
+                territory:                 document.getElementById('territory').value.trim(),
+                address_line1:             document.getElementById('addressLine1').value.trim(),
+                city:                      document.getElementById('city').value.trim(),
+                state:                     document.getElementById('state').value.trim().toUpperCase(),
+                postal_code:               document.getElementById('postalCode').value.trim(),
+                emergency_contact_name:    document.getElementById('emergencyName').value.trim(),
+                emergency_contact_phone:   document.getElementById('emergencyPhone').value.trim(),
+                certifications:            certifications,
                 notification_prefs: notifPrefsOut,
                 updated_at:         new Date().toISOString()
             };
@@ -959,7 +1008,7 @@
 
             // Refresh hero
             document.getElementById('heroName').textContent = [firstName, lastName].filter(Boolean).join(' ');
-            document.getElementById('heroRole').textContent = capitalize(document.getElementById('role').value);
+            document.getElementById('heroRole').textContent = document.getElementById('role').value;
             renderAvatar(firstName, lastName);
 
             showToast('Profile saved!', 'success');
@@ -1042,5 +1091,9 @@ if (_pendingSession) {
     init();
 }
 </script>
+
+<!-- Web compatibility / browser testing layer (safe no-op in WebView) -->
+<script src="web-compat.js"></script>
+
 </body>
 </html>

@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Theme handler - must load very early to prevent flash -->
+    <script src="theme.js"></script>
     <script>
         // Session recovery — runs BEFORE Supabase loads
         var _pendingSession = null;
@@ -56,10 +58,10 @@
                             access_token:  session.access_token,
                             refresh_token: session.refresh_token
                         }).then(function(result) {
-                            if (result.error)
-                            else
-                            updateAuthUI();
-                            loadDashboardData();
+                            if (!result.error) {
+                                if (typeof updateAuthUI === 'function') updateAuthUI();
+                                if (typeof loadDashboardData === 'function') loadDashboardData();
+                            }
                         });
                     } else {
                         // Supabase not ready yet — store as pending
@@ -76,32 +78,34 @@
     <link rel="stylesheet" href="tsp.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        :root {
-            --gold:      #FBBF24;
-            --gold-dim:  #D4A017;
-            --gold-glow: rgba(251,191,36,0.08);
-            --bg:        #111;
-            --surface:   #0d0d0d;
-            --surface2:  #151515;
-            --surface3:  #1a1a1a;
-            --surface4:  #222;
-            --border:    #1f1f1f;
-            --border-g:  rgba(251,191,36,0.15);
-            --text:      #fff;
-            --text2:     #ccc;
-            --text3:     #888;
-            --red:       #ef4444;
-            --green:     #22c55e;
-            --blue:      #3b82f6;
-            --purple:    #7c3aed;
-            --orange:    #f59e0b;
-        }
+        /* CSS variables defined in tsp.css */
         body {
             font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg);
             color: var(--text);
             min-height: 100vh;
             -webkit-font-smoothing: antialiased;
+        }
+
+        /* ════════════════════════════════
+           AUTOMATIC LIGHT MODE (follows phone)
+        ════════════════════════════════ */
+        @media (prefers-color-scheme: light) {
+            :root {
+                --gold:       #D97706;
+                --gold-dk:    #B45309;
+                --bg:         #f8f9fa;
+                --surface:    #ffffff;
+                --surface2:   #f1f3f5;
+                --surface3:   #e9ecef;
+                --border:     #dee2e6;
+                --border-gold:#D9770644;
+                --text:       #212529;
+                --text-muted: #6c757d;
+                --red:        #dc2626;
+                --green:      #16a34a;
+                --blue:       #2563eb;
+            }
         }
 
         /* ── Header ── */
@@ -124,11 +128,7 @@
             letter-spacing: 1.5px; text-transform: uppercase; margin-top: 1px;
         }
 
-        .login-button {
-            background: var(--gold); border: none; border-radius: 8px;
-            padding: 8px 16px; color: #111827; font-weight: 600; cursor: pointer;
-            font-family: inherit;
-        }
+/* .login-button replaced by global .btn-primary */
 
         /* ── Avatar & Dropdown ── */
         .avatar-wrapper { position: relative; display: none; }
@@ -153,7 +153,7 @@
             box-shadow: 0 8px 24px rgba(0,0,0,0.6); z-index: 1000;
         }
         .avatar-dropdown.open { display: block; }
-        .dropdown-user-info { padding: 14px 16px 12px; border-bottom: 1px solid #333; }
+        .dropdown-user-info { padding: 14px 16px 12px; border-bottom: 1px solid var(--border); }
         .dropdown-user-name {
             font-weight: 700; font-size: 14px; color: var(--gold);
             white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -164,13 +164,13 @@
         }
         .dropdown-item {
             display: flex; align-items: center; gap: 10px; width: 100%;
-            padding: 13px 16px; background: none; border: none; color: #fff;
+            padding: 13px 16px; background: none; border: none; color: var(--text);
             font-size: 14px; font-family: inherit; cursor: pointer;
             text-align: left; transition: background 0.15s;
         }
-        .dropdown-item:hover { background: #2a2a2a; }
-        .dropdown-item.danger { color: #f87171; border-top: 1px solid #333; }
-        .dropdown-item.danger:hover { background: #2a1a1a; }
+        .dropdown-item:hover { background: var(--surface2); }
+        .dropdown-item.danger { color: #f87171; border-top: 1px solid var(--border); }
+        .dropdown-item.danger:hover { background: var(--surface2); }
         .dropdown-icon { font-size: 16px; width: 20px; text-align: center; }
 
         /* ── Page Content ── */
@@ -416,6 +416,7 @@
                 <div class="dropdown-user-info">
                     <div class="dropdown-user-name" id="dropdownName">User</div>
                     <div class="dropdown-user-email" id="dropdownEmail"></div>
+                    <div class="dropdown-user-role" id="dropdownRole" style="font-size:11px;color:var(--text-muted);margin-top:2px;"></div>
                 </div>
                 <button class="dropdown-item" onclick="goToProfile()">
                     <span class="dropdown-icon">👤</span> Profile
@@ -483,6 +484,7 @@
     <div class="section" id="activitySection" style="display:none;">
         <div class="section-header">
             <div class="section-title">🔄 Recent Activity</div>
+            <button class="section-link" onclick="navTo('reports_list.html')">View All →</button>
         </div>
         <div id="activityList"></div>
     </div>
@@ -516,6 +518,23 @@
         </div>
     </div>
 
+    <!-- Billing & Financial -->
+    <div class="section" id="billing-financial-section">
+        <div class="section-header">
+            <div class="section-title">💰 Billing & Financial</div>
+        </div>
+        <div class="nav-grid">
+            <button class="nav-card" onclick="navTo('estimates_list.html')">
+                <div class="nav-icon">📝</div>
+                <div class="nav-label">Estimates</div>
+            </button>
+            <button class="nav-card" onclick="navTo('invoices_list.html')">
+                <div class="nav-icon">🧾</div>
+                <div class="nav-label">Invoices</div>
+            </button>
+        </div>
+    </div>
+
 </div><!-- .page -->
 
 <!-- Login Popup -->
@@ -543,6 +562,12 @@
                     <input type="password" id="password" required style="padding-right:44px;width:100%;">
                     <span id="pwEye" onclick="togglePw()" style="position:absolute;right:12px;top:50%;transform:translateY(-50%);cursor:pointer;font-size:20px;user-select:none;">👁️</span>
                 </div>
+            </div>
+            <div class="form-group" id="biometricOption" style="display:none; margin-top:8px;">
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; cursor:pointer;">
+                    <input type="checkbox" id="enableBiometric" checked>
+                    <span>Use fingerprint to login next time</span>
+                </label>
             </div>
             <button type="submit" id="submitBtn">Sign In</button>
         </form>
@@ -578,6 +603,28 @@
     let isSignUpMode = false;
     let _manualLoginInProgress = false;
 
+    // Immediate consume of _pendingSession (from early head script's localStorage/_s read)
+    // on cold launch. This forces setSession right after client creation so the session
+    // is active before the INITIAL_SESSION event or the 1200ms logged-out timer logic.
+    // The .then will call update/load when functions are available (they are defined later
+    // in this script; the promise resolves after full parse).
+    if (typeof _pendingSession !== 'undefined' && _pendingSession && _pendingSession.access_token) {
+        var _ps = _pendingSession;
+        _pendingSession = null;
+        try {
+            localStorage.setItem('tsp-auth-token', JSON.stringify({ currentSession: _ps, expiresAt: _ps.expires_at }));
+        } catch(e) {}
+        supabaseClient.auth.setSession({
+            access_token: _ps.access_token,
+            refresh_token: _ps.refresh_token || ''
+        }).then(function(result) {
+            if (!result.error) {
+                if (typeof updateAuthUI === 'function') updateAuthUI();
+                if (typeof loadDashboardData === 'function') loadDashboardData();
+            }
+        });
+    }
+
     /* ── Session-aware navigation ── */
     function togglePw() {
         var inp = document.getElementById('password');
@@ -598,6 +645,10 @@
         window.location.href = page;
     }
 
+    // Also expose a direct nav for cards that may be clicked while auth is still settling on home.
+    // (The main navTo above already does the right thing; this is just for clarity in onclick handlers.)
+    window.navTo = navTo;
+
     /* ── Auth state ── */
     var _loggedOutTimer = null;
     supabaseClient.auth.onAuthStateChange(function(event, session) {
@@ -615,8 +666,12 @@
                 if (result.error) { }
                 else {
                     try {
-                        if (typeof Android !== 'undefined' && result.data.session)
+                        if (typeof Android !== 'undefined' && result.data.session) {
                             Android.saveSession(JSON.stringify(result.data.session));
+                            // Offer biometric after restore from pending
+                            // Biometric enable is offered via the login popup checkbox during fresh login
+                            // For restores, rely on settings toggle or previous enable
+                        }
                     } catch(e) {}
                 }
                 updateAuthUI();
@@ -632,15 +687,16 @@
             // Form handler is managing the flow — skip duplicate loadDashboardData
             return;
         }
+        if (session?.user) currentUser = session.user;
         updateAuthUI();
         if (session?.user) {
             loadDashboardData();
-        } else if (event === 'SIGNED_OUT') {
+        } else if (event === 'SIGNED_OUT' && !session) {
             // Explicit sign-out — show immediately
             showLoggedOutState();
         } else {
             // INITIAL_SESSION with no user — wait briefly for Android bridge injection
-            _loggedOutTimer = setTimeout(function() {
+            _loggedOutTimer = setTimeout(function() {  // longer grace period for injection/restore on cold launch
                 // Re-check: did a session arrive while we waited?
                 supabaseClient.auth.getUser().then(function(res) {
                     if (res.data.user) {
@@ -648,10 +704,26 @@
                         updateAuthUI();
                         loadDashboardData();
                     } else {
-                        showLoggedOutState();
+                        // Only show logged out if we still have no user at timeout time (avoid race with injection/restore)
+                        if (!currentUser) {
+                            let hasPersistedToken = false;
+                            try {
+                                const raw = localStorage.getItem('tsp-auth-token');
+                                if (raw) {
+                                    const p = JSON.parse(raw);
+                                    const s = (p && p.currentSession) ? p.currentSession : (p && p.access_token ? p : null);
+                                    if (s && s.access_token) hasPersistedToken = true;
+                                }
+                            } catch(e) {}
+                            if (!hasPersistedToken) {
+                                showLoggedOutState();
+                            }
+                            // else: token present in localStorage; onPageFinished injection or early pending restore
+                            // will set the session and call update/load shortly. Do not force logged-out UI.
+                        }
                     }
                 });
-            }, 1200);
+            }, 2500);
         }
 
         try {
@@ -660,6 +732,7 @@
                     Android.saveSession(JSON.stringify(session));
                 } else if (event === 'SIGNED_OUT' && !session) {
                     Android.clearSession();
+                    try { if (typeof Android !== 'undefined') Android.setBiometricEnabled(false); } catch(e) {}
                 }
             }
         } catch(e) {}
@@ -720,6 +793,25 @@
         document.getElementById('toggleText').innerHTML = isSignUpMode
             ? 'Already have an account? <a href="#" onclick="toggleAuthMode(false)">Sign In</a>'
             : 'Don\'t have an account? <a href="#" onclick="toggleAuthMode(true)">Sign Up</a>';
+
+        // Show biometric option if available (for both signin and signup)
+        const bioOpt = document.getElementById('biometricOption');
+        if (bioOpt) {
+            let can = false;
+            try {
+                can = typeof Android !== 'undefined' && typeof Android.canUseBiometric === 'function' && !!Android.canUseBiometric();
+            } catch (e) { can = false; }
+            bioOpt.style.display = can ? 'block' : 'none';
+            // Sync the checkbox state with current native flag (don't always force checked)
+            const bioChk = document.getElementById('enableBiometric');
+            if (bioChk && can) {
+                try {
+                    if (typeof Android.isBiometricEnabled === 'function') {
+                        bioChk.checked = !!Android.isBiometricEnabled();
+                    }
+                } catch (e) {}
+            }
+        }
     }
     async function sendMagicLink() {
         const email = document.getElementById('email').value.trim();
@@ -752,7 +844,17 @@
                 messageEl.textContent = error.message;
             } else if (signUpData.session) {
                 // Email confirmation is off — user is logged in immediately
-                try { if (typeof Android !== 'undefined') Android.saveSession(JSON.stringify(signUpData.session)); } catch(e) {}
+                try {
+                    if (typeof Android !== 'undefined') Android.saveSession(JSON.stringify(signUpData.session));
+                    // Enable biometric if the checkbox was checked in the form
+                    const bioChk = document.getElementById('enableBiometric');
+                    if (typeof Android !== 'undefined' && bioChk && bioChk.checked && typeof Android.setBiometricEnabled === 'function') {
+                        if (!Android.isBiometricEnabled()) {
+                            Android.setBiometricEnabled(true);
+                            if (Android.showToast) Android.showToast('Fingerprint login enabled');
+                        }
+                    }
+                } catch(e) {}
                 // Create minimal user_profiles row so onboarding check works
                 try {
                     await supabaseClient.from('user_profiles').upsert({
@@ -760,6 +862,7 @@
                         first_name: firstName,
                         last_name: lastName,
                         email: signUpData.user.email,
+                        role: 'engineer',
                         onboarding_completed: false
                     }, { onConflict: 'id' });
                 } catch(e) {}
@@ -788,6 +891,14 @@
                 messageEl.textContent = 'Welcome back! Loading your dashboard...';
                 try {
                     if (typeof Android !== 'undefined') Android.saveSession(JSON.stringify(data.session));
+                    // Enable biometric if the checkbox was checked in the form
+                    const bioChk = document.getElementById('enableBiometric');
+                    if (typeof Android !== 'undefined' && bioChk && bioChk.checked && typeof Android.setBiometricEnabled === 'function') {
+                        if (!Android.isBiometricEnabled()) {
+                            Android.setBiometricEnabled(true);
+                            if (Android.showToast) Android.showToast('Fingerprint login enabled');
+                        }
+                    }
                 } catch(e) {}
                 currentUser = data.user;
                 // Give user time to see the success state
@@ -803,7 +914,12 @@
     async function logout() {
         document.getElementById('avatarDropdown').classList.remove('open');
         try { await supabaseClient.auth.signOut(); } catch(e) {}
-        try { if (typeof Android !== 'undefined') Android.clearSession(); } catch(e) {}
+        try {
+            if (typeof Android !== 'undefined') {
+                Android.clearSession();
+                Android.setBiometricEnabled(false);  // disable on explicit logout for security
+            }
+        } catch(e) {}
         currentUser = null;
         await updateAuthUI();
         showLoggedOutState();
@@ -838,8 +954,36 @@
 
             const { data: profile } = await supabaseClient
                 .from('user_profiles').select('role').eq('id', user.id).maybeSingle();
-            const canAdmin = profile && ['admin','dispatcher'].includes(profile.role);
-            document.getElementById('companyProfileBtn').style.display = canAdmin ? 'flex' : 'none';
+            
+            const userRole = profile?.role || 'engineer';
+
+            // Show role in avatar dropdown for easy debugging across devices/accounts
+            const roleEl = document.getElementById('dropdownRole');
+            if (roleEl) {
+                const roleLabels = {
+                    'engineer': 'Service Engineer',
+                    'dispatcher': 'Dispatcher / Scheduler',
+                    'service_manager': 'Service Manager',
+                    'billing_manager': 'Billing Manager',
+                    'crm': 'CRM / Marketing',
+                    'admin': 'Business Owner / Admin'
+                };
+                roleEl.textContent = 'Role: ' + (roleLabels[userRole] || userRole);
+            }
+
+            // Updated role check for new role system
+            const allowedCompanyAccess = ['admin', 'service_manager'];
+            const canAccessCompany = allowedCompanyAccess.includes(userRole);
+            document.getElementById('companyProfileBtn').style.display = canAccessCompany ? 'flex' : 'none';
+
+            // Role-based visibility for Billing & Financial (admin always sees everything)
+            const canViewBilling = userRole === 'admin' || 
+                                   ['billing_manager', 'service_manager', 'dispatcher'].includes(userRole);
+            
+            const billingSection = document.getElementById('billing-financial-section');
+            if (billingSection) {
+                billingSection.style.display = canViewBilling ? '' : 'none';
+            }
 
             if (photoUrl) {
                 avatarImg.src = photoUrl;
@@ -850,6 +994,10 @@
                 avatarInitials.style.display = 'flex';
                 avatarInitials.textContent   = initials;
             }
+
+            // Ensure logged out notice is hidden when we have a user
+            const loggedOut = document.getElementById('loggedOutMsg');
+            if (loggedOut) loggedOut.style.display = 'none';
         } else {
             loginBtn.style.display      = 'block';
             avatarWrapper.style.display = 'none';
@@ -881,6 +1029,27 @@
     async function loadDashboardData() {
         if (!currentUser) { showLoggedOutState(); return; }
 
+        // Load user's organization for scoping (if not already loaded)
+        let userOrgId = null;
+        let currentUserRole = 'engineer';
+        try {
+            const { data: profile } = await supabaseClient
+                .from('user_profiles')
+                .select('organization_id, role')
+                .eq('id', currentUser.id)
+                .maybeSingle();
+            const cand = profile?.organization_id;
+            // Accept numeric legacy org ids (e.g. 4 for Luxor) as well as UUIDs
+            if (cand != null &&
+                ((typeof cand === 'number' && Number.isFinite(cand) && cand > 0) ||
+                 (typeof cand === 'string' && (cand.includes('-') || /^\d+$/.test(cand.trim())) && cand.length > 0))) {
+                userOrgId = cand;
+            } else {
+                userOrgId = null;
+            }
+            currentUserRole = profile?.role || 'engineer';
+        } catch(e) {}
+
         // Check if onboarding is needed (first time user)
         // maybeSingle() returns null (not an error) when no row exists
         const { data: obProfile, error: obError } = await supabaseClient
@@ -888,8 +1057,24 @@
             .select('onboarding_completed')
             .eq('id', currentUser.id)
             .maybeSingle();
-        // Redirect if: no row found, onboarding not completed, or query errored
-        if (!obProfile || !obProfile.onboarding_completed) {
+
+        // Check premium status from subscriptions table, then notify Android bridge
+        try {
+            if (typeof Android !== 'undefined' && Android.setPremiumStatus) {
+                const { data: sub } = await supabaseClient
+                    .from('subscriptions')
+                    .select('status, expires_at')
+                    .eq('user_id', currentUser.id)
+                    .eq('status', 'active')
+                    .maybeSingle();
+                const isPremium = sub && sub.expires_at && new Date(sub.expires_at) > new Date();
+                Android.setPremiumStatus(isPremium ? true : false);
+            }
+        } catch(e) {}
+
+        // If DB query errored (network issue etc.) — don't redirect, just show dashboard
+        // Only redirect if we got a real response confirming onboarding is NOT done
+        if (!obError && (!obProfile || obProfile.onboarding_completed !== true)) {
             try {
                 const { data: { session } } = await supabaseClient.auth.getSession();
                 const sep = session?.access_token ? '?' : '';
@@ -905,25 +1090,48 @@
         document.getElementById('activitySection').style.display = 'block';
 
         try {
-            /* Fetch all tickets assigned to me */
-            const { data: tickets, error } = await supabaseClient
+            /* Fetch tickets visible to this user (org-scoped + assigned) */
+            let ticketQuery = supabaseClient
                 .from('service_tickets')
                 .select('*')
-                .eq('assigned_to', currentUser.id)
                 .order('service_date', { ascending: true });
+
+            const isValidOrg = userOrgId != null &&
+                ((typeof userOrgId === 'number' && Number.isFinite(userOrgId) && userOrgId > 0) ||
+                 (typeof userOrgId === 'string' && (userOrgId.includes('-') || /^\d+$/.test(userOrgId.trim()))));
+            if (isValidOrg) {
+                ticketQuery = ticketQuery.eq('organization_id', userOrgId);
+            } else {
+                // Fallback to only assigned-to-me if no org
+                ticketQuery = ticketQuery.eq('assigned_to', currentUser.id);
+            }
+
+            const { data: tickets, error } = await ticketQuery;
 
             if (error) { return; }
             const allTickets = tickets || [];
 
+            /* For engineers (My Tasks default), dashboard stats and upcoming should match what they see in schedule */
+            const isEngineer = currentUserRole === 'engineer';
+            const visibleTickets = (currentUser?.id && isEngineer)
+                ? allTickets.filter(t => t.assigned_to === currentUser.id)
+                : allTickets;
+
             /* ── Stats ── */
             const today = new Date().toISOString().slice(0, 10);
-            const open      = allTickets.filter(t => t.status !== 'Completed' && t.status !== 'Cancelled');
-            const todayCalls= allTickets.filter(t => t.service_date === today && t.status !== 'Completed' && t.status !== 'Cancelled');
-            const awaiting  = allTickets.filter(t => t.status === 'Awaiting Scheduling');
+            const open      = visibleTickets.filter(t => t.status !== 'Completed' && t.status !== 'Cancelled');
+            const todayCalls= visibleTickets.filter(t => t.service_date === today && t.status !== 'Completed' && t.status !== 'Cancelled');
+            const awaiting  = visibleTickets.filter(t => t.status === 'Awaiting Scheduling');
             const thirtyAgo = new Date(Date.now() - 30*86400000).toISOString().slice(0, 10);
-            const completed = allTickets.filter(t => t.status === 'Completed' && t.service_date >= thirtyAgo);
+            const completed = visibleTickets.filter(t => t.status === 'Completed' && t.service_date >= thirtyAgo);
 
             document.getElementById('statOpen').textContent     = open.length;
+
+            // Temporary debug - remove after testing
+            try {
+                const dbg = document.getElementById('greetingSub');
+                if (dbg) dbg.textContent = 'Org: ' + (userOrgId || 'null') + ' | Tickets loaded: ' + allTickets.length;
+            } catch(e){}
             document.getElementById('statToday').textContent    = todayCalls.length;
             document.getElementById('statAwaiting').textContent = awaiting.length;
             document.getElementById('statCompleted').textContent= completed.length;
@@ -936,9 +1144,9 @@
 
             /* ── Today's Schedule ── */
             const schedList = document.getElementById('scheduleList');
-            // Show today + upcoming (next 3 days) tickets
+            // Show today + upcoming (next 3 days) tickets  (respect My Tasks for engineers)
             const soonDate = new Date(Date.now() + 3*86400000).toISOString().slice(0,10);
-            const upcoming = allTickets.filter(t =>
+            const upcoming = visibleTickets.filter(t =>
                 t.service_date && t.service_date >= today && t.service_date <= soonDate
                 && t.status !== 'Completed' && t.status !== 'Cancelled'
             ).sort((a,b) => {
@@ -959,6 +1167,8 @@
                     const isToday = t.service_date === today;
                     const dayLabel = isToday ? 'Today' : new Date(t.service_date + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' });
                     const equipment = [t.equipment_make, t.equipment_model].filter(Boolean).join(' ') || '';
+                    const svcType  = t.service_type || '';
+                    const metaParts = [equipment, svcType, dayLabel].filter(Boolean);
                     return `
                         <div class="sched-card" onclick="navTo('service_schedule.html')">
                             <div class="sched-inner">
@@ -966,7 +1176,7 @@
                                 <div class="sched-body">
                                     <div class="sched-info">
                                         <div class="sched-customer">${escHtml(t.customer_name || 'No customer')}</div>
-                                        <div class="sched-meta">${escHtml(equipment)}${equipment && dayLabel ? ' · ' : ''}${dayLabel}</div>
+                                        <div class="sched-meta">${escHtml(metaParts.join(' · '))}</div>
                                     </div>
                                     <div class="sched-time">${time || '—'}</div>
                                 </div>
@@ -990,14 +1200,14 @@
                     const dotClass = isComplete ? 'completed' : 'created';
                     const ago = timeAgo(t.created_at);
                     return `
-                        <div class="activity-card">
+                        <div class="activity-card" onclick="navTo('service_schedule.html')" style="cursor:pointer;">
                             <div class="activity-dot ${dotClass}"></div>
                             <div class="activity-content">
                                 <div class="activity-text">
                                     <strong>${escHtml(t.ticket_number || '—')}</strong> — ${escHtml(t.customer_name || 'Unknown')}
                                     <span style="color:var(--text3);"> · ${escHtml(t.status || 'Open')}</span>
                                 </div>
-                                <div class="activity-time">${ago}</div>
+                                <div class="activity-time">${ago} · Tap to open schedule</div>
                             </div>
                         </div>`;
                 }).join('');
@@ -1036,8 +1246,14 @@
             } catch(e) {}
             _pendingSession = null;
         }
-        updateAuthUI();
+        if (_bootSession && _bootSession.user) currentUser = _bootSession.user;
+        await updateAuthUI();
+        if (currentUser) loadDashboardData();
     })();
 </script>
+
+<!-- Web compatibility / browser testing layer (safe no-op in WebView) -->
+<script src="web-compat.js"></script>
+
 </body>
 </html>

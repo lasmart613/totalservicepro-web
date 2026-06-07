@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Welcome · Total Service Pro</title>
+    <script src="theme.js"></script>
     <script>
         var _pendingSession = null;
         (function() {
@@ -396,6 +397,20 @@
 
         // Load existing company profile if any (maybeSingle — won't throw if missing)
         const { data: profile } = await supabaseClient.from('user_profiles').select('*, organizations(*)').eq('id', user.id).maybeSingle();
+
+        // Already completed — skip straight to dashboard, don't show onboarding again
+        if (profile?.onboarding_completed === true) {
+            try {
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (session?.access_token) {
+                    window.location.href = 'index.html?_s=' + btoa(JSON.stringify(session));
+                    return;
+                }
+            } catch(e) {}
+            window.location.href = 'index.html';
+            return;
+        }
+
         if (profile) {
             if (profile.phone)     document.getElementById('techPhone').value = profile.phone;
             if (profile.job_title) document.getElementById('jobTitle').value  = profile.job_title;

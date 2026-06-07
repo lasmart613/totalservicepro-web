@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Centralized theme system -->
+    <script src="theme.js"></script>
     <script>
         var _pendingSession=null,_sessionRestored=false;
         (function(){try{const p=new URLSearchParams(window.location.search),enc=p.get('_s');if(enc){const s=JSON.parse(atob(enc));if(s&&s.access_token){_pendingSession=s;localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));const u=new URL(window.location.href);u.searchParams.delete('_s');window.history.replaceState({},'',u.toString());return}}const raw=localStorage.getItem('tsp-auth-token');if(raw){const p2=JSON.parse(raw),ss=(p2&&p2.currentSession)?p2.currentSession:(p2&&p2.access_token)?p2:null;if(ss&&ss.access_token)_pendingSession=ss;}}catch(e){}})();
@@ -23,7 +25,7 @@
         .hdr-btn:hover{border-color:var(--gold);color:var(--gold)}
         .hdr-btn.active{border-color:var(--gold);color:var(--gold);background:rgba(251,191,36,0.08)}
 
-        .login-button{background:var(--gold);border:none;border-radius:8px;padding:8px 16px;color:#111;font-weight:600;cursor:pointer;font-family:inherit}
+        /* Using global .btn-primary instead */
         .avatar-wrapper{position:relative;display:none}
         .avatar-btn{background:none;border:none;padding:0;cursor:pointer;border-radius:50%;display:flex;align-items:center;justify-content:center}
         .avatar-initials{width:36px;height:36px;border-radius:50%;background:var(--gold);color:#111;font-weight:700;font-size:14px;display:flex;align-items:center;justify-content:center;border:2px solid var(--gold)}
@@ -141,7 +143,7 @@
         </div>
         <button class="hdr-btn" id="myListingsBtn" onclick="toggleMyListings()" title="My Listings">📦</button>
         <div id="authSection">
-            <button id="loginBtn" class="login-button" onclick="navTo('index.html')">Login</button>
+            <button id="loginBtn" class="btn btn-primary" onclick="navTo('index.html')">Login</button>
             <div class="avatar-wrapper" id="avatarWrapper">
                 <button class="avatar-btn" onclick="toggleDropdown(event)">
                     <img id="avatarImg" class="avatar-img" src="" alt="" />
@@ -262,7 +264,7 @@
         </div>
         <div class="modal-footer">
             <button class="btn-cancel" onclick="closeCreate()">Cancel</button>
-            <button class="btn-primary" id="btnPost" onclick="submitListing()">Post Listing</button>
+            <button class="btn btn-primary" id="btnPost" onclick="submitListing()">Post Listing</button>
         </div>
     </div>
 </div>
@@ -276,6 +278,18 @@
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
         { auth: { persistSession:true, storageKey:'tsp-auth-token', storage:window.localStorage, autoRefreshToken:true, detectSessionInUrl:false } }
     );
+
+    // Immediately apply pending session from _s (or localStorage set by bootstrap) so auth doesn't appear lost on navigation
+    if (_pendingSession) {
+        var _ps = _pendingSession; _pendingSession = null;
+        supabaseClient.auth.setSession({ access_token: _ps.access_token, refresh_token: _ps.refresh_token })
+            .then(r => {
+                if (!r.error) {
+                    if (typeof Android !== 'undefined' && r.data && r.data.session) try { Android.saveSession(JSON.stringify(r.data.session)); } catch(e){ }
+                    if (typeof updateAuthUI === 'function') updateAuthUI();
+                }
+            });
+    }
 
     let currentUser = null;
     let listings = [];

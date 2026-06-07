@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Centralized theme system (fixes dark mode on this page) -->
+    <script src="theme.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Duty Cycle Calculator · TSP</title>
@@ -19,6 +21,7 @@
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="tsp.css">
     <style>
+        /* Calculator styles now primarily come from tsp.css */
         .calc-page{padding:16px 16px 80px;max-width:600px;margin:0 auto;}
         .result-card{background:var(--surface2);border:2px solid var(--gold);border-radius:16px;padding:28px;text-align:center;margin:20px 0;display:none;}
         .result-label{font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:2px;margin-bottom:8px;}
@@ -72,7 +75,7 @@
         <input type="number" class="form-input" id="pps" step="0.01" placeholder="e.g. 10">
     </div>
 
-    <button class="btn btn-gold" style="width:100%;padding:14px;font-size:16px;" onclick="calculateDutyCycle()">Calculate Duty Cycle</button>
+    <button class="btn btn-primary btn-block" onclick="calculateDutyCycle()">Calculate Duty Cycle</button>
 
     <div id="result" class="result-card">
         <div class="result-label">Duty Cycle</div>
@@ -114,7 +117,7 @@
     document.addEventListener('click',()=>document.getElementById('avatarDropdown')?.classList.remove('open'));
     async function logoutUser(){document.getElementById('avatarDropdown').classList.remove('open');await _sb.auth.signOut();updateAuthUI();try{if(typeof Android!=='undefined')Android.clearSession();}catch(e){}}
     async function updateAuthUI(){const{data:{user}}=await _sb.auth.getUser();const aw=document.getElementById('avatarWrapper');if(user){if(aw)aw.style.display='block';const meta=user.user_metadata||{},fn=meta.first_name||'',ln=meta.last_name||'';document.getElementById('dropdownName').textContent=[fn,ln].filter(Boolean).join(' ')||'User';document.getElementById('dropdownEmail').textContent=user.email||'';const img=document.getElementById('avatarImg'),ini=document.getElementById('avatarInitials'),photo=meta.avatar_url||meta.picture||'';if(photo){img.src=photo;img.style.display='block';ini.style.display='none';}else{img.style.display='none';ini.style.display='flex';ini.textContent=((fn[0]||'')+(ln[0]||'')).toUpperCase()||user.email[0].toUpperCase();}}else{if(aw)aw.style.display='none';}}
-    function showToast(msg,type=''){let el=document.getElementById('_toast');if(!el){el=document.createElement('div');el.id='_toast';el.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:#1a1a1a;border:1px solid #FBBF24;border-radius:10px;padding:12px 20px;font-size:14px;font-weight:600;z-index:9999;transition:all 0.3s;white-space:nowrap;opacity:0;';document.body.appendChild(el);}el.style.borderColor=type==='error'?'#ef4444':'#FBBF24';el.textContent=msg;el.style.opacity='1';el.style.transform='translateX(-50%) translateY(0)';clearTimeout(el._t);el._t=setTimeout(()=>{el.style.opacity='0';el.style.transform='translateX(-50%) translateY(20px)';},3000);}
+    function showToast(msg,type=''){let el=document.getElementById('_toast');if(!el){el=document.createElement('div');el.id='_toast';el.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--surface2);border:1px solid var(--gold);border-radius:10px;padding:12px 20px;font-size:14px;font-weight:600;z-index:9999;transition:all 0.3s;white-space:nowrap;opacity:0;color:var(--text);';document.body.appendChild(el);}el.style.borderColor=type==='error'?'var(--red)':'var(--gold)';el.textContent=msg;el.style.opacity='1';el.style.transform='translateX(-50%) translateY(0)';clearTimeout(el._t);el._t=setTimeout(()=>{el.style.opacity='0';el.style.transform='translateX(-50%) translateY(20px)';},3000);}
     _sb.auth.onAuthStateChange((event,session)=>{updateAuthUI();try{if(typeof Android!=='undefined'){if(session?.access_token)Android.saveSession(JSON.stringify(session));else if(event==='SIGNED_OUT'&&!session)Android.clearSession();}}catch(e){}});
     if(_pendingSession){const ps=_pendingSession;_pendingSession=null;_sb.auth.setSession({access_token:ps.access_token,refresh_token:ps.refresh_token}).then(({data})=>{updateAuthUI();try{if(typeof Android!=='undefined'&&data.session)Android.saveSession(JSON.stringify(data.session));}catch(e){}});}else{updateAuthUI();}
 </script>

@@ -1,9 +1,24 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>
+        // Apply saved theme OR system preference before render to prevent flash
+        (function() {
+            try {
+                var s = JSON.parse(localStorage.getItem('tsp_settings') || '{}');
+                if (s.theme === 'light') {
+                    document.documentElement.classList.add('light');
+                } else if (!s.theme && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+                    document.documentElement.classList.add('light');
+                }
+            } catch(e) {}
+        })();
+    </script>
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Service Hub · TSP</title>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
         var _pendingSession = null;
@@ -16,48 +31,161 @@
                 history.replaceState(null, '', _purl.toString());
             } else {
                 var _raw = localStorage.getItem('tsp-auth-token');
-                if (_raw) { var _p = JSON.parse(_raw); var _s2 = _p?.currentSession||(_p?.access_token?_p:null); if (_s2?.access_token) _pendingSession = _s2; }
+                if (_raw) {
+                    var _p = JSON.parse(_raw);
+                    var _s2 = _p?.currentSession || (_p?.access_token ? _p : null);
+                    if (_s2?.access_token) _pendingSession = _s2;
+                }
             }
         } catch(e) {}
+
         const supabaseClient = supabase.createClient(
             'https://yljztfajyvjzqikxdddf.supabase.co',
             'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
-            { auth: { persistSession:true, storageKey:'tsp-auth-token', storage:window.localStorage, autoRefreshToken:true, detectSessionInUrl:false } }
+            {
+                auth: {
+                    persistSession: true,
+                    storageKey: 'tsp-auth-token',
+                    storage: window.localStorage,
+                    autoRefreshToken: true,
+                    detectSessionInUrl: false
+                }
+            }
         );
     </script>
+
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="tsp.css">
+
     <style>
-        body { display: flex; flex-direction: column; min-height: 100vh; }
-        .hub-page { padding: 20px 16px 40px; max-width: 600px; margin: 0 auto; width: 100%; }
-        .hub-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
-        .hub-card {
-            background: var(--surface2); border: 1px solid var(--border);
-            border-radius: 14px; padding: 24px 16px; text-align: center;
-            cursor: pointer; font-family: inherit; transition: all 0.15s;
-            position: relative; overflow: hidden; display: flex; flex-direction: column; align-items: center;
+        :root {
+            --gold:       #FBBF24;
+            --gold-dk:    #D97706;
+            --bg:         #111;
+            --surface:    #111;
+            --surface2:   #1a1a1a;
+            --surface3:   #222;
+            --border:     #2a2a2a;
+            --border-gold:#FBBF2444;
+            --text:       #fff;
+            --text-muted: #888;
+            --text2:      #e5e5e5;
+            --text3:      #aaa;
+            --red:        #ef4444;
         }
-        .hub-card::before { content:''; position:absolute; top:0; left:0; right:0; height:3px; background:var(--gold); opacity:0; transition:opacity 0.15s; }
-        .hub-card:hover { border-color: var(--gold); background: var(--surface3); transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.4); }
+
+        @media (prefers-color-scheme: light) {
+            :root {
+                --gold:       #D97706;
+                --gold-dk:    #B45309;
+                --bg:         #f8f9fa;
+                --surface:    #ffffff;
+                --surface2:   #f1f3f5;
+                --surface3:   #e9ecef;
+                --border:     #dee2e6;
+                --border-gold:#D9770644;
+                --text:       #212529;
+                --text-muted: #6c757d;
+                --text2:      #333;
+                --text3:      #666;
+                --red:        #dc2626;
+            }
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        .hub-page {
+            padding: 20px 16px 40px;
+            max-width: 600px;
+            margin: 0 auto;
+            width: 100%;
+        }
+
+        .hub-grid {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 14px;
+        }
+
+        .hub-card {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 14px;
+            padding: 24px 16px;
+            text-align: center;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.15s;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+
+        .hub-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 3px;
+            background: var(--gold);
+            opacity: 0;
+            transition: opacity 0.15s;
+        }
+
+        .hub-card:hover {
+            border-color: var(--gold);
+            background: var(--surface3);
+            transform: translateY(-2px);
+            box-shadow: 0 6px 16px rgba(0,0,0,0.4);
+        }
+
         .hub-card:hover::before { opacity: 1; }
         .hub-card:active { transform: translateY(0); }
+
         .hub-icon { font-size: 36px; margin-bottom: 10px; }
         .hub-label { font-size: 13px; font-weight: 700; color: var(--text2); }
     </style>
 </head>
 <body>
+
 <div class="header">
     <button class="header-back" onclick="navigateTo('index.html')">‹</button>
     <div class="header-title">Service Hub</div>
     <div class="avatar-wrapper" id="avatarWrapper">
-        <button class="avatar-btn" onclick="toggleDropdown(event)"><img id="avatarImg" class="avatar-img" src="" alt=""/><div id="avatarInitials" class="avatar-initials">U</div></button>
+        <button class="avatar-btn" onclick="toggleDropdown(event)">
+            <img id="avatarImg" class="avatar-img" src="" alt=""/>
+            <div id="avatarInitials" class="avatar-initials">U</div>
+        </button>
         <div class="avatar-dropdown" id="avatarDropdown">
-            <div class="dropdown-user-info"><div class="dropdown-user-name" id="dropdownName">User</div><div class="dropdown-user-email" id="dropdownEmail"></div></div>
-            <button class="dropdown-item" onclick="navigateTo('user_profile.html')"><span class="dropdown-icon">👤</span> Profile</button>
-            <button class="dropdown-item" onclick="navigateTo('company_profile.html')"><span class="dropdown-icon">🏢</span> Company Profile</button>
-            <button class="dropdown-item" onclick="navigateTo('settings.html')"><span class="dropdown-icon">⚙️</span> Settings</button>
-            <button class="dropdown-item" id="upgradeBtn" onclick="navigateTo('paywall.html')" style="display:none;color:var(--gold);"><span class="dropdown-icon">⭐</span> Upgrade</button>
-            <button class="dropdown-item danger" onclick="logoutUser()"><span class="dropdown-icon">🚪</span> Log Out</button>
+            <div class="dropdown-user-info">
+                <div class="dropdown-user-name" id="dropdownName">User</div>
+                <div class="dropdown-user-email" id="dropdownEmail"></div>
+                <div class="dropdown-user-role" id="dropdownRole" style="font-size:11px;color:var(--text-muted);margin-top:2px;"></div>
+            </div>
+            <button class="dropdown-item" onclick="navigateTo('user_profile.html')">
+                <span class="dropdown-icon">👤</span> Profile
+            </button>
+            <button class="dropdown-item" id="hub-company-profile-link" onclick="navigateTo('company_profile.html')">
+                <span class="dropdown-icon">🏢</span> Company Profile
+            </button>
+            <button class="dropdown-item" onclick="navigateTo('settings.html')">
+                <span class="dropdown-icon">⚙️</span> Settings
+            </button>
+            <button class="dropdown-item" id="upgradeBtn" onclick="navigateTo('paywall.html')" style="display:none;color:var(--gold);">
+                <span class="dropdown-icon">⭐</span> Upgrade
+            </button>
+            <button class="dropdown-item danger" onclick="logoutUser()">
+                <span class="dropdown-icon">🚪</span> Log Out
+            </button>
         </div>
     </div>
 </div>
@@ -67,13 +195,32 @@
         <div style="font-size:22px;font-weight:800;">Service Tools</div>
         <div style="font-size:13px;color:var(--text3);margin-top:4px;">Professional laser service resources</div>
     </div>
+
     <div class="hub-grid">
-        <button class="hub-card" onclick="navigateTo('service_schedule.html')"><div class="hub-icon">📅</div><div class="hub-label">Service Schedule</div></button>
-        <button class="hub-card" onclick="navigateTo('customer_directory.html')"><div class="hub-icon">👥</div><div class="hub-label">Customers</div></button>
-        <button class="hub-card" onclick="navigateTo('parts_catalog.html')"><div class="hub-icon">🔩</div><div class="hub-label">Parts Catalog</div></button>
-        <button class="hub-card" onclick="navigateTo('manual_library.html')"><div class="hub-icon">📚</div><div class="hub-label">Service Manuals</div></button>
-        <button class="hub-card" onclick="navigateTo('ai_assistant.html')"><div class="hub-icon">🤖</div><div class="hub-label">AI Assistant</div></button>
-        <button class="hub-card" onclick="navigateTo('reports_list.html')"><div class="hub-icon">📋</div><div class="hub-label">Service Reports</div></button>
+        <button class="hub-card" onclick="navigateTo('service_schedule.html')">
+            <div class="hub-icon">📅</div>
+            <div class="hub-label">Service Schedule</div>
+        </button>
+        <button class="hub-card" onclick="navigateTo('customer_directory.html')">
+            <div class="hub-icon">👥</div>
+            <div class="hub-label">Customers</div>
+        </button>
+        <button class="hub-card" onclick="navigateTo('parts_catalog.html')">
+            <div class="hub-icon">🔩</div>
+            <div class="hub-label">Parts Catalog</div>
+        </button>
+        <button class="hub-card" onclick="navigateTo('manual_library.html')">
+            <div class="hub-icon">📚</div>
+            <div class="hub-label">Service Manuals</div>
+        </button>
+        <button class="hub-card" onclick="navigateTo('ai_assistant.html')">
+            <div class="hub-icon">🤖</div>
+            <div class="hub-label">AI Assistant</div>
+        </button>
+        <button class="hub-card" onclick="navigateTo('reports_list.html')">
+            <div class="hub-icon">📋</div>
+            <div class="hub-label">Service Reports</div>
+        </button>
     </div>
 </div>
 
@@ -84,34 +231,216 @@
         <div class="modal-title">Sign In</div>
         <div id="formMessage" style="color:var(--red);font-size:13px;margin-bottom:12px;min-height:18px;"></div>
         <form id="authForm">
-            <div class="form-group"><label>Email</label><input type="email" id="email" class="form-input" required></div>
-            <div class="form-group"><label>Password</label><input type="password" id="password" class="form-input"></div>
-            <button type="submit" class="btn btn-gold btn-full">Sign In</button>
+            <div class="form-group">
+                <label>Email</label>
+                <input type="email" id="email" class="form-input" required>
+            </div>
+            <div class="form-group">
+                <label>Password</label>
+                <input type="password" id="password" class="form-input">
+            </div>
+            <button type="submit" class="btn btn-primary btn-block">Sign In</button>
         </form>
-        <div style="text-align:center;margin-top:14px;"><a href="#" onclick="forgotPassword()" style="color:var(--gold);font-size:13px;">Forgot password?</a></div>
+        <div style="text-align:center;margin-top:14px;">
+            <a href="#" onclick="forgotPassword()" style="color:var(--gold);font-size:13px;">Forgot password?</a>
+        </div>
     </div>
 </div>
 
 <script>
     function navigateTo(page) {
-        try { var sess=JSON.parse(localStorage.getItem('tsp-auth-token')||'null'); var raw=sess&&(sess.access_token?sess:(sess.currentSession||null)); if(raw&&raw.access_token){window.location.href=page+(page.includes('?')?'&':'?')+'_s='+btoa(JSON.stringify({access_token:raw.access_token,refresh_token:raw.refresh_token}));return;} } catch(e) {}
+        try {
+            var sess = JSON.parse(localStorage.getItem('tsp-auth-token') || 'null');
+            var raw = sess && (sess.access_token ? sess : (sess.currentSession || null));
+            if (raw && raw.access_token) {
+                window.location.href = page + (page.includes('?') ? '&' : '?') + '_s=' + btoa(JSON.stringify({
+                    access_token: raw.access_token,
+                    refresh_token: raw.refresh_token
+                }));
+                return;
+            }
+        } catch(e) {}
         window.location.href = page;
     }
-    function toggleDropdown(e){e.stopPropagation();document.getElementById('avatarDropdown').classList.toggle('open');}
-    document.addEventListener('click',()=>document.getElementById('avatarDropdown')?.classList.remove('open'));
-    function showLoginPopup(){document.getElementById('loginPopup').classList.add('open');}
-    function closeLoginPopup(){document.getElementById('loginPopup').classList.remove('open');document.getElementById('formMessage').textContent='';}
-    async function forgotPassword(){const email=document.getElementById('email').value.trim();if(!email)return(document.getElementById('formMessage').textContent='Enter your email first');const{error}=await supabaseClient.auth.resetPasswordForEmail(email);document.getElementById('formMessage').textContent=error?error.message:'Reset link sent!';}
-    document.addEventListener('DOMContentLoaded',()=>{const form=document.getElementById('authForm');if(form)form.addEventListener('submit',async(e)=>{e.preventDefault();const{error}=await supabaseClient.auth.signInWithPassword({email:document.getElementById('email').value.trim(),password:document.getElementById('password').value.trim()});if(error)document.getElementById('formMessage').textContent=error.message;else closeLoginPopup();});});
-    async function logoutUser(){document.getElementById('avatarDropdown').classList.remove('open');await supabaseClient.auth.signOut();try{if(typeof Android!=='undefined')Android.clearSession();}catch(e){}}
-    async function updateAuthUI(){const{data:{user}}=await supabaseClient.auth.getUser();const aw=document.getElementById('avatarWrapper');if(user){if(aw)aw.style.display='block';const meta=user.user_metadata||{},fn=meta.first_name||'',ln=meta.last_name||'';document.getElementById('dropdownName').textContent=[fn,ln].filter(Boolean).join(' ')||'User';document.getElementById('dropdownEmail').textContent=user.email||'';const img=document.getElementById('avatarImg'),ini=document.getElementById('avatarInitials'),photo=meta.avatar_url||meta.picture||'';if(photo){img.src=photo;img.style.display='block';ini.style.display='none';}else{img.style.display='none';ini.style.display='flex';ini.textContent=((fn[0]||'')+(ln[0]||'')).toUpperCase()||user.email[0].toUpperCase();}}else{if(aw)aw.style.display='none';}}
-    async function checkTierAndShowUpgrade(){try{const{data:{user}}=await supabaseClient.auth.getUser();if(!user)return;const{data:sub}=await supabaseClient.from('subscriptions').select('tier,status').eq('user_id',user.id).single();const isPaid=sub&&['premium','team','enterprise'].includes(sub.tier)&&sub.status==='active';const btn=document.getElementById('upgradeBtn');if(btn)btn.style.display=isPaid?'none':'flex';}catch(e){}}
-    supabaseClient.auth.onAuthStateChange(function(event,session){
-        if(_pendingSession){var ps=_pendingSession;_pendingSession=null;supabaseClient.auth.setSession({access_token:ps.access_token,refresh_token:ps.refresh_token}).then(function(r){if(!r.error){try{if(typeof Android!=='undefined'&&r.data.session)Android.saveSession(JSON.stringify(r.data.session));}catch(e){}}updateAuthUI();checkTierAndShowUpgrade();});return;}
-        updateAuthUI();
-        try{if(typeof Android!=='undefined'){if(session?.access_token)Android.saveSession(JSON.stringify(session));else if(event==='SIGNED_OUT'&&!session)Android.clearSession();}}catch(e){}
+
+    function toggleDropdown(e) {
+        e.stopPropagation();
+        document.getElementById('avatarDropdown').classList.toggle('open');
+    }
+
+    document.addEventListener('click', () => {
+        document.getElementById('avatarDropdown')?.classList.remove('open');
     });
-    updateAuthUI(); checkTierAndShowUpgrade();
+
+    function showLoginPopup() {
+        document.getElementById('loginPopup').classList.add('open');
+    }
+
+    function closeLoginPopup() {
+        document.getElementById('loginPopup').classList.remove('open');
+        document.getElementById('formMessage').textContent = '';
+    }
+
+    async function forgotPassword() {
+        const email = document.getElementById('email').value.trim();
+        if (!email) return (document.getElementById('formMessage').textContent = 'Enter your email first');
+        const { error } = await supabaseClient.auth.resetPasswordForEmail(email);
+        document.getElementById('formMessage').textContent = error ? error.message : 'Reset link sent!';
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        const form = document.getElementById('authForm');
+        if (form) {
+            form.addEventListener('submit', async (e) => {
+                e.preventDefault();
+                const { error } = await supabaseClient.auth.signInWithPassword({
+                    email: document.getElementById('email').value.trim(),
+                    password: document.getElementById('password').value.trim()
+                });
+                if (error) {
+                    document.getElementById('formMessage').textContent = error.message;
+                } else {
+                    closeLoginPopup();
+                }
+            });
+        }
+    });
+
+    async function logoutUser() {
+        document.getElementById('avatarDropdown').classList.remove('open');
+        await supabaseClient.auth.signOut();
+        try {
+            if (typeof Android !== 'undefined') Android.clearSession();
+        } catch(e) {}
+    }
+
+    let currentUserRole = 'engineer';
+
+    async function updateAuthUI() {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        const aw = document.getElementById('avatarWrapper');
+        if (user) {
+            if (aw) aw.style.display = 'block';
+            const meta = user.user_metadata || {};
+            const fn = meta.first_name || '';
+            const ln = meta.last_name || '';
+            document.getElementById('dropdownName').textContent = [fn, ln].filter(Boolean).join(' ') || 'User';
+            document.getElementById('dropdownEmail').textContent = user.email || '';
+
+            const img = document.getElementById('avatarImg');
+            const ini = document.getElementById('avatarInitials');
+            const photo = meta.avatar_url || meta.picture || '';
+
+            if (photo) {
+                img.src = photo;
+                img.style.display = 'block';
+                ini.style.display = 'none';
+            } else {
+                img.style.display = 'none';
+                ini.style.display = 'flex';
+                ini.textContent = ((fn[0] || '') + (ln[0] || '')).toUpperCase() || user.email[0].toUpperCase();
+            }
+
+            // Load role for visibility rules
+            try {
+                const { data: profile } = await supabaseClient
+                    .from('user_profiles')
+                    .select('role')
+                    .eq('id', user.id)
+                    .maybeSingle();
+                currentUserRole = profile?.role || 'engineer';
+            } catch(e) {}
+
+            // Show role in dropdown (useful for multi-account testing)
+            const roleLabels = {
+                'engineer': 'Service Engineer',
+                'dispatcher': 'Dispatcher / Scheduler',
+                'service_manager': 'Service Manager',
+                'billing_manager': 'Billing Manager',
+                'crm': 'CRM / Marketing',
+                'admin': 'Business Owner / Admin'
+            };
+            const roleEl = document.getElementById('dropdownRole');
+            if (roleEl) {
+                roleEl.textContent = 'Role: ' + (roleLabels[currentUserRole] || currentUserRole);
+            }
+
+            applyRoleBasedVisibility();
+        } else {
+            if (aw) aw.style.display = 'none';
+        }
+    }
+
+    function applyRoleBasedVisibility() {
+        const isAdmin = currentUserRole === 'admin';
+
+        // Service Schedule card: Visible to everyone (engineers need to see their assigned tasks)
+        // Admin always sees everything
+        document.querySelectorAll('.hub-card').forEach(card => {
+            const label = card.textContent || '';
+            if (label.includes('Service Schedule')) {
+                // Engineers can see it (at minimum to view their own tasks)
+                card.style.display = '';  // Always show for now
+            }
+        });
+
+        // Hide Company Profile in dropdown for non-authorized roles
+        const companyLink = document.getElementById('hub-company-profile-link');
+        if (companyLink) {
+            const allowed = ['admin', 'service_manager'];
+            companyLink.style.display = (isAdmin || allowed.includes(currentUserRole)) ? '' : 'none';
+        }
+    }
+
+    async function checkTierAndShowUpgrade() {
+        try {
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (!user) return;
+            const { data: sub } = await supabaseClient
+                .from('subscriptions')
+                .select('tier,status')
+                .eq('user_id', user.id)
+                .single();
+            const isPaid = sub && ['premium','team','enterprise'].includes(sub.tier) && sub.status === 'active';
+            const btn = document.getElementById('upgradeBtn');
+            if (btn) btn.style.display = isPaid ? 'none' : 'flex';
+        } catch(e) {}
+    }
+
+    supabaseClient.auth.onAuthStateChange(function(event, session) {
+        if (_pendingSession) {
+            var ps = _pendingSession;
+            _pendingSession = null;
+            supabaseClient.auth.setSession({
+                access_token: ps.access_token,
+                refresh_token: ps.refresh_token
+            }).then(function(r) {
+                if (!r.error) {
+                    try {
+                        if (typeof Android !== 'undefined' && r.data.session)
+                            Android.saveSession(JSON.stringify(r.data.session));
+                    } catch(e) {}
+                }
+                updateAuthUI();
+                checkTierAndShowUpgrade();
+            });
+            return;
+        }
+        updateAuthUI();
+        try {
+            if (typeof Android !== 'undefined') {
+                if (session?.access_token) Android.saveSession(JSON.stringify(session));
+                else if (event === 'SIGNED_OUT' && !session) Android.clearSession();
+            }
+        } catch(e) {}
+    });
+
+    updateAuthUI();
+    checkTierAndShowUpgrade();
 </script>
+
+<!-- Web compatibility / browser testing layer (safe no-op in WebView) -->
+<script src="web-compat.js"></script>
+
 </body>
 </html>

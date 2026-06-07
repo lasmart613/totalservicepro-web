@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <script>
+        (function() {
+            try {
+                var s = JSON.parse(localStorage.getItem('tsp_settings') || '{}');
+                if (s.theme === 'light') {
+                    document.documentElement.classList.add('light');
+                } else if (!s.theme && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+                    document.documentElement.classList.add('light');
+                }
+            } catch(e) {}
+        })();
+    </script>
+
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Invoices · Total Service Pro</title>
+
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const enc = new URLSearchParams(window.location.search).get('_s');
+                if (enc) {
+                    const s = JSON.parse(atob(enc));
+                    if (s?.access_token) {
+                        _pendingSession = s;
+                        localStorage.setItem('tsp-auth-token', JSON.stringify({currentSession:s,expiresAt:s.expires_at}));
+                        const u = new URL(window.location.href);
+                        u.searchParams.delete('_s');
+                        window.history.replaceState({},'',u.toString());
+                        return;
+                    }
+                }
+                const raw = localStorage.getItem('tsp-auth-token');
+                if (raw) {
+                    const p = JSON.parse(raw);
+                    const sess = p?.currentSession || (p?.access_token ? p : null);
+                    if (sess?.access_token) _pendingSession = sess;
+                }
+            } catch(e) {}
+        })();
+
+        var supabaseClient = supabase.createClient(
+            'https://yljztfajyvjzqikxdddf.supabase.co',
+            'eyJhbGciOiJIUzE1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+            {
+                auth: {
+                    persistSession: true,
+                    storageKey: 'tsp-auth-token',
+                    storage: window.localStorage,
+                    autoRefreshToken: true,
+                    detectSessionInUrl: false
+                }
+            }
+        );
+    </script>
+
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
+
+    <style>
+        .page { padding: 16px; max-width: 900px; margin: 0 auto; padding-bottom: 80px; }
+        .header-bar {
+            display: flex; align-items: center; gap: 12px;
+            margin-bottom: 16px;
+        }
+        .back-btn { font-size: 22px; background: none; border: none; color: var(--gold); cursor: pointer; }
+        .page-title { font-size: 20px; font-weight: 800; color: var(--text); }
+
+        .filters {
+            display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap;
+        }
+        .filter-btn {
+            padding: 6px 14px; border-radius: 999px; border: 1px solid var(--border);
+            background: var(--surface2); color: var(--text); font-size: 13px; cursor: pointer;
+        }
+        .filter-btn.active {
+            background: var(--gold); color: #111827; border-color: var(--gold);
+        }
+
+        .invoice-card {
+            background: var(--surface2);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 14px 16px;
+            margin-bottom: 10px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 12px;
+        }
+        .invoice-info { flex: 1; }
+        .invoice-customer { font-weight: 700; font-size: 15px; }
+        .invoice-meta { font-size: 12px; color: var(--text3); margin-top: 2px; }
+        .invoice-total { font-weight: 700; color: var(--gold); font-size: 16px; white-space: nowrap; }
+
+        .status-badge {
+            font-size: 11px; padding: 2px 9px; border-radius: 999px; font-weight: 600;
+        }
+        .status-draft { background: #374151; color: #d1d5db; }
+        .status-sent { background: #1e3a8a; color: #bfdbfe; }
+        .status-paid { background: #14532d; color: #bbf7d0; }
+
+        .empty { text-align: center; padding: 40px 20px; color: var(--text3); }
+        .new-invoice-btn {
+            position: fixed; bottom: 70px; right: 16px;
+            background: var(--gold); color: #111827; border: none;
+            padding: 12px 20px; border-radius: 999px; font-weight: 700;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            display: flex; align-items: center; gap: 6px;
+            cursor: pointer; z-index: 100;
+        }
+    </style>
+</head>
+<body>
+    <div class="page">
+        <div class="header-bar">
+            <button class="back-btn" onclick="goBack()">←</button>
+            <div class="page-title">Invoices</div>
+        </div>
+
+        <div class="filters">
+            <button class="filter-btn active" data-filter="all" onclick="filterInvoices('all')">All</button>
+            <button class="filter-btn" data-filter="draft" onclick="filterInvoices('draft')">Drafts</button>
+            <button class="filter-btn" data-filter="sent" onclick="filterInvoices('sent')">Sent</button>
+            <button class="filter-btn" data-filter="paid" onclick="filterInvoices('paid')">Paid</button>
+        </div>
+
+        <div id="invoicesList">
+            <div class="empty">Loading invoices...</div>
+        </div>
+    </div>
+
+    <button class="new-invoice-btn" onclick="navTo('invoice_form.html')">
+        + New Invoice
+    </button>
+
+    <script>
+        let allInvoices = [];
+        let currentUserOrgId = null;
+
+        async function loadInvoices() {
+            const container = document.getElementById('invoicesList');
+            container.innerHTML = '<div class="empty">Loading...</div>';
+
+            // Load user's org for scoping
+            if (!currentUserOrgId) {
+                try {
+                    const { data: { user } } = await supabaseClient.auth.getUser();
+                    if (user) {
+                        const { data: profile } = await supabaseClient
+                            .from('user_profiles')
+                            .select('organization_id')
+                            .eq('id', user.id)
+                            .maybeSingle();
+                        const cand = profile?.organization_id;
+                        // Accept numeric legacy org ids (e.g. 4) as well as UUIDs
+                        currentUserOrgId = (cand != null &&
+                            ((typeof cand === 'number' && Number.isFinite(cand) && cand > 0) ||
+                             (typeof cand === 'string' && (cand.includes('-') || /^\d+$/.test(cand.trim())) && cand.length > 0)))
+                            ? cand : null;
+                    }
+                } catch(e) {}
+            }
+
+            try {
+                let query = supabaseClient
+                    .from('service_invoices')
+                    .select('*')
+                    .order('created_at', { ascending: false })
+                    .limit(100);
+
+                const isValidOrg = currentUserOrgId != null &&
+                    ((typeof currentUserOrgId === 'number' && Number.isFinite(currentUserOrgId) && currentUserOrgId > 0) ||
+                     (typeof currentUserOrgId === 'string' && (currentUserOrgId.includes('-') || /^\d+$/.test(currentUserOrgId.trim()))));
+                if (isValidOrg) {
+                    query = query.eq('organization_id', currentUserOrgId);
+                }
+                // No forced created_by fallback here — rely on RLS policies for visibility.
+
+                const { data, error } = await query;
+
+                if (error) throw error;
+
+                allInvoices = data || [];
+                renderInvoices(allInvoices);
+            } catch (e) {
+                console.warn('Could not load invoices from Supabase, using demo data');
+                allInvoices = [
+                    { id: 101, customer_name: "Desert Dermatology", total: 1240, status: "paid", created_at: "2025-05-22" },
+                    { id: 102, customer_name: "City Medical Center", total: 875, status: "sent", created_at: "2025-05-29" }
+                ];
+                renderInvoices(allInvoices);
+            }
+        }
+
+        function renderInvoices(list) {
+            const container = document.getElementById('invoicesList');
+            if (!list.length) {
+                container.innerHTML = '<div class="empty">No invoices yet.</div>';
+                return;
+            }
+
+            container.innerHTML = list.map(inv => {
+                const statusClass = inv.status === 'paid' ? 'status-paid' : 
+                                    inv.status === 'draft' ? 'status-draft' : 'status-sent';
+                const statusLabel = inv.status ? inv.status.charAt(0).toUpperCase() + inv.status.slice(1) : 'Unknown';
+
+                return `
+                    <div class="invoice-card" data-status="${inv.status || 'unknown'}" onclick="viewInvoice(${inv.id})" style="cursor:pointer;">
+                        <div class="invoice-info">
+                            <div class="invoice-customer">${inv.customer_name || 'Unknown Customer'}</div>
+                            <div class="invoice-meta">
+                                ${inv.created_at ? new Date(inv.created_at).toLocaleDateString() : ''} 
+                                • <span class="status-badge ${statusClass}">${statusLabel}</span>
+                            </div>
+                        </div>
+                        <div>
+                            <div class="invoice-total">$${(inv.total || 0).toFixed(2)}</div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function filterInvoices(filter) {
+            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+            event.currentTarget.classList.add('active');
+
+            let filtered = allInvoices;
+            if (filter !== 'all') {
+                filtered = allInvoices.filter(e => (e.status || '').toLowerCase() === filter);
+            }
+            renderInvoices(filtered);
+        }
+
+        function viewInvoice(id) {
+            // For now open the form (future: prefill from ID)
+            navTo('invoice_form.html');
+        }
+
+        function navTo(page) {
+            try {
+                const session = window._pendingSession || JSON.parse(localStorage.getItem('tsp-auth-token') || '{}').currentSession;
+                if (session && session.access_token) {
+                    const sep = page.includes('?') ? '&' : '?';
+                    window.location.href = page + sep + '_s=' + btoa(JSON.stringify(session));
+                    return;
+                }
+            } catch(e) {}
+            window.location.href = page;
+        }
+
+        async function goBack() {
+            try {
+                const { data: { session } } = await supabaseClient.auth.getSession();
+                if (session && session.access_token) {
+                    window.location.href = 'index.html?_s=' + btoa(JSON.stringify(session));
+                    return;
+                }
+            } catch(e) {}
+            window.location.href = 'index.html';
+        }
+
+        window.addEventListener('load', () => {
+            loadInvoices();
+        });
+    </script>
+
+<!-- Web compatibility / browser testing layer (safe no-op in WebView) -->
+<script src="web-compat.js"></script>
+
+</body>
+</html>

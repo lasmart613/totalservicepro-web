@@ -1,309 +1,558 @@
-/* ═══════════════════════════════════════════════════════════
-   Total Service Pro — Shared Stylesheet  v1.0
-   Drop this file into your Android assets folder alongside
-   all HTML pages and reference with:
-     <link rel="stylesheet" href="tsp.css">
-   ═══════════════════════════════════════════════════════════ */
-
-/* ── Google Font (loaded from CDN in each HTML head) ─────── */
-/* Add this to each page <head>:
-   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-*/
-
-/* ── Design Tokens ──────────────────────────────────────── */
+/* ========== THEME VARIABLES (Global) ========== */
 :root {
-    --gold:      #FBBF24;
-    --gold-dim:  #D4A017;
-    --gold-glow: rgba(251,191,36,0.08);
-    --gold-border: rgba(251,191,36,0.15);
-    --bg:        #111;
-    --surface:   #0d0d0d;
-    --surface2:  #151515;
-    --surface3:  #1a1a1a;
-    --surface4:  #222;
-    --border:    #1f1f1f;
-    --border2:   #2a2a2a;
-    --text:      #fff;
-    --text2:     #ccc;
-    --text3:     #888;
-    --red:       #ef4444;
-    --green:     #22c55e;
-    --blue:      #3b82f6;
-    --purple:    #7c3aed;
-    --orange:    #f59e0b;
+    /* Core surfaces */
+    --bg: #111827;
+    --surface: #1F2937;
+    --surface2: #374151;
+    --surface3: #1a2233;
+    --surface4: #111827;
+
+    /* Text */
+    --text: #F3E8D8;
+    --text2: #9CA3AF;
+    --text3: #6B7280;
+
+    /* Brand */
+    --gold: #FBBF24;
+    --gold-dk: #D97706;
+    --gold-glow: rgba(251, 191, 36, 0.15);
+    --gold-border: #FBBF2444;
+
+    /* Borders */
+    --border: #374151;
+    --border2: #4B5563;
+
+    /* Status */
+    --red: #ef4444;
+    --green: #22c55e;
+    --blue: #3b82f6;
 }
 
-/* ── Reset & Base ───────────────────────────────────────── */
-* { margin: 0; padding: 0; box-sizing: border-box; }
+/* ========== LIGHT MODE (Global) ========== */
+html.light {
+    --bg: #F8F1E3;
+    --surface: #FFFFFF;
+    --surface2: #F3E8D8;
+    --surface3: #F8F1E3;
+    --surface4: #F8F1E3;
 
-body {
-    font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    background: var(--bg);
+    --text: #111827;
+    --text2: #374151;
+    --text3: #6B7280;
+
+    --gold: #B8860B;
+    --gold-dk: #92400E;
+    --gold-glow: rgba(184, 134, 11, 0.12);
+    --gold-border: #B8860B44;
+
+    --border: #E5D9C2;
+    --border2: #D1D5DB;
+
+    --red: #dc2626;
+    --green: #16a34a;
+    --blue: #2563eb;
+}
+
+/* ========== BASE PAGE STYLES (Critical for dark mode) ========== */
+html, body {
+    background: var(--bg) !important;
     color: var(--text);
-    min-height: 100vh;
-    -webkit-font-smoothing: antialiased;
+    margin: 0;
+    padding: 0;
+    min-height: 100%;
 }
 
-/* ── Header ─────────────────────────────────────────────── */
-.header {
-    background: var(--surface);
-    padding: 14px 20px;
+/* ========== CALCULATOR COMPONENTS ========== */
+/* These styles help calculators look good in both modes without per-page duplication */
+
+.calc-page {
+    padding: 16px 16px 80px;
+    max-width: 600px;
+    margin: 0 auto;
+    background: var(--bg);   /* Ensure main content area respects theme */
+}
+
+.result-card {
+    background: var(--surface2);
+    border: 2px solid var(--gold);
+    border-radius: 16px;
+    padding: 24px;
+    text-align: center;
+    margin: 20px 0;
+}
+
+.result-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text3);
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    margin-bottom: 6px;
+}
+
+.result-value {
+    font-size: 48px;
+    font-weight: 800;
+    color: var(--gold);
+    line-height: 1;
+}
+
+.result-unit {
+    font-size: 18px;
+    color: var(--text3);
+    margin-left: 4px;
+}
+
+.result-detail {
+    margin-top: 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    text-align: left;
+}
+
+.result-row {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    border-bottom: 1px solid var(--gold);
-    position: sticky; top: 0; z-index: 100;
+    font-size: 13px;
+    padding: 5px 0;
+    border-bottom: 1px solid var(--border);
 }
-.header-back {
-    background: none; border: none; color: var(--gold);
-    font-size: 22px; cursor: pointer; padding: 4px 8px;
-    border-radius: 8px; line-height: 1;
-}
-.header-back:active { background: var(--surface3); }
-.header-title {
-    font-size: 17px; font-weight: 700; color: var(--text);
-    flex: 1; margin: 0 12px;
-}
-.brand { display: flex; flex-direction: column; line-height: 1.15; }
-.brand-name { font-size: 19px; font-weight: 800; color: var(--gold); letter-spacing: -0.3px; }
-.brand-sub { font-size: 10px; font-weight: 500; color: var(--text3); letter-spacing: 1.5px; text-transform: uppercase; margin-top: 1px; }
 
-/* ── Page Wrapper ───────────────────────────────────────── */
-.page { padding: 16px 16px 80px; max-width: 900px; margin: 0 auto; }
-.page-title { font-size: 22px; font-weight: 800; color: var(--text); margin-bottom: 4px; }
-.page-sub { font-size: 13px; color: var(--text3); margin-bottom: 20px; }
-
-/* ── Section ────────────────────────────────────────────── */
-.section { margin-bottom: 22px; }
-.section-header {
-    display: flex; justify-content: space-between; align-items: center;
-    margin-bottom: 10px;
+.result-row:last-child {
+    border: none;
 }
-.section-title { font-size: 15px; font-weight: 700; color: var(--text); letter-spacing: -0.2px; }
-.section-link {
-    font-size: 12px; font-weight: 600; color: var(--gold);
-    cursor: pointer; border: none; background: none; font-family: inherit;
-}
-.section-link:hover { text-decoration: underline; }
 
-/* ── Cards ──────────────────────────────────────────────── */
-.card {
+.result-row-val {
+    font-weight: 700;
+    color: var(--text);
+}
+
+.formula-box {
     background: var(--surface2);
-    border: 1px solid var(--border);
-    border-radius: 12px;
-    overflow: hidden;
-    margin-bottom: 10px;
-    transition: border-color 0.15s;
+    border-left: 3px solid var(--gold);
+    border-radius: 0 8px 8px 0;
+    padding: 12px 14px;
+    margin-top: 16px;
+    font-size: 12px;
+    color: var(--text3);
+    line-height: 1.7;
+    font-family: 'Courier New', monospace;
 }
-.card:hover { border-color: var(--gold-border); }
-.card-body { padding: 14px 16px; }
-.card-title { font-size: 13px; font-weight: 700; color: var(--gold); text-transform: uppercase; letter-spacing: 0.8px; margin-bottom: 10px; }
 
-/* ── Stat Cards ─────────────────────────────────────────── */
-.stats-row {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-    margin-bottom: 22px;
-}
-.stat-card {
+/* Button rows used in many calculators */
+.button-row {
+    display: flex;
     background: var(--surface2);
-    border: 1px solid var(--border);
+    border: 1px solid var(--border2);
     border-radius: 12px;
-    padding: 14px 12px;
-    text-align: center;
-    transition: border-color 0.2s;
+    padding: 4px;
+    margin-bottom: 16px;
+}
+
+.button-row .btn-option {
+    flex: 1;
+    padding: 10px 12px;
+    border: none;
+    background: none;
+    color: var(--text3);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    border-radius: 8px;
     cursor: pointer;
+    transition: all 0.15s;
 }
-.stat-card:hover { border-color: var(--gold-border); }
-.stat-num { font-size: 26px; font-weight: 800; color: var(--gold); line-height: 1; }
-.stat-num.red    { color: var(--red); }
-.stat-num.green  { color: var(--green); }
-.stat-num.blue   { color: var(--blue); }
-.stat-num.purple { color: var(--purple); }
-.stat-label { font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 6px; line-height: 1.3; }
 
-/* ── Nav Grid Cards ─────────────────────────────────────── */
-.nav-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
-.nav-card {
-    background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 12px; padding: 16px 8px; text-align: center;
-    cursor: pointer; font-family: inherit;
-    transition: all 0.12s ease; position: relative; overflow: hidden;
-    display: flex; flex-direction: column; align-items: center;
+.button-row .btn-option.active {
+    background: var(--gold);
+    color: #111827;
+    box-shadow: 0 2px 8px rgba(251, 191, 36, 0.3);
 }
-.nav-card::before {
-    content: ''; position: absolute; top: 0; left: 0; right: 0; height: 3px;
-    background: var(--gold); opacity: 0; transition: opacity 0.15s;
-}
-.nav-card:hover { border-color: var(--gold); background: var(--surface3); transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.4); }
-.nav-card:hover::before { opacity: 1; }
-.nav-card:active { transform: translateY(0); }
-.nav-icon { font-size: 26px; margin-bottom: 6px; }
-.nav-label { font-size: 11px; font-weight: 700; color: var(--text2); letter-spacing: 0.2px; line-height: 1.3; }
 
-/* ── Buttons ─────────────────────────────────────────────── */
+.button-row .btn-option:hover:not(.active) {
+    color: var(--text);
+}
+
+/* Form elements in calculators */
+.form-group label {
+    display: block;
+    font-size: 12px;
+    color: var(--text3);
+    margin-bottom: 6px;
+    font-weight: 600;
+}
+
+.form-select,
+input[type="number"],
+input[type="text"] {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border2);
+    border-radius: 8px;
+    background: var(--surface);
+    color: var(--text);
+    font-size: 15px;
+    font-family: inherit;
+}
+
+html.light .form-select,
+html.light input[type="number"],
+html.light input[type="text"] {
+    background: #fff;
+    border-color: #D1D5DB;
+}
+
+/* Toast messages (common in calculators + service schedule)
+   Supports long error messages by wrapping instead of overflowing. */
+#_toast {
+    position: fixed;
+    bottom: 82px;
+    left: 50%;
+    transform: translateX(-50%) translateY(18px);
+    max-width: calc(100vw - 18px);
+    background: var(--surface2);
+    border: 1px solid var(--gold);
+    border-radius: 10px;
+    padding: 11px 15px;
+    font-size: 13.5px;
+    font-weight: 600;
+    z-index: 99999;
+    transition: opacity 0.25s ease, transform 0.25s ease;
+    white-space: normal;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    text-align: left;
+    line-height: 1.38;
+    opacity: 0;
+    color: var(--text);
+    box-shadow: 0 6px 18px rgba(0,0,0,0.45);
+}
+
+/* ========== STANDARDIZED BUTTONS (Fluke-inspired: Dark Grey + Yellow) ========== */
+
+/* Base button */
 .btn {
-    display: inline-flex; align-items: center; justify-content: center; gap: 8px;
-    padding: 10px 20px; border-radius: 8px; border: none;
-    font-family: inherit; font-size: 14px; font-weight: 700;
-    cursor: pointer; transition: all 0.15s; text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 12px 20px;
+    font-size: 15px;
+    font-weight: 700;
+    font-family: inherit;
+    border-radius: 10px;
+    border: 1px solid transparent;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    text-decoration: none;
+    white-space: nowrap;
+    user-select: none;
 }
-.btn-gold  { background: var(--gold); color: #111827; }
-.btn-gold:hover { background: var(--gold-dim); }
-.btn-gold:active { transform: scale(0.97); }
-.btn-outline { background: none; border: 1px solid var(--gold); color: var(--gold); }
-.btn-outline:hover { background: var(--gold-glow); }
-.btn-ghost { background: none; border: 1px solid var(--border2); color: var(--text2); }
-.btn-ghost:hover { border-color: var(--gold-border); color: var(--text); }
-.btn-danger { background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.3); color: #fca5a5; }
-.btn-sm { padding: 7px 14px; font-size: 12px; border-radius: 6px; }
-.btn-full { width: 100%; }
-.btn:disabled { opacity: 0.45; cursor: not-allowed; }
 
-/* ── Form Elements ──────────────────────────────────────── */
-.form-group { margin-bottom: 18px; }
-.form-group label { display: block; margin-bottom: 7px; color: var(--gold); font-weight: 600; font-size: 13px; }
-.form-input, .form-select, .form-textarea {
-    width: 100%; padding: 12px 14px;
-    background: var(--surface4); border: 1px solid var(--border2);
-    border-radius: 8px; color: var(--text);
-    font-family: inherit; font-size: 14px;
-    outline: none; transition: border-color 0.15s;
+/* Primary - Fluke Yellow/Gold (most important actions) */
+.btn-primary,
+button.btn-primary,
+a.btn-primary {
+    background: var(--gold);
+    color: #111827;
+    border-color: var(--gold);
+    box-shadow: 0 2px 6px rgba(251, 191, 36, 0.25);
 }
-.form-input:focus, .form-select:focus, .form-textarea:focus { border-color: var(--gold); }
-.form-input::placeholder, .form-textarea::placeholder { color: var(--text3); }
-.form-select option { background: var(--surface4); }
-.form-textarea { resize: vertical; min-height: 80px; }
-.form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
-/* Password input with eye toggle */
-.input-wrap { position: relative; }
-.input-eye { position: absolute; right: 12px; top: 50%; transform: translateY(-50%); background: none; border: none; cursor: pointer; font-size: 18px; color: var(--text3); }
-
-/* ── Tags / Badges ──────────────────────────────────────── */
-.tag {
-    display: inline-block; padding: 3px 9px; border-radius: 20px;
-    font-size: 11px; font-weight: 700;
+.btn-primary:hover,
+button.btn-primary:hover {
+    background: #EAB308;
+    transform: translateY(-1px);
 }
-.tag-gold    { background: var(--gold-glow); color: var(--gold); border: 1px solid var(--gold-border); }
-.tag-green   { background: rgba(34,197,94,0.1); color: var(--green); border: 1px solid rgba(34,197,94,0.3); }
-.tag-red     { background: rgba(239,68,68,0.1); color: var(--red); border: 1px solid rgba(239,68,68,0.3); }
-.tag-blue    { background: rgba(59,130,246,0.1); color: var(--blue); border: 1px solid rgba(59,130,246,0.3); }
-.tag-purple  { background: rgba(124,58,237,0.1); color: var(--purple); border: 1px solid rgba(124,58,237,0.3); }
-.tag-muted   { background: var(--surface3); color: var(--text3); border: 1px solid var(--border2); }
 
-/* ── Schedule / Ticket Cards ────────────────────────────── */
-.sched-card {
-    background: var(--surface2); border: 1px solid var(--border);
-    border-radius: 12px; overflow: hidden; margin-bottom: 8px;
-    cursor: pointer; transition: border-color 0.15s;
+.btn-primary:active {
+    transform: translateY(0);
+    box-shadow: 0 1px 3px rgba(251, 191, 36, 0.3);
 }
-.sched-card:hover { border-color: var(--gold-border); }
-.sched-inner { display: flex; align-items: stretch; }
-.sched-priority { width: 5px; flex-shrink: 0; }
-.sched-priority.high      { background: var(--red); }
-.sched-priority.medium    { background: var(--orange); }
-.sched-priority.low       { background: var(--green); }
-.sched-priority.emergency { background: var(--purple); }
-.sched-body { flex: 1; padding: 12px 14px; display: flex; justify-content: space-between; align-items: center; }
-.sched-info { flex: 1; min-width: 0; }
-.sched-customer { font-size: 14px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sched-meta { font-size: 11px; color: var(--text3); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sched-right { text-align: right; flex-shrink: 0; margin-left: 12px; }
-.sched-time { font-size: 12px; font-weight: 700; color: var(--gold); white-space: nowrap; }
-.sched-status { font-size: 10px; color: var(--text3); margin-top: 3px; }
 
-/* ── List rows ──────────────────────────────────────────── */
-.list-row {
-    display: flex; align-items: center; gap: 12px;
-    padding: 13px 16px; background: var(--surface2);
-    border: 1px solid var(--border); border-radius: 10px;
-    margin-bottom: 8px; cursor: pointer; transition: border-color 0.15s;
+/* Secondary - Dark surface with yellow accent */
+.btn-secondary {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border2);
 }
-.list-row:hover { border-color: var(--gold-border); }
-.list-icon { font-size: 22px; width: 32px; text-align: center; flex-shrink: 0; }
-.list-main { flex: 1; min-width: 0; }
-.list-title { font-size: 14px; font-weight: 700; color: var(--text); }
-.list-sub { font-size: 11px; color: var(--text3); margin-top: 2px; }
-.list-arrow { color: var(--text3); font-size: 18px; flex-shrink: 0; }
 
-/* ── Avatar & Dropdown ──────────────────────────────────── */
-.avatar-wrapper { position: relative; display: none; }
-.avatar-btn { background: none; border: none; padding: 0; cursor: pointer; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
-.avatar-img { width: 40px; height: 40px; border-radius: 50%; object-fit: cover; border: 2px solid var(--gold); display: none; }
-.avatar-initials { width: 40px; height: 40px; border-radius: 50%; background: var(--gold); color: #111827; font-weight: 700; font-size: 16px; display: flex; align-items: center; justify-content: center; border: 2px solid var(--gold); }
-.avatar-dropdown { display: none; position: absolute; top: calc(100% + 10px); right: 0; background: var(--surface3); border: 1px solid var(--gold); border-radius: 12px; min-width: 200px; overflow: hidden; box-shadow: 0 8px 24px rgba(0,0,0,0.6); z-index: 1000; }
-.avatar-dropdown.open { display: block; }
-.dropdown-user-info { padding: 14px 16px 12px; border-bottom: 1px solid #333; }
-.dropdown-user-name { font-weight: 700; font-size: 14px; color: var(--gold); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dropdown-user-email { font-size: 11px; color: var(--text3); margin-top: 3px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dropdown-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 13px 16px; background: none; border: none; color: #fff; font-size: 14px; font-family: inherit; cursor: pointer; text-align: left; transition: background 0.15s; }
-.dropdown-item:hover { background: #2a2a2a; }
-.dropdown-item.danger { color: #f87171; border-top: 1px solid #333; }
-.dropdown-item.danger:hover { background: #2a1a1a; }
-.dropdown-icon { font-size: 16px; width: 20px; text-align: center; }
-
-/* ── Modal / Login Popup ────────────────────────────────── */
-.modal-overlay {
-    position: fixed; top: 0; left: 0; width: 100%; height: 100%;
-    background: rgba(0,0,0,0.85); display: none;
-    align-items: center; justify-content: center; z-index: 2000;
+.btn-secondary:hover {
+    background: var(--surface3);
+    border-color: var(--gold);
+    color: var(--gold);
 }
-.modal-overlay.open { display: flex; }
-.modal-box {
-    background: var(--surface3); border: 2px solid var(--gold);
-    border-radius: 16px; padding: 28px; width: 90%; max-width: 420px;
-    position: relative; color: #fff; max-height: 90vh; overflow-y: auto;
+
+/* Danger / Destructive */
+.btn-danger {
+    background: #7f1d1d;
+    color: #fee2e2;
+    border-color: #991b1b;
 }
-.modal-title { color: var(--gold); font-size: 20px; font-weight: 800; margin-bottom: 20px; }
-.modal-close { position: absolute; top: 12px; right: 16px; font-size: 28px; cursor: pointer; color: var(--gold); background: none; border: none; line-height: 1; }
-.modal-tabs { display: flex; gap: 0; margin-bottom: 20px; border-bottom: 1px solid var(--border2); }
-.modal-tab { flex: 1; padding: 10px; background: none; border: none; color: var(--text3); font-family: inherit; font-size: 14px; font-weight: 600; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.15s; }
-.modal-tab.active { color: var(--gold); border-bottom-color: var(--gold); }
 
-/* ── Empty / Loading States ─────────────────────────────── */
-.empty-state { padding: 40px 20px; text-align: center; color: var(--text3); }
-.empty-icon { font-size: 36px; margin-bottom: 10px; opacity: 0.5; }
-.empty-title { font-size: 15px; font-weight: 700; color: var(--text3); margin-bottom: 6px; }
-.empty-sub { font-size: 13px; line-height: 1.5; }
-
-.spinner {
-    width: 28px; height: 28px;
-    border: 3px solid var(--border2);
-    border-top-color: var(--gold);
-    border-radius: 50%;
-    animation: spin 0.7s linear infinite;
-    margin: 0 auto;
+.btn-danger:hover {
+    background: #991b1b;
+    color: #fff;
 }
-@keyframes spin { to { transform: rotate(360deg); } }
 
-.skeleton {
-    background: linear-gradient(90deg, var(--surface2) 25%, var(--surface3) 50%, var(--surface2) 75%);
-    background-size: 200% 100%;
-    animation: shimmer 1.5s infinite;
+/* Ghost / Outline */
+.btn-ghost {
+    background: transparent;
+    color: var(--text);
+    border: 1px solid var(--border2);
+}
+
+.btn-ghost:hover {
+    background: var(--surface2);
+    border-color: var(--gold);
+    color: var(--gold);
+}
+
+/* Small buttons */
+.btn-sm {
+    padding: 8px 14px;
+    font-size: 13px;
     border-radius: 8px;
 }
-@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
 
-/* ── Toast ──────────────────────────────────────────────── */
-.toast {
-    position: fixed; bottom: 90px; left: 50%;
-    transform: translateX(-50%) translateY(80px);
-    background: var(--surface3); border: 1px solid var(--gold);
-    border-radius: 10px; padding: 12px 20px;
-    font-size: 14px; font-weight: 600; z-index: 9999;
-    transition: transform 0.3s ease; white-space: nowrap;
-    pointer-events: none;
+/* Large buttons */
+.btn-lg {
+    padding: 16px 28px;
+    font-size: 17px;
+    border-radius: 12px;
 }
-.toast.show { transform: translateX(-50%) translateY(0); }
-.toast.success { border-color: var(--green); color: var(--green); }
-.toast.error   { border-color: var(--red);   color: var(--red); }
 
-/* ── Divider ────────────────────────────────────────────── */
-.divider { height: 1px; background: var(--border2); margin: 16px 0; }
+/* Full width */
+.btn-block {
+    width: 100%;
+}
 
-/* ── Scrollbar ──────────────────────────────────────────── */
-::-webkit-scrollbar { width: 4px; height: 4px; }
-::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 2px; }
+/* Floating Action Button (Fluke style) */
+.fab {
+    position: fixed;
+    bottom: 24px;
+    right: 20px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: var(--gold);
+    color: #111827;
+    border: none;
+    font-size: 28px;
+    font-weight: 700;
+    cursor: pointer;
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 90;
+    transition: transform 0.15s, box-shadow 0.15s;
+}
+
+.fab:hover {
+    transform: scale(1.05);
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4);
+}
+
+.fab:active {
+    transform: scale(0.95);
+}
+
+/* ========== UI COMPONENTS - BUTTONS & CARDS (Fluke-inspired) ========== */
+
+/* Consistent back / header icon buttons */
+.back-btn,
+.header-back {
+    background: none;
+    border: none;
+    color: var(--gold);
+    font-size: 22px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 6px 10px;
+    border-radius: 8px;
+    transition: all 0.15s ease;
+}
+.back-btn:hover,
+.header-back:hover {
+    background: var(--surface2);
+    color: var(--gold-dk);
+}
+.back-btn:active,
+.header-back:active {
+    transform: scale(0.95);
+}
+
+/* Calendar navigation buttons */
+.cal-nav .nav-btn {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-size: 18px;
+    width: 36px;
+    height: 36px;
+    border-radius: 8px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+}
+.cal-nav .nav-btn:hover {
+    border-color: var(--gold);
+    color: var(--gold);
+    background: var(--surface2);
+}
+.cal-nav .today-btn {
+    background: var(--surface);
+    border: 1px solid var(--border2);
+    color: var(--text);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 4px 14px;
+    border-radius: 999px;
+    cursor: pointer;
+    transition: all 0.15s;
+}
+.cal-nav .today-btn:hover {
+    border-color: var(--gold);
+    color: var(--gold);
+}
+
+/* Segmented / toggle button groups (used in calculators, density, etc.) */
+.button-row .btn-option,
+.btn-option {
+    flex: 1;
+    padding: 10px 14px;
+    border: 1px solid var(--border2);
+    background: var(--surface2);
+    color: var(--text3);
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 700;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.15s;
+    text-align: center;
+}
+.button-row .btn-option.active,
+.btn-option.active {
+    background: var(--gold);
+    color: #111827;
+    border-color: var(--gold);
+    box-shadow: 0 2px 8px rgba(251, 191, 36, 0.3);
+}
+.button-row .btn-option:hover:not(.active),
+.btn-option:hover:not(.active) {
+    color: var(--text);
+    border-color: var(--gold);
+    background: var(--surface3);
+}
+
+/* Main navigation / hub cards (big tappable rectangles) */
+.nav-card {
+    background: var(--surface2);
+    border: 1px solid var(--border2);
+    border-radius: 14px;
+    padding: 20px 16px;
+    text-align: center;
+    cursor: pointer;
+    font-family: inherit;
+    transition: all 0.15s ease;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 8px;
+    min-height: 110px;
+    justify-content: center;
+}
+.nav-card:hover {
+    border-color: var(--gold);
+    background: var(--surface3);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 16px rgba(0,0,0,0.3);
+}
+.nav-card .nav-icon {
+    font-size: 32px;
+    line-height: 1;
+}
+.nav-card .nav-label {
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text);
+    line-height: 1.3;
+}
+
+/* Bottom navigation items */
+.bottom-nav-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    background: none;
+    border: none;
+    color: var(--text3);
+    cursor: pointer;
+    font-family: inherit;
+    min-width: 56px;
+    padding: 6px 4px;
+    font-size: 10px;
+    transition: color 0.15s;
+}
+.bottom-nav-item:hover,
+.bottom-nav-item.active {
+    color: var(--gold);
+}
+.bottom-nav-item span:first-child {
+    font-size: 20px;
+}
+.bottom-nav-item span:last-child {
+    font-weight: 700;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+}
+
+/* Dropdown menu items */
+.dropdown-item {
+    width: 100%;
+    text-align: left;
+    background: none;
+    border: none;
+    padding: 10px 14px;
+    font-size: 14px;
+    color: var(--text);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    transition: all 0.15s;
+}
+.dropdown-item:hover {
+    background: var(--surface2);
+    color: var(--gold);
+}
+.dropdown-item.danger {
+    color: var(--red);
+}
+.dropdown-item.danger:hover {
+    background: #3f1f1f;
+    color: #fee2e2;
+}
+
+/* Legacy / page-specific overrides cleanup note:
+   Many pages previously defined their own .back-btn, .nav-btn, .bottom-nav-item etc.
+   The definitions above in tsp.css now take precedence for consistency. */
+
+/* Safety net: Make common action buttons look decent even if they only have class="btn" */
+button.btn:not(.btn-primary):not(.btn-secondary):not(.btn-danger):not(.btn-ghost),
+a.btn:not(.btn-primary):not(.btn-secondary):not(.btn-danger):not(.btn-ghost) {
+    background: var(--surface2);
+    color: var(--text);
+    border: 1px solid var(--border2);
+}
+button.btn:not(.btn-primary):not(.btn-secondary):not(.btn-danger):not(.btn-ghost):hover,
+a.btn:not(.btn-primary):not(.btn-secondary):not(.btn-danger):not(.btn-ghost):hover {
+    border-color: var(--gold);
+    color: var(--gold);
+}

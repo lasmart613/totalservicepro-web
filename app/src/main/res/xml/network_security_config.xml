@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!-- SECURITY: Block all cleartext (HTTP) traffic by default -->
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <!-- Use system default CAs -->
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Allow specific known domains (all should be HTTPS) -->
+    <domain-config cleartextTrafficPermitted="false">
+        <!-- Supabase Backend -->
+        <domain includeSubdomains="true">yljztfajyvjzqikxdddf.supabase.co</domain>
+
+        <!-- Google / AdMob / Fonts -->
+        <domain includeSubdomains="true">google.com</domain>
+        <domain includeSubdomains="true">googleapis.com</domain>
+        <domain includeSubdomains="true">gstatic.com</domain>
+        <domain includeSubdomains="true">googleadservices.com</domain>
+        <domain includeSubdomains="true">googlesyndication.com</domain>
+    </domain-config>
+</network-security-config>

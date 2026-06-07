@@ -3,454 +3,457 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Service Manual Library · TSP</title>
-    <!-- ── Session boot: runs BEFORE Supabase loads ── -->
-    <script>
-        var _pendingSession = null;
-        (function() {
-            try {
-                const enc = new URLSearchParams(window.location.search).get('_s');
-                if (enc) {
-                    const s = JSON.parse(atob(enc));
-                    if (s && s.access_token) {
-                        _pendingSession = s;
-                        localStorage.setItem('tsp-auth-token', JSON.stringify({ currentSession: s, expiresAt: s.expires_at }));
-                        const u = new URL(window.location.href); u.searchParams.delete('_s');
-                        window.history.replaceState({}, '', u.toString());
-                        return;
-                    }
-                }
-                const raw = localStorage.getItem('tsp-auth-token');
-                if (raw) {
-                    const p = JSON.parse(raw);
-                    const sess = p?.currentSession || (p?.access_token ? p : null);
-                    if (sess?.access_token) _pendingSession = sess;
-                }
-            } catch(e) {}
-        })();
-        function restoreSession(jsonStr) {
-            try {
-                const parsed = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
-                const session = parsed?.currentSession || parsed;
-                if (session?.access_token) {
-                    localStorage.setItem('tsp-auth-token', JSON.stringify({ currentSession: session, expiresAt: session.expires_at }));
-                    if (typeof supabaseClient !== 'undefined') {
-                        supabaseClient.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token })
-                            .then(() => { updateAuthUI(); loadUserManuals().then(() => { renderSlotBar(); renderContent(); checkTierAndShowUpgrade(); }); });
-                    } else { _pendingSession = session; }
-                }
-            } catch(e) {}
-        }
-    </script>
+    <title>Service Manuals · TSP</title>
+    <script src="theme.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="tsp.css">
     <style>
-        /* ── Manual Library page styles ── */
-        .lib-header {
-            background: var(--surface);
-            padding: 14px 20px;
-            display: flex; align-items: center; gap: 12px;
-            border-bottom: 1px solid var(--gold);
-            position: sticky; top: 0; z-index: 100;
+        .shelf-section { margin-bottom: 28px; }
+        .brand-header {
+            font-size: 14px;
+            font-weight: 700;
+            color: #d4af37;
+            margin-bottom: 10px;
+            padding-left: 8px;
+            letter-spacing: 0.5px;
         }
-        .lib-brand { flex: 1; }
-        .lib-brand-name { font-size: 17px; font-weight: 800; color: var(--gold); }
-        .lib-brand-sub { font-size: 10px; color: var(--text3); text-transform: uppercase; letter-spacing: 1.5px; margin-top: 1px; }
-
-        .slot-bar {
-            padding: 10px 16px;
-            background: var(--surface2);
-            border-bottom: 1px solid var(--border);
-            display: flex; align-items: center; gap: 10px;
+        .shelf {
+            background: linear-gradient(180deg, #5c4633 0%, #3f2f22 100%);
+            border: 5px solid #2a2118;
+            border-radius: 14px;
+            padding: 16px 12px 10px;
+            box-shadow: inset 0 0 40px rgba(0,0,0,0.5), 0 6px 16px rgba(0,0,0,0.5);
+            position: relative;
+            overflow: hidden;
         }
-        .slot-label { font-size: 12px; font-weight: 600; color: var(--text3); }
-        .slot-dots { display: flex; gap: 4px; flex-wrap: wrap; }
-        .slot-dot { width: 10px; height: 10px; border-radius: 50%; background: var(--border2); border: 1px solid var(--border2); transition: all 0.2s; }
-        .slot-dot.used { background: var(--gold); border-color: var(--gold); }
-        .slot-dot.last { border-color: var(--red); }
-
-        .tabs { display: flex; border-bottom: 1px solid var(--border); background: var(--surface); }
-        .tab { flex: 1; padding: 11px; background: none; border: none; color: var(--text3); font-family: inherit; font-size: 13px; font-weight: 700; cursor: pointer; border-bottom: 2px solid transparent; margin-bottom: -1px; transition: all 0.15s; }
-        .tab.active { color: var(--gold); border-bottom-color: var(--gold); }
-
-        .search-bar { padding: 12px 16px; background: var(--surface); border-bottom: 1px solid var(--border); }
-        .search-bar input {
-            width: 100%; padding: 10px 14px; background: var(--surface3);
-            border: 1px solid var(--border2); border-radius: 20px;
-            color: var(--text); font-family: inherit; font-size: 14px; outline: none;
+        .shelf::before {
+            content: '';
+            position: absolute;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background:
+                linear-gradient(90deg, rgba(0,0,0,0.15) 0%, transparent 20%, transparent 80%, rgba(0,0,0,0.15) 100%),
+                repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(255,255,255,0.03) 4px, rgba(255,255,255,0.03) 8px);
+            pointer-events: none;
         }
-        .search-bar input:focus { border-color: var(--gold); }
-        .search-bar input::placeholder { color: var(--text3); }
-
-        .main-content { padding: 16px 16px 80px; }
-
-        /* Book shelf */
-        .shelf-section { margin-bottom: 24px; }
-        .brand-label { font-size: 13px; font-weight: 700; color: var(--text2); margin-bottom: 10px; display: flex; align-items: center; gap: 6px; }
-        .brand-count { font-size: 11px; color: var(--text3); font-weight: 500; }
-        .shelf-unit { background: var(--surface2); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; }
-        .books-row { display: flex; flex-wrap: wrap; gap: 8px; padding: 14px 14px 8px; }
-        .shelf-plank { height: 8px; background: linear-gradient(180deg, var(--border2) 0%, #0a0a0a 100%); border-top: 1px solid var(--border2); }
-
-        /* Individual book */
-        .book { position: relative; cursor: pointer; transition: transform 0.15s; }
-        .book:hover { transform: translateY(-4px); }
-        .book:active { transform: translateY(-2px); }
-        .book-spine {
-            width: 52px; height: 110px; border-radius: 4px 2px 2px 4px;
-            display: flex; flex-direction: column; align-items: center; justify-content: space-between;
-            padding: 8px 4px; writing-mode: vertical-rl; text-orientation: mixed;
-            box-shadow: 2px 2px 6px rgba(0,0,0,0.5), inset -1px 0 3px rgba(0,0,0,0.3);
+        .books-row {
+            display: flex;
+            flex-wrap: nowrap;
+            gap: 8px;
+            overflow-x: auto;
+            padding: 4px 0 8px;
+        }
+        .book {
+            flex-shrink: 0;
+            cursor: pointer;
+            transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
             position: relative;
         }
-        .book-color-0 { background: linear-gradient(160deg,#1e3a5f,#0f2040); }
-        .book-color-1 { background: linear-gradient(160deg,#3b1a1a,#1f0a0a); }
-        .book-color-2 { background: linear-gradient(160deg,#1a3b1a,#0a1f0a); }
-        .book-color-3 { background: linear-gradient(160deg,#3b2e1a,#1f1808); }
-        .book-color-4 { background: linear-gradient(160deg,#2e1a3b,#180a1f); }
-        .book-color-5 { background: linear-gradient(160deg,#1a2e3b,#08131f); }
-        .book-color-6 { background: linear-gradient(160deg,#3b3b1a,#1f1f08); }
-        .book-color-7 { background: linear-gradient(160deg,#2e1a1a,#1a0808); }
-        .book-brand { font-size: 8px; font-weight: 700; color: rgba(255,255,255,0.5); letter-spacing: 0.5px; text-transform: uppercase; writing-mode: vertical-rl; }
-        .book-title-text { font-size: 10px; font-weight: 700; color: #fff; text-align: center; writing-mode: vertical-rl; line-height: 1.2; max-height: 70px; overflow: hidden; }
-        .book-year { font-size: 9px; color: rgba(255,255,255,0.4); writing-mode: vertical-rl; }
-        .book.saved .book-spine { box-shadow: 2px 2px 6px rgba(0,0,0,0.5), inset -1px 0 3px rgba(0,0,0,0.3), 0 0 8px rgba(251,191,36,0.3); }
-        .book-saved-badge { position: absolute; top: -4px; right: -4px; width: 16px; height: 16px; background: var(--gold); border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 9px; color: #111; font-weight: 700; z-index: 1; }
-
-        /* Empty state */
-        .empty-state { text-align: center; padding: 48px 20px; color: var(--text3); }
-        .empty-icon { font-size: 40px; margin-bottom: 12px; opacity: 0.5; }
-        .empty-title { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
-        .empty-sub { font-size: 13px; line-height: 1.5; }
-
-        /* Modals */
-        .modal-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.85); align-items: center; justify-content: center; z-index: 2000; }
-        .modal-overlay.open { display: flex; }
-        .modal-box { background: var(--surface3); border: 2px solid var(--gold); border-radius: 16px; padding: 28px; width: 90%; max-width: 380px; position: relative; }
-        .modal-title { font-size: 18px; font-weight: 800; color: var(--gold); margin-bottom: 16px; }
-        .modal-close { position: absolute; top: 12px; right: 16px; font-size: 26px; cursor: pointer; color: var(--gold); background: none; border: none; }
-        .modal-book-mini { width: 36px; height: 70px; border-radius: 3px 1px 1px 3px; margin-bottom: 10px; }
-
-        /* Bottom nav */
-        .bottom-nav { position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--border2); display: flex; justify-content: space-around; padding: 8px 0 max(8px, env(safe-area-inset-bottom)); z-index: 100; }
-        .bottom-nav-item { display: flex; flex-direction: column; align-items: center; gap: 2px; background: none; border: none; color: var(--text3); cursor: pointer; font-family: inherit; min-width: 56px; padding: 4px; transition: color 0.15s; }
-        .bottom-nav-item:hover, .bottom-nav-item.active { color: var(--gold); }
-        .bottom-nav-item span:first-child { font-size: 20px; }
-        .bottom-nav-item span:last-child { font-size: 9px; font-weight: 700; letter-spacing: 0.3px; text-transform: uppercase; }
+        .book:hover { transform: translateY(-8px) rotate(1deg); }
+        .book-spine {
+            width: 54px;
+            height: 105px;
+            border-radius: 4px 3px 3px 4px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: space-between;
+            padding: 10px 6px 8px;
+            box-shadow: 4px 4px 10px rgba(0,0,0,0.7), inset -3px 0 6px rgba(0,0,0,0.5), inset 1px 0 3px rgba(255,255,255,0.15);
+            position: relative;
+            overflow: hidden;
+        }
+        .book-spine::before {
+            content: '';
+            position: absolute;
+            left: 0; top: 0; right: 0; bottom: 0;
+            background: linear-gradient(145deg, rgba(255,215,0,0.08) 0%, transparent 40%);
+            pointer-events: none;
+        }
+        .book-title {
+            font-size: 8.5px;
+            font-weight: 700;
+            color: #f0e6d2;
+            writing-mode: vertical-rl;
+            text-orientation: mixed;
+            text-align: center;
+            line-height: 1.15;
+            max-height: 68px;
+            overflow: hidden;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.6);
+        }
+        .book-spine::after {
+            content: '';
+            position: absolute;
+            left: 7px;
+            top: 10px;
+            bottom: 10px;
+            width: 1.5px;
+            background: linear-gradient(to bottom, rgba(255,215,0,0.3), transparent, rgba(255,215,0,0.2));
+        }
+        .owned-badge {
+            position: absolute;
+            top: -4px;
+            right: -4px;
+            background: #22c55e;
+            color: white;
+            font-size: 9px;
+            padding: 1px 5px;
+            border-radius: 8px;
+            font-weight: 700;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border);
+            background: var(--surface);
+        }
+        .tab {
+            flex: 1;
+            padding: 11px;
+            background: none;
+            border: none;
+            color: var(--text3);
+            font-family: inherit;
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            transition: all 0.15s;
+        }
+        .tab.active {
+            color: var(--gold);
+            border-bottom-color: var(--gold);
+        }
+        .modal {
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.75);
+            display: none;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+        }
+        .modal-content {
+            background: var(--surface2);
+            border-radius: 16px;
+            padding: 24px;
+            width: 90%;
+            max-width: 340px;
+            text-align: center;
+        }
+        .warning-text {
+            font-size: 12px;
+            color: #f59e0b;
+            margin-top: 8px;
+        }
+        .user-avatar {
+            width: 32px;
+            height: 32px;
+            border-radius: 50%;
+            background: #d4af37;
+            color: #1a140f;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 13px;
+            cursor: pointer;
+            border: 2px solid #d4af37;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
     </style>
 </head>
 <body>
 
-<!-- Header -->
-<div class="lib-header">
+<!-- HEADER WITH AVATAR ON RIGHT -->
+<div class="lib-header" style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px;">
     <div class="lib-brand">
         <div class="lib-brand-name">Service Manuals</div>
         <div class="lib-brand-sub">Total Service Pro</div>
     </div>
-    <div id="authSection">
-        <button id="loginBtn" class="btn btn-gold btn-sm" onclick="showLoginPopup()">Login</button>
-        <div class="avatar-wrapper" id="avatarWrapper">
-            <button class="avatar-btn" onclick="toggleDropdown(event)">
-                <img id="avatarImg" class="avatar-img" src="" alt=""/>
-                <div id="avatarInitials" class="avatar-initials">U</div>
-            </button>
-            <div class="avatar-dropdown" id="avatarDropdown">
-                <div class="dropdown-user-info">
-                    <div class="dropdown-user-name" id="dropdownName">User</div>
-                    <div class="dropdown-user-email" id="dropdownEmail"></div>
-                </div>
-                <button class="dropdown-item" onclick="navTo('user_profile.html')"><span class="dropdown-icon">👤</span> Profile</button>
-                <button class="dropdown-item" onclick="navTo('settings.html')"><span class="dropdown-icon">⚙️</span> Settings</button>
-                <button class="dropdown-item" id="upgradeBtn" onclick="navTo('paywall.html')" style="display:none;color:var(--gold);"><span class="dropdown-icon">⭐</span> Upgrade</button>
-                <button class="dropdown-item danger" onclick="logoutUser()"><span class="dropdown-icon">🚪</span> Log Out</button>
-            </div>
-        </div>
-    </div>
-</div>
 
-<!-- Slot bar -->
-<div class="slot-bar">
-    <span class="slot-label" id="slotLabel">0 of 5 slots used</span>
-    <div class="slot-dots" id="slotDots"></div>
+    <div id="authSection" style="display: flex; align-items: center; gap: 8px;">
+        <button id="loginBtn" class="btn btn-gold btn-sm" onclick="showLoginPopup()">Login</button>
+        <div id="avatar" class="user-avatar" onclick="showUserMenu()" style="display: none;"></div>
+    </div>
 </div>
 
 <!-- Tabs -->
 <div class="tabs">
-    <button class="tab active" id="tabBrowse" onclick="switchTab('browse')">📚 Browse All</button>
-    <button class="tab" id="tabLibrary" onclick="switchTab('library')">🔖 My Library</button>
+    <button class="tab active" id="tabBrowse" onclick="switchTab('browse')"> Browse All</button>
+    <button class="tab" id="tabLibrary" onclick="switchTab('library')"> My Library</button>
 </div>
 
-<!-- Search -->
-<div class="search-bar">
-    <input type="text" id="searchInput" placeholder="Search manuals by title or brand..." oninput="handleSearch()">
-</div>
-
-<!-- Content -->
 <div class="main-content" id="mainContent">
     <div class="empty-state"><div class="spinner"></div></div>
 </div>
 
-<!-- Bottom nav -->
-<div class="bottom-nav">
-    <button class="bottom-nav-item" onclick="navTo('index.html')"><span>🏠</span><span>Home</span></button>
-    <button class="bottom-nav-item active" onclick="navTo('manual_library.html')"><span>📚</span><span>Manuals</span></button>
-    <button class="bottom-nav-item" onclick="navTo('service_schedule.html')"><span>📅</span><span>Schedule</span></button>
-    <button class="bottom-nav-item" onclick="navTo('calculators_menu.html')"><span>🔬</span><span>Calc</span></button>
-    <button class="bottom-nav-item" onclick="navTo('settings.html')"><span>⚙️</span><span>Settings</span></button>
-</div>
-
 <!-- Add to Library Modal -->
-<div class="modal-overlay" id="confirmModal">
-    <div class="modal-box">
-        <button class="modal-close" onclick="closeConfirmModal()">×</button>
-        <div class="modal-title">Add to Library?</div>
-        <div id="modalBookMini" class="modal-book-mini"></div>
-        <div style="font-size:15px;font-weight:700;margin-bottom:4px;" id="confirmTitle"></div>
-        <div style="font-size:12px;color:var(--text3);margin-bottom:14px;" id="confirmBrand"></div>
-        <div style="font-size:12px;color:var(--text3);margin-bottom:8px;">Slots: <strong id="confirmSlotCount"></strong></div>
-        <div class="slot-dots" id="confirmSlotDots" style="margin-bottom:12px;"></div>
-        <div id="confirmWarning" style="display:none;font-size:12px;color:var(--red);margin-bottom:12px;"></div>
-        <button class="btn btn-gold btn-full" id="confirmBtn" onclick="confirmAddManual()">Add to My Library</button>
-        <button class="btn btn-ghost btn-full" style="margin-top:8px;" onclick="closeConfirmModal()">Cancel</button>
+<div class="modal" id="addModal">
+    <div class="modal-content">
+        <h3 style="margin-bottom:8px;">Add to Library?</h3>
+        <p id="modalManualTitle" style="font-weight:700; color:#fff; margin-bottom:12px;"></p>
+
+        <div class="warning-text">⚠️ This action cannot be undone.</div>
+
+        <div style="margin:16px 0; padding:12px; background:var(--surface3); border-radius:12px;">
+            <div id="slotText" style="font-size:13px; color:var(--text3);">0 of 5 slots used</div>
+        </div>
+
+        <div style="display:flex; gap:10px; margin-top:20px;">
+            <button class="btn" onclick="closeModal()" style="flex:1; background:#444;">Cancel</button>
+            <button class="btn btn-gold" id="addBtn" onclick="addToLibrary()" style="flex:1;">Add to Library</button>
+        </div>
+
+        <div id="upgradePrompt" style="display:none; margin-top:16px; font-size:13px; color:#f59e0b;">
+            Library is full.<br>
+            <button onclick="upgradeAccount()" class="btn btn-gold" style="margin-top:8px; padding:6px 16px; font-size:12px;">Upgrade Account</button>
+        </div>
     </div>
 </div>
-
-<!-- Upgrade Modal -->
-<div class="modal-overlay" id="upgradeModal">
-    <div class="modal-box">
-        <button class="modal-close" onclick="closeUpgradeModal()">×</button>
-        <div class="modal-title">⭐ Upgrade</div>
-        <div id="upgradeModalBody" style="font-size:14px;color:var(--text2);margin-bottom:20px;line-height:1.6;"></div>
-        <button class="btn btn-gold btn-full" onclick="navTo('paywall.html')">View Plans</button>
-        <button class="btn btn-ghost btn-full" style="margin-top:8px;" onclick="closeUpgradeModal()">Not Now</button>
-    </div>
-</div>
-
-<!-- Login Popup -->
-<div id="loginPopup" class="modal-overlay">
-    <div class="modal-box">
-        <button class="modal-close" onclick="closeLoginPopup()">×</button>
-        <div class="modal-title">Sign In</div>
-        <div id="loginMessage" style="color:var(--red);font-size:13px;margin-bottom:12px;"></div>
-        <form id="loginForm">
-            <div class="form-group"><label>Email</label><input type="email" id="loginEmail" class="form-input" required></div>
-            <div class="form-group">
-                <label>Password</label>
-                <div class="input-wrap">
-                    <input type="password" id="loginPassword" class="form-input" required style="padding-right:44px;">
-                    <button type="button" class="input-eye" id="pwEye" onclick="togglePw()">👁️</button>
-                </div>
-            </div>
-            <button type="submit" class="btn btn-gold btn-full">Sign In</button>
-        </form>
-        <div style="text-align:center;margin-top:14px;font-size:13px;"><a href="#" onclick="forgotPassword()" style="color:var(--gold);">Forgot password?</a></div>
-    </div>
-</div>
-
-<div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
     const supabaseClient = supabase.createClient(
         'https://yljztfajyvjzqikxdddf.supabase.co',
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
-        { auth: { persistSession: true, storageKey: 'tsp-auth-token', storage: window.localStorage, autoRefreshToken: true, detectSessionInUrl: false } }
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM'
     );
 
-    let FREE_LIMIT = 5, allManuals = [], userManualIds = new Set(), currentTab = 'browse', pendingManual = null, searchTimeout = null;
-    const BRAND_ICONS = { 'Candela':'🔵','Lumenis':'🟢','Cynosure':'🟠','Fotona':'🔴','Iridex':'🟣','Biolitec':'⚪','Lisa Laser':'🟡','Lutronic':'🔶','Omniguide':'🔷','Wolf':'⚫' };
-
-    supabaseClient.auth.onAuthStateChange((event, session) => {
-        updateAuthUI(); checkTierAndShowUpgrade();
-        try {
-            if (typeof Android !== 'undefined') {
-                if (session?.access_token) Android.saveSession(JSON.stringify(session));
-                else if (event === 'SIGNED_OUT' && !session) Android.clearSession();
-            }
-        } catch(e) {}
-    });
-
-    async function navTo(page) {
-        try {
-            const { data: { session } } = await supabaseClient.auth.getSession();
-            if (session?.access_token) { const sep = page.includes('?')?'&':'?'; window.location.href = page + sep + '_s=' + btoa(JSON.stringify(session)); return; }
-        } catch(e) {}
-        window.location.href = page;
-    }
+    let allManuals = [];
+    let userManualIds = new Set();
+    let currentTab = 'browse';
+    let currentManual = null;
+    let FREE_LIMIT = 5;
+    let currentUser = null;
 
     async function init() {
-        // Apply pending session before loading data
-        if (_pendingSession) {
-            try {
-                await supabaseClient.auth.setSession({ access_token: _pendingSession.access_token, refresh_token: _pendingSession.refresh_token });
-            } catch(e) {}
-            _pendingSession = null;
-        }
+        try {
+            const raw = localStorage.getItem('tsp-auth-token');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                const session = parsed?.currentSession || parsed;
+                if (session?.access_token && session?.refresh_token) {
+                    await supabaseClient.auth.setSession({
+                        access_token: session.access_token,
+                        refresh_token: session.refresh_token
+                    });
+                }
+            }
+        } catch(e) {}
+
         updateAuthUI();
-        await Promise.all([loadManuals(), loadUserManuals()]);
-        renderSlotBar(); renderContent(); checkTierAndShowUpgrade();
+
+        try {
+            await loadManuals();
+            await loadUserManuals();
+            renderContent();
+        } catch(err) {
+            console.error(err);
+            document.getElementById('mainContent').innerHTML =
+                `<div class="empty-state"><h3>Failed to load manuals</h3><p>${err.message}</p></div>`;
+        }
     }
 
     async function loadManuals() {
         const { data, error } = await supabaseClient.from('manuals').select('*').order('brand').order('title');
-        if (!error) allManuals = data || [];
+        if (error) throw error;
+        allManuals = data || [];
     }
 
     async function loadUserManuals() {
         const { data: { user } } = await supabaseClient.auth.getUser();
         if (!user) return;
+        currentUser = user;
+
         const [manualsRes, profileRes] = await Promise.all([
             supabaseClient.from('user_manuals').select('manual_id').eq('user_id', user.id),
             supabaseClient.from('user_profiles').select('manual_slots').eq('id', user.id).single()
         ]);
+
         userManualIds = new Set((manualsRes.data || []).map(r => r.manual_id));
-        if (profileRes.data?.manual_slots != null) FREE_LIMIT = profileRes.data.manual_slots;
+        if (profileRes.data?.manual_slots) FREE_LIMIT = profileRes.data.manual_slots;
     }
 
-    function renderSlotBar() {
-        const used = userManualIds.size;
-        document.getElementById('slotLabel').textContent = used + ' of ' + (FREE_LIMIT === -1 ? '∞' : FREE_LIMIT) + ' slots used';
-        const dots = document.getElementById('slotDots'); dots.innerHTML = '';
-        if (FREE_LIMIT === -1) { dots.innerHTML = '<span style="font-size:11px;color:var(--gold);">UNLIMITED</span>'; return; }
-        const count = Math.min(FREE_LIMIT, 10);
-        for (let i = 0; i < count; i++) { const d = document.createElement('div'); d.className = 'slot-dot' + (i < used ? ' used' : '') + (i === FREE_LIMIT - 1 ? ' last' : ''); dots.appendChild(d); }
+    function updateAuthUI() {
+        const loginBtn = document.getElementById('loginBtn');
+        const avatar = document.getElementById('avatar');
+
+        supabaseClient.auth.getUser().then(({ data: { user } }) => {
+            if (user) {
+                loginBtn.style.display = 'none';
+                avatar.style.display = 'flex';
+
+                const name = user.user_metadata?.full_name || user.email || 'U';
+                const initials = name.split(' ').map(n => n[0]).join('').toUpperCase().slice(0, 2);
+                avatar.textContent = initials;
+            } else {
+                loginBtn.style.display = 'block';
+                avatar.style.display = 'none';
+            }
+        });
     }
 
-    function switchTab(tab) { currentTab = tab; document.getElementById('tabBrowse').className = 'tab' + (tab === 'browse' ? ' active' : ''); document.getElementById('tabLibrary').className = 'tab' + (tab === 'library' ? ' active' : ''); renderContent(); }
-    function handleSearch() { clearTimeout(searchTimeout); searchTimeout = setTimeout(renderContent, 200); }
+    function showUserMenu() {
+        const menu = confirm('Logged in as ' + (currentUser?.email || 'User') + '\n\nLogout?');
+        if (menu) {
+            supabaseClient.auth.signOut().then(() => {
+                localStorage.removeItem('tsp-auth-token');
+                window.location.reload();
+            });
+        }
+    }
+
+    function switchTab(tab) {
+        currentTab = tab;
+        document.getElementById('tabBrowse').className = 'tab' + (tab === 'browse' ? ' active' : '');
+        document.getElementById('tabLibrary').className = 'tab' + (tab === 'library' ? ' active' : '');
+        renderContent();
+    }
 
     function renderContent() {
-        const search = document.getElementById('searchInput').value.trim().toLowerCase();
         const container = document.getElementById('mainContent');
-        let manuals = allManuals;
+
+        let filtered = allManuals;
         if (currentTab === 'library') {
-            manuals = manuals.filter(m => userManualIds.has(m.id));
-            if (manuals.length === 0 && !search) { container.innerHTML = `<div class="empty-state"><div class="empty-icon">📭</div><div class="empty-title">Your library is empty</div><div class="empty-sub">Browse all manuals and add up to ${FREE_LIMIT === -1 ? 'unlimited' : FREE_LIMIT} for free</div></div>`; return; }
+            filtered = filtered.filter(m => userManualIds.has(m.id));
         }
-        if (search) manuals = manuals.filter(m => (m.title + m.brand + (m.model||'')).toLowerCase().includes(search));
-        if (manuals.length === 0) { container.innerHTML = `<div class="empty-state"><div class="empty-icon">🔍</div><div class="empty-title">No manuals found</div></div>`; return; }
+
+        if (filtered.length === 0) {
+            container.innerHTML = `<div class="empty-state"><h3>No manuals found</h3></div>`;
+            return;
+        }
+
         const grouped = {};
-        manuals.forEach(m => { if (!grouped[m.brand]) grouped[m.brand] = []; grouped[m.brand].push(m); });
-        container.innerHTML = Object.entries(grouped).map(([brand, items]) => `
-            <div class="shelf-section">
-                <div class="brand-label">${BRAND_ICONS[brand] || '📘'} ${brand} <span class="brand-count">${items.length} manual${items.length !== 1 ? 's' : ''}</span></div>
-                <div class="shelf-unit">
-                    <div class="books-row">${items.map((m, i) => renderBook(m, i)).join('')}</div>
-                    <div class="shelf-plank"></div>
+        filtered.forEach(m => {
+            if (!grouped[m.brand]) grouped[m.brand] = [];
+            grouped[m.brand].push(m);
+        });
+
+        let html = '';
+        Object.keys(grouped).forEach(brand => {
+            const books = grouped[brand];
+            html += `
+                <div class="shelf-section">
+                    <div class="brand-header">${brand}</div>
+                    <div class="shelf">
+                        <div class="books-row">
+                            ${books.map((m, i) => {
+                                const isOwned = userManualIds.has(m.id);
+                                return `
+                                    <div class="book" onclick="handleBookClick('${m.id}')">
+                                        <div class="book-spine book-color-${i % 8}">
+                                            <div class="book-title">${m.title}</div>
+                                        </div>
+                                        ${isOwned ? '<div class="owned-badge">✓</div>' : ''}
+                                    </div>
+                                `;
+                            }).join('')}
+                        </div>
+                    </div>
                 </div>
-            </div>`).join('');
+            `;
+        });
+
+        container.innerHTML = html;
     }
 
-    function renderBook(m, index) {
-        const saved = userManualIds.has(m.id);
-        const colorClass = 'book-color-' + (index % 8);
-        const onclick = saved ? `openManual(${m.id})` : `promptAddManual(${m.id})`;
-        return `<div class="book ${saved ? 'saved' : ''}" onclick="${onclick}">${saved ? '<div class="book-saved-badge">✓</div>' : ''}<div class="book-spine ${colorClass}"><div class="book-brand">${m.brand}</div><div class="book-title-text">${m.title}</div><div class="book-year">${saved ? '✓' : '+'}</div></div></div>`;
-    }
+    async function handleBookClick(manualId) {
+        const manual = allManuals.find(m => String(m.id) === String(manualId));
+        if (!manual) {
+            alert('Manual not found');
+            return;
+        }
 
-    async function promptAddManual(manualId) {
-        const { data: { user } } = await supabaseClient.auth.getUser();
-        if (!user) { showLoginPopup(); return; }
-        if (FREE_LIMIT !== -1 && userManualIds.size >= FREE_LIMIT) { showUpgradeModal(); return; }
-        const manual = allManuals.find(m => m.id === manualId); if (!manual) return;
-        pendingManual = manual;
-        const used = userManualIds.size;
-        const colorIndex = allManuals.filter(m => m.brand === manual.brand).findIndex(m => m.id === manual.id);
-        document.getElementById('confirmTitle').textContent = manual.title;
-        document.getElementById('confirmBrand').textContent = manual.brand;
-        document.getElementById('modalBookMini').className = 'modal-book-mini book-color-' + (colorIndex % 8);
-        document.getElementById('confirmSlotCount').textContent = FREE_LIMIT === -1 ? used + ' / ∞' : used + ' / ' + FREE_LIMIT;
-        const dots = document.getElementById('confirmSlotDots'); dots.innerHTML = '';
-        if (FREE_LIMIT === -1) { dots.innerHTML = '<span style="font-size:11px;color:var(--gold);">Unlimited</span>'; }
-        else { const c = Math.min(FREE_LIMIT, 10); for (let i = 0; i < c; i++) { const d = document.createElement('div'); d.className = 'slot-dot' + (i < used ? ' used' : '') + (i === FREE_LIMIT - 1 ? ' last' : ''); dots.appendChild(d); } }
-        const w = document.getElementById('confirmWarning');
-        if (FREE_LIMIT !== -1 && FREE_LIMIT - used === 1) { w.textContent = '⚠️ This is your last free slot!'; w.style.display = 'block'; } else { w.style.display = 'none'; }
-        document.getElementById('confirmModal').classList.add('open');
-    }
+        const alreadyOwns = userManualIds.has(manual.id);
 
-    async function confirmAddManual() {
-        if (!pendingManual) return;
-        const btn = document.getElementById('confirmBtn'); btn.disabled = true; btn.textContent = 'Adding...';
-        const { data: { user } } = await supabaseClient.auth.getUser();
-        const { error } = await supabaseClient.from('user_manuals').insert({ user_id: user.id, manual_id: pendingManual.id });
-        if (error) { btn.disabled = false; btn.textContent = 'Add to My Library'; showToast('Error: ' + error.message, 'error'); return; }
-        userManualIds.add(pendingManual.id);
-        const saved = pendingManual; pendingManual = null;
-        closeConfirmModal(); renderSlotBar(); renderContent(); openManual(saved.id);
-    }
-
-    function closeConfirmModal() { document.getElementById('confirmModal').classList.remove('open'); document.getElementById('confirmBtn').disabled = false; document.getElementById('confirmBtn').textContent = 'Add to My Library'; pendingManual = null; }
-
-    async function openManual(manualId) {
-        const manual = allManuals.find(m => m.id === manualId); if (!manual) return;
-        const { data: { session } } = await supabaseClient.auth.getSession(); if (!session) { showLoginPopup(); return; }
-        const p = new URLSearchParams({ manual_id: manual.id, title: manual.title, brand: manual.brand, storage_path: manual.storage_path, _s: btoa(JSON.stringify(session)) });
-        window.location.href = 'pdf_viewer.html?' + p.toString();
-    }
-
-    function showUpgradeModal() { document.getElementById('upgradeModalBody').innerHTML = `You've used all ${FREE_LIMIT} slots.<br>Upgrade for more manuals and advanced features.`; document.getElementById('upgradeModal').classList.add('open'); }
-    function closeUpgradeModal() { document.getElementById('upgradeModal').classList.remove('open'); }
-    function toggleDropdown(e) { e.stopPropagation(); document.getElementById('avatarDropdown').classList.toggle('open'); }
-    document.addEventListener('click', () => document.getElementById('avatarDropdown')?.classList.remove('open'));
-    function showLoginPopup() { document.getElementById('loginPopup').classList.add('open'); }
-    function closeLoginPopup() { document.getElementById('loginPopup').classList.remove('open'); }
-
-    async function forgotPassword() {
-        const email = document.getElementById('loginEmail').value.trim();
-        if (!email) return (document.getElementById('loginMessage').textContent = 'Enter your email first');
-        const { error } = await supabaseClient.auth.resetPasswordForEmail(email);
-        document.getElementById('loginMessage').textContent = error ? error.message : 'Reset link sent!';
-    }
-    function togglePw() { const inp = document.getElementById('loginPassword'), eye = document.getElementById('pwEye'); if (inp.type === 'password') { inp.type = 'text'; eye.textContent = '🙈'; } else { inp.type = 'password'; eye.textContent = '👁️'; } }
-
-    document.getElementById('loginForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const { error } = await supabaseClient.auth.signInWithPassword({ email: document.getElementById('loginEmail').value.trim(), password: document.getElementById('loginPassword').value.trim() });
-        if (error) { document.getElementById('loginMessage').textContent = error.message; }
-        else { closeLoginPopup(); await loadUserManuals(); renderSlotBar(); renderContent(); }
-    });
-
-    async function logoutUser() {
-        document.getElementById('avatarDropdown').classList.remove('open');
-        await supabaseClient.auth.signOut();
-        userManualIds = new Set(); FREE_LIMIT = 5; renderSlotBar(); renderContent();
-        try { if (typeof Android !== 'undefined') Android.clearSession(); } catch(e) {}
-    }
-
-    async function updateAuthUI() {
-        const { data: { user } } = await supabaseClient.auth.getUser();
-        const loginBtn = document.getElementById('loginBtn'), aw = document.getElementById('avatarWrapper');
-        if (user) {
-            if (loginBtn) loginBtn.style.display = 'none'; if (aw) aw.style.display = 'block';
-            const meta = user.user_metadata || {};
-            const fn = meta.first_name || '', ln = meta.last_name || '';
-            const initials = ((fn[0] || '') + (ln[0] || '')).toUpperCase() || user.email[0].toUpperCase();
-            document.getElementById('dropdownName').textContent = [fn, ln].filter(Boolean).join(' ') || 'User';
-            document.getElementById('dropdownEmail').textContent = user.email || '';
-            const img = document.getElementById('avatarImg'), ini = document.getElementById('avatarInitials');
-            const photo = meta.avatar_url || meta.picture || '';
-            if (photo) { img.src = photo; img.style.display = 'block'; ini.style.display = 'none'; }
-            else { img.style.display = 'none'; ini.style.display = 'flex'; ini.textContent = initials; }
+        if (alreadyOwns) {
+            await openManual(manual);
         } else {
-            if (loginBtn) loginBtn.style.display = 'block'; if (aw) aw.style.display = 'none';
+            if (currentTab === 'browse') {
+                currentManual = manual;
+                showAddModal(manual);
+            } else {
+                await openManual(manual);
+            }
         }
     }
 
-    async function checkTierAndShowUpgrade() {
+    function showAddModal(manual) {
+        const modal = document.getElementById('addModal');
+        const titleEl = document.getElementById('modalManualTitle');
+        const slotText = document.getElementById('slotText');
+        const addBtn = document.getElementById('addBtn');
+        const upgradePrompt = document.getElementById('upgradePrompt');
+
+        titleEl.textContent = manual.title;
+        const used = userManualIds.size;
+
+        slotText.textContent = `${used} of ${FREE_LIMIT} slots used`;
+
+        upgradePrompt.style.display = 'none';
+        addBtn.style.display = 'block';
+
+        if (used >= FREE_LIMIT) {
+            addBtn.style.display = 'none';
+            upgradePrompt.style.display = 'block';
+        }
+
+        modal.style.display = 'flex';
+    }
+
+    function closeModal() {
+        document.getElementById('addModal').style.display = 'none';
+    }
+
+    async function addToLibrary() {
+        if (!currentManual) return;
+
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) {
+            alert('Please log in first');
+            closeModal();
+            return;
+        }
+
         try {
-            const { data: { user } } = await supabaseClient.auth.getUser(); if (!user) return;
-            const { data: sub } = await supabaseClient.from('subscriptions').select('tier,status').eq('user_id', user.id).single();
-            const isPaid = sub && ['premium','team','enterprise'].includes(sub.tier) && sub.status === 'active';
-            const btn = document.getElementById('upgradeBtn'); if (btn) btn.style.display = isPaid ? 'none' : 'flex';
-        } catch(e) {}
+            await supabaseClient.from('user_manuals').insert({
+                user_id: user.id,
+                manual_id: currentManual.id
+            });
+
+            userManualIds.add(currentManual.id);
+            closeModal();
+            renderContent();
+
+            setTimeout(() => {
+                openManual(currentManual);
+            }, 300);
+
+        } catch (err) {
+            alert('Failed to add: ' + err.message);
+            closeModal();
+        }
     }
 
-    function showToast(msg, type = '') {
-        const t = document.getElementById('toast'); t.textContent = msg; t.className = 'toast show' + (type ? ' ' + type : '');
-        clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 3000);
+    function upgradeAccount() {
+        closeModal();
+        window.location.href = 'paywall.html';
     }
 
-    init();
+    async function openManual(manual) {
+        // Use the dedicated PDF viewer for the best experience + internal link support.
+        // Pass manual_id so the viewer can fetch is_folder + chapter_metadata (Option 1 long-term model).
+        const params = new URLSearchParams({
+            storage_path: manual.storage_path || '',
+            title: manual.title || 'Service Manual',
+            manual_id: manual.id
+        });
+
+        window.location.href = `pdf_viewer.html?${params.toString()}`;
+    }
+
+    window.onload = init;
 </script>
 </body>
 </html>

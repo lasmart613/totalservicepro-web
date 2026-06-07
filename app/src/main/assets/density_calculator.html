@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Centralized theme system -->
+    <script src="theme.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Density Calculator · TSP</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const enc = new URLSearchParams(window.location.search).get('_s');
+                if (enc) { const s = JSON.parse(atob(enc)); if (s?.access_token) { _pendingSession = s; localStorage.setItem('tsp-auth-token', JSON.stringify({currentSession:s,expiresAt:s.expires_at})); const u=new URL(window.location.href); u.searchParams.delete('_s'); window.history.replaceState({},'',u.toString()); return; } }
+                const raw = localStorage.getItem('tsp-auth-token'); if (raw) { const p=JSON.parse(raw); const sess=p?.currentSession||(p?.access_token?p:null); if (sess?.access_token) _pendingSession=sess; }
+            } catch(e) {}
+        })();
+        const _sb = supabase.createClient('https://yljztfajyvjzqikxdddf.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',{auth:{persistSession:true,storageKey:'tsp-auth-token',storage:window.localStorage,autoRefreshToken:true,detectSessionInUrl:false}});
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
+    <style>
+        /* Most calculator styles now come from tsp.css */
+        .calc-page { padding: 16px 16px 80px; max-width: 600px; margin: 0 auto; }
+        .result-card { background: var(--surface2); border: 2px solid var(--gold); border-radius: 16px; padding: 28px; text-align: center; margin: 20px 0; display: none; }
+        .result-label { font-size: 11px; font-weight: 700; color: var(--text3); text-transform: uppercase; letter-spacing: 2px; margin-bottom: 8px; }
+        .result-value { font-size: 56px; font-weight: 800; color: var(--gold); line-height: 1; }
+        .result-unit { font-size: 20px; color: var(--text3); margin-left: 4px; }
+        .result-detail { margin-top: 16px; display: flex; flex-direction: column; gap: 6px; text-align: left; }
+        .result-row { display: flex; justify-content: space-between; font-size: 13px; padding: 6px 0; border-bottom: 1px solid var(--border); }
+        .result-row:last-child { border: none; }
+        .result-row-val { font-weight: 700; color: var(--text); }
+
+        .button-row {
+            display: flex;
+            background: var(--surface2);
+            border: 1px solid var(--border2);
+            border-radius: 12px;
+            padding: 4px;
+            margin-bottom: 20px;
+        }
+        /* .btn-option and .bottom-nav-item now come from global tsp.css */
+
+        .formula-box { background: var(--surface2); border-left: 3px solid var(--gold); border-radius: 0 8px 8px 0; padding: 14px 16px; margin-top: 20px; font-size: 12px; color: var(--text3); line-height: 1.8; font-family: 'Courier New', monospace; }
+    </style>
+</head>
+<body>
+
+<div class="header">
+    <button class="header-back" onclick="navTo('calculators_menu.html')">‹</button>
+    <div class="header-title">📐 Density</div>
+    <div class="avatar-wrapper" id="avatarWrapper">
+        <button class="avatar-btn" onclick="toggleDropdown(event)"><img id="avatarImg" class="avatar-img" src="" alt=""/><div id="avatarInitials" class="avatar-initials">U</div></button>
+        <div class="avatar-dropdown" id="avatarDropdown">
+            <div class="dropdown-user-info"><div class="dropdown-user-name" id="dropdownName">User</div><div class="dropdown-user-email" id="dropdownEmail"></div></div>
+            <button class="dropdown-item" onclick="navTo('user_profile.html')"><span class="dropdown-icon">👤</span> Profile</button>
+            <button class="dropdown-item" onclick="navTo('settings.html')"><span class="dropdown-icon">⚙️</span> Settings</button>
+            <button class="dropdown-item" id="upgradeBtn" onclick="navTo('paywall.html')" style="display:none;color:var(--gold);"><span class="dropdown-icon">⭐</span> Upgrade</button>
+            <button class="dropdown-item danger" onclick="logoutUser()"><span class="dropdown-icon">🚪</span> Log Out</button>
+        </div>
+    </div>
+</div>
+
+<div class="calc-page">
+    <div style="margin-bottom:16px;">
+        <div style="font-size:20px;font-weight:800;">Energy & Power Density</div>
+        <div style="font-size:13px;color:var(--text3);margin-top:3px;">Fluence (J/cm²) • Irradiance (W/cm²) — unified calculator</div>
+    </div>
+
+    <!-- Mode Toggle (Fluence / Irradiance) -->
+    <div class="button-row">
+        <button class="btn-option active" id="btnFluence" onclick="setMode('fluence')">Fluence (J/cm²)</button>
+        <button class="btn-option" id="btnIrradiance" onclick="setMode('irradiance')">Irradiance (W/cm²)</button>
+    </div>
+
+    <!-- Waveform (CW / Pulsed) - only shown in Irradiance mode -->
+    <div class="form-group" id="waveformGroup" style="display:none;">
+        <label>Waveform</label>
+        <div class="button-row">
+            <button class="btn-option active" id="btnCW" onclick="setWaveform('cw')">CW</button>
+            <button class="btn-option" id="btnPulsed" onclick="setWaveform('pulsed')">Pulsed</button>
+        </div>
+    </div>
+
+    <!-- Pulsed-specific inputs (Energy/Fluence per pulse + Rep Rate) -->
+    <div class="form-group" id="pulsedInputs" style="display:none;">
+        <label>Per-Pulse Input</label>
+        <div class="button-row">
+            <button class="btn-option active" id="btnPerPulseEnergy" onclick="setPulsedInputMode('energy')">Energy per Pulse (J)</button>
+            <button class="btn-option" id="btnPerPulseFluence" onclick="setPulsedInputMode('fluence')">Fluence per Pulse (J/cm²)</button>
+        </div>
+
+        <div id="perPulseEnergyWrap">
+            <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px;">Energy per Pulse</label>
+            <input type="number" class="form-input" id="energyPerPulse" step="0.01" placeholder="e.g. 2.5">
+        </div>
+        <div id="perPulseFluenceWrap" style="display:none;">
+            <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px;">Fluence per Pulse</label>
+            <input type="number" class="form-input" id="fluencePerPulse" step="0.01" placeholder="e.g. 12.5">
+        </div>
+
+        <div style="margin-top:12px;">
+            <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px;">Repetition Rate (Hz / pps)</label>
+            <input type="number" class="form-input" id="repRate" step="0.1" placeholder="e.g. 10">
+        </div>
+    </div>
+
+    <!-- Beam Shape -->
+    <div class="form-group">
+        <label>Beam Shape</label>
+        <div class="button-row">
+            <button class="btn-option active" id="btnCircular" onclick="setShape('circular')">Circular</button>
+            <button class="btn-option" id="btnRect" onclick="setShape('rectangular')">Rectangular</button>
+        </div>
+
+        <div id="circularInputs">
+            <label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px;">Diameter (mm)</label>
+            <select class="form-select" id="diameter"></select>
+        </div>
+        <div id="rectInputs" style="display:none;">
+            <div class="button-row">
+                <button class="btn-option active" id="btnSquare" onclick="setRectType('square')">Square</button>
+                <button class="btn-option" id="btnRectType" onclick="setRectType('rectangular')">Rectangle</button>
+            </div>
+            <div id="squareInputs"><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px;">Side Length (mm)</label><select class="form-select" id="sideLength"></select></div>
+            <div id="rectDimInputs" style="display:none;">
+                <div class="form-row">
+                    <div><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px;">Length (mm)</label><select class="form-select" id="rectLength"></select></div>
+                    <div><label style="font-size:12px;color:var(--text3);display:block;margin-bottom:6px;">Width (mm)</label><select class="form-select" id="rectWidth"></select></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Single Value Input (used for Fluence mode and Irradiance CW mode) -->
+    <div class="form-group" id="singleValueGroup">
+        <label id="inputLabel">Energy (Joules)</label>
+        <input type="number" class="form-input" id="valueInput" step="0.01" placeholder="e.g. 1.5" onkeypress="if(event.key==='Enter')calculate()">
+    </div>
+
+    <button class="btn btn-primary btn-block" onclick="calculate()" id="calcBtn">Calculate Fluence</button>
+
+    <!-- Result -->
+    <div id="result" class="result-card">
+        <div class="result-label" id="resultLabel">Fluence</div>
+        <div><span class="result-value" id="resultValue">0</span><span class="result-unit" id="resultUnit">J/cm²</span></div>
+        <div class="result-detail" id="resultDetail"></div>
+    </div>
+
+    <!-- Formula -->
+    <div class="formula-box" id="formulaBox">
+        Fluence (J/cm²) = Energy (J) ÷ Area (cm²)<br>
+        Irradiance (W/cm²) = Power (W) ÷ Area (cm²)
+    </div>
+</div>
+
+<div class="bottom-nav">
+    <button class="bottom-nav-item" onclick="navTo('index.html')"><span>🏠</span><span>Home</span></button>
+    <button class="bottom-nav-item" onclick="navTo('calculators_menu.html')"><span>🔬</span><span>Calc</span></button>
+    <button class="bottom-nav-item" onclick="navTo('manual_library.html')"><span>📚</span><span>Manuals</span></button>
+    <button class="bottom-nav-item" onclick="navTo('ai_assistant.html')"><span>🤖</span><span>AI</span></button>
+</div>
+
+<script>
+    // Populate dropdowns
+    const diamSel = document.getElementById('diameter');
+    for (let i=2;i<=30;i++){const o=document.createElement('option');o.value=i;o.textContent=i+' mm';if(i===15)o.selected=true;diamSel.appendChild(o);}
+    ['sideLength','rectLength','rectWidth'].forEach(id=>{const el=document.getElementById(id);if(!el)return;for(let i=2;i<=30;i++){const o=document.createElement('option');o.value=i;o.textContent=i+' mm';if(i===10)o.selected=true;el.appendChild(o);}});
+
+    let currentMode = 'fluence';
+    let currentShape = 'circular';
+    let currentRectType = 'square';
+    let currentWaveform = 'cw';        // 'cw' | 'pulsed' (only used in irradiance mode)
+    let pulsedInputMode = 'energy';    // 'energy' | 'fluence' (only used when waveform === 'pulsed')
+
+    function updateWaveformVisibility() {
+        const isIrradiance = currentMode === 'irradiance';
+        const waveformGroup = document.getElementById('waveformGroup');
+        const pulsedInputs = document.getElementById('pulsedInputs');
+        const singleValue = document.getElementById('singleValueGroup');
+
+        if (waveformGroup) waveformGroup.style.display = isIrradiance ? 'block' : 'none';
+
+        const showPulsed = isIrradiance && currentWaveform === 'pulsed';
+        if (pulsedInputs) pulsedInputs.style.display = showPulsed ? 'block' : 'none';
+        if (singleValue) singleValue.style.display = showPulsed ? 'none' : 'block';
+
+        // Keep waveform button states in sync
+        const cwBtn = document.getElementById('btnCW');
+        const pulsedBtn = document.getElementById('btnPulsed');
+        if (cwBtn && pulsedBtn) {
+            cwBtn.classList.toggle('active', currentWaveform === 'cw');
+            pulsedBtn.classList.toggle('active', currentWaveform === 'pulsed');
+        }
+    }
+
+    function setMode(mode) {
+        currentMode = mode;
+        const isFluence = mode === 'fluence';
+
+        document.getElementById('btnFluence').classList.toggle('active', isFluence);
+        document.getElementById('btnIrradiance').classList.toggle('active', !isFluence);
+
+        // Reset waveform to CW when switching modes
+        if (isFluence) {
+            currentWaveform = 'cw';
+        } else if (currentWaveform !== 'cw' && currentWaveform !== 'pulsed') {
+            currentWaveform = 'cw';
+        }
+
+        updateInputLabels();
+        updateWaveformVisibility();
+        document.getElementById('result').style.display = 'none';
+    }
+
+    function setWaveform(w) {
+        currentWaveform = w;
+
+        document.getElementById('btnCW').classList.toggle('active', w === 'cw');
+        document.getElementById('btnPulsed').classList.toggle('active', w === 'pulsed');
+
+        updateInputLabels();
+        updateWaveformVisibility();
+        document.getElementById('result').style.display = 'none';
+    }
+
+    function setPulsedInputMode(mode) {
+        pulsedInputMode = mode;
+
+        const energyWrap = document.getElementById('perPulseEnergyWrap');
+        const fluenceWrap = document.getElementById('perPulseFluenceWrap');
+
+        const energyBtn = document.getElementById('btnPerPulseEnergy');
+        const fluenceBtn = document.getElementById('btnPerPulseFluence');
+
+        if (energyWrap) energyWrap.style.display = (mode === 'energy') ? 'block' : 'none';
+        if (fluenceWrap) fluenceWrap.style.display = (mode === 'fluence') ? 'block' : 'none';
+
+        energyBtn.classList.toggle('active', mode === 'energy');
+        fluenceBtn.classList.toggle('active', mode === 'fluence');
+
+        document.getElementById('result').style.display = 'none';
+    }
+
+    function updateInputLabels() {
+        const isFluence = currentMode === 'fluence';
+        const isPulsed = (currentMode === 'irradiance' && currentWaveform === 'pulsed');
+
+        const labelEl = document.getElementById('inputLabel');
+        const btn = document.getElementById('calcBtn');
+        const resultLabel = document.getElementById('resultLabel');
+        const resultUnit = document.getElementById('resultUnit');
+        const formula = document.getElementById('formulaBox');
+
+        if (isFluence) {
+            if (labelEl) labelEl.textContent = 'Energy (Joules)';
+            if (btn) btn.textContent = 'Calculate Fluence';
+            if (resultLabel) resultLabel.textContent = 'Fluence';
+            if (resultUnit) resultUnit.textContent = 'J/cm²';
+            if (formula) {
+                formula.innerHTML = 'Fluence (J/cm²) = Energy (J) ÷ Area (cm²)<br>' +
+                    'Circular Area = π × (d÷2)² ÷ 100<br>Square Area = s² ÷ 100<br>Rect Area = L × W ÷ 100';
+            }
+        } else {
+            // Irradiance mode
+            if (isPulsed) {
+                if (btn) btn.textContent = 'Calculate Average Irradiance';
+                if (resultLabel) resultLabel.textContent = 'Avg Irradiance';
+                if (resultUnit) resultUnit.textContent = 'W/cm²';
+            } else {
+                if (labelEl) labelEl.textContent = 'Peak Power (Watts)';
+                if (btn) btn.textContent = 'Calculate Irradiance';
+                if (resultLabel) resultLabel.textContent = 'Irradiance';
+                if (resultUnit) resultUnit.textContent = 'W/cm²';
+            }
+
+            if (formula) {
+                if (isPulsed) {
+                    formula.innerHTML = 'Avg Power (W) = Energy per pulse (J) × Rep Rate (Hz)<br>' +
+                        'Avg Irradiance = Avg Power ÷ Area<br><br>' +
+                        '— OR —<br><br>' +
+                        'Avg Irradiance (W/cm²) = Fluence per pulse (J/cm²) × Rep Rate (Hz)';
+                } else {
+                    formula.innerHTML = 'Irradiance (W/cm²) = Power (W) ÷ Area (cm²)<br>' +
+                        'Circular Area = π × (d÷2)² ÷ 100<br>Square Area = s² ÷ 100<br>Rect Area = L × W ÷ 100';
+                }
+            }
+        }
+    }
+
+    function setShape(s) {
+        currentShape = s;
+        document.getElementById('circularInputs').style.display = s==='circular'?'block':'none';
+        document.getElementById('rectInputs').style.display = s==='rectangular'?'block':'none';
+
+        document.getElementById('btnCircular').classList.toggle('active', s==='circular');
+        document.getElementById('btnRect').classList.toggle('active', s==='rectangular');
+
+        document.getElementById('result').style.display = 'none';
+    }
+
+    function setRectType(t) {
+        currentRectType = t;
+        document.getElementById('squareInputs').style.display = t==='square'?'block':'none';
+        document.getElementById('rectDimInputs').style.display = t==='rectangular'?'block':'none';
+
+        document.getElementById('btnSquare').classList.toggle('active', t==='square');
+        document.getElementById('btnRectType').classList.toggle('active', t==='rectangular');
+
+        document.getElementById('result').style.display = 'none';
+    }
+
+    function getAreaCm2() {
+        if (currentShape === 'circular') {
+            const d = parseFloat(document.getElementById('diameter').value || 0);
+            return Math.PI * Math.pow(d/2, 2) / 100;
+        } else if (currentRectType === 'square') {
+            const s = parseFloat(document.getElementById('sideLength').value || 0);
+            return (s * s) / 100;
+        } else {
+            const l = parseFloat(document.getElementById('rectLength').value || 0);
+            const w = parseFloat(document.getElementById('rectWidth').value || 0);
+            return (l * w) / 100;
+        }
+    }
+
+    function calculate() {
+        const isFluence = currentMode === 'fluence';
+        const isPulsed = (currentMode === 'irradiance' && currentWaveform === 'pulsed');
+        const area = getAreaCm2();
+
+        if (isPulsed) {
+            // === Pulsed Irradiance (Average) ===
+            const repRate = parseFloat(document.getElementById('repRate').value);
+            if (isNaN(repRate) || repRate <= 0 || area <= 0) {
+                showToast('Enter valid Rep Rate and spot size', 'error');
+                return;
+            }
+
+            let avgIrradiance, avgPower, perPulseValue, perPulseUnit;
+
+            if (pulsedInputMode === 'energy') {
+                const energy = parseFloat(document.getElementById('energyPerPulse').value);
+                if (isNaN(energy) || energy <= 0) {
+                    showToast('Enter valid energy per pulse', 'error');
+                    return;
+                }
+                avgPower = energy * repRate;
+                avgIrradiance = avgPower / area;
+                perPulseValue = energy;
+                perPulseUnit = 'J';
+            } else {
+                // Fluence per pulse mode
+                const fluence = parseFloat(document.getElementById('fluencePerPulse').value);
+                if (isNaN(fluence) || fluence <= 0) {
+                    showToast('Enter valid fluence per pulse', 'error');
+                    return;
+                }
+                avgIrradiance = fluence * repRate;
+                avgPower = avgIrradiance * area;
+                perPulseValue = fluence;
+                perPulseUnit = 'J/cm²';
+            }
+
+            document.getElementById('resultValue').textContent = avgIrradiance.toFixed(2);
+            document.getElementById('resultLabel').textContent = 'Avg Irradiance';
+            document.getElementById('resultUnit').textContent = 'W/cm²';
+
+            document.getElementById('resultDetail').innerHTML = `
+                <div class="result-row"><span>Per-Pulse</span><span class="result-row-val">${perPulseValue} ${perPulseUnit}</span></div>
+                <div class="result-row"><span>Rep Rate</span><span class="result-row-val">${repRate} Hz</span></div>
+                <div class="result-row"><span>Avg Power</span><span class="result-row-val">${avgPower.toFixed(2)} W</span></div>
+                <div class="result-row"><span>Spot Area</span><span class="result-row-val">${area.toFixed(4)} cm²</span></div>
+                <div class="result-row"><span><strong>Avg Irradiance</strong></span><span class="result-row-val"><strong>${avgIrradiance.toFixed(2)} W/cm²</strong></span></div>
+            `;
+            document.getElementById('result').style.display = 'block';
+            return;
+        }
+
+        // === Normal (single-value) modes: Fluence or Irradiance CW ===
+        const value = parseFloat(document.getElementById('valueInput').value);
+        if (isNaN(value) || value <= 0 || area <= 0) {
+            showToast('Enter valid positive values', 'error');
+            return;
+        }
+
+        const result = value / area;
+
+        document.getElementById('resultValue').textContent = result.toFixed(2);
+        document.getElementById('resultLabel').textContent = isFluence ? 'Fluence' : 'Irradiance';
+        document.getElementById('resultUnit').textContent = isFluence ? 'J/cm²' : 'W/cm²';
+
+        document.getElementById('resultDetail').innerHTML = `
+            <div class="result-row"><span>${isFluence ? 'Energy' : 'Power'}</span><span class="result-row-val">${value} ${isFluence ? 'J' : 'W'}</span></div>
+            <div class="result-row"><span>Spot Area</span><span class="result-row-val">${area.toFixed(4)} cm²</span></div>
+            <div class="result-row"><span>${isFluence ? 'Fluence' : 'Irradiance'}</span><span class="result-row-val">${result.toFixed(2)} ${isFluence ? 'J/cm²' : 'W/cm²'}</span></div>
+        `;
+        document.getElementById('result').style.display = 'block';
+    }
+
+    async function navTo(page){try{const{data:{session}}=await _sb.auth.getSession();if(session?.access_token){const sep=page.includes('?')?'&':'?';window.location.href=page+sep+'_s='+btoa(JSON.stringify(session));return;}}catch(e){}window.location.href=page;}
+    function toggleDropdown(e){e.stopPropagation();document.getElementById('avatarDropdown').classList.toggle('open');}
+    document.addEventListener('click',()=>document.getElementById('avatarDropdown')?.classList.remove('open'));
+    async function logoutUser(){document.getElementById('avatarDropdown').classList.remove('open');await _sb.auth.signOut();updateAuthUI();try{if(typeof Android!=='undefined')Android.clearSession();}catch(e){}}
+    async function updateAuthUI(){const{data:{user}}=await _sb.auth.getUser();const aw=document.getElementById('avatarWrapper');if(user){if(aw)aw.style.display='block';const meta=user.user_metadata||{},fn=meta.first_name||'',ln=meta.last_name||'';document.getElementById('dropdownName').textContent=[fn,ln].filter(Boolean).join(' ')||'User';document.getElementById('dropdownEmail').textContent=user.email||'';const img=document.getElementById('avatarImg'),ini=document.getElementById('avatarInitials'),photo=meta.avatar_url||meta.picture||'';if(photo){img.src=photo;img.style.display='block';ini.style.display='none';}else{img.style.display='none';ini.style.display='flex';ini.textContent=((fn[0]||'')+(ln[0]||'')).toUpperCase()||user.email[0].toUpperCase();}}else{if(aw)aw.style.display='none';}}
+    function showToast(msg,type=''){let el=document.getElementById('_toast');if(!el){el=document.createElement('div');el.id='_toast';el.style.cssText='position:fixed;bottom:80px;left:50%;transform:translateX(-50%) translateY(20px);background:var(--surface2);border:1px solid var(--gold);border-radius:10px;padding:12px 20px;font-size:14px;font-weight:600;z-index:9999;transition:all 0.3s;white-space:nowrap;opacity:0;color:var(--text);';document.body.appendChild(el);}if(type==='error')el.style.borderColor='var(--red)';else el.style.borderColor='var(--gold)';el.textContent=msg;el.style.opacity='1';el.style.transform='translateX(-50%) translateY(0)';clearTimeout(el._t);el._t=setTimeout(()=>{el.style.opacity='0';el.style.transform='translateX(-50%) translateY(20px)';},3000);}
+    _sb.auth.onAuthStateChange((event,session)=>{updateAuthUI();try{if(typeof Android!=='undefined'){if(session?.access_token)Android.saveSession(JSON.stringify(session));else if(event==='SIGNED_OUT'&&!session)Android.clearSession();}}catch(e){}});
+    if(_pendingSession){const ps=_pendingSession;_pendingSession=null;_sb.auth.setSession({access_token:ps.access_token,refresh_token:ps.refresh_token}).then(({data})=>{updateAuthUI();try{if(typeof Android!=='undefined'&&data.session)Android.saveSession(JSON.stringify(data.session));}catch(e){}});}else{updateAuthUI();}
+
+    // Initialize
+    setMode('fluence');
+
+    // Initial sync for pulsed sub-controls (in case user immediately switches to Irradiance → Pulsed)
+    (function initPulsedButtons() {
+        const energyBtn = document.getElementById('btnPerPulseEnergy');
+        const fluenceBtn = document.getElementById('btnPerPulseFluence');
+        if (energyBtn) energyBtn.classList.add('active');
+        if (fluenceBtn) fluenceBtn.classList.remove('active');
+    })();
+</script>
+</body>
+</html>

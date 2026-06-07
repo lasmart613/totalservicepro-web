@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Centralized theme system -->
+    <script src="theme.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Estimate Generator · Total Service Pro</title>
@@ -42,6 +44,25 @@
             #preview { position: absolute; left: 0; top: 0; width: 100%; }
             .no-print { display: none !important; }
         }
+
+        /* Customer Autocomplete Styles (matching service_report.html) */
+        .cust-search-wrap { position: relative; }
+        .cust-dropdown {
+            display: none; position: absolute; top: calc(100% + 4px); left: 0; right: 0;
+            background: var(--surface2); border: 1px solid var(--gold); border-radius: 10px;
+            max-height: 240px; overflow-y: auto; z-index: 300;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.5);
+        }
+        .cust-dropdown.open { display: block; }
+        .cust-option {
+            padding: 10px 14px; cursor: pointer; border-bottom: 1px solid var(--border);
+            transition: background 0.1s;
+        }
+        .cust-option:last-child { border-bottom: none; }
+        .cust-option:hover { background: var(--surface3); }
+        .cust-option-name { font-size: 14px; font-weight: 700; color: var(--text); }
+        .cust-option-sub  { font-size: 11px; color: var(--text3); margin-top: 2px; }
+        .cust-option-new  { color: var(--gold); font-size: 13px; font-weight: 700; }
     </style>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="tsp.css">
@@ -50,127 +71,161 @@
 
 
 <div class="page" style="max-width:900px;margin:0 auto;">
-    <h1 style="font-size:22px;font-weight:800;color:var(--text);margin-bottom:4px;">Service Estimate Generator</h1>
-    <p style="font-size:13px;color:var(--text3);margin-bottom:20px;">Create quotes for PM, repairs, or full service calls</p>
+        <h1 style="font-size:22px;font-weight:800;color:var(--text);margin-bottom:4px;">Service Estimate Generator</h1>
+        <p style="font-size:13px;color:var(--text3);margin-bottom:20px;">Create quotes for PM, repairs, or full service calls</p>
 
-    <div class="section">
-        <h2>Customer & Device Info</h2>
-        <div class="grid-2">
-            <div>
-                <label>Customer/Clinic Name</label>
-                <input type="text" id="customer" placeholder="e.g. Desert Dermatology">
+        <div class="section">
+            <h2>Customer & Device Info</h2>
+
+            <!-- Customer Autocomplete (same pattern as Service Reports) -->
+            <div class="form-row full" style="margin-bottom:12px;">
+                <div class="form-group">
+                    <label>Customer / Clinic Name</label>
+                    <div class="cust-search-wrap" id="custSearchWrap">
+                        <input id="customer" placeholder="Search or type clinic name..." autocomplete="off" 
+                               oninput="onCustSearch()" onfocus="onCustSearch()">
+                        <div class="cust-dropdown" id="custDropdown"></div>
+                    </div>
+                </div>
             </div>
-            <div>
-                <label>Contact Phone/Email</label>
-                <input type="text" id="contact" placeholder="Optional">
+
+            <div class="grid-2">
+                <div>
+                    <label>Address</label>
+                    <input type="text" id="custAddress" placeholder="123 Main St">
+                </div>
+                <div>
+                    <label>Contact Phone</label>
+                    <input type="tel" id="custPhone" placeholder="+1 555-000-0000">
+                </div>
+            </div>
+            <div class="grid-2" style="margin-top:8px;">
+                <div>
+                    <label>City</label>
+                    <input type="text" id="custCity" placeholder="City">
+                </div>
+                <div style="display:flex; gap:8px;">
+                    <div style="flex:1;">
+                        <label>State</label>
+                        <input type="text" id="custState" placeholder="CA" maxlength="2">
+                    </div>
+                    <div style="flex:1;">
+                        <label>ZIP</label>
+                        <input type="text" id="custZip" placeholder="90210">
+                    </div>
+                </div>
+            </div>
+            <div class="grid-2" style="margin-top:16px;">
+                <div>
+                    <label>Device Model</label>
+                    <select id="model">
+                        <option value="">Select...</option>
+                        <option>GentleLASE</option>
+                        <option>GentleLASE PLUS</option>
+                        <option>GentleLASE Limited Edition</option>
+                        <option>GentleMax Pro</option>
+                        <option>Other</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Serial # / Current Pulse Count</label>
+                    <input type="text" id="serial" placeholder="e.g. GL12345 – 145,000 pulses">
+                </div>
             </div>
         </div>
-        <div class="grid-2" style="margin-top:16px;">
-            <div>
-                <label>Device Model</label>
-                <select id="model">
-                    <option value="">Select...</option>
-                    <option>GentleLASE</option>
-                    <option>GentleLASE PLUS</option>
-                    <option>GentleLASE Limited Edition</option>
-                    <option>GentleMax Pro</option>
-                    <option>Other</option>
-                </select>
+
+        <div class="section">
+            <h2>Service Type(s)</h2>
+            <div class="checkbox-group">
+                <label><input type="checkbox" class="service-type" value="Preventative Maintenance"> Routine PM Visit</label>
+                <label><input type="checkbox" class="service-type" value="Flashlamp Replacement"> Flashlamp(s) Replacement</label>
+                <label><input type="checkbox" class="service-type" value="Laser Head"> Laser Head Rebuild/Replacement</label>
+                <label><input type="checkbox" class="service-type" value="Focus Lens"> Focus Lens Replacement</label>
+                <label><input type="checkbox" class="service-type" value="DCD/Calibration"> DCD or Calport Calibration</label>
+                <label><input type="checkbox" class="service-type" value="Diagnostic"> Diagnostic / Troubleshooting</label>
+                <label><input type="checkbox" class="service-type" value="Other Repair"> Other Repair (specify below)</label>
             </div>
-            <div>
-                <label>Serial # / Current Pulse Count</label>
-                <input type="text" id="serial" placeholder="e.g. GL12345 – 145,000 pulses">
+            <textarea id="other-service" placeholder="Describe other services or custom work..." rows="2" style="width:100%; margin-top:8px;"></textarea>
+        </div>
+
+        <div class="section">
+            <h2>Reported Issues / Notes</h2>
+            <textarea id="issues" rows="4" placeholder="e.g. Low energy output, error code E-12, bubbling in DCD, head >150k pulses..."></textarea>
+        </div>
+
+        <div class="section">
+            <h2>Travel & Urgency</h2>
+            <div class="grid-2">
+                <div>
+                    <label>Travel Distance (miles round-trip)</label>
+                    <input type="number" id="miles" min="0" value="0">
+                </div>
+                <div>
+                    <label>Urgency Level</label>
+                    <select id="urgency">
+                        <option value="standard">Standard (next available)</option>
+                        <option value="rush">Rush (within 48h)</option>
+                        <option value="emergency">Emergency (same/next day)</option>
+                    </select>
+                </div>
             </div>
         </div>
-    </div>
 
-    <div class="section">
-        <h2>Service Type(s)</h2>
-        <div class="checkbox-group">
-            <label><input type="checkbox" class="service-type" value="Preventative Maintenance"> Routine PM Visit</label>
-            <label><input type="checkbox" class="service-type" value="Flashlamp Replacement"> Flashlamp(s) Replacement</label>
-            <label><input type="checkbox" class="service-type" value="Laser Head"> Laser Head Rebuild/Replacement</label>
-            <label><input type="checkbox" class="service-type" value="Focus Lens"> Focus Lens Replacement</label>
-            <label><input type="checkbox" class="service-type" value="DCD/Calibration"> DCD or Calport Calibration</label>
-            <label><input type="checkbox" class="service-type" value="Diagnostic"> Diagnostic / Troubleshooting</label>
-            <label><input type="checkbox" class="service-type" value="Other Repair"> Other Repair (specify below)</label>
+        <div class="section">
+            <h2>Pricing (you enter these – saved locally)</h2>
+            <div class="grid-2">
+                <div>
+                    <label>Labor Rate ($/hour)</label>
+                    <input type="number" id="laborRate" value="185" step="5">
+                </div>
+                <div>
+                    <label>Estimated Labor Hours</label>
+                    <input type="number" id="laborHours" value="2" step="0.5">
+                </div>
+                <div>
+                    <label>Travel Rate ($/mile)</label>
+                    <input type="number" id="travelRate" value="1.25" step="0.1">
+                </div>
+                <div>
+                    <label>Diagnostic Fee (if separate)</label>
+                    <input type="number" id="diagFee" value="250">
+                </div>
+                <div>
+                    <label>Tax Rate (%)</label>
+                    <input type="number" id="taxRate" value="8.75" step="0.1">
+                </div>
+            </div>
+            <p style="margin-top:12px; font-size:0.9rem; color:var(--text-muted);">Parts prices: enter below per item (total parts cost summed)</p>
+            <textarea id="partsList" rows="5" placeholder="e.g. Flashlamps pair: 650\nLaser head: 4750\nCryogen bottle: 120\n..."></textarea>
         </div>
-        <textarea id="other-service" placeholder="Describe other services or custom work..." rows="2" style="width:100%; margin-top:8px;"></textarea>
-    </div>
 
-    <div class="section">
-        <h2>Reported Issues / Notes</h2>
-        <textarea id="issues" rows="4" placeholder="e.g. Low energy output, error code E-12, bubbling in DCD, head >150k pulses..."></textarea>
-    </div>
-
-    <div class="section">
-        <h2>Travel & Urgency</h2>
-        <div class="grid-2">
-            <div>
-                <label>Travel Distance (miles round-trip)</label>
-                <input type="number" id="miles" min="0" value="0">
-            </div>
-            <div>
-                <label>Urgency Level</label>
-                <select id="urgency">
-                    <option value="standard">Standard (next available)</option>
-                    <option value="rush">Rush (within 48h)</option>
-                    <option value="emergency">Emergency (same/next day)</option>
-                </select>
-            </div>
-        </div>
-    </div>
-
-    <div class="section">
-        <h2>Pricing (you enter these – saved locally)</h2>
-        <div class="grid-2">
-            <div>
-                <label>Labor Rate ($/hour)</label>
-                <input type="number" id="laborRate" value="185" step="5">
-            </div>
-            <div>
-                <label>Estimated Labor Hours</label>
-                <input type="number" id="laborHours" value="2" step="0.5">
-            </div>
-            <div>
-                <label>Travel Rate ($/mile)</label>
-                <input type="number" id="travelRate" value="1.25" step="0.1">
-            </div>
-            <div>
-                <label>Diagnostic Fee (if separate)</label>
-                <input type="number" id="diagFee" value="250">
-            </div>
-            <div>
-                <label>Tax Rate (%)</label>
-                <input type="number" id="taxRate" value="8.75" step="0.1">
+        <div class="no-print" style="text-align:center; margin:32px 0;">
+            <button onclick="calculateAndPreview()" style="padding:16px 40px; font-size:1.2rem;">Calculate & Preview Estimate</button>
+            <button class="btn btn-primary" onclick="generatePDF()">Download PDF</button>
+            <button class="btn btn-secondary" onclick="saveToSupabase()">Save to Records</button>
+            <div style="margin-top:12px;">
+                <button onclick="navTo('estimates_list.html')" style="padding:8px 16px; font-size:0.9rem; background:none; border:1px solid var(--border); color:var(--text);">← Back to Estimates List</button>
             </div>
         </div>
-        <p style="margin-top:12px; font-size:0.9rem; color:var(--text-muted);">Parts prices: enter below per item (total parts cost summed)</p>
-        <textarea id="partsList" rows="5" placeholder="e.g. Flashlamps pair: 650\nLaser head: 4750\nCryogen bottle: 120\n..."></textarea>
-    </div>
 
-    <div class="no-print" style="text-align:center; margin:32px 0;">
-        <button onclick="calculateAndPreview()" style="padding:16px 40px; font-size:1.2rem;">Calculate & Preview Estimate</button>
-        <button onclick="generatePDF()" style="margin-left:16px; background:#22C55E; padding:16px 40px; font-size:1.2rem;">Download PDF</button>
-        <button onclick="saveToSupabase()" style="margin-left:16px; background:#3B82F6; padding:16px 40px; font-size:1.2rem;">Save to Records</button>
+        <div id="preview" class="section">
+            <h1 style="margin-bottom:8px;">Service Estimate</h1>
+            <div id="previewContent">Fill in the form and click Calculate to see preview here...</div>
+        </div>
     </div>
-
-    <div id="preview" class="section">
-        <h1 style="margin-bottom:8px;">Service Estimate</h1>
-        <div id="previewContent">Fill in the form and click Calculate to see preview here...</div>
-    </div>
-</div>
 
 <script>
     const supabase = supabaseClient;
 
-    // Load saved pricing
+    // Load saved pricing + customers for autocomplete
     window.addEventListener('load', () => {
         const saved = JSON.parse(localStorage.getItem('tsp_estimate_pricing') || '{}');
         if (saved.laborRate) document.getElementById('laborRate').value = saved.laborRate;
         if (saved.travelRate) document.getElementById('travelRate').value = saved.travelRate;
         if (saved.diagFee) document.getElementById('diagFee').value = saved.diagFee;
         if (saved.taxRate) document.getElementById('taxRate').value = saved.taxRate;
+
+        loadCustomers();
     });
 
     function calculateAndPreview() {
@@ -283,21 +338,168 @@
     async function saveToSupabase() {
         if (!confirm('Save this estimate to your records?')) return;
 
+        const customerName = document.getElementById('customer').value.trim();
+        if (!customerName) {
+            alert('Customer name is required.');
+            return;
+        }
+
+        // === NEW: Auto-create customer in organizations if it doesn't exist ===
+        let orgId = null;
+        try {
+            // Check if customer already exists
+            const { data: existing } = await supabaseClient
+                .from('organizations')
+                .select('id')
+                .eq('name', customerName)
+                .eq('type', 'customer')
+                .maybeSingle();
+
+            if (existing) {
+                orgId = existing.id;
+            } else {
+                // Create new customer
+                const newOrg = {
+                    name: customerName,
+                    address: document.getElementById('custAddress')?.value || null,
+                    city: document.getElementById('custCity')?.value || null,
+                    state: document.getElementById('custState')?.value || null,
+                    phone: document.getElementById('custPhone')?.value || null,
+                    email: document.getElementById('custEmail')?.value || null,
+                    type: 'customer',
+                    is_active: true,
+                    created_by: (await supabaseClient.auth.getUser()).data.user?.id || null  // so RLS makes it visible to your service company
+                };
+                const { data: created, error: createErr } = await supabaseClient
+                    .from('organizations')
+                    .insert([newOrg])
+                    .select('id')
+                    .single();
+
+                if (createErr) throw createErr;
+                orgId = created.id;
+            }
+        } catch (e) {
+            console.warn('Could not create/lookup organization:', e);
+        }
+
+        // Load user's organization for the estimate record
+        let userOrgId = orgId; // fallback to customer's if no user org
+        try {
+            const { data: { user } } = await supabase.auth.getUser();
+            if (user) {
+                const { data: profile } = await supabase
+                    .from('user_profiles')
+                    .select('organization_id')
+                    .eq('id', user.id)
+                    .maybeSingle();
+                if (profile?.organization_id) userOrgId = profile.organization_id;
+            }
+        } catch(e) {}
+
         const data = {
-            customer_name: document.getElementById('customer').value || null,
+            customer_name: customerName,
+            organization_id: userOrgId,
             device_model: document.getElementById('model').value || null,
             serial_pulses: document.getElementById('serial').value || null,
             services: Array.from(document.querySelectorAll('.service-type:checked')).map(cb => cb.value),
             issues: document.getElementById('issues').value || null,
             total: parseFloat(document.querySelector('.totals span')?.innerText.replace('$','') || 0),
-            estimate_data: {} // you can JSON.stringify full form if needed
+            estimate_data: {} 
         };
 
         const { error } = await supabase.from('service_estimates').insert([data]);
-        if (error) alert('Save failed: ' + error.message);
-        else alert('Estimate saved!');
+        if (error) {
+            alert('Save failed: ' + error.message);
+        } else {
+            alert('Estimate saved!');
+            // Optionally navigate back to list
+            // navTo('estimates_list.html');
+        }
     }
 
+    // ========== CUSTOMER AUTOCOMPLETE (adapted from service_report.html) ==========
+    let allCustomers = [];
+    let custSearchTimeout = null;
+
+    async function loadCustomers() {
+        try {
+            const { data } = await supabaseClient
+                .from('organizations')
+                .select('id, name, address, city, state, phone, email')
+                .eq('type', 'customer')
+                .eq('is_active', true)
+                .order('name');
+            allCustomers = data || [];
+        } catch(e) {
+            console.warn('Could not load customers for autocomplete');
+        }
+    }
+
+    function onCustSearch() {
+        clearTimeout(custSearchTimeout);
+        custSearchTimeout = setTimeout(showCustDropdown, 180);
+    }
+
+    function showCustDropdown() {
+        const input = document.getElementById('customer');
+        const dropdown = document.getElementById('custDropdown');
+        if (!input || !dropdown) return;
+
+        const q = input.value.trim().toLowerCase();
+
+        const matches = q 
+            ? allCustomers.filter(c => c.name.toLowerCase().includes(q) || (c.city||'').toLowerCase().includes(q))
+            : allCustomers.slice(0, 8);
+
+        dropdown.innerHTML = '';
+
+        matches.slice(0, 8).forEach(org => {
+            const div = document.createElement('div');
+            div.className = 'cust-option';
+            const loc = [org.city, org.state].filter(Boolean).join(', ');
+            div.innerHTML = `<div class="cust-option-name">${org.name}</div>` +
+                (loc ? `<div class="cust-option-sub">📍 ${loc}</div>` : '');
+            div.onclick = () => selectCustomer(org);
+            dropdown.appendChild(div);
+        });
+
+        // Option to use typed name (new customer)
+        if (q && !matches.find(m => m.name.toLowerCase() === q)) {
+            const div = document.createElement('div');
+            div.className = 'cust-option';
+            div.innerHTML = `<div class="cust-option-new">＋ Use "${input.value.trim()}" (new customer)</div>`;
+            div.onclick = () => dropdown.classList.remove('open');
+            dropdown.appendChild(div);
+        }
+
+        dropdown.classList.add('open');
+    }
+
+    function selectCustomer(org) {
+        document.getElementById('customer').value    = org.name || '';
+        if (document.getElementById('custAddress')) document.getElementById('custAddress').value = org.address || '';
+        if (document.getElementById('custCity'))    document.getElementById('custCity').value    = org.city    || '';
+        if (document.getElementById('custState'))   document.getElementById('custState').value   = org.state   || '';
+        if (document.getElementById('custPhone'))   document.getElementById('custPhone').value   = org.phone   || '';
+        if (document.getElementById('custEmail'))   document.getElementById('custEmail').value   = org.email   || '';
+        const dropdown = document.getElementById('custDropdown');
+        if (dropdown) dropdown.classList.remove('open');
+    }
+
+    // Close dropdown on outside click
+    document.addEventListener('click', function(e) {
+        const wrap = document.getElementById('custSearchWrap');
+        const dropdown = document.getElementById('custDropdown');
+        if (wrap && dropdown && !wrap.contains(e.target)) {
+            dropdown.classList.remove('open');
+        }
+    });
+
 </script>
+
+<!-- Web compatibility / browser testing layer (safe no-op in WebView) -->
+<script src="web-compat.js"></script>
+
 </body>
 </html>

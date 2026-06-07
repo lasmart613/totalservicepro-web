@@ -1,256 +1,1168 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script src="theme.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Manual Viewer · TSP</title>
-    <script>
-        var _pendingSession = null;
-        (function() {
-            try {
-                const enc = new URLSearchParams(window.location.search).get('_s');
-                if (enc) {
-                    const s = JSON.parse(atob(enc));
-                    if (s && s.access_token) {
-                        _pendingSession = s;
-                        localStorage.setItem('tsp-auth-token', JSON.stringify({ currentSession: s, expiresAt: s.expires_at }));
-                        const u = new URL(window.location.href); u.searchParams.delete('_s');
-                        window.history.replaceState({}, '', u.toString());
-                        return;
-                    }
-                }
-                const raw = localStorage.getItem('tsp-auth-token');
-                if (raw) { const p = JSON.parse(raw); const sess = p?.currentSession || (p?.access_token ? p : null); if (sess?.access_token) _pendingSession = sess; }
-            } catch(e) {}
-        })();
-        function restoreSession(jsonStr) {
-            try {
-                const parsed = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
-                const session = parsed?.currentSession || parsed;
-                if (session?.access_token) {
-                    localStorage.setItem('tsp-auth-token', JSON.stringify({ currentSession: session, expiresAt: session.expires_at }));
-                    if (typeof _sb !== 'undefined') {
-                        _sb.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
-                    } else { _pendingSession = session; }
-                }
-            } catch(e) {}
-        }
-    </script>
-    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="tsp.css">
+    <title>Service Manual Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
-        body { display: flex; flex-direction: column; height: 100vh; overflow: hidden; }
-        .viewer-header {
-            background: var(--surface); border-bottom: 1px solid var(--gold);
-            padding: 10px 14px; display: flex; align-items: center; gap: 10px;
-            flex-shrink: 0; z-index: 100;
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #111827; color: #fff; height: 100vh; overflow: hidden; display: flex; flex-direction: column; }
+
+        .header {
+            background: #1F2937; border-bottom: 1px solid #374151;
+            padding: 10px 14px; display: flex; align-items: center;
+            gap: 10px; flex-shrink: 0; z-index: 100;
         }
-        .viewer-back { background: none; border: none; color: var(--gold); font-size: 22px; cursor: pointer; padding: 4px 8px; border-radius: 8px; line-height: 1; flex-shrink: 0; }
-        .viewer-back:active { background: var(--surface3); }
-        .viewer-info { flex: 1; min-width: 0; }
-        .viewer-title { font-size: 14px; font-weight: 700; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .viewer-brand { font-size: 11px; color: var(--text3); margin-top: 1px; }
-        .toc-btn { background: none; border: 1px solid var(--border2); border-radius: 8px; padding: 6px 10px; color: var(--text2); font-family: inherit; font-size: 12px; cursor: pointer; flex-shrink: 0; transition: all 0.15s; }
-        .toc-btn:hover { border-color: var(--gold-border); color: var(--gold); }
-        .pdf-frame-wrap { flex: 1; position: relative; overflow: hidden; }
-        #pdfFrame { width: 100%; height: 100%; border: none; display: none; }
-        #pdfFrame.visible { display: block; }
-        .loading-screen { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 14px; background: var(--bg); }
-        .loading-screen.hidden { display: none; }
-        .loading-label { font-size: 13px; color: var(--text3); }
-        .error-screen { position: absolute; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; text-align: center; padding: 40px 24px; gap: 12px; background: var(--bg); }
-        .error-screen.visible { display: flex; }
-        .error-icon { font-size: 48px; }
-        .error-title { font-size: 16px; font-weight: 700; color: var(--red); }
-        .error-msg { font-size: 13px; color: var(--text3); line-height: 1.5; max-width: 280px; }
-        .toc-drawer { position: absolute; top: 0; left: 0; bottom: 0; width: 80%; max-width: 300px; background: var(--surface2); border-right: 1px solid var(--border2); transform: translateX(-100%); transition: transform 0.25s ease; z-index: 200; display: flex; flex-direction: column; overflow: hidden; }
-        .toc-drawer.open { transform: translateX(0); }
-        .toc-overlay { position: absolute; inset: 0; background: rgba(0,0,0,0.6); z-index: 199; display: none; }
-        .toc-overlay.open { display: block; }
-        .toc-header { padding: 14px 16px; border-bottom: 1px solid var(--border2); display: flex; align-items: center; justify-content: space-between; }
-        .toc-header-title { font-size: 14px; font-weight: 700; color: var(--gold); }
-        .toc-close { background: none; border: none; color: var(--text3); font-size: 22px; cursor: pointer; }
-        .toc-list { flex: 1; overflow-y: auto; padding: 8px 0; }
-        .toc-item { display: block; width: 100%; padding: 11px 16px; background: none; border: none; color: var(--text2); font-family: inherit; font-size: 13px; text-align: left; cursor: pointer; transition: background 0.1s; border-bottom: 1px solid var(--border); }
-        .toc-item:hover { background: var(--surface3); color: var(--text); }
-        .toc-item-brand { font-size: 10px; color: var(--text3); display: block; margin-top: 2px; }
-        .toc-empty { padding: 24px 16px; font-size: 13px; color: var(--text3); text-align: center; }
+        .back-btn {
+            background: #FBBF24; border: none; border-radius: 8px;
+            padding: 8px 14px; color: #111827; font-weight: 700;
+            font-size: 14px; cursor: pointer;
+        }
+        .header-title {
+            flex: 1; font-size: 15px; font-weight: 600; color: #FBBF24;
+            overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+        }
+
+        .toolbar {
+            background: #1a2233; border-bottom: 1px solid #374151;
+            padding: 8px 14px; display: flex; align-items: center; gap: 8px;
+        }
+        .tool-btn {
+            background: rgba(251,191,36,0.1); border: 1px solid #374151;
+            border-radius: 6px; padding: 7px 12px; color: #FBBF24;
+            font-size: 13px; cursor: pointer;
+        }
+
+        .pdf-container { flex: 1; overflow: auto; background: #0d1117; position: relative; }
+        .canvas-wrapper { display: flex; justify-content: center; padding: 16px 8px; }
+
+        .state-screen {
+            position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            padding: 40px; text-align: center;
+        }
+
+        .loading-text { color: #9CA3AF; font-size: 15px; margin-bottom: 16px; }
+
+        .progress-container {
+            width: 80%; max-width: 320px;
+        }
+        .progress-bar {
+            width: 100%;
+            height: 10px;
+            background: #374151;
+            border-radius: 9999px;
+            overflow: hidden;
+            margin-bottom: 8px;
+        }
+        .progress-bar progress {
+            width: 100%;
+            height: 100%;
+            accent-color: #FBBF24;
+        }
+        .progress-text {
+            color: #FBBF24;
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .error-icon { font-size: 48px; margin-bottom: 16px; }
+        .error-title { font-size: 18px; font-weight: 700; color: #f87171; margin-bottom: 8px; }
+        .retry-btn {
+            background: #FBBF24; border: none; border-radius: 8px;
+            padding: 10px 24px; color: #111827; font-weight: 700; cursor: pointer;
+        }
+
+        .bottom-nav {
+            background: #1F2937; border-top: 1px solid #374151;
+            display: flex; justify-content: space-around; padding: 8px 0;
+        }
+        .bottom-nav-item {
+            display: flex; flex-direction: column; align-items: center;
+            color: #9CA3AF; font-size: 10px; font-weight: 600; cursor: pointer;
+        }
+
+        /* Chapter selector (Option 1 folder-style manuals) - matches viewer gold/dark theme */
+        .chapter-selector { text-align: left; }
+        .chapter-card {
+            background: #1F2937;
+            border: 1px solid #374151;
+            border-radius: 8px;
+            padding: 11px 12px;
+            cursor: pointer;
+            transition: border-color .12s, transform .12s, box-shadow .12s;
+            text-align: left;
+            min-height: 68px;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+        }
+        .chapter-card:hover {
+            border-color: #FBBF24;
+            transform: translateY(-1px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+        }
+        .chapter-card:active { transform: scale(0.985); }
+        .chapter-order {
+            font-size: 10px; font-weight: 700; color: #FBBF24;
+            letter-spacing: 0.5px; margin-bottom: 2px;
+        }
+        .chapter-title {
+            font-size: 13px; line-height: 1.25; color: #E5E7EB; font-weight: 500;
+        }
     </style>
 </head>
 <body>
 
-<div class="viewer-header">
-    <button class="viewer-back" onclick="goBack()">‹</button>
-    <div class="viewer-info">
-        <div class="viewer-title" id="viewerTitle">Loading...</div>
-        <div class="viewer-brand" id="viewerBrand"></div>
-    </div>
-    <button class="toc-btn" id="tocBtn" onclick="openTOC()" style="display:none;">📋 Contents</button>
+<div class="header">
+    <button class="back-btn" onclick="goBack()">← Back</button>
+    <div class="header-title" id="headerTitle">Service Manual</div>
 </div>
 
-<div class="pdf-frame-wrap">
-    <div class="loading-screen" id="loadingScreen">
-        <div class="spinner"></div>
-        <div class="loading-label" id="loadingLabel">Getting access...</div>
+<div class="toolbar">
+    <button class="tool-btn" onclick="prevPage()">◄ Prev</button>
+    <input type="number" id="pageInput" style="width:50px; text-align:center;" onchange="jumpToPage()" onkeydown="if (event.key === 'Enter') jumpToPage()">
+    <span id="pageInfo">/ -</span>
+    <button class="tool-btn" onclick="nextPage()">Next ►</button>
+    <button class="tool-btn" onclick="zoomOut()">－</button>
+    <span class="zoom-info" id="zoomInfo" onclick="resetZoom()">100%</span>
+    <button class="tool-btn" onclick="zoomIn()">＋</button>
+    <button class="tool-btn" id="chaptersBtn" onclick="showChapterSelector()" style="display:none; background:rgba(251,191,36,0.25); border-color:#FBBF24;">📚 Chapters</button>
+</div>
+
+<div class="pdf-container" id="pdfContainer">
+    <div class="canvas-wrapper">
+        <canvas id="pdfCanvas"></canvas>
     </div>
-    <div class="error-screen" id="errorScreen">
-        <div class="error-icon">⚠️</div>
-        <div class="error-title" id="errorTitle">Could not load manual</div>
-        <div class="error-msg" id="errorMsg">Please check your connection and try again.</div>
-        <button class="btn btn-ghost" style="margin-top:8px;" onclick="goBack()">← Go Back</button>
-    </div>
-    <iframe id="pdfFrame"></iframe>
-    <div class="toc-overlay" id="tocOverlay" onclick="closeTOC()"></div>
-    <div class="toc-drawer" id="tocDrawer">
-        <div class="toc-header">
-            <span class="toc-header-title">Contents</span>
-            <button class="toc-close" onclick="closeTOC()">×</button>
+
+    <!-- Loading Screen with Progress Bar -->
+    <div class="state-screen" id="loadingScreen">
+        <div class="loading-text" id="loadingText">Connecting to manual server...</div>
+
+        <div class="progress-container">
+            <div class="progress-bar">
+                <progress id="progressBar" value="0" max="100"></progress>
+            </div>
+            <div class="progress-text" id="progressText">0%</div>
         </div>
-        <div class="toc-list" id="tocList"><div class="toc-empty">Loading...</div></div>
+    </div>
+
+    <div class="state-screen" id="errorScreen" style="display:none;">
+        <div class="error-icon">⚠️</div>
+        <div class="error-title">Failed to load manual</div>
+        <div id="errorBody" style="color:#9CA3AF; margin-bottom:20px;"></div>
+        <button class="retry-btn" onclick="retryLoad()">Try Again</button>
+    </div>
+
+    <!-- Chapter selector for folder-style / multi-chapter manuals (Option 1) -->
+    <div class="state-screen chapter-selector" id="chapterSelector" style="display:none; background:#0f172a; z-index:25; padding:24px 16px;">
+        <div style="width:100%; max-width:820px; margin:0 auto;">
+            <div style="display:flex; align-items:center; gap:12px; margin-bottom:14px;">
+                <div style="font-size:22px; font-weight:700; color:#FBBF24;">📚 Chapters</div>
+                <div id="chapterManualTitle" style="color:#9CA3AF; font-size:14px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;"></div>
+            </div>
+            <div id="chapterGrid" style="display:grid; grid-template-columns:repeat(auto-fill,minmax(168px,1fr)); gap:10px;"></div>
+            <div style="margin-top:18px; color:#64748b; font-size:12px; line-height:1.35;">
+                Tap any chapter to stream it instantly. Internal TOC and cross-chapter links continue to work.
+            </div>
+        </div>
     </div>
 </div>
 
-<div class="toast" id="toast"></div>
+<div class="bottom-nav">
+    <div class="bottom-nav-item" onclick="navTo('index.html')">🏠<br>Home</div>
+    <div class="bottom-nav-item" onclick="goBack()">◀<br>Back</div>
+</div>
 
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-    const _sb = supabase.createClient(
-        'https://yljztfajyvjzqikxdddf.supabase.co',
-        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
-        { auth: { persistSession: true, storageKey: 'tsp-auth-token', storage: window.localStorage, autoRefreshToken: true, detectSessionInUrl: false } }
-    );
+    const SUPABASE_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM';
+    const EDGE_FN_URL = SUPABASE_URL + '/functions/v1/get-manual-url';
 
-    const EDGE_URL = 'https://yljztfajyvjzqikxdddf.supabase.co/functions/v1/get-manual-url';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
-    // Read URL params
-    const params      = new URLSearchParams(window.location.search);
-    const manualTitle = params.get('title')        || 'Service Manual';
-    const manualBrand = params.get('brand')        || '';
-    const storagePath = params.get('storage_path') || '';
-
-    document.getElementById('viewerTitle').textContent = manualTitle;
-    document.getElementById('viewerBrand').textContent = manualBrand;
-
-    _sb.auth.onAuthStateChange((event, session) => {
-        try { if (typeof Android !== 'undefined') { if (session?.access_token) Android.saveSession(JSON.stringify(session)); else if (event === 'SIGNED_OUT' && !session) Android.clearSession(); } } catch(e) {}
+    const supabaseClient = supabase.createClient(SUPABASE_URL, SUPABASE_KEY, {
+        auth: { persistSession: true, storageKey: 'tsp-auth-token', storage: window.localStorage }
     });
 
+    const params = new URLSearchParams(window.location.search);
+    const storagePath = params.get('storage_path') || '';
+    const title = params.get('title') || 'Service Manual';
+
+    let pdfDoc = null;
+    let currentPage = 1;
+    let totalPages = 0;
+    let fitScale = 1.0;
+    let zoomLevel = 1.0;
+    let rendering = false;
+
+    let currentPageAnnotations = [];   // for reliable click hit-testing
+    let currentLinkOverlays = [];      // legacy DOM overlays (being phased down)
+
+    const canvas = document.getElementById('pdfCanvas');
+    const ctx = canvas.getContext('2d');
+
+    // Reliable zoom-proof link activation
+    canvas.addEventListener('click', (e) => {
+        handleCanvasLinkClick(e.clientX, e.clientY);
+    });
+    const loadingScreen = document.getElementById('loadingScreen');
+    const errorScreen = document.getElementById('errorScreen');
+    const progressBar = document.getElementById('progressBar');
+    const progressText = document.getElementById('progressText');
+    const loadingText = document.getElementById('loadingText');
+
     async function init() {
-        if (_pendingSession) {
-            try { await _sb.auth.setSession({ access_token: _pendingSession.access_token, refresh_token: _pendingSession.refresh_token }); } catch(e) {}
-            _pendingSession = null;
+        const headerTitleEl = document.querySelector('.header-title');
+        if (headerTitleEl) headerTitleEl.textContent = title;
+
+        // Ensure Chapters button is hidden until we know this is a folder manual
+        const chaptersBtn = document.getElementById('chaptersBtn');
+        if (chaptersBtn) chaptersBtn.style.display = 'none';
+
+        // Option 1: check for folder-style manual first (via manual_id or legacy non-.pdf path)
+        const handledAsFolder = await checkForFolderAndShowChapters();
+        if (!handledAsFolder) {
+            if (storagePath) {
+                await loadPDF(storagePath);
+            } else {
+                showError("No manual specified.");
+            }
         }
-        const { data: { session } } = await _sb.auth.getSession();
-        if (!session) { showError('Not signed in', 'Please sign in to view manuals.'); return; }
-        if (!storagePath) { showError('Invalid link', 'No manual path was provided.'); return; }
-        setLoading('Fetching manual...');
-        loadPDF(session.access_token);
     }
 
-    async function loadPDF(token) {
-        try {
-            let targetPath = storagePath;
+    async function getSignedUrl(path) {
+        console.log('[PDF Viewer] Requesting signed URL for storage_path:', path);
+        const { data: { session } } = await supabaseClient.auth.getSession();
 
-            // If path is a folder (no .pdf extension), list it and pick the first PDF
-            if (!storagePath.toLowerCase().endsWith('.pdf')) {
-                setLoading('Finding manual files...');
-                const listResp = await fetch(EDGE_URL, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                    body: JSON.stringify({ storage_path: storagePath, action: 'list' })
-                });
-                const listData = await listResp.json();
-                if (!listResp.ok || !listData.files) { showError('Access denied', listData.error || 'Could not list manual folder.'); return; }
-                const pdfs = listData.files.filter(f => f.name.toLowerCase().endsWith('.pdf'));
-                if (!pdfs.length) { showError('No files found', 'This manual folder appears to be empty.'); return; }
-                // Normalize dir to lowercase+underscores, preserve filename casing
-                const dirNorm = storagePath.toLowerCase().replace(/ /g, '_');
-                targetPath = dirNorm + '/' + pdfs[0].name;
-                // Populate TOC if multiple PDFs
-                if (pdfs.length > 1) {
-                    populateTOC(pdfs, storagePath);
-                    document.getElementById('tocBtn').style.display = 'block';
+        if (!session?.access_token) {
+            console.error('[PDF Viewer] No auth token available for Edge Function');
+        }
+
+        const res = await fetch(EDGE_FN_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + (session?.access_token || ''),
+                'apikey': SUPABASE_KEY
+            },
+            body: JSON.stringify({ storage_path: path })
+        });
+
+        const data = await res.json();
+
+        if (!res.ok || data.error) {
+            console.error('[PDF Viewer] Edge Function error for path', path, {
+                status: res.status,
+                response: data
+            });
+            const message = data.error || `Access denied or file not found (status ${res.status})`;
+            throw new Error(message);
+        }
+
+        console.log('[PDF Viewer] Got signed URL for', path);
+        return data.url;
+    }
+
+    async function loadPDF(path) {
+        showLoading("Connecting...");
+        progressBar.value = 0;
+        progressText.textContent = "0%";
+
+        try {
+            const url = await getSignedUrl(path);
+            showLoading("Loading manual...");
+
+            const loadingTask = pdfjsLib.getDocument({ url });
+
+            loadingTask.onProgress = (progress) => {
+                if (progress.total > 0) {
+                    const percent = Math.round((progress.loaded / progress.total) * 100);
+                    progressBar.value = percent;
+                    progressText.textContent = percent + "%";
+                    loadingText.textContent = `Loading manual... ${percent}%`;
+                } else {
+                    const kb = Math.round(progress.loaded / 1024);
+                    loadingText.textContent = `Loading... ${kb} KB`;
+                    progressBar.value = Math.min(95, progressBar.value + 5);
                 }
+            };
+
+            pdfDoc = await loadingTask.promise;
+            totalPages = pdfDoc.numPages;
+            currentPage = 1;
+
+            hideLoading();
+            await renderPage(currentPage);
+            updateToolbar();
+            updateZoomInfo();
+            updatePageInfo();  // ensure page controls are correct on first load
+
+            // Option 1: if we are viewing a chapter that belongs to a folder manual we have metadata for,
+            // keep the "Chapters" button visible so the user can return to the grid easily.
+            if (currentChapters && currentChapters.length > 0) {
+                const btn = document.getElementById('chaptersBtn');
+                if (btn) btn.style.display = 'inline-block';
             }
 
-            setLoading('Fetching manual...');
-            const resp = await fetch(EDGE_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                body: JSON.stringify({ storage_path: targetPath })
-            });
-            const data = await resp.json();
-            if (!resp.ok || !data.url) { showError('Access denied', data.error || 'Manual not in your library.'); return; }
+        } catch (err) {
+            console.error('[PDF Viewer] Failed to load PDF with path:', path, err);
 
-            await openInViewer(data.url);
+            const params = new URLSearchParams(window.location.search);
+            const currentStorage = params.get('storage_path') || '';
+            const isCrossFileAttempt = !!currentStorage && path && !path.startsWith('http');
 
-        } catch(e) {
-            showError('Connection error', e.message || 'Please check your connection.');
+            if (isCrossFileAttempt) {
+                // Detect if this looks like a sibling file in the same manual folder
+                const currentDir = currentStorage.includes('/') 
+                    ? currentStorage.substring(0, currentStorage.lastIndexOf('/')) 
+                    : '';
+                const looksLikeSibling = currentDir && path.startsWith(currentDir + '/');
+
+                if (looksLikeSibling) {
+                    showError(
+                        "This chapter/section belongs to the same manual you own.\n\n" +
+                        "The individual chapter PDFs sometimes need to be added separately to your library.\n\n" +
+                        "Error: " + (err.message || "Access denied for this file")
+                    );
+                } else {
+                    showError(
+                        "This section is in another manual.\n\n" +
+                        "You may need to add that manual to your library first.\n\n" +
+                        "Error: " + (err.message || "Access denied or file not found")
+                    );
+                }
+            } else {
+                showError(err.message || "Failed to load PDF");
+            }
         }
     }
 
-    // Fetch PDF as blob to avoid WebView CORS/redirect issues with signed URLs
-    async function openInViewer(signedUrl) {
-        setLoading('Loading PDF...');
-        try {
-            const pdfResp = await fetch(signedUrl);
-            if (!pdfResp.ok) { showError('Download failed', 'Could not download PDF. Please try again.'); return; }
-            const blob = await pdfResp.blob();
-            const blobUrl = URL.createObjectURL(blob);
-            const frame = document.getElementById('pdfFrame');
-            frame.src = './pdfjs/web/viewer.html?file=' + encodeURIComponent(blobUrl);
-            frame.onload = function() {
-                document.getElementById('loadingScreen').classList.add('hidden');
-                frame.classList.add('visible');
-                try { if (typeof Android !== 'undefined') Android.showToast('📖 ' + manualTitle); } catch(e) {}
-            };
-            frame.onerror = function() { showError('Load failed', 'Could not open the PDF viewer.'); };
-        } catch(e) {
-            showError('Load failed', e.message || 'Could not load the PDF.');
+    async function loadNewPDF(newStoragePath, newTitle = null) {
+        if (newTitle) {
+            const headerTitleEl = document.querySelector('.header-title');
+            if (headerTitleEl) headerTitleEl.textContent = newTitle;
+        }
+        // Clean up previous doc if needed
+        if (pdfDoc) {
+            pdfDoc.destroy();
+            pdfDoc = null;
+        }
+        await loadPDF(newStoragePath);
+    }
+
+    // Global handler for .pdf links inside the document (fallback + simple case)
+    document.addEventListener('click', function(e) {
+        const target = e.target.closest('a');
+        if (target && target.href && target.href.toLowerCase().endsWith('.pdf')) {
+            e.preventDefault();
+            const raw = target.href.split('/').pop().split('?')[0];
+            console.log('[PDF Viewer] (fallback) Internal PDF link clicked →', raw);
+            const resolved = resolveRelativeStoragePath(raw);
+            loadNewPDF(resolved, raw.replace(/\.pdf$/i, ''));
+        }
+    }, true);
+
+    async function renderPage(num) {
+        if (rendering || !pdfDoc) return;
+        rendering = true;
+
+        clearLinkOverlays();
+        currentPage = num;
+
+        const page = await pdfDoc.getPage(num);
+        const viewport = page.getViewport({ scale: fitScale * zoomLevel });
+
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        rendering = false;
+
+        updatePageInfo();
+
+        // Store annotations for reliable click-to-link hit testing (zoom-proof)
+        currentPageAnnotations = await page.getAnnotations();
+
+        // Diagnostic logging — helps us see what the MGL PDF actually uses for its TOC (Link vs Widget/Button)
+        const linkCount = currentPageAnnotations.filter(a => a.subtype === 'Link').length;
+        const widgetCount = currentPageAnnotations.filter(a => a.subtype === 'Widget').length;
+        const buttonWidgets = currentPageAnnotations.filter(a => a.subtype === 'Widget' && (a.fieldType === 'Btn' || !a.fieldType)).length;
+
+        console.log(`[PDF Links] Page ${num} annotations: total=${currentPageAnnotations.length}, Links=${linkCount}, Widgets=${widgetCount}, Button-like Widgets=${buttonWidgets}`);
+
+        // Draw link highlights directly on the canvas — perfectly aligned at any zoom level
+        drawLinkHighlights(viewport);
+
+        // We no longer rely on DOM overlays for link activation (they drift on heavy zoom).
+        // Click handling is now done via canvas coordinate hit-testing (see handleCanvasLinkClick).
+    }
+
+    function showLoading(msg) {
+        loadingScreen.style.display = 'flex';
+        errorScreen.style.display = 'none';
+        loadingText.textContent = msg;
+        progressBar.style.display = 'block';
+        progressText.style.display = 'block';
+    }
+
+    // Draw link areas directly onto the canvas — perfectly stable at any zoom level
+    function drawLinkHighlights(viewport) {
+        if (!currentPageAnnotations || currentPageAnnotations.length === 0) return;
+
+        ctx.save();
+
+        // More visible gold highlight for technical manuals / TOCs
+        // Light fill + strong gold outline so links (especially TOC entries) are easy to see
+        ctx.fillStyle = 'rgba(251, 191, 36, 0.16)';
+        ctx.strokeStyle = '#FBBF24';
+        ctx.lineWidth = 2.0;
+
+        let linkCount = 0;
+        currentPageAnnotations.forEach(ann => {
+            // Support both standard Link annotations and Widget/Button annotations
+            // (Many service manuals like MGL use buttons/widgets for the TOC instead of plain links)
+            const isClickable = ann.subtype === 'Link' ||
+                               (ann.subtype === 'Widget' && (ann.fieldType === 'Btn' || ann.fieldType === 'Button' || !ann.fieldType));
+
+            if (!isClickable || !ann.rect) return;
+
+            const [x1, y1, x2, y2] = viewport.convertToViewportRectangle(ann.rect);
+            ctx.fillRect(x1, y1, x2 - x1, y2 - y1);
+            ctx.strokeRect(x1, y1, x2 - x1, y2 - y1);
+            linkCount++;
+        });
+
+        ctx.restore();
+
+        if (linkCount > 0) {
+            console.log(`[PDF Links] Drew ${linkCount} link highlight(s) on this page`);
         }
     }
 
-    function populateTOC(pdfs, folderPath) {
-        const tocList = document.getElementById('tocList'); tocList.innerHTML = '';
-        pdfs.forEach(f => {
-            const btn = document.createElement('button'); btn.className = 'toc-item';
-            const dirNorm = folderPath.toLowerCase().replace(/ /g, '_');
-            const filePath = dirNorm + '/' + f.name;
-            const label = f.name.replace(/\.pdf$/i, '').replace(/_/g, ' ');
-            btn.innerHTML = label + '<span class="toc-item-brand">' + manualBrand + '</span>';
-            btn.onclick = () => handleCrossDocLink(filePath);
-            tocList.appendChild(btn);
+    // Zoom-proof link activation via hit testing on the canvas
+    function handleCanvasLinkClick(clientX, clientY) {
+        if (!pdfDoc || !currentPageAnnotations || currentPageAnnotations.length === 0) return;
+
+        const rect = canvas.getBoundingClientRect();
+        const canvasX = clientX - rect.left;
+        const canvasY = clientY - rect.top;
+
+        // We need the viewport that was used for the current render
+        const currentViewport = pdfDoc.getPage(currentPage).then(p =>
+            p.getViewport({ scale: fitScale * zoomLevel })
+        );
+
+        // Because we can't easily await here in a sync click handler, we do a best-effort sync approximation
+        // For simplicity and reliability we reconstruct the viewport synchronously from known values
+        const v = pdfDoc ? null : null; // placeholder - we use the same math as renderPage
+
+        // Simpler reliable approach: use the last known scale
+        const scale = fitScale * zoomLevel;
+        // Approximate inverse using the same logic as before
+        // For best accuracy we store the last viewport, but for now use a practical method:
+
+        // Actually do an async lookup for accuracy
+        pdfDoc.getPage(currentPage).then(page => {
+            const vp = page.getViewport({ scale: fitScale * zoomLevel });
+            const [pdfX, pdfY] = vp.convertToPdfPoint(canvasX, canvasY);
+
+            for (const ann of currentPageAnnotations) {
+                // Support Link + Widget/Button annotations (important for MGL-style service manual TOCs)
+                const isClickable = ann.subtype === 'Link' ||
+                                   (ann.subtype === 'Widget' && (ann.fieldType === 'Btn' || ann.fieldType === 'Button' || !ann.fieldType));
+
+                if (!isClickable || !ann.rect) continue;
+
+                const [x1, y1, x2, y2] = ann.rect;
+                if (pdfX >= x1 && pdfX <= x2 && pdfY >= y1 && pdfY <= y2) {
+                    console.log('[PDF Links] Hit link via canvas hit-test:', ann);
+
+                    // Log the full annotation so we can see its real structure
+                    console.log('[PDF Links] Full clicked annotation object:');
+                    console.dir(ann);   // This gives the best object inspection in most WebViews
+                    try {
+                        console.log('[PDF Links] Annotation as JSON:', JSON.stringify(ann, null, 2));
+                    } catch (e) {
+                        console.log('[PDF Links] Could not stringify annotation');
+                    }
+
+                    // Check multiple possible places for external / cross-file links
+                    // pdf.js often puts relative cross-file links (GoToR) under "unsafeUrl"
+                    const possibleUrl = ann.url || ann.unsafeUrl || ann.file || ann.filename ||
+                                        (ann.action && (ann.action.url || ann.action.filename || ann.action.file));
+
+                    if (possibleUrl) {
+                        console.log('[PDF Links] Found possible external link target:', possibleUrl);
+                        const url = possibleUrl;
+
+                        if (typeof url === 'string' && url.toLowerCase().endsWith('.pdf')) {
+                            let path = url.split('/').pop().split('?')[0]; // default to filename
+
+                            // Preserve relative folder structure when present (e.g. "Sect 3/8503-01-0826_A.pdf")
+                            if (url.includes('/')) {
+                                path = url.split('#')[0]; // strip any destination fragment
+                            }
+
+                            console.log('[PDF Links] Canvas hit-test → raw link path:', path);
+
+                            const resolvedPath = resolveRelativeStoragePath(path);
+                            console.log('[PDF Links] Resolved storage path for cross-file load:', resolvedPath);
+
+                            // Always use the fully resolved storage path for cross-file links
+                            loadNewPDF(resolvedPath, path.split('/').pop().replace(/\.pdf$/i, ''));
+                        } else if (typeof url === 'string') {
+                            window.open(url, '_blank');
+                        }
+                        return;
+                    }
+
+                    // Internal destination (works for both Link and Widget/Button annotations)
+                    const possibleDest = ann.dest || (ann.action && ann.action.dest);
+
+                    if (possibleDest) {
+                        console.log('[PDF Links] Found internal destination:', possibleDest);
+                        handleInternalDestination(possibleDest);
+                        return;
+                    }
+
+                    // Some Widget buttons store the destination differently
+                    if (ann.subtype === 'Widget' && ann.action && ann.action.dest) {
+                        console.log('[PDF Links] Found Widget destination:', ann.action.dest);
+                        handleInternalDestination(ann.action.dest);
+                        return;
+                    }
+
+                    // Check for GoToR (Go To Remote) action - very common in service manuals for other PDFs
+                    if (ann.action && ann.action.type === 'GoToR') {
+                        console.log('[PDF Links] Detected GoToR (remote) action:', ann.action);
+                        const remoteFile = ann.action.filename || ann.action.file || ann.action.url;
+                        if (remoteFile) {
+                            let raw = typeof remoteFile === 'string' ? remoteFile.split('/').pop() : '';
+                            console.log('[PDF Links] GoToR target filename:', raw);
+                            const resolved = resolveRelativeStoragePath(raw);
+                            loadNewPDF(resolved, raw.replace(/\.pdf$/i, ''));
+                            return;
+                        }
+                    }
+
+                    console.warn('[PDF Links] Annotation did not contain any recognizable link target (url, dest, action, filename, etc.)');
+                    console.warn('[PDF Links] Full annotation keys:', Object.keys(ann));
+                }
+            }
         });
     }
 
-    async function handleCrossDocLink(filePath) {
-        closeTOC();
-        const { data: { session } } = await _sb.auth.getSession(); if (!session) return;
-        setLoading('Loading document...');
-        document.getElementById('pdfFrame').classList.remove('visible');
+    // Robust internal destination handler (extracted for reuse)
+    async function handleInternalDestination(dest) {
+        console.log('[PDF Links] handleInternalDestination called with:', dest);
         try {
-            const resp = await fetch(EDGE_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session.access_token },
-                body: JSON.stringify({ storage_path: filePath })
+            if (typeof dest === 'string') {
+                dest = await pdfDoc.getDestination(dest);
+                console.log('[PDF Links] Resolved string dest to:', dest);
+            }
+
+            let targetPage = null;
+
+            if (Array.isArray(dest) && dest.length > 0) {
+                const pageRef = dest[0];
+                try {
+                    const idx = await pdfDoc.getPageIndex(pageRef);
+                    targetPage = idx + 1;
+                } catch (e) {
+                    console.warn('[PDF Links] getPageIndex failed:', e);
+                    if (typeof dest[1] === 'number') {
+                        targetPage = Math.floor(dest[1]) + 1;
+                    }
+                }
+            }
+
+            if (targetPage && targetPage !== currentPage && targetPage <= totalPages) {
+                console.log(`[PDF Links] Navigating to page ${targetPage}`);
+                await renderPage(targetPage);
+            } else if (targetPage === currentPage) {
+                console.log('[PDF Links] Destination is on the current page (no-op for now)');
+            } else {
+                console.warn('[PDF Links] Could not resolve a valid target page from dest');
+            }
+        } catch (err) {
+            console.error('[PDF Links] Internal destination error:', err);
+        }
+    }
+
+    // Resolves a relative path from inside a PDF (e.g. "Sect 3/8503-01-0824_A.pdf")
+    // against the current storage_path of the open manual.
+    function resolveRelativeStoragePath(relativePath) {
+        if (!relativePath) return '';
+
+        console.log('[PDF Links] resolveRelativeStoragePath input:', relativePath);
+
+        // If it already looks like a full storage path, use it
+        if (relativePath.startsWith('manuals/') || relativePath.startsWith('shared/')) {
+            return relativePath;
+        }
+
+        const params = new URLSearchParams(window.location.search);
+        let currentPath = params.get('storage_path') || '';
+
+        // Decode the current storage path (it arrives URL-encoded)
+        try {
+            currentPath = decodeURIComponent(currentPath);
+        } catch (e) {}
+
+        const currentDir = currentPath.includes('/') 
+            ? currentPath.substring(0, currentPath.lastIndexOf('/'))
+            : currentPath;
+
+        let resolved = currentDir ? `${currentDir}/${relativePath}` : relativePath;
+        resolved = resolved.replace(/\/+/g, '/');
+
+        console.log('[PDF Links] resolveRelativeStoragePath result:', resolved);
+        return resolved;
+    }
+
+    // ========== Option 1: Folder / Chapter Selector Support (long-term data model) ==========
+    // Uses chapter_metadata + is_folder from the manuals table (populated via the 20250525 migration).
+    // Works with the existing getSignedUrl + loadNewPDF + resolveRelativeStoragePath pipeline.
+    let currentChapters = [];
+    let currentFolderTitle = '';
+    let currentManualId = null;
+    let baseStoragePrefix = '';
+
+    async function checkForFolderAndShowChapters() {
+        const params = new URLSearchParams(window.location.search);
+        const manualId = params.get('manual_id');
+        const sp = params.get('storage_path') || '';
+        currentManualId = manualId ? parseInt(manualId, 10) : null;
+
+        // Preferred path: library passed ?manual_id → we can fetch rich folder info
+        if (currentManualId) {
+            try {
+                const { data: manual, error } = await supabaseClient
+                    .from('manuals')
+                    .select('id, title, is_folder, entry_file_path, chapter_metadata, storage_path')
+                    .eq('id', currentManualId)
+                    .single();
+                if (!error && manual) {
+                    // Remember the row for the "Try loading default chapter" button in the notice
+                    window._lastQueriedManual = manual;
+
+                    const hasGoodChapters = Array.isArray(manual.chapter_metadata) && manual.chapter_metadata.length > 0;
+
+                    if (hasGoodChapters) {
+                        // Real folder with data → show nice grid
+                        currentChapters = manual.chapter_metadata;
+                        currentFolderTitle = manual.title || title;
+                        baseStoragePrefix = manual.storage_path || (sp.includes('/') ? sp.substring(0, sp.lastIndexOf('/')) : '');
+                        renderChapterGrid(currentChapters, currentFolderTitle);
+                        return true;
+                    }
+
+                    // No chapter list yet (pre-backfill or not marked is_folder).
+                    // Be helpful: if the row has an entry_file_path, load that PDF automatically.
+                    if (manual.entry_file_path) {
+                        const base = (manual.storage_path || sp || '').replace(/\/$/, '');
+                        const entry = manual.entry_file_path.replace(/^\//, '');
+                        const targetPath = base ? `${base}/${entry}` : entry;
+                        console.log('[Chapters] Auto-loading entry_file_path for manual', manual.id, targetPath);
+                        // Load it and treat as handled (user still gets the Chapters button later if they backfill)
+                        const canvasWrap = document.querySelector('.canvas-wrapper');
+                        if (canvasWrap) canvasWrap.style.display = '';
+                        const sel = document.getElementById('chapterSelector');
+                        if (sel) sel.style.display = 'none';
+                        await loadPDF(targetPath);
+                        // Show the Chapters button in case they later add metadata
+                        const btn = document.getElementById('chaptersBtn');
+                        if (btn) btn.style.display = 'inline-block';
+                        return true;
+                    }
+
+                    // Row exists but no chapters + no entry_file_path.
+                    // Only show the notice if the current storage_path is clearly a folder (not a .pdf)
+                    if (sp && !sp.toLowerCase().endsWith('.pdf')) {
+                        showChapterNotice(sp);
+                        return true;
+                    }
+
+                    // Otherwise fall through and let normal PDF loading happen with whatever storage_path we have
+                }
+            } catch (e) {
+                console.warn('[Chapters] Supabase lookup for manual folder info failed:', e);
+            }
+        }
+
+        // Final safety net only for very old links that pass a bare folder path with no manual_id at all
+        if (sp && !sp.toLowerCase().endsWith('.pdf')) {
+            showChapterNotice(sp);
+            return true;
+        }
+        return false;
+    }
+
+    function renderChapterGrid(chapters, folderTitle) {
+        const selector = document.getElementById('chapterSelector');
+        const grid = document.getElementById('chapterGrid');
+        const titleEl = document.getElementById('chapterManualTitle');
+        if (!selector || !grid) return;
+
+        if (titleEl) titleEl.textContent = folderTitle || 'Service Manual';
+        grid.innerHTML = '';
+
+        const sorted = [...(chapters || [])].sort((a, b) => (a.order ?? 99) - (b.order ?? 99));
+        sorted.forEach(ch => {
+            const card = document.createElement('div');
+            card.className = 'chapter-card';
+            const ord = (ch.order != null) ? `CHAPTER ${ch.order}` : 'CHAPTER';
+            const t = ch.title || (ch.storage_path ? ch.storage_path.split('/').pop().replace(/\.pdf$/i, '') : 'Section');
+            card.innerHTML = `
+                <div class="chapter-order">${ord}</div>
+                <div class="chapter-title">${t}</div>
+            `;
+            card.onclick = () => selectChapter(ch);
+            grid.appendChild(card);
+        });
+
+        const canvasWrap = document.querySelector('.canvas-wrapper');
+        if (canvasWrap) canvasWrap.style.display = 'none';
+        selector.style.display = 'flex';
+
+        const btn = document.getElementById('chaptersBtn');
+        if (btn) btn.style.display = 'inline-block';
+
+        hideLoading();
+        if (errorScreen) errorScreen.style.display = 'none';
+    }
+
+    function selectChapter(chapter) {
+        const selector = document.getElementById('chapterSelector');
+        const canvasWrap = document.querySelector('.canvas-wrapper');
+        if (selector) selector.style.display = 'none';
+        if (canvasWrap) canvasWrap.style.display = '';
+
+        const fullPath = chapter.storage_path || chapter.path || '';
+        const chTitle = chapter.title || 'Chapter';
+        loadNewPDF(fullPath, chTitle);
+
+        // Keep the Chapters button visible so user can return to the grid without leaving the viewer
+        const btn = document.getElementById('chaptersBtn');
+        if (btn) btn.style.display = 'inline-block';
+    }
+
+    function showChapterSelector() {
+        const selector = document.getElementById('chapterSelector');
+        const canvasWrap = document.querySelector('.canvas-wrapper');
+        if (!selector) return;
+
+        if (currentChapters && currentChapters.length > 0) {
+            if (canvasWrap) canvasWrap.style.display = 'none';
+            selector.style.display = 'flex';
+            const tEl = document.getElementById('chapterManualTitle');
+            if (tEl) tEl.textContent = currentFolderTitle || title || '';
+        } else {
+            alert('No chapter list is cached for this manual. Open the manual again from the library or use internal links inside an already-loaded chapter.');
+        }
+    }
+
+    function showChapterNotice(folderPath) {
+        const selector = document.getElementById('chapterSelector');
+        const grid = document.getElementById('chapterGrid');
+        if (!selector || !grid) {
+            showError('Folder-style manual (no chapter list configured yet). Path: ' + folderPath);
+            return;
+        }
+        const titleEl = document.getElementById('chapterManualTitle');
+        if (titleEl) titleEl.textContent = title || 'Service Manual';
+
+        // Short, friendly, actionable notice (pre-backfill state)
+        grid.innerHTML = `
+            <div style="grid-column:1/-1; background:#1F2937; border:1px solid #374151; border-radius:8px; padding:14px; color:#cbd5e1; font-size:13px; line-height:1.4;">
+                <strong>Chapter list not configured yet</strong><br><br>
+                This Candela manual is a multi-chapter folder. Run the Option 1 migration + backfill in Supabase (see OPTION1_SERVICE_MANUALS_GUIDE.md), then the full chapter grid will appear here.<br><br>
+                <button onclick="attemptLoadDefaultChapter()" style="background:#FBBF24; color:#111827; border:none; padding:6px 14px; border-radius:6px; font-weight:600; cursor:pointer;">Try loading default chapter</button>
+            </div>
+        `;
+
+        const canvasWrap = document.querySelector('.canvas-wrapper');
+        if (canvasWrap) canvasWrap.style.display = 'none';
+        selector.style.display = 'flex';
+    }
+
+    // Helper exposed for the notice button + future use
+    async function attemptLoadDefaultChapter() {
+        const selector = document.getElementById('chapterSelector');
+        const canvasWrap = document.querySelector('.canvas-wrapper');
+        if (selector) selector.style.display = 'none';
+        if (canvasWrap) canvasWrap.style.display = '';
+
+        // Try the original storage_path from URL, or the entry if we have it
+        const params = new URLSearchParams(window.location.search);
+        let target = params.get('storage_path') || '';
+        // If we have a manual row in memory with entry, prefer it (simple heuristic)
+        if (window._lastQueriedManual && window._lastQueriedManual.entry_file_path) {
+            const base = window._lastQueriedManual.storage_path || '';
+            target = base ? (base.replace(/\/$/, '') + '/' + window._lastQueriedManual.entry_file_path.replace(/^\//, '')) : window._lastQueriedManual.entry_file_path;
+        }
+        if (target) {
+            await loadPDF(target);
+        } else {
+            showError('No default chapter path available yet.');
+        }
+    }
+    // ========== End Option 1 chapter support ==========
+
+    function hideLoading() {
+        loadingScreen.style.display = 'none';
+    }
+
+    function showError(msg) {
+        loadingScreen.style.display = 'none';
+        errorScreen.style.display = 'flex';
+        document.getElementById('errorBody').textContent = msg;
+    }
+
+    function updatePageInfo() {
+        const pageInput = document.getElementById('pageInput');
+        const pageInfo = document.getElementById('pageInfo');
+
+        if (pageInput) pageInput.value = currentPage;
+        if (pageInfo) pageInfo.textContent = `/ ${totalPages}`;
+    }
+
+    function updateToolbar() {
+        updatePageInfo();
+    }
+
+    function zoomIn() {
+        zoomLevel = Math.min(zoomLevel + 0.25, 5.0);
+        renderPage(currentPage);
+        updateZoomInfo();
+    }
+
+    function zoomOut() {
+        zoomLevel = Math.max(zoomLevel - 0.25, 0.25);
+        renderPage(currentPage);
+        updateZoomInfo();
+    }
+
+    function resetZoom() {
+        zoomLevel = 1.0;
+        fitScale = 1.0;
+        renderPage(currentPage);
+        updateZoomInfo();
+    }
+
+    function updateZoomInfo() {
+        const zoomInfo = document.getElementById('zoomInfo');
+        if (zoomInfo) {
+            const percent = Math.round(zoomLevel * 100);
+            zoomInfo.textContent = `${percent}%`;
+        }
+    }
+
+    function clearLinkOverlays() {
+        currentLinkOverlays.forEach(el => {
+            if (el && el.parentNode) el.parentNode.removeChild(el);
+        });
+        currentLinkOverlays = [];
+    }
+
+    async function setupLinkOverlays(page, viewport) {
+        clearLinkOverlays();
+
+        try {
+            const annotations = await page.getAnnotations();
+
+            annotations.forEach((annotation) => {
+                if (annotation.subtype !== 'Link') return;
+
+                const rect = annotation.rect;
+                if (!rect || rect.length !== 4) return;
+
+                // Use pdf.js built-in conversion — much more reliable across zoom levels
+                const [left, top, right, bottom] = viewport.convertToViewportRectangle(rect);
+
+                const width = Math.max(4, right - left);
+                const height = Math.max(4, bottom - top);
+
+                const linkEl = document.createElement('a');
+                linkEl.style.position = 'absolute';
+                linkEl.style.left = `${left}px`;
+                linkEl.style.top = `${top}px`;
+                linkEl.style.width = `${width}px`;
+                linkEl.style.height = `${height}px`;
+                linkEl.style.cursor = 'pointer';
+                linkEl.style.zIndex = '20';
+                linkEl.style.background = 'rgba(251,191,36,0.12)';
+                linkEl.style.border = '1px dashed rgba(251,191,36,0.6)';
+                linkEl.style.borderRadius = '3px';
+                linkEl.style.transition = 'background 0.1s';
+                linkEl.title = annotation.url || 'Jump to section';
+
+                // Make links more obvious on hover
+                linkEl.onmouseenter = () => {
+                    linkEl.style.background = 'rgba(251,191,36,0.25)';
+                    linkEl.style.border = '1px solid #FBBF24';
+                };
+                linkEl.onmouseleave = () => {
+                    linkEl.style.background = 'rgba(251,191,36,0.12)';
+                    linkEl.style.border = '1px dashed rgba(251,191,36,0.6)';
+                };
+
+                const wrapper = canvas.parentElement;
+                if (!wrapper) return;
+
+                wrapper.style.position = 'relative';
+                wrapper.appendChild(linkEl);
+                currentLinkOverlays.push(linkEl);
+
+                linkEl.onclick = async (e) => {
+                    e.preventDefault();
+                    console.log('[PDF Links] DOM overlay clicked');
+                    console.dir(annotation);
+                    try {
+                        console.log('[PDF Links] DOM annotation JSON:', JSON.stringify(annotation, null, 2));
+                    } catch (_) {}
+
+                    // External URL (e.g. another PDF)
+                    if (annotation.url) {
+                        const url = annotation.url;
+                        console.log('[PDF Links] Link has url:', url);
+
+                        if (url.toLowerCase().endsWith('.pdf')) {
+                            let path = url.split('/').pop().split('?')[0];
+
+                            if (url.includes('/manuals/')) {
+                                path = url.substring(url.indexOf('/manuals/') + 1);
+                            } else if (url.includes('manuals/')) {
+                                path = url.substring(url.indexOf('manuals/'));
+                            }
+
+                            console.log('[PDF Links] DOM overlay → cross-file load with path:', path);
+                            const resolved = resolveRelativeStoragePath(path);
+                            loadNewPDF(resolved, path.split('/').pop().replace(/\.pdf$/i, ''));
+                        } else {
+                            window.open(url, '_blank');
+                        }
+                        return;
+                    }
+
+                    // Internal destination (TOC, section links, etc.)
+                    if (annotation.dest) {
+                        console.log('[PDF Links] Internal dest clicked:', annotation.dest);
+                        try {
+                            let dest = annotation.dest;
+
+                            if (typeof dest === 'string') {
+                                dest = await pdfDoc.getDestination(dest);
+                            }
+
+                            let targetPageNum = null;
+
+                            if (Array.isArray(dest) && dest.length > 0) {
+                                const pageRef = dest[0];
+                                try {
+                                    const pageIndex = await pdfDoc.getPageIndex(pageRef);
+                                    targetPageNum = pageIndex + 1;
+                                } catch (refErr) {
+                                    console.warn('getPageIndex failed, trying dest array fallback', refErr);
+                                    // Some PDFs put the page number directly in certain dest formats
+                                    if (typeof dest[1] === 'number') {
+                                        targetPageNum = Math.floor(dest[1]) + 1;
+                                    }
+                                }
+                            }
+
+                            if (targetPageNum && targetPageNum !== currentPage && targetPageNum <= totalPages) {
+                                console.log(`[PDF Links] Jumping ${currentPage} → ${targetPageNum}`);
+                                await renderPage(targetPageNum);
+                            } else if (targetPageNum === currentPage) {
+                                console.log('[PDF Links] Destination is on current page');
+                            } else {
+                                console.warn('[PDF Links] Could not resolve valid target page from dest');
+                            }
+                        } catch (err) {
+                            console.error('Failed to follow internal link:', err);
+                        }
+                    } else {
+                        console.warn('[PDF Links] Link had neither url nor dest:', annotation);
+                    }
+                };
             });
-            const data = await resp.json();
-            if (!resp.ok || !data.url) { showError('Access denied', data.error || 'Could not load document.'); return; }
-            await openInViewer(data.url);
-        } catch(e) { showError('Connection error', e.message); }
+        } catch (e) {
+            console.warn('Failed to setup link overlays:', e);
+        }
     }
 
-    function openTOC()  { document.getElementById('tocDrawer').classList.add('open'); document.getElementById('tocOverlay').classList.add('open'); }
-    function closeTOC() { document.getElementById('tocDrawer').classList.remove('open'); document.getElementById('tocOverlay').classList.remove('open'); }
-
-    function goBack() {
-        try { const s = JSON.parse(localStorage.getItem('tsp-auth-token'))?.currentSession; if (s?.access_token) { window.location.href = 'manual_library.html?_s=' + btoa(JSON.stringify(s)); return; } } catch(e) {}
-        window.location.href = 'manual_library.html';
+    function prevPage() {
+        if (currentPage > 1) {
+            currentPage--;
+            renderPage(currentPage);
+            updatePageInfo();
+        }
     }
-    function setLoading(msg) { document.getElementById('loadingLabel').textContent = msg; document.getElementById('loadingScreen').classList.remove('hidden'); document.getElementById('errorScreen').classList.remove('visible'); }
-    function showError(title, msg) { document.getElementById('loadingScreen').classList.add('hidden'); document.getElementById('errorTitle').textContent = title; document.getElementById('errorMsg').textContent = msg; document.getElementById('errorScreen').classList.add('visible'); }
 
-    init();
+    function nextPage() {
+        if (currentPage < totalPages) {
+            currentPage++;
+            renderPage(currentPage);
+            updatePageInfo();
+        }
+    }
+
+    function jumpToPage() {
+        const pageInput = document.getElementById('pageInput');
+        if (!pageInput) return;
+
+        let pageNum = parseInt(pageInput.value, 10);
+        if (isNaN(pageNum)) return;
+
+        pageNum = Math.max(1, Math.min(pageNum, totalPages));
+
+        if (pageNum !== currentPage) {
+            currentPage = pageNum;
+            renderPage(currentPage);
+        }
+        updatePageInfo();
+    }
+
+    async function goBack() {
+        if (typeof Android !== 'undefined' && Android.goBack) {
+            Android.goBack();
+        } else {
+            window.history.back();
+        }
+    }
+
+    async function navTo(page) {
+        window.location.href = page;
+    }
+
+    // Keyboard navigation
+    document.addEventListener('keydown', function(e) {
+        if (!pdfDoc) return;
+
+        switch (e.key) {
+            case 'ArrowLeft':
+            case 'PageUp':
+                e.preventDefault();
+                prevPage();
+                break;
+            case 'ArrowRight':
+            case 'PageDown':
+            case ' ':
+                e.preventDefault();
+                nextPage();
+                break;
+            case 'Home':
+                e.preventDefault();
+                currentPage = 1;
+                renderPage(currentPage);
+                break;
+            case 'End':
+                e.preventDefault();
+                currentPage = totalPages;
+                renderPage(currentPage);
+                break;
+            case '+':
+            case '=':
+                e.preventDefault();
+                zoomIn();
+                break;
+            case '-':
+                e.preventDefault();
+                zoomOut();
+                break;
+            case '0':
+                if (e.ctrlKey || e.metaKey) {
+                    e.preventDefault();
+                    resetZoom();
+                }
+                break;
+        }
+    });
+
+    // ==================== TOUCH GESTURES ====================
+    let touchStartX = 0;
+    let touchStartY = 0;
+    let initialPinchDistance = 0;
+    let initialZoom = 1.0;
+    let isPinching = false;
+
+    const pdfContainer = document.getElementById('pdfContainer');
+
+    function getDistance(touch1, touch2) {
+        const dx = touch1.clientX - touch2.clientX;
+        const dy = touch1.clientY - touch2.clientY;
+        return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    if (pdfContainer) {
+        pdfContainer.addEventListener('touchstart', function(e) {
+            if (e.touches.length === 1) {
+                touchStartX = e.touches[0].clientX;
+                touchStartY = e.touches[0].clientY;
+                isPinching = false;
+            } else if (e.touches.length === 2) {
+                isPinching = true;
+                initialPinchDistance = getDistance(e.touches[0], e.touches[1]);
+                initialZoom = zoomLevel;
+                e.preventDefault();
+            }
+        }, { passive: false });
+
+        pdfContainer.addEventListener('touchmove', function(e) {
+            if (e.touches.length === 2 && isPinching) {
+                e.preventDefault();
+                const currentDistance = getDistance(e.touches[0], e.touches[1]);
+                if (initialPinchDistance > 0) {
+                    const scale = currentDistance / initialPinchDistance;
+                    const newZoom = Math.max(0.25, Math.min(5.0, initialZoom * scale));
+                    if (Math.abs(newZoom - zoomLevel) > 0.02) {
+                        zoomLevel = newZoom;
+                        renderPage(currentPage);
+                        updateZoomInfo();
+                    }
+                }
+            }
+        }, { passive: false });
+
+        pdfContainer.addEventListener('touchend', function(e) {
+            if (!isPinching && e.changedTouches.length === 1) {
+                const touchEndX = e.changedTouches[0].clientX;
+                const touchEndY = e.changedTouches[0].clientY;
+
+                const deltaX = touchEndX - touchStartX;
+                const deltaY = touchEndY - touchStartY;
+
+                // Horizontal swipe (more horizontal than vertical, sufficient distance)
+                if (Math.abs(deltaX) > Math.abs(deltaY) && Math.abs(deltaX) > 60) {
+                    if (deltaX > 0) {
+                        prevPage();
+                    } else {
+                        nextPage();
+                    }
+                }
+            }
+            isPinching = false;
+            initialPinchDistance = 0;
+        });
+    }
+
+    // Make sure page info is correct after everything loads
+    function finalizeUI() {
+        updatePageInfo();
+        updateZoomInfo();
+    }
+
+    window.onload = function() {
+        init().then(() => {
+            // Small delay to ensure everything is painted
+            setTimeout(finalizeUI, 100);
+        });
+    };
 </script>
 </body>
 </html>

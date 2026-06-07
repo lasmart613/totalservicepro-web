@@ -3,6 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="google-adsense-account" content="ca-pub-5353320292042327">
+    <script async src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5353320292042327" crossorigin="anonymous"></script>
     <title>Fluence Calculator · TSP</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
@@ -142,5 +144,6 @@
     _sb.auth.onAuthStateChange((event,session)=>{updateAuthUI();try{if(typeof Android!=='undefined'){if(session?.access_token)Android.saveSession(JSON.stringify(session));else if(event==='SIGNED_OUT'&&!session)Android.clearSession();}}catch(e){}});
     if(_pendingSession){const ps=_pendingSession;_pendingSession=null;_sb.auth.setSession({access_token:ps.access_token,refresh_token:ps.refresh_token}).then(({data})=>{updateAuthUI();try{if(typeof Android!=='undefined'&&data.session)Android.saveSession(JSON.stringify(data.session));}catch(e){}});}else{updateAuthUI();}
 </script>
+<script src="web-compat.js"></script>
 </body>
 </html>

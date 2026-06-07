@@ -1,35 +1,169 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <script>
+        // Apply saved theme OR system preference before render to prevent flash
+        (function() {
+            try {
+                var s = JSON.parse(localStorage.getItem('tsp_settings') || '{}');
+                if (s.theme === 'light') {
+                    document.documentElement.classList.add('light');
+                } else if (!s.theme && window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+                    document.documentElement.classList.add('light');
+                }
+            } catch(e) {}
+        })();
+    </script>
+
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Service Reports · TSP</title>
+
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
     <script>
         var _pendingSession = null;
         (function() {
             try {
                 const enc = new URLSearchParams(window.location.search).get('_s');
-                if (enc) { const s=JSON.parse(atob(enc)); if(s?.access_token){_pendingSession=s;localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));const u=new URL(window.location.href);u.searchParams.delete('_s');window.history.replaceState({},'',u.toString());return;} }
-                const raw=localStorage.getItem('tsp-auth-token'); if(raw){const p=JSON.parse(raw);const sess=p?.currentSession||(p?.access_token?p:null);if(sess?.access_token)_pendingSession=sess;}
+                if (enc) {
+                    const s=JSON.parse(atob(enc));
+                    if(s?.access_token){
+                        _pendingSession=s;
+                        localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));
+                        const u=new URL(window.location.href);
+                        u.searchParams.delete('_s');
+                        window.history.replaceState({},'',u.toString());
+                        return;
+                    }
+                }
+                const raw=localStorage.getItem('tsp-auth-token');
+                if(raw){
+                    const p=JSON.parse(raw);
+                    const sess=p?.currentSession||(p?.access_token?p:null);
+                    if(sess?.access_token) _pendingSession=sess;
+                }
             } catch(e) {}
         })();
+
         var supabaseClient = supabase.createClient(
             'https://yljztfajyvjzqikxdddf.supabase.co',
             'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
             { auth: { persistSession:true, storageKey:'tsp-auth-token', storage:window.localStorage, autoRefreshToken:true, detectSessionInUrl:false } }
         );
-        // _pendingSession will be applied in init() with proper await
+
+        // Apply pending session immediately so queries in init() see auth (for direct loads via bottom nav / injection)
+        if (_pendingSession) {
+            var _ps = _pendingSession; _pendingSession = null;
+            supabaseClient.auth.setSession({ access_token: _ps.access_token, refresh_token: _ps.refresh_token });
+        }
+
+        // Global restore hook called by native MainActivity onPageFinished for every page load
+        function restoreSession(jsonStr) {
+            try {
+                const parsed = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+                const session = (parsed && parsed.currentSession) ? parsed.currentSession : parsed;
+                if (session && session.access_token) {
+                    localStorage.setItem('tsp-auth-token', JSON.stringify({ currentSession: session, expiresAt: session.expires_at }));
+                    if (typeof supabaseClient !== 'undefined') {
+                        supabaseClient.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
+                    } else {
+                        _pendingSession = session;
+                    }
+                }
+            } catch(e) {}
+        }
     </script>
+
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="tsp.css">
-    <style>
-        .filter-row { display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:16px; scrollbar-width:none; }
-        .filter-row::-webkit-scrollbar { display:none; }
-        .filter-chip { flex-shrink:0; padding:7px 16px; background:var(--surface3); border:1px solid var(--border2); border-radius:20px; font-size:13px; font-weight:600; color:var(--text3); cursor:pointer; font-family:inherit; white-space:nowrap; transition:all 0.15s; }
-        .filter-chip.active { background:var(--gold-glow); border-color:var(--gold-border); color:var(--gold); }
 
-        .report-card { background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:10px; cursor:pointer; transition:border-color 0.15s; display:flex; align-items:center; gap:12px; }
+    <style>
+        :root {
+            --gold:        #FBBF24;
+            --gold-dk:     #D97706;
+            --gold-glow:   rgba(251,191,36,0.15);
+            --gold-border: #FBBF2444;
+            --bg:          #111;
+            --surface:     #111;
+            --surface2:    #1a1a1a;
+            --surface3:    #222;
+            --border:      #2a2a2a;
+            --border2:     #333;
+            --text:        #fff;
+            --text2:       #e5e5e5;
+            --text3:       #aaa;
+            --green:       #22c55e;
+        }
+
+        @media (prefers-color-scheme: light) {
+            :root {
+                --gold:        #D97706;
+                --gold-dk:     #B45309;
+                --gold-glow:   rgba(217,119,6,0.12);
+                --gold-border: #D9770644;
+                --bg:          #f8f9fa;
+                --surface:     #ffffff;
+                --surface2:    #f1f3f5;
+                --surface3:    #e9ecef;
+                --border:      #dee2e6;
+                --border2:     #d1d5db;
+                --text:        #212529;
+                --text2:       #374151;
+                --text3:       #6b7280;
+                --green:       #16a34a;
+            }
+        }
+
+        body {
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+            background: var(--bg);
+            color: var(--text);
+        }
+
+        .filter-row {
+            display:flex;
+            gap:8px;
+            overflow-x:auto;
+            padding-bottom:4px;
+            margin-bottom:16px;
+            scrollbar-width:none;
+        }
+        .filter-row::-webkit-scrollbar { display:none; }
+
+        .filter-chip {
+            flex-shrink:0;
+            padding:7px 16px;
+            background:var(--surface3);
+            border:1px solid var(--border2);
+            border-radius:20px;
+            font-size:13px;
+            font-weight:600;
+            color:var(--text3);
+            cursor:pointer;
+            font-family:inherit;
+            white-space:nowrap;
+            transition:all 0.15s;
+        }
+        .filter-chip.active {
+            background:var(--gold-glow);
+            border-color:var(--gold-border);
+            color:var(--gold);
+        }
+
+        .report-card {
+            background:var(--surface2);
+            border:1px solid var(--border);
+            border-radius:12px;
+            padding:14px 16px;
+            margin-bottom:10px;
+            cursor:pointer;
+            transition:border-color 0.15s;
+            display:flex;
+            align-items:center;
+            gap:12px;
+        }
         .report-card:hover { border-color:var(--gold-border); }
         .report-card.draft  { border-left:4px solid var(--gold); }
         .report-card.complete { border-left:4px solid var(--green); }
@@ -42,19 +176,59 @@
         .report-right { flex-shrink:0; text-align:right; }
         .report-date { font-size:11px; color:var(--text3); }
 
-        .status-badge { display:inline-block; padding:3px 9px; border-radius:20px; font-size:10px; font-weight:700; margin-top:4px; }
-        .status-badge.draft    { background:rgba(251,191,36,0.1); color:var(--gold); border:1px solid var(--gold-border); }
-        .status-badge.complete { background:rgba(34,197,94,0.1);  color:var(--green); border:1px solid rgba(34,197,94,0.3); }
+        .status-badge {
+            display:inline-block;
+            padding:3px 9px;
+            border-radius:20px;
+            font-size:10px;
+            font-weight:700;
+            margin-top:4px;
+        }
+        .status-badge.draft    { background:var(--gold-glow); color:var(--gold); border:1px solid var(--gold-border); }
+        .status-badge.complete { background:rgba(34,197,94,0.1); color:var(--green); border:1px solid rgba(34,197,94,0.3); }
 
         .search-bar { position:relative; margin-bottom:14px; }
-        .search-bar input { width:100%; padding:10px 36px 10px 14px; background:var(--surface3); border:1px solid var(--border2); border-radius:20px; color:var(--text); font-family:inherit; font-size:14px; outline:none; }
+        .search-bar input {
+            width:100%;
+            padding:10px 36px 10px 14px;
+            background:var(--surface3);
+            border:1px solid var(--border2);
+            border-radius:20px;
+            color:var(--text);
+            font-family:inherit;
+            font-size:14px;
+            outline:none;
+        }
         .search-bar input:focus { border-color:var(--gold); }
         .search-bar input::placeholder { color:var(--text3); }
 
-        .fab { position:fixed;bottom:20px;right:20px;width:56px;height:56px;border-radius:50%;background:var(--gold);color:#111;font-size:28px;border:none;cursor:pointer;box-shadow:0 4px 16px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;z-index:50;transition:transform 0.15s; }
+        .fab {
+            position:fixed;
+            bottom:20px;
+            right:20px;
+            width:56px;
+            height:56px;
+            border-radius:50%;
+            background:var(--gold);
+            color:#111;
+            font-size:28px;
+            border:none;
+            cursor:pointer;
+            box-shadow:0 4px 16px rgba(0,0,0,0.4);
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            z-index:50;
+            transition:transform 0.15s;
+        }
         .fab:active { transform:scale(0.93); }
 
-        .stats-2 { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:18px; }
+        .stats-2 {
+            display:grid;
+            grid-template-columns:1fr 1fr;
+            gap:10px;
+            margin-bottom:18px;
+        }
     </style>
 </head>
 <body>
@@ -68,8 +242,14 @@
 <div class="page">
 
     <div class="stats-2">
-        <div class="stat-card"><div class="stat-num" id="statDrafts">—</div><div class="stat-label">Drafts</div></div>
-        <div class="stat-card"><div class="stat-num green" id="statComplete">—</div><div class="stat-label">Completed</div></div>
+        <div class="stat-card">
+            <div class="stat-num" id="statDrafts">—</div>
+            <div class="stat-label">Drafts</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-num green" id="statComplete">—</div>
+            <div class="stat-label">Completed</div>
+        </div>
     </div>
 
     <div class="search-bar">
@@ -96,13 +276,37 @@
     let allReports = [];
     let activeFilter = 'all';
     let currentUser = null;
+    let currentUserOrgId = null;
+
+    function isValidOrgId(val) {
+        if (val == null) return false;
+        if (typeof val === 'number' && Number.isFinite(val) && val > 0) return true;
+        if (typeof val === 'string') {
+            const s = val.trim();
+            if (s.includes('-') && s.length > 10) return true; // UUID style
+            if (/^\d+$/.test(s)) return true; // legacy integer id (e.g. 4 for Luxor Photonix)
+        }
+        return false;
+    }
 
     supabaseClient.auth.onAuthStateChange((event, session) => {
-        try { if(typeof Android!=='undefined'){if(session?.access_token)Android.saveSession(JSON.stringify(session));else if(event==='SIGNED_OUT'&&!session)Android.clearSession();} } catch(e) {}
+        try {
+            if(typeof Android!=='undefined'){
+                if(session?.access_token) Android.saveSession(JSON.stringify(session));
+                else if(event==='SIGNED_OUT'&&!session) Android.clearSession();
+            }
+        } catch(e) {}
     });
 
     async function navTo(page) {
-        try { const{data:{session}}=await supabaseClient.auth.getSession(); if(session?.access_token){const sep=page.includes('?')?'&':'?';window.location.href=page+sep+'_s='+btoa(JSON.stringify(session));return;} } catch(e) {}
+        try {
+            const{data:{session}}=await supabaseClient.auth.getSession();
+            if(session?.access_token){
+                const sep=page.includes('?')?'&':'?';
+                window.location.href=page+sep+'_s='+btoa(JSON.stringify(session));
+                return;
+            }
+        } catch(e) {}
         window.location.href = page;
     }
 
@@ -110,7 +314,17 @@
         try {
             const{data:{session}}=await supabaseClient.auth.getSession();
             if(session?.access_token){
-                window.location.href='service_report.html?report_id='+id+'&_s='+btoa(JSON.stringify(session));
+                let href = 'service_report.html?report_id='+id+'&_s='+btoa(JSON.stringify(session));
+                // Pass the full report data we already have from the list via localStorage (avoids very long URLs).
+                // This allows service_report.html to fallback and populate UI if the full DB load
+                // by ID fails due to RLS/org scoping (even though list could see it).
+                try {
+                    const rd = allReports.find(x => x.id === id);
+                    if (rd) {
+                        localStorage.setItem('tsp-pending-report', JSON.stringify(rd));
+                    }
+                } catch(e) {}
+                window.location.href = href;
                 return;
             }
         } catch(e) {}
@@ -118,27 +332,112 @@
     }
 
     async function init() {
-        // Try existing session first, then apply pending if needed
         let { data: { session: _initSession } } = await supabaseClient.auth.getSession();
-        if (!_initSession && _pendingSession) {
-            try {
-                const r = await supabaseClient.auth.setSession({ access_token: _pendingSession.access_token, refresh_token: _pendingSession.refresh_token });
-                _initSession = r.data?.session;
-            } catch(e) {}
-            _pendingSession = null;
+        if (!_initSession) {
+            // Try pending (set by head) or re-read from localStorage (for robustness on direct loads)
+            let toSet = _pendingSession;
+            if (!toSet) {
+                try {
+                    const raw = localStorage.getItem('tsp-auth-token');
+                    if (raw) {
+                        const p = JSON.parse(raw);
+                        const s = (p && p.currentSession) ? p.currentSession : (p && p.access_token ? p : null);
+                        if (s && s.access_token) toSet = s;
+                    }
+                } catch(e) {}
+            }
+            if (toSet) {
+                try {
+                    const r = await supabaseClient.auth.setSession({
+                        access_token: toSet.access_token,
+                        refresh_token: toSet.refresh_token
+                    });
+                    _initSession = r.data?.session;
+                } catch(e) {}
+                _pendingSession = null;
+            }
         }
-        const { data: { user } } = await supabaseClient.auth.getUser();
-        if (!user) { navTo('index.html'); return; }
+        // Robust auth wait: give the head setSession (from _s or local) and the onPageFinished injection time to settle.
+        // Prevents premature redirect back to home on first click when session restore is slightly slow (e.g. first menu click vs second).
+        let user = null;
+        for (let attempt = 0; attempt < 6; attempt++) {
+            const { data: { user: u } } = await supabaseClient.auth.getUser();
+            if (u) {
+                user = u;
+                break;
+            }
+            await new Promise(r => setTimeout(r, 350));
+        }
+
+        if (!user) {
+            // If we have a persisted token in localStorage, the onPageFinished injection (forces localStorage + restoreSession)
+            // or a late-arriving _s= may still establish the session. Do not bounce the user immediately.
+            let hasPersistedToken = false;
+            try {
+                const raw = localStorage.getItem('tsp-auth-token');
+                if (raw) {
+                    const p = JSON.parse(raw);
+                    const s = (p && p.currentSession) ? p.currentSession : (p && p.access_token ? p : null);
+                    if (s && s.access_token) hasPersistedToken = true;
+                }
+            } catch(e) {}
+
+            if (hasPersistedToken) {
+                // Give injection more time, then re-check once. If still no user, then redirect.
+                setTimeout(async () => {
+                    const { data: { user: u } } = await supabaseClient.auth.getUser();
+                    if (u) {
+                        currentUser = u;
+                        await loadUserProfileAndReports();
+                    } else {
+                        navTo('index.html');
+                    }
+                }, 2000);
+                return; // stay on the (loading) SR screen for now
+            }
+
+            navTo('index.html'); return;
+        }
+
         currentUser = user;
+        await loadUserProfileAndReports();
+    }
+
+    async function loadUserProfileAndReports() {
+        // Load user's organization for scoping
+        try {
+            const { data: profile } = await supabaseClient
+                .from('user_profiles')
+                .select('organization_id')
+                .eq('id', currentUser.id)
+                .maybeSingle();
+            const candidate = profile?.organization_id;
+            if (isValidOrgId(candidate)) {
+                currentUserOrgId = candidate;
+            } else {
+                currentUserOrgId = null;
+            }
+        } catch(e) {}
+
         await loadReports();
     }
 
     async function loadReports() {
-        const { data, error } = await supabaseClient
+        let query = supabaseClient
             .from('service_reports')
-            .select('id, report_number, equipment_name, serial_number, customer_name, service_type, status, date_out, updated_at, model_type')
-            .eq('created_by', currentUser.id)
+            .select('id, report_number, equipment_name, serial_number, customer_name, service_type, status, date_out, updated_at, model_type, organization_id, created_by, customer_address, customer_city, customer_state, customer_phone, customer_email, sku, checklist_electrical, checklist_mechanical, checklist_aesthetic, power_measurements, model_parameters, ground_resistance, leakage_current, ground_resistance_pass, leakage_current_pass, test_equipment, comments, service_engineer, next_pm_due, ticket_number, tech_name, tech_phone, tech_email, tech_company_name, tech_company_address, tech_company_city, tech_company_state, tech_company_phone, tech_company_logo_url')
             .order('updated_at', { ascending: false });
+
+        const hasValidOrg = isValidOrgId(currentUserOrgId);
+        if (hasValidOrg) {
+            query = query.eq('organization_id', currentUserOrgId);
+        }
+        // When we have no valid org in profile, do NOT force a created_by filter here.
+        // Let the Supabase RLS policies (which you configured) determine visibility
+        // (typically rows where organization_id matches the user's profile, or owned by the user).
+        // Forcing client-side created_by can hide rows if RLS is org-centric.
+
+        const { data, error } = await query;
 
         if (error) { showToast('Load failed: ' + error.message, 'error'); return; }
         allReports = data || [];
@@ -149,6 +448,14 @@
     function updateStats() {
         document.getElementById('statDrafts').textContent   = allReports.filter(r => r.status === 'draft').length;
         document.getElementById('statComplete').textContent = allReports.filter(r => r.status === 'complete').length;
+
+        // Temporary debug - remove after testing
+        try {
+            const dbg = document.getElementById('statDrafts');
+            if (dbg) {
+                dbg.textContent = allReports.filter(r => r.status === 'draft').length + ' (org:' + (currentUserOrgId || 'null') + ', loaded:' + allReports.length + ')';
+            }
+        } catch(e){}
     }
 
     function setFilter(f, el) {
@@ -181,23 +488,22 @@
             return;
         }
 
-        list.innerHTML = '';
+        // Build as single innerHTML to reduce reflows / jank on low-end GPUs
+        let html = '';
         reports.forEach(r => {
-            const card = document.createElement('div');
-            card.className = 'report-card ' + (r.status || 'draft');
-            card.onclick = () => openReport(r.id);
-
             const icon = r.status === 'complete' ? '✅' : '📝';
-            const title = r.equipment_name || r.model_type || r.report_number || 'Untitled Report';
-            const customer = r.customer_name || '—';
+            const title = (r.equipment_name || r.model_type || r.report_number || 'Untitled Report').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+            const customer = (r.customer_name || '—').replace(/</g, '&lt;').replace(/>/g, '&gt;');
             const dateStr = r.date_out
                 ? new Date(r.date_out + 'T00:00:00').toLocaleDateString([], { month:'short', day:'numeric', year:'numeric' })
                 : 'No date';
             const updated = new Date(r.updated_at).toLocaleDateString([], { month:'short', day:'numeric' });
-            const sn = r.serial_number ? 'SN: ' + r.serial_number : '';
+            const sn = r.serial_number ? 'SN: ' + r.serial_number.replace(/</g, '&lt;') : '';
             const svcType = r.service_type || '';
+            const status = r.status || 'draft';
+            const statusLabel = (status === 'complete' ? 'Complete' : 'Draft');
 
-            card.innerHTML =
+            html += '<div class="report-card ' + status + '" onclick="openReport(\'' + r.id + '\')">' +
                 '<div class="report-icon">' + icon + '</div>' +
                 '<div class="report-info">' +
                     '<div class="report-title">' + title + '</div>' +
@@ -210,21 +516,27 @@
                 '</div>' +
                 '<div class="report-right">' +
                     '<div class="report-date">' + dateStr + '</div>' +
-                    '<div class="status-badge ' + (r.status || 'draft') + '">' + (r.status === 'complete' ? 'Complete' : 'Draft') + '</div>' +
+                    '<div class="status-badge ' + status + '">' + statusLabel + '</div>' +
                     '<div class="report-date" style="margin-top:4px;">Saved ' + updated + '</div>' +
-                '</div>';
-
-            list.appendChild(card);
+                '</div>' +
+            '</div>';
         });
+        list.innerHTML = html;
     }
 
     function showToast(msg, type='') {
-        const t = document.getElementById('toast'); t.textContent = msg;
+        const t = document.getElementById('toast');
+        t.textContent = msg;
         t.className = 'toast show' + (type ? ' ' + type : '');
-        clearTimeout(t._t); t._t = setTimeout(() => t.classList.remove('show'), 3000);
+        clearTimeout(t._t);
+        t._t = setTimeout(() => t.classList.remove('show'), 3000);
     }
 
     init();
 </script>
+
+<!-- Web compatibility / browser testing layer (safe no-op in WebView) -->
+<script src="web-compat.js"></script>
+
 </body>
 </html>

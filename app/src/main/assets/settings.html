@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Settings</title>
+
+    <!-- Centralized theme system -->
+    <script src="theme.js"></script>
+    <link rel="stylesheet" href="tsp.css">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -23,6 +27,27 @@
             --blue:      #3b82f6;
         }
 
+        /* ════════════════════════════════
+           AUTOMATIC LIGHT MODE (follows phone)
+        ════════════════════════════════ */
+        @media (prefers-color-scheme: light) {
+            :root {
+                --gold:       #D97706;
+                --gold-dk:    #B45309;
+                --bg:         #f8f9fa;
+                --surface:    #ffffff;
+                --surface2:   #f1f3f5;
+                --surface3:   #e9ecef;
+                --border:     #dee2e6;
+                --border-gold:#D9770644;
+                --text:       #212529;
+                --text-muted: #6c757d;
+                --red:        #dc2626;
+                --green:      #16a34a;
+                --blue:       #2563eb;
+            }
+        }
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg);
@@ -30,17 +55,6 @@
             min-height: 100vh;
             padding-bottom: 60px;
             transition: background 0.3s, color 0.3s;
-        }
-
-        /* Light theme override */
-        body.light {
-            --bg:       #f5f5f5;
-            --surface:  #fff;
-            --surface2: #f0f0f0;
-            --surface3: #e8e8e8;
-            --border:   #ddd;
-            --text:     #111;
-            --text-muted: #666;
         }
 
         /* ── Header ── */
@@ -51,12 +65,7 @@
             border-bottom: 1px solid var(--gold);
             position: sticky; top: 0; z-index: 100;
         }
-        .back-btn {
-            background: none; border: none; color: var(--gold);
-            font-size: 22px; cursor: pointer; padding: 4px 8px;
-            border-radius: 8px; line-height: 1;
-        }
-        .back-btn:hover { background: var(--surface2); }
+        /* .back-btn now uses global styles from tsp.css */
         .header-title { font-size: 18px; font-weight: 700; flex: 1; }
 
         /* ── Sections ── */
@@ -99,13 +108,6 @@
             cursor: pointer; transition: background 0.2s;
             border: 1px solid var(--border);
         }
-        .toggle-track::before {
-            content: '';
-            position: absolute; left: 3px; top: 3px;
-            width: 20px; height: 20px; border-radius: 50%;
-            background: var(--text-muted);
-            transition: transform 0.2s, background 0.2s;
-        }
         .toggle-switch input:checked + .toggle-track { background: var(--gold); border-color: var(--gold); }
         .toggle-switch input:checked + .toggle-track::before { transform: translateX(20px); background: #111; }
 
@@ -140,24 +142,18 @@
         .setting-select:focus { border-color: var(--gold); }
         .setting-select option { background: var(--surface2); }
 
-        /* Theme cards */
+        /* Theme cards - HIDDEN (app now follows system) */
         .theme-cards {
-            display: flex; gap: 10px;
-            padding: 14px 16px;
+            display: none;
         }
-        .theme-card {
-            flex: 1; padding: 14px 10px;
-            border-radius: 12px; border: 2px solid var(--border);
-            cursor: pointer; text-align: center;
-            transition: border-color 0.15s, transform 0.15s;
+
+        .theme-note {
+            padding: 12px 16px;
+            font-size: 13px;
+            color: var(--text-muted);
+            background: var(--surface2);
+            border-top: 1px solid var(--border);
         }
-        .theme-card:hover { transform: translateY(-2px); }
-        .theme-card.active { border-color: var(--gold); }
-        .theme-card.dark-card  { background: #111; color: #fff; }
-        .theme-card.light-card { background: #f5f5f5; color: #111; }
-        .theme-card-icon   { font-size: 24px; margin-bottom: 6px; }
-        .theme-card-label  { font-size: 12px; font-weight: 700; }
-        .theme-card-check  { font-size: 16px; color: var(--gold); height: 20px; }
 
         /* About section */
         .about-row {
@@ -196,7 +192,7 @@
             border-radius: 10px; border: none;
             font-size: 15px; font-weight: 700; cursor: pointer;
         }
-        .save-bar-btn.primary { background: var(--gold); color: #111827; }
+/* .save-bar-btn replaced by global .btn-primary */
         .save-bar-btn.primary:hover { background: var(--gold-dk); }
         .save-bar-btn.secondary {
             background: var(--surface2);
@@ -244,21 +240,26 @@
         <span class="section-title">Appearance</span>
     </div>
 
-    <!-- Theme cards -->
-    <div style="padding:12px 16px 4px;font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">
-        Theme
-    </div>
     <div class="theme-cards">
-        <div class="theme-card dark-card active" id="themeDark" onclick="setTheme('dark')">
+        <div class="theme-card dark-card" id="themeDark" onclick="setAppTheme('dark')">
             <div class="theme-card-icon">🌙</div>
             <div class="theme-card-label">Dark</div>
             <div class="theme-card-check" id="darkCheck">✓</div>
         </div>
-        <div class="theme-card light-card" id="themeLight" onclick="setTheme('light')">
+        <div class="theme-card light-card" id="themeLight" onclick="setAppTheme('light')">
             <div class="theme-card-icon">☀️</div>
             <div class="theme-card-label">Light</div>
             <div class="theme-card-check" id="lightCheck"></div>
         </div>
+        <div class="theme-card system-card" id="themeSystem" onclick="setAppTheme('system')">
+            <div class="theme-card-icon">⚙️</div>
+            <div class="theme-card-label">System</div>
+            <div class="theme-card-check" id="systemCheck"></div>
+        </div>
+    </div>
+
+    <div class="theme-note">
+        Choose Dark, Light, or follow your device’s system setting.
     </div>
 </div>
 
@@ -313,6 +314,28 @@
         </div>
         <label class="toggle-switch">
             <input type="checkbox" id="showCancelled">
+            <span class="toggle-track"></span>
+        </label>
+    </div>
+
+</div>
+
+<!-- ════════════════════════════════
+     SECURITY / LOGIN
+════════════════════════════════ -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">🔐</span>
+        <span class="section-title">Security & Login</span>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Fingerprint Login</div>
+            <div class="setting-sub">Use your fingerprint to quickly unlock the app on launch</div>
+        </div>
+        <label class="toggle-switch">
+            <input type="checkbox" id="biometricLogin" onchange="toggleBiometric(this.checked)">
             <span class="toggle-track"></span>
         </label>
     </div>
@@ -407,6 +430,51 @@
         <span class="action-label">Manage notification types</span>
         <span style="font-size:12px;color:var(--text-muted);margin-right:6px;">in Profile</span>
         <span class="action-arrow">›</span>
+    </div>
+</div>
+
+<!-- ════════════════════════════════
+     AI ASSISTANT
+════════════════════════════════ -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">🤖</span>
+        <span class="section-title">AI Assistant (Zapp)</span>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Zapp Brannigan Persona</div>
+            <div class="setting-sub">Voice mode replies with the swagger of Zapp Brannigan from Futurama. Technically accurate, magnificently delivered.</div>
+        </div>
+        <label class="toggle-switch">
+            <input type="checkbox" id="zappPersona" checked>
+            <span class="toggle-track"></span>
+        </label>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Voice Gender</div>
+            <div class="setting-sub">Choose a male or female voice for Zapp voice responses</div>
+        </div>
+        <select class="setting-select" id="zappVoiceGender" style="width:110px;flex-shrink:0;">
+            <option value="male">Male</option>
+            <option value="female">Female</option>
+        </select>
+    </div>
+
+    <div class="setting-row" id="zappVoiceRow">
+        <div class="setting-info">
+            <div class="setting-label">Voice</div>
+            <div class="setting-sub" id="zappVoiceSub">Choose from available male voices</div>
+        </div>
+        <select class="setting-select" id="zappVoice" style="width:110px;flex-shrink:0;" onchange="saveSettings()">
+            <option value="sage">Sage — warm &amp; clear</option>
+            <option value="rex">Rex — confident</option>
+            <option value="sal">Sal — versatile</option>
+            <option value="leo">Leo — authoritative</option>
+        </select>
     </div>
 </div>
 
@@ -531,7 +599,7 @@
     // ═══════════════════════════════════════════════════
     //  SUPABASE
     // ═══════════════════════════════════════════════════
-    // ── Extract _s param ──
+    // ── Extract _s param OR localStorage (for direct bottom-nav loads without _s) ──
     var _pendingSession = null;
     try {
         var _purl = new URL(window.location.href);
@@ -540,6 +608,14 @@
             _pendingSession = JSON.parse(atob(_sp));
             _purl.searchParams.delete('_s');
             history.replaceState(null, '', _purl.toString());
+        } else {
+            // Fallback for direct loads (bottom nav) or cold restores
+            const raw = localStorage.getItem('tsp-auth-token');
+            if (raw) {
+                const p = JSON.parse(raw);
+                const sess = (p && p.currentSession) ? p.currentSession : (p && p.access_token ? p : null);
+                if (sess && sess.access_token) _pendingSession = sess;
+            }
         }
     } catch(e) {}
 
@@ -556,6 +632,28 @@
             }
         }
     );
+
+    // Apply pending immediately for stability on direct loads
+    if (_pendingSession) {
+        var _ps = _pendingSession; _pendingSession = null;
+        supabaseClient.auth.setSession({ access_token: _ps.access_token, refresh_token: _ps.refresh_token });
+    }
+
+    // Restore hook for native MainActivity injection on page finish (bottom nav etc)
+    function restoreSession(jsonStr) {
+        try {
+            const parsed = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
+            const session = (parsed && parsed.currentSession) ? parsed.currentSession : parsed;
+            if (session && session.access_token) {
+                localStorage.setItem('tsp-auth-token', JSON.stringify({ currentSession: session, expiresAt: session.expires_at }));
+                if (typeof supabaseClient !== 'undefined') {
+                    supabaseClient.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token });
+                } else {
+                    _pendingSession = session;
+                }
+            }
+        } catch(e) {}
+    }
 
     function navigateTo(page) {
         try {
@@ -591,6 +689,9 @@
         pushNotif:      true,
         notifSound:     false,
         notifDot:       true,
+        zappPersona:    true,
+        zappVoiceGender:'male',
+        zappVoice:      'sage',
     };
 
     let settings = { ...DEFAULTS };
@@ -608,6 +709,7 @@
 
         applySettings();
         populateForm();
+        initThemeUI();
 
         // Detect platform
         const isAndroid = typeof Android !== 'undefined' || /Android/.test(navigator.userAgent);
@@ -621,8 +723,8 @@
     }
 
     function populateForm() {
-        // Theme
-        setTheme(settings.theme, false);
+        // Theme UI is initialized separately via initThemeUI()
+        // We still keep the function in case other pages call it
 
         // Calendar view
         setCalView(settings.calView, false);
@@ -633,6 +735,20 @@
         // Show completed/cancelled
         document.getElementById('showCompleted').checked = settings.showCompleted;
         document.getElementById('showCancelled').checked = settings.showCancelled;
+
+        // Biometric login (state managed by native Android)
+        const bioCb = document.getElementById('biometricLogin');
+        if (bioCb) {
+            if (typeof Android !== 'undefined' && typeof Android.isBiometricEnabled === 'function') {
+                bioCb.checked = Android.isBiometricEnabled();
+            } else {
+                bioCb.checked = false;
+                bioCb.disabled = true;
+            }
+            if (typeof Android !== 'undefined' && typeof Android.canUseBiometric === 'function' && !Android.canUseBiometric()) {
+                bioCb.disabled = true;
+            }
+        }
 
         // Date format
         document.getElementById('dateFormat').value = settings.dateFormat;
@@ -645,6 +761,12 @@
         document.getElementById('pushNotif').checked  = settings.pushNotif;
         document.getElementById('notifSound').checked = settings.notifSound;
         document.getElementById('notifDot').checked   = settings.notifDot;
+
+        // AI Assistant
+        document.getElementById('zappPersona').checked     = settings.zappPersona !== false;
+        document.getElementById('zappVoiceGender').value   = settings.zappVoiceGender || 'male';
+        document.getElementById('zappVoice').value         = settings.zappVoice || 'sage';
+        updateZappVoiceOptions(settings.zappVoiceGender || 'male', false);
 
         // Native-backed settings
         try {
@@ -659,22 +781,62 @@
     }
 
     function applySettings() {
-        // Apply theme to body
-        document.body.classList.toggle('light', settings.theme === 'light');
+        // Theme is now handled automatically by prefers-color-scheme
+        // No need to manually add/remove 'light' class
     }
 
     // ═══════════════════════════════════════════════════
-    //  THEME
+    //  THEME - Uses centralized theme.js (TSPTheme)
     // ═══════════════════════════════════════════════════
-    function setTheme(theme, updateState = true) {
-        if (updateState) settings.theme = theme;
+    function setAppTheme(mode) {
+        if (window.TSPTheme && typeof window.TSPTheme.setTheme === 'function') {
+            window.TSPTheme.setTheme(mode);
+        } else {
+            // Fallback if theme.js not loaded
+            localStorage.setItem('tsp_theme', mode);
+            if (mode === 'light') {
+                document.documentElement.classList.add('light');
+            } else if (mode === 'dark') {
+                document.documentElement.classList.remove('light');
+            } else {
+                // system
+                const prefersLight = window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches;
+                document.documentElement.classList.toggle('light', prefersLight);
+            }
+        }
+        updateThemeUI(mode);
+    }
 
-        document.body.classList.toggle('light', theme === 'light');
+    function updateThemeUI(activeMode) {
+        // Remove active state from all
+        document.querySelectorAll('.theme-card').forEach(card => card.classList.remove('active'));
+        document.querySelectorAll('.theme-card-check').forEach(el => el.textContent = '');
 
-        document.getElementById('themeDark').classList.toggle('active',  theme === 'dark');
-        document.getElementById('themeLight').classList.toggle('active', theme === 'light');
-        document.getElementById('darkCheck').textContent  = theme === 'dark'  ? '✓' : '';
-        document.getElementById('lightCheck').textContent = theme === 'light' ? '✓' : '';
+        const map = {
+            'dark': 'themeDark',
+            'light': 'themeLight',
+            'system': 'themeSystem'
+        };
+
+        const activeId = map[activeMode] || 'themeSystem';
+        const activeCard = document.getElementById(activeId);
+        if (activeCard) activeCard.classList.add('active');
+
+        const checkId = activeMode === 'dark' ? 'darkCheck' :
+                        activeMode === 'light' ? 'lightCheck' : 'systemCheck';
+        const checkEl = document.getElementById(checkId);
+        if (checkEl) checkEl.textContent = '✓';
+    }
+
+    // Initialize theme UI on load
+    function initThemeUI() {
+        let current = 'system';
+        if (window.TSPTheme && typeof window.TSPTheme.getTheme === 'function') {
+            current = window.TSPTheme.getTheme();
+        } else {
+            current = localStorage.getItem('tsp_theme') || 'system';
+        }
+        updateThemeUI(current);
     }
 
     // ═══════════════════════════════════════════════════
@@ -730,8 +892,54 @@
     }
 
     // ═══════════════════════════════════════════════════
+    //  AI ASSISTANT SETTINGS
+    // ═══════════════════════════════════════════════════
+    const VOICES = {
+        male:   [
+            { id: 'sage', label: 'Sage — warm & clear' },
+            { id: 'rex',  label: 'Rex — confident' },
+            { id: 'sal',  label: 'Sal — versatile' },
+            { id: 'leo',  label: 'Leo — authoritative' },
+        ],
+        female: [
+            { id: 'eve',  label: 'Eve — expressive' },
+            { id: 'ara',  label: 'Ara — warm & conversational' },
+        ]
+    };
+
+    function updateZappVoiceOptions(gender, resetValue = true) {
+        const sel = document.getElementById('zappVoice');
+        const sub = document.getElementById('zappVoiceSub');
+        if (!sel) return;
+        const voices = VOICES[gender] || VOICES.male;
+        sel.innerHTML = voices.map(v => `<option value="${v.id}">${v.label}</option>`).join('');
+        if (resetValue) {
+            sel.value = voices[0].id;
+            settings.zappVoice = voices[0].id;
+        } else {
+            // Try to restore saved value; fall back to first
+            const saved = settings.zappVoice;
+            const match = voices.find(v => v.id === saved);
+            sel.value = match ? saved : voices[0].id;
+        }
+        if (sub) sub.textContent = `Choose from available ${gender} voices`;
+        saveSettings();
+    }
+
+    // Wire gender dropdown
+    document.getElementById('zappVoiceGender').addEventListener('change', function() {
+        updateZappVoiceOptions(this.value, true);
+    });
+
+    // ═══════════════════════════════════════════════════
     //  SAVE / RESET
     // ═══════════════════════════════════════════════════
+    function toggleBiometric(enabled) {
+        if (typeof Android !== 'undefined' && typeof Android.setBiometricEnabled === 'function') {
+            Android.setBiometricEnabled(enabled);
+        }
+    }
+
     function saveSettings() {
         // Collect all current values
         settings.weekStart     = document.getElementById('weekStart').value;
@@ -740,6 +948,9 @@
         settings.pushNotif     = document.getElementById('pushNotif').checked;
         settings.notifSound    = document.getElementById('notifSound').checked;
         settings.notifDot      = document.getElementById('notifDot').checked;
+        settings.zappPersona    = document.getElementById('zappPersona').checked;
+        settings.zappVoiceGender= document.getElementById('zappVoiceGender').value;
+        settings.zappVoice      = document.getElementById('zappVoice').value;
 
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
         applySettings();
@@ -751,6 +962,7 @@
                 Android.setExitConfirmEnabled(!!document.getElementById('exitConfirm').checked);
             }
         } catch(e) {}
+        // Note: Removed history.back() to prevent page from closing on load
     }
 
     function resetDefaults() {

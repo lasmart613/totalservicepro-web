@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <!-- Centralized theme system -->
+    <script src="theme.js"></script>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Customers · TSP</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script>
+        var _pendingSession = null;
+        (function() {
+            try {
+                const enc = new URLSearchParams(window.location.search).get('_s');
+                if (enc) { const s = JSON.parse(atob(enc)); if (s?.access_token) { _pendingSession = s; localStorage.setItem('tsp-auth-token', JSON.stringify({currentSession:s,expiresAt:s.expires_at})); const u=new URL(window.location.href); u.searchParams.delete('_s'); window.history.replaceState({},'',u.toString()); return; } }
+                const raw = localStorage.getItem('tsp-auth-token'); if (raw) { const p=JSON.parse(raw); const sess=p?.currentSession||(p?.access_token?p:null); if (sess?.access_token) _pendingSession=sess; }
+            } catch(e) {}
+        })();
+        const supabaseClient = supabase.createClient('https://yljztfajyvjzqikxdddf.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',{auth:{persistSession:true,storageKey:'tsp-auth-token',storage:window.localStorage,autoRefreshToken:true,detectSessionInUrl:false}});
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="tsp.css">
+    <style>
+        .stats-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 18px; }
+        .search-bar { position: relative; margin-bottom: 14px; }
+        .search-bar input { width:100%; padding:10px 36px 10px 14px; background:var(--surface3); border:1px solid var(--border2); border-radius:20px; color:var(--text); font-family:inherit; font-size:14px; outline:none; }
+        .search-bar input:focus { border-color:var(--gold); }
+        .search-bar input::placeholder { color:var(--text3); }
+        .search-clear { position:absolute; right:12px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text3); cursor:pointer; font-size:16px; display:none; }
+        .filter-row { display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:16px; scrollbar-width:none; }
+        .filter-row::-webkit-scrollbar { display:none; }
+        .filter-chip { flex-shrink:0; padding:6px 14px; background:var(--surface3); border:1px solid var(--border2); border-radius:20px; font-size:12px; font-weight:600; color:var(--text3); cursor:pointer; font-family:inherit; white-space:nowrap; transition:all 0.15s; }
+        .filter-chip.active { background:var(--gold-glow); border-color:var(--gold-border); color:var(--gold); }
+        .customer-card { background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:10px; cursor:pointer; transition:border-color 0.15s; }
+        .customer-card:hover { border-color:var(--gold-border); }
+        .card-top { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
+        .card-avatar { width:44px; height:44px; border-radius:10px; background:var(--gold); color:#111; font-size:16px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden; }
+        .card-avatar img { width:100%; height:100%; object-fit:cover; }
+        .card-name { font-size:15px; font-weight:700; color:var(--text); }
+        .card-type { font-size:11px; color:var(--text3); margin-top:1px; text-transform:capitalize; }
+        .card-location { font-size:12px; color:var(--text3); margin-top:2px; }
+        .card-arrow { margin-left:auto; color:var(--text3); font-size:20px; flex-shrink:0; }
+        .card-stats { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:8px; }
+        .card-stat { font-size:12px; color:var(--text3); }
+        .card-stat span { color:var(--text); font-weight:700; }
+        .card-brands { display:flex; gap:6px; flex-wrap:wrap; }
+        .brand-chip { padding:3px 8px; background:var(--surface3); border:1px solid var(--border2); border-radius:20px; font-size:11px; color:var(--text3); }
+        .last-service { font-size:11px; color:var(--text3); }
+        .last-service.recent { color:var(--green); }
+        .last-service.overdue { color:var(--orange); }
+        .fab { position:fixed; bottom:80px; right:20px; width:54px; height:54px; border-radius:50%; background:var(--gold); color:#111; font-size:26px; border:none; cursor:pointer; box-shadow:0 4px 16px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:50; transition:transform 0.15s; }
+        .fab:active { transform:scale(0.93); }
+        .state-box { text-align:center; padding:48px 20px; color:var(--text3); }
+        .state-icon { font-size:40px; margin-bottom:12px; opacity:0.5; }
+        .state-title { font-size:16px; font-weight:700; margin-bottom:6px; }
+        .state-sub { font-size:13px; line-height:1.5; }
+        .bottom-nav { position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border2);display:flex;justify-content:space-around;padding:8px 0 max(8px,env(safe-area-inset-bottom));z-index:100; }
+        .bottom-nav-item { display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;color:var(--text3);cursor:pointer;font-family:inherit;min-width:56px;padding:4px;transition:color 0.15s; }
+        .bottom-nav-item:hover,.bottom-nav-item.active { color:var(--gold); }
+        .bottom-nav-item span:first-child { font-size:20px; }
+        .bottom-nav-item span:last-child { font-size:9px;font-weight:700;text-transform:uppercase; }
+    </style>
+</head>
+<body>
+<div class="header">
+    <button class="header-back" onclick="navigateTo('index.html')">‹</button>
+    <div class="header-title">Customers</div>
+    <div class="avatar-wrapper" id="avatarWrapper">
+        <button class="avatar-btn" onclick="toggleDropdown(event)"><img id="avatarImg" class="avatar-img" src="" alt=""/><div id="avatarInitials" class="avatar-initials">U</div></button>
+        <div class="avatar-dropdown" id="avatarDropdown">
+            <div class="dropdown-user-info"><div class="dropdown-user-name" id="dropdownName">User</div><div class="dropdown-user-email" id="dropdownEmail"></div></div>
+            <button class="dropdown-item" onclick="navigateTo('user_profile.html')"><span class="dropdown-icon">👤</span> Profile</button>
+            <button class="dropdown-item" onclick="navigateTo('settings.html')"><span class="dropdown-icon">⚙️</span> Settings</button>
+            <button class="dropdown-item" id="upgradeBtn" onclick="navigateTo('paywall.html')" style="display:none;color:var(--gold);"><span class="dropdown-icon">⭐</span> Upgrade</button>
+            <button class="dropdown-item danger" onclick="logoutUser()"><span class="dropdown-icon">🚪</span> Log Out</button>
+        </div>
+    </div>
+</div>
+
+<div class="page">
+    <div style="margin-bottom:16px;"><div style="font-size:22px;font-weight:800;">Customer Directory</div><div id="pageSubtitle" style="font-size:13px;color:var(--text3);margin-top:3px;">Loading...</div></div>
+
+    <div class="stats-3">
+        <div class="stat-card"><div class="stat-num" id="statTotal">—</div><div class="stat-label">Customers</div></div>
+        <div class="stat-card"><div class="stat-num blue" id="statEquip">—</div><div class="stat-label">Equipment</div></div>
+        <div class="stat-card"><div class="stat-num purple" id="statTickets">—</div><div class="stat-label">Open Tickets</div></div>
+    </div>
+
+    <div class="search-bar">
+        <input type="text" id="searchInput" placeholder="Search customers..." oninput="onSearch()">
+        <button class="search-clear" id="searchClear" onclick="clearSearch()">✕</button>
+    </div>
+
+    <div class="filter-row">
+        <button class="filter-chip active" onclick="setFilter('all',this)">All</button>
+        <button class="filter-chip" onclick="setFilter('medical_spa',this)">Medical Spa</button>
+        <button class="filter-chip" onclick="setFilter('dermatology',this)">Dermatology</button>
+        <button class="filter-chip" onclick="setFilter('plastic_surgery',this)">Plastic Surgery</button>
+        <button class="filter-chip" onclick="setFilter('hospital',this)">Hospital</button>
+        <button class="filter-chip" onclick="setFilter('other',this)">Other</button>
+    </div>
+
+    <div id="cardList">
+        <div class="skeleton" style="height:100px;border-radius:12px;margin-bottom:10px;" id="skel1"></div>
+        <div class="skeleton" style="height:100px;border-radius:12px;margin-bottom:10px;" id="skel2"></div>
+        <div class="skeleton" style="height:100px;border-radius:12px;" id="skel3"></div>
+    </div>
+</div>
+
+<button class="fab" onclick="openAddModal()" title="Add Customer">＋</button>
+
+<div class="bottom-nav">
+    <button class="bottom-nav-item" onclick="navigateTo('index.html')"><span>🏠</span><span>Home</span></button>
+    <button class="bottom-nav-item active"><span>👥</span><span>Customers</span></button>
+    <button class="bottom-nav-item" onclick="navigateTo('service_schedule.html')"><span>📅</span><span>Schedule</span></button>
+    <button class="bottom-nav-item" onclick="navigateTo('manual_library.html')"><span>📚</span><span>Manuals</span></button>
+    <button class="bottom-nav-item" onclick="navigateTo('settings.html')"><span>⚙️</span><span>Settings</span></button>
+</div>
+
+<!-- Add Customer Modal -->
+<div class="modal-overlay" id="addModal">
+    <div class="modal-box" style="max-height:90vh;overflow-y:auto;">
+        <button class="modal-close" onclick="closeAddModal()">×</button>
+        <div class="modal-title">Add Customer</div>
+        <div class="form-group"><label>Business Name *</label><input type="text" class="form-input" id="newName" placeholder="e.g. Desert Dermatology"></div>
+        <div class="form-group"><label>Type</label>
+            <select class="form-select" id="newBizType">
+                <option value="medical_spa">Medical Spa</option>
+                <option value="dermatology">Dermatology</option>
+                <option value="plastic_surgery">Plastic Surgery</option>
+                <option value="hospital">Hospital</option>
+                <option value="other">Other</option>
+            </select>
+        </div>
+        <div class="form-row">
+            <div class="form-group"><label>Phone</label><input type="tel" class="form-input" id="newPhone" placeholder="+1 555-000-0000"></div>
+            <div class="form-group"><label>Email</label><input type="email" class="form-input" id="newEmail" placeholder="info@clinic.com"></div>
+        </div>
+        <div class="form-group"><label>Address</label><input type="text" class="form-input" id="newAddress" placeholder="123 Main St"></div>
+        <div class="form-row">
+            <div class="form-group"><label>City</label><input type="text" class="form-input" id="newCity"></div>
+            <div class="form-group"><label>State</label><input type="text" class="form-input" id="newState" maxlength="2" placeholder="CA"></div>
+        </div>
+        <div class="form-group"><label>Website</label><input type="url" class="form-input" id="newWebsite" placeholder="https://"></div>
+        <button class="btn btn-primary btn-block" onclick="saveNewCustomer()" style="margin-top:8px;">Add Customer</button>
+        <button class="btn btn-ghost btn-full" onclick="closeAddModal()" style="margin-top:8px;">Cancel</button>
+    </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+    let allCustomers=[], filtered=[], activeFilter='all', activeBrand=null, searchQuery='';
+
+    supabaseClient.auth.onAuthStateChange((event, session) => {
+        updateAuthUI();
+        try { if(typeof Android!=='undefined'){if(session?.access_token)Android.saveSession(JSON.stringify(session));else if(event==='SIGNED_OUT'&&!session)Android.clearSession();} } catch(e) {}
+    });
+
+    async function navigateTo(page) {
+        try { const{data:{session}}=await supabaseClient.auth.getSession(); if(session?.access_token){const sep=page.includes('?')?'&':'?';window.location.href=page+sep+'_s='+btoa(JSON.stringify(session));return;} } catch(e) {}
+        window.location.href = page;
+    }
+
+    async function init() { await loadCustomers(); }
+
+    async function loadCustomers() {
+        try {
+            const {data:orgs,error}=await supabaseClient.from('organizations').select('*').eq('type','customer').eq('is_active',true).order('name');
+            if(error) throw error;
+            const {data:equip}=await supabaseClient.from('equipment').select('organization_id').neq('status','Decommissioned');
+            const {data:tickets}=await supabaseClient.from('service_tickets').select('organization_id,status').not('status','in','("Completed","Cancelled")');
+            const {data:lastService}=await supabaseClient.from('service_tickets').select('organization_id,service_date').eq('status','Completed').order('service_date',{ascending:false});
+            const equipMap={},ticketMap={},lastSvcMap={};
+            (equip||[]).forEach(e=>{equipMap[e.organization_id]=(equipMap[e.organization_id]||0)+1;});
+            (tickets||[]).forEach(t=>{ticketMap[t.organization_id]=(ticketMap[t.organization_id]||0)+1;});
+            (lastService||[]).forEach(t=>{if(!lastSvcMap[t.organization_id])lastSvcMap[t.organization_id]=t.service_date;});
+            allCustomers=(orgs||[]).map(org=>({...org,equipCount:equipMap[org.id]||0,ticketCount:ticketMap[org.id]||0,lastService:lastSvcMap[org.id]||null}));
+            updateStats(); applyFilters();
+        } catch(e) { showSkeletons(false); showToast('Load failed: '+e.message,'error'); }
+    }
+
+    function updateStats() {
+        document.getElementById('statTotal').textContent=allCustomers.length;
+        document.getElementById('statEquip').textContent=allCustomers.reduce((s,c)=>s+c.equipCount,0);
+        document.getElementById('statTickets').textContent=allCustomers.reduce((s,c)=>s+c.ticketCount,0);
+        document.getElementById('pageSubtitle').textContent=`${allCustomers.length} customer${allCustomers.length!==1?'s':''}`;
+    }
+
+    function setFilter(val,el){activeFilter=val;activeBrand=null;document.querySelectorAll('.filter-chip').forEach(c=>c.classList.remove('active'));el.classList.add('active');applyFilters();}
+    function onSearch(){searchQuery=document.getElementById('searchInput').value.trim().toLowerCase();document.getElementById('searchClear').style.display=searchQuery?'block':'none';applyFilters();}
+    function clearSearch(){document.getElementById('searchInput').value='';searchQuery='';document.getElementById('searchClear').style.display='none';applyFilters();}
+
+    function applyFilters() {
+        filtered=allCustomers.filter(c=>{
+            if(activeFilter!=='all'&&c.biz_type!==activeFilter)return false;
+            if(searchQuery){const hay=[c.name,c.city,c.state,c.biz_type].join(' ').toLowerCase();if(!hay.includes(searchQuery))return false;}
+            return true;
+        });
+        renderCards();
+    }
+
+    function renderCards() {
+        showSkeletons(false);
+        const list=document.getElementById('cardList'); list.innerHTML='';
+        if(!filtered.length){list.innerHTML=`<div class="state-box"><div class="state-icon">${searchQuery||activeFilter!=='all'?'🔍':'👥'}</div><div class="state-title">${searchQuery||activeFilter!=='all'?'No matches found':'No customers yet'}</div><div class="state-sub">${searchQuery||activeFilter!=='all'?'Try a different search or filter':'Tap ＋ to add your first customer'}</div></div>`;return;}
+        filtered.forEach(c=>{
+            const card=document.createElement('div'); card.className='customer-card';
+            card.onclick=()=>navigateTo(`customer_profile.html?id=${c.id}`);
+            const initials=c.name.split(' ').slice(0,2).map(w=>w[0]).join('').toUpperCase();
+            const location=[c.city,c.state].filter(Boolean).join(', ')||'—';
+            const brands=(c.supported_brands||[]).slice(0,3);
+            const lastSvc=formatLastService(c.lastService);
+            card.innerHTML=`<div class="card-top"><div class="card-avatar">${c.logo_url?`<img src="${c.logo_url}" alt="${c.name}">`:`${initials}`}</div><div class="card-info"><div class="card-name">${c.name}</div><div class="card-type">${(c.biz_type||'customer').replace(/_/g,' ')}</div><div class="card-location">📍 ${location}</div></div><div class="card-arrow">›</div></div><div class="card-stats"><div class="card-stat">🔬 <span>${c.equipCount}</span> equip</div><div class="card-stat">🎫 <span>${c.ticketCount}</span> open</div>${lastSvc?`<div class="last-service ${lastSvc.cls}">🕐 ${lastSvc.label}</div>`:''}</div>${brands.length?`<div class="card-brands">${brands.map(b=>`<div class="brand-chip">${b}</div>`).join('')}</div>`:''}`;
+            list.appendChild(card);
+        });
+    }
+
+    function showSkeletons(show){['skel1','skel2','skel3'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=show?'block':'none';});}
+    function formatLastService(d){if(!d)return null;const days=Math.floor((Date.now()-new Date(d))/86400000);if(days<30)return{label:`Serviced ${days}d ago`,cls:'recent'};if(days<90)return{label:`Serviced ${days}d ago`,cls:''};if(days<365)return{label:`Serviced ${Math.floor(days/30)}mo ago`,cls:'overdue'};return{label:`Serviced ${Math.floor(days/365)}yr ago`,cls:'overdue'};}
+
+    function openAddModal(){document.getElementById('addModal').classList.add('open');setTimeout(()=>document.getElementById('newName').focus(),100);}
+    function closeAddModal(){document.getElementById('addModal').classList.remove('open');['newName','newPhone','newEmail','newAddress','newCity','newState','newWebsite'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});}
+
+    async function saveNewCustomer() {
+        const name=document.getElementById('newName').value.trim();
+        if(!name){showToast('Business name is required','error');return;}
+        try {
+            const{data,error}=await supabaseClient.from('organizations').insert([{name,type:'customer',created_by:(await supabaseClient.auth.getUser()).data.user?.id||null,biz_type:document.getElementById('newBizType').value||null,phone:document.getElementById('newPhone').value.trim()||null,email:document.getElementById('newEmail').value.trim()||null,address:document.getElementById('newAddress').value.trim()||null,city:document.getElementById('newCity').value.trim()||null,state:document.getElementById('newState').value.trim().toUpperCase()||null,website:document.getElementById('newWebsite').value.trim()||null}]).select().single();
+            if(error)throw error;
+            showToast('✓ '+name+' added','success'); closeAddModal();
+            setTimeout(()=>navigateTo(`customer_profile.html?id=${data.id}`),800);
+        } catch(e){showToast('Save failed: '+e.message,'error');}
+    }
+
+    document.getElementById('addModal').addEventListener('click',function(e){if(e.target===this)closeAddModal();});
+
+    function toggleDropdown(e){e.stopPropagation();document.getElementById('avatarDropdown').classList.toggle('open');}
+    document.addEventListener('click',()=>document.getElementById('avatarDropdown')?.classList.remove('open'));
+    async function logoutUser(){document.getElementById('avatarDropdown').classList.remove('open');await supabaseClient.auth.signOut();updateAuthUI();try{if(typeof Android!=='undefined')Android.clearSession();}catch(e){}}
+    async function updateAuthUI(){const{data:{user}}=await supabaseClient.auth.getUser();const aw=document.getElementById('avatarWrapper');if(user){if(aw)aw.style.display='block';const meta=user.user_metadata||{},fn=meta.first_name||'',ln=meta.last_name||'';document.getElementById('dropdownName').textContent=[fn,ln].filter(Boolean).join(' ')||'User';document.getElementById('dropdownEmail').textContent=user.email||'';const img=document.getElementById('avatarImg'),ini=document.getElementById('avatarInitials'),photo=meta.avatar_url||meta.picture||'';if(photo){img.src=photo;img.style.display='block';ini.style.display='none';}else{img.style.display='none';ini.style.display='flex';ini.textContent=((fn[0]||'')+(ln[0]||'')).toUpperCase()||user.email[0].toUpperCase();}}else{if(aw)aw.style.display='none';}}
+    async function checkTierAndShowUpgrade(){try{const{data:{user}}=await supabaseClient.auth.getUser();if(!user)return;const{data:sub}=await supabaseClient.from('subscriptions').select('tier,status').eq('user_id',user.id).single();const isPaid=sub&&['premium','team','enterprise'].includes(sub.tier)&&sub.status==='active';const btn=document.getElementById('upgradeBtn');if(btn)btn.style.display=isPaid?'none':'flex';}catch(e){}}
+    function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(type?type+' ':''+'show');setTimeout(()=>t.classList.remove('show'),3000);}
+
+    if(_pendingSession){const ps=_pendingSession;_pendingSession=null;supabaseClient.auth.setSession({access_token:ps.access_token,refresh_token:ps.refresh_token}).then(({data})=>{updateAuthUI();checkTierAndShowUpgrade();try{if(typeof Android!=='undefined'&&data.session)Android.saveSession(JSON.stringify(data.session));}catch(e){}init();});}
+    else{updateAuthUI();checkTierAndShowUpgrade();init();}
+</script>
+</body>
+</html>

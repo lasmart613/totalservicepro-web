@@ -1,247 +1,976 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Centralized theme system -->
+    <script src="theme.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Customers · TSP</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <script>
-        var _pendingSession = null;
-        (function() {
-            try {
-                const enc = new URLSearchParams(window.location.search).get('_s');
-                if (enc) { const s = JSON.parse(atob(enc)); if (s?.access_token) { _pendingSession = s; localStorage.setItem('tsp-auth-token', JSON.stringify({currentSession:s,expiresAt:s.expires_at})); const u=new URL(window.location.href); u.searchParams.delete('_s'); window.history.replaceState({},'',u.toString()); return; } }
-                const raw = localStorage.getItem('tsp-auth-token'); if (raw) { const p=JSON.parse(raw); const sess=p?.currentSession||(p?.access_token?p:null); if (sess?.access_token) _pendingSession=sess; }
-            } catch(e) {}
-        })();
-        const supabaseClient = supabase.createClient('https://yljztfajyvjzqikxdddf.supabase.co','eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',{auth:{persistSession:true,storageKey:'tsp-auth-token',storage:window.localStorage,autoRefreshToken:true,detectSessionInUrl:false}});
-    </script>
+    <title>Company Profile · Total Service Pro</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        /* CSS variables defined in tsp.css */
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding-bottom: 80px; }
+
+        .header { background: var(--surface); padding: 14px 16px; display: flex; align-items: center; gap: 12px; border-bottom: 1px solid var(--gold); position: sticky; top: 0; z-index: 100; }
+        .back-btn { background: none; border: none; color: var(--gold); font-size: 22px; cursor: pointer; padding: 4px 8px; border-radius: 8px; }
+        .back-btn:hover { background: var(--surface2); }
+        .header-title { font-size: 18px; font-weight: 700; flex: 1; }
+/* .save-btn replaced by global .btn-primary */
+
+        /* Hero */
+        .hero { display: flex; flex-direction: column; align-items: center; padding: 28px 20px 20px; background: linear-gradient(180deg, #1a1500 0%, var(--bg) 100%); border-bottom: 1px solid var(--border); }
+        .logo-wrap { position: relative; width: 90px; height: 90px; margin-bottom: 14px; }
+        .logo-img { width: 90px; height: 90px; border-radius: 18px; object-fit: cover; border: 2px solid var(--gold); display: none; }
+        .logo-initials { width: 90px; height: 90px; border-radius: 18px; background: var(--gold); color: #111; font-size: 32px; font-weight: 700; display: flex; align-items: center; justify-content: center; border: 2px solid var(--gold); }
+        .logo-edit-btn { position: absolute; bottom: -4px; right: -4px; width: 28px; height: 28px; border-radius: 50%; background: var(--gold); color: #111; border: 2px solid var(--bg); font-size: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer; }
+        #logoFileInput { display: none; }
+        .hero-name { font-size: 20px; font-weight: 700; margin-bottom: 3px; }
+        .hero-type { font-size: 12px; color: var(--gold); font-weight: 600; }
+        .hero-prefix { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+        /* Stars */
+        .star-rating { display: flex; gap: 6px; margin-top: 10px; }
+        .star { font-size: 24px; cursor: pointer; opacity: 0.4; transition: opacity 0.15s, transform 0.1s; }
+        .star.active { opacity: 1; }
+        .star:hover { transform: scale(1.2); }
+
+        /* Sections */
+        .section { margin: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: 14px; overflow: hidden; }
+        .section-header { padding: 13px 16px 9px; border-bottom: 1px solid var(--border); display: flex; align-items: center; gap: 8px; }
+        .section-icon { font-size: 16px; }
+        .section-title { font-size: 13px; font-weight: 700; color: var(--gold); text-transform: uppercase; letter-spacing: 0.8px; flex: 1; }
+        .section-action { font-size: 12px; color: var(--gold); cursor: pointer; font-weight: 600; }
+        .section-body { padding: 14px 16px; }
+
+        /* Fields */
+        .field-row { display: flex; gap: 10px; margin-bottom: 12px; }
+        .field-row:last-child { margin-bottom: 0; }
+        .field { flex: 1; }
+        .field label { display: block; font-size: 11px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 5px; }
+        .field input, .field select, .field textarea { width: 100%; padding: 10px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 9px; color: var(--text); font-size: 14px; font-family: inherit; outline: none; transition: border-color 0.15s; }
+        .field input:focus, .field select:focus, .field textarea:focus { border-color: var(--gold); }
+        .field select option { background: var(--surface2); }
+        .field textarea { resize: vertical; min-height: 72px; }
+
+        /* Prefix card */
+        .prefix-card { background: var(--surface2); border: 1px solid var(--border-gold); border-radius: 10px; padding: 14px 16px; display: flex; align-items: center; gap: 14px; margin-bottom: 12px; }
+        .prefix-display { font-size: 28px; font-weight: 700; color: var(--gold); letter-spacing: 2px; font-family: monospace; }
+        .prefix-info { flex: 1; }
+        .prefix-label { font-size: 11px; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 3px; }
+        .prefix-example { font-size: 13px; color: var(--text-muted); }
+        .prefix-example span { color: var(--gold); }
+
+        /* Brand chips */
+        .brand-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+        .brand-chip { display: flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 20px; font-size: 13px; font-weight: 600; }
+        .brand-chip.active { border-color: var(--gold); background: #1a1500; color: var(--gold); }
+        .brand-chip:not(.active) { cursor: pointer; color: var(--text-muted); }
+        .brand-chip:not(.active):hover { border-color: var(--gold); color: var(--text); }
+        .brand-chip.active .chip-remove { cursor: pointer; color: var(--gold-dk); }
+
+        /* Team roster */
+        .roster-item { display: flex; align-items: center; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border); }
+        .roster-item:last-child { border-bottom: none; }
+        .roster-avatar { width: 38px; height: 38px; border-radius: 50%; background: var(--gold); color: #111; font-size: 14px; font-weight: 700; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+        .roster-avatar img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
+        .roster-name { font-size: 14px; font-weight: 600; flex: 1; }
+        .roster-role { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+        .roster-status { font-size: 11px; padding: 3px 8px; border-radius: 20px; font-weight: 600; }
+        .roster-status.active   { background: #22c55e22; color: var(--green); border: 1px solid #22c55e44; }
+        .roster-status.pending  { background: #f59e0b22; color: #f59e0b;      border: 1px solid #f59e0b44; }
+        .roster-status.inactive { background: #88888822; color: var(--text-muted); border: 1px solid #88888844; }
+        .invite-btn { width: 100%; padding: 11px; background: var(--surface2); border: 1px dashed var(--gold); border-radius: 10px; color: var(--gold); font-size: 13px; font-weight: 700; cursor: pointer; margin-top: 10px; }
+        .invite-btn:hover { background: #1a1500; }
+
+        /* Service territory */
+        .territory-tags { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 10px; }
+        .territory-tag { display: flex; align-items: center; gap: 6px; padding: 6px 10px; background: var(--surface2); border: 1px solid var(--border); border-radius: 8px; font-size: 13px; }
+        .territory-tag-remove { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 14px; line-height: 1; }
+        .territory-tag-remove:hover { color: var(--red); }
+        .tag-add-row { display: flex; gap: 8px; }
+        .tag-input { flex: 1; padding: 9px 12px; background: var(--surface2); border: 1px solid var(--border); border-radius: 9px; color: var(--text); font-size: 14px; font-family: inherit; outline: none; }
+        .tag-input:focus { border-color: var(--gold); }
+        .tag-add-btn { padding: 9px 14px; background: var(--surface3); border: 1px solid var(--border); border-radius: 9px; color: var(--gold); font-size: 14px; font-weight: 700; cursor: pointer; }
+        .tag-add-btn:hover { border-color: var(--gold); }
+
+        /* Billing */
+        .billing-plan { display: flex; align-items: center; gap: 12px; padding: 14px; background: var(--surface2); border: 1px solid var(--border-gold); border-radius: 10px; margin-bottom: 12px; }
+        .billing-plan-icon { font-size: 28px; }
+        .billing-plan-name { font-size: 16px; font-weight: 700; color: var(--gold); }
+        .billing-plan-sub  { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+        .billing-action { margin-left: auto; padding: 8px 14px; background: var(--surface3); border: 1px solid var(--border); border-radius: 8px; color: var(--text); font-size: 12px; font-weight: 700; cursor: pointer; }
+        .billing-action:hover { border-color: var(--gold); color: var(--gold); }
+        .billing-row { display: flex; justify-content: space-between; align-items: center; padding: 10px 0; border-bottom: 1px solid var(--border); }
+        .billing-row:last-child { border-bottom: none; }
+        .billing-key { font-size: 13px; color: var(--text-muted); }
+        .billing-val { font-size: 13px; font-weight: 600; }
+        .billing-val.gold { color: var(--gold); }
+
+        /* Toast */
+        .toast { position: fixed; bottom: 90px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--surface2); border: 1px solid var(--gold); border-radius: 10px; padding: 12px 20px; font-size: 14px; font-weight: 600; z-index: 9999; transition: transform 0.3s ease, opacity 0.3s ease; white-space: nowrap; opacity: 0; pointer-events: none; }
+        .toast.show { transform: translateX(-50%) translateY(0); opacity: 1; pointer-events: auto; }
+        .toast.success { border-color: var(--green); color: var(--green); }
+        .toast.error   { border-color: var(--red);   color: var(--red); }
+
+        .save-bar { position: fixed; bottom: 0; left: 0; right: 0; background: var(--surface); border-top: 1px solid var(--border); padding: 12px 16px; z-index: 50; }
+/* .save-bar-btn replaced by global .btn-primary */
+        .save-bar-btn:hover { background: var(--gold-dk); }
+        .save-bar-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+    </style>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="tsp.css">
-    <style>
-        .stats-3 { display: grid; grid-template-columns: repeat(3,1fr); gap: 10px; margin-bottom: 18px; }
-        .search-bar { position: relative; margin-bottom: 14px; }
-        .search-bar input { width:100%; padding:10px 36px 10px 14px; background:var(--surface3); border:1px solid var(--border2); border-radius:20px; color:var(--text); font-family:inherit; font-size:14px; outline:none; }
-        .search-bar input:focus { border-color:var(--gold); }
-        .search-bar input::placeholder { color:var(--text3); }
-        .search-clear { position:absolute; right:12px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text3); cursor:pointer; font-size:16px; display:none; }
-        .filter-row { display:flex; gap:8px; overflow-x:auto; padding-bottom:4px; margin-bottom:16px; scrollbar-width:none; }
-        .filter-row::-webkit-scrollbar { display:none; }
-        .filter-chip { flex-shrink:0; padding:6px 14px; background:var(--surface3); border:1px solid var(--border2); border-radius:20px; font-size:12px; font-weight:600; color:var(--text3); cursor:pointer; font-family:inherit; white-space:nowrap; transition:all 0.15s; }
-        .filter-chip.active { background:var(--gold-glow); border-color:var(--gold-border); color:var(--gold); }
-        .customer-card { background:var(--surface2); border:1px solid var(--border); border-radius:12px; padding:14px 16px; margin-bottom:10px; cursor:pointer; transition:border-color 0.15s; }
-        .customer-card:hover { border-color:var(--gold-border); }
-        .card-top { display:flex; align-items:center; gap:12px; margin-bottom:10px; }
-        .card-avatar { width:44px; height:44px; border-radius:10px; background:var(--gold); color:#111; font-size:16px; font-weight:800; display:flex; align-items:center; justify-content:center; flex-shrink:0; overflow:hidden; }
-        .card-avatar img { width:100%; height:100%; object-fit:cover; }
-        .card-name { font-size:15px; font-weight:700; color:var(--text); }
-        .card-type { font-size:11px; color:var(--text3); margin-top:1px; text-transform:capitalize; }
-        .card-location { font-size:12px; color:var(--text3); margin-top:2px; }
-        .card-arrow { margin-left:auto; color:var(--text3); font-size:20px; flex-shrink:0; }
-        .card-stats { display:flex; gap:14px; flex-wrap:wrap; margin-bottom:8px; }
-        .card-stat { font-size:12px; color:var(--text3); }
-        .card-stat span { color:var(--text); font-weight:700; }
-        .card-brands { display:flex; gap:6px; flex-wrap:wrap; }
-        .brand-chip { padding:3px 8px; background:var(--surface3); border:1px solid var(--border2); border-radius:20px; font-size:11px; color:var(--text3); }
-        .last-service { font-size:11px; color:var(--text3); }
-        .last-service.recent { color:var(--green); }
-        .last-service.overdue { color:var(--orange); }
-        .fab { position:fixed; bottom:80px; right:20px; width:54px; height:54px; border-radius:50%; background:var(--gold); color:#111; font-size:26px; border:none; cursor:pointer; box-shadow:0 4px 16px rgba(0,0,0,0.4); display:flex; align-items:center; justify-content:center; z-index:50; transition:transform 0.15s; }
-        .fab:active { transform:scale(0.93); }
-        .state-box { text-align:center; padding:48px 20px; color:var(--text3); }
-        .state-icon { font-size:40px; margin-bottom:12px; opacity:0.5; }
-        .state-title { font-size:16px; font-weight:700; margin-bottom:6px; }
-        .state-sub { font-size:13px; line-height:1.5; }
-        .bottom-nav { position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border2);display:flex;justify-content:space-around;padding:8px 0 max(8px,env(safe-area-inset-bottom));z-index:100; }
-        .bottom-nav-item { display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;color:var(--text3);cursor:pointer;font-family:inherit;min-width:56px;padding:4px;transition:color 0.15s; }
-        .bottom-nav-item:hover,.bottom-nav-item.active { color:var(--gold); }
-        .bottom-nav-item span:first-child { font-size:20px; }
-        .bottom-nav-item span:last-child { font-size:9px;font-weight:700;text-transform:uppercase; }
-    </style>
 </head>
 <body>
+
 <div class="header">
-    <button class="header-back" onclick="navigateTo('index.html')">‹</button>
-    <div class="header-title">Customers</div>
-    <div class="avatar-wrapper" id="avatarWrapper">
-        <button class="avatar-btn" onclick="toggleDropdown(event)"><img id="avatarImg" class="avatar-img" src="" alt=""/><div id="avatarInitials" class="avatar-initials">U</div></button>
-        <div class="avatar-dropdown" id="avatarDropdown">
-            <div class="dropdown-user-info"><div class="dropdown-user-name" id="dropdownName">User</div><div class="dropdown-user-email" id="dropdownEmail"></div></div>
-            <button class="dropdown-item" onclick="navigateTo('user_profile.html')"><span class="dropdown-icon">👤</span> Profile</button>
-            <button class="dropdown-item" onclick="navigateTo('settings.html')"><span class="dropdown-icon">⚙️</span> Settings</button>
-            <button class="dropdown-item" id="upgradeBtn" onclick="navigateTo('paywall.html')" style="display:none;color:var(--gold);"><span class="dropdown-icon">⭐</span> Upgrade</button>
-            <button class="dropdown-item danger" onclick="logoutUser()"><span class="dropdown-icon">🚪</span> Log Out</button>
+    <button class="back-btn" onclick="navigateTo('settings.html')">←</button>
+    <div class="header-title">Company Profile</div>
+</div>
+
+<!-- Hero -->
+<div class="hero">
+    <div class="logo-wrap">
+        <img id="logoImg" class="logo-img" src="" alt="Company logo">
+        <div id="logoInitials" class="logo-initials">?</div>
+        <button class="logo-edit-btn" onclick="document.getElementById('logoFileInput').click()">✏️</button>
+        <input type="file" id="logoFileInput" accept="image/*" onchange="handleLogoUpload(event)">
+        <button id="removeLogoBtn" class="logo-edit-btn" style="right:28px;background:#ef4444;color:white;display:none;" onclick="removeLogo()" title="Remove logo">×</button>
+    </div>
+    <div class="hero-name"   id="heroName">Loading...</div>
+    <div class="hero-type"   id="heroType"></div>
+    <div class="hero-prefix" id="heroPrefix"></div>
+    <div class="star-rating" id="starRating"></div>
+</div>
+
+<!-- Basic Info -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">🏢</span>
+        <span class="section-title">Company Info</span>
+    </div>
+    <div class="section-body">
+        <div class="field-row">
+            <div class="field">
+                <label>Company Name *</label>
+                <input type="text" id="companyName" placeholder="Acme Laser Services">
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Years in Business</label>
+                <input type="number" id="yearsInBusiness" placeholder="e.g. 12" min="0" max="200">
+            </div>
+            <div class="field">
+                <label>Company Type</label>
+                <select id="companyType">
+                    <option value="service_company">Service Company</option>
+                    <option value="vendor">Vendor / Supplier</option>
+                </select>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Website URL</label>
+                <input type="url" id="companyWebsite" placeholder="https://www.yourcompany.com">
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Company Description</label>
+                <textarea id="companyDescription" placeholder="Brief overview of your services and expertise..."></textarea>
+            </div>
         </div>
     </div>
 </div>
 
-<div class="page">
-    <div style="margin-bottom:16px;"><div style="font-size:22px;font-weight:800;">Customer Directory</div><div id="pageSubtitle" style="font-size:13px;color:var(--text3);margin-top:3px;">Loading...</div></div>
-
-    <div class="stats-3">
-        <div class="stat-card"><div class="stat-num" id="statTotal">—</div><div class="stat-label">Customers</div></div>
-        <div class="stat-card"><div class="stat-num blue" id="statEquip">—</div><div class="stat-label">Equipment</div></div>
-        <div class="stat-card"><div class="stat-num purple" id="statTickets">—</div><div class="stat-label">Open Tickets</div></div>
+<!-- Contact Info -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">📞</span>
+        <span class="section-title">Contact Info</span>
     </div>
-
-    <div class="search-bar">
-        <input type="text" id="searchInput" placeholder="Search customers..." oninput="onSearch()">
-        <button class="search-clear" id="searchClear" onclick="clearSearch()">✕</button>
-    </div>
-
-    <div class="filter-row">
-        <button class="filter-chip active" onclick="setFilter('all',this)">All</button>
-        <button class="filter-chip" onclick="setFilter('medical_spa',this)">Medical Spa</button>
-        <button class="filter-chip" onclick="setFilter('dermatology',this)">Dermatology</button>
-        <button class="filter-chip" onclick="setFilter('plastic_surgery',this)">Plastic Surgery</button>
-        <button class="filter-chip" onclick="setFilter('hospital',this)">Hospital</button>
-        <button class="filter-chip" onclick="setFilter('other',this)">Other</button>
-    </div>
-
-    <div id="cardList">
-        <div class="skeleton" style="height:100px;border-radius:12px;margin-bottom:10px;" id="skel1"></div>
-        <div class="skeleton" style="height:100px;border-radius:12px;margin-bottom:10px;" id="skel2"></div>
-        <div class="skeleton" style="height:100px;border-radius:12px;" id="skel3"></div>
+    <div class="section-body">
+        <div class="field-row">
+            <div class="field">
+                <label>Phone</label>
+                <input type="tel" id="companyPhone" placeholder="+1 (555) 000-0000">
+            </div>
+            <div class="field">
+                <label>Email</label>
+                <input type="email" id="companyEmail" placeholder="service@company.com">
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Address</label>
+                <input type="text" id="companyAddress" placeholder="123 Main St">
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>City</label>
+                <input type="text" id="companyCity">
+            </div>
+            <div class="field" style="max-width:70px;">
+                <label>State</label>
+                <input type="text" id="companyState" maxlength="2">
+            </div>
+            <div class="field" style="max-width:90px;">
+                <label>ZIP</label>
+                <input type="text" id="companyZip" maxlength="10">
+            </div>
+        </div>
     </div>
 </div>
 
-<button class="fab" onclick="openAddModal()" title="Add Customer">＋</button>
-
-<div class="bottom-nav">
-    <button class="bottom-nav-item" onclick="navigateTo('index.html')"><span>🏠</span><span>Home</span></button>
-    <button class="bottom-nav-item active"><span>👥</span><span>Customers</span></button>
-    <button class="bottom-nav-item" onclick="navigateTo('service_schedule.html')"><span>📅</span><span>Schedule</span></button>
-    <button class="bottom-nav-item" onclick="navigateTo('manual_library.html')"><span>📚</span><span>Manuals</span></button>
-    <button class="bottom-nav-item" onclick="navigateTo('settings.html')"><span>⚙️</span><span>Settings</span></button>
+<!-- Ticket Prefix -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">🎫</span>
+        <span class="section-title">Ticket Prefix</span>
+    </div>
+    <div class="section-body">
+        <div class="prefix-card">
+            <div class="prefix-display" id="prefixDisplay">???</div>
+            <div class="prefix-info">
+                <div class="prefix-label">Your ticket prefix</div>
+                <div class="prefix-example">Tickets will look like <span id="prefixExample">???-0042</span></div>
+            </div>
+        </div>
+        <div class="field-row">
+            <div class="field">
+                <label>Custom Prefix (3 letters)</label>
+                <input type="text" id="ticketPrefix" maxlength="3"
+                       placeholder="e.g. MRN"
+                       oninput="this.value=this.value.toUpperCase().replace(/[^A-Z]/g,''); updatePrefixPreview(this.value)"
+                       style="letter-spacing:4px;font-size:18px;font-weight:700;text-align:center;">
+            </div>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:4px;">
+            ⚠️ Changing your prefix affects future tickets only. Existing tickets keep their original prefix.
+        </div>
+    </div>
 </div>
 
-<!-- Add Customer Modal -->
-<div class="modal-overlay" id="addModal">
-    <div class="modal-box" style="max-height:90vh;overflow-y:auto;">
-        <button class="modal-close" onclick="closeAddModal()">×</button>
-        <div class="modal-title">Add Customer</div>
-        <div class="form-group"><label>Business Name *</label><input type="text" class="form-input" id="newName" placeholder="e.g. Desert Dermatology"></div>
-        <div class="form-group"><label>Type</label>
-            <select class="form-select" id="newBizType">
-                <option value="medical_spa">Medical Spa</option>
-                <option value="dermatology">Dermatology</option>
-                <option value="plastic_surgery">Plastic Surgery</option>
-                <option value="hospital">Hospital</option>
-                <option value="other">Other</option>
-            </select>
-        </div>
-        <div class="form-row">
-            <div class="form-group"><label>Phone</label><input type="tel" class="form-input" id="newPhone" placeholder="+1 555-000-0000"></div>
-            <div class="form-group"><label>Email</label><input type="email" class="form-input" id="newEmail" placeholder="info@clinic.com"></div>
-        </div>
-        <div class="form-group"><label>Address</label><input type="text" class="form-input" id="newAddress" placeholder="123 Main St"></div>
-        <div class="form-row">
-            <div class="form-group"><label>City</label><input type="text" class="form-input" id="newCity"></div>
-            <div class="form-group"><label>State</label><input type="text" class="form-input" id="newState" maxlength="2" placeholder="CA"></div>
-        </div>
-        <div class="form-group"><label>Website</label><input type="url" class="form-input" id="newWebsite" placeholder="https://"></div>
-        <button class="btn btn-gold btn-full" onclick="saveNewCustomer()" style="margin-top:8px;">Add Customer</button>
-        <button class="btn btn-ghost btn-full" onclick="closeAddModal()" style="margin-top:8px;">Cancel</button>
+<!-- Supported Equipment Brands -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">🔬</span>
+        <span class="section-title">Supported Equipment Brands</span>
     </div>
+    <div class="section-body">
+        <div class="brand-chips" id="brandChips"></div>
+        <div style="font-size:12px;color:var(--text-muted);">Tap to toggle which brands your team services.</div>
+    </div>
+</div>
+
+<!-- Service Territory -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">📍</span>
+        <span class="section-title">Service Territory</span>
+    </div>
+    <div class="section-body">
+        <div class="territory-tags" id="territoryTags"></div>
+        <div class="tag-add-row">
+            <input type="text" class="tag-input" id="territoryInput"
+                   placeholder="Add state, city, or region..."
+                   onkeydown="if(event.key==='Enter'){event.preventDefault();addTerritory();}">
+            <button class="tag-add-btn" onclick="addTerritory()">+ Add</button>
+        </div>
+    </div>
+</div>
+
+<!-- Customer Rating -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">⭐</span>
+        <span class="section-title">Customer Rating</span>
+    </div>
+    <div class="section-body">
+        <div style="display:flex;align-items:center;gap:16px;padding:6px 0;">
+            <div id="ratingStarsLarge" style="display:flex;gap:8px;"></div>
+            <div>
+                <div style="font-size:22px;font-weight:700;color:var(--gold);" id="ratingNum">—</div>
+                <div style="font-size:12px;color:var(--text-muted);">out of 5 stars</div>
+            </div>
+        </div>
+        <div style="font-size:12px;color:var(--text-muted);margin-top:8px;">
+            This rating is set by an admin and reflects overall customer satisfaction.
+        </div>
+    </div>
+</div>
+
+<!-- Team Roster -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">👷</span>
+        <span class="section-title">Team Roster</span>
+        <span class="section-action" onclick="navigateTo('service_schedule.html')">Manage →</span>
+    </div>
+    <div class="section-body" style="padding:0 16px;">
+        <div id="rosterList"></div>
+        <button class="invite-btn" onclick="showInviteModal()">
+            ✉️ Invite Team Member
+        </button>
+    </div>
+</div>
+
+<!-- Billing & Subscription -->
+<div class="section">
+    <div class="section-header">
+        <span class="section-icon">💳</span>
+        <span class="section-title">Billing & Subscription</span>
+    </div>
+    <div class="section-body">
+        <div class="billing-plan">
+            <div class="billing-plan-icon" id="planIcon">🆓</div>
+            <div>
+                <div class="billing-plan-name" id="planName">Free Plan</div>
+                <div class="billing-plan-sub"  id="planSub">Basic features with ads</div>
+            </div>
+            <button class="billing-action" onclick="showUpgradeOptions()">Upgrade</button>
+        </div>
+        <div class="billing-row">
+            <span class="billing-key">Team Members</span>
+            <span class="billing-val" id="billingTeamCount">—</span>
+        </div>
+        <div class="billing-row">
+            <span class="billing-key">Tickets This Month</span>
+            <span class="billing-val" id="billingTicketCount">—</span>
+        </div>
+        <div class="billing-row">
+            <span class="billing-key">Storage Used</span>
+            <span class="billing-val">—</span>
+        </div>
+        <div class="billing-row">
+            <span class="billing-key">Renewal Date</span>
+            <span class="billing-val gold" id="billingRenewal">—</span>
+        </div>
+    </div>
+</div>
+
+<div class="save-bar">
+    <button class="btn btn-primary btn-block" id="saveCompanyBtn" onclick="saveCompany()">Save Company Profile</button>
 </div>
 
 <div class="toast" id="toast"></div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-    let allCustomers=[], filtered=[], activeFilter='all', activeBrand=null, searchQuery='';
+    // ── Extract _s session param ──
+    var _pendingSession = null;
+    try {
+        var _purl = new URL(window.location.href);
+        var _sp = _purl.searchParams.get('_s');
+        if (_sp) {
+            _pendingSession = JSON.parse(atob(_sp));
+            _purl.searchParams.delete('_s');
+            history.replaceState(null, '', _purl.toString());
+        }
+    } catch(e) {}
 
-    supabaseClient.auth.onAuthStateChange((event, session) => {
-        updateAuthUI();
-        try { if(typeof Android!=='undefined'){if(session?.access_token)Android.saveSession(JSON.stringify(session));else if(event==='SIGNED_OUT'&&!session)Android.clearSession();} } catch(e) {}
-    });
+const supabaseClient = supabase.createClient(
+    'https://yljztfajyvjzqikxdddf.supabase.co',
+    'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
+    {
+        auth: {
+            persistSession: true,
+            storageKey: 'tsp-auth-token',
+            storage: window.localStorage,
+            autoRefreshToken: true,
+            detectSessionInUrl: false
+        }
+    }
+);
 
-    async function navigateTo(page) {
-        try { const{data:{session}}=await supabaseClient.auth.getSession(); if(session?.access_token){const sep=page.includes('?')?'&':'?';window.location.href=page+sep+'_s='+btoa(JSON.stringify(session));return;} } catch(e) {}
+    function navigateTo(page) {
+        try {
+            var sess = JSON.parse(localStorage.getItem('tsp-auth-token') || 'null');
+            var raw  = sess && (sess.access_token ? sess : (sess.currentSession || null));
+            if (raw && raw.access_token) {
+                var encoded = btoa(JSON.stringify({
+                    access_token:  raw.access_token,
+                    refresh_token: raw.refresh_token,
+                    user: raw.user
+                }));
+                var sep = page.includes('?') ? '&' : '?';
+                window.location.href = page + sep + '_s=' + encoded;
+                return;
+            }
+        } catch(e) {}
         window.location.href = page;
     }
 
-    async function init() { await loadCustomers(); }
+const ALL_BRANDS = ['Lumenis','Candela','Cynosure','Cutera','Solta Medical','Alma','Syneron','Fotona','Sciton','Other'];
+const BRAND_ICONS = { 'Lumenis':'🔬','Candela':'⚡','Cynosure':'💡','Cutera':'🌟','Solta Medical':'✨','Alma':'🌊','Syneron':'🔷','Fotona':'🔴','Sciton':'🔵','Other':'⚙️' };
 
-    async function loadCustomers() {
-        try {
-            const {data:orgs,error}=await supabaseClient.from('organizations').select('*').eq('type','customer').eq('is_active',true).order('name');
-            if(error) throw error;
-            const {data:equip}=await supabaseClient.from('equipment').select('organization_id').neq('status','Decommissioned');
-            const {data:tickets}=await supabaseClient.from('service_tickets').select('organization_id,status').not('status','in','("Completed","Cancelled")');
-            const {data:lastService}=await supabaseClient.from('service_tickets').select('organization_id,service_date').eq('status','Completed').order('service_date',{ascending:false});
-            const equipMap={},ticketMap={},lastSvcMap={};
-            (equip||[]).forEach(e=>{equipMap[e.organization_id]=(equipMap[e.organization_id]||0)+1;});
-            (tickets||[]).forEach(t=>{ticketMap[t.organization_id]=(ticketMap[t.organization_id]||0)+1;});
-            (lastService||[]).forEach(t=>{if(!lastSvcMap[t.organization_id])lastSvcMap[t.organization_id]=t.service_date;});
-            allCustomers=(orgs||[]).map(org=>({...org,equipCount:equipMap[org.id]||0,ticketCount:ticketMap[org.id]||0,lastService:lastSvcMap[org.id]||null}));
-            updateStats(); applyFilters();
-        } catch(e) { showSkeletons(false); showToast('Load failed: '+e.message,'error'); }
+let currentUser    = null;
+let currentProfile = null;
+let orgData        = null;
+let selectedBrands = [];
+let territories    = [];
+let rating         = 0;
+let logoUrl        = null;
+
+// Standard roles for a service business (non-redundant)
+const ROLES = {
+  'engineer':        'Service Engineer',
+  'dispatcher':      'Dispatcher / Scheduler',
+  'service_manager': 'Service Manager',
+  'billing_manager': 'Billing Manager',
+  'crm':             'CRM / Marketing',
+  'admin':           'Business Owner / Admin'
+};
+
+async function init() {
+    const { data: { user } } = await supabaseClient.auth.getUser();
+    if (!user) { window.location.href = 'index.html'; return; }
+    currentUser = user;
+
+    const { data: profile } = await supabaseClient
+        .from('user_profiles')
+        .select('*, organizations(*)')
+        .eq('id', user.id)
+        .single();
+    currentProfile = profile;
+
+    // Allow higher-level roles to view company profile
+    const allowedRoles = ['admin', 'service_manager'];
+    if (!profile || !allowedRoles.includes(profile.role)) {
+        showToast('Access denied. Admin or Service Manager role required.', 'error');
+        setTimeout(() => window.location.href = 'index.html', 1500);
+        return;
     }
 
-    function updateStats() {
-        document.getElementById('statTotal').textContent=allCustomers.length;
-        document.getElementById('statEquip').textContent=allCustomers.reduce((s,c)=>s+c.equipCount,0);
-        document.getElementById('statTickets').textContent=allCustomers.reduce((s,c)=>s+c.ticketCount,0);
-        document.getElementById('pageSubtitle').textContent=`${allCustomers.length} customer${allCustomers.length!==1?'s':''}`;
+    if (profile.organizations) {
+        orgData = profile.organizations;
+        populateForm(orgData);
+    } else {
+        showToast('No organization linked to your account', 'error');
     }
 
-    function setFilter(val,el){activeFilter=val;activeBrand=null;document.querySelectorAll('.filter-chip').forEach(c=>c.classList.remove('active'));el.classList.add('active');applyFilters();}
-    function onSearch(){searchQuery=document.getElementById('searchInput').value.trim().toLowerCase();document.getElementById('searchClear').style.display=searchQuery?'block':'none';applyFilters();}
-    function clearSearch(){document.getElementById('searchInput').value='';searchQuery='';document.getElementById('searchClear').style.display='none';applyFilters();}
+    await loadRoster();
+    await loadBillingStats();
+}
 
-    function applyFilters() {
-        filtered=allCustomers.filter(c=>{
-            if(activeFilter!=='all'&&c.biz_type!==activeFilter)return false;
-            if(searchQuery){const hay=[c.name,c.city,c.state,c.biz_type].join(' ').toLowerCase();if(!hay.includes(searchQuery))return false;}
-            return true;
+function populateForm(org) {
+    // Hero
+    const prefix = org.ticket_prefix || '???';
+    logoUrl = org.logo_url || null;
+    renderLogo(org.name);
+    document.getElementById('heroName').textContent   = org.name;
+    document.getElementById('heroType').textContent   = capitalize(org.type || 'service_company');
+    document.getElementById('heroPrefix').textContent = 'Ticket prefix: ' + prefix;
+
+    // Fields
+    document.getElementById('companyName').value        = org.name || '';
+    document.getElementById('yearsInBusiness').value    = org.years_in_business || '';
+    document.getElementById('companyType').value        = org.type || 'service_company';
+    document.getElementById('companyWebsite').value     = org.website || '';
+    document.getElementById('companyDescription').value = org.description || '';
+    document.getElementById('companyPhone').value       = org.phone || '';
+    document.getElementById('companyEmail').value       = org.email || '';
+    document.getElementById('companyAddress').value     = org.address || '';
+    document.getElementById('companyCity').value        = org.city || '';
+    document.getElementById('companyState').value       = org.state || '';
+    document.getElementById('companyZip').value         = org.zip || '';
+    document.getElementById('ticketPrefix').value       = prefix;
+    updatePrefixPreview(prefix);
+
+    // Brands
+    selectedBrands = org.supported_brands || [];
+    renderBrandChips();
+
+    // Territory
+    territories = org.service_territories || [];
+    renderTerritoryTags();
+
+    // Rating
+    rating = org.customer_rating || 0;
+    renderRatingStars();
+    renderRatingLarge();
+}
+
+function renderLogo(name) {
+    const imgEl  = document.getElementById('logoImg');
+    const initEl = document.getElementById('logoInitials');
+    const removeBtn = document.getElementById('removeLogoBtn');
+    if (logoUrl) {
+        imgEl.src = logoUrl; imgEl.style.display = 'block'; initEl.style.display = 'none';
+        if (removeBtn) removeBtn.style.display = 'flex';
+    } else {
+        imgEl.style.display = 'none'; initEl.style.display = 'flex';
+        initEl.textContent = (name || '?').slice(0,2).toUpperCase();
+        if (removeBtn) removeBtn.style.display = 'none';
+    }
+}
+
+// ── Logo Upload ──
+async function handleLogoUpload(event) {
+    const file = event.target.files[0];
+    if (!file) return;
+    if (file.size > 3 * 1024 * 1024) { showToast('Image must be under 3MB', 'error'); return; }
+    showToast('Uploading logo...', '');
+    try {
+        const ext  = file.name.split('.').pop();
+        const path = `logos/${currentProfile.organization_id}.${ext}`;
+        const { error } = await supabaseClient.storage.from('company-assets').upload(path, file, { upsert: true });
+        if (error) throw error;
+        const { data: urlData } = supabaseClient.storage.from('company-assets').getPublicUrl(path);
+        logoUrl = urlData.publicUrl + '?t=' + Date.now();
+        await supabaseClient.from('organizations').update({ logo_url: logoUrl }).eq('id', orgData.id);
+        renderLogo(document.getElementById('companyName').value);
+        showToast('Logo updated!', 'success');
+    } catch(e) { showToast('Upload failed: ' + e.message, 'error'); }
+}
+
+async function removeLogo() {
+    if (!confirm('Remove company logo?')) return;
+    try {
+        logoUrl = null;
+        await supabaseClient.from('organizations').update({ logo_url: null }).eq('id', orgData.id);
+        // Optional: also delete from storage, but for simplicity we just clear the URL
+        renderLogo(document.getElementById('companyName').value);
+        showToast('Logo removed', 'success');
+    } catch(e) {
+        showToast('Failed to remove logo: ' + e.message, 'error');
+    }
+}
+
+function showInviteModal() {
+    if (currentProfile?.role !== 'admin') {
+        showToast('Only admins can invite new team members', 'error');
+        return;
+    }
+
+    const roleOptions = Object.entries(ROLES)
+        .map(([key, label]) => `<option value="${key}">${label}</option>`)
+        .join('');
+
+    const modalHTML = `
+        <div style="position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999;">
+            <div style="background:var(--surface);width:90%;max-width:380px;border-radius:14px;border:2px solid var(--gold);padding:20px;">
+                <h3 style="color:var(--gold);margin-bottom:16px;">Invite Team Member</h3>
+                <div style="margin-bottom:12px;">
+                    <label style="font-size:12px;color:var(--text3);">Email</label>
+                    <input id="inviteEmail" type="email" placeholder="engineer@company.com" style="width:100%;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+                </div>
+                <div style="margin-bottom:12px;">
+                    <label style="font-size:12px;color:var(--text3);">Role</label>
+                    <select id="inviteRole" style="width:100%;padding:10px;background:var(--surface2);border:1px solid var(--border);border-radius:8px;color:var(--text);">
+                        ${roleOptions}
+                    </select>
+                </div>
+                <div style="display:flex;gap:10px;margin-top:16px;">
+                    <button onclick="this.closest('[style*=\"position:fixed\"]').remove()" style="flex:1;padding:10px;border:1px solid var(--border);background:none;color:var(--text);border-radius:8px;">Cancel</button>
+                    <button onclick="sendInvite(this)" style="flex:1;padding:10px;background:var(--gold);color:#111;border:none;border-radius:8px;font-weight:600;">Send Invite</button>
+                </div>
+                <div style="font-size:11px;color:var(--text3);margin-top:12px;">
+                    Note: Full invite flow (email + acceptance) requires backend/edge functions.
+                </div>
+            </div>
+        </div>
+    `;
+    document.body.insertAdjacentHTML('beforeend', modalHTML);
+}
+
+async function sendInvite(btn) {
+    const email = document.getElementById('inviteEmail').value.trim();
+    const role = document.getElementById('inviteRole').value;
+    if (!email) { alert('Email required'); return; }
+
+    try {
+        // This is a simplified version. In production you'd use Supabase Edge Functions or Auth invites.
+        const { error } = await supabaseClient.from('engineer_invitations').insert([{
+            organization_id: currentProfile.organization_id,
+            email: email,
+            role: role,
+            invited_by: currentUser.id,
+            accepted: false
+        }]);
+        if (error) throw error;
+        btn.closest('[style*="position:fixed"]').remove();
+        showToast('Invitation created (pending acceptance)', 'success');
+        loadRoster();
+    } catch(e) {
+        alert('Invite failed: ' + e.message);
+    }
+}
+
+// Quick helper to verify current user's permissions
+function isCurrentUserAdmin() {
+    return currentProfile?.role === 'admin';
+}
+
+// ── Prefix ──
+function updatePrefixPreview(val) {
+    const v = (val || '???').padEnd(3,'?').slice(0,3);
+    document.getElementById('prefixDisplay').textContent  = v;
+    document.getElementById('prefixExample').innerHTML    = `<span>${v}</span>-0042`;
+    document.getElementById('heroPrefix').textContent     = 'Ticket prefix: ' + v;
+}
+
+// ── Brands ──
+function renderBrandChips() {
+    const container = document.getElementById('brandChips');
+    container.innerHTML = '';
+    ALL_BRANDS.forEach(brand => {
+        const active = selectedBrands.includes(brand);
+        const chip = document.createElement('div');
+        chip.className = 'brand-chip' + (active ? ' active' : '');
+        chip.innerHTML = `${BRAND_ICONS[brand] || '⚙️'} ${brand}${active ? ' <span class="chip-remove">×</span>' : ''}`;
+        chip.onclick = () => toggleBrand(brand);
+        container.appendChild(chip);
+    });
+}
+
+function toggleBrand(brand) {
+    const idx = selectedBrands.indexOf(brand);
+    if (idx > -1) selectedBrands.splice(idx, 1);
+    else selectedBrands.push(brand);
+    renderBrandChips();
+}
+
+// ── Territory ──
+function renderTerritoryTags() {
+    const container = document.getElementById('territoryTags');
+    container.innerHTML = '';
+    if (territories.length === 0) {
+        container.innerHTML = '<div style="font-size:13px;color:var(--text-muted);">No territories added yet.</div>';
+        return;
+    }
+    territories.forEach((t, i) => {
+        const tag = document.createElement('div');
+        tag.className = 'territory-tag';
+        tag.innerHTML = `📍 ${t} <button class="territory-tag-remove" onclick="removeTerritory(${i})">×</button>`;
+        container.appendChild(tag);
+    });
+}
+
+function addTerritory() {
+    const input = document.getElementById('territoryInput');
+    const val   = input.value.trim();
+    if (!val || territories.includes(val)) return;
+    territories.push(val);
+    input.value = '';
+    renderTerritoryTags();
+}
+
+function removeTerritory(i) {
+    territories.splice(i, 1);
+    renderTerritoryTags();
+}
+
+// ── Rating ──
+function renderRatingStars() {
+    const container = document.getElementById('starRating');
+    container.innerHTML = '';
+    for (let i = 1; i <= 5; i++) {
+        const star = document.createElement('span');
+        star.className = 'star' + (i <= rating ? ' active' : '');
+        star.textContent = '⭐';
+        star.onclick = () => { rating = i; renderRatingStars(); renderRatingLarge(); };
+        container.appendChild(star);
+    }
+}
+
+function renderRatingLarge() {
+    const container = document.getElementById('ratingStarsLarge');
+    container.innerHTML = '';
+    document.getElementById('ratingNum').textContent = rating > 0 ? rating.toFixed(1) : '—';
+    for (let i = 1; i <= 5; i++) {
+        const star = document.createElement('span');
+        star.style.cssText = 'font-size:22px;cursor:pointer;opacity:' + (i <= rating ? '1' : '0.3');
+        star.textContent = '⭐';
+        star.onclick = () => { rating = i; renderRatingStars(); renderRatingLarge(); };
+        container.appendChild(star);
+    }
+}
+
+// ── Roster ──
+function capitalize(str) {
+    if (!str) return '';
+    return str.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+}
+
+async function changeUserRole(userId, newRole) {
+    // Double-check on client (real security must come from RLS)
+    if (currentProfile?.role !== 'admin') {
+        showToast('Only admins can change roles', 'error');
+        loadRoster();
+        return;
+    }
+    if (userId === currentUser.id && newRole !== 'admin') {
+        if (!confirm('Removing your own admin access?')) {
+            loadRoster();
+            return;
+        }
+    }
+    try {
+        const { error } = await supabaseClient
+            .from('user_profiles')
+            .update({ role: newRole })
+            .eq('id', userId)
+            .eq('organization_id', currentProfile.organization_id);
+        if (error) throw error;
+        showToast('Role updated', 'success');
+        loadRoster();
+    } catch(e) {
+        showToast('Failed to update role: ' + e.message, 'error');
+        loadRoster();
+    }
+}
+
+async function toggleUserActive(userId, makeActive) {
+    if (currentProfile?.role !== 'admin') {
+        showToast('Only admins can change user status', 'error');
+        return;
+    }
+    if (userId === currentUser.id) {
+        showToast('You cannot deactivate your own account', 'error');
+        return;
+    }
+    const action = makeActive ? 'reactivate' : 'terminate';
+    if (!confirm(`Are you sure you want to ${action} this user?`)) {
+        loadRoster();
+        return;
+    }
+    try {
+        const { error } = await supabaseClient
+            .from('user_profiles')
+            .update({ is_active: makeActive })
+            .eq('id', userId)
+            .eq('organization_id', currentProfile.organization_id);
+        if (error) throw error;
+        showToast(`User ${makeActive ? 'reactivated' : 'terminated'}`, 'success');
+        loadRoster();
+    } catch(e) {
+        showToast('Failed to update status: ' + e.message, 'error');
+        loadRoster();
+    }
+}
+
+async function loadRoster() {
+    if (!currentProfile?.organization_id) return;
+    try {
+        const { data: members } = await supabaseClient
+            .from('user_profiles')
+            .select('id, first_name, last_name, role, is_active, avatar_url')
+            .eq('organization_id', currentProfile.organization_id)
+            .order('first_name');
+
+        const { data: invites } = await supabaseClient
+            .from('engineer_invitations')
+            .select('*')
+            .eq('organization_id', currentProfile.organization_id)
+            .eq('accepted', false);
+
+        const list = document.getElementById('rosterList');
+        list.innerHTML = '';
+
+        const isAdmin = currentProfile?.role === 'admin';
+
+        (members || []).forEach(m => {
+            const initials = ((m.first_name||'')[0]||'') + ((m.last_name||'')[0]||'');
+            const name     = [m.first_name, m.last_name].filter(Boolean).join(' ') || 'Unknown';
+            const currentRole = m.role || 'engineer';
+            const row = document.createElement('div');
+            row.className = 'roster-item';
+
+            let roleHTML = `<div class="roster-role">${capitalize(currentRole)}</div>`;
+            let statusHTML = `<span class="roster-status ${m.is_active ? 'active' : 'inactive'}">${m.is_active ? 'Active' : 'Inactive'}</span>`;
+
+            if (isAdmin && m.id !== currentUser.id) {
+                // Admins can change role and deactivate others (not themselves)
+                roleHTML = `
+                    <div class="roster-role">
+                        <select onchange="changeUserRole('${m.id}', this.value)" style="font-size:11px; padding:2px 6px; border-radius:4px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
+                            ${Object.entries(ROLES).map(([key, label]) => 
+                                `<option value="${key}" ${key === currentRole ? 'selected' : ''}>${label}</option>`
+                            ).join('')}
+                        </select>
+                    </div>
+                `;
+
+                statusHTML = `
+                    <div style="display:flex; flex-direction:column; align-items:flex-end; gap:4px;">
+                        <span class="roster-status ${m.is_active ? 'active' : 'inactive'}">${m.is_active ? 'Active' : 'Inactive'}</span>
+                        <button onclick="toggleUserActive('${m.id}', ${!m.is_active})" 
+                                style="font-size:10px; padding:2px 8px; border-radius:4px; background:${m.is_active ? '#ef444422' : '#22c55e22'}; color:${m.is_active ? '#ef4444' : '#22c55e'}; border:1px solid ${m.is_active ? '#ef444444' : '#22c55e44'}; cursor:pointer;">
+                            ${m.is_active ? 'Terminate' : 'Reactivate'}
+                        </button>
+                    </div>
+                `;
+            }
+
+            row.innerHTML = `
+                <div class="roster-avatar">${m.avatar_url ? `<img src="${m.avatar_url}">` : initials || '?'}</div>
+                <div style="flex:1;">
+                    <div class="roster-name">${name}${m.id === currentUser.id ? ' <span style="color:var(--gold);font-size:11px;">(you)</span>' : ''}</div>
+                    ${roleHTML}
+                </div>
+                ${statusHTML}
+            `;
+            list.appendChild(row);
         });
-        renderCards();
-    }
 
-    function renderCards() {
-        showSkeletons(false);
-        const list=document.getElementById('cardList'); list.innerHTML='';
-        if(!filtered.length){list.innerHTML=`<div class="state-box"><div class="state-icon">${searchQuery||activeFilter!=='all'?'🔍':'👥'}</div><div class="state-title">${searchQuery||activeFilter!=='all'?'No matches found':'No customers yet'}</div><div class="state-sub">${searchQuery||activeFilter!=='all'?'Try a different search or filter':'Tap ＋ to add your first customer'}</div></div>`;return;}
-        filtered.forEach(c=>{
-            const card=document.createElement('div'); card.className='customer-card';
-            card.onclick=()=>navigateTo(`customer_profile.html?id=${c.id}`);
-            const initials=c.name.split(' ').slice(0,2).map(w=>w[0]).join('').toUpperCase();
-            const location=[c.city,c.state].filter(Boolean).join(', ')||'—';
-            const brands=(c.supported_brands||[]).slice(0,3);
-            const lastSvc=formatLastService(c.lastService);
-            card.innerHTML=`<div class="card-top"><div class="card-avatar">${c.logo_url?`<img src="${c.logo_url}" alt="${c.name}">`:`${initials}`}</div><div class="card-info"><div class="card-name">${c.name}</div><div class="card-type">${(c.biz_type||'customer').replace(/_/g,' ')}</div><div class="card-location">📍 ${location}</div></div><div class="card-arrow">›</div></div><div class="card-stats"><div class="card-stat">🔬 <span>${c.equipCount}</span> equip</div><div class="card-stat">🎫 <span>${c.ticketCount}</span> open</div>${lastSvc?`<div class="last-service ${lastSvc.cls}">🕐 ${lastSvc.label}</div>`:''}</div>${brands.length?`<div class="card-brands">${brands.map(b=>`<div class="brand-chip">${b}</div>`).join('')}</div>`:''}`;
-            list.appendChild(card);
+        (invites || []).forEach(inv => {
+            const name = [inv.first_name, inv.last_name].filter(Boolean).join(' ') || inv.email;
+            const row  = document.createElement('div');
+            row.className = 'roster-item';
+            row.innerHTML = `
+                <div class="roster-avatar" style="background:var(--surface3);color:var(--text-muted);">✉️</div>
+                <div style="flex:1;">
+                    <div class="roster-name">${name}</div>
+                    <div class="roster-role">${inv.email} · ${capitalize(inv.role)}</div>
+                </div>
+                <span class="roster-status pending">Pending</span>
+            `;
+            list.appendChild(row);
         });
+
+        document.getElementById('billingTeamCount').textContent =
+            (members?.length || 0) + ' active' + ((invites?.length || 0) > 0 ? `, ${invites.length} pending` : '');
+
+    } catch(e) { console.warn('Roster load failed:', e.message); }
+}
+
+// ── Billing Stats ──
+async function loadBillingStats() {
+    if (!currentProfile?.organization_id) return;
+    try {
+        const startOfMonth = new Date(); startOfMonth.setDate(1); startOfMonth.setHours(0,0,0,0);
+        const { count } = await supabaseClient
+            .from('service_tickets')
+            .select('id', { count: 'exact', head: true })
+            .eq('organization_id', currentProfile.organization_id)
+            .gte('created_at', startOfMonth.toISOString());
+        document.getElementById('billingTicketCount').textContent = (count || 0) + ' tickets';
+
+        const { data: sub } = await supabaseClient
+            .from('subscriptions')
+            .select('*')
+            .eq('user_id', currentUser.id)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+
+        if (sub) {
+            const plans = {
+                'free':    { icon:'🆓', name:'Free Plan',    sub:'Basic features with ads' },
+                'pro':     { icon:'⭐', name:'Pro Plan',     sub:'All features, no ads' },
+                'team':    { icon:'👥', name:'Team Plan',    sub:'Multi-engineer + dispatch' },
+                'enterprise': { icon:'🏢', name:'Enterprise', sub:'Unlimited + priority support' }
+            };
+            const plan = plans[sub.tier || 'free'] || plans.free;
+            document.getElementById('planIcon').textContent  = plan.icon;
+            document.getElementById('planName').textContent  = plan.name;
+            document.getElementById('planSub').textContent   = plan.sub;
+            document.getElementById('billingRenewal').textContent =
+                sub.current_period_end ? new Date(sub.current_period_end).toLocaleDateString() : '—';
+        }
+    } catch(e) { /* billing optional */ }
+}
+
+function showUpgradeOptions() {
+    showToast('Upgrade plans coming soon!', '');
+}
+
+// ── Save ──
+async function saveCompany() {
+    const btn = document.getElementById('saveCompanyBtn');
+    btn.disabled = true; btn.textContent = 'Saving...';
+
+    try {
+        const newPrefix = document.getElementById('ticketPrefix').value.trim().toUpperCase();
+        if (newPrefix && newPrefix.length !== 3) {
+            showToast('Ticket prefix must be exactly 3 letters', 'error');
+            return;
+        }
+
+        const updates = {
+            name:               document.getElementById('companyName').value.trim(),
+            type:               document.getElementById('companyType').value,
+            website:            document.getElementById('companyWebsite').value.trim(),
+            description:        document.getElementById('companyDescription').value.trim(),
+            phone:              document.getElementById('companyPhone').value.trim(),
+            email:              document.getElementById('companyEmail').value.trim(),
+            address:            document.getElementById('companyAddress').value.trim(),
+            city:               document.getElementById('companyCity').value.trim(),
+            state:              document.getElementById('companyState').value.trim(),
+            zip:                document.getElementById('companyZip').value.trim(),
+            ticket_prefix:      newPrefix || orgData.ticket_prefix,
+            supported_brands:   selectedBrands,
+            service_territories:territories,
+            customer_rating:    rating,
+            years_in_business:  parseInt(document.getElementById('yearsInBusiness').value) || null,
+            updated_at:         new Date().toISOString()
+        };
+
+        const { error } = await supabaseClient
+            .from('organizations')
+            .update(updates)
+            .eq('id', orgData.id);
+        if (error) throw error;
+
+        Object.assign(orgData, updates);
+        document.getElementById('heroName').textContent   = updates.name;
+        document.getElementById('heroPrefix').textContent = 'Ticket prefix: ' + updates.ticket_prefix;
+        showToast('Company profile saved!', 'success');
+    } catch(e) {
+        showToast('Save failed: ' + e.message, 'error');
+    } finally {
+        btn.disabled = false; btn.textContent = 'Save Company Profile';
     }
+}
 
-    function showSkeletons(show){['skel1','skel2','skel3'].forEach(id=>{const el=document.getElementById(id);if(el)el.style.display=show?'block':'none';});}
-    function formatLastService(d){if(!d)return null;const days=Math.floor((Date.now()-new Date(d))/86400000);if(days<30)return{label:`Serviced ${days}d ago`,cls:'recent'};if(days<90)return{label:`Serviced ${days}d ago`,cls:''};if(days<365)return{label:`Serviced ${Math.floor(days/30)}mo ago`,cls:'overdue'};return{label:`Serviced ${Math.floor(days/365)}yr ago`,cls:'overdue'};}
+function capitalize(str) { return str ? str.charAt(0).toUpperCase() + str.slice(1).replace(/_/g,' ') : ''; }
+function showToast(msg, type='') {
+    const t = document.getElementById('toast');
+    t.textContent = msg; t.className = 'toast '+type+' show';
+    setTimeout(() => t.classList.remove('show'), 3000);
+}
 
-    function openAddModal(){document.getElementById('addModal').classList.add('open');setTimeout(()=>document.getElementById('newName').focus(),100);}
-    function closeAddModal(){document.getElementById('addModal').classList.remove('open');['newName','newPhone','newEmail','newAddress','newCity','newState','newWebsite'].forEach(id=>{const el=document.getElementById(id);if(el)el.value='';});}
-
-    async function saveNewCustomer() {
-        const name=document.getElementById('newName').value.trim();
-        if(!name){showToast('Business name is required','error');return;}
+    supabaseClient.auth.onAuthStateChange(function(event, session) {
         try {
-            const{data,error}=await supabaseClient.from('organizations').insert([{name,type:'customer',created_by:currentUser.id,biz_type:document.getElementById('newBizType').value||null,phone:document.getElementById('newPhone').value.trim()||null,email:document.getElementById('newEmail').value.trim()||null,address:document.getElementById('newAddress').value.trim()||null,city:document.getElementById('newCity').value.trim()||null,state:document.getElementById('newState').value.trim().toUpperCase()||null,website:document.getElementById('newWebsite').value.trim()||null}]).select().single();
-            if(error)throw error;
-            showToast('✓ '+name+' added','success'); closeAddModal();
-            setTimeout(()=>navigateTo(`customer_profile.html?id=${data.id}`),800);
-        } catch(e){showToast('Save failed: '+e.message,'error');}
+            if (typeof Android !== 'undefined') {
+                if (session?.access_token) {
+                    Android.saveSession(JSON.stringify(session));
+                } else if (event === 'SIGNED_OUT' && !session) {
+                    Android.clearSession();
+                }
+            }
+        } catch(e) {}
+    });
+
+    if (_pendingSession) {
+        var _ps = _pendingSession;
+        _pendingSession = null;
+        supabaseClient.auth.setSession({
+            access_token:  _ps.access_token,
+            refresh_token: _ps.refresh_token
+        }).then(function(result) {
+            if (result.error) { console.log('TSP: setSession error:', result.error.message); }
+            else {
+                console.log('TSP: setSession success:', result.data.session?.user?.email);
+                try {
+                    if (typeof Android !== 'undefined' && result.data.session)
+                        Android.saveSession(JSON.stringify(result.data.session));
+                } catch(e) {}
+            }
+            init();
+        });
+    } else {
+        init();
     }
-
-    document.getElementById('addModal').addEventListener('click',function(e){if(e.target===this)closeAddModal();});
-
-    function toggleDropdown(e){e.stopPropagation();document.getElementById('avatarDropdown').classList.toggle('open');}
-    document.addEventListener('click',()=>document.getElementById('avatarDropdown')?.classList.remove('open'));
-    async function logoutUser(){document.getElementById('avatarDropdown').classList.remove('open');await supabaseClient.auth.signOut();updateAuthUI();try{if(typeof Android!=='undefined')Android.clearSession();}catch(e){}}
-    async function updateAuthUI(){const{data:{user}}=await supabaseClient.auth.getUser();const aw=document.getElementById('avatarWrapper');if(user){if(aw)aw.style.display='block';const meta=user.user_metadata||{},fn=meta.first_name||'',ln=meta.last_name||'';document.getElementById('dropdownName').textContent=[fn,ln].filter(Boolean).join(' ')||'User';document.getElementById('dropdownEmail').textContent=user.email||'';const img=document.getElementById('avatarImg'),ini=document.getElementById('avatarInitials'),photo=meta.avatar_url||meta.picture||'';if(photo){img.src=photo;img.style.display='block';ini.style.display='none';}else{img.style.display='none';ini.style.display='flex';ini.textContent=((fn[0]||'')+(ln[0]||'')).toUpperCase()||user.email[0].toUpperCase();}}else{if(aw)aw.style.display='none';}}
-    async function checkTierAndShowUpgrade(){try{const{data:{user}}=await supabaseClient.auth.getUser();if(!user)return;const{data:sub}=await supabaseClient.from('subscriptions').select('tier,status').eq('user_id',user.id).single();const isPaid=sub&&['premium','team','enterprise'].includes(sub.tier)&&sub.status==='active';const btn=document.getElementById('upgradeBtn');if(btn)btn.style.display=isPaid?'none':'flex';}catch(e){}}
-    function showToast(msg,type=''){const t=document.getElementById('toast');t.textContent=msg;t.className='toast '+(type?type+' ':''+'show');setTimeout(()=>t.classList.remove('show'),3000);}
-
-    if(_pendingSession){const ps=_pendingSession;_pendingSession=null;supabaseClient.auth.setSession({access_token:ps.access_token,refresh_token:ps.refresh_token}).then(({data})=>{updateAuthUI();checkTierAndShowUpgrade();try{if(typeof Android!=='undefined'&&data.session)Android.saveSession(JSON.stringify(data.session));}catch(e){}init();});}
-    else{updateAuthUI();checkTierAndShowUpgrade();init();}
 </script>
+
+<!-- Web compatibility / browser testing layer (safe no-op in WebView) -->
+<script src="web-compat.js"></script>
+
 </body>
 </html>

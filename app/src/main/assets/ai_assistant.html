@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>AI Assistant · TSP</title>
+    <script src="theme.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="tsp.css">
     <script>
@@ -32,7 +33,6 @@
                 }
             } catch(e) {}
         })();
-
         function restoreSession(jsonStr) {
             try {
                 const parsed = typeof jsonStr === 'string' ? JSON.parse(jsonStr) : jsonStr;
@@ -41,37 +41,158 @@
                     const stored = { currentSession: session, expiresAt: session.expires_at };
                     localStorage.setItem('tsp-auth-token', JSON.stringify(stored));
                     if (typeof supabaseClient !== 'undefined') {
-                        supabaseClient.auth.setSession({
-                            access_token: session.access_token,
-                            refresh_token: session.refresh_token
-                        }).then(() => initPage());
-                    } else {
-                        _pendingSession = session;
-                    }
+                        supabaseClient.auth.setSession({ access_token: session.access_token, refresh_token: session.refresh_token }).then(() => initPage());
+                    } else { _pendingSession = session; }
                 }
             } catch(e) {}
         }
     </script>
     <style>
+        :root {
+            --gold:        #FBBF24;
+            --gold-dk:     #D97706;
+            --gold-glow:   rgba(251,191,36,0.15);
+            --gold-border: #FBBF2444;
+            --bg:          #111;
+            --surface:     #111;
+            --surface2:    #1a1a1a;
+            --surface3:    #222;
+            --border:      #2a2a2a;
+            --border2:     #333;
+            --text:        #fff;
+            --text2:       #e5e5e5;
+            --text3:       #aaa;
+            --green:       #22c55e;
+            --red:         #ef4444;
+
+            /* Voice / Zapp theme */
+            --voice-bg:        #0d0d1a;
+            --voice-purple:    #7c3aed;
+            --voice-purple-dk: #4c1d95;
+            --voice-purple-lt: #a78bfa;
+            --voice-red:       #ef4444;
+        }
+
+        @media (prefers-color-scheme: light) {
+            :root {
+                --gold:        #D97706;
+                --gold-dk:     #B45309;
+                --gold-glow:   rgba(217,119,6,0.12);
+                --gold-border: #D9770644;
+                --bg:          #f8f9fa;
+                --surface:     #ffffff;
+                --surface2:    #f1f3f5;
+                --surface3:    #e9ecef;
+                --border:      #dee2e6;
+                --border2:     #d1d5db;
+                --text:        #212529;
+                --text2:       #374151;
+                --text3:       #6b7280;
+                --green:       #16a34a;
+                --red:         #dc2626;
+
+                /* Voice / Zapp theme - lighter version */
+                --voice-bg:        #f4f4ff;
+                --voice-purple:    #6d28d9;
+                --voice-purple-dk: #5b21b6;
+                --voice-purple-lt: #c4b5fd;
+                --voice-red:       #dc2626;
+            }
+        }
+
+        /* ── Mode toggle ── */
+        .mode-bar {
+            display: flex; align-items: center; justify-content: center;
+            padding: 10px 14px 8px; gap: 8px;
+            background: var(--surface2); border-bottom: 1px solid var(--border);
+        }
+        .mode-toggle {
+            display: flex; background: var(--surface3); border: 1px solid var(--border2);
+            border-radius: 24px; padding: 3px; gap: 2px;
+        }
+        .mode-btn {
+            display: flex; align-items: center; gap: 6px;
+            padding: 7px 16px; border-radius: 20px; border: none;
+            font-family: inherit; font-size: 13px; font-weight: 600;
+            color: var(--text3); background: transparent;
+            cursor: pointer; transition: all 0.2s; white-space: nowrap;
+        }
+        .mode-btn.active {
+            background: var(--gold); color: #111827;
+            box-shadow: 0 1px 4px rgba(251,191,36,0.4);
+        }
+        .mode-btn.active.voice-active {
+            background: var(--voice-purple); color: #fff;
+            box-shadow: 0 1px 8px rgba(124,58,237,0.5);
+        }
+
+        /* ── Usage bar ── */
+        .usage-bar {
+            display: flex; justify-content: center; gap: 16px;
+            padding: 6px 14px; background: var(--surface2);
+            border-bottom: 1px solid var(--border);
+        }
+        .usage-pill {
+            display: flex; align-items: center; gap: 5px;
+            font-size: 11px; font-weight: 600; color: var(--text3);
+        }
+        .usage-pips { display: flex; gap: 3px; }
+        .pip {
+            width: 8px; height: 8px; border-radius: 50%;
+            background: var(--border2); transition: background 0.2s;
+        }
+        .pip.filled-text  { background: var(--gold); }
+        .pip.filled-voice { background: var(--voice-purple); }
+        .pip.exhausted    { background: var(--red); }
+
+        /* ── Context bar ── */
+        .context-bar {
+            display: flex; flex-direction: column; gap: 8px;
+            padding: 10px 14px; background: var(--surface2); border-bottom: 1px solid var(--border);
+        }
+        .context-row { display: flex; align-items: center; gap: 8px; }
+        .context-label {
+            font-size: 11px; font-weight: 700; color: var(--gold);
+            text-transform: uppercase; letter-spacing: 0.8px;
+            white-space: nowrap; width: 80px; flex-shrink: 0;
+        }
+        .context-select {
+            flex: 1; background: var(--surface3); border: 1px solid var(--border2);
+            border-radius: 8px; color: var(--text); font-family: inherit; font-size: 13px;
+            padding: 8px 10px; outline: none; transition: border-color 0.15s;
+        }
+        .context-select:focus { border-color: var(--gold); }
+        .context-select.has-value { border-color: rgba(251,191,36,0.45); }
+        #modelRow { opacity: 0.4; pointer-events: none; transition: opacity 0.2s; }
+        #modelRow.enabled { opacity: 1; pointer-events: auto; }
+
+        /* ── Chat layout ── */
         .chat-outer {
-            display: flex;
-            flex-direction: column;
+            display: flex; flex-direction: column;
             height: calc(100vh - 57px);
         }
+        .chat-panel { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+        /* ── Text mode ── */
         .chat-messages {
-            flex: 1;
-            overflow-y: auto;
-            padding: 16px;
-            display: flex;
-            flex-direction: column;
-            gap: 14px;
+            flex: 1; overflow-y: auto; padding: 16px;
+            display: flex; flex-direction: column; gap: 14px;
         }
         .msg { max-width: 85%; display: flex; flex-direction: column; gap: 3px; }
         .msg.user  { align-self: flex-end; align-items: flex-end; }
         .msg.assistant { align-self: flex-start; align-items: flex-start; }
-        .msg-bubble { padding: 11px 15px; border-radius: 16px; font-size: 14px; line-height: 1.55; }
-        .msg.user .msg-bubble { background: var(--gold); color: #111827; border-radius: 16px 16px 4px 16px; font-weight: 500; }
-        .msg.assistant .msg-bubble { background: var(--surface3); color: var(--text2); border: 1px solid var(--border2); border-radius: 16px 16px 16px 4px; }
+        .msg-bubble {
+            padding: 11px 15px; border-radius: 16px;
+            font-size: 14px; line-height: 1.55;
+        }
+        .msg.user .msg-bubble {
+            background: var(--gold); color: #111827;
+            border-radius: 16px 16px 4px 16px; font-weight: 500;
+        }
+        .msg.assistant .msg-bubble {
+            background: var(--surface3); color: var(--text2);
+            border: 1px solid var(--border2); border-radius: 16px 16px 16px 4px;
+        }
         .msg-time { font-size: 10px; color: var(--text3); padding: 0 4px; }
 
         .typing-indicator { display: flex; gap: 5px; align-items: center; padding: 4px 0; }
@@ -80,13 +201,27 @@
         .typing-dot:nth-child(3) { animation-delay: 0.4s; }
         @keyframes tdot { 0%,60%,100%{transform:translateY(0)} 30%{transform:translateY(-5px)} }
 
+        /* ── Quick chips ── */
+        .quick-row {
+            display: flex; gap: 8px; overflow-x: auto;
+            padding: 10px 14px; background: var(--surface);
+            border-bottom: 1px solid var(--border); scrollbar-width: none;
+        }
+        .quick-row::-webkit-scrollbar { display: none; }
+        .quick-chip {
+            flex-shrink: 0; padding: 6px 13px;
+            background: var(--surface3); border: 1px solid var(--border2);
+            border-radius: 20px; font-size: 12px; font-weight: 600;
+            color: var(--text2); cursor: pointer; font-family: inherit;
+            white-space: nowrap; transition: all 0.15s;
+        }
+        .quick-chip:active { border-color: var(--gold); color: var(--gold); }
+
+        /* ── Text input bar ── */
         .chat-input-area {
-            padding: 10px 12px;
-            background: var(--surface);
+            padding: 10px 12px; background: var(--surface);
             border-top: 1px solid var(--border2);
-            display: flex;
-            gap: 8px;
-            align-items: flex-end;
+            display: flex; gap: 8px; align-items: flex-end;
         }
         .chat-input-area textarea {
             flex: 1; background: var(--surface3); border: 1px solid var(--border2);
@@ -97,14 +232,18 @@
         .chat-input-area textarea:focus { border-color: var(--gold); }
         .chat-input-area textarea::placeholder { color: var(--text3); }
 
-        .mic-btn {
+        .icon-btn {
             width: 42px; height: 42px; border-radius: 50%;
             background: var(--surface3); border: 1px solid var(--border2);
             color: var(--text3); font-size: 18px;
             display: flex; align-items: center; justify-content: center;
             cursor: pointer; flex-shrink: 0; transition: all 0.2s;
         }
-        .mic-btn.listening { background: rgba(239,68,68,0.15); border-color: var(--red); color: var(--red); animation: mic-pulse 1s ease-in-out infinite; }
+        .icon-btn:disabled { opacity: 0.35; cursor: not-allowed; }
+        .icon-btn.listening {
+            background: rgba(239,68,68,0.15); border-color: var(--red);
+            color: var(--red); animation: mic-pulse 1s ease-in-out infinite;
+        }
         @keyframes mic-pulse { 0%,100%{transform:scale(1)} 50%{transform:scale(1.1)} }
 
         .send-btn {
@@ -116,36 +255,100 @@
         .send-btn:disabled { opacity: 0.4; cursor: not-allowed; }
         .send-btn:active { transform: scale(0.94); }
 
-        .context-bar {
-            display: flex; flex-direction: column; gap: 8px;
-            padding: 10px 14px; background: var(--surface2); border-bottom: 1px solid var(--border);
+        /* ── Voice (Zapp) mode ── */
+        .voice-panel {
+            flex: 1; display: flex; flex-direction: column;
+            align-items: center; justify-content: flex-start;
+            background: var(--voice-bg); overflow: hidden;
+            display: none;
         }
-        .context-row { display: flex; align-items: center; gap: 8px; }
-        .context-label { font-size: 11px; font-weight: 700; color: var(--gold); text-transform: uppercase; letter-spacing: 0.8px; white-space: nowrap; width: 80px; flex-shrink: 0; }
-        .context-select {
-            flex: 1; background: var(--surface3); border: 1px solid var(--border2);
-            border-radius: 8px; color: var(--text); font-family: inherit; font-size: 13px;
-            padding: 8px 10px; outline: none; transition: border-color 0.15s;
-        }
-        .context-select:focus { border-color: var(--gold); }
-        .context-select.has-value { border-color: rgba(251,191,36,0.4); color: var(--text); }
-        #modelRow { opacity: 0.4; pointer-events: none; transition: opacity 0.2s; }
-        #modelRow.enabled { opacity: 1; pointer-events: auto; }
+        .voice-panel.active { display: flex; }
 
-        .quick-row {
-            display: flex; gap: 8px; overflow-x: auto;
-            padding: 10px 14px; background: var(--surface); border-bottom: 1px solid var(--border);
-            scrollbar-width: none;
+        .voice-manual-tag {
+            margin-top: 14px; padding: 5px 14px;
+            background: rgba(124,58,237,0.15); border: 1px solid rgba(124,58,237,0.3);
+            border-radius: 20px; font-size: 11px; font-weight: 600;
+            color: var(--voice-purple-lt); letter-spacing: 0.5px;
         }
-        .quick-row::-webkit-scrollbar { display: none; }
-        .quick-chip {
-            flex-shrink: 0; padding: 6px 13px; background: var(--surface3);
-            border: 1px solid var(--border2); border-radius: 20px;
-            font-size: 12px; font-weight: 600; color: var(--text2);
-            cursor: pointer; font-family: inherit; white-space: nowrap; transition: all 0.15s;
-        }
-        .quick-chip:active { background: var(--gold-glow); border-color: var(--gold-border); color: var(--gold); }
+        .voice-manual-tag.none { color: #4b4b6b; border-color: #2a2a40; background: transparent; }
 
+        .zapp-orb-wrap {
+            flex: 1; display: flex; flex-direction: column;
+            align-items: center; justify-content: center; gap: 28px;
+            padding: 20px;
+        }
+        .zapp-orb {
+            width: 140px; height: 140px; border-radius: 50%;
+            background: radial-gradient(circle at 35% 35%, var(--voice-purple-lt), var(--voice-purple-dk));
+            box-shadow: 0 0 40px rgba(124,58,237,0.4), 0 0 80px rgba(124,58,237,0.15);
+            display: flex; align-items: center; justify-content: center;
+            font-size: 52px; transition: all 0.3s; position: relative;
+            cursor: pointer; user-select: none;
+        }
+        .zapp-orb::before {
+            content: ''; position: absolute; inset: -6px; border-radius: 50%;
+            border: 2px solid rgba(168,85,247,0.2);
+        }
+        .zapp-orb.idle      { animation: none; }
+        .zapp-orb.listening { animation: orb-listen 1s ease-in-out infinite; box-shadow: 0 0 60px rgba(239,68,68,0.6), 0 0 100px rgba(239,68,68,0.2); background: radial-gradient(circle at 35% 35%, #f87171, #991b1b); }
+        .zapp-orb.thinking  { animation: orb-think 2s ease-in-out infinite; }
+        .zapp-orb.speaking  { animation: orb-speak 0.5s ease-in-out infinite; box-shadow: 0 0 60px rgba(124,58,237,0.7), 0 0 120px rgba(124,58,237,0.3); }
+        @keyframes orb-listen { 0%,100%{transform:scale(1)} 50%{transform:scale(1.08)} }
+        @keyframes orb-think  { 0%,100%{transform:scale(1);opacity:1} 50%{transform:scale(0.95);opacity:0.8} }
+        @keyframes orb-speak  { 0%,100%{transform:scale(1)} 25%{transform:scale(1.05)} 75%{transform:scale(0.97)} }
+
+        .zapp-status {
+            font-size: 15px; font-weight: 600; color: var(--voice-purple-lt);
+            letter-spacing: 0.5px; text-align: center;
+            min-height: 22px;
+        }
+        .zapp-status.listening { color: #f87171; }
+        .zapp-status.speaking  { color: #c4b5fd; }
+        .zapp-status.thinking  { color: var(--voice-purple); }
+
+        .zapp-transcript {
+            width: 100%; max-width: 340px;
+            background: rgba(124,58,237,0.08); border: 1px solid rgba(124,58,237,0.2);
+            border-radius: 16px; padding: 14px 16px;
+            font-size: 13px; color: #c4b5fd; line-height: 1.55;
+            min-height: 60px; text-align: center;
+            max-height: 140px; overflow-y: auto;
+        }
+        .zapp-transcript.empty { color: #3d3d5c; font-style: italic; }
+
+        .voice-bottom {
+            width: 100%; padding: 20px 24px 28px;
+            display: flex; flex-direction: column; align-items: center; gap: 16px;
+            background: var(--voice-bg); border-top: 1px solid #1a1a2e;
+        }
+        .voice-mic-btn {
+            width: 72px; height: 72px; border-radius: 50%;
+            background: linear-gradient(135deg, var(--voice-purple), var(--voice-purple-dk));
+            border: none; color: #fff; font-size: 30px;
+            display: flex; align-items: center; justify-content: center;
+            cursor: pointer; box-shadow: 0 4px 20px rgba(124,58,237,0.5);
+            transition: all 0.2s;
+        }
+        .voice-mic-btn.listening {
+            background: linear-gradient(135deg, #dc2626, #991b1b);
+            box-shadow: 0 4px 24px rgba(220,38,38,0.6);
+            animation: mic-pulse 1s ease-in-out infinite;
+        }
+        .voice-mic-btn:disabled { opacity: 0.4; cursor: not-allowed; animation: none; }
+
+        .voice-hint {
+            font-size: 12px; color: #3d3d5c; text-align: center; font-weight: 500;
+        }
+        .voice-response-text {
+            width: 100%; max-width: 340px;
+            background: rgba(124,58,237,0.06);
+            border: 1px solid rgba(124,58,237,0.15);
+            border-radius: 14px; padding: 12px 16px;
+            font-size: 13px; color: #9ca3af; line-height: 1.55;
+            display: none; max-height: 120px; overflow-y: auto;
+        }
+
+        /* ── Gates / misc ── */
         .premium-gate {
             display: flex; flex-direction: column; align-items: center;
             justify-content: center; flex: 1; text-align: center; padding: 40px 24px;
@@ -153,14 +356,21 @@
         .premium-gate-icon { font-size: 52px; margin-bottom: 16px; }
         .premium-gate-title { font-size: 20px; font-weight: 800; color: var(--gold); margin-bottom: 10px; }
         .premium-gate-sub { font-size: 14px; color: var(--text3); line-height: 1.6; margin-bottom: 24px; max-width: 280px; }
+
+        .limit-banner {
+            margin: 8px 14px; padding: 10px 14px;
+            background: rgba(239,68,68,0.1); border: 1px solid rgba(239,68,68,0.25);
+            border-radius: 10px; font-size: 12px; color: #fca5a5;
+            display: none; line-height: 1.5;
+        }
     </style>
 </head>
 <body>
 
 <div class="header">
     <button class="header-back" onclick="navigateTo('index.html')">‹</button>
-    <div class="header-title">AI Assistant</div>
-    <span class="tag tag-gold" style="font-size:10px;">Premium</span>
+    <div class="header-title" id="headerTitle">AI Assistant</div>
+    <button onclick="clearHistory()" style="background:none;border:none;color:var(--text3);font-size:11px;font-family:inherit;font-weight:600;cursor:pointer;padding:4px 8px;" title="Clear conversation history">Clear</button>
 </div>
 
 <div class="chat-outer" id="chatOuter">
@@ -180,26 +390,59 @@
     );
 
     const GROK_URL = 'https://yljztfajyvjzqikxdddf.supabase.co/functions/v1/grok-assistant';
-    let messages = [], selectedManualPath = '', isTyping = false, currentUserId = null, isListening = false;
+
+    function getAIPrefs() {
+        try {
+            const raw = localStorage.getItem('tsp_settings');
+            if (raw) {
+                const s = JSON.parse(raw);
+                return {
+                    zappPersona:    s.zappPersona !== false,
+                    zappVoice:      s.zappVoice || 'sage',
+                };
+            }
+        } catch(e) {}
+        return { zappPersona: true, zappVoice: 'sage' };
+    }
+
+    let messages = [], selectedManualPath = '', isTyping = false;
+    let currentUserId = null, isListening = false;
+    let voiceMode = false;
+    let currentAudio = null;
+    let usage = { text: { used: 0, limit: 5 }, voice: { used: 0, limit: 1 } };
+    let allManuals = [];
 
     supabaseClient.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT' && !session && typeof Android !== 'undefined') Android.clearSession();
     });
 
+    const STORAGE_KEY = 'tsp_ai_v1';
+
     function saveState() {
         try {
-            sessionStorage.setItem('tsp_ai_msgs', JSON.stringify(messages));
-            sessionStorage.setItem('tsp_ai_manual', selectedManualPath);
-            const mfr = document.getElementById('mfrSelect')?.value || '';
-            sessionStorage.setItem('tsp_ai_mfr', mfr);
-        } catch(e) {}
+            const state = {
+                msgs: messages.slice(-40),
+                manual: selectedManualPath,
+                mfr: document.getElementById('mfrSelect')?.value || '',
+                mode: voiceMode ? 'voice' : 'text',
+                ts: Date.now()
+            };
+            localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+        } catch(e) {
+            try {
+                const state = { msgs: messages.slice(-10), manual: selectedManualPath, mfr: '', mode: 'text', ts: Date.now() };
+                localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+            } catch(e2) {}
+        }
     }
+
     function loadState() {
         try {
-            const m = sessionStorage.getItem('tsp_ai_msgs');
-            const man = sessionStorage.getItem('tsp_ai_manual');
-            if (m) messages = JSON.parse(m);
-            if (man) selectedManualPath = man;
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (!raw) return;
+            const state = JSON.parse(raw);
+            if (state.msgs)   messages = state.msgs;
+            if (state.manual) selectedManualPath = state.manual;
         } catch(e) {}
     }
 
@@ -211,75 +454,37 @@
         if (!user) { navigateTo('index.html'); return; }
         currentUserId = user.id;
 
-        const { data: sub } = await supabaseClient.from('subscriptions').select('tier,status').eq('user_id', user.id).single();
+        const { data: sub } = await supabaseClient.from('subscriptions').select('tier,status,expires_at').eq('user_id', user.id).single();
         const isPremium = sub && ['premium','team','enterprise'].includes(sub.tier) && sub.status === 'active';
-
-        if (isPremium) { buildChatUI(); loadState(); await loadManuals(); renderSavedMessages(); }
-        else { buildGateUI(); }
+        buildUI(isPremium);
+        loadState();
+        await loadManuals();
+        renderSavedMessages();
+        await refreshUsage();
     }
 
-    let allManuals = [];
-
-    async function loadManuals() {
-        const { data } = await supabaseClient.from('manuals').select('title,storage_path,brand').order('brand').order('title');
-        if (!data) return;
-        allManuals = data;
-
-        // Populate manufacturer dropdown with unique brands
-        const brands = [...new Set(data.map(m => m.brand))].sort();
-        const mfrSel = document.getElementById('mfrSelect');
-        if (!mfrSel) return;
-        brands.forEach(b => {
-            const o = document.createElement('option');
-            o.value = b; o.textContent = b;
-            mfrSel.appendChild(o);
-        });
-
-        // Restore saved state
-        if (selectedManualPath) {
-            const saved = allManuals.find(m => m.storage_path === selectedManualPath);
-            if (saved) {
-                mfrSel.value = saved.brand;
-                mfrSel.classList.add('has-value');
-                populateModels(saved.brand, selectedManualPath);
-            }
-        }
-    }
-
-    function populateModels(brand, selectPath = '') {
-        const modelSel = document.getElementById('manualSelect');
-        const modelRow = document.getElementById('modelRow');
-        if (!modelSel || !modelRow) return;
-        modelSel.innerHTML = '<option value="">Select model...</option>';
-        const models = allManuals.filter(m => m.brand === brand);
-        models.forEach(m => {
-            const o = document.createElement('option');
-            o.value = m.storage_path; o.textContent = m.title;
-            modelSel.appendChild(o);
-        });
-        modelRow.classList.add('enabled');
-        if (selectPath) {
-            modelSel.value = selectPath;
-            modelSel.classList.add('has-value');
-        }
-    }
-
-    function onMfrChange() {
-        const mfrSel = document.getElementById('mfrSelect');
-        const modelSel = document.getElementById('manualSelect');
-        const modelRow = document.getElementById('modelRow');
-        const brand = mfrSel.value;
-        mfrSel.classList.toggle('has-value', !!brand);
-        // Reset model selection
-        selectedManualPath = '';
-        if (modelSel) { modelSel.innerHTML = '<option value="">Select model...</option>'; modelSel.classList.remove('has-value'); }
-        if (!brand) { modelRow.classList.remove('enabled'); return; }
-        populateModels(brand);
-        saveState();
-    }
-
-    function buildChatUI() {
+    function buildUI(isPremium) {
         document.getElementById('chatOuter').innerHTML = `
+            <div class="mode-bar">
+                <div class="mode-toggle" id="modeToggle">
+                    <button class="mode-btn active" id="textModeBtn" onclick="setMode('text')">⌨️ Text</button>
+                    <button class="mode-btn" id="voiceModeBtn" onclick="setMode('voice')">🎙️ Zapp Voice</button>
+                </div>
+            </div>
+
+            <div class="usage-bar" id="usageBar">
+                <div class="usage-pill" id="textUsagePill">
+                    <span>⌨️</span>
+                    <div class="usage-pips" id="textPips"></div>
+                    <span id="textUsageLabel" style="font-size:10px;"></span>
+                </div>
+                <div class="usage-pill" id="voiceUsagePill">
+                    <span>🎙️</span>
+                    <div class="usage-pips" id="voicePips"></div>
+                    <span id="voiceUsageLabel" style="font-size:10px;"></span>
+                </div>
+            </div>
+
             <div class="context-bar">
                 <div class="context-row">
                     <span class="context-label">Brand</span>
@@ -294,23 +499,80 @@
                     </select>
                 </div>
             </div>
-            <div class="quick-row">
-                <button class="quick-chip" onclick="quickPrompt('What are the most common fault codes for this system?')">⚡ Fault codes</button>
-                <button class="quick-chip" onclick="quickPrompt('Walk me through the calibration procedure')">🔧 Calibration</button>
-                <button class="quick-chip" onclick="quickPrompt('What are the laser safety precautions?')">⚠️ Safety</button>
-                <button class="quick-chip" onclick="quickPrompt('What spare parts should I carry for this system?')">🔩 Spare parts</button>
-                <button class="quick-chip" onclick="quickPrompt('What preventive maintenance steps should I perform?')">📋 PM steps</button>
-            </div>
-            <div class="chat-messages" id="chatMessages">
-                <div data-welcome style="text-align:center;color:var(--text3);font-size:13px;padding:20px 0;">
-                    👋 Select a manual above and start asking questions.
+
+            <div class="limit-banner" id="limitBanner"></div>
+
+            <div class="chat-panel" id="textPanel">
+                <div class="quick-row">
+                    <button class="quick-chip" onclick="quickPrompt('What are the most common fault codes for this system?')">⚡ Fault codes</button>
+                    <button class="quick-chip" onclick="quickPrompt('Walk me through the calibration procedure')">🔧 Calibration</button>
+                    <button class="quick-chip" onclick="quickPrompt('What preventive maintenance steps should I perform?')">📋 PM steps</button>
+                    <button class="quick-chip" onclick="quickPrompt('What spare parts should I carry for this system?')">🔩 Spare parts</button>
+                    <button class="quick-chip" onclick="quickPrompt('What are the laser safety precautions?')">⚠️ Safety</button>
+                </div>
+                <div class="chat-messages" id="chatMessages">
+                    <div data-welcome style="text-align:center;color:var(--text3);font-size:13px;padding:20px 0;line-height:1.7;">
+                        👋 Select a manual above, then ask anything.<br>
+                        <span style="font-size:11px;opacity:0.6;">Mic = speak your question, get a text answer.<br>Switch to Zapp Voice for spoken responses.</span>
+                    </div>
+                </div>
+                <div class="chat-input-area">
+                    <textarea id="chatInput" placeholder="Ask about any laser system..." rows="1"
+                        onkeydown="onKey(event)" oninput="autoResize(this)"></textarea>
+                    <button class="icon-btn" id="micBtn" onclick="toggleMic()" title="Speak your question (text response)">🎤</button>
+                    <button class="send-btn" id="sendBtn" onclick="sendMessage()">↑</button>
                 </div>
             </div>
-            <div class="chat-input-area">
-                <textarea id="chatInput" placeholder="Ask about any laser system..." rows="1"
-                    onkeydown="onKey(event)" oninput="autoResize(this)"></textarea>
-                <button class="mic-btn" id="micBtn" onclick="toggleMic()">🎤</button>
-                <button class="send-btn" id="sendBtn" onclick="sendMessage()">↑</button>
+
+            <div class="voice-panel" id="voicePanel">
+                <div style="width:100%;display:flex;justify-content:space-between;align-items:center;padding:10px 16px 0;">
+                    <div class="voice-manual-tag none" id="voiceManualTag">No manual selected</div>
+                    <button onclick="toggleVoiceSettings()" id="voiceSettingsBtn"
+                        style="background:none;border:none;font-size:20px;cursor:pointer;color:#4b4b6b;padding:4px 8px;border-radius:8px;transition:color 0.2s;"
+                        title="Voice settings">⚙️</button>
+                </div>
+
+                <div id="voiceSettingsPanel" style="display:none;width:100%;background:#12122a;border-bottom:1px solid #1e1e38;padding:14px 20px;gap:14px;flex-direction:column;">
+                    <div style="display:flex;align-items:center;justify-content:space-between;">
+                        <div>
+                            <div style="font-size:13px;font-weight:700;color:#c4b5fd;">Zapp Brannigan Persona</div>
+                            <div style="font-size:11px;color:#4b4b6b;margin-top:2px;">Theatrical, self-assured, technically accurate</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="vZappPersona" onchange="saveVoiceSettings()">
+                            <span class="toggle-track"></span>
+                        </label>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                        <div>
+                            <div style="font-size:13px;font-weight:700;color:#c4b5fd;">Voice Gender</div>
+                        </div>
+                        <select id="vVoiceGender" onchange="onVoiceGenderChange()"
+                            style="background:#1a1a2e;border:1px solid #2d2d4e;border-radius:8px;color:#c4b5fd;font-size:12px;padding:6px 10px;outline:none;">
+                            <option value="male">Male</option>
+                            <option value="female">Female</option>
+                        </select>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                        <div>
+                            <div style="font-size:13px;font-weight:700;color:#c4b5fd;">Voice</div>
+                        </div>
+                        <select id="vVoice" onchange="saveVoiceSettings()"
+                            style="background:#1a1a2e;border:1px solid #2d2d4e;border-radius:8px;color:#c4b5fd;font-size:12px;padding:6px 10px;outline:none;min-width:150px;">
+                        </select>
+                    </div>
+                </div>
+
+                <div class="zapp-orb-wrap">
+                    <div class="zapp-orb idle" id="zappOrb" onclick="zapTap()">🤖</div>
+                    <div class="zapp-status" id="zappStatus">Tap to ask Zapp</div>
+                    <div class="zapp-transcript empty" id="zappTranscript">Your question will appear here...</div>
+                    <div class="voice-response-text" id="voiceResponseText"></div>
+                </div>
+                <div class="voice-bottom">
+                    <button class="voice-mic-btn" id="voiceMicBtn" onclick="zapTap()">🎤</button>
+                    <div class="voice-hint" id="voiceHint">Tap to speak · Tap again to stop</div>
+                </div>
             </div>
         `;
     }
@@ -320,10 +582,198 @@
             <div class="premium-gate">
                 <div class="premium-gate-icon">🤖</div>
                 <div class="premium-gate-title">Premium Feature</div>
-                <div class="premium-gate-sub">The AI troubleshooting assistant requires a Premium or Team subscription.</div>
-                <button class="btn btn-gold" onclick="navigateTo('paywall.html')">Upgrade to Premium</button>
+                <div class="premium-gate-sub">The AI troubleshooting assistant requires a Premium subscription.</div>
+                <button class="btn btn-primary" onclick="navigateTo('paywall.html')">Upgrade to Premium</button>
             </div>
         `;
+    }
+
+    function setMode(mode) {
+        voiceMode = (mode === 'voice');
+        const textBtn = document.getElementById('textModeBtn');
+        const voiceBtn = document.getElementById('voiceModeBtn');
+        const textPanel = document.getElementById('textPanel');
+        const voicePanel = document.getElementById('voicePanel');
+        const header = document.getElementById('headerTitle');
+
+        if (voiceMode) {
+            textBtn.classList.remove('active');
+            voiceBtn.classList.add('active', 'voice-active');
+            textPanel.style.display = 'none';
+            if (voicePanel) voicePanel.classList.add('active');
+            if (header) header.textContent = 'Zapp Voice';
+            updateVoiceManualTag();
+            syncVoiceSettingsPanel();
+        } else {
+            voiceBtn.classList.remove('active', 'voice-active');
+            textBtn.classList.add('active');
+            if (voicePanel) voicePanel.classList.remove('active');
+            textPanel.style.display = 'flex';
+            if (header) header.textContent = 'AI Assistant';
+            stopAudio();
+        }
+        saveState();
+    }
+
+    function updateVoiceManualTag() {
+        const tag = document.getElementById('voiceManualTag');
+        if (!tag) return;
+        if (selectedManualPath && allManuals.length) {
+            const m = allManuals.find(x => x.storage_path === selectedManualPath);
+            if (m) {
+                tag.textContent = `📖 ${m.brand} · ${m.title}`;
+                tag.classList.remove('none');
+                return;
+            }
+        }
+        tag.textContent = 'No manual selected';
+        tag.classList.add('none');
+    }
+
+    async function refreshUsage() {
+        try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            if (!session) return;
+            const resp = await fetch(GROK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + session.access_token },
+                body: JSON.stringify({ action: 'usage' })
+            });
+            if (resp.ok) { usage = await resp.json(); renderUsage(); }
+        } catch(e) {}
+    }
+
+    function updateUsage(newUsage) {
+        if (newUsage) { usage = newUsage; renderUsage(); }
+    }
+
+    function renderUsage() {
+        renderPips('textPips', usage.text.used, usage.text.limit, 'filled-text');
+        renderPips('voicePips', usage.voice.used, usage.voice.limit, 'filled-voice');
+        const tLabel = document.getElementById('textUsageLabel');
+        const vLabel = document.getElementById('voiceUsageLabel');
+        if (tLabel) tLabel.textContent = `${usage.text.used}/${usage.text.limit}`;
+        if (vLabel) vLabel.textContent = `${usage.voice.used}/${usage.voice.limit}`;
+    }
+
+    function renderPips(containerId, used, limit, filledClass) {
+        const c = document.getElementById(containerId);
+        if (!c) return;
+        c.innerHTML = '';
+        const display = Math.min(limit, 10);
+        for (let i = 0; i < display; i++) {
+            const pip = document.createElement('div');
+            pip.className = 'pip';
+            if (i < used) pip.classList.add(used >= limit ? 'exhausted' : filledClass);
+            c.appendChild(pip);
+        }
+        if (limit > 10) {
+            const more = document.createElement('span');
+            more.style.cssText = 'font-size:10px;color:var(--text3);margin-left:2px;';
+            more.textContent = `+${limit - 10}`;
+            c.appendChild(more);
+        }
+    }
+
+    function showLimitBanner(msg) {
+        const b = document.getElementById('limitBanner');
+        if (!b) return;
+        b.textContent = msg;
+        b.style.display = 'block';
+        setTimeout(() => { b.style.display = 'none'; }, 8000);
+    }
+
+    async function loadManuals() {
+        const { data } = await supabaseClient.from('manuals').select('title,storage_path,brand').order('brand').order('title');
+        if (!data) return;
+        allManuals = data;
+        const brands = [...new Set(data.map(m => m.brand))].sort();
+        const mfrSel = document.getElementById('mfrSelect');
+        if (!mfrSel) return;
+        brands.forEach(b => { const o = document.createElement('option'); o.value = b; o.textContent = b; mfrSel.appendChild(o); });
+
+        let savedMfr = '', savedMode = 'text';
+        try {
+            const raw = localStorage.getItem(STORAGE_KEY);
+            if (raw) { const s = JSON.parse(raw); savedMfr = s.mfr || ''; savedMode = s.mode || 'text'; }
+        } catch(e) {}
+        if (selectedManualPath) {
+            const saved = allManuals.find(m => m.storage_path === selectedManualPath);
+            if (saved) {
+                mfrSel.value = saved.brand; mfrSel.classList.add('has-value');
+                populateModels(saved.brand, selectedManualPath);
+            }
+        } else if (savedMfr) {
+            mfrSel.value = savedMfr; mfrSel.classList.add('has-value');
+            if (savedMfr) populateModels(savedMfr);
+        }
+
+        if (savedMode === 'voice') setMode('voice');
+    }
+
+    function populateModels(brand, selectPath = '') {
+        const modelSel = document.getElementById('manualSelect');
+        const modelRow = document.getElementById('modelRow');
+        if (!modelSel || !modelRow) return;
+        modelSel.innerHTML = '<option value="">Select model...</option>';
+        allManuals.filter(m => m.brand === brand).forEach(m => {
+            const o = document.createElement('option'); o.value = m.storage_path; o.textContent = m.title;
+            modelSel.appendChild(o);
+        });
+        modelRow.classList.add('enabled');
+        if (selectPath) { modelSel.value = selectPath; modelSel.classList.add('has-value'); }
+    }
+
+    function onMfrChange() {
+        const mfrSel = document.getElementById('mfrSelect');
+        const modelSel = document.getElementById('manualSelect');
+        const modelRow = document.getElementById('modelRow');
+        const brand = mfrSel.value;
+        mfrSel.classList.toggle('has-value', !!brand);
+        selectedManualPath = '';
+        if (modelSel) { modelSel.innerHTML = '<option value="">Select model...</option>'; modelSel.classList.remove('has-value'); }
+        if (!brand) { modelRow.classList.remove('enabled'); return; }
+        populateModels(brand); saveState();
+    }
+
+    function onManualChange() {
+        const sel = document.getElementById('manualSelect');
+        selectedManualPath = sel.value;
+        sel.classList.toggle('has-value', !!selectedManualPath);
+        updateVoiceManualTag();
+        saveState();
+    }
+
+    const WORD_NUMS = {
+        'zero':0,'one':1,'two':2,'three':3,'four':4,'five':5,'six':6,'seven':7,
+        'eight':8,'nine':9,'ten':10,'eleven':11,'twelve':12,'thirteen':13,
+        'fourteen':14,'fifteen':15,'sixteen':16,'seventeen':17,'eighteen':18,
+        'nineteen':19,'twenty':20,'thirty':30,'forty':40,'fifty':50,
+        'for':4,'fore':4,'too':2,'to':2,'won':1,'ate':8,'nein':9,'sex':6,'tree':3
+    };
+
+    function normalizeSpokenText(text) {
+        if (!text) return text;
+        let t = text;
+        t = t.replace(
+            /\b(fault|error|alarm|code|f-?)\s+([a-z]+)(?:\s+(point|dot)\s+([a-z]+|\d+))?/gi,
+            (match, prefix, word, dotWord, afterDot) => {
+                const wl = word.toLowerCase();
+                const num = WORD_NUMS[wl];
+                if (num === undefined) return match;
+                let result = prefix + ' ' + num;
+                if (dotWord && afterDot) {
+                    const afterNum = WORD_NUMS[afterDot.toLowerCase()];
+                    result += '.' + (afterNum !== undefined ? afterNum : afterDot);
+                }
+                return result;
+            }
+        );
+        t = t.replace(/\b(\d+)\s+(?:point|dot)\s+([a-z]+|\d+)\b/gi, (match, n, word) => {
+            const afterNum = WORD_NUMS[word.toLowerCase()];
+            return n + '.' + (afterNum !== undefined ? afterNum : word);
+        });
+        return t;
     }
 
     function renderSavedMessages() {
@@ -334,13 +784,6 @@
         messages.forEach(m => renderMessage(m.role, m.content, false));
     }
 
-    function onManualChange() {
-        const sel = document.getElementById('manualSelect');
-        selectedManualPath = sel.value;
-        sel.classList.toggle('has-value', !!selectedManualPath);
-        saveState();
-    }
-
     function renderMessage(role, content, scroll = true) {
         const c = document.getElementById('chatMessages');
         if (!c) return;
@@ -348,56 +791,361 @@
         const d = document.createElement('div');
         d.className = 'msg ' + role;
         const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-        const html = content.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+        const html = content
+            .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+            .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
+            .replace(/\n/g,'<br>');
         d.innerHTML = `<div class="msg-bubble">${html}</div><div class="msg-time">${time}</div>`;
         c.appendChild(d);
         if (scroll) c.scrollTop = c.scrollHeight;
     }
 
     function addMessage(role, content) { messages.push({role, content}); renderMessage(role, content); saveState(); }
-    function showTyping() { const c = document.getElementById('chatMessages'); if (!c) return; const d = document.createElement('div'); d.className='msg assistant'; d.id='typing'; d.innerHTML='<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>'; c.appendChild(d); c.scrollTop=c.scrollHeight; }
+    function showTyping() {
+        const c = document.getElementById('chatMessages'); if (!c) return;
+        const d = document.createElement('div'); d.className='msg assistant'; d.id='typing';
+        d.innerHTML='<div class="msg-bubble"><div class="typing-indicator"><div class="typing-dot"></div><div class="typing-dot"></div><div class="typing-dot"></div></div></div>';
+        c.appendChild(d); c.scrollTop = c.scrollHeight;
+    }
     function hideTyping() { const t = document.getElementById('typing'); if (t) t.remove(); }
 
     async function sendMessage() {
         const inp = document.getElementById('chatInput'); if (!inp) return;
         const text = inp.value.trim(); if (!text || isTyping) return;
+
+        if (usage.text.used >= usage.text.limit) {
+            showLimitBanner(`Daily text limit reached (${usage.text.used}/${usage.text.limit}). Resets at midnight. ${usage.tier === 'free' ? 'Upgrade to Premium for 50/day.' : ''}`);
+            return;
+        }
+
         inp.value = ''; inp.style.height = '42px';
         addMessage('user', text);
         isTyping = true;
         const sb = document.getElementById('sendBtn'), mb = document.getElementById('micBtn');
         if (sb) sb.disabled = true; if (mb) mb.disabled = true;
         showTyping();
+
         try {
             const { data: { session } } = await supabaseClient.auth.getSession();
             const token = session?.access_token || '';
-            const sysPrompt = selectedManualPath
-                ? `You are an expert medical laser service technician. The technician is referencing manual: ${selectedManualPath}. Answer field service questions concisely.`
-                : `You are an expert medical laser service technician specializing in Lumenis, Candela, Cynosure, Cutera, Coherent, Fotona. Answer field service questions concisely.`;
             const resp = await fetch(GROK_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                body: JSON.stringify({ action:'chat', userId:currentUserId, messages:[{role:'system',content:sysPrompt},...messages.slice(-10)], collectionId:null })
+                body: JSON.stringify({
+                    action: 'chat',
+                    manualPath: selectedManualPath || null,
+                    messages: messages.slice(-12)
+                })
             });
             const data = await resp.json();
             hideTyping();
-            addMessage('assistant', !resp.ok ? '⚠️ '+(data.error||'Request failed.') : (data.choices?.[0]?.message?.content || 'Could not process that.'));
-        } catch(e) { hideTyping(); addMessage('assistant','⚠️ Connection error. Please try again.'); }
+
+            if (!resp.ok) {
+                if (resp.status === 429) {
+                    showLimitBanner(data.message || 'Daily limit reached.');
+                } else {
+                    addMessage('assistant', '⚠️ ' + (data.error || 'Request failed.'));
+                }
+            } else {
+                addMessage('assistant', data.choices?.[0]?.message?.content || 'Could not process that.');
+                if (data._usage) updateUsage(data._usage);
+            }
+        } catch(e) {
+            hideTyping(); addMessage('assistant','⚠️ Connection error. Please try again.');
+        }
         isTyping = false;
         if (sb) sb.disabled = false; if (mb) mb.disabled = false;
     }
 
+    function quickPrompt(text) {
+        const inp = document.getElementById('chatInput');
+        if (inp) { inp.value = text; autoResize(inp); }
+        sendMessage();
+    }
+    function onKey(e) { if (e.key==='Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); } }
+    function autoResize(el) { el.style.height='42px'; el.style.height=Math.min(el.scrollHeight,110)+'px'; }
+
     function toggleMic() {
-        if (typeof Android === 'undefined' || !Android.startVoiceRecognition) { showToast('Voice input not available'); return; }
+        if (typeof Android === 'undefined' || !Android.startVoiceRecognition) {
+            showToast('Voice input requires the TSP Android app'); return;
+        }
         if (isListening) { Android.stopVoiceRecognition(); setMicState(false); }
         else { Android.startVoiceRecognition(); setMicState(true); }
     }
-    function setMicState(on) { isListening = on; const btn = document.getElementById('micBtn'); if (!btn) return; btn.classList.toggle('listening', on); btn.textContent = on ? '🔴' : '🎤'; }
-    window.onSpeechResult = function(text) { setMicState(false); if (text?.trim()) { const inp = document.getElementById('chatInput'); if (inp) { inp.value=text.trim(); autoResize(inp); } setTimeout(sendMessage,300); } };
-    window.onSpeechError = function(err) { setMicState(false); if (err && err !== 'cancelled') showToast('Voice error: '+err); };
+    function setMicState(on) {
+        isListening = on;
+        const btn = document.getElementById('micBtn');
+        if (!btn) return;
+        btn.classList.toggle('listening', on);
+        btn.textContent = on ? '🔴' : '🎤';
+    }
+    window.onSpeechResult = function(text) {
+        setMicState(false);
+        if (!text?.trim()) return;
+        const normalized = normalizeSpokenText(text.trim());
+        if (voiceMode) {
+            handleZappSpeech(normalized);
+        } else {
+            const inp = document.getElementById('chatInput');
+            if (inp) { inp.value = normalized; autoResize(inp); }
+            setTimeout(sendMessage, 300);
+        }
+    };
+    window.onSpeechError = function(err) {
+        setMicState(false);
+        setZappMicState(false);
+        if (err && err !== 'cancelled') showToast('Voice error: ' + err);
+    };
 
-    function quickPrompt(text) { const inp = document.getElementById('chatInput'); if (inp) { inp.value=text; autoResize(inp); } sendMessage(); }
-    function onKey(e) { if (e.key==='Enter'&&!e.shiftKey) { e.preventDefault(); sendMessage(); } }
-    function autoResize(el) { el.style.height='42px'; el.style.height=Math.min(el.scrollHeight,110)+'px'; }
+    const VOICE_OPTIONS = {
+        male:   [
+            { id: 'sage', label: 'Sage — warm & clear' },
+            { id: 'rex',  label: 'Rex — confident' },
+            { id: 'sal',  label: 'Sal — versatile' },
+            { id: 'leo',  label: 'Leo — authoritative' },
+        ],
+        female: [
+            { id: 'eve',  label: 'Eve — expressive' },
+            { id: 'ara',  label: 'Ara — warm & conversational' },
+        ]
+    };
+
+    function toggleVoiceSettings() {
+        const panel = document.getElementById('voiceSettingsPanel');
+        const btn = document.getElementById('voiceSettingsBtn');
+        if (!panel) return;
+        const open = panel.style.display === 'flex';
+        panel.style.display = open ? 'none' : 'flex';
+        if (btn) btn.style.color = open ? '#4b4b6b' : '#a78bfa';
+        if (!open) syncVoiceSettingsPanel();
+    }
+
+    function syncVoiceSettingsPanel() {
+        const prefs = getAIPrefs();
+        const personaEl = document.getElementById('vZappPersona');
+        const genderEl  = document.getElementById('vVoiceGender');
+        if (personaEl) personaEl.checked = prefs.zappPersona;
+        if (genderEl) {
+            const isFemale = ['eve','ara'].includes(prefs.zappVoice);
+            genderEl.value = isFemale ? 'female' : 'male';
+            populateVoiceDropdown(isFemale ? 'female' : 'male', prefs.zappVoice);
+        }
+    }
+
+    function populateVoiceDropdown(gender, selectedId) {
+        const sel = document.getElementById('vVoice');
+        if (!sel) return;
+        const voices = VOICE_OPTIONS[gender] || VOICE_OPTIONS.male;
+        sel.innerHTML = voices.map(v => `<option value="${v.id}">${v.label}</option>`).join('');
+        const match = voices.find(v => v.id === selectedId);
+        sel.value = match ? selectedId : voices[0].id;
+    }
+
+    function onVoiceGenderChange() {
+        const gender = document.getElementById('vVoiceGender')?.value || 'male';
+        const voices = VOICE_OPTIONS[gender] || VOICE_OPTIONS.male;
+        populateVoiceDropdown(gender, voices[0].id);
+        saveVoiceSettings();
+    }
+
+    function saveVoiceSettings() {
+        try {
+            const persona = document.getElementById('vZappPersona')?.checked ?? true;
+            const voice   = document.getElementById('vVoice')?.value || 'sage';
+            const raw = localStorage.getItem('tsp_settings');
+            const s = raw ? JSON.parse(raw) : {};
+            const gender = ['eve','ara'].includes(voice) ? 'female' : 'male';
+            s.zappPersona     = persona;
+            s.zappVoice       = voice;
+            s.zappVoiceGender = gender;
+            localStorage.setItem('tsp_settings', JSON.stringify(s));
+            showToast('Voice settings saved', '');
+        } catch(e) {}
+    }
+
+    function setMode(mode) {
+        voiceMode = (mode === 'voice');
+        const textBtn = document.getElementById('textModeBtn');
+        const voiceBtn = document.getElementById('voiceModeBtn');
+        const textPanel = document.getElementById('textPanel');
+        const voicePanel = document.getElementById('voicePanel');
+        const header = document.getElementById('headerTitle');
+
+        if (voiceMode) {
+            textBtn.classList.remove('active');
+            voiceBtn.classList.add('active', 'voice-active');
+            textPanel.style.display = 'none';
+            if (voicePanel) voicePanel.classList.add('active');
+            if (header) header.textContent = 'Zapp Voice';
+            updateVoiceManualTag();
+            syncVoiceSettingsPanel();
+        } else {
+            voiceBtn.classList.remove('active', 'voice-active');
+            textBtn.classList.add('active');
+            if (voicePanel) voicePanel.classList.remove('active');
+            textPanel.style.display = 'flex';
+            if (header) header.textContent = 'AI Assistant';
+            stopAudio();
+        }
+        saveState();
+    }
+
+    function setZappMicState(on) {
+        zappListening = on;
+        const orb = document.getElementById('zappOrb');
+        const status = document.getElementById('zappStatus');
+        const vmb = document.getElementById('voiceMicBtn');
+        const transcript = document.getElementById('zappTranscript');
+        if (orb) { orb.className = 'zapp-orb ' + (on ? 'listening' : 'idle'); }
+        if (status) { status.textContent = on ? 'Listening...' : 'Tap to ask Zapp'; status.className = 'zapp-status' + (on ? ' listening' : ''); }
+        if (vmb) { vmb.classList.toggle('listening', on); vmb.textContent = on ? '🔴' : '🎤'; }
+        if (transcript && on) { transcript.textContent = 'Listening...'; transcript.classList.remove('empty'); }
+    }
+
+    async function handleZappSpeech(text) {
+        const transcript = document.getElementById('zappTranscript');
+        const orb = document.getElementById('zappOrb');
+        const status = document.getElementById('zappStatus');
+        const responseEl = document.getElementById('voiceResponseText');
+
+        if (transcript) { transcript.textContent = '"' + text + '"'; transcript.classList.remove('empty'); }
+        setZappThinking(true);
+
+        if (usage.text.used >= usage.text.limit) {
+            setZappThinking(false);
+            showLimitBanner(`Daily text limit reached. Cannot get response.`);
+            return;
+        }
+
+        try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const token = session?.access_token || '';
+            messages.push({ role: 'user', content: text });
+
+            const resp = await fetch(GROK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({
+                    action: 'chat',
+                    manualPath: selectedManualPath || null,
+                    voiceMode: true,
+                    zappPersona: getAIPrefs().zappPersona,
+                    messages: messages.slice(-10)
+                })
+            });
+            const data = await resp.json();
+            setZappThinking(false);
+
+            if (!resp.ok) {
+                if (resp.status === 429) showLimitBanner(data.message || 'Limit reached.');
+                return;
+            }
+
+            const reply = data.choices?.[0]?.message?.content || '';
+            if (data._usage) updateUsage(data._usage);
+            messages.push({ role: 'assistant', content: reply });
+            saveState();
+
+            if (usage.voice.used >= usage.voice.limit) {
+                if (responseEl) { responseEl.textContent = reply; responseEl.style.display = 'block'; }
+                if (status) { status.textContent = 'Text only (voice limit reached)'; status.className = 'zapp-status'; }
+                showLimitBanner(`Voice limit reached (${usage.voice.used}/${usage.voice.limit}). Response shown as text.`);
+                return;
+            }
+
+            if (responseEl) { responseEl.textContent = reply; responseEl.style.display = 'block'; }
+            await zapSpeak(reply, token);
+
+        } catch(e) {
+            setZappThinking(false);
+            if (status) { status.textContent = 'Connection error'; status.className = 'zapp-status'; }
+        }
+    }
+
+    function setZappThinking(on) {
+        zappThinking = on;
+        const orb = document.getElementById('zappOrb');
+        const status = document.getElementById('zappStatus');
+        const vmb = document.getElementById('voiceMicBtn');
+        if (orb) orb.className = 'zapp-orb ' + (on ? 'thinking' : 'idle');
+        if (status) { status.textContent = on ? 'Thinking...' : 'Tap to ask Zapp'; status.className = 'zapp-status' + (on ? ' thinking' : ''); }
+        if (vmb) vmb.disabled = on;
+    }
+
+    async function zapSpeak(text, token) {
+        const orb = document.getElementById('zappOrb');
+        const status = document.getElementById('zappStatus');
+        const vmb = document.getElementById('voiceMicBtn');
+        const hint = document.getElementById('voiceHint');
+
+        zappSpeaking = true;
+        if (orb) orb.className = 'zapp-orb speaking';
+        if (status) { status.textContent = 'Speaking...'; status.className = 'zapp-status speaking'; }
+        if (vmb) vmb.disabled = true;
+        if (hint) hint.textContent = 'Tap orb to stop';
+
+        try {
+            let ttsText = text;
+            if (ttsText.length > 600) {
+                const cut = ttsText.lastIndexOf('.', 600);
+                ttsText = cut > 200 ? ttsText.substring(0, cut + 1) : ttsText.substring(0, 600);
+            }
+            ttsText = ttsText.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n— Source:.*$/s, '').trim();
+
+            const resp = await fetch(GROK_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
+                body: JSON.stringify({ action: 'tts', text: ttsText, voiceId: getAIPrefs().zappVoice })
+            });
+
+            if (resp.status === 429) {
+                const errData = await resp.json();
+                showLimitBanner(errData.message || 'Voice limit reached.');
+                stopAudio(); return;
+            }
+
+            if (!resp.ok) { stopAudio(); return; }
+
+            await refreshUsage();
+
+            const blob = await resp.blob();
+            const url = URL.createObjectURL(blob);
+            currentAudio = new Audio(url);
+            currentAudio.onended = stopAudio;
+            currentAudio.onerror = stopAudio;
+            currentAudio.play();
+        } catch(e) { stopAudio(); }
+    }
+
+    function stopAudio() {
+        if (currentAudio) { try { currentAudio.pause(); currentAudio = null; } catch(e) {} }
+        zappSpeaking = false;
+        const orb = document.getElementById('zappOrb');
+        const status = document.getElementById('zappStatus');
+        const vmb = document.getElementById('voiceMicBtn');
+        const hint = document.getElementById('voiceHint');
+        if (orb) orb.className = 'zapp-orb idle';
+        if (status) { status.textContent = 'Tap to ask Zapp'; status.className = 'zapp-status'; }
+        if (vmb) vmb.disabled = false;
+        if (hint) hint.textContent = 'Tap to speak · Tap again to stop';
+    }
+
+    function clearHistory() {
+        if (!confirm('Clear conversation history?')) return;
+        messages = [];
+        saveState();
+        const c = document.getElementById('chatMessages');
+        if (c) {
+            c.innerHTML = `<div data-welcome style="text-align:center;color:var(--text3);font-size:13px;padding:20px 0;line-height:1.7;">
+                👋 Select a manual above, then ask anything.<br>
+                <span style="font-size:11px;opacity:0.6;">Mic = speak your question, get a text answer.<br>Switch to Zapp Voice for spoken responses.</span>
+            </div>`;
+        }
+        const zt = document.getElementById('zappTranscript');
+        if (zt) { zt.textContent = 'Your question will appear here...'; zt.classList.add('empty'); }
+        const vr = document.getElementById('voiceResponseText');
+        if (vr) vr.style.display = 'none';
+    }
 
     function navigateTo(page) {
         try {
@@ -408,7 +1156,8 @@
     }
 
     function showToast(msg, type='') {
-        const t = document.getElementById('toast'); t.textContent=msg; t.className='toast show'+(type?' '+type:'');
+        const t = document.getElementById('toast'); t.textContent=msg;
+        t.className='toast show'+(type?' '+type:'');
         clearTimeout(t._t); t._t=setTimeout(()=>t.classList.remove('show'),3000);
     }
 

@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Centralized theme system -->
+    <script src="theme.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Calculators · TSP</title>
@@ -40,10 +42,7 @@
         .calc-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
         @media(min-width:480px) { .calc-grid { grid-template-columns: repeat(3, 1fr); } }
         .bottom-nav { position:fixed;bottom:0;left:0;right:0;background:var(--surface);border-top:1px solid var(--border2);display:flex;justify-content:space-around;padding:8px 0 max(8px,env(safe-area-inset-bottom));z-index:100; }
-        .bottom-nav-item { display:flex;flex-direction:column;align-items:center;gap:2px;background:none;border:none;color:var(--text3);cursor:pointer;font-family:inherit;min-width:56px;padding:4px;transition:color 0.15s; }
-        .bottom-nav-item:hover,.bottom-nav-item.active { color:var(--gold); }
-        .bottom-nav-item span:first-child { font-size:20px; }
-        .bottom-nav-item span:last-child { font-size:9px;font-weight:700;letter-spacing:0.3px;text-transform:uppercase; }
+        /* bottom-nav-item now uses global styles from tsp.css */
     </style>
 </head>
 <body>
@@ -75,8 +74,8 @@
         <div style="font-size:13px;color:var(--text3);margin-top:4px;">Select a calculator</div>
     </div>
     <div class="calc-grid">
-        <button class="nav-card" onclick="navTo('fluence.html')"><div class="nav-icon">⚡</div><div class="nav-label">Fluence<br><span style="font-weight:500;color:var(--text3)">Energy Density</span></div></button>
-        <button class="nav-card" onclick="navTo('irradiance.html')"><div class="nav-icon">💡</div><div class="nav-label">Irradiance<br><span style="font-weight:500;color:var(--text3)">Power Density</span></div></button>
+        <button class="nav-card" onclick="navTo('density_calculator.html')"><div class="nav-icon">⚡</div><div class="nav-label">Fluence<br><span style="font-weight:500;color:var(--text3)">Energy Density</span></div></button>
+        <button class="nav-card" onclick="navTo('density_calculator.html')"><div class="nav-icon">💡</div><div class="nav-label">Irradiance<br><span style="font-weight:500;color:var(--text3)">Power Density</span></div></button>
         <button class="nav-card" onclick="navTo('duty_cycle.html')"><div class="nav-icon">🔄</div><div class="nav-label">Duty Cycle<br><span style="font-weight:500;color:var(--text3)">Pulse Cycle</span></div></button>
         <button class="nav-card" onclick="navTo('wavelength.html')"><div class="nav-icon">📏</div><div class="nav-label">Wavelength<br><span style="font-weight:500;color:var(--text3)">VBeam WL</span></div></button>
         <button class="nav-card" onclick="navTo('avgpower.html')"><div class="nav-icon">📊</div><div class="nav-label">Avg Power<br><span style="font-weight:500;color:var(--text3)">Energy × Freq</span></div></button>

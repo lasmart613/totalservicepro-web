@@ -4,41 +4,34 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Service Manuals · TSP</title>
-    <!-- Session boot before anything else -->
-    <script>
-        var _pendingSession = null;
-        (function() {
-            try {
-                const enc = new URLSearchParams(window.location.search).get('_s');
-                if (enc) { const s=JSON.parse(atob(enc)); if(s?.access_token){_pendingSession=s;localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:s,expiresAt:s.expires_at}));const u=new URL(window.location.href);u.searchParams.delete('_s');window.history.replaceState({},'',u.toString());return;} }
-                const raw=localStorage.getItem('tsp-auth-token'); if(raw){const p=JSON.parse(raw);const sess=p?.currentSession||(p?.access_token?p:null);if(sess?.access_token)_pendingSession=sess;}
-            } catch(e) {}
-        })();
-        function restoreSession(jsonStr){try{const parsed=typeof jsonStr==='string'?JSON.parse(jsonStr):jsonStr;const session=parsed?.currentSession||parsed;if(session?.access_token){localStorage.setItem('tsp-auth-token',JSON.stringify({currentSession:session,expiresAt:session.expires_at}));}}catch(e){}}
-    </script>
+    <script src="theme.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="tsp.css">
     <style>
-        body { display:flex; flex-direction:column; height:100vh; overflow:hidden; }
-        .manuals-page { display:flex; flex-direction:column; flex:1; overflow:hidden; }
-        .chip-bar { padding:10px 14px; background:var(--surface2); border-bottom:1px solid var(--border); overflow-x:auto; scrollbar-width:none; display:none; }
-        .chip-bar::-webkit-scrollbar { display:none; }
-        .chip-bar.visible { display:block; }
-        .chips { display:flex; gap:8px; flex-wrap:nowrap; min-width:max-content; }
-        .manual-chip { flex-shrink:0; padding:7px 16px; background:var(--surface3); border:1px solid var(--gold-border); border-radius:20px; font-size:13px; font-weight:600; color:var(--gold); cursor:pointer; font-family:inherit; white-space:nowrap; transition:all 0.15s; }
-        .manual-chip.active { background:var(--gold); color:#111; }
-        .manual-chip:active { transform:scale(0.96); }
-        .welcome-screen { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; padding:40px 24px; text-align:center; }
-        .welcome-icon { font-size:64px; margin-bottom:16px; opacity:0.6; }
-        .mfr-select { background:var(--surface2); border:2px solid var(--gold); border-radius:12px; color:var(--gold); padding:14px 20px; font-size:16px; font-weight:600; font-family:inherit; outline:none; min-width:280px; cursor:pointer; margin-bottom:16px; }
-        .mfr-select option { background:var(--surface); }
-        .welcome-sub { font-size:14px; color:var(--text3); line-height:1.5; max-width:320px; }
-        .pdf-wrap { flex:1; display:none; position:relative; }
-        .pdf-wrap.visible { display:block; }
-        .pdf-wrap iframe { width:100%; height:100%; border:none; }
-        .loading-overlay { position:absolute; inset:0; display:none; align-items:center; justify-content:center; flex-direction:column; gap:12px; background:var(--bg); }
-        .loading-overlay.visible { display:flex; }
-        .loading-overlay span { font-size:13px; color:var(--text3); }
+        .manual-list { padding: 16px; }
+        .manual-item {
+            background: var(--surface2);
+            border: 1px solid var(--border2);
+            border-radius: 12px;
+            padding: 16px;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .manual-item:hover { background: var(--surface3); border-color: var(--gold); }
+        .manual-item:active { transform: scale(0.98); }
+        .manual-icon { font-size: 28px; }
+        .manual-info { flex: 1; }
+        .manual-brand { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; }
+        .manual-title { font-size: 15px; font-weight: 700; color: var(--text); margin-top: 2px; }
+        .dev-badge {
+            position: absolute; top: 60px; right: 16px;
+            background: #FBBF24; color: #111; font-size: 10px;
+            padding: 2px 8px; border-radius: 10px; font-weight: 700;
+        }
     </style>
 </head>
 <body>
@@ -48,73 +41,118 @@
     <div style="width:40px;"></div>
 </div>
 
-<div class="manuals-page">
-    <div class="chip-bar" id="chipBar">
-        <div class="chips" id="chips"></div>
-    </div>
-
-    <div class="welcome-screen" id="welcomeScreen">
-        <select class="mfr-select" id="mfrSelect" onchange="selectManufacturer()">
-            <option value="">Choose Manufacturer...</option>
-            <option value="lumenis">Lumenis</option>
-            <option value="candela">Candela</option>
-        </select>
-        <div class="welcome-icon">📖</div>
-        <div class="welcome-sub">Select a manufacturer then choose a manual to view</div>
-    </div>
-
-    <div class="pdf-wrap" id="pdfWrap">
-        <div class="loading-overlay" id="loadingOverlay">
-            <div class="spinner"></div>
-            <span>Loading manual...</span>
-        </div>
-        <iframe id="pdfViewer"></iframe>
-    </div>
+<div class="main-content" id="mainContent">
+    <div class="empty-state"><div class="spinner"></div></div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script>
-    const manuals = {
-        lumenis: [
-            { id:'lumenis_acupulse', name:'AcuPulse', file:'manuals/pdfs/lumenis_acupulse.pdf' },
-            { id:'lumenis_versapulse', name:'VersaPulse PowerSuite', file:'manuals/pdfs/LUMENIS_VERSAPULSE_POWERSUITE_SERVICE_MANUAL.pdf' }
-        ],
-        candela: [
-            { id:'candela_gentlelase', name:'GentleLASE', file:'manuals/pdfs/candela_gentlelase.pdf' },
-            { id:'candela_gentleyag', name:'GentleYAG', file:'manuals/pdfs/candela_gentleyag.pdf' },
-            { id:'candela_vbeam', name:'VBeam', file:'manuals/pdfs/candela_vbeam.pdf' }
-        ]
-    };
-    let currentMfr='', currentManualId='';
+    const supabaseClient = supabase.createClient(
+        'https://yljztfajyvjzqikxdddf.supabase.co',
+        'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM'
+    );
+
+    let manualsData = [];
+
+    async function loadManuals() {
+        const container = document.getElementById('mainContent');
+        const { data: { user } } = await supabaseClient.auth.getUser();
+
+        if (!user) {
+            container.innerHTML = `<div class="empty-state"><h3>Please log in</h3></div>`;
+            return;
+        }
+
+        let { data: userManuals } = await supabaseClient
+            .from('user_manuals')
+            .select(`manual_id, manuals (id, brand, title, file_path)`)
+            .eq('user_id', user.id);
+
+        let manuals = [];
+        let isDevMode = false;
+
+        if (userManuals && userManuals.length > 0) {
+            manuals = userManuals.map(row => row.manuals);
+        } else {
+            const { data: allManuals } = await supabaseClient
+                .from('manuals')
+                .select('*')
+                .order('brand')
+                .order('title');
+            manuals = allManuals || [];
+            isDevMode = true;
+        }
+
+        if (manuals.length === 0) {
+            container.innerHTML = `<div class="empty-state"><h3>No manuals found</h3></div>`;
+            return;
+        }
+
+        manualsData = manuals;
+
+        let html = `<div class="manual-list">`;
+        manuals.forEach((manual, index) => {
+            html += `
+                <div class="manual-item" onclick="openManual(${index})">
+                    <div class="manual-icon">📕</div>
+                    <div class="manual-info">
+                        <div class="manual-brand">${manual.brand}</div>
+                        <div class="manual-title">${manual.title}</div>
+                    </div>
+                </div>
+            `;
+        });
+        html += `</div>`;
+
+        container.innerHTML = html;
+
+        if (isDevMode) {
+            const badge = document.createElement('div');
+            badge.className = 'dev-badge';
+            badge.textContent = 'DEV MODE - All Manuals';
+            document.body.appendChild(badge);
+        }
+    }
+
+    async function openManual(index) {
+        const manual = manualsData[index];
+        const container = document.getElementById('mainContent');
+
+        container.innerHTML = `
+            <div style="padding:40px 20px; text-align:center;">
+                <div class="spinner" style="margin:0 auto 16px;"></div>
+                <div style="font-size:15px; font-weight:600;">Opening ${manual.title}...</div>
+            </div>
+        `;
+
+        try {
+            let filePath = manual.file_path;
+            if (!filePath.startsWith('shared/')) {
+                filePath = `shared/${filePath}`;
+            }
+
+            const { data: signedUrlData, error } = await supabaseClient
+                .storage
+                .from('manuals')
+                .createSignedUrl(filePath, 3600);
+
+            if (error) throw error;
+
+            window.location.href = signedUrlData.signedUrl;
+
+        } catch (err) {
+            console.error(err);
+            alert('Failed to open manual: ' + err.message);
+            loadManuals();
+        }
+    }
 
     function goBack() {
-        try { var s=JSON.parse(localStorage.getItem('tsp-auth-token'));var raw=s&&(s.access_token?s:(s.currentSession||null));if(raw?.access_token){window.location.href='service_hub.html?_s='+btoa(JSON.stringify({access_token:raw.access_token,refresh_token:raw.refresh_token}));return;} } catch(e) {}
-        window.location.href='service_hub.html';
+        // Prefer the nice bookshelf view in Manual Library
+        window.location.href = 'manual_library.html';
     }
 
-    function selectManufacturer() {
-        const mfr = document.getElementById('mfrSelect').value;
-        if (!mfr) { document.getElementById('chipBar').classList.remove('visible'); return; }
-        currentMfr = mfr;
-        const chips = document.getElementById('chips'); chips.innerHTML='';
-        (manuals[mfr]||[]).forEach(m => { const c=document.createElement('button'); c.className='manual-chip'; c.textContent=m.name; c.onclick=()=>loadManual(m); chips.appendChild(c); });
-        document.getElementById('chipBar').classList.add('visible');
-    }
-
-    function loadManual(manual) {
-        document.querySelectorAll('.manual-chip').forEach(c=>c.classList.toggle('active', c.textContent===manual.name));
-        document.getElementById('welcomeScreen').style.display='none';
-        document.getElementById('pdfWrap').classList.add('visible');
-        document.getElementById('loadingOverlay').classList.add('visible');
-        const viewer=document.getElementById('pdfViewer');
-        viewer.src='./pdfjs/web/viewer.html?file=../../'+encodeURIComponent(manual.file);
-        viewer.onload=()=>{document.getElementById('loadingOverlay').classList.remove('visible');currentManualId=manual.id;localStorage.setItem('selectedManufacturer',currentMfr);localStorage.setItem('selectedManual',manual.id);try{if(typeof Android!=='undefined'&&Android.showToast)Android.showToast('📖 '+manual.name+' loaded');}catch(e){};};
-        viewer.onerror=()=>{document.getElementById('loadingOverlay').classList.remove('visible');document.getElementById('welcomeScreen').style.display='flex';document.getElementById('pdfWrap').classList.remove('visible');};
-    }
-
-    // Restore last state
-    const savedMfr=localStorage.getItem('selectedManufacturer');
-    const savedManual=localStorage.getItem('selectedManual');
-    if (savedMfr) { document.getElementById('mfrSelect').value=savedMfr; selectManufacturer(); if(savedManual){const m=(manuals[savedMfr]||[]).find(x=>x.id===savedManual);if(m)setTimeout(()=>loadManual(m),100);} }
+    window.onload = loadManuals;
 </script>
 </body>
 </html>

@@ -1,6 +1,8 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+    <!-- Centralized theme system -->
+    <script src="theme.js"></script>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VBeam Wavelength · TSP</title>
@@ -84,7 +86,7 @@
             </select>
             <div class="correction-status" id="correctionStatus"></div>
         </div>
-        <button class="btn btn-gold" style="width:100%;padding:14px;" onclick="goToScreen2()">Next: Readings Without Filter →</button>
+        <button class="btn btn-primary btn-block" onclick="goToScreen2()">Next: Readings Without Filter →</button>
     </div>
 
     <!-- Screen 2: Without Filter -->
@@ -94,7 +96,7 @@
         <div class="form-group"><label>Head Detector 1 — HD1 (mJ)</label><input type="number" class="form-input" id="hd1_1" step="0.01" placeholder="Enter HD1 reading"></div>
         <div class="btn-row">
             <button class="btn btn-ghost" style="flex:1;" onclick="goToScreen1()">← Back</button>
-            <button class="btn btn-gold" style="flex:2;" onclick="goToScreen3()">Next: With Filter →</button>
+            <button class="btn btn-primary" style="flex:2;" onclick="goToScreen3()">Next: With Filter →</button>
         </div>
     </div>
 
@@ -105,7 +107,7 @@
         <div class="form-group"><label>Head Detector 1 — HD1 (mJ)</label><input type="number" class="form-input" id="hd1_2" step="0.01" placeholder="Enter HD1 reading"></div>
         <div class="btn-row">
             <button class="btn btn-ghost" style="flex:1;" onclick="goToScreen2()">← Back</button>
-            <button class="btn btn-gold" style="flex:2;" onclick="calculateWavelength()">Calculate Wavelength</button>
+            <button class="btn btn-primary" style="flex:2;" onclick="calculateWavelength()">Calculate Wavelength</button>
         </div>
         <div class="result-card" id="resultCard">
             <div class="result-label">Calculated Wavelength</div>
