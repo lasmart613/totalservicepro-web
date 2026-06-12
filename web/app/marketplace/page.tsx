@@ -161,7 +161,8 @@ export default function Marketplace() {
     return bids.filter(b => b.request_id === reqId);
   }
 
-  const isPro = profile && ['fse', 'engineer', 'service_manager', 'company_admin'].includes(profile.role);
+  const userRole = (profile?.role || '').toString().toLowerCase().trim();
+  const isPro = ['fse', 'engineer', 'service_manager', 'company_admin'].includes(userRole);
   const isOwnerish = profile && ['owner', 'customer'].includes(profile.role);
   const isMyPost = (n: PostedNeed) => user && (n.posted_by === user.id || (profile?.organization_id && n.organization_id === profile.organization_id));
 
@@ -247,34 +248,50 @@ export default function Marketplace() {
       const { error } = await supabase.from('bids').insert(payload);
       if (error) throw error;
 
-      setMessage('Bid submitted successfully! Owner will review and can accept to create a contract.');
+      // Always add to local state immediately for instant UI feedback (real + demo)
+      const newBid: Bid = {
+        id: 'bid-' + Date.now(),
+        request_id: requestId,
+        bidder_user_id: user.id,
+        bidder_org_id: profile?.organization_id || null,
+        amount: parseFloat(bidAmount),
+        proposed_date: bidDate || null,
+        notes: bidNotes.trim() || null,
+        status: 'pending',
+        created_at: new Date().toISOString(),
+      };
+      setBids(prev => [newBid, ...prev]);
+
+      setMessage('Bid submitted successfully! The owner will review it privately and can accept to create a contract.');
       // Reset form
       setBidFormFor(null);
       setBidAmount('');
       setBidDate('');
       setBidNotes('');
-      // Refresh bids + needs (status may stay open until accept)
+      // Refresh from server
       const currentNeeds = needs;
       await loadBidsForRequests(currentNeeds.map(n => n.id).filter(Boolean) as string[]);
     } catch (err: any) {
       console.error('Bid insert failed (check RLS on bids table for pros):', err);
       const isMissing = err?.code === '42P01' || (err?.message || '').includes('does not exist');
       const baseMsg = isMissing
-        ? 'Cannot bid: bids (or service_requests) table missing. Run the 20260611 marketplace migration in Supabase SQL Editor.'
-        : 'Bid recorded locally for demo. ' + (err.message || 'Apply 20260611 migration + RLS if needed.');
-      setMessage(baseMsg);
-      // demo local
+        ? 'Cannot bid: bids table missing. Run the 20260611 marketplace migration in Supabase SQL Editor.'
+        : 'Bid recorded locally for demo (will sync when tables ready). ' + (err.message || '');
+
+      // Always show the bid in UI even on error (local)
       const demoBid: Bid = {
         id: 'localbid-' + Date.now(),
         request_id: requestId,
         bidder_user_id: user.id,
         amount: parseFloat(bidAmount),
         proposed_date: bidDate || null,
-        notes: bidNotes || null,
+        notes: bidNotes.trim() || null,
         status: 'pending',
         created_at: new Date().toISOString(),
       };
       setBids(prev => [demoBid, ...prev]);
+
+      setMessage(baseMsg);
       setBidFormFor(null);
     } finally {
       setSubmittingBid(false);

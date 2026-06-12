@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { Header } from '../components/Header';
 import { getSupabaseClient } from '../lib/supabase/client';
 import { FileText, Calendar, Users, BarChart3, UserCheck, Clock, CheckCircle, BookOpen, Wrench, User, Building2, Hospital, Package } from 'lucide-react';
-import AdBanner from '../components/AdBanner';
 
 type Role = 'engineer' | 'fse' | 'dispatcher' | 'service_manager' | 'company_admin' | 'parts_supplier' | 'admin' | 'billing_manager' | 'crm' | 'owner' | 'customer' | string;
 
@@ -93,16 +92,14 @@ export default function Dashboard() {
     })();
   }, [supabase]);
 
-  // Trigger AdSense for the free-plan ad units.
-  // Call push() once per ad unit after the ins elements are in the DOM.
+  // Trigger AdSense push for the ad unit (the ins must be in DOM first).
+  // The main loader script is in layout.tsx.
   useEffect(() => {
     if (isFSE || isCustomer) {
       const timer = setTimeout(() => {
         try {
           // @ts-ignore
           (window.adsbygoogle = window.adsbygoogle || []).push({});
-          // @ts-ignore
-          (window.adsbygoogle = window.adsbygoogle || []).push({}); // second unit
         } catch (e) {
           // AdSense script not ready yet or in development - harmless
         }
@@ -309,7 +306,7 @@ export default function Dashboard() {
             <div className="card p-5">
               <div className="flex items-center gap-2 mb-3"><FileText size={18} className="text-[var(--gold)]" /> <span className="font-bold">My Assigned Tickets</span></div>
               <div className="text-sm text-[var(--text3)]">You have {stats.myAssigned} active items. Go to Reports or Hub to start work.</div>
-              <Link href="/reports/new" className="mt-3 inline-block text-sm text-[var(--gold)] hover:underline">Start a new report for an assigned ticket →</Link>
+              <Link href="/service-schedule" className="mt-3 inline-block text-sm text-[var(--gold)] hover:underline">Go to Service Schedule →</Link>
             </div>
             <div className="card p-5">
               <div className="flex items-center gap-2 mb-3"><Clock size={18} className="text-[var(--gold)]" /> <span className="font-bold">My Recent Reports</span></div>
@@ -493,22 +490,12 @@ export default function Dashboard() {
           <div className="mb-8">
             <div className="font-bold mb-3 text-sm tracking-wider text-[var(--text3)]">ADVERTISEMENTS</div>
 
-            {/* AdSense Banner 1 - Responsive (recommended for dashboard) */}
+            {/* AdSense ad unit - using the exact snippet provided by user for "TSP-Web" */}
             <div className="card p-2 bg-[var(--surface)] border border-[var(--border)] mb-3">
               <ins className="adsbygoogle"
                    style={{ display: 'block' }}
                    data-ad-client="ca-pub-5353320292042327"
-                   data-ad-slot="YOUR_SLOT_ID_HERE"   {/* Create a new "Display ad" unit in AdSense → get the slot ID and paste it here */}
-                   data-ad-format="auto"
-                   data-full-width-responsive="true"></ins>
-            </div>
-
-            {/* AdSense Banner 2 - Another unit for additional revenue on free plans */}
-            <div className="card p-2 bg-[var(--surface)] border border-[var(--border)]">
-              <ins className="adsbygoogle"
-                   style={{ display: 'block' }}
-                   data-ad-client="ca-pub-5353320292042327"
-                   data-ad-slot="YOUR_SECOND_SLOT_ID_HERE"  {/* Optional second slot from AdSense */}
+                   data-ad-slot="8443570568"
                    data-ad-format="auto"
                    data-full-width-responsive="true"></ins>
             </div>
