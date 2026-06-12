@@ -16,5 +16,6 @@
   "/signup/company/page": "app/signup/company/page.js",
   "/signup/fse/page": "app/signup/fse/page.js",
   "/signup/owner/page": "app/signup/owner/page.js",
-  "/signup/page": "app/signup/page.js"
+  "/signup/page": "app/signup/page.js",
+  "/signup/supplier/page": "app/signup/supplier/page.js"
 }

@@ -41,7 +41,7 @@ export type UserProfile = {
   email?: string | null;
   phone?: string | null;
   job_title?: string | null;
-  role?: 'engineer' | 'fse' | 'dispatcher' | 'service_manager' | 'company_admin' | 'billing_manager' | 'crm' | 'admin' | 'owner' | 'customer' | string;
+  role?: 'engineer' | 'fse' | 'dispatcher' | 'service_manager' | 'company_admin' | 'parts_supplier' | 'billing_manager' | 'crm' | 'admin' | 'owner' | 'customer' | string;
   organization_id?: string | number | null;
   avatar_url?: string | null;
   notification_prefs?: any;

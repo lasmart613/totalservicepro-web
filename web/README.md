@@ -70,6 +70,7 @@ Professional role-based signups replace the basic engineer-only toggle:
 - **/signup** — Overview landing with cards for all types + links. Prominent from Header (when logged out) and Login page.
 - **/signup/fse** — For individual Field Service Engineers. Fields: name, email, password+confirm, phone, years exp, certifications (text), preferred regions (chips: Northeast/Southwest etc.), bio, LinkedIn link. Creates profile role=`fse`. No org created (affiliate later).
 - **/signup/company** — For service companies. Creates `organizations` (type=`service_company`) + profile role=`service_manager`. Fields: company name, contact name/email/pw, phone, address/city/state, website, services (multi-chip: PM/Emergency/Install etc.), # techs, tax ID (opt), bio.
+- **/signup/supplier** — For parts suppliers. Creates `organizations` (type=`parts_supplier`) + profile role=`parts_supplier`. Fields: company name, contact name/email/pw, phone, address/city/state, website, parts categories (multi-chip: Consumables/Handpieces/Optics etc.), # staff, tax ID (opt), bio.
 - **/signup/owner** — For laser owners/facilities (customer side). Creates org type=`customer` + profile role=`owner`. Fields: facility name, contact, email/pw, phone, addr/city/state, type (Hospital/MedSpa/Clinic/etc select), # lasers, laser models (multi from shared MODELS), preferred services, notes. On success redirects owners to /marketplace.
 
 All forms:

@@ -258,7 +258,7 @@ export default function CompanySignup() {
         </div>
 
         <p className="text-center text-xs text-[var(--text3)] mt-6">
-          Organization of type <code>service_company</code> will be created and linked to your profile (role: service_manager). You can manage company profile after login.
+          Organization of type <code>service_company</code> will be created and linked to your profile (role: service_manager). For Parts Suppliers use the dedicated /signup/supplier flow (type `parts_supplier`). You can manage company profile after login.
         </p>
       </div>
     </div>

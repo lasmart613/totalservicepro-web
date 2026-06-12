@@ -6,12 +6,6 @@ redirectsOrigin = "inline"
 [functions."*"]
 
 [[plugins]]
-origin = "ui"
-package = "@netlify/plugin-lighthouse"
-
-[plugins.inputs]
-
-[[plugins]]
 origin = "config"
 package = "@netlify/plugin-nextjs"
 

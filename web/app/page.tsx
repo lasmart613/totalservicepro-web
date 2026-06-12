@@ -6,7 +6,7 @@ import { Header } from '../components/Header';
 import { getSupabaseClient } from '../lib/supabase/client';
 import { FileText, Calendar, Users, BarChart3, UserCheck, Clock, CheckCircle, BookOpen, Wrench } from 'lucide-react';
 
-type Role = 'engineer' | 'fse' | 'dispatcher' | 'service_manager' | 'company_admin' | 'admin' | 'billing_manager' | 'crm' | 'owner' | 'customer' | string;
+type Role = 'engineer' | 'fse' | 'dispatcher' | 'service_manager' | 'company_admin' | 'parts_supplier' | 'admin' | 'billing_manager' | 'crm' | 'owner' | 'customer' | string;
 
 interface Profile {
   role?: Role;
@@ -37,7 +37,7 @@ export default function Dashboard() {
   const supabase = getSupabaseClient();
 
   const role = profile?.role || 'engineer';
-  const isHighLevel = ['service_manager', 'company_admin', 'admin', 'billing_manager', 'crm', 'owner', 'customer'].includes(role);
+  const isHighLevel = ['service_manager', 'company_admin', 'parts_supplier', 'admin', 'billing_manager', 'crm', 'owner', 'customer'].includes(role);
   const isDispatcher = role === 'dispatcher';
   const isFSE = ['engineer', 'fse'].includes(role) || (!isHighLevel && !isDispatcher);
   const isCustomer = ['owner', 'customer'].includes(role);

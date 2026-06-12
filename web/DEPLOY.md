@@ -239,6 +239,7 @@ New dedicated professional signups and marketplace were added (see README for fu
 - `/signup` (overview + cards)
 - `/signup/fse`
 - `/signup/company`
+- `/signup/supplier` (new: Parts Supplier, type=`parts_supplier`, role=`parts_supplier`)
 - `/signup/owner`
 - `/marketplace` (post needs to service_requests, bid/respond via bids form, owner accept creates service_contracts; my-posts/my-bids tabs; role-aware)
 

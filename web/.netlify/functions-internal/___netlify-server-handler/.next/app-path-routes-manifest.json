@@ -16,5 +16,6 @@
   "/signup/company/page": "/signup/company",
   "/signup/fse/page": "/signup/fse",
   "/signup/owner/page": "/signup/owner",
-  "/signup/page": "/signup"
+  "/signup/page": "/signup",
+  "/signup/supplier/page": "/signup/supplier"
 }

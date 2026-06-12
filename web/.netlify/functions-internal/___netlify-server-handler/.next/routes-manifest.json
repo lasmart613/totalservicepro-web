@@ -133,6 +133,12 @@
       "regex": "^/signup/owner(?:/)?$",
       "routeKeys": {},
       "namedRegex": "^/signup/owner(?:/)?$"
+    },
+    {
+      "page": "/signup/supplier",
+      "regex": "^/signup/supplier(?:/)?$",
+      "routeKeys": {},
+      "namedRegex": "^/signup/supplier(?:/)?$"
     }
   ],
   "dataRoutes": [],
