@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '../components/Header';
 import { getSupabaseClient } from '../lib/supabase/client';
-import { FileText, Calendar, Users, BarChart3, UserCheck, Clock, CheckCircle, BookOpen, Wrench } from 'lucide-react';
+import { FileText, Calendar, Users, BarChart3, UserCheck, Clock, CheckCircle, BookOpen, Wrench, User, Building2, Hospital, Package } from 'lucide-react';
 
 type Role = 'engineer' | 'fse' | 'dispatcher' | 'service_manager' | 'company_admin' | 'parts_supplier' | 'admin' | 'billing_manager' | 'crm' | 'owner' | 'customer' | string;
 
@@ -307,6 +307,101 @@ export default function Dashboard() {
       </>
     );
   };
+
+  // For unauthenticated users, show the nice onboarding homescreen with 4 tiles
+  // (restores the old liked version with FSE, Service Company, Laser Owner, plus new Parts Supplier)
+  if (!user) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header />
+
+        <div className="max-w-4xl mx-auto w-full px-4 py-10">
+          <div className="text-center mb-10">
+            <Link href="/" className="inline-block mb-2">
+              <span className="font-extrabold text-3xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
+            </Link>
+            <h1 className="text-3xl font-extrabold tracking-tight">Join the Network</h1>
+            <p className="text-[var(--text3)] mt-2 max-w-md mx-auto">Professional sign-up for the laser service marketplace. Owners post needs. FSEs and companies fulfill them.</p>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
+            {/* FSE Card */}
+            <Link href="/signup/fse" className="card p-6 hover:border-[var(--gold-border)] group">
+              <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
+                <User size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
+              </div>
+              <div className="font-bold text-xl mb-1">Field Service Engineer (FSE)</div>
+              <div className="text-sm text-[var(--text3)] mb-4">Independent techs and certified engineers. Role: fse / engineer</div>
+              <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
+                <li>• Certifications &amp; experience</li>
+                <li>• Preferred regions</li>
+                <li>• Bio &amp; LinkedIn / resume</li>
+                <li>• Browse open needs &amp; submit bids (live in beta)</li>
+              </ul>
+              <div className="btn btn-primary w-full text-center">Sign Up as FSE →</div>
+            </Link>
+
+            {/* Company Card */}
+            <Link href="/signup/company" className="card p-6 hover:border-[var(--gold-border)] group">
+              <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
+                <Building2 size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
+              </div>
+              <div className="font-bold text-xl mb-1">Service Company</div>
+              <div className="text-sm text-[var(--text3)] mb-4">Teams &amp; businesses offering laser service. Creates organization. Role: service_manager</div>
+              <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
+                <li>• Company name, address, website</li>
+                <li>• Services offered (PM, Repair, Install...)</li>
+                <li>• # of techs / business details</li>
+                <li>• Manage team, bid on needs, accept contracts</li>
+              </ul>
+              <div className="btn btn-primary w-full text-center">Sign Up as Company →</div>
+            </Link>
+
+            {/* Owner Card */}
+            <Link href="/signup/owner" className="card p-6 hover:border-[var(--gold-border)] group">
+              <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
+                <Hospital size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
+              </div>
+              <div className="font-bold text-xl mb-1">Laser Owner / Facility</div>
+              <div className="text-sm text-[var(--text3)] mb-4">Hospitals, Med Spas, Clinics, Private Practices. Role: owner / customer. Creates customer org.</div>
+              <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
+                <li>• Facility details &amp; contact</li>
+                <li>• Laser systems &amp; models owned</li>
+                <li>• Post service needs (PM / repair)</li>
+                <li>• Marketplace access for bids</li>
+              </ul>
+              <div className="btn btn-primary w-full text-center">Sign Up as Owner →</div>
+            </Link>
+
+            {/* Parts Supplier Card */}
+            <Link href="/signup/supplier" className="card p-6 hover:border-[var(--gold-border)] group">
+              <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
+                <Package size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
+              </div>
+              <div className="font-bold text-xl mb-1">Parts Supplier</div>
+              <div className="text-sm text-[var(--text3)] mb-4">Suppliers of consumables, handpieces, optics, electronics. Creates organization. Role: parts_supplier</div>
+              <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
+                <li>• Company details, website</li>
+                <li>• Parts categories supplied (Consumables/Handpieces/Optics...)</li>
+                <li>• Staff / business details</li>
+                <li>• List parts &amp; respond to owner needs (beta)</li>
+              </ul>
+              <div className="btn btn-primary w-full text-center">Sign Up as Parts Supplier →</div>
+            </Link>
+          </div>
+
+          <div className="mt-10 text-center">
+            <p className="text-sm text-[var(--text3)]">Already registered? <Link href="/login" className="text-[var(--gold)] hover:underline">Sign in here</Link></p>
+            <p className="text-xs mt-4 text-[var(--text3)]">All signups use Supabase auth + user_profiles. Organizations created for companies &amp; owners. Email confirmation may be required.</p>
+          </div>
+
+          <div className="mt-8 p-4 bg-[var(--surface3)] border border-[var(--border)] rounded-xl text-xs text-[var(--text3)]">
+            <strong>Marketplace Vision - Bidding Live:</strong> Owners post contracts, emergency repairs, PM plans (to service_requests). FSEs/companies bid/respond (to bids table). Owners accept to award + auto-create service_contract. Full payments/notifications next. Try end-to-end with different role signups.
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col">
