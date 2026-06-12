@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { Providers } from "../components/providers";
+import Script from "next/script";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -40,6 +41,18 @@ export default function RootLayout({
     >
       <body className="min-h-full flex flex-col bg-[var(--bg)] text-[var(--text)]">
         <Providers>{children}</Providers>
+
+        {/* Google AdSense script - provided by user.
+            This is the main loader. It should only be included once in the app.
+            Ad units (the <ins class="adsbygoogle"> blocks) go in the dashboard
+            inside the free-plans conditional (isFSE || isCustomer).
+        */}
+        <Script
+          async
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5353320292042327"
+          crossOrigin="anonymous"
+          strategy="afterInteractive"
+        />
       </body>
     </html>
   );

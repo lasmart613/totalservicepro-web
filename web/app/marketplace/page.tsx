@@ -75,7 +75,7 @@ export default function Marketplace() {
       try {
         const { data: requests } = await supabase
           .from('service_requests')
-          .select('id, posted_by, organization_id, location, service_type, model_type, urgency, description, budget_max, status, created_at, city, state, organizations(name)')
+          .select('id, posted_by, organization_id, title, location, service_type, model_type, urgency, description, budget_max, status, created_at, city, state, organizations(name)')
           .or('status.eq.open,status.eq.bidding')
           .order('created_at', { ascending: false })
           .limit(20);
@@ -84,7 +84,7 @@ export default function Marketplace() {
             id: r.id,
             posted_by: r.posted_by,
             organization_id: r.organization_id,
-            customer_name: r.organizations?.name || r.title || '—',
+            customer_name: r.organizations?.name || r.title || 'Anonymous Facility',
             location: r.location,
             service_type: r.service_type,
             model_type: r.model_type,
@@ -98,8 +98,15 @@ export default function Marketplace() {
           }));
           setNeeds(loadedNeeds);
         }
-      } catch (e) {
+      } catch (e: any) {
         console.info('service_requests query (use new marketplace table):', e);
+        const isMissingTable = e?.code === '42P01' || (e?.message || '').includes('does not exist') || (e?.message || '').includes('service_requests');
+        const isTypeOrFkError = e?.code === '42804' || (e?.message || '').includes('incompatible types') || (e?.message || '').includes('foreign key constraint');
+
+        if (isMissingTable || isTypeOrFkError) {
+          setMessage('⚠️ Marketplace tables not found or have wrong column types (e.g. organization_id must be bigint to match organizations.id). Run the corrected supabase/migrations/20260611_000000_add_marketplace_tables.sql (then 20260613) in Supabase SQL Editor, then refresh.');
+        }
+
         // Provide demo entries for vision (until table + RLS ready)
         loadedNeeds = [
           { id: 'demo1', posted_by: 'demo', customer_name: 'Downtown MedSpa', location: 'Austin, TX', service_type: 'PM', model_type: 'V_Beam_1', urgency: 'Medium', description: 'Quarterly PM on 2x Candela V-Beam systems. Next due in 3 weeks.', budget_range: '$800-1200', status: 'open', created_at: new Date().toISOString() },
@@ -130,8 +137,14 @@ export default function Marketplace() {
         .in('request_id', requestIds)
         .order('created_at', { ascending: false });
       setBids((bidData || []) as Bid[]);
-    } catch (e) {
+    } catch (e: any) {
       console.info('bids query (may need migration/RLS):', e);
+      const isMissingTable = e?.code === '42P01' || (e?.message || '').includes('does not exist');
+
+      if (isMissingTable && !message) {
+        setMessage('⚠️ bids table missing. Apply the 20260611 marketplace migration (and 20260613 fix) in Supabase SQL Editor.');
+      }
+
       // demo bids for vision if real table not ready
       if (requestIds.includes('demo1')) {
         setBids([{
@@ -196,7 +209,11 @@ export default function Marketplace() {
       await loadUserAndNeeds();
     } catch (err: any) {
       console.error('Post to service_requests failed (may require new table + RLS policy):', err);
-      setMessage('Posted locally for demo (run the marketplace migration in Supabase). ' + (err.message || ''));
+      const isMissing = err?.code === '42P01' || (err?.message || '').includes('does not exist');
+      const baseMsg = isMissing
+        ? 'Cannot post: service_requests table does not exist. Run supabase/migrations/20260611_000000_add_marketplace_tables.sql in Supabase first.'
+        : 'Posted locally for demo (run the marketplace migration in Supabase). ' + (err.message || '');
+      setMessage(baseMsg);
       // Still add to local list for demo UX
       const demoNeed: PostedNeed = {
         id: 'local-' + Date.now(),
@@ -241,7 +258,11 @@ export default function Marketplace() {
       await loadBidsForRequests(currentNeeds.map(n => n.id).filter(Boolean) as string[]);
     } catch (err: any) {
       console.error('Bid insert failed (check RLS on bids table for pros):', err);
-      setMessage('Bid recorded locally for demo. ' + (err.message || 'Apply 20260611 migration + RLS if needed.'));
+      const isMissing = err?.code === '42P01' || (err?.message || '').includes('does not exist');
+      const baseMsg = isMissing
+        ? 'Cannot bid: bids (or service_requests) table missing. Run the 20260611 marketplace migration in Supabase SQL Editor.'
+        : 'Bid recorded locally for demo. ' + (err.message || 'Apply 20260611 migration + RLS if needed.');
+      setMessage(baseMsg);
       // demo local
       const demoBid: Bid = {
         id: 'localbid-' + Date.now(),
@@ -298,7 +319,11 @@ export default function Marketplace() {
       await loadUserAndNeeds();
     } catch (err: any) {
       console.error('Accept flow error (bids update + service_contracts insert; verify RLS):', err);
-      setMessage('Accept simulated for demo (run migration if tables missing). ' + (err.message || ''));
+      const isMissing = err?.code === '42P01' || (err?.message || '').includes('does not exist');
+      const baseMsg = isMissing
+        ? 'Cannot accept: service_contracts or bids table missing. Run 20260611 marketplace migration.'
+        : 'Accept simulated for demo (run migration if tables missing). ' + (err.message || '');
+      setMessage(baseMsg);
       // local simulation
       setBids(prev => prev.map(b => b.id === bid.id ? { ...b, status: 'accepted' } : (b.request_id === request.id && b.status === 'pending' ? { ...b, status: 'rejected' } : b)));
       setNeeds(prev => prev.map(n => n.id === request.id ? { ...n, status: 'awarded' } : n));
@@ -446,6 +471,13 @@ export default function Marketplace() {
               <button onClick={loadUserAndNeeds} className="text-xs text-[var(--gold)] hover:underline">Refresh</button>
             </div>
 
+            {/* Prominent guidance for FSEs and Service Companies (the core bidding users) */}
+            {isPro && myView === 'all' && (
+              <div className="mb-3 p-3 rounded bg-[var(--gold-glow)] text-xs border border-[var(--gold-border)]">
+                <strong>FSEs &amp; Service Companies:</strong> Browse open needs posted by laser owners/facilities. Click <em>“Respond / Bid (Private)”</em> on any request to submit your bid (amount, date, notes). Your bids are private — only the owner sees them. Owners can accept to award a contract.
+              </div>
+            )}
+
             {loadingList ? (
               <div className="card p-8 text-center text-[var(--text3)]">Loading open requests...</div>
             ) : (myView === 'all' ? needs : myView === 'my-posts' ? needs.filter(isMyPost) : []).length === 0 && myView !== 'my-bids' ? (
@@ -492,7 +524,7 @@ export default function Marketplace() {
                     <div key={n.id || idx} className="card p-4">
                       <div className="flex justify-between gap-4">
                         <div className="min-w-0">
-                          <div className="font-bold text-base truncate">{n.customer_name || 'Anonymous Facility'}</div>
+                          <div className="font-bold text-base truncate">{n.customer_name}</div>
                           <div className="text-sm text-[var(--text3)]">{n.location || '—'} • {n.service_type || 'Service'} {n.model_type && `• ${n.model_type}`}</div>
                           <div className="mt-2 text-sm whitespace-pre-wrap">{n.description}</div>
                           {n.budget_range && <div className="mt-1 text-xs">Budget: {n.budget_range}</div>}
@@ -516,8 +548,21 @@ export default function Marketplace() {
                             {showBidsList && reqBids.length === 0 && <span className="text-xs text-[var(--text3)]">No bids yet on this request.</span>}
                           </>
                         ) : isPro && n.status !== 'awarded' && !isMine ? (
-                          <button onClick={() => { setBidFormFor(showBidForm ? null : n.id || null); setViewBidsFor(null); }} className="btn btn-primary text-xs px-3 py-1">
-                            {showBidForm ? 'Cancel Bid' : 'Respond / Bid'}
+                          <button
+                            onClick={() => {
+                              const opening = !showBidForm;
+                              setBidFormFor(opening ? (n.id || null) : null);
+                              setViewBidsFor(null);
+                              if (opening) {
+                                // Reset form fields when opening a new bid form (prevents carrying values between needs)
+                                setBidAmount('');
+                                setBidDate('');
+                                setBidNotes('');
+                              }
+                            }}
+                            className="btn btn-primary text-xs px-3 py-1"
+                          >
+                            {showBidForm ? 'Cancel Bid' : 'Respond / Bid (Private)'}
                           </button>
                         ) : (
                           <span className="text-xs text-[var(--text3)]">

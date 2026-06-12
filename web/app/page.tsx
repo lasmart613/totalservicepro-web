@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Header } from '../components/Header';
 import { getSupabaseClient } from '../lib/supabase/client';
 import { FileText, Calendar, Users, BarChart3, UserCheck, Clock, CheckCircle, BookOpen, Wrench, User, Building2, Hospital, Package } from 'lucide-react';
+import AdBanner from '../components/AdBanner';
 
 type Role = 'engineer' | 'fse' | 'dispatcher' | 'service_manager' | 'company_admin' | 'parts_supplier' | 'admin' | 'billing_manager' | 'crm' | 'owner' | 'customer' | string;
 
@@ -91,6 +92,24 @@ export default function Dashboard() {
       }
     })();
   }, [supabase]);
+
+  // Trigger AdSense for the free-plan ad units.
+  // Call push() once per ad unit after the ins elements are in the DOM.
+  useEffect(() => {
+    if (isFSE || isCustomer) {
+      const timer = setTimeout(() => {
+        try {
+          // @ts-ignore
+          (window.adsbygoogle = window.adsbygoogle || []).push({});
+          // @ts-ignore
+          (window.adsbygoogle = window.adsbygoogle || []).push({}); // second unit
+        } catch (e) {
+          // AdSense script not ready yet or in development - harmless
+        }
+      }, 300); // small delay to let the async script settle
+      return () => clearTimeout(timer);
+    }
+  }, [isFSE, isCustomer]);
 
   // Simple dispatcher assignment (demo - updates local state + could persist to a ticket table)
   const assignToFSE = (ticketId: string, fseName: string) => {
@@ -443,10 +462,10 @@ export default function Dashboard() {
               <div className="font-bold">Tech Hub</div>
               <div className="text-xs text-[var(--text3)] mt-1">{isDispatcher ? 'Scheduling & assignments' : 'Schedule, customers, parts & more'}</div>
             </Link>
-            <Link href="/reports/new" className="card p-6 flex flex-col items-center text-center hover:border-[var(--gold)] bg-[var(--surface)]">
-              <div className="text-3xl mb-2">＋</div>
-              <div className="font-bold">New Service Report</div>
-              <div className="text-xs text-[var(--text3)] mt-1">Dynamic model-specific form with PDF export</div>
+            <Link href="/service-schedule" className="card p-6 flex flex-col items-center text-center hover:border-[var(--gold)]">
+              <div className="text-3xl mb-2">📅</div>
+              <div className="font-bold">Service Schedule</div>
+              <div className="text-xs text-[var(--text3)] mt-1">Tickets, assignments &amp; upcoming work</div>
             </Link>
             <Link href="/marketplace" className="card p-6 flex flex-col items-center text-center hover:border-[var(--gold)]">
               <div className="text-3xl mb-2">🛒</div>
@@ -465,6 +484,40 @@ export default function Dashboard() {
             <div className="text-[10px] mt-2 text-[var(--text3)]">Sign up as Owner, FSE, or Service Company to participate fully.</div>
           </div>
         </div>
+
+        {/* FREE PLAN ADS (Google AdSense) - shown ONLY for isFSE || isCustomer (FSEs and Laser Owners/Customers).
+            Hidden for high-level / company roles.
+            The loader script (your provided snippet) is loaded once in app/layout.tsx.
+        */}
+        {(isFSE || isCustomer) && (
+          <div className="mb-8">
+            <div className="font-bold mb-3 text-sm tracking-wider text-[var(--text3)]">ADVERTISEMENTS</div>
+
+            {/* AdSense Banner 1 - Responsive (recommended for dashboard) */}
+            <div className="card p-2 bg-[var(--surface)] border border-[var(--border)] mb-3">
+              <ins className="adsbygoogle"
+                   style={{ display: 'block' }}
+                   data-ad-client="ca-pub-5353320292042327"
+                   data-ad-slot="YOUR_SLOT_ID_HERE"   {/* Create a new "Display ad" unit in AdSense → get the slot ID and paste it here */}
+                   data-ad-format="auto"
+                   data-full-width-responsive="true"></ins>
+            </div>
+
+            {/* AdSense Banner 2 - Another unit for additional revenue on free plans */}
+            <div className="card p-2 bg-[var(--surface)] border border-[var(--border)]">
+              <ins className="adsbygoogle"
+                   style={{ display: 'block' }}
+                   data-ad-client="ca-pub-5353320292042327"
+                   data-ad-slot="YOUR_SECOND_SLOT_ID_HERE"  {/* Optional second slot from AdSense */}
+                   data-ad-format="auto"
+                   data-full-width-responsive="true"></ins>
+            </div>
+
+            <div className="text-[9px] text-center text-[var(--text3)] mt-1">
+              Ads support the free tier. <Link href="/settings" className="underline">Upgrade to Premium</Link> for ad-free experience.
+            </div>
+          </div>
+        )}
 
         {/* Recent / Team Activity (role filtered) */}
         <div>

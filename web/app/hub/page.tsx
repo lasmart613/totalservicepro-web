@@ -12,7 +12,7 @@ export default function TechHub() {
     { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Search & compatibility' },
     { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Full bookshelf' },
     { href: '/reports', icon: '📋', label: 'Service Reports', desc: 'Performance & safety docs' },
-    { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Coming soon' },
+    { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Intelligent service guidance (coming soon)' },
   ];
 
   return (
@@ -32,7 +32,7 @@ export default function TechHub() {
           ))}
         </div>
 
-        <div className="mt-8 text-xs text-center text-[var(--text3)]">More features (schedule, customers, parts) ported from the Android assets in future iterations. Current focus: Reports + Manuals + Auth.</div>
+        <div className="mt-8 text-xs text-center text-[var(--text3)]">Additional pages (Service Schedule, Customers, Parts, AI Assistant) now have placeholders. Full ports from the Android assets (service_schedule.html, customer_directory.html, parts_catalog.html, ai_assistant.html) coming soon. Current focus: Marketplace + Reports + Manuals + Auth.</div>
       </div>
     </div>
   );
