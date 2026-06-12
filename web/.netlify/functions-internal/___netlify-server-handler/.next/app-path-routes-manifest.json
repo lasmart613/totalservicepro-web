@@ -1,0 +1,20 @@
+{
+  "/_not-found/page": "/_not-found",
+  "/_global-error/page": "/_global-error",
+  "/favicon.ico/route": "/favicon.ico",
+  "/company/page": "/company",
+  "/hub/page": "/hub",
+  "/login/page": "/login",
+  "/manuals/page": "/manuals",
+  "/marketplace/page": "/marketplace",
+  "/page": "/",
+  "/profile/page": "/profile",
+  "/reports/[id]/page": "/reports/[id]",
+  "/reports/new/page": "/reports/new",
+  "/reports/page": "/reports",
+  "/settings/page": "/settings",
+  "/signup/company/page": "/signup/company",
+  "/signup/fse/page": "/signup/fse",
+  "/signup/owner/page": "/signup/owner",
+  "/signup/page": "/signup"
+}

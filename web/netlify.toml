@@ -1,0 +1,26 @@
+[build]
+  command = "npm run build"
+  publish = ".next"
+  # publish = ".next" (with the post-build script writing .next/_redirects using /static/:splat
+  # targets for the flattened layout when .next contents become the site root). This is the
+  # layout the Next.js Runtime + @netlify/plugin-nextjs + CLI consistently resolve to for
+  # standalone output deploys (even when not specified, it often defaults here; explicit avoids
+  # resolution quirks on Windows). The generated _redirects will now be inside the publish dir
+  # so Netlify picks it up. Mappings:
+  #   /_next/static/* -> /static/:splat 200
+  #   /* -> /.netlify/functions/___netlify-server-handler 200!
+  # Plugin fully manages the rest (blobs for static pages, handler bundling for dynamic/SSR like
+  # /reports/[id], headers, etc). No [[redirects]] in toml to avoid conflicts.
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
+
+# Security headers only (plugin may augment headers for _next/static caching etc.)
+[[headers]]
+  for = "/*"
+  [headers.values]
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
+    # Additional security for production
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-XSS-Protection = "1; mode=block"

@@ -1,0 +1,43 @@
+{
+  "name": "web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build --webpack && node -e \"const fs=require('fs');fs.writeFileSync('.next/_redirects','/_next/static/* /static/:splat 200\\n/_next/image/* /static/:splat 200\\n/* /.netlify/functions/___netlify-server-handler 200!\\n/_next/image /.netlify/images?url=:url&w=:width&q=:quality 200\\n/_ipx/* /.netlify/images?url=:url&w=:width&q=:quality 200\\n');console.log('Wrote .next/_redirects for Netlify routing')\"",
+    "start": "next start",
+    "lint": "eslint",
+    "deploy": "netlify deploy --prod",
+    "deploy:preview": "netlify deploy"
+  },
+  "dependencies": {
+    "@hookform/resolvers": "^3.10.0",
+    "@supabase/supabase-js": "^2.45.0",
+    "@tanstack/react-query": "^5.101.0",
+    "clsx": "^2.1.1",
+    "date-fns": "^3.6.0",
+    "jspdf": "^2.5.2",
+    "jspdf-autotable": "^3.8.4",
+    "lucide-react": "^0.441.0",
+    "next": "16.2.7",
+    "react": "19.2.4",
+    "react-dom": "19.2.4",
+    "react-hook-form": "^7.78.0",
+    "react-signature-canvas": "^1.0.7",
+    "sonner": "^1.7.4",
+    "tailwind-merge": "^2.6.1",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
+    "@netlify/plugin-nextjs": "^5.15.11",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.7",
+    "netlify-cli": "^26.1.0",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

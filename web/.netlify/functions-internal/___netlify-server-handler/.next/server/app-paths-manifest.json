@@ -1,0 +1,20 @@
+{
+  "/_not-found/page": "app/_not-found/page.js",
+  "/_global-error/page": "app/_global-error/page.js",
+  "/favicon.ico/route": "app/favicon.ico/route.js",
+  "/company/page": "app/company/page.js",
+  "/hub/page": "app/hub/page.js",
+  "/login/page": "app/login/page.js",
+  "/manuals/page": "app/manuals/page.js",
+  "/marketplace/page": "app/marketplace/page.js",
+  "/page": "app/page.js",
+  "/profile/page": "app/profile/page.js",
+  "/reports/[id]/page": "app/reports/[id]/page.js",
+  "/reports/new/page": "app/reports/new/page.js",
+  "/reports/page": "app/reports/page.js",
+  "/settings/page": "app/settings/page.js",
+  "/signup/company/page": "app/signup/company/page.js",
+  "/signup/fse/page": "app/signup/fse/page.js",
+  "/signup/owner/page": "app/signup/owner/page.js",
+  "/signup/page": "app/signup/page.js"
+}
