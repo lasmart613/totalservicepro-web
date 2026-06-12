@@ -177,6 +177,10 @@ export default function Marketplace() {
       setMessage('Please sign in or sign up as an owner to post.');
       return;
     }
+    if (!isOwnerish) {
+      setMessage('Only Laser Owners can post service needs.');
+      return;
+    }
     setPosting(true);
 
     const locationStr = [city, state].filter(Boolean).join(', ') || '—';
@@ -377,7 +381,7 @@ export default function Marketplace() {
         {/* Vision note - bidding now functional */}
         <div className="mb-6 p-3 bg-[var(--surface3)] border border-[var(--gold-border)] rounded text-sm">
           <strong>Marketplace Beta - Bidding Live:</strong> Owners post needs (PM, emergency repairs, contracts). Signed-up FSEs &amp; service companies can bid/respond. Owners review bids and accept to award + auto-create service_contract. 
-          <span className="text-[var(--text3)]"> Requires the 20260611 marketplace migration + RLS in Supabase for full persistence.</span>
+          <span className="text-[var(--text3)]"> Requires the 20260611 marketplace migration + RLS in Supabase for full persistence. The SQL files are at supabase/migrations/20260611_000000_add_marketplace_tables.sql (main tables) and supabase/migrations/20260613_fix_service_requests_rls_for_all_fse.sql (improved visibility for FSEs) in the main project root. Run them in the Supabase SQL Editor if tables or policies are missing.</span>
         </div>
 
         {/* Tabs / My views for logged in users */}
@@ -391,90 +395,98 @@ export default function Marketplace() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Post a Need Form (left / top on mobile) - only relevant for owners or always visible */}
+          {/* Post a Need Form (left / top on mobile) - only for owners */}
           <div className="lg:col-span-2">
-            <div className="card p-5">
-              <h2 className="font-bold mb-1 text-lg">Post a Service Need</h2>
-              <p className="text-xs text-[var(--text3)] mb-4">Owners &amp; facilities: describe the work (PM, repairs, contracts). Pros can bid immediately.</p>
+            {user && !isOwnerish ? (
+              <div className="card p-5">
+                <h2 className="font-bold mb-1 text-lg">Post a Service Need</h2>
+                <p className="text-sm text-[var(--text3)]">Only Laser Owners / Facilities can post service needs.</p>
+                <p className="text-xs mt-2">You are signed in as <strong>{profile?.role || 'professional'}</strong>. Browse the open needs to the right and use the “Respond / Bid (Private)” buttons to submit bids on requests that interest you.</p>
+              </div>
+            ) : (
+              <div className="card p-5">
+                <h2 className="font-bold mb-1 text-lg">Post a Service Need</h2>
+                <p className="text-xs text-[var(--text3)] mb-4">Owners &amp; facilities: describe the work (PM, repairs, contracts). Pros can bid immediately.</p>
 
-              {!user && (
-                <div className="mb-4 p-3 bg-[var(--gold-glow)] rounded text-sm">
-                  <Link href="/signup/owner" className="font-semibold text-[var(--gold)]">Sign up as Owner</Link> or <Link href="/login" className="text-[var(--gold)] underline">sign in</Link> to post live needs.
-                </div>
-              )}
-
-              {message && (
-                <div className={`mb-4 p-2.5 rounded text-sm ${message.includes('posted') || message.includes('Bid submitted') || message.includes('accepted') || message.includes('Awarded') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
-                  {message}
-                </div>
-              )}
-
-              <form onSubmit={handlePost} className="space-y-4">
-                <div>
-                  <label className="label">Facility / Practice Name *</label>
-                  <input className="input" value={facility} onChange={e => setFacility(e.target.value)} required placeholder="Your Med Spa or Hospital" disabled={!user && facility === ''} />
-                </div>
-
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label className="label">City</label>
-                    <input className="input" value={city} onChange={e => setCity(e.target.value)} placeholder="Phoenix" />
+                {!user && (
+                  <div className="mb-4 p-3 bg-[var(--gold-glow)] rounded text-sm">
+                    <Link href="/signup/owner" className="font-semibold text-[var(--gold)]">Sign up as Owner</Link> or <Link href="/login" className="text-[var(--gold)] underline">sign in</Link> to post live needs.
                   </div>
-                  <div>
-                    <label className="label">State</label>
-                    <input className="input" value={state} onChange={e => setState(e.target.value)} placeholder="AZ" />
-                  </div>
-                </div>
+                )}
 
-                <div className="grid grid-cols-2 gap-3">
+                {message && (
+                  <div className={`mb-4 p-2.5 rounded text-sm ${message.includes('posted') || message.includes('Bid submitted') || message.includes('accepted') || message.includes('Awarded') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+                    {message}
+                  </div>
+                )}
+
+                <form onSubmit={handlePost} className="space-y-4">
                   <div>
-                    <label className="label">Service Type</label>
-                    <select className="select" value={serviceType} onChange={e => setServiceType(e.target.value)}>
-                      {SERVICE_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
+                    <label className="label">Facility / Practice Name *</label>
+                    <input className="input" value={facility} onChange={e => setFacility(e.target.value)} required placeholder="Your Med Spa or Hospital" disabled={!user && facility === ''} />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">City</label>
+                      <input className="input" value={city} onChange={e => setCity(e.target.value)} placeholder="Phoenix" />
+                    </div>
+                    <div>
+                      <label className="label">State</label>
+                      <input className="input" value={state} onChange={e => setState(e.target.value)} placeholder="AZ" />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Service Type</label>
+                      <select className="select" value={serviceType} onChange={e => setServiceType(e.target.value)}>
+                        {SERVICE_TYPES.map(s => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="label">Urgency</label>
+                      <select className="select" value={urgency} onChange={e => setUrgency(e.target.value)}>
+                        {URGENCY_LEVELS.map(u => <option key={u} value={u}>{u}</option>)}
+                      </select>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="label">Laser Model (if known)</label>
+                    <select className="select" value={modelType} onChange={e => setModelType(e.target.value)}>
+                      <option value="">— Any / Not specified —</option>
+                      {modelOptions.map(k => (
+                        <option key={k} value={k}>{MODELS[k].label}</option>
+                      ))}
+                      <option value="Other">Other / Multiple</option>
                     </select>
                   </div>
+
                   <div>
-                    <label className="label">Urgency</label>
-                    <select className="select" value={urgency} onChange={e => setUrgency(e.target.value)}>
-                      {URGENCY_LEVELS.map(u => <option key={u} value={u}>{u}</option>)}
-                    </select>
+                    <label className="label">Description / Scope of Work *</label>
+                    <textarea className="input" rows={4} value={description} onChange={e => setDescription(e.target.value)} required placeholder="e.g. Annual PM on 3x Candela systems including dye kit refresh, alignment, and safety certs. Access 8am-5pm." />
                   </div>
-                </div>
 
-                <div>
-                  <label className="label">Laser Model (if known)</label>
-                  <select className="select" value={modelType} onChange={e => setModelType(e.target.value)}>
-                    <option value="">— Any / Not specified —</option>
-                    {modelOptions.map(k => (
-                      <option key={k} value={k}>{MODELS[k].label}</option>
-                    ))}
-                    <option value="Other">Other / Multiple</option>
-                  </select>
-                </div>
+                  <div>
+                    <label className="label">Budget Range (optional)</label>
+                    <input className="input" value={budget} onChange={e => setBudget(e.target.value)} placeholder="$1,200 - $1,800 or 'Negotiable'" />
+                  </div>
 
-                <div>
-                  <label className="label">Description / Scope of Work *</label>
-                  <textarea className="input" rows={4} value={description} onChange={e => setDescription(e.target.value)} required placeholder="e.g. Annual PM on 3x Candela systems including dye kit refresh, alignment, and safety certs. Access 8am-5pm." />
-                </div>
-
-                <div>
-                  <label className="label">Budget Range (optional)</label>
-                  <input className="input" value={budget} onChange={e => setBudget(e.target.value)} placeholder="$1,200 - $1,800 or 'Negotiable'" />
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={posting || !user}
-                  className="btn btn-primary w-full py-3 disabled:opacity-60"
-                >
-                  {posting ? 'Posting need...' : (user ? 'Post Service Need (open for bids)' : 'Sign in to Post')}
-                </button>
-                {!isOwnerish && user && <p className="text-[10px] text-center text-[var(--text3)]">Tip: Sign up as Owner for best experience &amp; future notifications.</p>}
-              </form>
-            </div>
+                  <button
+                    type="submit"
+                    disabled={posting || !user || !isOwnerish}
+                    className="btn btn-primary w-full py-3 disabled:opacity-60"
+                  >
+                    {posting ? 'Posting need...' : (user ? 'Post Service Need (open for bids)' : 'Sign in to Post')}
+                  </button>
+                  {!isOwnerish && user && <p className="text-[10px] text-center text-[var(--text3)]">Only owners can post needs.</p>}
+                </form>
+              </div>
+            )}
 
             <div className="mt-4 text-xs text-[var(--text3)] px-1">
-              After posting, your need appears below. FSEs/companies can bid right away. After signup as pro: visit here to respond.
+              After posting (as owner), your need appears below. FSEs/companies can bid right away.
             </div>
           </div>
 
@@ -652,9 +664,19 @@ export default function Marketplace() {
         </div>
 
         <div className="mt-10 text-center">
-          <Link href="/signup/owner" className="btn btn-primary">Sign up as Laser Owner to post needs</Link>
-          <span className="mx-3 text-[var(--text3)]">or</span>
-          <Link href="/signup/fse" className="btn btn-secondary">Sign up as FSE / Company to bid &amp; fulfill</Link>
+          {!user ? (
+            <>
+              <Link href="/signup/owner" className="btn btn-primary">Sign up as Laser Owner to post needs</Link>
+              <span className="mx-3 text-[var(--text3)]">or</span>
+              <Link href="/signup/fse" className="btn btn-secondary">Sign up as FSE / Company to bid & fulfill</Link>
+            </>
+          ) : isOwnerish ? (
+            <span className="text-sm text-[var(--text3)]">You are signed in as an owner. Use the form on the left to post needs.</span>
+          ) : isPro ? (
+            <span className="text-sm text-[var(--text3)]">You are signed in as {profile?.role || 'a professional'}. Browse open needs below and click “Respond / Bid (Private)” on any request to submit a private bid.</span>
+          ) : (
+            <span className="text-sm text-[var(--text3)]">Sign up with an owner or pro role to participate in the marketplace.</span>
+          )}
         </div>
       </div>
     </div>

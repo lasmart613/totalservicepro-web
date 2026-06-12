@@ -484,13 +484,14 @@ export default function Dashboard() {
 
         {/* FREE PLAN ADS (Google AdSense) - shown ONLY for isFSE || isCustomer (FSEs and Laser Owners/Customers).
             Hidden for high-level / company roles.
-            The loader script (your provided snippet) is loaded once in app/layout.tsx.
+            The loader script is loaded once in app/layout.tsx using your provided client.
+            This uses the exact ad unit snippet you supplied (slot 8443570568).
         */}
         {(isFSE || isCustomer) && (
           <div className="mb-8">
             <div className="font-bold mb-3 text-sm tracking-wider text-[var(--text3)]">ADVERTISEMENTS</div>
 
-            {/* AdSense ad unit - using the exact snippet provided by user for "TSP-Web" */}
+            {/* Exact ad unit from your Google AdSense snippet for "TSP-Web" */}
             <div className="card p-2 bg-[var(--surface)] border border-[var(--border)] mb-3">
               <ins className="adsbygoogle"
                    style={{ display: 'block' }}
@@ -502,6 +503,7 @@ export default function Dashboard() {
 
             <div className="text-[9px] text-center text-[var(--text3)] mt-1">
               Ads support the free tier. <Link href="/settings" className="underline">Upgrade to Premium</Link> for ad-free experience.
+              (If no ad appears yet: ensure your AdSense account has approved the site + ad unit, and the push has run.)
             </div>
           </div>
         )}

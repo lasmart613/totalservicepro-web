@@ -130,7 +130,12 @@ export default function OwnerSignup() {
         setMessage('Account created! Check your email to confirm, then sign in. Visit Marketplace to post service needs.');
       }
     } catch (err: any) {
-      setMessage(err.message || 'Owner sign up failed.');
+      const msg = err.message || 'Owner sign up failed.';
+      if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('user already exists') || msg.toLowerCase().includes('duplicate')) {
+        setMessage('An account with this email already exists. Please check your email (including spam) for a confirmation link from a previous signup attempt. If a prior signup failed after auth but before organization/profile creation, a partial auth user may remain – try a different email or ask an admin to clean up the auth.users table in Supabase. You can also try signing in.');
+      } else {
+        setMessage(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -264,7 +269,7 @@ export default function OwnerSignup() {
               disabled={loading}
               className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
             >
-              {loading ? 'Creating owner account...' : 'Create Owner Account &amp; Post Needs'}
+              {loading ? 'Creating owner account...' : 'Create Owner Account & Post Needs'}
             </button>
           </form>
 

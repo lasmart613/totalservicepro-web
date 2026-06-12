@@ -100,6 +100,9 @@ export default function CompanySignup() {
 
       const newOrgId = orgData?.id ?? null;
 
+      // Thorough onboarding: after company creation, guide to /company for CRM setup, team, logo etc.
+      // (profile upsert below will link it)
+
       // 3. Upsert user profile linked to org with management role
       const profileData: any = {
         id: userId,
@@ -121,13 +124,18 @@ export default function CompanySignup() {
       }
 
       if (authData.session) {
-        // Success, go to dashboard (or /company to edit)
-        router.push('/');
+        // Thorough onboarding redirect: company admins go straight to /company for CRM, team management, logo upload, etc.
+        router.push('/company');
       } else {
-        setMessage('Account created! Check your email to confirm, then sign in. Your company organization was created.');
+        setMessage('Account created! Check your email to confirm, then sign in. Your company organization was created. Visit /company to complete thorough onboarding (CRM customers, team, logo).');
       }
     } catch (err: any) {
-      setMessage(err.message || 'Company sign up failed.');
+      const msg = err.message || 'Company sign up failed.';
+      if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('user already exists') || msg.toLowerCase().includes('duplicate')) {
+        setMessage('An account with this email already exists. Please check your email (including spam) for a confirmation link from a previous signup attempt. If a prior signup failed after auth but before organization/profile creation, a partial auth user may remain – try a different email or ask an admin to clean up the auth.users table in Supabase. You can also try signing in.');
+      } else {
+        setMessage(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -248,7 +256,7 @@ export default function CompanySignup() {
               disabled={loading}
               className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
             >
-              {loading ? 'Creating company account...' : 'Create Company Account &amp; Organization'}
+              {loading ? 'Creating company account...' : 'Create Company Account & Organization'}
             </button>
           </form>
 

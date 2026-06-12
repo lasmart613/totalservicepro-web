@@ -42,10 +42,12 @@ export default function LoginPage() {
             first_name: firstName,
             last_name: lastName,
             email,
-            role: 'engineer',
+            // role intentionally not set here - direct users to role-specific signup flows for proper onboarding (fse, service_manager, owner, etc.)
+            // legacy inline signup no longer forces 'engineer' (read-only)
             onboarding_completed: false,
           }, { onConflict: 'id' });
-          router.push('/');
+          // After quick signup, send to role selection for robust onboarding
+          router.push('/signup');
         } else {
           setMessage('Account created! Check your email to confirm, then sign in.');
         }
@@ -55,7 +57,12 @@ export default function LoginPage() {
         router.push('/');
       }
     } catch (err: any) {
-      setMessage(err.message || 'Authentication failed');
+      const msg = err.message || 'Authentication failed';
+      if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('user already exists') || msg.toLowerCase().includes('duplicate')) {
+        setMessage('An account with this email already exists. Please check your email (including spam) for a confirmation link from a previous signup attempt. If a prior signup failed after auth, a partial auth user may remain – try a different email or ask an admin to clean up the auth.users table in Supabase. You can also try signing in.');
+      } else {
+        setMessage(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -146,7 +153,7 @@ export default function LoginPage() {
         {/* Professional multi-type sign up links (marketplace vision) */}
         <div className="mt-8 card p-5 text-sm">
           <div className="font-bold mb-3 text-center" style={{ color: 'var(--gold)' }}>Join the Laser Service Network</div>
-          <p className="text-center text-xs text-[var(--text3)] mb-4">Choose your role for a tailored signup experience. Owners post needs; FSEs/companies bid &amp; fulfill (live bidding at /marketplace).</p>
+          <p className="text-center text-xs text-[var(--text3)] mb-4">Choose your role for a tailored signup experience. Owners post needs; FSEs/companies bid & fulfill (live bidding at /marketplace).</p>
           <div className="grid grid-cols-1 gap-2">
             <Link href="/signup/fse" className="btn btn-secondary w-full justify-center text-sm py-2">Sign up as FSE / Field Engineer</Link>
             <Link href="/signup/company" className="btn btn-secondary w-full justify-center text-sm py-2">Sign up as Service Company</Link>

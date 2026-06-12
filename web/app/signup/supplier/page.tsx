@@ -129,7 +129,12 @@ export default function SupplierSignup() {
         setMessage('Account created! Check your email to confirm, then sign in. Your parts supplier organization was created.');
       }
     } catch (err: any) {
-      setMessage(err.message || 'Parts supplier sign up failed.');
+      const msg = err.message || 'Parts supplier sign up failed.';
+      if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('user already exists') || msg.toLowerCase().includes('duplicate')) {
+        setMessage('An account with this email already exists. Please check your email (including spam) for a confirmation link from a previous signup attempt. If a prior signup failed after auth, a partial auth user may remain – try a different email or ask an admin to clean up the auth.users table in Supabase. You can also try signing in.');
+      } else {
+        setMessage(msg);
+      }
     } finally {
       setLoading(false);
     }
@@ -250,7 +255,7 @@ export default function SupplierSignup() {
               disabled={loading}
               className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
             >
-              {loading ? 'Creating supplier account...' : 'Create Parts Supplier Account &amp; Organization'}
+              {loading ? 'Creating supplier account...' : 'Create Parts Supplier Account & Organization'}
             </button>
           </form>
 
