@@ -15,10 +15,26 @@ export default function ServiceSchedule() {
     { id: 4, date: '2026-06-19', title: 'Handpiece Calibration', time: '11:00 AM' },
   ];
 
-  const hasCallOnDay = (dayNum: number) => myServiceCalls.some(call => {
-    const d = parseInt(call.date.split('-')[2]);
-    return d === dayNum;
-  });
+  // Generate real June 2026 calendar (starts on Monday)
+  const year = 2026;
+  const month = 5; // June (0-indexed)
+  const firstDay = new Date(year, month, 1).getDay(); // 1 = Monday
+  const daysInMonth = new Date(year, month + 1, 0).getDate(); // 30
+
+  const calendarDays = [];
+  // Add empty cells for days before the 1st
+  for (let i = 0; i < firstDay; i++) {
+    calendarDays.push(null);
+  }
+  // Add actual days
+  for (let d = 1; d <= daysInMonth; d++) {
+    calendarDays.push(d);
+  }
+
+  const hasService = (day: number | null) => {
+    if (!day) return false;
+    return myServiceCalls.some(call => parseInt(call.date.split('-')[2]) === day);
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -40,7 +56,7 @@ export default function ServiceSchedule() {
           <button onClick={() => setView('agenda')} className={`btn ${view === 'agenda' ? 'btn-primary' : ''}`}>Agenda</button>
         </div>
 
-        {/* MONTH VIEW - Proper Calendar */}
+        {/* MONTH VIEW - Real Calendar */}
         {view === 'month' && (
           <div className="card p-6">
             <div className="flex justify-between items-center mb-6">
@@ -49,20 +65,20 @@ export default function ServiceSchedule() {
               <button className="btn btn-secondary p-3"><ChevronRight size={20} /></button>
             </div>
 
-            <div className="grid grid-cols-7 gap-px bg-[var(--border)]">
-              {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
-                <div key={d} className="bg-[var(--surface)] py-3 text-center font-medium text-sm border-b border-[var(--border)]">{d}</div>
+            <div className="grid grid-cols-7 gap-px bg-[var(--border)] text-center text-sm">
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
+                <div key={d} className="bg-[var(--surface)] py-3 font-medium">{d}</div>
               ))}
-              {Array.from({ length: 35 }).map((_, i) => {
-                const day = i + 1;
-                const call = hasCallOnDay(day);
-                return (
-                  <div key={i} className="bg-[var(--surface)] min-h-[110px] p-2 border border-[var(--border)] hover:bg-[var(--surface3)] relative">
-                    <span className="text-sm">{day}</span>
-                    {call && <div className="text-[10px] text-[var(--gold)] mt-1">● Service</div>}
-                  </div>
-                );
-              })}
+              {calendarDays.map((day, i) => (
+                <div key={i} className="bg-[var(--surface)] min-h-[100px] p-2 border border-[var(--border)] hover:bg-[var(--surface3)] relative">
+                  {day && (
+                    <>
+                      <div className="text-sm">{day}</div>
+                      {hasService(day) && <div className="text-[10px] mt-1 text-[var(--gold)]">● Service</div>}
+                    </>
+                  )}
+                </div>
+              ))}
             </div>
           </div>
         )}
@@ -70,11 +86,11 @@ export default function ServiceSchedule() {
         {/* WEEK VIEW - Vertical */}
         {view === 'week' && (
           <div className="card p-6 space-y-8">
-            {['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(day => (
-              <div key={day} className="border-l-4 border-[var(--gold)] pl-6">
-                <div className="font-bold mb-3">{day}</div>
-                {myServiceCalls.filter(c => new Date(c.date).toLocaleDateString('en-US', { weekday: 'long' }) === day).map(call => (
-                  <div key={call.id} className="bg-[var(--surface3)] p-4 rounded-xl mb-3">
+            {['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(dayName => (
+              <div key={dayName} className="border-l-4 border-[var(--gold)] pl-6">
+                <div className="font-bold mb-4">{dayName}</div>
+                {myServiceCalls.filter(c => new Date(c.date).toLocaleDateString('en-US',{weekday:'long'}) === dayName).map(call => (
+                  <div key={call.id} className="bg-[var(--surface3)] p-5 rounded-xl mb-3">
                     <div>{call.time} — {call.title}</div>
                   </div>
                 ))}
@@ -86,7 +102,7 @@ export default function ServiceSchedule() {
         {/* DAY + AGENDA */}
         {(view === 'day' || view === 'agenda') && (
           <div className="card p-6 space-y-6">
-            <h3 className="font-bold">Upcoming Calls</h3>
+            <h3 className="font-bold text-xl">Upcoming Service Calls</h3>
             {myServiceCalls.map(call => (
               <div key={call.id} className="bg-[var(--surface3)] p-5 rounded-xl">
                 <div className="font-medium">{call.time} — {call.title}</div>
