@@ -2,13 +2,12 @@
 
 import React, { useState } from 'react';
 import Link from 'next/link';
-import { Header } from '../components/Header';
-import { Calendar as CalendarIcon, ArrowLeft, Clock } from 'lucide-react';
+import { Header } from '../../components/Header';
+import { Calendar as CalendarIcon, Clock } from 'lucide-react';
 
 export default function ServiceSchedule() {
   const [view, setView] = useState<'month' | 'week' | 'agenda'>('agenda');
 
-  // Demo data
   const upcoming = [
     { date: '2026-06-15', day: 'Monday', title: 'VBeam PM - Downtown MedSpa', time: '09:00 AM', location: 'Austin, TX' },
     { date: '2026-06-16', day: 'Tuesday', title: 'GentleYAG Alignment - City Clinic', time: '02:00 PM', location: 'Phoenix, AZ' },
@@ -29,14 +28,13 @@ export default function ServiceSchedule() {
           <Link href="/" className="text-[var(--gold)] hover:underline">← Back to Dashboard</Link>
         </div>
 
-        {/* View Toggle */}
         <div className="flex flex-wrap gap-2 mb-8">
           <button onClick={() => setView('month')} className={`btn ${view === 'month' ? 'btn-primary' : 'btn-secondary'}`}>Month View</button>
           <button onClick={() => setView('week')} className={`btn ${view === 'week' ? 'btn-primary' : 'btn-secondary'}`}>Week View</button>
           <button onClick={() => setView('agenda')} className={`btn ${view === 'agenda' ? 'btn-primary' : 'btn-secondary'}`}>Agenda View</button>
         </div>
 
-        {/* Month View - Yellow border on each day */}
+        {/* Month View */}
         {view === 'month' && (
           <div className="card p-6">
             <div className="grid grid-cols-7 gap-px bg-[var(--border)] text-center text-sm">
@@ -46,7 +44,6 @@ export default function ServiceSchedule() {
               {Array.from({ length: 35 }).map((_, i) => (
                 <div key={i} className="bg-[var(--surface)] min-h-[110px] p-2 border-2 border-[var(--gold)] hover:border-yellow-400 transition-colors relative">
                   <div className="text-xs text-[var(--text3)] font-medium">{i + 1}</div>
-                  {i % 4 === 0 && <div className="text-[10px] mt-1 text-[var(--gold)]">PM Due</div>}
                 </div>
               ))}
             </div>
@@ -74,7 +71,7 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* Agenda View - Vertical with yellow borders between days */}
+        {/* Agenda View */}
         {view === 'agenda' && (
           <div className="card p-6 space-y-8">
             {upcoming.map((item, index) => (
@@ -96,7 +93,7 @@ export default function ServiceSchedule() {
         )}
 
         <div className="mt-12 text-center text-sm text-[var(--text3)]">
-          Full interactive calendar with drag &amp; drop and Google sync coming soon.
+          Full interactive calendar coming soon
         </div>
       </div>
     </div>
