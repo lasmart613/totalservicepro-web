@@ -430,11 +430,11 @@ export default function CompanyProfile() {
             </div>
           </div>
         </div>
+        )}
 
         <p className="text-[10px] text-[var(--text3)]">
           Full multi-user company management, invitations, and permissions coming soon. This gives Service Companies the ability to manage team (FSEs, dispatchers/schedulers, admins) and company data. CRM allows adding customers with full contact, address, and equipment data from the organizations table.
         </p>
-        )}
 
         {/* Thorough Onboarding Note / Checklist - shown for service company admins */}
         {org.type === 'service_company' && (userRole === 'service_manager' || userRole === 'company_admin') && (
