@@ -7,6 +7,7 @@ import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight } from 'luci
 
 export default function ServiceSchedule() {
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
+  const [currentMonth, setCurrentMonth] = useState(6); // June 2026
 
   const myServiceCalls = [
     { id: 1, date: '2026-06-15', title: 'VBeam PM - Downtown MedSpa', time: '09:00 AM' },
@@ -15,26 +16,15 @@ export default function ServiceSchedule() {
     { id: 4, date: '2026-06-19', title: 'Handpiece Calibration', time: '11:00 AM' },
   ];
 
-  // Generate real June 2026 calendar (starts on Monday)
-  const year = 2026;
-  const month = 5; // June (0-indexed)
-  const firstDay = new Date(year, month, 1).getDay(); // 1 = Monday
-  const daysInMonth = new Date(year, month + 1, 0).getDate(); // 30
+  const monthName = new Date(2026, currentMonth - 1, 1).toLocaleString('default', { month: 'long' });
 
-  const calendarDays = [];
-  // Add empty cells for days before the 1st
-  for (let i = 0; i < firstDay; i++) {
-    calendarDays.push(null);
-  }
-  // Add actual days
-  for (let d = 1; d <= daysInMonth; d++) {
-    calendarDays.push(d);
-  }
+  const nextMonth = () => setCurrentMonth(prev => prev === 12 ? 1 : prev + 1);
+  const prevMonth = () => setCurrentMonth(prev => prev === 1 ? 12 : prev - 1);
 
-  const hasService = (day: number | null) => {
-    if (!day) return false;
-    return myServiceCalls.some(call => parseInt(call.date.split('-')[2]) === day);
-  };
+  // Month View - Real calendar
+  const firstDay = new Date(2026, currentMonth - 1, 1).getDay();
+  const daysInMonth = new Date(2026, currentMonth, 0).getDate();
+  const calendarDays = Array(firstDay).fill(null).concat(Array.from({ length: daysInMonth }, (_, i) => i + 1));
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -56,25 +46,27 @@ export default function ServiceSchedule() {
           <button onClick={() => setView('agenda')} className={`btn ${view === 'agenda' ? 'btn-primary' : ''}`}>Agenda</button>
         </div>
 
-        {/* MONTH VIEW - Real Calendar */}
+        {/* MONTH VIEW */}
         {view === 'month' && (
           <div className="card p-6">
             <div className="flex justify-between items-center mb-6">
-              <button className="btn btn-secondary p-3"><ChevronLeft size={20} /></button>
-              <div className="text-3xl font-bold">June 2026</div>
-              <button className="btn btn-secondary p-3"><ChevronRight size={20} /></button>
+              <button onClick={prevMonth} className="btn btn-secondary p-3"><ChevronLeft size={20} /></button>
+              <div className="text-3xl font-bold">{monthName} 2026</div>
+              <button onClick={nextMonth} className="btn btn-secondary p-3"><ChevronRight size={20} /></button>
             </div>
 
-            <div className="grid grid-cols-7 gap-px bg-[var(--border)] text-center text-sm">
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(d => (
-                <div key={d} className="bg-[var(--surface)] py-3 font-medium">{d}</div>
+            <div className="grid grid-cols-7 gap-px bg-[var(--border)]">
+              {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
+                <div key={d} className="bg-[var(--surface)] py-3 text-center font-medium text-sm">{d}</div>
               ))}
               {calendarDays.map((day, i) => (
                 <div key={i} className="bg-[var(--surface)] min-h-[100px] p-2 border border-[var(--border)] hover:bg-[var(--surface3)] relative">
                   {day && (
                     <>
                       <div className="text-sm">{day}</div>
-                      {hasService(day) && <div className="text-[10px] mt-1 text-[var(--gold)]">● Service</div>}
+                      {myServiceCalls.some(c => parseInt(c.date.split('-')[2]) === day) && (
+                        <div className="text-[10px] mt-1 text-[var(--gold)]">● Service</div>
+                      )}
                     </>
                   )}
                 </div>
@@ -83,29 +75,36 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* WEEK VIEW - Vertical */}
+        {/* WEEK VIEW - Horizontal Sun → Sat with vertical calls */}
         {view === 'week' && (
-          <div className="card p-6 space-y-8">
-            {['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'].map(dayName => (
-              <div key={dayName} className="border-l-4 border-[var(--gold)] pl-6">
-                <div className="font-bold mb-4">{dayName}</div>
-                {myServiceCalls.filter(c => new Date(c.date).toLocaleDateString('en-US',{weekday:'long'}) === dayName).map(call => (
-                  <div key={call.id} className="bg-[var(--surface3)] p-5 rounded-xl mb-3">
-                    <div>{call.time} — {call.title}</div>
+          <div className="card p-6 overflow-x-auto">
+            <div className="grid grid-cols-7 gap-2 min-w-[900px]">
+              {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(dayName => (
+                <div key={dayName} className="border border-[var(--border)] rounded-lg p-3 min-h-[400px]">
+                  <div className="font-bold text-center mb-4 pb-2 border-b border-[var(--border)]">{dayName}</div>
+                  <div className="space-y-3">
+                    {myServiceCalls
+                      .filter(c => new Date(c.date).toLocaleDateString('en-US', { weekday: 'short' }) === dayName)
+                      .map(call => (
+                        <div key={call.id} className="bg-[var(--surface3)] p-3 rounded text-sm">
+                          <div className="font-medium">{call.time}</div>
+                          <div className="text-[var(--text3)] text-xs mt-1">{call.title}</div>
+                        </div>
+                      ))}
                   </div>
-                ))}
-              </div>
-            ))}
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
         {/* DAY + AGENDA */}
         {(view === 'day' || view === 'agenda') && (
           <div className="card p-6 space-y-6">
-            <h3 className="font-bold text-xl">Upcoming Service Calls</h3>
+            <h3 className="font-bold text-xl mb-4">Upcoming Service Calls</h3>
             {myServiceCalls.map(call => (
               <div key={call.id} className="bg-[var(--surface3)] p-5 rounded-xl">
-                <div className="font-medium">{call.time} — {call.title}</div>
+                <div className="font-medium text-lg">{call.time} — {call.title}</div>
                 <div className="text-sm text-[var(--text3)]">{call.date}</div>
               </div>
             ))}
