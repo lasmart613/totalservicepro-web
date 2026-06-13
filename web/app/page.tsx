@@ -36,10 +36,10 @@ export default function Dashboard() {
   const [assigned, setAssigned] = useState<any[]>([]);
   const supabase = getSupabaseClient();
 
-  const role = profile?.role || 'engineer';
+  const role = profile?.role || '';
   const isHighLevel = ['service_manager', 'company_admin', 'parts_supplier', 'admin', 'billing_manager', 'crm', 'owner', 'customer'].includes(role);
   const isDispatcher = role === 'dispatcher';
-  const isFSE = ['engineer', 'fse'].includes(role) || (!isHighLevel && !isDispatcher);
+  const isFSE = ['engineer', 'fse'].includes(role) || (role === '' || (!isHighLevel && !isDispatcher));
   const isCustomer = ['owner', 'customer'].includes(role);
 
   useEffect(() => {

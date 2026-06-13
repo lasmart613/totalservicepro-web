@@ -42,7 +42,7 @@ export default function SignupIndex() {
               <Building2 size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
             <div className="font-bold text-xl mb-1">Service Company</div>
-            <div className="text-sm text-[var(--text3)] mb-4">Teams &amp; businesses offering laser service. Creates organization. Role: service_manager</div>
+            <div className="text-sm text-[var(--text3)] mb-4">Teams &amp; businesses offering laser service. Creates organization. Role: company_admin (or service_manager)</div>
             <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
               <li>• Company name, address, website</li>
               <li>• Services offered (PM, Repair, Install...)</li>

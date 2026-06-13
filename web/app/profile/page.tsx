@@ -42,7 +42,8 @@ export default function Profile() {
           </div>
           <div><label className="label">Phone</label><input className="input" value={profile.phone || ''} onChange={e => setProfile({ ...profile, phone: e.target.value })} /></div>
           <div><label className="label">Job Title</label><input className="input" value={profile.job_title || ''} onChange={e => setProfile({ ...profile, job_title: e.target.value })} /></div>
-          <div><label className="label">Role (read-only for now)</label><input className="input" value={profile.role || 'engineer'} disabled /></div>
+          <div><label className="label">Role (read-only for now)</label><input className="input" value={profile.role || 'Not set (set during signup)'} disabled /></div>
+          <p className="text-[10px] text-[var(--text3)] mt-1">Company signups default to company_admin (Admin). FSE signups default to fse. If incorrect, re-signup with the role-specific flow or contact support.</p>
         </div>
 
         <button onClick={save} disabled={saving} className="btn btn-primary mt-5 w-full">Save Profile</button>

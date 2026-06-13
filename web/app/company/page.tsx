@@ -16,6 +16,7 @@ export default function CompanyProfile() {
   const [addMessage, setAddMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = getSupabaseClient();
+  const [userRole, setUserRole] = useState('');
 
   // CRM states for customers (from organizations table, type='customer')
   const [customers, setCustomers] = useState<any[]>([]);
@@ -47,6 +48,7 @@ export default function CompanyProfile() {
 
       if (prof?.organizations) {
         setOrg(prof.organizations);
+        setUserRole(prof.role || '');
         await loadTeamMembers(prof.organizations.id);
         await loadCustomers();
       }
@@ -66,20 +68,26 @@ export default function CompanyProfile() {
   async function saveOrg() {
     setSaving(true);
     try {
+      if (!org?.id) {
+        alert('Organization not loaded yet. Please refresh the page.');
+        setSaving(false);
+        return;
+      }
+      const updateData = {
+        name: org.name ?? null,
+        address: org.address ?? null,
+        city: org.city ?? null,
+        state: org.state ?? null,
+        phone: org.phone ?? null,
+        website: org.website ?? null,
+        bio: org.bio ?? null,
+      };
       const { error } = await supabase
         .from('organizations')
-        .update({
-          name: org.name,
-          address: org.address,
-          city: org.city,
-          state: org.state,
-          phone: org.phone,
-          website: org.website,
-          bio: org.bio,
-        })
+        .update(updateData)
         .eq('id', org.id);
       if (error) throw error;
-      alert('Company data saved.');
+      alert('Details saved.');
     } catch (err: any) {
       alert('Save failed: ' + (err.message || err));
     }
@@ -200,6 +208,7 @@ export default function CompanyProfile() {
         city: newCustomer.city || null,
         state: newCustomer.state || null,
         phone: newCustomer.contactPhone || null,
+        // bio column added via 20260614 migration for contact info storage on customer orgs
         bio: (newCustomer.contactName || newCustomer.contactEmail || newCustomer.notes)
           ? `Contact: ${newCustomer.contactName || ''} (${newCustomer.contactEmail || ''}, ${newCustomer.contactPhone || ''})\n${newCustomer.notes || ''}`
           : null,
@@ -226,7 +235,7 @@ export default function CompanyProfile() {
 
         {/* Org Info + Logo */}
         <div className="card p-6">
-          <h2 className="font-bold mb-4">Company Details</h2>
+          <h2 className="font-bold mb-4">{org.type === 'customer' ? 'Facility Details' : 'Company Details'}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
               <div>
@@ -285,11 +294,12 @@ export default function CompanyProfile() {
           </div>
 
           <button onClick={saveOrg} disabled={saving} className="btn btn-primary mt-6 w-full md:w-auto">
-            {saving ? 'Saving...' : 'Save Company Details'}
+            {saving ? 'Saving...' : (org.type === 'customer' ? 'Save Facility Details' : 'Save Company Details')}
           </button>
         </div>
 
-        {/* Team Management - add FSEs, dispatcher, admin, scheduler */}
+        {/* Team Management - only for Service Company admins */}
+        {org.type === 'service_company' && (userRole === 'service_manager' || userRole === 'company_admin') && (
         <div className="card p-6">
           <h2 className="font-bold mb-4">Team Members (FSEs, Dispatchers, Admins, etc.)</h2>
 
@@ -354,8 +364,10 @@ export default function CompanyProfile() {
             </div>
           </div>
         </div>
+        )}
 
         {/* CRM Section for Company Admins - thorough customer management */}
+        {org.type === 'service_company' && (userRole === 'service_manager' || userRole === 'company_admin') && (
         <div className="card p-6">
           <h2 className="font-bold mb-4">📋 Customer CRM</h2>
           <p className="text-sm text-[var(--text3)] mb-4">
@@ -422,8 +434,10 @@ export default function CompanyProfile() {
         <p className="text-[10px] text-[var(--text3)]">
           Full multi-user company management, invitations, and permissions coming soon. This gives Service Companies the ability to manage team (FSEs, dispatchers/schedulers, admins) and company data. CRM allows adding customers with full contact, address, and equipment data from the organizations table.
         </p>
+        )}
 
-        {/* Thorough Onboarding Note / Checklist */}
+        {/* Thorough Onboarding Note / Checklist - shown for service company admins */}
+        {org.type === 'service_company' && (userRole === 'service_manager' || userRole === 'company_admin') && (
         <div className="card p-4 bg-[var(--gold-glow)] text-sm">
           <div className="font-bold mb-2">Thorough Onboarding Checklist for New Service Company Admins</div>
           <ul className="list-disc pl-5 space-y-1 text-xs">
@@ -435,6 +449,14 @@ export default function CompanyProfile() {
           </ul>
           <p className="text-xs mt-2">This makes onboarding robust for Service Companies.</p>
         </div>
+        )}
+
+        {/* For Laser Owners / Customers: simple message if they land here */}
+        {org.type === 'customer' && userRole === 'owner' && (
+          <div className="card p-4 bg-[var(--surface3)] text-sm">
+            <p>As a Laser Owner, your facility details can be managed here. Team and Customer CRM sections are for Service Company admins. Use the Marketplace to post service needs.</p>
+          </div>
+        )}
       </div>
     </div>
   );
