@@ -93,12 +93,12 @@ export default function CompanySignup() {
         .select('id')
         .single();
 
+      let newOrgId = orgData?.id ?? null;
       if (orgError) {
         console.error('Org create error (check RLS for authenticated inserts):', orgError);
-        // Still proceed with profile, user can link org manually later or admin fixes
+        // No longer silent: /company will auto-create + link org on save using user-entered fields (robust fallback)
+        newOrgId = null;
       }
-
-      const newOrgId = orgData?.id ?? null;
 
       // Thorough onboarding: after company creation, guide to /company for CRM setup, team, logo etc.
       // (profile upsert below will link it)
@@ -124,10 +124,10 @@ export default function CompanySignup() {
       }
 
       if (authData.session) {
-        // Thorough onboarding redirect: company admins go straight to /company for CRM, team management, logo upload, etc.
+        // Redirect to /company which now robustly loads (or falls back to create on save) the org for new signups
         router.push('/company');
       } else {
-        setMessage('Account created! Check your email to confirm, then sign in. Your company organization was created. Visit /company to complete thorough onboarding (CRM customers, team, logo).');
+        setMessage('Account created! Check your email to confirm, then sign in. Organization setup will be completed at /company (auto-creates if needed).');
       }
     } catch (err: any) {
       const msg = err.message || 'Company sign up failed.';

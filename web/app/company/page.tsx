@@ -4,6 +4,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { Header } from '../../components/Header';
 import { getSupabaseClient } from '../../lib/supabase/client';
 import { MODELS } from '../../lib/models';
+import { toast } from 'sonner';
 
 const TEAM_ROLES = ['fse', 'dispatcher', 'service_manager', 'company_admin', 'admin'];
 
@@ -17,6 +18,7 @@ export default function CompanyProfile() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = getSupabaseClient();
   const [userRole, setUserRole] = useState('');
+  const [loadingOrg, setLoadingOrg] = useState(true);
 
   // CRM states for customers (from organizations table, type='customer')
   const [customers, setCustomers] = useState<any[]>([]);
@@ -37,21 +39,42 @@ export default function CompanyProfile() {
 
   useEffect(() => {
     (async () => {
+      setLoadingOrg(true);
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        setLoadingOrg(false);
+        return;
+      }
 
       const { data: prof } = await supabase
         .from('user_profiles')
-        .select('organization_id, organizations(*)')
+        .select('organization_id, role, organizations(*)')
         .eq('id', user.id)
         .maybeSingle();
 
       if (prof?.organizations) {
         setOrg(prof.organizations);
         setUserRole(prof.role || '');
-        await loadTeamMembers(prof.organizations.id);
+        await loadTeamMembers((prof.organizations as any)?.id);
         await loadCustomers();
+      } else if (prof?.organization_id) {
+        try {
+          const { data: orgData } = await supabase
+            .from('organizations')
+            .select('*')
+            .eq('id', prof.organization_id)
+            .single();
+          if (orgData) {
+            setOrg(orgData);
+            setUserRole(prof.role || '');
+            await loadTeamMembers((orgData as any).id);
+            await loadCustomers();
+          }
+        } catch (e) {
+          console.warn('Fallback org fetch failed:', e);
+        }
       }
+      setLoadingOrg(false);
     })();
   }, []);
 
@@ -68,39 +91,97 @@ export default function CompanyProfile() {
   async function saveOrg() {
     setSaving(true);
     try {
-      if (!org?.id) {
-        alert('Organization not loaded yet. Please refresh the page.');
-        setSaving(false);
-        return;
+      let currentOrg = org;
+      if (!currentOrg?.id) {
+        // Robust auto-create for new company signups that landed without org (race/RLS after /signup/company)
+        const orgInsert: any = {
+          name: currentOrg.name || 'My Company',
+          type: 'service_company',
+          address: currentOrg.address ?? null,
+          city: currentOrg.city ?? null,
+          state: currentOrg.state ?? null,
+          phone: currentOrg.phone ?? null,
+          website: currentOrg.website ?? null,
+          bio: currentOrg.bio ?? null,
+        };
+        const { data: newOrgData, error: insertErr } = await supabase
+          .from('organizations')
+          .insert(orgInsert)
+          .select('id')
+          .single();
+        if (insertErr || !newOrgData?.id) {
+          throw new Error('Failed to create organization: ' + (insertErr?.message || ''));
+        }
+        const newId = newOrgData.id;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await supabase.from('user_profiles').update({ organization_id: newId }).eq('id', user.id);
+        }
+        currentOrg = { ...currentOrg, id: newId };
+        setOrg(currentOrg);
+        await loadTeamMembers(newId);
+        await loadCustomers();
+        toast.success('Organization created and linked.');
       }
       const updateData = {
-        name: org.name ?? null,
-        address: org.address ?? null,
-        city: org.city ?? null,
-        state: org.state ?? null,
-        phone: org.phone ?? null,
-        website: org.website ?? null,
-        bio: org.bio ?? null,
+        name: currentOrg.name ?? null,
+        address: currentOrg.address ?? null,
+        city: currentOrg.city ?? null,
+        state: currentOrg.state ?? null,
+        phone: currentOrg.phone ?? null,
+        website: currentOrg.website ?? null,
+        bio: currentOrg.bio ?? null,
       };
       const { error } = await supabase
         .from('organizations')
         .update(updateData)
-        .eq('id', org.id);
+        .eq('id', currentOrg.id);
       if (error) throw error;
-      alert('Details saved.');
+      toast.success('Details saved.');
     } catch (err: any) {
-      alert('Save failed: ' + (err.message || err));
+      toast.error('Save failed: ' + (err.message || err));
     }
     setSaving(false);
   }
 
   async function uploadLogo(file: File) {
-    if (!org.id) return alert('No organization loaded.');
     setUploadingLogo(true);
     try {
+      let currentOrg = org;
+      if (!currentOrg?.id) {
+        // Robust auto-create (same root cause as save: org not loaded for fresh signup)
+        const orgInsert: any = {
+          name: currentOrg.name || 'My Company',
+          type: 'service_company',
+          address: currentOrg.address ?? null,
+          city: currentOrg.city ?? null,
+          state: currentOrg.state ?? null,
+          phone: currentOrg.phone ?? null,
+          website: currentOrg.website ?? null,
+          bio: currentOrg.bio ?? null,
+        };
+        const { data: newOrgData, error: insertErr } = await supabase
+          .from('organizations')
+          .insert(orgInsert)
+          .select('id')
+          .single();
+        if (insertErr || !newOrgData?.id) {
+          throw new Error('Failed to create organization for logo: ' + (insertErr?.message || ''));
+        }
+        const newId = newOrgData.id;
+        const { data: { user } } = await supabase.auth.getUser();
+        if (user) {
+          await supabase.from('user_profiles').update({ organization_id: newId }).eq('id', user.id);
+        }
+        currentOrg = { ...currentOrg, id: newId };
+        setOrg(currentOrg);
+        await loadTeamMembers(newId);
+        await loadCustomers();
+        toast.success('Organization created and linked for logo upload.');
+      }
       const fileExt = file.name.split('.').pop();
-      const fileName = `logo-${org.id}-${Date.now()}.${fileExt}`;
-      const filePath = `${org.id}/${fileName}`;
+      const fileName = `logo-${currentOrg.id}-${Date.now()}.${fileExt}`;
+      const filePath = `${currentOrg.id}/${fileName}`;
 
       const { error: uploadError } = await supabase.storage
         .from('logos')
@@ -114,13 +195,13 @@ export default function CompanyProfile() {
       const { error: updateError } = await supabase
         .from('organizations')
         .update({ logo_url: logoUrl })
-        .eq('id', org.id);
+        .eq('id', currentOrg.id);
       if (updateError) throw updateError;
 
-      setOrg({ ...org, logo_url: logoUrl });
-      alert('Logo uploaded successfully!');
+      setOrg({ ...currentOrg, logo_url: logoUrl });
+      toast.success('Logo uploaded successfully!');
     } catch (err: any) {
-      alert('Logo upload failed: ' + (err.message || err) + '\n(Make sure "logos" storage bucket exists and has proper policies.)');
+      toast.error('Logo upload failed: ' + (err.message || err) + '\n(Make sure "logos" storage bucket exists and has proper policies.)');
     }
     setUploadingLogo(false);
   }
@@ -181,7 +262,7 @@ export default function CompanyProfile() {
       if (error) throw error;
       await loadTeamMembers(org.id);
     } catch (err: any) {
-      alert('Failed to update role: ' + (err.message || err));
+      toast.error('Failed to update role: ' + (err.message || err));
     }
   }
 
@@ -231,6 +312,11 @@ export default function CompanyProfile() {
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="max-w-4xl mx-auto w-full p-6 space-y-8">
+        {loadingOrg && (
+          <div className="mb-4 text-center text-xs py-1.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text3)]">
+            Loading company profile…
+          </div>
+        )}
         <h1 className="text-2xl font-extrabold">🏢 Company Management</h1>
 
         {/* Org Info + Logo */}
