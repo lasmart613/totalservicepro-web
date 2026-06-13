@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Header } from '../components/Header';
 import { getSupabaseClient } from '../lib/supabase/client';
 import { FileText, Calendar, Users, BarChart3, UserCheck, Clock, CheckCircle, BookOpen, Wrench, User, Building2, Hospital, Package } from 'lucide-react';
+import { toast } from 'sonner';
 
 type Role = 'engineer' | 'fse' | 'dispatcher' | 'service_manager' | 'company_admin' | 'parts_supplier' | 'admin' | 'billing_manager' | 'crm' | 'owner' | 'customer' | string;
 
@@ -34,6 +35,7 @@ export default function Dashboard() {
     { id: 't3', title: 'Metro Med - GentleYAG Alignment', customer: 'Metro Medical', due: '2026-06-14' },
   ]);
   const [assigned, setAssigned] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   const supabase = getSupabaseClient();
 
   const role = profile?.role || '';
@@ -46,7 +48,10 @@ export default function Dashboard() {
     (async () => {
       const { data: { user: u } } = await supabase.auth.getUser();
       setUser(u);
-      if (!u) return;
+      if (!u) {
+        setLoading(false);
+        return;
+      }
 
       // Load profile for role
       const { data: prof } = await supabase
@@ -89,6 +94,7 @@ export default function Dashboard() {
         }
         setRecent(toShow.slice(0, 6));
       }
+      setLoading(false);
     })();
   }, [supabase]);
 
@@ -119,7 +125,9 @@ export default function Dashboard() {
     setPendingAssignments(pendingAssignments.filter(t => t.id !== ticketId));
 
     // In real impl: update service_schedule or tickets table with fse + date
-    alert(`Assigned ${ticket.title} to ${fseName}. (In production this would update the tickets table and notify the FSE)`);
+    toast.success(`Assigned ${ticket.title} to ${fseName}.`, {
+      description: 'In production this would update the tickets table and notify the FSE.',
+    });
   };
 
   const renderKPIs = () => {
@@ -424,6 +432,11 @@ export default function Dashboard() {
       <Header />
 
       <div className="max-w-5xl mx-auto w-full px-4 py-6">
+        {loading && (
+          <div className="mb-4 text-center text-xs py-1.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text3)]">
+            Loading dashboard data…
+          </div>
+        )}
         <div className="mb-8">
           <div className="text-3xl font-extrabold tracking-tight">
             {isCustomer ? 'Owner / Facility Dashboard' : isHighLevel ? 'Team Command Center' : isDispatcher ? 'Dispatch & Scheduling' : 'My Field Dashboard'}

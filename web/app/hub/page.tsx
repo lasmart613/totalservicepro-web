@@ -6,13 +6,13 @@ import { Header } from '../../components/Header';
 
 export default function TechHub() {
   const cards = [
-    { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Post needs, bid/respond, accept contracts (beta live)' },
-    { href: '/service-schedule', icon: '📅', label: 'Service Schedule', desc: 'Tickets & assignments' },
-    { href: '/customers', icon: '👥', label: 'Customers', desc: 'Directory & profiles' },
-    { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Search & compatibility' },
-    { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Full bookshelf' },
-    { href: '/reports', icon: '📋', label: 'Service Reports', desc: 'Performance & safety docs' },
-    { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Intelligent service guidance (coming soon)' },
+    { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Post service needs, receive bids, accept contracts (beta live)' },
+    { href: '/service-schedule', icon: '📅', label: 'Service Schedule', desc: 'Tickets, assignments & scheduling' },
+    { href: '/customers', icon: '👥', label: 'Customers', desc: 'Directory & customer profiles' },
+    { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Search parts & compatibility' },
+    { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Full digital bookshelf' },
+    { href: '/reports', icon: '📋', label: 'Service Reports', desc: 'Performance & safety documentation' },
+    { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Intelligent service guidance (beta)' },
   ];
 
   return (
@@ -32,7 +32,7 @@ export default function TechHub() {
           ))}
         </div>
 
-        <div className="mt-8 text-xs text-center text-[var(--text3)]">Additional pages (Service Schedule, Customers, Parts, AI Assistant) now have placeholders. Full ports from the Android assets (service_schedule.html, customer_directory.html, parts_catalog.html, ai_assistant.html) coming soon. Current focus: Marketplace + Reports + Manuals + Auth.</div>
+        <div className="mt-8 text-xs text-center text-[var(--text3)]">Service Schedule, Customers, Parts &amp; AI Assistant are available as functional starters. Marketplace, Reports, Manuals &amp; Auth flows are production-ready. Full feature parity with Android ports in progress.</div>
       </div>
     </div>
   );
