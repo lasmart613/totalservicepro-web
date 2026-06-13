@@ -1,27 +1,50 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { Header } from '../../components/Header';
+import { getSupabaseClient } from '../../lib/supabase/client';
 import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function ServiceSchedule() {
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
-  const [currentMonth, setCurrentMonth] = useState(6); // June 2026
+  const [currentMonth, setCurrentMonth] = useState(6);
   const [weekOffset, setWeekOffset] = useState(0);
   const [dayOffset, setDayOffset] = useState(0);
+  const [serviceCalls, setServiceCalls] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
 
-  // TODO: Replace with real Supabase data fetch
-  const myServiceCalls = [
-    { id: 1, date: '2026-06-15', title: 'VBeam PM - Downtown MedSpa', time: '09:00', duration: 120 },
-    { id: 2, date: '2026-06-16', title: 'GentleYAG Alignment - City Clinic', time: '14:00', duration: 90 },
-    { id: 3, date: '2026-06-18', title: 'CO2 Service - Metro Hospital', time: '10:30', duration: 60 },
-    { id: 4, date: '2026-06-19', title: 'Handpiece Calibration', time: '11:00', duration: 45 },
-  ];
+  const supabase = getSupabaseClient();
 
-  const today = new Date();
-  const currentDate = new Date(today);
-  currentDate.setDate(today.getDate() + dayOffset);
+  // Fetch real scheduled calls for the logged-in FSE
+  useEffect(() => {
+    const fetchServiceCalls = async () => {
+      setLoading(true);
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) return;
+
+        const { data, error } = await supabase
+          .from('service_schedule') // ← Change table name if needed
+          .select('*')
+          .eq('fse_id', user.id)
+          .order('date', { ascending: true });
+
+        if (error) throw error;
+        setServiceCalls(data || []);
+      } catch (err) {
+        console.error('Error fetching service calls:', err);
+        setServiceCalls([]);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    fetchServiceCalls();
+  }, [supabase]);
+
+  const currentDate = new Date();
+  currentDate.setDate(currentDate.getDate() + dayOffset);
 
   const monthName = new Date(2026, currentMonth - 1, 1).toLocaleString('default', { month: 'long' });
 
@@ -34,13 +57,12 @@ export default function ServiceSchedule() {
   const nextDay = () => setDayOffset(prev => prev + 1);
   const prevDay = () => setDayOffset(prev => prev - 1);
 
-  // Generate calendar days for month view
+  // Generate calendar days
   const firstDay = new Date(2026, currentMonth - 1, 1).getDay();
   const daysInMonth = new Date(2026, currentMonth, 0).getDate();
   const calendarDays = Array(firstDay).fill(null).concat(Array.from({ length: daysInMonth }, (_, i) => i + 1));
 
-  // Time slots for hourly views (6am - 9pm)
-  const timeSlots = Array.from({ length: 16 }, (_, i) => 6 + i);
+  const timeSlots = Array.from({ length: 16 }, (_, i) => 6 + i); // 6am - 9pm
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -80,7 +102,7 @@ export default function ServiceSchedule() {
                   {day && (
                     <>
                       <div className="text-sm">{day}</div>
-                      {myServiceCalls.some(c => parseInt(c.date.split('-')[2]) === day) && (
+                      {serviceCalls.some(c => parseInt(c.date.split('-')[2]) === day) && (
                         <div className="text-[10px] mt-1 text-[var(--gold)]">● Service</div>
                       )}
                     </>
@@ -91,7 +113,7 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* WEEK VIEW - Horizontal with dates + hourly grid */}
+        {/* WEEK VIEW */}
         {view === 'week' && (
           <div className="card p-6 overflow-x-auto">
             <div className="flex justify-between items-center mb-4">
@@ -101,7 +123,6 @@ export default function ServiceSchedule() {
             </div>
 
             <div className="grid grid-cols-8 gap-px bg-[var(--border)] min-w-[1100px]">
-              {/* Time labels */}
               <div className="bg-[var(--surface)]">
                 <div className="h-12"></div>
                 {timeSlots.map(h => (
@@ -111,9 +132,8 @@ export default function ServiceSchedule() {
                 ))}
               </div>
 
-              {/* Days */}
               {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((dayName, idx) => {
-                const dayDate = new Date(2026, 5, 14 + (weekOffset * 7) + idx); // approximate
+                const dayDate = new Date(2026, 5, 14 + (weekOffset * 7) + idx);
                 const dayStr = dayDate.toISOString().split('T')[0];
 
                 return (
@@ -127,13 +147,12 @@ export default function ServiceSchedule() {
                       <div key={slotIdx} className="h-12 border-b border-[var(--border)] relative"></div>
                     ))}
 
-                    {/* Gold duration blocks */}
-                    {myServiceCalls
+                    {serviceCalls
                       .filter(c => c.date === dayStr)
                       .map(call => {
                         const startHour = parseInt(call.time.split(':')[0]);
                         const top = (startHour - 6) * 48;
-                        const height = (call.duration / 60) * 48;
+                        const height = ((call.duration || 60) / 60) * 48;
 
                         return (
                           <div
@@ -152,7 +171,7 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* DAY VIEW - Single day with hourly grid */}
+        {/* DAY VIEW - Single day with narrow time column */}
         {view === 'day' && (
           <div className="card p-6 overflow-x-auto">
             <div className="flex justify-between items-center mb-6">
@@ -163,28 +182,28 @@ export default function ServiceSchedule() {
               <button onClick={nextDay} className="btn btn-secondary p-3"><ChevronRight size={20} /></button>
             </div>
 
-            <div className="grid grid-cols-2 gap-px bg-[var(--border)] min-w-[600px]">
-              {/* Time column */}
+            <div className="grid grid-cols-[80px_1fr] gap-px bg-[var(--border)] min-w-[600px]">
+              {/* Narrow time column */}
               <div className="bg-[var(--surface)]">
                 {timeSlots.map(h => (
-                  <div key={h} className="h-12 border-b border-[var(--border)] px-3 text-sm flex items-center text-[var(--text3)]">
+                  <div key={h} className="h-12 border-b border-[var(--border)] px-2 text-xs text-[var(--text3)] flex items-center">
                     {h}:00
                   </div>
                 ))}
               </div>
 
-              {/* Calls column */}
+              {/* Calls column with gold blocks */}
               <div className="bg-[var(--surface)] relative">
                 {timeSlots.map(h => (
                   <div key={h} className="h-12 border-b border-[var(--border)]"></div>
                 ))}
 
-                {myServiceCalls
+                {serviceCalls
                   .filter(c => c.date === currentDate.toISOString().split('T')[0])
                   .map(call => {
                     const startHour = parseInt(call.time.split(':')[0]);
                     const top = (startHour - 6) * 48;
-                    const height = (call.duration / 60) * 48;
+                    const height = ((call.duration || 60) / 60) * 48;
 
                     return (
                       <div
@@ -205,12 +224,16 @@ export default function ServiceSchedule() {
         {view === 'agenda' && (
           <div className="card p-6 space-y-6">
             <h3 className="font-bold text-xl mb-4">Upcoming Service Calls</h3>
-            {myServiceCalls.map(call => (
-              <div key={call.id} className="bg-[var(--surface3)] p-5 rounded-xl">
-                <div className="font-medium text-lg">{call.time} — {call.title}</div>
-                <div className="text-sm text-[var(--text3)]">{call.date}</div>
-              </div>
-            ))}
+            {serviceCalls.length === 0 ? (
+              <p className="text-[var(--text3)]">No upcoming service calls found.</p>
+            ) : (
+              serviceCalls.map(call => (
+                <div key={call.id} className="bg-[var(--surface3)] p-5 rounded-xl">
+                  <div className="font-medium text-lg">{call.time} — {call.title}</div>
+                  <div className="text-sm text-[var(--text3)]">{call.date}</div>
+                </div>
+              ))
+            )}
           </div>
         )}
       </div>
