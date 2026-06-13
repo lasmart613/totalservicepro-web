@@ -16,7 +16,6 @@ export default function ServiceSchedule() {
 
   const supabase = getSupabaseClient();
 
-  // Fetch real scheduled calls for the logged-in FSE
   useEffect(() => {
     const fetchServiceCalls = async () => {
       setLoading(true);
@@ -33,8 +32,8 @@ export default function ServiceSchedule() {
             end_time,
             service_type,
             customer_name,
-            status,
-            priority
+            equipment_model,
+            status
           `)
           .eq('assigned_to', user.id)
           .in('status', ['Scheduled', 'En Route', 'On Site'])
@@ -42,7 +41,6 @@ export default function ServiceSchedule() {
 
         if (error) throw error;
 
-        // Transform data for the calendar
         const formatted = (data || []).map((ticket: any) => {
           const start = ticket.scheduled_time;
           const end = ticket.end_time;
@@ -60,6 +58,7 @@ export default function ServiceSchedule() {
             time: start || '09:00',
             duration: duration > 0 ? duration : 60,
             title: `${ticket.service_type || 'Service'} - ${ticket.customer_name}`,
+            equipment_model: ticket.equipment_model || '',
           };
         });
 
@@ -89,7 +88,6 @@ export default function ServiceSchedule() {
   const nextDay = () => setDayOffset(prev => prev + 1);
   const prevDay = () => setDayOffset(prev => prev - 1);
 
-  // Calendar generation
   const firstDay = new Date(2026, currentMonth - 1, 1).getDay();
   const daysInMonth = new Date(2026, currentMonth, 0).getDate();
   const calendarDays = Array(firstDay).fill(null).concat(Array.from({ length: daysInMonth }, (_, i) => i + 1));
@@ -129,23 +127,36 @@ export default function ServiceSchedule() {
               {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
                 <div key={d} className="bg-[var(--surface)] py-3 text-center font-medium text-sm">{d}</div>
               ))}
-              {calendarDays.map((day, i) => (
-                <div key={i} className="bg-[var(--surface)] min-h-[100px] p-2 border border-[var(--border)] hover:bg-[var(--surface3)] relative">
-                  {day && (
-                    <>
-                      <div className="text-sm">{day}</div>
-                      {serviceCalls.some(c => parseInt(c.date.split('-')[2]) === day) && (
-                        <div className="text-[10px] mt-1 text-[var(--gold)]">● Service</div>
-                      )}
-                    </>
-                  )}
-                </div>
-              ))}
+              {calendarDays.map((day, i) => {
+                const dayCalls = serviceCalls.filter(c => parseInt(c.date.split('-')[2]) === day);
+                return (
+                  <div key={i} className="bg-[var(--surface)] min-h-[120px] p-2 border border-[var(--border)] hover:bg-[var(--surface3)] relative overflow-hidden">
+                    {day && (
+                      <>
+                        <div className="text-sm font-medium mb-1">{day}</div>
+                        {dayCalls.length > 0 && (
+                          <div className="text-[10px] leading-tight text-[var(--gold)] space-y-0.5">
+                            {dayCalls.slice(0, 2).map((call, idx) => (
+                              <div key={idx} className="truncate">
+                                {call.time} {call.title}
+                                {call.equipment_model && ` • ${call.equipment_model}`}
+                              </div>
+                            ))}
+                            {dayCalls.length > 2 && (
+                              <div className="text-[var(--text3)]">+{dayCalls.length - 2} more</div>
+                            )}
+                          </div>
+                        )}
+                      </>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
         )}
 
-        {/* WEEK VIEW */}
+        {/* WEEK VIEW - Better descriptions */}
         {view === 'week' && (
           <div className="card p-6 overflow-x-auto">
             <div className="flex justify-between items-center mb-4">
@@ -193,6 +204,7 @@ export default function ServiceSchedule() {
                             style={{ top: `${top}px`, height: `${height}px` }}
                           >
                             {call.time} {call.title}
+                            {call.equipment_model && ` • ${call.equipment_model}`}
                           </div>
                         );
                       })}
@@ -203,7 +215,7 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* DAY VIEW - Narrow time column + hourly grid */}
+        {/* DAY VIEW - Better descriptions + narrow time column */}
         {view === 'day' && (
           <div className="card p-6 overflow-x-auto">
             <div className="flex justify-between items-center mb-6">
@@ -215,7 +227,6 @@ export default function ServiceSchedule() {
             </div>
 
             <div className="grid grid-cols-[70px_1fr] gap-px bg-[var(--border)] min-w-[600px]">
-              {/* Narrow time column */}
               <div className="bg-[var(--surface)]">
                 {timeSlots.map(h => (
                   <div key={h} className="h-12 border-b border-[var(--border)] px-2 text-xs text-[var(--text3)] flex items-center">
@@ -224,7 +235,6 @@ export default function ServiceSchedule() {
                 ))}
               </div>
 
-              {/* Calls column */}
               <div className="bg-[var(--surface)] relative">
                 {timeSlots.map(h => (
                   <div key={h} className="h-12 border-b border-[var(--border)]"></div>
@@ -244,6 +254,7 @@ export default function ServiceSchedule() {
                         style={{ top: `${top}px`, height: `${height}px` }}
                       >
                         {call.time} — {call.title}
+                        {call.equipment_model && ` • ${call.equipment_model}`}
                       </div>
                     );
                   })}
@@ -252,7 +263,7 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* AGENDA VIEW */}
+        {/* AGENDA VIEW - Better descriptions */}
         {view === 'agenda' && (
           <div className="card p-6 space-y-6">
             <h3 className="font-bold text-xl mb-4">Upcoming Service Calls</h3>
@@ -261,7 +272,10 @@ export default function ServiceSchedule() {
             ) : (
               serviceCalls.map(call => (
                 <div key={call.id} className="bg-[var(--surface3)] p-5 rounded-xl">
-                  <div className="font-medium text-lg">{call.time} — {call.title}</div>
+                  <div className="font-medium text-lg">
+                    {call.time} — {call.title}
+                    {call.equipment_model && ` • ${call.equipment_model}`}
+                  </div>
                   <div className="text-sm text-[var(--text3)]">{call.date}</div>
                 </div>
               ))
