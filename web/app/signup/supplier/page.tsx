@@ -78,6 +78,8 @@ export default function SupplierSignup() {
       }
 
       // 2. Create organization (type parts_supplier)
+      // IMPORTANT: omit 'bio' from org insert to avoid schema cache errors if 'bio' column not yet added to organizations table.
+      // (Bio collected here is saved to user_profiles.bio instead. Org-level bio requires the migration.)
       const orgInsert = {
         name: companyName,
         type: 'parts_supplier',
@@ -86,7 +88,6 @@ export default function SupplierSignup() {
         state: state || null,
         phone: phone || null,
         website: website || null,
-        bio: bio || null,
         num_techs: numStaff ? parseInt(numStaff, 10) : null,
         tax_id: taxId || null,
         services_offered: selectedParts.length ? selectedParts.join(' | ') : null,

@@ -94,6 +94,9 @@ export default function CompanyProfile() {
       let currentOrg = org;
       if (!currentOrg?.id) {
         // Robust auto-create for new company signups that landed without org (race/RLS after /signup/company)
+        // IMPORTANT: only use guaranteed columns here (name, type, address, city, state, phone, website).
+        // 'bio' on organizations requires the migration (ALTER TABLE ... ADD COLUMN bio; NOTIFY pgrst, 'reload schema';).
+        // Bio was referenced in non-existent 20260614 migration; omitting to avoid schema cache errors until applied.
         const orgInsert: any = {
           name: currentOrg.name || 'My Company',
           type: 'service_company',
@@ -102,7 +105,6 @@ export default function CompanyProfile() {
           state: currentOrg.state ?? null,
           phone: currentOrg.phone ?? null,
           website: currentOrg.website ?? null,
-          bio: currentOrg.bio ?? null,
         };
         const { data: newOrgData, error: insertErr } = await supabase
           .from('organizations')
@@ -123,6 +125,10 @@ export default function CompanyProfile() {
         await loadCustomers();
         toast.success('Organization created and linked.');
       }
+      // updateData uses only guaranteed base columns. Bio omitted here (and in orgInsert above) because
+      // the 'bio' column on 'organizations' table may not exist in all DBs until the migration SQL is run
+      // (see task notes / Supabase SQL Editor command below). Bio collected in signups is stored on user_profiles
+      // (which has the column from 20260611 migration). Future: once org bio column added, we can re-add safely.
       const updateData = {
         name: currentOrg.name ?? null,
         address: currentOrg.address ?? null,
@@ -130,7 +136,6 @@ export default function CompanyProfile() {
         state: currentOrg.state ?? null,
         phone: currentOrg.phone ?? null,
         website: currentOrg.website ?? null,
-        bio: currentOrg.bio ?? null,
       };
       const { error } = await supabase
         .from('organizations')
@@ -150,6 +155,9 @@ export default function CompanyProfile() {
       let currentOrg = org;
       if (!currentOrg?.id) {
         // Robust auto-create (same root cause as save: org not loaded for fresh signup)
+        // IMPORTANT: only use guaranteed columns here (name, type, address, city, state, phone, website).
+        // 'bio' on organizations requires the migration (ALTER TABLE ... ADD COLUMN bio; NOTIFY pgrst, 'reload schema';).
+        // Bio was referenced in non-existent 20260614 migration; omitting to avoid schema cache errors until applied.
         const orgInsert: any = {
           name: currentOrg.name || 'My Company',
           type: 'service_company',
@@ -158,7 +166,6 @@ export default function CompanyProfile() {
           state: currentOrg.state ?? null,
           phone: currentOrg.phone ?? null,
           website: currentOrg.website ?? null,
-          bio: currentOrg.bio ?? null,
         };
         const { data: newOrgData, error: insertErr } = await supabase
           .from('organizations')
@@ -201,6 +208,7 @@ export default function CompanyProfile() {
       setOrg({ ...currentOrg, logo_url: logoUrl });
       toast.success('Logo uploaded successfully!');
     } catch (err: any) {
+      // Consistent "logos" (plural) bucket name in error (confirmed in all storage.from('logos') calls below).
       toast.error('Logo upload failed: ' + (err.message || err) + '\n(Make sure "logos" storage bucket exists and has proper policies.)');
     }
     setUploadingLogo(false);
@@ -289,10 +297,10 @@ export default function CompanyProfile() {
         city: newCustomer.city || null,
         state: newCustomer.state || null,
         phone: newCustomer.contactPhone || null,
-        // bio column added via 20260614 migration for contact info storage on customer orgs
-        bio: (newCustomer.contactName || newCustomer.contactEmail || newCustomer.notes)
-          ? `Contact: ${newCustomer.contactName || ''} (${newCustomer.contactEmail || ''}, ${newCustomer.contactPhone || ''})\n${newCustomer.notes || ''}`
-          : null,
+        // bio for customer contact summary omitted from insert to prevent schema cache / missing column errors.
+        // 'bio' column on organizations requires the migration (see comments in saveOrg/uploadLogo and the SQL below).
+        // Once migration applied, we can re-enable storing contact notes in org.bio for customers.
+        // For now, the notes/contact are in the form but not persisted to org until column exists (or use other fields).
         laser_models: newCustomer.selectedEquipment.length ? newCustomer.selectedEquipment.join(' | ') : null,
         facility_type: 'Clinic', // can be enhanced with select
       };

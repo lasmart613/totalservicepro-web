@@ -81,6 +81,8 @@ export default function OwnerSignup() {
       }
 
       // Create customer organization
+      // IMPORTANT: omit 'bio' from org insert to avoid schema cache errors if 'bio' column not yet added to organizations table.
+      // (Bio collected here is saved to user_profiles.bio instead. Org-level bio for customers requires the migration.)
       const orgInsert: any = {
         name: facilityName,
         type: 'customer',
@@ -92,7 +94,6 @@ export default function OwnerSignup() {
         num_lasers: numLasers ? parseInt(numLasers, 10) : null,
         laser_models: selectedModels.length ? selectedModels.join(', ') : null,
         preferred_services: selectedServices.length ? selectedServices.join(' | ') : null,
-        bio: bio || null,
       };
 
       const { data: orgData, error: orgError } = await supabase

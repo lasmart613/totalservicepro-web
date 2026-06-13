@@ -72,6 +72,9 @@ export default function CompanySignup() {
       }
 
       // 2. Create organization (type service_company)
+      // IMPORTANT: only guaranteed columns for insert (name, type, address, city, state, phone, website + extra like num_techs etc that exist).
+      // 'bio' on organizations requires running the ADD COLUMN migration + schema reload (see company/page.tsx and SQL below).
+      // Bio from signup form is saved to user_profiles.bio (which has the column); org bio can be added later.
       const orgInsert = {
         name: companyName,
         type: 'service_company',
@@ -81,7 +84,6 @@ export default function CompanySignup() {
         phone: phone || null,
         // website not in base type but flexible column or add later; Supabase accepts extra
         website: website || null,
-        bio: bio || null,
         num_techs: numTechs ? parseInt(numTechs, 10) : null,
         tax_id: taxId || null,
         services_offered: selectedServices.length ? selectedServices.join(' | ') : null,
