@@ -25,13 +25,45 @@ export default function ServiceSchedule() {
         if (!user) return;
 
         const { data, error } = await supabase
-          .from('service_schedule') // ← Change table name if needed
-          .select('*')
-          .eq('fse_id', user.id)
-          .order('date', { ascending: true });
+          .from('service_tickets')
+          .select(`
+            id,
+            service_date,
+            scheduled_time,
+            end_time,
+            service_type,
+            customer_name,
+            status,
+            priority
+          `)
+          .eq('assigned_to', user.id)
+          .in('status', ['Scheduled', 'En Route', 'On Site'])
+          .order('service_date', { ascending: true });
 
         if (error) throw error;
-        setServiceCalls(data || []);
+
+        // Transform data for the calendar
+        const formatted = (data || []).map((ticket: any) => {
+          const start = ticket.scheduled_time;
+          const end = ticket.end_time;
+
+          let duration = 60;
+          if (start && end) {
+            const [sh, sm] = start.split(':').map(Number);
+            const [eh, em] = end.split(':').map(Number);
+            duration = (eh * 60 + em) - (sh * 60 + sm);
+          }
+
+          return {
+            id: ticket.id,
+            date: ticket.service_date,
+            time: start || '09:00',
+            duration: duration > 0 ? duration : 60,
+            title: `${ticket.service_type || 'Service'} - ${ticket.customer_name}`,
+          };
+        });
+
+        setServiceCalls(formatted);
       } catch (err) {
         console.error('Error fetching service calls:', err);
         setServiceCalls([]);
@@ -57,12 +89,12 @@ export default function ServiceSchedule() {
   const nextDay = () => setDayOffset(prev => prev + 1);
   const prevDay = () => setDayOffset(prev => prev - 1);
 
-  // Generate calendar days
+  // Calendar generation
   const firstDay = new Date(2026, currentMonth - 1, 1).getDay();
   const daysInMonth = new Date(2026, currentMonth, 0).getDate();
   const calendarDays = Array(firstDay).fill(null).concat(Array.from({ length: daysInMonth }, (_, i) => i + 1));
 
-  const timeSlots = Array.from({ length: 16 }, (_, i) => 6 + i); // 6am - 9pm
+  const timeSlots = Array.from({ length: 16 }, (_, i) => 6 + i);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -171,7 +203,7 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* DAY VIEW - Single day with narrow time column */}
+        {/* DAY VIEW - Narrow time column + hourly grid */}
         {view === 'day' && (
           <div className="card p-6 overflow-x-auto">
             <div className="flex justify-between items-center mb-6">
@@ -182,7 +214,7 @@ export default function ServiceSchedule() {
               <button onClick={nextDay} className="btn btn-secondary p-3"><ChevronRight size={20} /></button>
             </div>
 
-            <div className="grid grid-cols-[80px_1fr] gap-px bg-[var(--border)] min-w-[600px]">
+            <div className="grid grid-cols-[70px_1fr] gap-px bg-[var(--border)] min-w-[600px]">
               {/* Narrow time column */}
               <div className="bg-[var(--surface)]">
                 {timeSlots.map(h => (
@@ -192,7 +224,7 @@ export default function ServiceSchedule() {
                 ))}
               </div>
 
-              {/* Calls column with gold blocks */}
+              {/* Calls column */}
               <div className="bg-[var(--surface)] relative">
                 {timeSlots.map(h => (
                   <div key={h} className="h-12 border-b border-[var(--border)]"></div>
