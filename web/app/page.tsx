@@ -403,8 +403,8 @@ export default function Dashboard() {
                 <Package size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
               </div>
               <div className="font-bold text-xl mb-1">Parts Supplier</div>
-              <div className="text-sm text-[var(--text3)] mb-4 break-words hyphens-auto">Suppliers of consumables, handpieces, optics. Creates organization. Role: parts_supplier</div>
-              <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)] break-words">
+              <div className="text-[13px] text-[var(--text3)] mb-4 break-words hyphens-auto break-all leading-tight">Suppliers of consumables, handpieces, optics. Creates organization. Role: parts_supplier</div>
+              <ul className="text-[13px] space-y-1.5 mb-5 text-[var(--text2)] break-words break-all leading-tight">
                 <li>• Consumables, handpieces, optics</li>
                 <li>• Staff &amp; business details</li>
                 <li>• List parts &amp; respond (beta)</li>
