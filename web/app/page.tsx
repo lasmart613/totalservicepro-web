@@ -398,17 +398,16 @@ export default function Dashboard() {
             </Link>
 
             {/* Parts Supplier Card */}
-            <Link href="/signup/supplier" className="card p-6 hover:border-[var(--gold-border)] group">
+            <Link href="/signup/supplier" className="card p-6 hover:border-[var(--gold-border)] group min-w-0">
               <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
                 <Package size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
               </div>
               <div className="font-bold text-xl mb-1">Parts Supplier</div>
               <div className="text-sm text-[var(--text3)] mb-4 break-words hyphens-auto">Suppliers of consumables, handpieces, optics. Creates organization. Role: parts_supplier</div>
-              <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
-                <li>• Company details, website</li>
-                <li>• Parts categories supplied (Consumables/Handpieces/Optics...)</li>
-                <li>• Staff / business details</li>
-                <li>• List parts &amp; respond to owner needs (beta)</li>
+              <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)] break-words">
+                <li>• Consumables, handpieces, optics</li>
+                <li>• Staff &amp; business details</li>
+                <li>• List parts &amp; respond (beta)</li>
               </ul>
               <div className="btn btn-primary w-full text-center">Sign Up as Parts Supplier →</div>
             </Link>
