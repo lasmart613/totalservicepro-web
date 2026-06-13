@@ -21,7 +21,7 @@ export default function SignupIndex() {
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
           {/* FSE Card */}
-          <Link href="/signup/fse" className="card p-6 hover:border-[var(--gold-border)] group">
+          <Link href="/signup/fse" className="card p-6 hover:border-[var(--gold-border)] group flex flex-col min-w-0">
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
               <User size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
@@ -37,7 +37,7 @@ export default function SignupIndex() {
           </Link>
 
           {/* Company Card */}
-          <Link href="/signup/company" className="card p-6 hover:border-[var(--gold-border)] group">
+          <Link href="/signup/company" className="card p-6 hover:border-[var(--gold-border)] group flex flex-col min-w-0">
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
               <Building2 size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
@@ -53,7 +53,7 @@ export default function SignupIndex() {
           </Link>
 
           {/* Owner Card */}
-          <Link href="/signup/owner" className="card p-6 hover:border-[var(--gold-border)] group">
+          <Link href="/signup/owner" className="card p-6 hover:border-[var(--gold-border)] group flex flex-col min-w-0">
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
               <Hospital size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
@@ -69,7 +69,7 @@ export default function SignupIndex() {
           </Link>
 
           {/* Parts Supplier Card */}
-          <Link href="/signup/supplier" className="card p-6 hover:border-[var(--gold-border)] group min-w-0">
+          <Link href="/signup/supplier" className="card p-6 hover:border-[var(--gold-border)] group flex flex-col min-w-0">
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
               <Package size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
