@@ -15,6 +15,11 @@ const PREFERRED_SERVICE_OPTIONS = [
 
 const modelKeys = Object.keys(MODELS);
 
+interface EquipmentItem {
+  modelKey: string;
+  serialNumber: string;
+}
+
 export default function OwnerSignup() {
   const [facilityName, setFacilityName] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -28,7 +33,9 @@ export default function OwnerSignup() {
   const [state, setState] = useState('');
   const [facilityType, setFacilityType] = useState('Clinic');
   const [numLasers, setNumLasers] = useState('');
-  const [selectedModels, setSelectedModels] = useState<string[]>([]);
+  const [equipmentList, setEquipmentList] = useState<EquipmentItem[]>([]);
+  const [currentModel, setCurrentModel] = useState('');
+  const [currentSerial, setCurrentSerial] = useState('');
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [bio, setBio] = useState('');
   const [message, setMessage] = useState('');
@@ -36,21 +43,31 @@ export default function OwnerSignup() {
   const router = useRouter();
   const supabase = getSupabaseClient();
 
-  const toggleModel = (key: string) => {
-    setSelectedModels(prev =>
-      prev.includes(key) ? prev.filter(k => k !== key) : [...prev, key]
-    );
-  };
-
   const toggleService = (svc: string) => {
     setSelectedServices(prev =>
       prev.includes(svc) ? prev.filter(s => s !== svc) : [...prev, svc]
     );
   };
 
+  const addEquipment = () => {
+    if (!currentModel || !currentSerial.trim()) {
+      setMessage('Please select a model and enter a serial number.');
+      return;
+    }
+    setEquipmentList(prev => [...prev, { modelKey: currentModel, serialNumber: currentSerial.trim() }]);
+    setCurrentModel('');
+    setCurrentSerial('');
+    setMessage('');
+  };
+
+  const removeEquipment = (index: number) => {
+    setEquipmentList(prev => prev.filter((_, i) => i !== index));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage('');
+
     if (!facilityName || !firstName || !lastName || !email || !password) {
       setMessage('Facility name, contact name, email and password are required.');
       return;
@@ -63,9 +80,11 @@ export default function OwnerSignup() {
       setMessage('Passwords do not match.');
       return;
     }
+
     setLoading(true);
 
     try {
+      // 1. Create auth user
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
@@ -80,9 +99,7 @@ export default function OwnerSignup() {
         return;
       }
 
-      // Create customer organization
-      // IMPORTANT: omit 'bio' from org insert to avoid schema cache errors if 'bio' column not yet added to organizations table.
-      // (Bio collected here is saved to user_profiles.bio instead. Org-level bio for customers requires the migration.)
+      // 2. Create organization (Laser Clinic / Customer)
       const orgInsert: any = {
         name: facilityName,
         type: 'customer',
@@ -92,7 +109,6 @@ export default function OwnerSignup() {
         phone: phone || null,
         facility_type: facilityType,
         num_lasers: numLasers ? parseInt(numLasers, 10) : null,
-        laser_models: selectedModels.length ? selectedModels.join(', ') : null,
         preferred_services: selectedServices.length ? selectedServices.join(' | ') : null,
       };
 
@@ -103,12 +119,12 @@ export default function OwnerSignup() {
         .single();
 
       if (orgError) {
-        console.error('Customer org create error (verify RLS):', orgError);
+        console.error('Organization creation error:', orgError);
       }
 
       const newOrgId = orgData?.id ?? null;
 
-      // Profile as owner
+      // 3. Create user profile as owner
       const profileData: any = {
         id: userId,
         first_name: firstName,
@@ -122,21 +138,32 @@ export default function OwnerSignup() {
         bio: bio || null,
       };
 
-      const { error: profErr } = await supabase.from('user_profiles').upsert(profileData, { onConflict: 'id' });
-      if (profErr) console.warn('Profile upsert:', profErr);
+      await supabase.from('user_profiles').upsert(profileData, { onConflict: 'id' });
+
+      // 4. Insert individual equipment records (if any were added)
+      if (newOrgId && equipmentList.length > 0) {
+        const equipmentRows = equipmentList.map(item => ({
+          organization_id: newOrgId,
+          manufacturer: MODELS[item.modelKey]?.manufacturer || 'Unknown',
+          model: MODELS[item.modelKey]?.label || item.modelKey,
+          serial_number: item.serialNumber,
+          status: 'Active',
+        }));
+
+        const { error: equipError } = await supabase.from('equipment').insert(equipmentRows);
+        if (equipError) {
+          console.warn('Equipment insert warning:', equipError);
+        }
+      }
 
       if (authData.session) {
-        router.push('/marketplace'); // Nice: send owners straight to post a need
+        router.push('/marketplace');
       } else {
-        setMessage('Account created! Check your email to confirm, then sign in. Visit Marketplace to post service needs.');
+        setMessage('Account created! Check your email to confirm, then sign in and visit Marketplace to post service needs.');
       }
     } catch (err: any) {
       const msg = err.message || 'Owner sign up failed.';
-      if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('user already exists') || msg.toLowerCase().includes('duplicate')) {
-        setMessage('An account with this email already exists. Please check your email (including spam) for a confirmation link from a previous signup attempt. If a prior signup failed after auth but before organization/profile creation, a partial auth user may remain – try a different email or ask an admin to clean up the auth.users table in Supabase. You can also try signing in.');
-      } else {
-        setMessage(msg);
-      }
+      setMessage(msg);
     } finally {
       setLoading(false);
     }
@@ -156,15 +183,16 @@ export default function OwnerSignup() {
 
         <div className="card p-6">
           {message && (
-            <div className={`mb-4 p-3 rounded text-sm ${message.includes('created') || message.includes('Check') || message.includes('Marketplace') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+            <div className={`mb-4 p-3 rounded text-sm ${message.includes('created') || message.includes('Check') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
               {message}
             </div>
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
+            {/* Facility & Contact Info - kept same */}
             <div>
               <label className="label">Facility / Company Name *</label>
-              <input className="input" value={facilityName} onChange={e => setFacilityName(e.target.value)} required placeholder="Acme Dermatology &amp; Laser" />
+              <input className="input" value={facilityName} onChange={e => setFacilityName(e.target.value)} required />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -201,8 +229,9 @@ export default function OwnerSignup() {
 
             <div>
               <label className="label">Address</label>
-              <input className="input" value={address} onChange={e => setAddress(e.target.value)} placeholder="456 Wellness Blvd" />
+              <input className="input" value={address} onChange={e => setAddress(e.target.value)} />
             </div>
+
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">City</label>
@@ -221,27 +250,65 @@ export default function OwnerSignup() {
               </select>
             </div>
 
+            {/* NEW: Equipment Entry with Dropdowns + Serial Number */}
             <div>
-              <label className="label">Number of Laser Systems</label>
-              <input className="input" type="number" min="0" value={numLasers} onChange={e => setNumLasers(e.target.value)} placeholder="3" />
-            </div>
-
-            <div>
-              <label className="label">Laser Models Owned (select all that apply)</label>
-              <div className="max-h-36 overflow-auto border border-[var(--border2)] rounded p-2 bg-[var(--surface3)] grid grid-cols-1 sm:grid-cols-2 gap-x-3 gap-y-0.5 text-sm">
-                {modelKeys.map(key => (
-                  <label key={key} className="flex items-center gap-2 cursor-pointer py-0.5">
-                    <input
-                      type="checkbox"
-                      checked={selectedModels.includes(key)}
-                      onChange={() => toggleModel(key)}
-                      className="accent-[var(--gold)]"
+              <label className="label">Equipment You Own</label>
+              <div className="border border-[var(--border)] rounded p-4 bg-[var(--surface3)] space-y-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div>
+                    <label className="text-xs text-[var(--text3)]">Model</label>
+                    <select 
+                      className="select" 
+                      value={currentModel} 
+                      onChange={e => setCurrentModel(e.target.value)}
+                    >
+                      <option value="">Select model...</option>
+                      {modelKeys.map(key => (
+                        <option key={key} value={key}>{MODELS[key]?.label || key}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-xs text-[var(--text3)]">Serial Number</label>
+                    <input 
+                      className="input" 
+                      placeholder="Serial #" 
+                      value={currentSerial} 
+                      onChange={e => setCurrentSerial(e.target.value)} 
                     />
-                    <span>{MODELS[key]?.label || key}</span>
-                  </label>
-                ))}
+                  </div>
+                  <div className="flex items-end">
+                    <button 
+                      type="button" 
+                      onClick={addEquipment} 
+                      className="btn btn-secondary w-full"
+                    >
+                      Add Equipment
+                    </button>
+                  </div>
+                </div>
+
+                {/* List of added equipment */}
+                {equipmentList.length > 0 && (
+                  <div className="mt-3 space-y-2">
+                    {equipmentList.map((item, index) => (
+                      <div key={index} className="flex justify-between items-center bg-[var(--surface)] p-2 rounded text-sm">
+                        <span>
+                          {MODELS[item.modelKey]?.label || item.modelKey} — <span className="font-mono">{item.serialNumber}</span>
+                        </span>
+                        <button 
+                          type="button" 
+                          onClick={() => removeEquipment(index)} 
+                          className="text-red-400 hover:text-red-500 text-xs"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
-              <p className="text-[10px] text-[var(--text3)] mt-1">Used to match you with qualified Service Companies and their FSE team members.</p>
+              <p className="text-[10px] text-[var(--text3)] mt-1">Add each laser system you own with its serial number.</p>
             </div>
 
             <div>
@@ -262,7 +329,7 @@ export default function OwnerSignup() {
 
             <div>
               <label className="label">Notes / Bio (optional)</label>
-              <textarea className="input" rows={2} value={bio} onChange={e => setBio(e.target.value)} placeholder="Current service provider, contract renewal dates, special requirements..." />
+              <textarea className="input" rows={2} value={bio} onChange={e => setBio(e.target.value)} placeholder="Current service provider, contract details..." />
             </div>
 
             <button
@@ -270,7 +337,7 @@ export default function OwnerSignup() {
               disabled={loading}
               className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
             >
-              {loading ? 'Creating owner account...' : 'Create Owner Account & Post Needs'}
+              {loading ? 'Creating account...' : 'Create Owner Account'}
             </button>
           </form>
 
@@ -278,10 +345,6 @@ export default function OwnerSignup() {
             <Link href="/login" className="text-[var(--gold)] hover:underline">Already have an account? Sign in</Link>
           </div>
         </div>
-
-        <p className="text-center text-xs text-[var(--text3)] mt-6">
-          Organization of type <code>customer</code> created. After signup, visit <Link href="/marketplace" className="text-[var(--gold)] underline">Marketplace</Link> to post your first service need (then review bids from Service Companies and their FSEs and accept to create contracts).
-        </p>
       </div>
     </div>
   );
