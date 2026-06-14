@@ -12,7 +12,7 @@ export default function Marketplace() {
   const [organization, setOrganization] = useState<any>(null);
   const [parts, setParts] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedManufacturer, setSelectedManufacturer] = useState('');
+  const [selectedBrand, setSelectedBrand] = useState('');
   const [loading, setLoading] = useState(true);
 
   const supabase = getSupabaseClient();
@@ -60,20 +60,21 @@ export default function Marketplace() {
     loadData();
   }, [supabase, organization?.type]);
 
-  // Dynamic manufacturers for filter
-  const manufacturers = [...new Set(parts.map(p => p.manufacturer).filter(Boolean))].sort();
+  // Get unique brands from the loaded parts (using 'brand' column)
+  const brands = [...new Set(parts.map(p => p.brand).filter(Boolean))].sort();
 
   // Filtered parts
   const filteredParts = parts.filter(part => {
-    const matchesSearch = !searchTerm || 
+    const matchesSearch =
+      !searchTerm ||
       (part.name && part.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (part.description && part.description.toLowerCase().includes(searchTerm.toLowerCase())) ||
       (part.part_number && part.part_number.toLowerCase().includes(searchTerm.toLowerCase())) ||
-      (part.manufacturer && part.manufacturer.toLowerCase().includes(searchTerm.toLowerCase()));
+      (part.brand && part.brand.toLowerCase().includes(searchTerm.toLowerCase()));
 
-    const matchesManufacturer = !selectedManufacturer || part.manufacturer === selectedManufacturer;
+    const matchesBrand = !selectedBrand || part.brand === selectedBrand;
 
-    return matchesSearch && matchesManufacturer;
+    return matchesSearch && matchesBrand;
   });
 
   if (loading) {
@@ -112,45 +113,37 @@ export default function Marketplace() {
             )}
           </div>
 
-          {/* Search + Filters */}
+          {/* Search + Brand Filter */}
           <div className="flex flex-col md:flex-row gap-4 mb-6">
             <input
               type="text"
-              placeholder="Search parts by name, description, part number..."
+              placeholder="Search parts..."
               className="input flex-1"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
             <select
               className="select w-full md:w-64"
-              value={selectedManufacturer}
-              onChange={(e) => setSelectedManufacturer(e.target.value)}
+              value={selectedBrand}
+              onChange={(e) => setSelectedBrand(e.target.value)}
             >
               <option value="">All Manufacturers</option>
-              {manufacturers.map(m => (
-                <option key={m} value={m}>{m}</option>
+              {brands.map(brand => (
+                <option key={brand} value={brand}>{brand}</option>
               ))}
             </select>
           </div>
 
           {filteredParts.length === 0 ? (
             <div className="card p-8 text-center">
-              <p className="text-[var(--text3)]">
-                {isLaserClinic 
-                  ? "No consumable parts match your search." 
-                  : "No parts found."}
-              </p>
+              <p className="text-[var(--text3)]">No parts match your search.</p>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredParts.map((part) => (
                 <div key={part.id} className="card overflow-hidden hover:border-[var(--gold)] transition-colors">
                   {part.image_url ? (
-                    <img 
-                      src={part.image_url} 
-                      alt={part.name} 
-                      className="w-full h-48 object-cover" 
-                    />
+                    <img src={part.image_url} alt={part.name} className="w-full h-48 object-cover" />
                   ) : (
                     <div className="w-full h-48 bg-[var(--surface3)] flex items-center justify-center">
                       <Package className="w-12 h-12 text-[var(--text3)]" />
@@ -158,7 +151,9 @@ export default function Marketplace() {
                   )}
                   <div className="p-6">
                     <div className="font-bold text-lg mb-1">{part.name}</div>
-                    <div className="text-sm text-[var(--text3)] mb-2">{part.part_number} • {part.manufacturer}</div>
+                    <div className="text-sm text-[var(--text3)] mb-2">
+                      {part.part_number} • {part.brand}
+                    </div>
                     <div className="text-sm mb-4 line-clamp-3">{part.description}</div>
                     <div className="flex justify-between items-center">
                       <span className="font-medium text-[var(--gold)]">
