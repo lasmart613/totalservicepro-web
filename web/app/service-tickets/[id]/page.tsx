@@ -64,7 +64,7 @@ export default function ServiceTicketDetail() {
       toast.success('Ticket updated successfully!');
     } catch (err) {
       console.error('Error saving ticket:', err);
-      toast.error('Failed to save changes. Please try again.');
+      toast.error('Failed to save changes.');
     } finally {
       setSaving(false);
     }
@@ -145,12 +145,8 @@ export default function ServiceTicketDetail() {
                 </select>
               ) : ticket.priority} />
               <Field label="Service Type" value={ticket.service_type} />
-              <Field label="Description" value={isEditing ? (
-                <textarea className="input" rows={3} value={formData.description || ''} onChange={(e) => handleInputChange('description', e.target.value)} />
-              ) : ticket.description} multiline />
-              <Field label="Notes" value={isEditing ? (
-                <textarea className="input" rows={3} value={formData.notes || ''} onChange={(e) => handleInputChange('notes', e.target.value)} />
-              ) : ticket.notes} multiline />
+              <Field label="Description" value={isEditing ? <textarea className="input" rows={3} value={formData.description || ''} onChange={(e) => handleInputChange('description', e.target.value)} /> : ticket.description} multiline />
+              <Field label="Notes" value={isEditing ? <textarea className="input" rows={3} value={formData.notes || ''} onChange={(e) => handleInputChange('notes', e.target.value)} /> : ticket.notes} multiline />
             </div>
           </div>
 
@@ -158,7 +154,7 @@ export default function ServiceTicketDetail() {
           <div className="card p-6">
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Customer Information</h2>
             <div className="space-y-4">
-              <Field label="Customer Name" value={isEditing ? <input className="input" value={formData.customer_name || ''} onChange={(e) => handleInputChange('customer_name', e.target.value)} /> : ticket.customer_name} />
+              <Field label="Customer Name" value={isEditing ? <input className="input" placeholder="Enter customer name or select existing" value={formData.customer_name || ''} onChange={(e) => handleInputChange('customer_name', e.target.value)} /> : ticket.customer_name} />
               <Field label="Phone" value={isEditing ? <input className="input" value={formData.customer_phone || ''} onChange={(e) => handleInputChange('customer_phone', e.target.value)} /> : ticket.customer_phone} />
               <Field label="Email" value={isEditing ? <input className="input" value={formData.customer_email || ''} onChange={(e) => handleInputChange('customer_email', e.target.value)} /> : ticket.customer_email} />
               <Field label="Address" value={isEditing ? <input className="input" value={formData.customer_address || formData.address || ''} onChange={(e) => handleInputChange('customer_address', e.target.value)} /> : (ticket.customer_address || ticket.address)} />
@@ -168,7 +164,7 @@ export default function ServiceTicketDetail() {
             </div>
           </div>
 
-          {/* Equipment Information (Expanded) */}
+          {/* Equipment Information (Full) */}
           <div className="card p-6">
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Equipment Information</h2>
             <div className="space-y-4">
