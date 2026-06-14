@@ -6,6 +6,7 @@ import { useParams } from 'next/navigation';
 import { Header } from '../../../components/Header';
 import { getSupabaseClient } from '../../../lib/supabase/client';
 import { ArrowLeft, Edit2, Save, X } from 'lucide-react';
+import { toast } from 'sonner';
 
 export default function ServiceTicketDetail() {
   const params = useParams();
@@ -60,10 +61,10 @@ export default function ServiceTicketDetail() {
 
       setTicket(formData);
       setIsEditing(false);
-      alert('Ticket updated successfully!');
+      toast.success('Ticket updated successfully!');
     } catch (err) {
       console.error('Error saving ticket:', err);
-      alert('Failed to save changes.');
+      toast.error('Failed to save changes. Please try again.');
     } finally {
       setSaving(false);
     }
@@ -133,11 +134,39 @@ export default function ServiceTicketDetail() {
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Ticket Information</h2>
             <div className="space-y-4">
               <Field label="Ticket Number" value={ticket.ticket_number} />
-              <Field label="Status" value={ticket.status} />
-              <Field label="Priority" value={ticket.priority} />
+              <Field 
+                label="Status" 
+                value={isEditing ? (
+                  <select className="input" value={formData.status || ''} onChange={(e) => handleInputChange('status', e.target.value)}>
+                    {['Awaiting Scheduling','Scheduled','En Route','On Site','Parts Ordered','Completed','Cancelled'].map(s => (
+                      <option key={s} value={s}>{s}</option>
+                    ))}
+                  </select>
+                ) : ticket.status} 
+              />
+              <Field 
+                label="Priority" 
+                value={isEditing ? (
+                  <select className="input" value={formData.priority || ''} onChange={(e) => handleInputChange('priority', e.target.value)}>
+                    {['Low','Medium','High','Emergency'].map(p => <option key={p} value={p}>{p}</option>)}
+                  </select>
+                ) : ticket.priority} 
+              />
               <Field label="Service Type" value={ticket.service_type} />
-              <Field label="Description" value={ticket.description} multiline />
-              <Field label="Notes" value={ticket.notes} multiline />
+              <Field 
+                label="Description" 
+                value={isEditing ? (
+                  <textarea className="input" rows={3} value={formData.description || ''} onChange={(e) => handleInputChange('description', e.target.value)} />
+                ) : ticket.description} 
+                multiline 
+              />
+              <Field 
+                label="Notes" 
+                value={isEditing ? (
+                  <textarea className="input" rows={3} value={formData.notes || ''} onChange={(e) => handleInputChange('notes', e.target.value)} />
+                ) : ticket.notes} 
+                multiline 
+              />
             </div>
           </div>
 
