@@ -2,14 +2,13 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { useParams, useRouter } from 'next/navigation';
-import { Header } from '../../components/Header';
-import { getSupabaseClient } from '../../lib/supabase/client';
-import { ArrowLeft, Edit2, Save, X, Clock } from 'lucide-react';
+import { useParams } from 'next/navigation';
+import { Header } from '../../../components/Header';
+import { getSupabaseClient } from '../../../lib/supabase/client';
+import { ArrowLeft, Edit2, Save, X } from 'lucide-react';
 
 export default function ServiceTicketDetail() {
   const params = useParams();
-  const router = useRouter();
   const ticketId = params.id as string;
 
   const [ticket, setTicket] = useState<any>(null);
@@ -17,37 +16,23 @@ export default function ServiceTicketDetail() {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const [saving, setSaving] = useState(false);
-  const [statusHistory, setStatusHistory] = useState<any[]>([]);
 
   const supabase = getSupabaseClient();
 
-  // Fetch ticket + status history
   useEffect(() => {
     const fetchTicket = async () => {
       if (!ticketId) return;
-
       setLoading(true);
       try {
-        // Fetch main ticket
-        const { data: ticketData, error: ticketError } = await supabase
+        const { data, error } = await supabase
           .from('service_tickets')
           .select('*')
           .eq('id', ticketId)
           .single();
 
-        if (ticketError) throw ticketError;
-
-        setTicket(ticketData);
-        setFormData(ticketData);
-
-        // Fetch status history (if table exists)
-        const { data: historyData } = await supabase
-          .from('service_ticket_status_history')
-          .select('*')
-          .eq('ticket_id', ticketId)
-          .order('changed_at', { ascending: false });
-
-        setStatusHistory(historyData || []);
+        if (error) throw error;
+        setTicket(data);
+        setFormData(data);
       } catch (err) {
         console.error('Error fetching ticket:', err);
       } finally {
@@ -64,46 +49,17 @@ export default function ServiceTicketDetail() {
 
   const handleSave = async () => {
     if (!ticketId) return;
-
     setSaving(true);
     try {
-      const oldStatus = ticket.status;
-      const newStatus = formData.status;
-
-      // Update the ticket
       const { error } = await supabase
         .from('service_tickets')
-        .update({
-          ...formData,
-          updated_at: new Date().toISOString(),
-        })
+        .update({ ...formData, updated_at: new Date().toISOString() })
         .eq('id', ticketId);
 
       if (error) throw error;
 
-      // Log status change if status was changed
-      if (oldStatus !== newStatus) {
-        await supabase.from('service_ticket_status_history').insert({
-          ticket_id: ticketId,
-          old_status: oldStatus,
-          new_status: newStatus,
-          changed_by: (await supabase.auth.getUser()).data.user?.id,
-          changed_at: new Date().toISOString(),
-        });
-      }
-
       setTicket(formData);
       setIsEditing(false);
-
-      // Refresh history
-      const { data: newHistory } = await supabase
-        .from('service_ticket_status_history')
-        .select('*')
-        .eq('ticket_id', ticketId)
-        .order('changed_at', { ascending: false });
-
-      setStatusHistory(newHistory || []);
-
       alert('Ticket updated successfully!');
     } catch (err) {
       console.error('Error saving ticket:', err);
@@ -177,18 +133,8 @@ export default function ServiceTicketDetail() {
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Ticket Information</h2>
             <div className="space-y-4">
               <Field label="Ticket Number" value={ticket.ticket_number} />
-              <Field label="Status" value={isEditing ? (
-                <select className="input" value={formData.status} onChange={(e) => handleInputChange('status', e.target.value)}>
-                  {['Awaiting Scheduling', 'Scheduled', 'En Route', 'On Site', 'Parts Ordered', 'Completed', 'Cancelled'].map(s => (
-                    <option key={s} value={s}>{s}</option>
-                  ))}
-                </select>
-              ) : ticket.status} />
-              <Field label="Priority" value={isEditing ? (
-                <select className="input" value={formData.priority} onChange={(e) => handleInputChange('priority', e.target.value)}>
-                  {['Low', 'Medium', 'High', 'Emergency'].map(p => <option key={p} value={p}>{p}</option>)}
-                </select>
-              ) : ticket.priority} />
+              <Field label="Status" value={ticket.status} />
+              <Field label="Priority" value={ticket.priority} />
               <Field label="Service Type" value={ticket.service_type} />
               <Field label="Description" value={ticket.description} multiline />
               <Field label="Notes" value={ticket.notes} multiline />
@@ -243,41 +189,12 @@ export default function ServiceTicketDetail() {
               <Field label="Last Updated" value={ticket.updated_at} />
             </div>
           </div>
-
-          {/* Status History Log */}
-          <div className="card p-6 lg:col-span-2">
-            <h2 className="text-xl font-bold mb-4 flex items-center gap-2">
-              <Clock size={20} /> Status History
-            </h2>
-            {statusHistory.length > 0 ? (
-              <div className="space-y-3">
-                {statusHistory.map((entry, index) => (
-                  <div key={index} className="bg-[var(--surface3)] p-4 rounded-xl text-sm">
-                    <div className="flex justify-between">
-                      <span className="font-medium">
-                        {entry.old_status} → <span className="text-[var(--gold)]">{entry.new_status}</span>
-                      </span>
-                      <span className="text-[var(--text3)] text-xs">
-                        {new Date(entry.changed_at).toLocaleString()}
-                      </span>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : (
-              <p className="text-[var(--text3)] text-sm">No status history recorded yet.</p>
-            )}
-            <p className="text-xs text-[var(--text3)] mt-4">
-              Status changes are automatically logged when you update the ticket.
-            </p>
-          </div>
         </div>
       </div>
     </div>
   );
 }
 
-// Reusable Field component
 function Field({ label, value, multiline = false }: { label: string; value: any; multiline?: boolean }) {
   if (!value && value !== false) return null;
 
