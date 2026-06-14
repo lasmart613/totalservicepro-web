@@ -268,7 +268,7 @@ export default function CompanySignup() {
         </div>
 
         <p className="text-center text-xs text-[var(--text3)] mt-6">
-          Organization of type <code>service_company</code> is created and linked to your profile with role <code>company_admin</code> (the signing-up user is the initial admin who can later add FSEs and other roles to the org via the Team section). For Parts Suppliers use the dedicated /signup/supplier flow (type `parts_supplier`). FSEs sign up separately then get assigned here. You can manage company profile after login.
+          First, org of type <code>service_company</code> is created + linked to your profile with role <code>company_admin</code> (creator is the admin by default). Redirects to /company for initial onboarding flow: use the Team section there to add people and their roles to the organization (multiple team members/roles supported: fse/dispatcher/service_manager/company_admin etc). The creator appears pre-populated as admin (can edit role in roster); each org must keep at least one admin. Sole proprietorships: one person holds admin (or other primary) + notes multiple roles via job_title. Roster + add form + CRM on /company. FSEs sign up individually then assigned here. (Parts supplier uses separate flow.)
         </p>
       </div>
     </div>

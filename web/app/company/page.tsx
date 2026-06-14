@@ -7,6 +7,33 @@ import { MODELS } from '../../lib/models';
 import { toast } from 'sonner';
 
 const TEAM_ROLES = ['fse', 'dispatcher', 'service_manager', 'company_admin', 'admin'];
+const ADMIN_ROLES = ['admin', 'company_admin'];
+
+// Minimal logic addition for onboarding flow: ensure creator (account owner) is always defaulted to company_admin
+// with the org linked. Called during /company load (post /signup/company org creation, or direct landing for new users).
+// Supports: creator admin by default (but role changeable via roster), each org at least 1 admin (enforced elsewhere), sole prop (creator can hold the admin role while using job_title for additional responsibilities).
+async function ensureCreatorIsAdmin(supabase: any, orgId: any) {
+  if (!orgId) return;
+  try {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: prof } = await supabase
+      .from('user_profiles')
+      .select('organization_id, role')
+      .eq('id', user.id)
+      .maybeSingle();
+    const needsLink = !prof?.organization_id || prof.organization_id !== orgId;
+    const needsAdminRole = !prof?.role || !ADMIN_ROLES.includes(prof.role);
+    if (needsLink || needsAdminRole) {
+      await supabase.from('user_profiles').update({
+        organization_id: orgId,
+        role: 'company_admin'
+      }).eq('id', user.id);
+    }
+  } catch (e) {
+    console.warn('ensureCreatorIsAdmin non-fatal:', e);
+  }
+}
 
 export default function CompanyProfile() {
   const [org, setOrg] = useState<any>({});
@@ -16,6 +43,7 @@ export default function CompanyProfile() {
   const [newMember, setNewMember] = useState({ email: '', firstName: '', lastName: '', role: 'fse' });
   const [addMessage, setAddMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const initialTeamMessageShownRef = useRef(false);
   const supabase = getSupabaseClient();
   const [userRole, setUserRole] = useState('');
   const [loadingOrg, setLoadingOrg] = useState(true);
@@ -55,7 +83,9 @@ export default function CompanyProfile() {
       if (prof?.organizations) {
         setOrg(prof.organizations);
         setUserRole(prof.role || '');
-        await loadTeamMembers((prof.organizations as any)?.id);
+        const orgId = (prof.organizations as any)?.id;
+        await ensureCreatorIsAdmin(supabase, orgId);
+        await loadTeamMembers(orgId);
         await loadCustomers();
       } else if (prof?.organization_id) {
         try {
@@ -67,7 +97,9 @@ export default function CompanyProfile() {
           if (orgData) {
             setOrg(orgData);
             setUserRole(prof.role || '');
-            await loadTeamMembers((orgData as any).id);
+            const orgId = (orgData as any).id;
+            await ensureCreatorIsAdmin(supabase, orgId);
+            await loadTeamMembers(orgId);
             await loadCustomers();
           }
         } catch (e) {
@@ -85,7 +117,66 @@ export default function CompanyProfile() {
       .select('id, first_name, last_name, email, role, job_title')
       .eq('organization_id', orgId)
       .order('role', { ascending: true });
-    setMembers(mems || []);
+    let loaded = mems || [];
+
+    // Pre-population logic extension for onboarding: always ensure the account creator appears in the roster
+    // as company_admin by default (editable via existing role selects in roster). This integrates the initial
+    // team+roles flow for new orgs (post /signup/company or /company landing): creator pre-added as admin,
+    // can be changed (subject to at least 1 admin rule), others added via the (unchanged) Add/Assign form.
+    // Supports sole proprietorships (one person as admin here + other duties noted in job_title).
+    // Merge keeps any other members (added people/roles) and avoids dups. No UI or form changes.
+    const { data: { user: currentUser } } = await supabase.auth.getUser();
+    if (currentUser) {
+      const hasCreator = loaded.some((m: any) => m.id === currentUser.id);
+      if (!hasCreator) {
+        // Fetch fresh self profile (may have just been ensured) to pre-pop roster for immediate visibility in initial onboarding
+        const { data: selfProf } = await supabase
+          .from('user_profiles')
+          .select('id, first_name, last_name, email, role, job_title')
+          .eq('id', currentUser.id)
+          .maybeSingle();
+        if (selfProf) {
+          loaded = [selfProf, ...loaded];
+        } else {
+          // Fallback synthetic pre-pop using minimal info (still shows creator as admin in roster immediately)
+          loaded = [{
+            id: currentUser.id,
+            first_name: (currentUser.user_metadata as any)?.first_name || '',
+            last_name: (currentUser.user_metadata as any)?.last_name || '',
+            email: currentUser.email || '',
+            role: 'company_admin',
+            job_title: 'Company Admin'
+          }, ...loaded];
+        }
+      }
+    }
+
+    setMembers(loaded);
+
+    // Post-load safeguard (logic only): if after pre-pop no admins remain (edge case), re-ensure creator as admin + reload to satisfy "each org should have at least one admin".
+    const isAdminRole = (r: string) => ADMIN_ROLES.includes(r);
+    const adminCount = loaded.filter((m: any) => isAdminRole(m.role || '')).length;
+    if (adminCount === 0 && orgId) {
+      await ensureCreatorIsAdmin(supabase, orgId);
+      // re-query to refresh loaded list with the ensured admin
+      const { data: refreshed } = await supabase.from('user_profiles').select('id, first_name, last_name, email, role, job_title').eq('organization_id', orgId);
+      let refreshedList = refreshed || [];
+      // re-apply the creator pre-pop merge if needed
+      const { data: { user: cu } } = await supabase.auth.getUser();
+      if (cu && !refreshedList.some((m: any) => m.id === cu.id)) {
+        const { data: sp } = await supabase.from('user_profiles').select('id, first_name, last_name, email, role, job_title').eq('id', cu.id).maybeSingle();
+        if (sp) refreshedList = [sp, ...refreshedList];
+      }
+      setMembers(refreshedList);
+      loaded = refreshedList;
+    }
+
+    // Flow refactor (no UI change): for new orgs (no/small team yet on initial /company load after /signup/company), emphasize initial team setup using the *existing* addMessage display area below the unchanged add form.
+    // Pre-emphasizes onboarding for adding people/roles. Ref guards against re-showing on every reload (e.g. after adds/role changes).
+    if (!initialTeamMessageShownRef.current && loaded.length <= 1) {
+      setAddMessage('Welcome — initial team setup as part of new org onboarding. Creator is admin by default (pre-filled/pre-populated in roster). Add multiple team members (email; they sign up first), choose roles from TEAM_ROLES (fse, dispatcher, service_manager, company_admin etc). Edit roles below (incl. your own as creator). Each org must have ≥1 admin. Sole proprietorships: one person holds admin + other roles (e.g. keep company_admin while acting as FSE/dispatcher etc; note additional roles in job_title via Profile).');
+      initialTeamMessageShownRef.current = true;
+    }
   }
 
   async function saveOrg() {
@@ -117,10 +208,12 @@ export default function CompanyProfile() {
         const newId = newOrgData.id;
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-          await supabase.from('user_profiles').update({ organization_id: newId }).eq('id', user.id);
+          // Ensure creator is admin by default on auto org create (fallback path for new signups landing at /company)
+          await supabase.from('user_profiles').update({ organization_id: newId, role: 'company_admin' }).eq('id', user.id);
         }
         currentOrg = { ...currentOrg, id: newId };
         setOrg(currentOrg);
+        await ensureCreatorIsAdmin(supabase, newId);
         await loadTeamMembers(newId);
         await loadCustomers();
         toast.success('Organization created and linked.');
@@ -178,10 +271,12 @@ export default function CompanyProfile() {
         const newId = newOrgData.id;
         const { data: { user } } = await supabase.auth.getUser();
         if (user) {
-          await supabase.from('user_profiles').update({ organization_id: newId }).eq('id', user.id);
+          // Ensure creator is admin by default on auto org create (fallback path for new signups landing at /company) - same as saveOrg
+          await supabase.from('user_profiles').update({ organization_id: newId, role: 'company_admin' }).eq('id', user.id);
         }
         currentOrg = { ...currentOrg, id: newId };
         setOrg(currentOrg);
+        await ensureCreatorIsAdmin(supabase, newId);
         await loadTeamMembers(newId);
         await loadCustomers();
         toast.success('Organization created and linked for logo upload.');
@@ -242,14 +337,14 @@ export default function CompanyProfile() {
             role: newMember.role,
             first_name: newMember.firstName || undefined,
             last_name: newMember.lastName || undefined,
-            job_title: newMember.role === 'dispatcher' ? 'Scheduler / Dispatcher' : undefined,
+            job_title: newMember.role === 'dispatcher' ? 'Scheduler / Dispatcher' : (newMember.role === 'company_admin' ? 'Company Admin' : (newMember.role === 'service_manager' ? 'Service Manager' : (newMember.role === 'fse' ? 'FSE / Engineer' : undefined))),
           })
           .eq('id', existing.id);
 
         if (error) throw error;
         setAddMessage('Team member linked/updated successfully.');
       } else {
-        setAddMessage('No account found for that email yet. Ask the person to sign up first (as individual via /signup/fse or the main signup, to get role fse), then try again to assign them to this Service Company (this sets their organization_id and confirms the fse role).');
+        setAddMessage('No account found for that email yet. Ask the person to sign up first (as individual via main signup or /signup/fse etc), then try again to assign them to this Service Company (this sets their organization_id + role inside the org). Org created at signup with creator as admin (pre-pop in roster); use this to add people and their roles to the organization during/after initial onboarding.');
         return;
       }
 
@@ -263,12 +358,41 @@ export default function CompanyProfile() {
 
   async function updateMemberRole(memberId: string, newRole: string) {
     try {
+      // Refactored flow logic (no UI change): enforce "each org must have at least one admin".
+      // Allows creator's role to be changed (via existing roster select; creator pre-populated as admin), but blocks if it would leave 0 admins.
+      // Supports sole prop: the one person keeps 'company_admin' (or 'admin') as primary role here while handling other duties (e.g. fse) noted in job_title (or Profile). Pre-pop + ensure in load paths keeps creator admin default during onboarding.
+      const { data: { user: currentUser } } = await supabase.auth.getUser();
+      const isAdminRole = (r: string) => ADMIN_ROLES.includes(r);
+
+      // Fresh query for accurate current admin count (state may be stale)
+      const { data: currentMems } = await supabase
+        .from('user_profiles')
+        .select('id, role')
+        .eq('organization_id', org.id);
+      const currentAdminsCount = (currentMems || []).filter(m => isAdminRole(m.role || '')).length;
+
+      const changing = (currentMems || []).find(m => m.id === memberId);
+      const wasAdmin = changing ? isAdminRole(changing.role || '') : false;
+      const willBeAdmin = isAdminRole(newRole);
+
+      if (wasAdmin && !willBeAdmin && currentAdminsCount <= 1) {
+        toast.error('Each organization must have at least one admin. Cannot remove the last admin (add another admin first if changing the creator or sole prop).');
+        // reload to revert any UI select temp change
+        await loadTeamMembers(org.id);
+        return;
+      }
+
       const { error } = await supabase
         .from('user_profiles')
         .update({ role: newRole })
         .eq('id', memberId);
       if (error) throw error;
       await loadTeamMembers(org.id);
+
+      // keep local state in sync if self (creator) changed role
+      if (currentUser && memberId === currentUser.id) {
+        setUserRole(newRole);
+      }
     } catch (err: any) {
       toast.error('Failed to update role: ' + (err.message || err));
     }
@@ -395,7 +519,7 @@ export default function CompanyProfile() {
         {/* Team Management - only for Service Company admins */}
         {org.type === 'service_company' && (userRole === 'service_manager' || userRole === 'company_admin') && (
         <div className="card p-6">
-          <h2 className="font-bold mb-4">Team Members (FSEs, Dispatchers, Admins, etc.) — roles added inside this Service Company org</h2>
+          <h2 className="font-bold mb-4">Team Members &amp; Roles — add people and their roles to the organization (part of initial onboarding flow). Creator is admin by default (pre-populated, editable). Roles: fse, dispatcher, service_manager, company_admin, admin etc inside this service_company org</h2>
 
           <div className="mb-6 p-4 bg-[var(--surface3)] rounded">
             <div className="font-semibold mb-2">Add / Assign Team Member</div>
@@ -429,13 +553,13 @@ export default function CompanyProfile() {
             </div>
             {addMessage && <div className="text-sm mt-2 text-[var(--text3)]">{addMessage}</div>}
             <p className="text-[10px] mt-2 text-[var(--text3)]">
-              FSEs (and other team roles) must sign up first as individuals (e.g. /signup/fse for fse role). Then company_admin / service_manager assigns them to this org here by email (this sets organization_id + role inside the service_company). First the org type (service_company) is chosen at signup, then roles are added to the organization.
+              Org created (type service_company at signup). Creator pre-populated as admin by default (changeable in roster below). Add people and their roles to the organization now (initial onboarding) or later. Each org must have ≥1 admin (enforced on role changes). FSEs/dispatchers sign up individually first (e.g. /signup/fse), then assign here by email (sets their organization_id + role). Sole proprietorships: one person can hold admin (primary role set here) + indicate multiple roles (e.g. also FSE) via their job_title in Profile.
             </p>
           </div>
 
           <div>
             <div className="font-semibold mb-2">Current Team ({members.length})</div>
-            {members.length === 0 && <div className="text-sm text-[var(--text3)]">No team members yet.</div>}
+            {members.length === 0 && <div className="text-sm text-[var(--text3)]">No team members yet (creator is pre-populated as company_admin in roster for initial org setup; use Add/Assign form above to add people and their roles to the organization).</div>}
             <div className="space-y-2">
               {members.map((m, idx) => (
                 <div key={idx} className="flex items-center justify-between border border-[var(--border)] rounded p-3 text-sm">
@@ -451,7 +575,7 @@ export default function CompanyProfile() {
                     >
                       {TEAM_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
                     </select>
-                    <span className="text-[10px] text-[var(--text3)]">(change role / set Admin / Dispatcher)</span>
+                    <span className="text-[10px] text-[var(--text3)]">(change role incl. creator's; must keep ≥1 admin in org)</span>
                   </div>
                 </div>
               ))}
@@ -527,21 +651,21 @@ export default function CompanyProfile() {
         )}
 
         <p className="text-[10px] text-[var(--text3)]">
-          Full multi-user company management, invitations, and permissions coming soon. This gives Service Companies the ability to manage team (FSEs, dispatchers/schedulers, admins — roles added to the service_company org) and company data. CRM allows adding customers (orgs of type customer) with full contact, address, and equipment data from the organizations table. First org type at signup, then roles inside.
+          Full multi-user company management, invitations, and permissions coming soon. (Invites/roster kept.) This gives Service Companies the ability to manage team (FSEs, dispatchers/schedulers, admins — roles added to the service_company org) and company data during/after initial onboarding. First org type (service_company) at /signup/company (creator=company_admin default, pre-populated), then use this page to add people and their roles to the organization as part of setup. CRM for customers too. Sole proprietorships supported: the (one) person sets primary admin role here; multiple roles noted in job_title.
         </p>
 
         {/* Thorough Onboarding Note / Checklist - shown for service company admins */}
         {org.type === 'service_company' && (userRole === 'service_manager' || userRole === 'company_admin') && (
         <div className="card p-4 bg-[var(--gold-glow)] text-sm">
-          <div className="font-bold mb-2">Thorough Onboarding Checklist for New Service Company Admins</div>
+          <div className="font-bold mb-2">Initial Onboarding: Company Details + Team (add people/roles) + CRM for New Service Company Admins</div>
           <ul className="list-disc pl-5 space-y-1 text-xs">
             <li>Complete company details and upload logo (above)</li>
-            <li>Add your team: FSEs, dispatchers/schedulers, admins (Team Members section) — FSEs sign up first (role fse), then get added here</li>
+            <li>Add people and their roles to the organization as part of onboarding (Team Members section): FSEs etc sign up first, then assign here by email/role. Creator pre-populated as admin by default (editable in roster); keep ≥1 admin always (enforced). Sole proprietorships: one person as admin here, additional roles in job_title/Profile.</li>
             <li>Set up your CRM: add initial customers with contact info, addresses, equipment (CRM section above)</li>
             <li>Explore Service Schedule and Marketplace to start operations</li>
-            <li>Invite team members to sign up (as individuals for FSEs) and assign them roles here (first org type, then roles inside org)</li>
+            <li>Invite team members to sign up (as individuals) and assign roles here during initial team setup (first org created at signup, then people+roles added to it)</li>
           </ul>
-          <p className="text-xs mt-2">This makes onboarding robust for Service Companies. (Org type service_company first at signup for the admin, then FSEs etc added as team roles.)</p>
+          <p className="text-xs mt-2">This makes onboarding robust: org type first (you admin), then add people and roles to the org here (part of /company initial setup for new Service Companies). Keep ≥1 admin always. Sole prop supported.</p>
         </div>
         )}
 

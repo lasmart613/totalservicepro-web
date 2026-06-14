@@ -16,7 +16,7 @@ export default function SignupIndex() {
             <span className="font-extrabold text-3xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </Link>
           <h1 className="text-3xl font-extrabold tracking-tight">Join the Network</h1>
-          <p className="text-[var(--text3)] mt-2 max-w-md mx-auto">Sign up by organization type first (Service Company, Laser Owner / Facility, or Parts Supplier). Then roles (including FSE) are added inside the organization. Service Company admins add FSEs via the Team section in /company.</p>
+          <p className="text-[var(--text3)] mt-2 max-w-md mx-auto">Sign up by organization type first (Service Company, Laser Owner / Facility, or Parts Supplier). Then roles (including FSE) are added inside the organization. For Service Companies: creator is admin by default; add people and their roles to the organization via /company Team (onboarding flow pre-populates creator as editable admin, enforces at least 1 admin, supports sole prop multi-role via primary + job_title).</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
