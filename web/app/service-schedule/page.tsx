@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Header } from '../../components/Header';
 import { getSupabaseClient } from '../../lib/supabase/client';
 import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
@@ -15,7 +16,9 @@ export default function ServiceSchedule() {
   const [loading, setLoading] = useState(true);
 
   const supabase = getSupabaseClient();
+  const router = useRouter();
 
+  // Fetch real data from Supabase
   useEffect(() => {
     const fetchServiceCalls = async () => {
       setLoading(true);
@@ -88,11 +91,54 @@ export default function ServiceSchedule() {
   const nextDay = () => setDayOffset(prev => prev + 1);
   const prevDay = () => setDayOffset(prev => prev - 1);
 
+  // Calendar generation
   const firstDay = new Date(2026, currentMonth - 1, 1).getDay();
   const daysInMonth = new Date(2026, currentMonth, 0).getDate();
   const calendarDays = Array(firstDay).fill(null).concat(Array.from({ length: daysInMonth }, (_, i) => i + 1));
 
   const timeSlots = Array.from({ length: 16 }, (_, i) => 6 + i);
+
+  // Click handler → Open full ticket
+  const handleEventClick = (callId: number) => {
+    router.push(`/service-tickets/${callId}`);
+  };
+
+  // Drag & Drop handlers (Week + Day views)
+  const handleDragStart = (e: React.DragEvent, call: any) => {
+    e.dataTransfer.setData('text/plain', JSON.stringify(call));
+  };
+
+  const handleDrop = async (e: React.DragEvent, newDate: string, newTime: string) => {
+    e.preventDefault();
+    const draggedCall = JSON.parse(e.dataTransfer.getData('text/plain'));
+
+    // Update locally
+    setServiceCalls(prev =>
+      prev.map(call =>
+        call.id === draggedCall.id
+          ? { ...call, date: newDate, time: newTime }
+          : call
+      )
+    );
+
+    // Update in Supabase
+    try {
+      await supabase
+        .from('service_tickets')
+        .update({
+          service_date: newDate,
+          scheduled_time: newTime,
+        })
+        .eq('id', draggedCall.id);
+    } catch (err) {
+      console.error('Failed to update schedule:', err);
+      alert('Failed to save changes. Please refresh.');
+    }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+  };
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -130,20 +176,25 @@ export default function ServiceSchedule() {
               {calendarDays.map((day, i) => {
                 const dayCalls = serviceCalls.filter(c => parseInt(c.date.split('-')[2]) === day);
                 return (
-                  <div key={i} className="bg-[var(--surface)] min-h-[120px] p-2 border border-[var(--border)] hover:bg-[var(--surface3)] relative overflow-hidden">
+                  <div key={i} className="bg-[var(--surface)] min-h-[130px] p-2 border border-[var(--border)] hover:bg-[var(--surface3)] relative overflow-hidden">
                     {day && (
                       <>
                         <div className="text-sm font-medium mb-1">{day}</div>
                         {dayCalls.length > 0 && (
-                          <div className="text-[10px] leading-tight text-[var(--gold)] space-y-0.5">
-                            {dayCalls.slice(0, 2).map((call, idx) => (
-                              <div key={idx} className="truncate">
+                          <div className="text-[10px] leading-snug text-[var(--gold)] space-y-0.5">
+                            {dayCalls.slice(0, 3).map((call, idx) => (
+                              <div
+                                key={idx}
+                                className="break-words cursor-pointer hover:underline"
+                                onClick={() => handleEventClick(call.id)}
+                                title={`${call.time} • ${call.title}${call.equipment_model ? ` • ${call.equipment_model}` : ''}`}
+                              >
                                 {call.time} {call.title}
                                 {call.equipment_model && ` • ${call.equipment_model}`}
                               </div>
                             ))}
-                            {dayCalls.length > 2 && (
-                              <div className="text-[var(--text3)]">+{dayCalls.length - 2} more</div>
+                            {dayCalls.length > 3 && (
+                              <div className="text-[var(--text3)] text-[9px]">+{dayCalls.length - 3} more</div>
                             )}
                           </div>
                         )}
@@ -156,7 +207,7 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* WEEK VIEW - Better descriptions */}
+        {/* WEEK VIEW with Drag & Drop */}
         {view === 'week' && (
           <div className="card p-6 overflow-x-auto">
             <div className="flex justify-between items-center mb-4">
@@ -180,15 +231,28 @@ export default function ServiceSchedule() {
                 const dayStr = dayDate.toISOString().split('T')[0];
 
                 return (
-                  <div key={idx} className="bg-[var(--surface)] relative border-l border-[var(--border)]">
+                  <div
+                    key={idx}
+                    className="bg-[var(--surface)] relative border-l border-[var(--border)]"
+                    onDragOver={handleDragOver}
+                    onDrop={(e) => handleDrop(e, dayStr, '09:00')}
+                  >
                     <div className="h-12 flex flex-col items-center justify-center border-b border-[var(--border)]">
                       <div className="font-medium">{dayName}</div>
                       <div className="text-xs text-[var(--text3)]">{dayDate.getDate()}</div>
                     </div>
 
-                    {timeSlots.map((hour, slotIdx) => (
-                      <div key={slotIdx} className="h-12 border-b border-[var(--border)] relative"></div>
-                    ))}
+                    {timeSlots.map((hour, slotIdx) => {
+                      const timeStr = `${hour.toString().padStart(2, '0')}:00`;
+                      return (
+                        <div
+                          key={slotIdx}
+                          className="h-12 border-b border-[var(--border)] relative"
+                          onDragOver={handleDragOver}
+                          onDrop={(e) => handleDrop(e, dayStr, timeStr)}
+                        />
+                      );
+                    })}
 
                     {serviceCalls
                       .filter(c => c.date === dayStr)
@@ -200,11 +264,14 @@ export default function ServiceSchedule() {
                         return (
                           <div
                             key={call.id}
-                            className="absolute left-1 right-1 bg-[var(--gold)] text-black text-xs p-1 rounded overflow-hidden z-10"
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, call)}
+                            onClick={() => handleEventClick(call.id)}
+                            className="absolute left-1 right-1 bg-[var(--gold)] text-black text-xs p-1 rounded overflow-hidden z-10 cursor-move"
                             style={{ top: `${top}px`, height: `${height}px` }}
+                            title={`${call.time} • ${call.title}${call.equipment_model ? ` • ${call.equipment_model}` : ''}`}
                           >
                             {call.time} {call.title}
-                            {call.equipment_model && ` • ${call.equipment_model}`}
                           </div>
                         );
                       })}
@@ -215,7 +282,7 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* DAY VIEW - Better descriptions + narrow time column */}
+        {/* DAY VIEW with Drag & Drop */}
         {view === 'day' && (
           <div className="card p-6 overflow-x-auto">
             <div className="flex justify-between items-center mb-6">
@@ -235,10 +302,18 @@ export default function ServiceSchedule() {
                 ))}
               </div>
 
-              <div className="bg-[var(--surface)] relative">
-                {timeSlots.map(h => (
-                  <div key={h} className="h-12 border-b border-[var(--border)]"></div>
-                ))}
+              <div className="bg-[var(--surface)] relative" onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, currentDate.toISOString().split('T')[0], '09:00')}>
+                {timeSlots.map(h => {
+                  const timeStr = `${h.toString().padStart(2, '0')}:00`;
+                  return (
+                    <div
+                      key={h}
+                      className="h-12 border-b border-[var(--border)] relative"
+                      onDragOver={handleDragOver}
+                      onDrop={(e) => handleDrop(e, currentDate.toISOString().split('T')[0], timeStr)}
+                    />
+                  );
+                })}
 
                 {serviceCalls
                   .filter(c => c.date === currentDate.toISOString().split('T')[0])
@@ -250,11 +325,14 @@ export default function ServiceSchedule() {
                     return (
                       <div
                         key={call.id}
-                        className="absolute left-2 right-2 bg-[var(--gold)] text-black text-sm p-2 rounded overflow-hidden"
+                        draggable
+                        onDragStart={(e) => handleDragStart(e, call)}
+                        onClick={() => handleEventClick(call.id)}
+                        className="absolute left-2 right-2 bg-[var(--gold)] text-black text-sm p-2 rounded overflow-hidden cursor-move"
                         style={{ top: `${top}px`, height: `${height}px` }}
+                        title={`${call.time} • ${call.title}${call.equipment_model ? ` • ${call.equipment_model}` : ''}`}
                       >
                         {call.time} — {call.title}
-                        {call.equipment_model && ` • ${call.equipment_model}`}
                       </div>
                     );
                   })}
@@ -263,7 +341,7 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* AGENDA VIEW - Better descriptions */}
+        {/* AGENDA VIEW */}
         {view === 'agenda' && (
           <div className="card p-6 space-y-6">
             <h3 className="font-bold text-xl mb-4">Upcoming Service Calls</h3>
@@ -271,7 +349,11 @@ export default function ServiceSchedule() {
               <p className="text-[var(--text3)]">No upcoming service calls found.</p>
             ) : (
               serviceCalls.map(call => (
-                <div key={call.id} className="bg-[var(--surface3)] p-5 rounded-xl">
+                <div
+                  key={call.id}
+                  onClick={() => handleEventClick(call.id)}
+                  className="bg-[var(--surface3)] p-5 rounded-xl cursor-pointer hover:bg-[var(--surface)]"
+                >
                   <div className="font-medium text-lg">
                     {call.time} — {call.title}
                     {call.equipment_model && ` • ${call.equipment_model}`}
