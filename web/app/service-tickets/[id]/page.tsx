@@ -17,35 +17,72 @@ export default function ServiceTicketDetail() {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const [saving, setSaving] = useState(false);
+  const [organizations, setOrganizations] = useState<any[]>([]);
 
   const supabase = getSupabaseClient();
 
+  // Fetch ticket + organizations
   useEffect(() => {
-    const fetchTicket = async () => {
+    const fetchData = async () => {
       if (!ticketId) return;
       setLoading(true);
       try {
-        const { data, error } = await supabase
+        // Fetch ticket
+        const { data: ticketData, error: ticketError } = await supabase
           .from('service_tickets')
           .select('*')
           .eq('id', ticketId)
           .single();
 
-        if (error) throw error;
-        setTicket(data);
-        setFormData(data);
+        if (ticketError) throw ticketError;
+        setTicket(ticketData);
+        setFormData(ticketData);
+
+        // Fetch customer organizations for dropdown
+        const { data: orgData } = await supabase
+          .from('organizations')
+          .select('id, name, address, city, state, zip, phone, email')
+          .eq('type', 'customer')
+          .eq('is_active', true)
+          .order('name');
+
+        setOrganizations(orgData || []);
       } catch (err) {
-        console.error('Error fetching ticket:', err);
+        console.error('Error fetching data:', err);
       } finally {
         setLoading(false);
       }
     };
 
-    fetchTicket();
+    fetchData();
   }, [ticketId, supabase]);
 
   const handleInputChange = (field: string, value: any) => {
     setFormData((prev: any) => ({ ...prev, [field]: value }));
+  };
+
+  // Handle customer selection from dropdown
+  const handleCustomerSelect = (orgId: string) => {
+    if (orgId === 'new') {
+      // New customer - clear autofill fields but keep customer_name editable
+      handleInputChange('organization_id', null);
+      return;
+    }
+
+    const selectedOrg = organizations.find(org => org.id.toString() === orgId);
+    if (selectedOrg) {
+      setFormData((prev: any) => ({
+        ...prev,
+        customer_name: selectedOrg.name,
+        customer_address: selectedOrg.address || prev.customer_address,
+        customer_city: selectedOrg.city || prev.customer_city,
+        customer_state: selectedOrg.state || prev.customer_state,
+        customer_zip: selectedOrg.zip || prev.zip,
+        customer_phone: selectedOrg.phone || prev.customer_phone,
+        customer_email: selectedOrg.email || prev.customer_email,
+        organization_id: selectedOrg.id,
+      }));
+    }
   };
 
   const handleSave = async () => {
@@ -150,11 +187,31 @@ export default function ServiceTicketDetail() {
             </div>
           </div>
 
-          {/* Customer Information */}
+          {/* Customer Information with Dropdown + Autofill */}
           <div className="card p-6">
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Customer Information</h2>
             <div className="space-y-4">
-              <Field label="Customer Name" value={isEditing ? <input className="input" placeholder="Enter customer name or select existing" value={formData.customer_name || ''} onChange={(e) => handleInputChange('customer_name', e.target.value)} /> : ticket.customer_name} />
+              {/* Customer Dropdown */}
+              {isEditing && (
+                <div>
+                  <div className="text-xs text-[var(--text3)] mb-1">Select Existing Customer</div>
+                  <select 
+                    className="input mb-3" 
+                    onChange={(e) => handleCustomerSelect(e.target.value)}
+                    defaultValue={formData.organization_id ? formData.organization_id.toString() : 'new'}
+                  >
+                    <option value="new">New / Custom Customer</option>
+                    {organizations.map(org => (
+                      <option key={org.id} value={org.id}>{org.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              <Field label="Customer Name" value={isEditing ? 
+                <input className="input" value={formData.customer_name || ''} onChange={(e) => handleInputChange('customer_name', e.target.value)} placeholder="Enter or select customer" /> 
+                : ticket.customer_name} />
+
               <Field label="Phone" value={isEditing ? <input className="input" value={formData.customer_phone || ''} onChange={(e) => handleInputChange('customer_phone', e.target.value)} /> : ticket.customer_phone} />
               <Field label="Email" value={isEditing ? <input className="input" value={formData.customer_email || ''} onChange={(e) => handleInputChange('customer_email', e.target.value)} /> : ticket.customer_email} />
               <Field label="Address" value={isEditing ? <input className="input" value={formData.customer_address || formData.address || ''} onChange={(e) => handleInputChange('customer_address', e.target.value)} /> : (ticket.customer_address || ticket.address)} />
@@ -164,7 +221,7 @@ export default function ServiceTicketDetail() {
             </div>
           </div>
 
-          {/* Equipment Information (Full) */}
+          {/* Equipment Information */}
           <div className="card p-6">
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Equipment Information</h2>
             <div className="space-y-4">
