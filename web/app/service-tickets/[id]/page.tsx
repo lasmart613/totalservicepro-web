@@ -134,39 +134,23 @@ export default function ServiceTicketDetail() {
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Ticket Information</h2>
             <div className="space-y-4">
               <Field label="Ticket Number" value={ticket.ticket_number} />
-              <Field 
-                label="Status" 
-                value={isEditing ? (
-                  <select className="input" value={formData.status || ''} onChange={(e) => handleInputChange('status', e.target.value)}>
-                    {['Awaiting Scheduling','Scheduled','En Route','On Site','Parts Ordered','Completed','Cancelled'].map(s => (
-                      <option key={s} value={s}>{s}</option>
-                    ))}
-                  </select>
-                ) : ticket.status} 
-              />
-              <Field 
-                label="Priority" 
-                value={isEditing ? (
-                  <select className="input" value={formData.priority || ''} onChange={(e) => handleInputChange('priority', e.target.value)}>
-                    {['Low','Medium','High','Emergency'].map(p => <option key={p} value={p}>{p}</option>)}
-                  </select>
-                ) : ticket.priority} 
-              />
+              <Field label="Status" value={isEditing ? (
+                <select className="input" value={formData.status || ''} onChange={(e) => handleInputChange('status', e.target.value)}>
+                  {['Awaiting Scheduling','Scheduled','En Route','On Site','Parts Ordered','Completed','Cancelled'].map(s => <option key={s} value={s}>{s}</option>)}
+                </select>
+              ) : ticket.status} />
+              <Field label="Priority" value={isEditing ? (
+                <select className="input" value={formData.priority || ''} onChange={(e) => handleInputChange('priority', e.target.value)}>
+                  {['Low','Medium','High','Emergency'].map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+              ) : ticket.priority} />
               <Field label="Service Type" value={ticket.service_type} />
-              <Field 
-                label="Description" 
-                value={isEditing ? (
-                  <textarea className="input" rows={3} value={formData.description || ''} onChange={(e) => handleInputChange('description', e.target.value)} />
-                ) : ticket.description} 
-                multiline 
-              />
-              <Field 
-                label="Notes" 
-                value={isEditing ? (
-                  <textarea className="input" rows={3} value={formData.notes || ''} onChange={(e) => handleInputChange('notes', e.target.value)} />
-                ) : ticket.notes} 
-                multiline 
-              />
+              <Field label="Description" value={isEditing ? (
+                <textarea className="input" rows={3} value={formData.description || ''} onChange={(e) => handleInputChange('description', e.target.value)} />
+              ) : ticket.description} multiline />
+              <Field label="Notes" value={isEditing ? (
+                <textarea className="input" rows={3} value={formData.notes || ''} onChange={(e) => handleInputChange('notes', e.target.value)} />
+              ) : ticket.notes} multiline />
             </div>
           </div>
 
@@ -174,24 +158,25 @@ export default function ServiceTicketDetail() {
           <div className="card p-6">
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Customer Information</h2>
             <div className="space-y-4">
-              <Field label="Customer Name" value={ticket.customer_name} />
-              <Field label="Phone" value={ticket.customer_phone} />
-              <Field label="Email" value={ticket.customer_email} />
-              <Field label="Address" value={ticket.customer_address || ticket.address} />
-              <Field label="City" value={ticket.customer_city || ticket.city} />
-              <Field label="State" value={ticket.customer_state || ticket.state} />
-              <Field label="ZIP" value={ticket.zip} />
+              <Field label="Customer Name" value={isEditing ? <input className="input" value={formData.customer_name || ''} onChange={(e) => handleInputChange('customer_name', e.target.value)} /> : ticket.customer_name} />
+              <Field label="Phone" value={isEditing ? <input className="input" value={formData.customer_phone || ''} onChange={(e) => handleInputChange('customer_phone', e.target.value)} /> : ticket.customer_phone} />
+              <Field label="Email" value={isEditing ? <input className="input" value={formData.customer_email || ''} onChange={(e) => handleInputChange('customer_email', e.target.value)} /> : ticket.customer_email} />
+              <Field label="Address" value={isEditing ? <input className="input" value={formData.customer_address || formData.address || ''} onChange={(e) => handleInputChange('customer_address', e.target.value)} /> : (ticket.customer_address || ticket.address)} />
+              <Field label="City" value={isEditing ? <input className="input" value={formData.customer_city || formData.city || ''} onChange={(e) => handleInputChange('customer_city', e.target.value)} /> : (ticket.customer_city || ticket.city)} />
+              <Field label="State" value={isEditing ? <input className="input" value={formData.customer_state || formData.state || ''} onChange={(e) => handleInputChange('customer_state', e.target.value)} /> : (ticket.customer_state || ticket.state)} />
+              <Field label="ZIP" value={isEditing ? <input className="input" value={formData.zip || ''} onChange={(e) => handleInputChange('zip', e.target.value)} /> : ticket.zip} />
             </div>
           </div>
 
-          {/* Equipment Information */}
+          {/* Equipment Information (Expanded) */}
           <div className="card p-6">
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Equipment Information</h2>
             <div className="space-y-4">
-              <Field label="Make" value={ticket.equipment_make} />
-              <Field label="Model" value={ticket.equipment_model} />
-              <Field label="Type" value={ticket.equipment_type} />
-              <Field label="Serial Number" value={ticket.serial_number} />
+              <Field label="Make" value={isEditing ? <input className="input" value={formData.equipment_make || ''} onChange={(e) => handleInputChange('equipment_make', e.target.value)} /> : ticket.equipment_make} />
+              <Field label="Model" value={isEditing ? <input className="input" value={formData.equipment_model || ''} onChange={(e) => handleInputChange('equipment_model', e.target.value)} /> : ticket.equipment_model} />
+              <Field label="Equipment Type" value={isEditing ? <input className="input" value={formData.equipment_type || ''} onChange={(e) => handleInputChange('equipment_type', e.target.value)} /> : ticket.equipment_type} />
+              <Field label="Serial Number" value={isEditing ? <input className="input" value={formData.serial_number || ''} onChange={(e) => handleInputChange('serial_number', e.target.value)} /> : ticket.serial_number} />
+              <Field label="PM Due Date" value={isEditing ? <input type="date" className="input" value={formData.service_date || ''} onChange={(e) => handleInputChange('service_date', e.target.value)} /> : ticket.service_date} />
             </div>
           </div>
 
@@ -199,9 +184,9 @@ export default function ServiceTicketDetail() {
           <div className="card p-6">
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Scheduling</h2>
             <div className="space-y-4">
-              <Field label="Service Date" value={ticket.service_date} />
-              <Field label="Scheduled Time" value={ticket.scheduled_time} />
-              <Field label="End Time" value={ticket.end_time} />
+              <Field label="Service Date" value={isEditing ? <input type="date" className="input" value={formData.service_date || ''} onChange={(e) => handleInputChange('service_date', e.target.value)} /> : ticket.service_date} />
+              <Field label="Scheduled Time" value={isEditing ? <input type="time" className="input" value={formData.scheduled_time || ''} onChange={(e) => handleInputChange('scheduled_time', e.target.value)} /> : ticket.scheduled_time} />
+              <Field label="End Time" value={isEditing ? <input type="time" className="input" value={formData.end_time || ''} onChange={(e) => handleInputChange('end_time', e.target.value)} /> : ticket.end_time} />
               <Field label="Arrival Time" value={ticket.arrival_time} />
               <Field label="Departure Time" value={ticket.departure_time} />
             </div>
@@ -211,8 +196,8 @@ export default function ServiceTicketDetail() {
           <div className="card p-6 lg:col-span-2">
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Additional Details</h2>
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <Field label="PO Number" value={ticket.po_number} />
-              <Field label="Contract Number" value={ticket.contract_number} />
+              <Field label="PO Number" value={isEditing ? <input className="input" value={formData.po_number || ''} onChange={(e) => handleInputChange('po_number', e.target.value)} /> : ticket.po_number} />
+              <Field label="Contract Number" value={isEditing ? <input className="input" value={formData.contract_number || ''} onChange={(e) => handleInputChange('contract_number', e.target.value)} /> : ticket.contract_number} />
               <Field label="Billable" value={ticket.billable ? 'Yes' : 'No'} />
               <Field label="Created At" value={ticket.created_at} />
               <Field label="Last Updated" value={ticket.updated_at} />
