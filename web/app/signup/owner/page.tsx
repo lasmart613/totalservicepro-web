@@ -241,7 +241,7 @@ export default function OwnerSignup() {
                   </label>
                 ))}
               </div>
-              <p className="text-[10px] text-[var(--text3)] mt-1">Used to match you with qualified FSEs/companies.</p>
+              <p className="text-[10px] text-[var(--text3)] mt-1">Used to match you with qualified Service Companies and their FSE team members.</p>
             </div>
 
             <div>
@@ -280,7 +280,7 @@ export default function OwnerSignup() {
         </div>
 
         <p className="text-center text-xs text-[var(--text3)] mt-6">
-          Organization of type <code>customer</code> created. After signup, visit <Link href="/marketplace" className="text-[var(--gold)] underline">Marketplace</Link> to post your first service need (then review bids from FSEs/companies and accept to create contracts).
+          Organization of type <code>customer</code> created. After signup, visit <Link href="/marketplace" className="text-[var(--gold)] underline">Marketplace</Link> to post your first service need (then review bids from Service Companies and their FSEs and accept to create contracts).
         </p>
       </div>
     </div>

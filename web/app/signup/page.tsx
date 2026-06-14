@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { Header } from '../../components/Header';
-import { User, Building2, Hospital, Package } from 'lucide-react';
+import { Building2, Hospital, Package } from 'lucide-react';
 
 export default function SignupIndex() {
   return (
@@ -16,26 +16,10 @@ export default function SignupIndex() {
             <span className="font-extrabold text-3xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </Link>
           <h1 className="text-3xl font-extrabold tracking-tight">Join the Network</h1>
-          <p className="text-[var(--text3)] mt-2 max-w-md mx-auto">Professional sign-up for the laser service marketplace. Owners post needs. FSEs and companies fulfill them.</p>
+          <p className="text-[var(--text3)] mt-2 max-w-md mx-auto">Sign up by organization type first (Service Company, Laser Owner / Facility, or Parts Supplier). Then roles (including FSE) are added inside the organization. Service Company admins add FSEs via the Team section in /company.</p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-5">
-          {/* FSE Card */}
-          <Link href="/signup/fse" className="card p-6 hover:border-[var(--gold-border)] group flex flex-col min-w-0">
-            <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
-              <User size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
-            </div>
-            <div className="font-bold text-xl mb-1">Field Service Engineer (FSE)</div>
-            <div className="text-sm text-[var(--text3)] mb-4">Independent techs and certified engineers. Role: fse / engineer</div>
-            <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
-              <li>• Certifications &amp; experience</li>
-              <li>• Preferred regions</li>
-              <li>• Bio &amp; LinkedIn / resume</li>
-              <li>• Browse open needs &amp; submit bids (live in beta)</li>
-            </ul>
-            <div className="btn btn-primary w-full text-center">Sign Up as FSE →</div>
-          </Link>
-
           {/* Company Card */}
           <Link href="/signup/company" className="card p-6 hover:border-[var(--gold-border)] group flex flex-col min-w-0">
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
@@ -86,11 +70,11 @@ export default function SignupIndex() {
 
         <div className="mt-10 text-center">
           <p className="text-sm text-[var(--text3)]">Already registered? <Link href="/login" className="text-[var(--gold)] hover:underline">Sign in here</Link></p>
-          <p className="text-xs mt-4 text-[var(--text3)]">All signups use Supabase auth + user_profiles. Organizations created for companies &amp; owners. Email confirmation may be required.</p>
+          <p className="text-xs mt-4 text-[var(--text3)]">All signups use Supabase auth + user_profiles. Organizations are created by type (service_company, customer, or parts_supplier) for the signing-up user (who gets company_admin / owner / parts_supplier role). FSEs sign up individually (role fse) and are added to a Service Company org by its admin via Team. Email confirmation may be required.</p>
         </div>
 
         <div className="mt-8 p-4 bg-[var(--surface3)] border border-[var(--border)] rounded-xl text-xs text-[var(--text3)]">
-          <strong>Marketplace Vision - Bidding Live:</strong> Owners post contracts, emergency repairs, PM plans (to service_requests). FSEs/companies bid/respond (to bids table). Owners accept to award + auto-create service_contract. Full payments/notifications next. Try end-to-end with different role signups.
+          <strong>Marketplace Vision - Bidding Live:</strong> Owners post contracts, emergency repairs, PM plans (to service_requests). Service Companies (and their FSE team members) bid/respond (to bids table). Owners accept to award + auto-create service_contract. FSEs are roles within Service Company organizations (added by company_admin/service_manager in /company Team). Full payments/notifications next. Try end-to-end with different org-type signups.
         </div>
       </div>
     </div>

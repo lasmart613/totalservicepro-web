@@ -82,12 +82,12 @@ export default function HomePage() {
 
   // Public homepage
   if (!user) {
-    // Your original 4-card onboarding (kept intact)
+    // Public / unauthenticated home. (Prominent 4-tile grid was previously here and on /signup; removed FSE tile per org-type-first model. 3 org-type tiles kept on /signup: Service Company, Laser Owner/Facility, Parts Supplier.)
+    // FSE is only a role inside a Service Company org (added by company_admin/service_manager via /company Team; individuals use /signup/fse first).
     return (
       <div className="min-h-screen flex flex-col">
         <Header />
-        {/* ... your existing public cards with FSE, Company, Owner, Parts Supplier ... */}
-        {/* (paste your original public return block here if you prefer - or use the improved one I gave earlier) */}
+        {/* unauthenticated entry tiles / cards now consolidated on /signup to match "org type first, then roles inside" (no top-level FSE tile on entry points) */}
       </div>
     );
   }
@@ -112,7 +112,7 @@ export default function HomePage() {
           </div>
         )}
 
-        {/* KPIs - Organizational + Per FSE */}
+        {/* KPIs - Organizational + Per FSE (FSE role within service_company org) */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-10">
           <div className="card p-5 text-center">
             <div className="text-4xl font-extrabold text-[var(--gold)]">{stats.openTickets}</div>

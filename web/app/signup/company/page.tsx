@@ -268,7 +268,7 @@ export default function CompanySignup() {
         </div>
 
         <p className="text-center text-xs text-[var(--text3)] mt-6">
-          Organization of type <code>service_company</code> will be created and linked to your profile (role: service_manager). For Parts Suppliers use the dedicated /signup/supplier flow (type `parts_supplier`). You can manage company profile after login.
+          Organization of type <code>service_company</code> is created and linked to your profile with role <code>company_admin</code> (the signing-up user is the initial admin who can later add FSEs and other roles to the org via the Team section). For Parts Suppliers use the dedicated /signup/supplier flow (type `parts_supplier`). FSEs sign up separately then get assigned here. You can manage company profile after login.
         </p>
       </div>
     </div>

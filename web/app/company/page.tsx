@@ -249,7 +249,7 @@ export default function CompanyProfile() {
         if (error) throw error;
         setAddMessage('Team member linked/updated successfully.');
       } else {
-        setAddMessage('No account found for that email yet. Ask the person to sign up first (via /signup/fse or appropriate), then try again to assign them to the company.');
+        setAddMessage('No account found for that email yet. Ask the person to sign up first (as individual via /signup/fse or the main signup, to get role fse), then try again to assign them to this Service Company (this sets their organization_id and confirms the fse role).');
         return;
       }
 
@@ -395,7 +395,7 @@ export default function CompanyProfile() {
         {/* Team Management - only for Service Company admins */}
         {org.type === 'service_company' && (userRole === 'service_manager' || userRole === 'company_admin') && (
         <div className="card p-6">
-          <h2 className="font-bold mb-4">Team Members (FSEs, Dispatchers, Admins, etc.)</h2>
+          <h2 className="font-bold mb-4">Team Members (FSEs, Dispatchers, Admins, etc.) — roles added inside this Service Company org</h2>
 
           <div className="mb-6 p-4 bg-[var(--surface3)] rounded">
             <div className="font-semibold mb-2">Add / Assign Team Member</div>
@@ -429,7 +429,7 @@ export default function CompanyProfile() {
             </div>
             {addMessage && <div className="text-sm mt-2 text-[var(--text3)]">{addMessage}</div>}
             <p className="text-[10px] mt-2 text-[var(--text3)]">
-              Members must sign up first via the appropriate flow. Then you can assign them here by email (sets organization_id + role).
+              FSEs (and other team roles) must sign up first as individuals (e.g. /signup/fse for fse role). Then company_admin / service_manager assigns them to this org here by email (this sets organization_id + role inside the service_company). First the org type (service_company) is chosen at signup, then roles are added to the organization.
             </p>
           </div>
 
@@ -527,7 +527,7 @@ export default function CompanyProfile() {
         )}
 
         <p className="text-[10px] text-[var(--text3)]">
-          Full multi-user company management, invitations, and permissions coming soon. This gives Service Companies the ability to manage team (FSEs, dispatchers/schedulers, admins) and company data. CRM allows adding customers with full contact, address, and equipment data from the organizations table.
+          Full multi-user company management, invitations, and permissions coming soon. This gives Service Companies the ability to manage team (FSEs, dispatchers/schedulers, admins — roles added to the service_company org) and company data. CRM allows adding customers (orgs of type customer) with full contact, address, and equipment data from the organizations table. First org type at signup, then roles inside.
         </p>
 
         {/* Thorough Onboarding Note / Checklist - shown for service company admins */}
@@ -536,12 +536,12 @@ export default function CompanyProfile() {
           <div className="font-bold mb-2">Thorough Onboarding Checklist for New Service Company Admins</div>
           <ul className="list-disc pl-5 space-y-1 text-xs">
             <li>Complete company details and upload logo (above)</li>
-            <li>Add your team: FSEs, dispatchers/schedulers, admins (Team Members section)</li>
+            <li>Add your team: FSEs, dispatchers/schedulers, admins (Team Members section) — FSEs sign up first (role fse), then get added here</li>
             <li>Set up your CRM: add initial customers with contact info, addresses, equipment (CRM section above)</li>
             <li>Explore Service Schedule and Marketplace to start operations</li>
-            <li>Invite team members to sign up and assign them roles here</li>
+            <li>Invite team members to sign up (as individuals for FSEs) and assign them roles here (first org type, then roles inside org)</li>
           </ul>
-          <p className="text-xs mt-2">This makes onboarding robust for Service Companies.</p>
+          <p className="text-xs mt-2">This makes onboarding robust for Service Companies. (Org type service_company first at signup for the admin, then FSEs etc added as team roles.)</p>
         </div>
         )}
 

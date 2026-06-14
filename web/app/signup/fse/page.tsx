@@ -65,7 +65,7 @@ export default function FSESignup() {
         return;
       }
 
-      // Upsert profile with FSE role (individual, org optional / join later)
+      // Upsert profile with FSE role (individual; later added to a service_company org by its admin assigning organization_id + role 'fse')
       const profileData: any = {
         id: userId,
         first_name: firstName,
@@ -117,7 +117,7 @@ export default function FSESignup() {
             <span className="font-extrabold text-2xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </div>
           <h1 className="text-2xl font-bold mt-1">Sign Up as FSE / Field Engineer</h1>
-          <p className="text-sm text-[var(--text3)]">Individual laser service technicians and engineers</p>
+          <p className="text-sm text-[var(--text3)]">Individual laser service technicians and engineers. This creates a profile with role 'fse'. You will be added to a Service Company organization (by its company_admin or service_manager using the Team section at /company) to link your organization_id.</p>
         </div>
 
         <div className="card p-6">
@@ -213,7 +213,7 @@ export default function FSESignup() {
         </div>
 
         <p className="text-center text-xs text-[var(--text3)] mt-6">
-          Your profile will be visible for marketplace matching. After signup, go to /marketplace to browse open needs and submit bids (as FSE). Role: fse. Organization can be added later.
+          Your profile (role: 'fse') will be visible for marketplace matching and bidding. Sign up here first as individual. Then a Service Company admin adds you to their org (sets organization_id and confirms fse role) via /company Team section. After that, browse /marketplace to submit bids.
         </p>
       </div>
     </div>

@@ -45,7 +45,8 @@ export default function Marketplace() {
         {/* Rest of your content... */}
         <div className="text-center py-20 text-[var(--text3)]">
           Full marketplace features are being built.<br />
-          Parts listing + bulk upload coming very soon.
+          Parts listing + bulk upload coming very soon.<br />
+          (Bidding: Service Company orgs and their FSE role members respond to owner needs.)
         </div>
       </div>
     </div>
