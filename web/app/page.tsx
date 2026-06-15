@@ -147,7 +147,7 @@ export default function HomePage() {
         {/* Quick Access */}
         <div className="mt-12">
           <h3 className="font-bold text-lg mb-4">Quick Access</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
             <Link href="/hub" className="card p-6 text-center hover:border-[var(--gold)]">
               <Wrench size={32} className="mx-auto mb-3 text-[var(--gold)]" />
               <div className="font-bold">Tech Hub</div>
@@ -163,6 +163,10 @@ export default function HomePage() {
             <Link href="/reports" className="card p-6 text-center hover:border-[var(--gold)]">
               <FileText size={32} className="mx-auto mb-3 text-[var(--gold)]" />
               <div className="font-bold">Reports</div>
+            </Link>
+            <Link href="/calculators" className="card p-6 text-center hover:border-[var(--gold)]">
+              <span className="block mx-auto mb-3 text-4xl text-[var(--gold)]">🔬</span>
+              <div className="font-bold">Calculators</div>
             </Link>
           </div>
         </div>

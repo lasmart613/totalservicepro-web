@@ -305,3 +305,181 @@ body {
   border-color: var(--gold-border);
   color: var(--gold);
 }
+
+/* Photometry Calculators (ported from Android density_calculator.html, fluence.html, duty_cycle etc. + tsp.css) */
+.calc-page {
+  padding: 16px 0 40px;
+  max-width: 600px;
+  margin: 0 auto;
+}
+
+.result-card {
+  background: var(--surface2);
+  border: 2px solid var(--gold);
+  border-radius: 16px;
+  padding: 28px;
+  text-align: center;
+  margin: 20px 0;
+}
+
+.result-label {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--text3);
+  text-transform: uppercase;
+  letter-spacing: 2px;
+  margin-bottom: 8px;
+}
+
+.result-value {
+  font-size: 56px;
+  font-weight: 800;
+  color: var(--gold);
+  line-height: 1;
+}
+
+.result-unit {
+  font-size: 20px;
+  color: var(--text3);
+  margin-left: 4px;
+}
+
+.result-detail {
+  margin-top: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  text-align: left;
+}
+
+.result-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.result-row:last-child {
+  border: none;
+}
+
+.result-row-val {
+  font-weight: 700;
+  color: var(--text);
+}
+
+.button-row {
+  display: flex;
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  padding: 4px;
+  margin-bottom: 16px;
+}
+
+.btn-option {
+  flex: 1;
+  padding: 9px 12px;
+  border-radius: 8px;
+  border: 1px solid transparent;
+  background: none;
+  color: var(--text3);
+  font-family: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.15s;
+  text-align: center;
+}
+
+.btn-option.active {
+  background: var(--gold-glow);
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.formula-box {
+  background: var(--surface2);
+  border-left: 3px solid var(--gold);
+  border-radius: 0 8px 8px 0;
+  padding: 14px 16px;
+  margin-top: 20px;
+  font-size: 12px;
+  color: var(--text3);
+  line-height: 1.8;
+  font-family: var(--font-mono), 'Courier New', monospace;
+  white-space: pre-line;
+}
+
+.form-group {
+  margin-bottom: 16px;
+}
+
+.form-row {
+  display: flex;
+  gap: 12px;
+}
+
+.form-row > div {
+  flex: 1;
+}
+
+/* Wavelength wizard */
+.step-dots {
+  display: flex;
+  gap: 8px;
+  justify-content: center;
+  margin-bottom: 20px;
+}
+
+.step-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--border2);
+  transition: background 0.2s;
+}
+
+.step-dot.active {
+  background: var(--gold);
+}
+
+.screen {
+  display: none;
+}
+
+.screen.active {
+  display: block;
+}
+
+.info-box {
+  background: var(--surface2);
+  border-left: 3px solid var(--gold);
+  border-radius: 0 8px 8px 0;
+  padding: 12px 14px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.5;
+}
+
+.btn-row {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.calc-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 14px;
+}
+
+@media (min-width: 480px) {
+  .calc-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+/* For menu cards in calculators use .card with icon + label/desc like hub */

@@ -13,6 +13,7 @@ export default function TechHub() {
     { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Full digital bookshelf' },
     { href: '/reports', icon: '📋', label: 'Service Reports', desc: 'Performance & safety documentation' },
     { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Intelligent service guidance (beta)' },
+    { href: '/calculators', icon: '🔬', label: 'Photometry Tools', desc: 'Fluence, Irradiance, Duty Cycle, Avg Power, Wavelength calculators' },
   ];
 
   return (
@@ -32,7 +33,7 @@ export default function TechHub() {
           ))}
         </div>
 
-        <div className="mt-8 text-xs text-center text-[var(--text3)]">Service Schedule, Customers, Parts &amp; AI Assistant are available as functional starters. Marketplace, Reports, Manuals &amp; Auth flows are production-ready. Full feature parity with Android ports in progress.</div>
+        <div className="mt-8 text-xs text-center text-[var(--text3)]">Service Schedule, Customers, Parts, AI Assistant &amp; Photometry Tools (Calculators) are available. Marketplace, Reports, Manuals &amp; Auth flows are production-ready. Full feature parity with Android ports.</div>
       </div>
     </div>
   );
