@@ -6,10 +6,9 @@ import { Header } from '../../components/Header';
 
 export default function TechHub() {
   const cards = [
-    { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Post service needs, receive bids, accept contracts (beta live)' },
     { href: '/service-schedule', icon: '📅', label: 'Service Schedule', desc: 'Tickets, assignments & scheduling' },
     { href: '/customers', icon: '👥', label: 'Customers', desc: 'Directory & customer profiles' },
-    { href: '/marketplace/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Search parts & compatibility' },
+    { href: '/marketplace/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Master list of parts, specs & cross-references' },
     { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Full digital bookshelf' },
     { href: '/reports', icon: '📋', label: 'Service Reports', desc: 'Performance & safety documentation' },
     { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Intelligent service guidance (beta)' },
@@ -21,7 +20,7 @@ export default function TechHub() {
       <Header />
       <div className="max-w-xl mx-auto w-full px-4 py-6">
         <h1 className="text-2xl font-extrabold mb-1">🛠️ Tech Hub</h1>
-        <p className="text-sm text-[var(--text3)] mb-6">Professional laser service resources</p>
+        <p className="text-sm text-[var(--text3)] mb-6">Professional laser service resources & reference tools</p>
 
         <div className="grid grid-cols-2 gap-3">
           {cards.map((c, i) => (
@@ -33,7 +32,9 @@ export default function TechHub() {
           ))}
         </div>
 
-        <div className="mt-8 text-xs text-center text-[var(--text3)]">Service Schedule, Customers, Parts, AI Assistant &amp; Photometry Tools (Calculators) are available. Marketplace, Reports, Manuals &amp; Auth flows are production-ready. Full feature parity with Android ports.</div>
+        <div className="mt-8 text-xs text-center text-[var(--text3)]">
+          Parts Catalog is a reference tool. Marketplace (buying/selling) is now on the Home page.
+        </div>
       </div>
     </div>
   );

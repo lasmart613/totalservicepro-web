@@ -42,7 +42,6 @@ export default function HomePage() {
           .maybeSingle();
         setProfile(prof);
 
-        // Load reports (demo / real data)
         const { data: reps } = await supabase
           .from('service_reports')
           .select('*')
@@ -54,7 +53,7 @@ export default function HomePage() {
             drafts: reps.filter(r => r.status === 'draft').length,
             complete: reps.filter(r => r.status === 'complete').length,
             openTickets: reps.filter(r => r.status === 'draft' || r.status === 'open').length,
-            myAssigned: 5, // placeholder
+            myAssigned: 5,
             teamReports: reps.length,
           });
           setRecent(reps.slice(0, 8));
@@ -80,14 +79,19 @@ export default function HomePage() {
     );
   }
 
-  // Public homepage
+  // Public homepage (logged out)
   if (!user) {
-    // Public / unauthenticated home. (Prominent 4-tile grid was previously here and on /signup; removed FSE tile per org-type-first model. 3 org-type tiles kept on /signup: Service Company, Laser Owner/Facility, Parts Supplier.)
-    // FSE is only a role inside a Service Company org (added by company_admin/service_manager via /company Team; individuals use /signup/fse first).
     return (
       <div className="min-h-screen flex flex-col">
         <Header />
-        {/* unauthenticated entry tiles / cards now consolidated on /signup to match "org type first, then roles inside" (no top-level FSE tile on entry points) */}
+        <div className="max-w-4xl mx-auto w-full px-4 py-10 text-center">
+          <h1 className="text-4xl font-extrabold tracking-tight mb-4">Welcome to Total Service Pro</h1>
+          <p className="text-xl text-[var(--text3)] mb-8">The professional platform for laser equipment service, parts, and marketplace.</p>
+          <div className="flex justify-center gap-4">
+            <Link href="/login" className="btn btn-primary px-8">Sign In</Link>
+            <Link href="/signup" className="btn btn-secondary px-8">Sign Up</Link>
+          </div>
+        </div>
       </div>
     );
   }
@@ -106,13 +110,13 @@ export default function HomePage() {
         {isPartsSupplier && (
           <div className="mt-6 p-6 border border-[var(--gold-border)] bg-[var(--gold-glow)]/10 rounded-xl">
             <h2 className="font-bold text-xl mb-3">Parts Supplier Tools</h2>
-            <Link href="/marketplace?tab=parts" className="btn btn-primary">
-              List New Parts / Manage Inventory →
+            <Link href="/marketplace/parts" className="btn btn-primary">
+              Manage Parts Listings →
             </Link>
           </div>
         )}
 
-        {/* KPIs - Organizational + Per FSE (FSE role within service_company org) */}
+        {/* KPIs */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-10">
           <div className="card p-5 text-center">
             <div className="text-4xl font-extrabold text-[var(--gold)]">{stats.openTickets}</div>
@@ -138,7 +142,6 @@ export default function HomePage() {
             <Calendar size={20} /> Upcoming Service Calls (Next 3-4 Days)
           </h3>
           <div className="card p-6">
-            {/* Demo upcoming calls - replace with real query later */}
             <p className="text-[var(--text3)]">3 upcoming calls this week. Full schedule view in Service Schedule.</p>
             <Link href="/service-schedule" className="text-[var(--gold)] mt-4 inline-block hover:underline">View Full Schedule →</Link>
           </div>
@@ -147,7 +150,7 @@ export default function HomePage() {
         {/* Quick Access */}
         <div className="mt-12">
           <h3 className="font-bold text-lg mb-4">Quick Access</h3>
-          <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             <Link href="/hub" className="card p-6 text-center hover:border-[var(--gold)]">
               <Wrench size={32} className="mx-auto mb-3 text-[var(--gold)]" />
               <div className="font-bold">Tech Hub</div>
@@ -164,9 +167,39 @@ export default function HomePage() {
               <FileText size={32} className="mx-auto mb-3 text-[var(--gold)]" />
               <div className="font-bold">Reports</div>
             </Link>
-            <Link href="/calculators" className="card p-6 text-center hover:border-[var(--gold)]">
-              <span className="block mx-auto mb-3 text-4xl text-[var(--gold)]">🔬</span>
-              <div className="font-bold">Calculators</div>
+          </div>
+        </div>
+
+        {/* NEW: Prominent Marketplace Section */}
+        <div className="mt-12">
+          <div className="flex items-center justify-between mb-4">
+            <h3 className="font-bold text-lg">Marketplace</h3>
+            <Link href="/marketplace" className="text-sm text-[var(--gold)] hover:underline">Browse all →</Link>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            <Link href="/marketplace/parts" className="card p-6 hover:border-[var(--gold)] group">
+              <div className="text-3xl mb-3">🔩</div>
+              <div className="font-bold text-lg mb-1">Parts</div>
+              <div className="text-sm text-[var(--text3)]">Parts listed for sale by suppliers</div>
+            </Link>
+
+            <Link href="/marketplace/used-systems" className="card p-6 hover:border-[var(--gold)] group">
+              <div className="text-3xl mb-3">🖥️</div>
+              <div className="font-bold text-lg mb-1">Used Laser Systems</div>
+              <div className="text-sm text-[var(--text3)]">Buy or sell pre-owned equipment</div>
+            </Link>
+
+            <Link href="/marketplace/consumables" className="card p-6 hover:border-[var(--gold)] group">
+              <div className="text-3xl mb-3">🧴</div>
+              <div className="font-bold text-lg mb-1">Consumables</div>
+              <div className="text-sm text-[var(--text3)]">Handpieces, fibers, tips & more</div>
+            </Link>
+
+            <Link href="/marketplace/requests" className="card p-6 hover:border-[var(--gold)] group">
+              <div className="text-3xl mb-3">🛠️</div>
+              <div className="font-bold text-lg mb-1">Service Requests / Needs</div>
+              <div className="text-sm text-[var(--text3)]">Post or browse service needs</div>
             </Link>
           </div>
         </div>
