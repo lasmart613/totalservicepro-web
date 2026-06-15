@@ -8,7 +8,7 @@ export default function TechHub() {
   const cards = [
     { href: '/service-schedule', icon: '📅', label: 'Service Schedule', desc: 'Tickets, assignments & scheduling' },
     { href: '/customers', icon: '👥', label: 'Customers', desc: 'Directory & customer profiles' },
-    { href: '/marketplace/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Master list of parts, specs & cross-references' },
+    { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Master list of parts, specs & cross-references' },
     { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Full digital bookshelf' },
     { href: '/reports', icon: '📋', label: 'Service Reports', desc: 'Performance & safety documentation' },
     { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Intelligent service guidance (beta)' },
@@ -33,7 +33,8 @@ export default function TechHub() {
         </div>
 
         <div className="mt-8 text-xs text-center text-[var(--text3)]">
-          Parts Catalog is a reference tool. Marketplace (buying/selling) is now on the Home page.
+          Parts Catalog = Reference tool (master list).  
+          Marketplace (buying/selling) is now on the Home page.
         </div>
       </div>
     </div>
