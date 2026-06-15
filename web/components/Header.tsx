@@ -4,12 +4,13 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getSupabaseClient } from '../lib/supabase/client';
 import { User } from '@supabase/supabase-js';
-import { LogOut, User as UserIcon, Settings, Building2 } from 'lucide-react';
+import { LogOut, User as UserIcon, Settings, Building2, Menu, X } from 'lucide-react';
 
 export function Header() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<any>(null);
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const supabase = getSupabaseClient();
 
   useEffect(() => {
@@ -36,9 +37,12 @@ export function Header() {
 
   const handleLogout = async () => {
     setDropdownOpen(false);
+    setMobileMenuOpen(false);
     await supabase.auth.signOut();
     window.location.href = '/login';
   };
+
+  const closeMobileMenu = () => setMobileMenuOpen(false);
 
   const fullName = profile 
     ? [profile.first_name, profile.last_name].filter(Boolean).join(' ') || user?.email?.split('@')[0]
@@ -54,15 +58,27 @@ export function Header() {
           <span className="font-extrabold text-xl tracking-[-0.5px]" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           <span className="text-[10px] font-medium tracking-[1.5px] text-[var(--text3)] uppercase -mt-0.5">Laser Equipment Service</span>
         </Link>
+
+        {/* Desktop Navigation */}
         <nav className="ml-6 hidden md:flex items-center gap-5 text-sm font-medium text-[var(--text2)]">
           <Link href="/reports" className="hover:text-[var(--gold)]">Reports</Link>
           <Link href="/manuals" className="hover:text-[var(--gold)]">Manuals</Link>
-          <Link href="/hub" className="hover:text-[var(--gold)]">Hub</Link>
+          <Link href="/hub" className="hover:text-[var(--gold)]">Tech Hub</Link>
           <Link href="/marketplace" className="hover:text-[var(--gold)]">Marketplace</Link>
         </nav>
       </div>
 
       <div className="flex items-center gap-3">
+        {/* Mobile Hamburger Button */}
+        <button
+          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+          className="md:hidden p-2 text-[var(--text)] hover:text-[var(--gold)]"
+          aria-label="Toggle menu"
+        >
+          {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
+        </button>
+
+        {/* User Account */}
         {!user ? (
           <div className="flex items-center gap-2">
             <Link href="/login" className="btn btn-primary text-sm px-4 py-1.5">Sign In</Link>
@@ -109,6 +125,26 @@ export function Header() {
           </div>
         )}
       </div>
+
+      {/* Mobile Navigation Menu */}
+      {mobileMenuOpen && (
+        <div className="md:hidden absolute top-[60px] left-0 right-0 bg-[var(--surface3)] border-b border-[var(--border)] z-[90] shadow-lg">
+          <nav className="flex flex-col px-4 py-2 text-sm font-medium">
+            <Link href="/reports" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
+              Reports
+            </Link>
+            <Link href="/manuals" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
+              Manuals
+            </Link>
+            <Link href="/hub" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
+              Tech Hub
+            </Link>
+            <Link href="/marketplace" className="py-3 hover:text-[var(--gold)]" onClick={closeMobileMenu}>
+              Marketplace
+            </Link>
+          </nav>
+        </div>
+      )}
     </header>
   );
 }

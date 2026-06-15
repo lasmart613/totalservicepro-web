@@ -3,7 +3,6 @@
 import React, { useEffect, useState } from 'react';
 import { Header } from '../../components/Header';
 import { getSupabaseClient } from '../../lib/supabase/client';
-import { useRouter } from 'next/navigation';
 
 const WAVELENGTH_OPTIONS = [
   { label: 'All Wavelengths', value: '' },
@@ -21,59 +20,14 @@ export default function ManualsLibrary() {
   const [tab, setTab] = useState<'browse' | 'library'>('browse');
   const [loading, setLoading] = useState(true);
   const [selectedWavelength, setSelectedWavelength] = useState('');
-  const [hasAccess, setHasAccess] = useState(false);
-  const router = useRouter();
   const supabase = getSupabaseClient();
 
   useEffect(() => {
-    checkAccessAndLoad();
+    loadData();
   }, []);
 
-  async function checkAccessAndLoad() {
-    setLoading(true);
-    try {
-      const { data: { user } } = await supabase.auth.getUser();
-      if (!user) {
-        router.push('/login');
-        return;
-      }
-
-      // Check organization type - only service_company allowed
-      const { data: prof } = await supabase
-        .from('user_profiles')
-        .select('organization_id')
-        .eq('id', user.id)
-        .single();
-
-      if (prof?.organization_id) {
-        const { data: org } = await supabase
-          .from('organizations')
-          .select('type')
-          .eq('id', prof.organization_id)
-          .single();
-
-        if (org?.type !== 'service_company') {
-          setHasAccess(false);
-          setLoading(false);
-          return;
-        }
-      } else {
-        setHasAccess(false);
-        setLoading(false);
-        return;
-      }
-
-      setHasAccess(true);
-      await loadData();
-    } catch (e) {
-      console.error(e);
-      setHasAccess(false);
-    } finally {
-      setLoading(false);
-    }
-  }
-
   async function loadData() {
+    setLoading(true);
     try {
       const { data: all } = await supabase.from('manuals').select('*').order('brand').order('title');
       setManuals(all || []);
@@ -88,6 +42,8 @@ export default function ManualsLibrary() {
       }
     } catch (e) {
       console.error(e);
+    } finally {
+      setLoading(false);
     }
   }
 
@@ -152,26 +108,6 @@ export default function ManualsLibrary() {
     return '#854d0e';
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-lg">Loading...</div>
-      </div>
-    );
-  }
-
-  if (!hasAccess) {
-    return (
-      <div className="min-h-screen flex flex-col">
-        <Header />
-        <div className="max-w-md mx-auto mt-20 text-center">
-          <h1 className="text-2xl font-bold mb-4">Access Restricted</h1>
-          <p className="text-[var(--text3)]">The Manuals Library is only available to Service Company organizations.</p>
-        </div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen flex flex-col bg-[#111827]">
       <Header />
@@ -180,7 +116,7 @@ export default function ManualsLibrary() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
           <div>
             <h1 className="text-3xl font-extrabold">📚 Service Manuals</h1>
-            <p className="text-sm text-[var(--text3)]">Bookshelf view • Filter by wavelength</p>
+            <p className="text-sm text-[var(--text3)]">Bookshelf view • Filter by wavelength • 3D spines</p>
           </div>
 
           <div className="flex flex-wrap gap-2">
@@ -218,47 +154,81 @@ export default function ManualsLibrary() {
         {loading ? (
           <div className="p-12 text-center text-[var(--text3)]">Loading bookshelf...</div>
         ) : (
-          <div className="space-y-12">
+          <div className="space-y-14">
             {Object.keys(groupedManuals).length === 0 && (
               <div className="text-center py-12 text-[var(--text3)]">No manuals found for the selected filter.</div>
             )}
 
             {Object.entries(groupedManuals).map(([brand, brandManuals]) => (
               <div key={brand} className="shelf-container">
-                <div className="flex items-center gap-3 mb-2 px-1">
-                  <div className="text-xl font-bold text-[#d4af37] tracking-wide">{brand}</div>
-                  <div className="flex-1 h-[2px] bg-gradient-to-r from-[#d4af37]/60 to-transparent" />
-                  <div className="text-xs text-[var(--text3)] bg-[#1f2937] px-2 py-0.5 rounded">{brandManuals.length} books</div>
+                {/* Books with 3D Perspective */}
+                <div className="perspective-container overflow-x-auto pb-2" style={{ perspective: '1200px' }}>
+                  <div className="flex gap-3 min-w-max px-2" style={{ transformStyle: 'preserve-3d' }}>
+                    {brandManuals.map((m, index) => (
+                      <div
+                        key={index}
+                        onClick={() => openManual(m)}
+                        className="book w-[92px] flex-shrink-0 cursor-pointer group"
+                        title={m.title}
+                        style={{
+                          transform: 'perspective(1000px) rotateY(-6deg)',
+                          transformStyle: 'preserve-3d',
+                          transition: 'transform 0.2s ease',
+                        }}
+                      >
+                        <div
+                          className="book-spine h-44 w-full rounded-sm flex flex-col justify-between p-2.5 text-white shadow-2xl transition-all duration-200 group-hover:-translate-y-0.5 group-hover:rotateY(-2deg)"
+                          style={{
+                            background: getBookColor(m),
+                            boxShadow: `
+                              inset 0 0 35px rgba(0,0,0,0.45),
+                              inset -12px 0 20px rgba(255,255,255,0.12),
+                              8px 10px 18px rgba(0,0,0,0.6)
+                            `,
+                            borderLeft: '3px solid rgba(0,0,0,0.25)',
+                          }}
+                        >
+                          {/* Spine Texture Lines */}
+                          <div 
+                            className="absolute inset-0 pointer-events-none rounded-sm"
+                            style={{
+                              background: `repeating-linear-gradient(
+                                90deg,
+                                transparent,
+                                transparent 3px,
+                                rgba(0,0,0,0.08) 3px,
+                                rgba(0,0,0,0.08) 4px
+                              )`,
+                            }}
+                          />
+
+                          <div className="text-[11px] font-semibold leading-tight line-clamp-5 relative z-10 drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)]">
+                            {m.title}
+                          </div>
+
+                          <div className="h-1 w-full bg-black/30 rounded relative z-10 mt-auto" />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
 
-                <div className="relative">
-                  <div className="h-2 bg-gradient-to-b from-[#78350f] to-[#451a03] rounded mb-1 shadow-inner" />
-                  <div className="shelf overflow-x-auto pb-3 -mx-1 px-1">
-                    <div className="flex gap-2 min-w-max">
-                      {brandManuals.map((m, index) => (
-                        <div
-                          key={index}
-                          onClick={() => openManual(m)}
-                          className="book w-24 flex-shrink-0 cursor-pointer group"
-                          title={m.title}
-                        >
-                          <div
-                            className="book-spine h-36 w-full rounded-sm flex flex-col justify-between p-2.5 text-white shadow-lg transition-all duration-200 group-hover:-translate-y-0.5"
-                            style={{
-                              background: getBookColor(m),
-                              boxShadow: 'inset 0 0 25px rgba(0,0,0,0.35), 5px 5px 10px rgba(0,0,0,0.5)',
-                            }}
-                          >
-                            <div className="text-[11px] font-semibold leading-tight line-clamp-4 drop-shadow-[0_1px_1px_rgba(0,0,0,0.7)]">
-                              {m.title}
-                            </div>
-                            <div className="h-1 w-full bg-black/20 rounded mt-auto" />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
+                {/* Wooden Shelf Bar */}
+                <div className="relative mt-1">
+                  <div 
+                    className="h-6 rounded-md flex items-center px-4 shadow-inner"
+                    style={{
+                      background: 'linear-gradient(to bottom, #854d0e 0%, #5c3311 40%, #3f230c 100%)',
+                      boxShadow: 'inset 0 2px 4px rgba(255,255,255,0.15), inset 0 -2px 4px rgba(0,0,0,0.5)',
+                    }}
+                  >
+                    <span className="text-sm font-bold text-[#f5d9a0] tracking-wide drop-shadow-sm">
+                      {brand}
+                    </span>
+                    <span className="ml-auto text-xs text-[#d4af37]/70">
+                      {brandManuals.length} books
+                    </span>
                   </div>
-                  <div className="h-1.5 bg-[#451a03] rounded-b shadow-md" />
                 </div>
               </div>
             ))}

@@ -9,7 +9,7 @@ export default function TechHub() {
     { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Post service needs, receive bids, accept contracts (beta live)' },
     { href: '/service-schedule', icon: '📅', label: 'Service Schedule', desc: 'Tickets, assignments & scheduling' },
     { href: '/customers', icon: '👥', label: 'Customers', desc: 'Directory & customer profiles' },
-    { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Search parts & compatibility' },
+    { href: '/marketplace/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Search parts & compatibility' },
     { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Full digital bookshelf' },
     { href: '/reports', icon: '📋', label: 'Service Reports', desc: 'Performance & safety documentation' },
     { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Intelligent service guidance (beta)' },
