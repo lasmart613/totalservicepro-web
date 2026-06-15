@@ -9,8 +9,8 @@ export default function Marketplace() {
   const [searchTerm, setSearchTerm] = useState('');
   const supabase = getSupabaseClient();
 
-  // TODO: Replace with real role check from user_profiles + organizations.type
-  const userRole = 'fse'; // placeholder for now
+  // TODO: Replace with real role check later
+  const userRole = 'fse'; // placeholder
 
   const categories = [
     {
@@ -18,34 +18,26 @@ export default function Marketplace() {
       desc: 'Parts listed for sale by suppliers and companies',
       href: '/marketplace/parts',
       icon: '🔩',
-      roles: ['fse', 'parts_supplier'],
     },
     {
       title: 'Used Laser Systems',
       desc: 'Buy or sell pre-owned laser equipment',
       href: '/marketplace/used-systems',
       icon: '🖥️',
-      roles: ['fse', 'owner'],
     },
     {
       title: 'Consumables',
       desc: 'Handpieces, fibers, tips, gels, and common consumables',
       href: '/marketplace/consumables',
       icon: '🧴',
-      roles: ['fse', 'owner', 'parts_supplier'],
     },
     {
       title: 'Service Requests / Needs',
       desc: 'Post or browse service needs and emergency repairs',
       href: '/marketplace/requests',
       icon: '🛠️',
-      roles: ['fse', 'owner'],
     },
   ];
-
-  const visibleCategories = categories.filter(cat =>
-    cat.roles.includes(userRole)
-  );
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -58,19 +50,27 @@ export default function Marketplace() {
             <p className="text-[var(--text3)]">Buy, sell, and connect in the laser service ecosystem</p>
           </div>
 
-          <div className="w-full md:w-80">
+          <div className="flex flex-col md:flex-row gap-3">
             <input
               type="text"
               placeholder="Search marketplace..."
-              className="input w-full"
+              className="input w-full md:w-80"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
+
+            {/* Prominent Create Listing Button */}
+            <Link 
+              href="/marketplace/list" 
+              className="btn btn-primary whitespace-nowrap"
+            >
+              + Create New Listing
+            </Link>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {visibleCategories.map((cat, index) => (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+          {categories.map((cat, index) => (
             <Link
               key={index}
               href={cat.href}
@@ -88,7 +88,7 @@ export default function Marketplace() {
         </div>
 
         <div className="mt-10 text-xs text-[var(--text3)]">
-          Parts shown in the marketplace are only items currently listed for sale. 
+          Only items that have been actively listed for sale appear in the Marketplace.  
           The full Parts Catalog (reference) is available in the Tech Hub.
         </div>
       </div>

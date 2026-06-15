@@ -8,7 +8,7 @@ export default function PartsCatalog() {
   const [parts, setParts] = useState<any[]>([]);
   const [filteredParts, setFilteredParts] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
-  const [selectedManufacturer, setSelectedManufacturer] = useState('');
+  const [selectedBrand, setSelectedBrand] = useState('');
   const [loading, setLoading] = useState(true);
   const supabase = getSupabaseClient();
 
@@ -46,20 +46,20 @@ export default function PartsCatalog() {
         part.name?.toLowerCase().includes(term) ||
         part.part_number?.toLowerCase().includes(term) ||
         part.description?.toLowerCase().includes(term) ||
-        part.manufacturer?.toLowerCase().includes(term)
+        part.brand?.toLowerCase().includes(term)
       );
     }
 
-    // Manufacturer filter
-    if (selectedManufacturer) {
-      result = result.filter(part => part.manufacturer === selectedManufacturer);
+    // Brand filter
+    if (selectedBrand) {
+      result = result.filter(part => part.brand === selectedBrand);
     }
 
     setFilteredParts(result);
-  }, [searchTerm, selectedManufacturer, parts]);
+  }, [searchTerm, selectedBrand, parts]);
 
-  // Get unique manufacturers for filter dropdown
-  const manufacturers = [...new Set(parts.map(p => p.manufacturer).filter(Boolean))].sort();
+  // Get unique brands for filter dropdown
+  const brands = [...new Set(parts.map(p => p.brand).filter(Boolean))].sort();
 
   if (loading) {
     return (
@@ -91,12 +91,12 @@ export default function PartsCatalog() {
 
             <select
               className="select w-full md:w-64"
-              value={selectedManufacturer}
-              onChange={(e) => setSelectedManufacturer(e.target.value)}
+              value={selectedBrand}
+              onChange={(e) => setSelectedBrand(e.target.value)}
             >
               <option value="">All Manufacturers</option>
-              {manufacturers.map((mfr) => (
-                <option key={mfr} value={mfr}>{mfr}</option>
+              {brands.map((brand) => (
+                <option key={brand} value={brand}>{brand}</option>
               ))}
             </select>
           </div>
@@ -125,7 +125,7 @@ export default function PartsCatalog() {
                 <div className="p-5">
                   <div className="font-bold text-lg mb-1">{part.name}</div>
                   <div className="text-sm text-[var(--text3)] mb-2">
-                    {part.part_number} • {part.manufacturer}
+                    {part.part_number} • {part.brand}
                   </div>
 
                   {part.description && (
