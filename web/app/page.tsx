@@ -6,6 +6,7 @@ import { Header } from '../components/Header';
 import { getSupabaseClient } from '../lib/supabase/client';
 import { FileText, Calendar, Users, BarChart3, UserCheck, Clock, BookOpen, Wrench, User, Building2, Hospital, Package } from 'lucide-react';
 import { toast } from 'sonner';
+import AdBanner from '../components/AdBanner';
 
 type Role = string;
 
@@ -107,6 +108,9 @@ export default function HomePage() {
         </h1>
         <p className="text-[var(--text3)]">Role: <span className="capitalize">{role}</span></p>
 
+        {/* Ad Banner - Only shows for free organizations */}
+        <AdBanner />
+
         {isPartsSupplier && (
           <div className="mt-6 p-6 border border-[var(--gold-border)] bg-[var(--gold-glow)]/10 rounded-xl">
             <h2 className="font-bold text-xl mb-3">Parts Supplier Tools</h2>
@@ -117,7 +121,7 @@ export default function HomePage() {
         )}
 
         {/* KPIs */}
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-10">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
           <div className="card p-5 text-center">
             <div className="text-4xl font-extrabold text-[var(--gold)]">{stats.openTickets}</div>
             <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">OPEN TICKETS</div>
@@ -170,7 +174,7 @@ export default function HomePage() {
           </div>
         </div>
 
-        {/* NEW: Prominent Marketplace Section */}
+        {/* Marketplace Section */}
         <div className="mt-12">
           <div className="flex items-center justify-between mb-4">
             <h3 className="font-bold text-lg">Marketplace</h3>

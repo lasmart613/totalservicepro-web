@@ -1,48 +1,67 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
+import { getSupabaseClient } from '../lib/supabase/client';
 
-interface AdBannerProps {
-  slot: string;
-  format?: string;
-  style?: React.CSSProperties;
-}
+export default function AdBanner() {
+  const [showAd, setShowAd] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const supabase = getSupabaseClient();
 
-declare global {
-  interface Window {
-    adsbygoogle: any[];
-  }
-}
-
-export default function AdBanner({ slot, format = 'auto', style }: AdBannerProps) {
   useEffect(() => {
-    try {
-      if (typeof window !== 'undefined') {
-        (window.adsbygoogle = window.adsbygoogle || []).push({});
-      }
-    } catch (err) {
-      console.error('AdSense error:', err);
-    }
-  }, []);
+    const checkPremiumStatus = async () => {
+      try {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) {
+          setShowAd(true);
+          return;
+        }
 
-  // Optional reusable component (uses your real client from the snippet you provided).
-  // Primary ad units are inline in the dashboard (page.tsx) for direct control.
-  // If using this component, create ad units in AdSense and pass the real slot.
-  const adClient = 'ca-pub-5353320292042327';
-  const resolvedSlot = slot || '1234567890'; // replace default with a real slot ID
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('organization_id')
+          .eq('id', user.id)
+          .single();
+
+        if (profile?.organization_id) {
+          const { data: org } = await supabase
+            .from('organizations')
+            .select('is_premium')
+            .eq('id', profile.organization_id)
+            .single();
+
+          setShowAd(!org?.is_premium);
+        } else {
+          setShowAd(true);
+        }
+      } catch (error) {
+        console.error('Error checking premium status:', error);
+        setShowAd(true);
+      } finally {
+        setLoading(false);
+      }
+    };
+
+    checkPremiumStatus();
+  }, [supabase]);
+
+  if (loading || !showAd) {
+    return null;
+  }
 
   return (
-    <ins
-      className="adsbygoogle"
-      style={{
-        display: 'block',
-        minHeight: '90px',
-        ...style,
-      }}
-      data-ad-client={adClient}
-      data-ad-slot={resolvedSlot}
-      data-ad-format={format}
-      data-full-width-responsive="true"
-    />
+    <div className="my-6 flex justify-center">
+      <ins
+        className="adsbygoogle"
+        style={{ display: 'block' }}
+        data-ad-client="ca-pub-5353320292042327"
+        data-ad-slot="1955313486"
+        data-ad-format="auto"
+        data-full-width-responsive="true"
+      ></ins>
+      <script>
+        (adsbygoogle = window.adsbygoogle || []).push({});
+      </script>
+    </div>
   );
 }
