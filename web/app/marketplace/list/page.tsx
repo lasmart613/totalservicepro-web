@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from '../../../components/Header';
 import { getSupabaseClient } from '../../../lib/supabase/client';
 import { toast } from 'sonner';
@@ -11,10 +11,10 @@ export default function MarketplaceList() {
   const [listingType, setListingType] = useState<ListingType>('part');
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState<File[]>([]);
+  const [userOrg, setUserOrg] = useState<any>(null);
   const supabase = getSupabaseClient();
 
   const [formData, setFormData] = useState({
-    title: '',
     description: '',
     price: '',
     partNumber: '',
@@ -26,7 +26,37 @@ export default function MarketplaceList() {
     urgency: 'Medium',
     preferredDate: '',
     errorCodes: '',
+    location: '',
   });
+
+  // Fetch user's organization for autofill
+  useEffect(() => {
+    const fetchUserOrg = async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('organization_id')
+          .eq('id', user.id)
+          .single();
+
+        if (profile?.organization_id) {
+          const { data: org } = await supabase
+            .from('organizations')
+            .select('name, address, city, state, zip')
+            .eq('id', profile.organization_id)
+            .single();
+
+          if (org) {
+            const locationString = `${org.name} - ${org.address || ''} ${org.city || ''}, ${org.state || ''}`;
+            setFormData(prev => ({ ...prev, location: locationString.trim() }));
+            setUserOrg(org);
+          }
+        }
+      }
+    };
+    fetchUserOrg();
+  }, [supabase]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -68,8 +98,8 @@ export default function MarketplaceList() {
       const imageUrls = await uploadImages();
       const { data: { user } } = await supabase.auth.getUser();
 
-      const payload = {
-        type: listingType,
+      let tableName = 'marketplace_parts';
+      let payload: any = {
         data: {
           ...formData,
           images: imageUrls,
@@ -78,15 +108,46 @@ export default function MarketplaceList() {
         created_at: new Date().toISOString(),
       };
 
-      const { error } = await supabase.from('marketplace_parts').insert(payload);
+      if (listingType === 'request') {
+        tableName = 'marketplace_requests';
+        payload = {
+          title: formData.description.substring(0, 80), // Use first part of description as title
+          description: formData.description,
+          urgency: formData.urgency,
+          preferred_date: formData.preferredDate || null,
+          error_codes: formData.errorCodes,
+          location: formData.location,
+          manufacturer: formData.manufacturer,
+          model: formData.model,
+          serial_number: formData.serialNumber,
+          images: imageUrls,
+          created_by: user?.id,
+          created_at: new Date().toISOString(),
+        };
+      } else if (listingType === 'used') {
+        payload.data = {
+          manufacturer: formData.manufacturer,
+          model: formData.model,
+          serialNumber: formData.serialNumber,
+          price: formData.price,
+          condition: formData.condition,
+          description: formData.description,
+          images: imageUrls,
+        };
+      }
+
+      const { error } = await supabase.from(tableName).insert(payload);
       if (error) throw error;
 
       toast.success('Listing created successfully!');
+      
+      // Reset form
       setFormData({
-        title: '', description: '', price: '', partNumber: '', condition: 'New', quantity: '1',
-        manufacturer: '', model: '', serialNumber: '', urgency: 'Medium', preferredDate: '', errorCodes: '',
+        description: '', price: '', partNumber: '', condition: 'New', quantity: '1',
+        manufacturer: '', model: '', serialNumber: '', urgency: 'Medium', preferredDate: '', errorCodes: '', location: '',
       });
       setImages([]);
+
     } catch (err: any) {
       toast.error('Failed to create listing: ' + err.message);
     } finally {
@@ -120,18 +181,7 @@ export default function MarketplaceList() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Common Fields */}
-          <div>
-            <label className="label">Title</label>
-            <input className="input" value={formData.title} onChange={e => handleInputChange('title', e.target.value)} required />
-          </div>
-
-          <div>
-            <label className="label">Description / Problem Description</label>
-            <textarea className="input min-h-[120px]" value={formData.description} onChange={e => handleInputChange('description', e.target.value)} required />
-          </div>
-
-          {/* Service Request Specific Fields */}
+          {/* Service Request Fields */}
           {listingType === 'request' && (
             <>
               <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -147,6 +197,11 @@ export default function MarketplaceList() {
                   <label className="label">Serial Number</label>
                   <input className="input" value={formData.serialNumber} onChange={e => handleInputChange('serialNumber', e.target.value)} />
                 </div>
+              </div>
+
+              <div>
+                <label className="label">Problem Description</label>
+                <textarea className="input min-h-[120px]" value={formData.description} onChange={e => handleInputChange('description', e.target.value)} required />
               </div>
 
               <div>
@@ -168,6 +223,11 @@ export default function MarketplaceList() {
                   <label className="label">Preferred Date</label>
                   <input type="date" className="input" value={formData.preferredDate} onChange={e => handleInputChange('preferredDate', e.target.value)} />
                 </div>
+              </div>
+
+              <div>
+                <label className="label">Location</label>
+                <input className="input" value={formData.location} onChange={e => handleInputChange('location', e.target.value)} placeholder="Your clinic location" />
               </div>
             </>
           )}
