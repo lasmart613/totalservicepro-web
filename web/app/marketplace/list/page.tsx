@@ -11,7 +11,9 @@ export default function MarketplaceList() {
   const [listingType, setListingType] = useState<ListingType>('part');
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState<File[]>([]);
-  const [userOrg, setUserOrg] = useState<any>(null);
+  const [locations, setLocations] = useState<any[]>([]);
+  const [manufacturers, setManufacturers] = useState<string[]>([]);
+  const [models, setModels] = useState<string[]>([]);
   const supabase = getSupabaseClient();
 
   const [formData, setFormData] = useState({
@@ -26,40 +28,92 @@ export default function MarketplaceList() {
     urgency: 'Medium',
     preferredDate: '',
     errorCodes: '',
-    location: '',
+    location_id: '',
+    street: '',
+    city: '',
+    state: '',
+    zip: '',
   });
 
-  // Fetch user's organization for autofill
+  // Fetch user's locations
   useEffect(() => {
-    const fetchUserOrg = async () => {
+    const fetchLocations = async () => {
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: profile } = await supabase
-          .from('user_profiles')
-          .select('organization_id')
-          .eq('id', user.id)
-          .single();
+      if (!user) return;
 
-        if (profile?.organization_id) {
-          const { data: org } = await supabase
-            .from('organizations')
-            .select('name, address, city, state, zip')
-            .eq('id', profile.organization_id)
-            .single();
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('organization_id')
+        .eq('id', user.id)
+        .single();
 
-          if (org) {
-            const locationString = `${org.name} - ${org.address || ''} ${org.city || ''}, ${org.state || ''}`;
-            setFormData(prev => ({ ...prev, location: locationString.trim() }));
-            setUserOrg(org);
-          }
+      if (profile?.organization_id) {
+        const { data: locs } = await supabase
+          .from('locations')
+          .select('*')
+          .eq('organization_id', profile.organization_id)
+          .order('is_primary', { ascending: false });
+
+        setLocations(locs || []);
+
+        const primary = locs?.find((l: any) => l.is_primary);
+        if (primary) {
+          setFormData(prev => ({ ...prev, location_id: primary.id }));
         }
       }
     };
-    fetchUserOrg();
+    fetchLocations();
   }, [supabase]);
+
+  // Fetch manufacturers from parts_catalog
+  useEffect(() => {
+    const fetchManufacturers = async () => {
+      const { data, error } = await supabase
+        .from('parts_catalog')
+        .select('brand')
+        .not('brand', 'is', null);
+
+      if (!error && data) {
+        const uniqueBrands = [...new Set(data.map((item: any) => item.brand).filter(Boolean))].sort();
+        setManufacturers(uniqueBrands);
+      }
+    };
+    fetchManufacturers();
+  }, [supabase]);
+
+  // Fetch models when manufacturer changes
+  useEffect(() => {
+    const fetchModels = async () => {
+      if (!formData.manufacturer) {
+        setModels([]);
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('parts_catalog')
+        .select('name')
+        .eq('brand', formData.manufacturer)
+        .not('name', 'is', null);
+
+      if (!error && data) {
+        const uniqueModels = [...new Set(data.map((item: any) => item.name).filter(Boolean))].sort();
+        setModels(uniqueModels);
+      }
+    };
+    fetchModels();
+  }, [formData.manufacturer, supabase]);
 
   const handleInputChange = (field: string, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
+  };
+
+  // Reset model when manufacturer changes
+  const handleManufacturerChange = (value: string) => {
+    setFormData(prev => ({
+      ...prev,
+      manufacturer: value,
+      model: '',
+    }));
   };
 
   const handleImageSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -100,10 +154,7 @@ export default function MarketplaceList() {
 
       let tableName = 'marketplace_parts';
       let payload: any = {
-        data: {
-          ...formData,
-          images: imageUrls,
-        },
+        data: { ...formData, images: imageUrls },
         created_by: user?.id,
         created_at: new Date().toISOString(),
       };
@@ -111,12 +162,12 @@ export default function MarketplaceList() {
       if (listingType === 'request') {
         tableName = 'marketplace_requests';
         payload = {
-          title: formData.description.substring(0, 80), // Use first part of description as title
+          title: formData.description.substring(0, 80),
           description: formData.description,
           urgency: formData.urgency,
           preferred_date: formData.preferredDate || null,
           error_codes: formData.errorCodes,
-          location: formData.location,
+          location_id: formData.location_id || null,
           manufacturer: formData.manufacturer,
           model: formData.model,
           serial_number: formData.serialNumber,
@@ -124,27 +175,16 @@ export default function MarketplaceList() {
           created_by: user?.id,
           created_at: new Date().toISOString(),
         };
-      } else if (listingType === 'used') {
-        payload.data = {
-          manufacturer: formData.manufacturer,
-          model: formData.model,
-          serialNumber: formData.serialNumber,
-          price: formData.price,
-          condition: formData.condition,
-          description: formData.description,
-          images: imageUrls,
-        };
       }
 
       const { error } = await supabase.from(tableName).insert(payload);
       if (error) throw error;
 
       toast.success('Listing created successfully!');
-      
-      // Reset form
       setFormData({
         description: '', price: '', partNumber: '', condition: 'New', quantity: '1',
-        manufacturer: '', model: '', serialNumber: '', urgency: 'Medium', preferredDate: '', errorCodes: '', location: '',
+        manufacturer: '', model: '', serialNumber: '', urgency: 'Medium', preferredDate: '', errorCodes: '',
+        location_id: '', street: '', city: '', state: '', zip: '',
       });
       setImages([]);
 
@@ -181,22 +221,43 @@ export default function MarketplaceList() {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Service Request Fields */}
           {listingType === 'request' && (
             <>
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {/* Dynamic Manufacturer + Model Dropdowns */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
                   <label className="label">Manufacturer</label>
-                  <input className="input" value={formData.manufacturer} onChange={e => handleInputChange('manufacturer', e.target.value)} />
+                  <select 
+                    className="select" 
+                    value={formData.manufacturer} 
+                    onChange={e => handleManufacturerChange(e.target.value)}
+                  >
+                    <option value="">Select Manufacturer</option>
+                    {manufacturers.map((mfr) => (
+                      <option key={mfr} value={mfr}>{mfr}</option>
+                    ))}
+                  </select>
                 </div>
+
                 <div>
                   <label className="label">Model</label>
-                  <input className="input" value={formData.model} onChange={e => handleInputChange('model', e.target.value)} />
+                  <select 
+                    className="select" 
+                    value={formData.model} 
+                    onChange={e => handleInputChange('model', e.target.value)}
+                    disabled={!formData.manufacturer}
+                  >
+                    <option value="">Select Model</option>
+                    {models.map((model) => (
+                      <option key={model} value={model}>{model}</option>
+                    ))}
+                  </select>
                 </div>
-                <div>
-                  <label className="label">Serial Number</label>
-                  <input className="input" value={formData.serialNumber} onChange={e => handleInputChange('serialNumber', e.target.value)} />
-                </div>
+              </div>
+
+              <div>
+                <label className="label">Serial Number</label>
+                <input className="input" value={formData.serialNumber} onChange={e => handleInputChange('serialNumber', e.target.value)} />
               </div>
 
               <div>
@@ -206,8 +267,46 @@ export default function MarketplaceList() {
 
               <div>
                 <label className="label">Error / Fault Codes (if any)</label>
-                <input className="input" value={formData.errorCodes} onChange={e => handleInputChange('errorCodes', e.target.value)} placeholder="e.g. Fault 12.1, E-45" />
+                <input className="input" value={formData.errorCodes} onChange={e => handleInputChange('errorCodes', e.target.value)} />
               </div>
+
+              {/* Location */}
+              {locations.length > 0 ? (
+                <div>
+                  <label className="label">Location</label>
+                  <select 
+                    className="select" 
+                    value={formData.location_id} 
+                    onChange={e => handleInputChange('location_id', e.target.value)}
+                  >
+                    <option value="">Select a location...</option>
+                    {locations.map((loc: any) => (
+                      <option key={loc.id} value={loc.id}>
+                        {loc.name} {loc.is_primary ? '(Primary)' : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div>
+                    <label className="label">Street Address</label>
+                    <input className="input" value={formData.street} onChange={e => handleInputChange('street', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">City</label>
+                    <input className="input" value={formData.city} onChange={e => handleInputChange('city', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">State</label>
+                    <input className="input" value={formData.state} onChange={e => handleInputChange('state', e.target.value)} />
+                  </div>
+                  <div>
+                    <label className="label">Zip</label>
+                    <input className="input" value={formData.zip} onChange={e => handleInputChange('zip', e.target.value)} />
+                  </div>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
@@ -223,11 +322,6 @@ export default function MarketplaceList() {
                   <label className="label">Preferred Date</label>
                   <input type="date" className="input" value={formData.preferredDate} onChange={e => handleInputChange('preferredDate', e.target.value)} />
                 </div>
-              </div>
-
-              <div>
-                <label className="label">Location</label>
-                <input className="input" value={formData.location} onChange={e => handleInputChange('location', e.target.value)} placeholder="Your clinic location" />
               </div>
             </>
           )}
