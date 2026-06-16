@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Header } from '../../components/Header';
-import { getSupabaseClient } from '../../lib/supabase/client';
+import { Header } from '../../../components/Header';
+import { getSupabaseClient } from '../../../lib/supabase/client';
 
 export default function ServiceRequestsMarketplace() {
   const [requests, setRequests] = useState<any[]>([]);
