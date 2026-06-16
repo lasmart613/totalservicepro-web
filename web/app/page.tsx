@@ -16,6 +16,7 @@ export default function HomePage() {
     completedReports: 0,
     totalReports: 0,
   });
+  const [fseStats, setFseStats] = useState<any[]>([]);
 
   const supabase = getSupabaseClient();
 
@@ -29,6 +30,7 @@ export default function HomePage() {
         return;
       }
 
+      // Get user profile + organization
       const { data: prof } = await supabase
         .from('user_profiles')
         .select('first_name, role, organization_id')
@@ -37,10 +39,18 @@ export default function HomePage() {
 
       setProfile(prof);
 
-      // Real KPI data
+      if (!prof?.organization_id) {
+        setLoading(false);
+        return;
+      }
+
+      const orgId = prof.organization_id;
+
+      // === Organization-level KPIs (real data only) ===
       const { data: reports } = await supabase
         .from('service_reports')
-        .select('status');
+        .select('status, assigned_to')
+        .eq('organization_id', orgId);   // ← Filtered by organization
 
       if (reports) {
         setStats({
@@ -48,6 +58,41 @@ export default function HomePage() {
           completedReports: reports.filter(r => r.status === 'complete').length,
           totalReports: reports.length,
         });
+
+        // === Per-FSE breakdown (for Admins) ===
+        if (prof.role === 'admin' || prof.role === 'company_admin') {
+          const fseMap: { [key: string]: { name: string; open: number; completed: number } } = {};
+
+          // Get FSE names
+          const fseIds = [...new Set(reports.map(r => r.assigned_to).filter(Boolean))];
+          if (fseIds.length > 0) {
+            const { data: fseUsers } = await supabase
+              .from('user_profiles')
+              .select('id, first_name, last_name')
+              .in('id', fseIds);
+
+            fseUsers?.forEach(fse => {
+              fseMap[fse.id] = {
+                name: `${fse.first_name || ''} ${fse.last_name || ''}`.trim(),
+                open: 0,
+                completed: 0,
+              };
+            });
+          }
+
+          // Count per FSE
+          reports.forEach(report => {
+            if (report.assigned_to && fseMap[report.assigned_to]) {
+              if (report.status === 'complete') {
+                fseMap[report.assigned_to].completed++;
+              } else {
+                fseMap[report.assigned_to].open++;
+              }
+            }
+          });
+
+          setFseStats(Object.values(fseMap));
+        }
       }
 
       setLoading(false);
@@ -88,7 +133,7 @@ export default function HomePage() {
 
         <AdBanner />
 
-        {/* Real KPIs */}
+        {/* Organization-specific KPIs (no hardcoded data) */}
         <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-8">
           <div className="card p-5 text-center">
             <div className="text-4xl font-extrabold text-[var(--gold)]">{stats.openTickets}</div>
@@ -103,6 +148,28 @@ export default function HomePage() {
             <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">TOTAL REPORTS</div>
           </div>
         </div>
+
+        {/* Admin: Per-FSE Breakdown */}
+        {(profile?.role === 'admin' || profile?.role === 'company_admin') && fseStats.length > 0 && (
+          <div className="mt-10">
+            <h3 className="font-bold text-lg mb-4">FSE Performance (Organization)</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              {fseStats.map((fse, index) => (
+                <div key={index} className="card p-5">
+                  <div className="font-semibold mb-2">{fse.name || 'Unassigned FSE'}</div>
+                  <div className="flex justify-between text-sm">
+                    <span>Open:</span>
+                    <span className="font-bold text-[var(--gold)]">{fse.open}</span>
+                  </div>
+                  <div className="flex justify-between text-sm">
+                    <span>Completed:</span>
+                    <span className="font-bold text-green-400">{fse.completed}</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Upcoming Service Calls */}
         <div className="mt-10">
