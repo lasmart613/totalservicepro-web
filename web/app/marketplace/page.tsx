@@ -2,15 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { Header } from '../../components/Header';
 
-interface MarketplacePageProps {
-  searchParams: {
-    type?: 'part' | 'used' | 'request';
-  };
-}
-
-export default function MarketplacePage({ searchParams }: MarketplacePageProps) {
-  const preselectedType = searchParams.type || null;
-
+export default function Marketplace() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
@@ -23,52 +15,47 @@ export default function MarketplacePage({ searchParams }: MarketplacePageProps) 
           </div>
 
           <Link 
-            href={`/marketplace/list${preselectedType ? `?type=${preselectedType}` : ''}`} 
+            href="/marketplace/list" 
             className="btn btn-primary whitespace-nowrap"
           >
             + Create New Listing
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-          <Link href="/marketplace/parts" className="card p-6 hover:border-[var(--gold)] group">
-            <div className="flex items-start gap-4">
-              <div className="text-4xl">🔩</div>
-              <div className="flex-1">
-                <h3 className="font-bold text-xl mb-1 group-hover:text-[var(--gold)]">Parts</h3>
-                <p className="text-sm text-[var(--text3)]">Parts listed for sale by suppliers and companies</p>
-              </div>
-            </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+          {/* Parts */}
+          <Link href="/marketplace/parts" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+            <div className="text-4xl mb-4">🔩</div>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Parts</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">Parts listed for sale by suppliers and companies</p>
           </Link>
 
-          <Link href="/marketplace/used-systems" className="card p-6 hover:border-[var(--gold)] group">
-            <div className="flex items-start gap-4">
-              <div className="text-4xl">🖥️</div>
-              <div className="flex-1">
-                <h3 className="font-bold text-xl mb-1 group-hover:text-[var(--gold)]">Used Laser Systems</h3>
-                <p className="text-sm text-[var(--text3)]">Buy or sell pre-owned laser equipment</p>
-              </div>
-            </div>
+          {/* Used Laser Systems */}
+          <Link href="/marketplace/used-systems" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+            <div className="text-4xl mb-4">🖥️</div>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Used Laser Systems</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">Buy or sell pre-owned laser equipment</p>
           </Link>
 
-          <Link href="/marketplace/consumables" className="card p-6 hover:border-[var(--gold)] group">
-            <div className="flex items-start gap-4">
-              <div className="text-4xl">🧴</div>
-              <div className="flex-1">
-                <h3 className="font-bold text-xl mb-1 group-hover:text-[var(--gold)]">Consumables</h3>
-                <p className="text-sm text-[var(--text3)]">Handpieces, fibers, tips, gels, and common consumables</p>
-              </div>
-            </div>
+          {/* Consumables */}
+          <Link href="/marketplace/consumables" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+            <div className="text-4xl mb-4">🧴</div>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Consumables</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">Handpieces, fibers, tips, gels, and common consumables</p>
           </Link>
 
-          <Link href="/marketplace/requests" className="card p-6 hover:border-[var(--gold)] group">
-            <div className="flex items-start gap-4">
-              <div className="text-4xl">🛠️</div>
-              <div className="flex-1">
-                <h3 className="font-bold text-xl mb-1 group-hover:text-[var(--gold)]">Service Requests / Needs</h3>
-                <p className="text-sm text-[var(--text3)]">Post or browse service needs and emergency repairs</p>
-              </div>
-            </div>
+          {/* Service Requests */}
+          <Link href="/marketplace/requests" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+            <div className="text-4xl mb-4">🛠️</div>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Service Requests</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">Post or browse service needs and emergency repairs</p>
+          </Link>
+
+          {/* My Bids - New */}
+          <Link href="/bids" className="card p-6 hover:border-[var(--gold)] group flex flex-col border-2 border-[var(--gold)]/30">
+            <div className="text-4xl mb-4">📋</div>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">My Bids</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">View and manage all bids you have submitted</p>
           </Link>
         </div>
 
