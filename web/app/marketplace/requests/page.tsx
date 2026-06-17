@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Header } from '../../components/Header';
-import { getSupabaseClient } from '../../lib/supabase/client';
+import { Header } from '../../../components/Header';
+import { getSupabaseClient } from '../../../lib/supabase/client';
 
 export default function ServiceRequestsMarketplace() {
   const [requests, setRequests] = useState<any[]>([]);
@@ -46,7 +46,7 @@ export default function ServiceRequestsMarketplace() {
       <div className="max-w-6xl mx-auto w-full px-4 py-8">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-3xl font-extrabold">Service Requests / Needs</h1>
+            <h1 className="text-3xl font-extrabold">Service Requests</h1>
             <p className="text-[var(--text3)]">Browse open service needs and submit bids</p>
           </div>
           <Link href="/marketplace/list?type=request" className="btn btn-primary">
