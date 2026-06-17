@@ -2,8 +2,8 @@
 
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { Header } from '../../../components/Header';
-import { getSupabaseClient } from '../../../lib/supabase/client';
+import { Header } from '../../components/Header';
+import { getSupabaseClient } from '../../lib/supabase/client';
 import { toast } from 'sonner';
 
 type ListingType = 'part' | 'used' | 'request';
