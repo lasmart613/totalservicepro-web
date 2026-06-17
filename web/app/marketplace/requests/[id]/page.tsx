@@ -3,8 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { Header } from '../../../components/Header';
-import { getSupabaseClient } from '../../../lib/supabase/client';
+import { Header } from '../../../../../components/Header';
+import { getSupabaseClient } from '../../../../../lib/supabase/client';
 import { toast } from 'sonner';
 
 export default function ServiceRequestDetail() {
@@ -42,7 +42,6 @@ export default function ServiceRequestDetail() {
 
     setRequest(reqData);
 
-    // Fetch full location details (including name)
     if (reqData.location_id) {
       const { data: locData } = await supabase
         .from('locations')
