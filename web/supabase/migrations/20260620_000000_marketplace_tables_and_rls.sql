@@ -16,6 +16,7 @@
 -- =====================================================
 CREATE TABLE IF NOT EXISTS public.marketplace_listings (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
+  seller_id uuid REFERENCES auth.users(id) ON DELETE SET NULL NOT NULL,
   created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   organization_id bigint REFERENCES public.organizations(id) ON DELETE SET NULL,
   listing_type text NOT NULL DEFAULT 'other', -- 'part' | 'used' | 'other'
@@ -40,6 +41,7 @@ ALTER TABLE public.marketplace_listings ENABLE ROW LEVEL SECURITY;
 
 -- DEFENSIVE FIX: Add columns if table existed from partial/previous migration (this fixes "column created_by does not exist")
 ALTER TABLE IF EXISTS public.marketplace_listings
+  ADD COLUMN IF NOT EXISTS seller_id uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS created_by uuid REFERENCES auth.users(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS organization_id bigint REFERENCES public.organizations(id) ON DELETE SET NULL,
   ADD COLUMN IF NOT EXISTS listing_type text,
@@ -58,11 +60,11 @@ UPDATE public.marketplace_listings SET status = COALESCE(status, 'active') WHERE
 DROP POLICY IF EXISTS "Owners manage own listings" ON public.marketplace_listings;
 DROP POLICY IF EXISTS "Authenticated can view active listings" ON public.marketplace_listings;
 
--- Owners (created_by) can fully manage their own listings
+-- Owners (seller_id or created_by) can fully manage their own listings
 CREATE POLICY "Owners manage own listings" ON public.marketplace_listings
   FOR ALL
-  USING (created_by = auth.uid())
-  WITH CHECK (created_by = auth.uid());
+  USING (seller_id = auth.uid() OR created_by = auth.uid())
+  WITH CHECK (seller_id = auth.uid() OR created_by = auth.uid());
 
 -- FSEs, service companies, and any authenticated users can browse active listings
 CREATE POLICY "Authenticated can view active listings" ON public.marketplace_listings

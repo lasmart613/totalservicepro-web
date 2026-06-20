@@ -179,7 +179,13 @@ export default function MarketplaceList() {
 
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      const imageUrls = await uploadImages(user?.id || 'anon');
+      if (!user?.id) {
+        toast.error('You must be logged in to create a listing');
+        setLoading(false);
+        return;
+      }
+
+      const imageUrls = await uploadImages(user.id);
 
       const finalManufacturer = formData.manufacturer === 'Other' 
         ? formData.customManufacturer 
@@ -196,7 +202,8 @@ export default function MarketplaceList() {
         images: imageUrls,
         description: formData.description,
         notes: formData.additionalNotes || formData.reasonForSelling,
-        created_by: user?.id,
+        seller_id: user.id,
+        created_by: user.id,
         created_at: new Date().toISOString(),
       };
 

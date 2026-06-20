@@ -26,7 +26,7 @@ export default function MyListings() {
       const { data, error } = await supabase
         .from('marketplace_listings')
         .select('*')
-        .eq('created_by', user.id)
+        .or(`seller_id.eq.${user.id},created_by.eq.${user.id}`)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
