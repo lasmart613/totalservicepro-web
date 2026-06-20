@@ -191,9 +191,21 @@ export default function MarketplaceList() {
         ? formData.customManufacturer 
         : formData.manufacturer;
 
+      let computedTitle = '';
+      if (listingType === 'part') {
+        computedTitle = formData.partNumber || formData.description?.substring(0, 80) || 'Part for Sale';
+      } else if (listingType === 'used') {
+        computedTitle = [finalManufacturer, formData.model, formData.serialNumber ? `(S/N ${formData.serialNumber})` : '']
+          .filter(Boolean).join(' ').trim();
+        if (!computedTitle) computedTitle = formData.description?.substring(0, 80) || 'Used Laser System';
+      } else {
+        computedTitle = formData.description?.substring(0, 80) || 'Service Request';
+      }
+
       let tableName = 'marketplace_listings';
       let payload: any = {
         listing_type: listingType,
+        title: computedTitle,
         manufacturer: finalManufacturer,
         model: formData.model,
         serial_number: formData.serialNumber,
@@ -212,7 +224,7 @@ export default function MarketplaceList() {
           ...payload,
           part_number: formData.partNumber,
           quantity: parseInt(formData.quantity) || 1,
-          data: {
+          details: {
             ...formData,
             manufacturer: finalManufacturer,
             images: imageUrls,
@@ -250,8 +262,9 @@ export default function MarketplaceList() {
 
       if (listingType === 'request') {
         tableName = 'marketplace_requests';
+        const requestTitle = formData.description.substring(0, 80) || 'Service Request';
         payload = {
-          title: formData.description.substring(0, 80),
+          title: requestTitle,
           description: formData.description,
           urgency: formData.urgency,
           preferred_date: formData.preferredDate || null,
@@ -261,7 +274,7 @@ export default function MarketplaceList() {
           model: formData.model,
           serial_number: formData.serialNumber,
           images: imageUrls,
-          created_by: user?.id,
+          created_by: user.id,
           created_at: new Date().toISOString(),
         };
       }
@@ -398,6 +411,17 @@ export default function MarketplaceList() {
                     value={formData.wavelength || (MODELS[formData.model]?.wavelengths?.[0]?.name ?? '')}
                     onChange={e => handleInputChange('wavelength', e.target.value)}
                     placeholder="e.g. 1064nm Nd:YAG"
+                  />
+                </div>
+
+                {/* Description for Used */}
+                <div>
+                  <label className="label">Description</label>
+                  <textarea 
+                    className="input min-h-[80px]" 
+                    value={formData.description} 
+                    onChange={e => handleInputChange('description', e.target.value)} 
+                    placeholder="Describe the laser system, condition, accessories, history..." 
                   />
                 </div>
 

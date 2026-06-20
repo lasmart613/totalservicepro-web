@@ -58,7 +58,7 @@ export default function MyListings() {
 
   const startEditing = (listing: any) => {
     setEditingId(listing.id);
-    setEditForm(listing.data || {});
+    setEditForm(listing.details || listing.data || {});
   };
 
   const cancelEditing = () => {
@@ -72,7 +72,7 @@ export default function MyListings() {
     try {
       const { error } = await supabase
         .from('marketplace_listings')
-        .update({ data: editForm })
+        .update({ details: editForm })
         .eq('id', editingId);
 
       if (error) throw error;
@@ -119,10 +119,10 @@ export default function MyListings() {
                 <div className="flex justify-between items-start mb-4">
                   <div>
                     <span className="text-xs uppercase tracking-widest text-[var(--text3)]">
-                      {listing.type?.toUpperCase()}
+                      {(listing.listing_type || listing.type || 'listing').toUpperCase()}
                     </span>
                     <h3 className="font-bold text-xl">
-                      {listing.data?.title || listing.data?.partNumber || listing.data?.model || 'Untitled Listing'}
+                      {listing.title || listing.data?.title || listing.details?.partNumber || listing.data?.partNumber || listing.details?.model || listing.data?.model || 'Untitled Listing'}
                     </h3>
                   </div>
                   <div className="flex gap-2">
@@ -156,14 +156,14 @@ export default function MyListings() {
                   </div>
                 ) : (
                   <div className="text-sm text-[var(--text3)]">
-                    {listing.data?.description || listing.data?.title || 'No description provided.'}
+                    {listing.description || listing.data?.description || listing.details?.description || listing.data?.title || 'No description provided.'}
                   </div>
                 )}
 
                 {/* Image Preview */}
-                {listing.data?.images?.length > 0 && (
+                {(listing.images || listing.data?.images)?.length > 0 && (
                   <div className="flex gap-3 mt-4">
-                    {listing.data.images.slice(0, 4).map((url: string, idx: number) => (
+                    {(listing.images || listing.data?.images).slice(0, 4).map((url: string, idx: number) => (
                       <img key={idx} src={url} alt="listing" className="w-20 h-20 object-cover rounded border" />
                     ))}
                   </div>
