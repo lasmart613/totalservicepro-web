@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useMemo } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { MODELS, buildManufacturers } from '@/lib/models';
@@ -9,6 +10,7 @@ import { toast } from 'sonner';
 type ListingType = 'part' | 'used' | 'request';
 
 export default function MarketplaceList() {
+  const searchParams = useSearchParams();
   const [listingType, setListingType] = useState<ListingType>('part');
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState<File[]>([]);
@@ -16,6 +18,14 @@ export default function MarketplaceList() {
   const [locations, setLocations] = useState<any[]>([]);
   const [manufacturers, setManufacturers] = useState<string[]>([]);
   const supabase = getSupabaseClient();
+
+  // Pre-select type from ?type= query (e.g. from category pages)
+  useEffect(() => {
+    const t = searchParams.get('type') as ListingType | null;
+    if (t && ['part', 'used', 'request'].includes(t)) {
+      setListingType(t);
+    }
+  }, [searchParams]);
 
   const [formData, setFormData] = useState({
     // Common

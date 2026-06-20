@@ -13,6 +13,7 @@ export default function ConsumablesMarketplace() {
   const [biddingOn, setBiddingOn] = useState<any>(null);
   const [bidPrice, setBidPrice] = useState('');
   const [bidNotes, setBidNotes] = useState('');
+  const [bidQuestion, setBidQuestion] = useState('');
   const supabase = getSupabaseClient();
 
   useEffect(() => {
@@ -26,6 +27,7 @@ export default function ConsumablesMarketplace() {
       .select('*')
       .eq('listing_type', 'part')
       .order('created_at', { ascending: false });
+    // Note: Consumables currently share the 'part' listing_type. Create with "Part for Sale" for now.
     if (!error && data) setListings(data);
     setLoading(false);
   };
@@ -42,6 +44,7 @@ export default function ConsumablesMarketplace() {
       bidder_id: user.id,
       price: parseFloat(bidPrice),
       notes: bidNotes,
+      question: bidQuestion,
       status: 'pending',
       created_at: new Date().toISOString(),
     });
@@ -52,6 +55,7 @@ export default function ConsumablesMarketplace() {
       setBiddingOn(null);
       setBidPrice('');
       setBidNotes('');
+      setBidQuestion('');
     }
   };
 
@@ -82,48 +86,60 @@ export default function ConsumablesMarketplace() {
           <p className="text-lg mb-4">No listings yet.</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {listings.map((l) => (
-              <div key={l.id} className="card p-6">
-                {l.images && l.images.length > 0 && (
-                  <img src={l.images[0]} alt="" className="w-full h-40 object-cover rounded mb-3" />
-                )}
-                <h3 className="font-bold text-xl mb-1">{l.title}</h3>
-                <p className="text-sm text-[var(--text3)] mb-2">{l.manufacturer} {l.model} {l.serial_number && `• ${l.serial_number}`}</p>
-                <div className="flex justify-between text-sm mb-2">
-                  <span>Condition: {l.condition}</span>
-                  <span className="font-semibold text-[var(--gold)]">${l.price}</span>
-                </div>
-                <p className="text-sm line-clamp-3 mb-3">{l.description || l.notes}</p>
-                <button 
-                  onClick={() => { setBiddingOn(l); setBidPrice(''); setBidNotes(''); }} 
-                  className="btn btn-primary w-full text-sm"
-                >
-                  Make Offer / Bid
-                </button>
+            {listings.map((l) => {
+              const imgs = Array.isArray(l.images) ? l.images : (l.images ? [l.images] : []);
+              const featured = imgs[0];
+              return (
+                <div key={l.id} className="card p-6">
+                  {featured && (
+                    <Link href={`/marketplace/listing/${l.id}`}>
+                      <img src={featured} alt="" className="w-full h-32 object-cover rounded mb-3 cursor-pointer" />
+                    </Link>
+                  )}
+                  <Link href={`/marketplace/listing/${l.id}`}>
+                    <h3 className="font-bold text-xl mb-1 hover:text-[var(--gold)] cursor-pointer">{l.title}</h3>
+                  </Link>
+                  <p className="text-sm text-[var(--text3)] mb-1">{l.description || l.notes}</p>
+                  <p className="text-sm text-[var(--text3)] mb-2">PN: {l.part_number || l.serial_number || 'N/A'}</p>
+                  <p className="text-sm mb-2">{l.manufacturer} {l.model} • {l.condition}</p>
+                  <div className="font-semibold text-[var(--gold)] mb-2">${l.price}</div>
+                  <button 
+                    onClick={() => { setBiddingOn(l); setBidPrice(''); setBidNotes(''); setBidQuestion(''); }} 
+                    className="btn btn-primary w-full text-sm"
+                  >
+                    Make Offer / Bid
+                  </button>
 
-                {biddingOn?.id === l.id && (
-                  <div className="mt-3 p-3 bg-[var(--surface3)] rounded">
-                    <input 
-                      type="number" 
-                      className="input mb-2" 
-                      placeholder="Your offer amount" 
-                      value={bidPrice} 
-                      onChange={e => setBidPrice(e.target.value)} 
-                    />
-                    <textarea 
-                      className="input mb-2 min-h-[60px]" 
-                      placeholder="Notes / offer details" 
-                      value={bidNotes} 
-                      onChange={e => setBidNotes(e.target.value)} 
-                    />
-                    <div className="flex gap-2">
-                      <button onClick={submitBid} className="btn btn-primary flex-1 text-sm">Submit Offer</button>
-                      <button onClick={() => setBiddingOn(null)} className="btn btn-secondary flex-1 text-sm">Cancel</button>
+                  {biddingOn?.id === l.id && (
+                    <div className="mt-3 p-3 bg-[var(--surface3)] rounded">
+                      <input 
+                        type="number" 
+                        className="input mb-2" 
+                        placeholder="Your offer amount" 
+                        value={bidPrice} 
+                        onChange={e => setBidPrice(e.target.value)} 
+                      />
+                      <textarea 
+                        className="input mb-2 min-h-[60px]" 
+                        placeholder="Notes / offer details" 
+                        value={bidNotes} 
+                        onChange={e => setBidNotes(e.target.value)} 
+                      />
+                      <textarea 
+                        className="input mb-2 min-h-[60px]" 
+                        placeholder="Question for the seller (optional)" 
+                        value={bidQuestion} 
+                        onChange={e => setBidQuestion(e.target.value)} 
+                      />
+                      <div className="flex gap-2">
+                        <button onClick={submitBid} className="btn btn-primary flex-1 text-sm">Submit Offer</button>
+                        <button onClick={() => setBiddingOn(null)} className="btn btn-secondary flex-1 text-sm">Cancel</button>
+                      </div>
                     </div>
-                  </div>
-                )}
-              </div>
-            ))}
+                  )}
+                </div>
+              );
+            })}
           </div>
         )}
         </div>

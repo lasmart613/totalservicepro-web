@@ -44,17 +44,33 @@ export default function Marketplace() {
         }
       }
 
-      // Example static notifications (easy to extend)
+      // Static "posted" example (easy to extend or replace with a notifications table later)
       notifs.push({
         id: 'posted',
         message: 'Your listing was posted successfully.',
         time: 'just now'
       });
-      notifs.push({
-        id: 'viewed',
-        message: 'Your listing was viewed 5 times today!',
-        time: 'today'
-      });
+
+      // Real view counts from your listings (functional counter)
+      const { data: myListingsWithViews } = await supabase
+        .from('marketplace_listings')
+        .select('id, title, views')
+        .eq('seller_id', user.id)
+        .order('views', { ascending: false })
+        .limit(3);
+
+      if (myListingsWithViews) {
+        myListingsWithViews.forEach(l => {
+          const v = l.views || 0;
+          if (v > 0) {
+            notifs.push({
+              id: `viewed-${l.id}`,
+              message: `Your listing "${l.title}" was viewed ${v} time${v === 1 ? '' : 's'}!`,
+              time: 'total'
+            });
+          }
+        });
+      }
 
       setNotifications(notifs.slice(0, 5)); // limit
     };

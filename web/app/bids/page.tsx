@@ -29,6 +29,7 @@ export default function MyBidsPage() {
         id,
         price,
         notes,
+        question,
         status,
         created_at,
         request_id,
@@ -126,6 +127,12 @@ export default function MyBidsPage() {
                   <div className="mt-4 pt-4 border-t">
                     <p className="text-sm text-[var(--text3)] mb-1">Your Notes:</p>
                     <p className="text-sm">{bid.notes}</p>
+                  </div>
+                )}
+                {bid.question && (
+                  <div className="mt-2">
+                    <p className="text-sm text-[var(--text3)] mb-1">Your Question to Seller:</p>
+                    <p className="text-sm">{bid.question}</p>
                   </div>
                 )}
               </div>

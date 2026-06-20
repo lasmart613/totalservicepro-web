@@ -17,6 +17,7 @@ export default function ServiceRequestDetail() {
   const [showBidForm, setShowBidForm] = useState(false);
   const [bidPrice, setBidPrice] = useState('');
   const [bidNotes, setBidNotes] = useState('');
+  const [bidQuestion, setBidQuestion] = useState('');
   const [submittingBid, setSubmittingBid] = useState(false);
 
   const supabase = getSupabaseClient();
@@ -76,6 +77,7 @@ export default function ServiceRequestDetail() {
         bidder_id: user.id,
         price: parseFloat(bidPrice),
         notes: bidNotes,
+        question: bidQuestion,
         status: 'pending',
         created_at: new Date().toISOString(),
       });
@@ -86,6 +88,7 @@ export default function ServiceRequestDetail() {
       setShowBidForm(false);
       setBidPrice('');
       setBidNotes('');
+      setBidQuestion('');
     } catch (err: any) {
       toast.error('Failed to submit bid: ' + err.message);
     } finally {
@@ -217,6 +220,15 @@ export default function ServiceRequestDetail() {
                     className="input min-h-[100px]" 
                     value={bidNotes} 
                     onChange={(e) => setBidNotes(e.target.value)} 
+                  />
+                </div>
+                <div>
+                  <label className="label">Question for the seller (optional)</label>
+                  <textarea 
+                    className="input min-h-[80px]" 
+                    placeholder="Ask any questions about the request..." 
+                    value={bidQuestion} 
+                    onChange={(e) => setBidQuestion(e.target.value)} 
                   />
                 </div>
                 <div className="flex gap-3">
