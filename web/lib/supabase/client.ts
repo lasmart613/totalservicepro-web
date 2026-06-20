@@ -1,17 +1,22 @@
 /**
- * Supabase client for browser (Total Service Pro web)
- * Uses the same project/anon key as the Android WebView assets for shared data/auth/RLS.
- * Session persistence via localStorage (key 'tsp-auth-token' for cross-compat if needed, but Supabase default also works).
+ * Supabase client for browser (Total Service Pro web only).
+ * MUST be configured via NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY env vars.
+ * Never hardcode keys in source.
  *
- * For web strengths: no more _s= URL param passing or Android injection hacks.
- * onAuthStateChange and getSession work normally.
+ * Session persistence via localStorage using 'tsp-auth-token' for compatibility.
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || 'https://yljztfajyvjzqikxdddf.supabase.co';
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || 
-  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM';
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
+if (!supabaseUrl || !supabaseAnonKey) {
+  throw new Error(
+    'Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables. ' +
+    'These are required for the web app. Configure them in your deployment (e.g. Netlify) or .env.local file.'
+  );
+}
 
 let supabaseInstance: SupabaseClient | null = null;
 
@@ -20,10 +25,10 @@ export function getSupabaseClient(): SupabaseClient {
     supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
       auth: {
         persistSession: true,
-        storageKey: 'tsp-auth-token', // match Android/webview for potential future cross
+        storageKey: 'tsp-auth-token',
         storage: typeof window !== 'undefined' ? window.localStorage : undefined,
         autoRefreshToken: true,
-        detectSessionInUrl: true, // web can use magic links etc in URL
+        detectSessionInUrl: true,
       },
     });
   }
@@ -32,6 +37,11 @@ export function getSupabaseClient(): SupabaseClient {
 
 // Convenience export for direct import
 export const supabase = getSupabaseClient();
+
+// Helper to get the configured Supabase URL (useful for constructing function URLs etc.)
+export function getSupabaseUrl(): string {
+  return supabaseUrl || '';
+}
 
 // Types for common rows (expand as needed; or use Supabase generated types later)
 export type UserProfile = {
@@ -105,43 +115,53 @@ export type ServiceReport = {
   // plus any other snapshot or relation fields
 };
 
-// Marketplace types (from 20260611 migration: service_requests, bids, service_contracts)
+// Marketplace types for the web app (marketplace_requests + bids used for service request bidding)
 export type ServiceRequest = {
   id: string;
   organization_id?: string | number | null;
-  posted_by?: string;
+  created_by?: string;
+  posted_by?: string; // legacy
   title?: string | null;
+  description?: string | null;
+  urgency?: string | null;
   location?: string | null;
   city?: string | null;
   state?: string | null;
+  location_id?: string | null;
+  manufacturer?: string | null;
+  model?: string | null;
+  serial_number?: string | null;
+  preferred_date?: string | null;
+  error_codes?: string | null;
+  images?: string[] | null;
   service_type?: string | null;
   model_type?: string | null;
-  urgency?: string | null;
-  description?: string | null;
   budget_max?: number | null;
   budget_min?: number | null;
   status?: 'open' | 'bidding' | 'awarded' | 'closed' | string;
   created_at?: string;
-  organizations?: {
-    name?: string;
-  } | null;
+  // joined
+  bids?: { count: number }[] | null;
+  organizations?: { name?: string } | null;
 };
 
 export type Bid = {
   id?: string;
   request_id: string;
-  bidder_user_id: string;
+  bidder_id: string; // used in current inserts/queries
+  bidder_user_id?: string; // legacy
   bidder_org_id?: string | number | null;
+  price?: number | null; // amount used as price in current UI
   amount?: number | null;
   proposed_date?: string | null;
   notes?: string | null;
   status?: 'pending' | 'accepted' | 'rejected' | string;
   created_at?: string;
-  // joined for display (if RLS/select allows)
-  bidder_profile?: {
-    first_name?: string | null;
-    last_name?: string | null;
-    email?: string | null;
+  // joined for display
+  marketplace_requests?: {
+    title?: string | null;
+    description?: string | null;
+    urgency?: string | null;
   } | null;
 };
 

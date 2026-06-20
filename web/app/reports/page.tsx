@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { getSupabaseClient, ServiceReport } from '../../lib/supabase/client';
-import { Header } from '../../components/Header';
+import { getSupabaseClient, ServiceReport } from '@/lib/supabase/client';
+import { Header } from '@/components/Header';
 import { Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 

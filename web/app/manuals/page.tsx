@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Header } from '../../components/Header';
-import { getSupabaseClient } from '../../lib/supabase/client';
+import { Header } from '@/components/Header';
+import { getSupabaseClient, getSupabaseUrl } from '@/lib/supabase/client';
 
 const WAVELENGTH_OPTIONS = [
   { label: 'All Wavelengths', value: '' },
@@ -50,7 +50,8 @@ export default function ManualsLibrary() {
   async function openManual(m: any) {
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      const resp = await fetch('https://yljztfajyvjzqikxdddf.supabase.co/functions/v1/get-manual-url', {
+      const supabaseUrl = getSupabaseUrl();
+      const resp = await fetch(`${supabaseUrl}/functions/v1/get-manual-url`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -162,7 +163,7 @@ export default function ManualsLibrary() {
             {Object.entries(groupedManuals).map(([brand, brandManuals]) => (
               <div key={brand} className="shelf-container">
                 {/* Books with 3D Perspective */}
-                <div className="perspective-container overflow-x-auto pb-2" style={{ perspective: '1200px' }}>
+                <div className="perspective-container overflow-x-auto pb-2 scrollbar-hide" style={{ perspective: '1200px' }}>
                   <div className="flex gap-3 min-w-max px-2" style={{ transformStyle: 'preserve-3d' }}>
                     {brandManuals.map((m, index) => (
                       <div

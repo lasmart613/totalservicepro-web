@@ -241,7 +241,7 @@ New dedicated professional signups and marketplace were added (see README for fu
 - `/signup/company`
 - `/signup/supplier` (new: Parts Supplier, type=`parts_supplier`, role=`parts_supplier`)
 - `/signup/owner`
-- `/marketplace` (post needs to service_requests, bid/respond via bids form, owner accept creates service_contracts; my-posts/my-bids tabs; role-aware)
+- `/marketplace` (post needs to marketplace_requests for bidding flow + bids table, also marketplace_parts/listings; My Bids at /bids; role-aware)
 
 These are included in builds (static prerendered). All use existing Supabase client, styles, and auth patterns.
 
@@ -259,14 +259,14 @@ After first deploys with these features, in Supabase dashboard (https://supabase
 3. **New marketplace tables** (recommended for clean separation; run the dedicated migration):
    - Run `supabase/migrations/20260611_000000_add_marketplace_tables.sql` (from the main Android project root; it lives alongside other migrations).
    - This creates:
-     - `service_requests`: posted needs (id, organization_id, posted_by, title, description, service_type, model_type, urgency, budget_min/max, deadline, location, status='open'/'bidding'/'awarded', etc.).
+     - `marketplace_requests` (current web impl for service request bidding): posted needs. (Older migrations reference `service_requests` — align as needed.)
      - `bids`: proposals (id, request_id, bidder_user_id, bidder_org_id, amount, proposed_date, notes, status='pending'/'accepted'/'rejected').
      - `service_contracts` (optional, for awarded bids).
    - Also adds columns to `user_profiles` (phone, experience_years, certifications, preferred_regions, bio, linkedin_url, job_title) and `organizations` (phone, website, services_offered, num_techs, tax_id, num_laser_systems, laser_models, facility_type, preferred_services) for the signup data.
    - Includes full RLS policies (owners manage their requests + bids on them + insert contracts; pros can insert/select bids on open requests; authenticated read open requests etc.). If bids insert fails for pros, verify policy allows INSERT on bids WHERE the request is open/bidding and bidder is authenticated (not the poster). Use Table Editor or the migration SQL.
    - After running: `NOTIFY pgrst, 'reload schema';` (or refresh schema cache in Supabase dashboard Table Editor).
-   - Update the web `app/marketplace/page.tsx` (bidding fully implemented): queries/inserts `service_requests` for posts, `bids` for responses (with bidder info), `service_contracts` on accept. Role checks (isOwnerish for accept/view bids; isPro for bid form). My Posts/Bids views. Inline forms + accept flow. Demo seeds + local sim on errors.
-   - Posts use service_requests (cleanly migrated from legacy service_tickets mentions). Bidding end-to-end: owner posts → pro bids → owner accepts (updates + contract insert).
+   - Update the web `app/marketplace/*` (bidding implemented): queries/inserts `marketplace_requests` for service request posts, `bids` for responses (bidder_id, price in current code), plus other marketplace_* tables for parts/listings. My Bids at /bids. Links and forms in requests + list + bids pages.
+   - Note: Some older notes/docs reference service_requests; current implementation standardized on marketplace_requests for the requests bidding feature.
    - Demo seeds shown if query/RLS fails initially (or no migration applied).
 
 4. **user_profiles** extra columns (optional but recommended for clean data):

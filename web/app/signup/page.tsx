@@ -2,7 +2,7 @@
 
 import React from 'react';
 import Link from 'next/link';
-import { Header } from '../../components/Header';
+import { Header } from '@/components/Header';
 import { Building2, Hospital, Package } from 'lucide-react';
 
 export default function SignupIndex() {
@@ -75,7 +75,7 @@ export default function SignupIndex() {
         </div>
 
         <div className="mt-8 p-4 bg-[var(--surface3)] border border-[var(--border)] rounded-xl text-xs text-[var(--text3)]">
-          <strong>Marketplace Vision - Bidding Live:</strong> Owners post contracts, emergency repairs, PM plans (to service_requests). Service Companies (and their FSE team members) bid/respond (to bids table). Owners accept to award + auto-create service_contract. FSEs are roles within Service Company organizations (added by company_admin/service_manager in /company Team). Full payments/notifications next. Try end-to-end with different org-type signups.
+          <strong>Marketplace Vision - Bidding Live:</strong> Owners post service needs (to marketplace_requests). Service Companies / FSEs bid (to bids table). My Bids page available. Owners can award bids. FSEs are roles within Service Company organizations (added by company_admin/service_manager in /company Team). Full payments/notifications next. Try end-to-end with different org-type signups.
         </div>
       </div>
     </div>

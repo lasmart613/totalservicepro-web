@@ -1,8 +1,9 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Header } from '../../../components/Header';
-import { getSupabaseClient } from '../../../lib/supabase/client';
+import Link from 'next/link';
+import { Header } from '@/components/Header';
+import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 
 export default function MyListings() {
@@ -23,9 +24,9 @@ export default function MyListings() {
       if (!user) return;
 
       const { data, error } = await supabase
-        .from('marketplace_listing')
+        .from('marketplace_listings')
         .select('*')
-        .eq('created_by', user.id) // Assuming you add created_by column
+        .eq('created_by', user.id)
         .order('created_at', { ascending: false });
 
       if (error) throw error;
@@ -42,7 +43,7 @@ export default function MyListings() {
 
     try {
       const { error } = await supabase
-        .from('marketplace_listing')
+        .from('marketplace_listings')
         .delete()
         .eq('id', id);
 
@@ -70,7 +71,7 @@ export default function MyListings() {
 
     try {
       const { error } = await supabase
-        .from('marketplace_listing')
+        .from('marketplace_listings')
         .update({ data: editForm })
         .eq('id', editingId);
 
@@ -103,13 +104,13 @@ export default function MyListings() {
       <div className="max-w-5xl mx-auto w-full px-4 py-8">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-extrabold">My Marketplace Listings</h1>
-          <a href="/marketplace/list" className="btn btn-primary">+ Create New Listing</a>
+          <Link href="/marketplace/list" className="btn btn-primary">+ Create New Listing</Link>
         </div>
 
         {listings.length === 0 ? (
           <div className="card p-8 text-center">
             <p className="text-lg mb-4">You don’t have any listings yet.</p>
-            <a href="/marketplace/list" className="btn btn-primary">Create Your First Listing</a>
+            <Link href="/marketplace/list" className="btn btn-primary">Create Your First Listing</Link>
           </div>
         ) : (
           <div className="space-y-6">

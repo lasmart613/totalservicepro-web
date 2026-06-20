@@ -7,9 +7,9 @@ export const dynamic = 'force-dynamic';
 
 import React, { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
-import { getSupabaseClient } from '../../../lib/supabase/client';
-import { Header } from '../../../components/Header';
-import { MODELS, buildManufacturers, CL_ELECTRICAL, CL_MECHANICAL, CL_AESTHETIC, DEFAULT_TEST_EQUIPMENT, computeDeviation, ModelDef, WavelengthSpec } from '../../../lib/models';
+import { getSupabaseClient } from '@/lib/supabase/client';
+import { Header } from '@/components/Header';
+import { MODELS, buildManufacturers, CL_ELECTRICAL, CL_MECHANICAL, CL_AESTHETIC, DEFAULT_TEST_EQUIPMENT, computeDeviation, ModelDef, WavelengthSpec } from '@/lib/models';
 import { ArrowLeft, Save, FileText, Check } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 

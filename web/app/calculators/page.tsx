@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { Header } from '../../components/Header';
+import { Header } from '@/components/Header';
 import { toast } from 'sonner';
 
 // Full lookup table ported from Android wavelength.html (VBeam filter method ~586-600nm)

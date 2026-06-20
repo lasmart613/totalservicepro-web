@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Header } from '../../../components/Header';
+import { Header } from '@/components/Header';
 import { Package, ArrowLeft, Image as ImageIcon } from 'lucide-react';
 
 export default function PartDetail() {

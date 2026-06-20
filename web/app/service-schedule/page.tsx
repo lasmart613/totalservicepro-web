@@ -3,8 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { Header } from '../../components/Header';
-import { getSupabaseClient } from '../../lib/supabase/client';
+import { Header } from '@/components/Header';
+import { getSupabaseClient } from '@/lib/supabase/client';
 import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
 
 export default function ServiceSchedule() {

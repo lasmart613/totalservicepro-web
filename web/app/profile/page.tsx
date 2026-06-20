@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { Header } from '../../components/Header';
-import { getSupabaseClient } from '../../lib/supabase/client';
+import { Header } from '@/components/Header';
+import { getSupabaseClient } from '@/lib/supabase/client';
 
 export default function Profile() {
   const [profile, setProfile] = useState<any>({});

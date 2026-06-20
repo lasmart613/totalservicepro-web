@@ -1,9 +1,9 @@
 'use client';
 
 import React, { useEffect, useState, useRef } from 'react';
-import { Header } from '../../components/Header';
-import { getSupabaseClient } from '../../lib/supabase/client';
-import { MODELS } from '../../lib/models';
+import { Header } from '@/components/Header';
+import { getSupabaseClient } from '@/lib/supabase/client';
+import { MODELS } from '@/lib/models';
 import { toast } from 'sonner';
 
 const TEAM_ROLES = ['fse', 'dispatcher', 'service_manager', 'company_admin', 'admin'];

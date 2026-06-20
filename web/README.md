@@ -88,12 +88,13 @@ All forms:
 **Login page**: Added prominent "Join the Laser Service Network" section with direct links to /signup/fse, /signup/company, /signup/owner.
 
 **Marketplace (/marketplace)**: 
-- Posting (owners): Full form inserts to `service_requests` (status 'open'/'bidding', posted_by, org, budget_max etc from 20260611 migration). Real data preferred; demo fallback.
-- Bidding (FSEs/companies/service pros): On open need cards, "Respond / Bid" opens inline form (amount, proposed_date, notes, prefilled contact from profile). Inserts to `bids` (request_id, bidder_user_id, bidder_org_id, amount, status='pending').
-- Owner side: On "My Posts", "View Received Bids (X)" shows list with Accept/Reject. Accept: updates bid+request statuses, inserts to `service_contracts` (links request+bid+users+amount), rejects siblings. "My Bids" tab shows submitted bids + status.
-- Role-aware (using extended isFSE/isCustomer/isPro from dashboard logic): Owners see/accept bids on own posts; pros see bid form on others' open needs; others see signup nudges. Tabs: All / My Posts / My Bids.
-- Vision advancing: End-to-end beta flow (post as owner → bid as pro → accept → contract row). Future: notifications, full contract view, payments. Links from dashboard/hub/header/signup/login prominent.
-- Uses service_requests (migrated away from legacy service_tickets references).
+- Service Requests (bidding): Uses `marketplace_requests` table + `bids` table for the bidding flow (see recent changes).
+- Other listings (parts, used, consumables): Use `marketplace_parts`, `marketplace_listing` etc.
+- Bidding flow implemented: requests list shows bid counts, detail page has bid form (inserts price + notes to bids with bidder_id), "My Bids" page at /bids.
+- Create listing form at /marketplace/list supports type=request (and parts/used).
+- "My Listings" at /marketplace/my-listings.
+- Links from dashboard, hub, header nav, and signup pages.
+- Note: DB schema references in older migrations/docs use `service_requests`; current web implementation uses `marketplace_requests` for the request bidding feature. Keep consistent or align via migration.
 
 **Navigation/UX**: Marketplace linked from dashboard (quick access + teaser), hub, header nav. Signup pages mention live bidding. "Sign Up" + "Marketplace" prominent for unauth/auth.
 

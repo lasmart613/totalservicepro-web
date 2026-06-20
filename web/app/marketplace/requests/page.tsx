@@ -2,8 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Header } from '../../../components/Header';
-import { getSupabaseClient } from '../../../lib/supabase/client';
+import { Header } from '@/components/Header';
+import { getSupabaseClient } from '@/lib/supabase/client';
 
 export default function ServiceRequestsMarketplace() {
   const [requests, setRequests] = useState<any[]>([]);
@@ -101,10 +101,10 @@ export default function ServiceRequestsMarketplace() {
                         View Details
                       </Link>
                       <Link 
-                        href={`/marketplace/list?type=request`} 
+                        href={`/marketplace/requests/${req.id}`} 
                         className="btn btn-primary text-sm"
                       >
-                        Submit Bid
+                        Bid Now
                       </Link>
                     </div>
                   </div>

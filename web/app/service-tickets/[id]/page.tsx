@@ -3,8 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { Header } from '../../../components/Header';
-import { getSupabaseClient } from '../../../lib/supabase/client';
+import { Header } from '@/components/Header';
+import { getSupabaseClient } from '@/lib/supabase/client';
 import { ArrowLeft, Edit2, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 
