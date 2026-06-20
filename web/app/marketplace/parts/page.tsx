@@ -84,15 +84,13 @@ export default function PartsMarketplace() {
             {listings.map((l) => (
               <div key={l.id} className="card p-6">
                 {l.images && l.images.length > 0 && (
-                  <img src={l.images[0]} alt="" className="w-full h-40 object-cover rounded mb-3" />
+                  <img src={l.images[0]} alt="Featured" className="w-full h-32 object-cover rounded mb-2" />
                 )}
                 <h3 className="font-bold text-xl mb-1">{l.title}</h3>
-                <p className="text-sm text-[var(--text3)] mb-2">{l.manufacturer} {l.model} {l.serial_number && `• ${l.serial_number}`}</p>
-                <div className="flex justify-between text-sm mb-2">
-                  <span>Condition: {l.condition}</span>
-                  <span className="font-semibold text-[var(--gold)]">${l.price}</span>
-                </div>
-                <p className="text-sm line-clamp-3 mb-3">{l.description || l.notes}</p>
+                <p className="text-sm text-[var(--text3)] mb-1">{l.description}</p>
+                <p className="text-sm text-[var(--text3)] mb-2">PN: {l.part_number || l.serial_number || 'N/A'}</p>
+                <p className="text-sm mb-1">{l.manufacturer} {l.model} • {l.condition}</p>
+                <div className="font-semibold text-[var(--gold)] mb-2">${l.price}</div>
                 <button 
                   onClick={() => { setBiddingOn(l); setBidPrice(''); setBidNotes(''); }} 
                   className="btn btn-primary w-full text-sm"

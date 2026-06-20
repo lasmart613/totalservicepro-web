@@ -12,6 +12,7 @@ export default function MarketplaceList() {
   const [listingType, setListingType] = useState<ListingType>('part');
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState<File[]>([]);
+  const [featuredIndex, setFeaturedIndex] = useState(0);
   const [locations, setLocations] = useState<any[]>([]);
   const [manufacturers, setManufacturers] = useState<string[]>([]);
   const supabase = getSupabaseClient();
@@ -186,6 +187,12 @@ export default function MarketplaceList() {
       }
 
       const imageUrls = await uploadImages(user.id);
+
+      // Reorder so featured photo is first (for top of card)
+      if (imageUrls.length > 1 && featuredIndex > 0) {
+        const featured = imageUrls.splice(featuredIndex, 1)[0];
+        imageUrls.unshift(featured);
+      }
 
       const finalManufacturer = formData.manufacturer === 'Other' 
         ? formData.customManufacturer 
@@ -683,6 +690,26 @@ export default function MarketplaceList() {
                     <button type="button" onClick={() => removeImage(index)} className="absolute top-1 right-1 bg-red-500 text-white text-xs w-5 h-5 rounded-full">×</button>
                   </div>
                 ))}
+              </div>
+            )}
+
+            {images.length > 1 && (
+              <div className="mt-3">
+                <label className="label text-sm">Featured Photo (shown at top of listing card)</label>
+                <div className="flex gap-2 flex-wrap">
+                  {images.map((file, index) => (
+                    <label key={index} className="cursor-pointer flex flex-col items-center text-xs">
+                      <input
+                        type="radio"
+                        name="featured"
+                        checked={featuredIndex === index}
+                        onChange={() => setFeaturedIndex(index)}
+                        className="mb-1"
+                      />
+                      <img src={URL.createObjectURL(file)} alt={`preview ${index}`} className="w-12 h-12 object-cover border rounded" />
+                    </label>
+                  ))}
+                </div>
               </div>
             )}
           </div>
