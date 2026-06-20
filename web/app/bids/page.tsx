@@ -32,10 +32,17 @@ export default function MyBidsPage() {
         status,
         created_at,
         request_id,
+        listing_id,
         marketplace_requests (
           title,
           description,
           urgency
+        ),
+        marketplace_listings (
+          title,
+          description,
+          manufacturer,
+          model
         )
       `)
       .eq('bidder_id', user.id)
@@ -64,7 +71,7 @@ export default function MyBidsPage() {
         <div className="flex justify-between items-center mb-8">
           <div>
             <h1 className="text-3xl font-extrabold">My Bids</h1>
-            <p className="text-[var(--text3)]">Bids you have submitted on service requests</p>
+            <p className="text-[var(--text3)]">Bids/offers you have submitted on listings and service requests</p>
           </div>
           <Link href="/marketplace/requests" className="btn btn-secondary">
             Browse Service Requests
@@ -85,10 +92,10 @@ export default function MyBidsPage() {
                 <div className="flex justify-between items-start">
                   <div>
                     <h3 className="font-bold text-xl mb-1">
-                      {bid.marketplace_requests?.title || 'Service Request'}
+                      {bid.marketplace_listings?.title || bid.marketplace_requests?.title || 'Listing'}
                     </h3>
                     <p className="text-sm text-[var(--text3)] line-clamp-2 mb-3">
-                      {bid.marketplace_requests?.description}
+                      {bid.marketplace_listings?.description || bid.marketplace_requests?.description}
                     </p>
 
                     <div className="flex flex-wrap gap-x-6 gap-y-1 text-sm">

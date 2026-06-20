@@ -57,6 +57,13 @@ export default function Marketplace() {
             <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">My Bids</h3>
             <p className="text-sm text-[var(--text3)] flex-1">View and manage all bids you have submitted</p>
           </Link>
+
+          {/* My Listings */}
+          <Link href="/marketplace/my-listings" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+            <div className="text-4xl mb-4">📝</div>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">My Listings</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">View and manage your own listings</p>
+          </Link>
         </div>
 
         <div className="mt-10 text-xs text-[var(--text3)]">

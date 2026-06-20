@@ -1,11 +1,67 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { toast } from 'sonner';
 
 export default function UsedSystemsMarketplace() {
+  const [listings, setListings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [biddingOn, setBiddingOn] = useState<any>(null);
+  const [bidPrice, setBidPrice] = useState('');
+  const [bidNotes, setBidNotes] = useState('');
+  const supabase = getSupabaseClient();
+
+  useEffect(() => {
+    fetchListings();
+  }, []);
+
+  const fetchListings = async () => {
+    setLoading(true);
+    const { data, error } = await supabase
+      .from('marketplace_listings')
+      .select('*')
+      .eq('listing_type', 'used')
+      .order('created_at', { ascending: false });
+    if (!error && data) setListings(data);
+    setLoading(false);
+  };
+
+  const submitBid = async () => {
+    if (!biddingOn || !bidPrice) return;
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error('Login required');
+      return;
+    }
+    const { error } = await supabase.from('bids').insert({
+      listing_id: biddingOn.id,
+      bidder_id: user.id,
+      price: parseFloat(bidPrice),
+      notes: bidNotes,
+      status: 'pending',
+      created_at: new Date().toISOString(),
+    });
+    if (error) {
+      toast.error('Failed to submit offer: ' + error.message);
+    } else {
+      toast.success('Offer submitted!');
+      setBiddingOn(null);
+      setBidPrice('');
+      setBidNotes('');
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div>Loading listings...</div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />

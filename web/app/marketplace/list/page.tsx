@@ -224,6 +224,7 @@ export default function MarketplaceList() {
           ...payload,
           part_number: formData.partNumber,
           quantity: parseInt(formData.quantity) || 1,
+          qty: parseInt(formData.quantity) || 1,
           details: {
             ...formData,
             manufacturer: finalManufacturer,
