@@ -216,25 +216,27 @@ export default function MarketplaceList() {
       if (listingType === 'used') {
         payload = {
           ...payload,
-          year_manufactured: formData.yearManufactured,
-          wavelength: formData.wavelength,
-          shot_counts: {
-            system: formData.totalSystemShots,
-            head: formData.headPulses,
-            lamp: formData.lampPulses,
-            handpiece: formData.handpieceShots,
-          },
-          performance_data: {
-            last_pm_date: formData.lastPMDate,
-            dye_kit_sn: formData.dyeKitSN,
-            dye_pulses: formData.dyePulses,
-            dye_replacement_date: formData.dyeKitReplacementDate,
-            hv_final: formData.hvFinal,
-            hv_60j: formData.hv60J,
-            hv_90j: formData.hv90J,
-            lamp_current_alex: formData.lampCurrentAlex,
-            lamp_current_yag: formData.lampCurrentYag,
-            fiber_transmission: formData.fiberTransmission,
+          year_manufactured: formData.yearManufactured ? parseInt(formData.yearManufactured, 10) : null,
+          details: {
+            wavelength: formData.wavelength,
+            shot_counts: {
+              system: formData.totalSystemShots,
+              head: formData.headPulses,
+              lamp: formData.lampPulses,
+              handpiece: formData.handpieceShots,
+            },
+            performance_data: {
+              last_pm_date: formData.lastPMDate,
+              dye_kit_sn: formData.dyeKitSN,
+              dye_pulses: formData.dyePulses,
+              dye_replacement_date: formData.dyeKitReplacementDate,
+              hv_final: formData.hvFinal,
+              hv_60j: formData.hv60J,
+              hv_90j: formData.hv90J,
+              lamp_current_alex: formData.lampCurrentAlex,
+              lamp_current_yag: formData.lampCurrentYag,
+              fiber_transmission: formData.fiberTransmission,
+            },
           },
         };
       }
