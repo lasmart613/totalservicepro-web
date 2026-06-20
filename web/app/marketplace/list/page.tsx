@@ -9,6 +9,10 @@ import { toast } from 'sonner';
 
 type ListingType = 'part' | 'used' | 'request';
 
+// This page performs client-side Supabase calls and reads search params.
+// Force dynamic to avoid prerender errors at build time (e.g. missing build-time env vars).
+export const dynamic = 'force-dynamic';
+
 export default function MarketplaceList() {
   const searchParams = useSearchParams();
   const [listingType, setListingType] = useState<ListingType>('part');
@@ -17,7 +21,6 @@ export default function MarketplaceList() {
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const [locations, setLocations] = useState<any[]>([]);
   const [manufacturers, setManufacturers] = useState<string[]>([]);
-  const supabase = getSupabaseClient();
 
   // Pre-select type from ?type= query (e.g. from category pages)
   useEffect(() => {
@@ -105,7 +108,7 @@ export default function MarketplaceList() {
   // Fetch locations
   useEffect(() => {
     const fetchLocations = async () => {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await getSupabaseClient().auth.getUser();
       if (!user) return;
 
       const { data: profile } = await supabase
@@ -175,9 +178,9 @@ export default function MarketplaceList() {
       const fileExt = file.name.split('.').pop();
       const fileName = `${Date.now()}-${Math.random().toString(36).substring(2)}.${fileExt}`;
       const filePath = `${userId}/listings/${fileName}`;
-      const { error } = await supabase.storage.from('marketplace-images').upload(filePath, file);
+      const { error } = await getSupabaseClient().storage.from('marketplace-images').upload(filePath, file);
       if (!error) {
-        const { data } = supabase.storage.from('marketplace-images').getPublicUrl(filePath);
+        const { data } = getSupabaseClient().storage.from('marketplace-images').getPublicUrl(filePath);
         if (data?.publicUrl) urls.push(data.publicUrl);
       }
     }
@@ -189,7 +192,7 @@ export default function MarketplaceList() {
     setLoading(true);
 
     try {
-      const { data: { user } } = await supabase.auth.getUser();
+      const { data: { user } } = await getSupabaseClient().auth.getUser();
       if (!user?.id) {
         toast.error('You must be logged in to create a listing');
         setLoading(false);
@@ -297,7 +300,7 @@ export default function MarketplaceList() {
         };
       }
 
-      const { error } = await supabase.from(tableName).insert(payload);
+      const { error } = await getSupabaseClient().from(tableName).insert(payload);
       if (error) throw error;
 
       toast.success('Listing created successfully!');
