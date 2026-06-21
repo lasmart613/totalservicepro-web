@@ -1,27 +1,46 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 
-export default function Settings() {
-  const supabase = getSupabaseClient();
+export const dynamic = 'force-dynamic';
 
-  // Persist settings with localStorage
-  const [defaultScheduleView, setDefaultScheduleView] = useState(() => localStorage.getItem('defaultScheduleView') || 'Month');
-  const [weekStartsOn, setWeekStartsOn] = useState(() => localStorage.getItem('weekStartsOn') || 'Sunday');
-  const [showCompleted, setShowCompleted] = useState(() => localStorage.getItem('showCompletedTickets') !== 'false');
-  const [showCancelled, setShowCancelled] = useState(() => localStorage.getItem('showCancelledTickets') !== 'false');
-  const [timeFormat, setTimeFormat] = useState(() => localStorage.getItem('timeFormat') || '12h');
-  const [timeZone, setTimeZone] = useState(() => localStorage.getItem('timeZone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
-  const [browserNotif, setBrowserNotif] = useState(() => localStorage.getItem('browserNotifications') !== 'false');
-  const [sound, setSound] = useState(() => localStorage.getItem('notificationSound') !== 'false');
+// Settings page uses browser APIs (localStorage) and must not be statically prerendered.
+// force-dynamic + safe client-only hydration prevents build errors like "Export encountered an error on /settings/page"
+
+export default function Settings() {
+  const [defaultScheduleView, setDefaultScheduleView] = useState('Month');
+  const [weekStartsOn, setWeekStartsOn] = useState('Sunday');
+  const [showCompleted, setShowCompleted] = useState(true);
+  const [showCancelled, setShowCancelled] = useState(true);
+  const [timeFormat, setTimeFormat] = useState('12h');
+  const [timeZone, setTimeZone] = useState('');
+  const [browserNotif, setBrowserNotif] = useState(true);
+  const [sound, setSound] = useState(true);
+
+  // Load from localStorage only on client
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      setDefaultScheduleView(localStorage.getItem('defaultScheduleView') || 'Month');
+      setWeekStartsOn(localStorage.getItem('weekStartsOn') || 'Sunday');
+      setShowCompleted(localStorage.getItem('showCompletedTickets') !== 'false');
+      setShowCancelled(localStorage.getItem('showCancelledTickets') !== 'false');
+      setTimeFormat(localStorage.getItem('timeFormat') || '12h');
+      setTimeZone(localStorage.getItem('timeZone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
+      setBrowserNotif(localStorage.getItem('browserNotifications') !== 'false');
+      setSound(localStorage.getItem('notificationSound') !== 'false');
+    }
+  }, []);
 
   const save = (key: string, value: any) => {
-    localStorage.setItem(key, String(value));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem(key, String(value));
+    }
   };
 
   const toggleTheme = () => {
+    if (typeof document === 'undefined') return;
     const html = document.documentElement;
     const isLight = html.classList.toggle('light');
     localStorage.setItem('tsp_theme', isLight ? 'light' : 'dark');
@@ -158,7 +177,7 @@ export default function Settings() {
 
           <div>
             <div className="font-semibold mb-2">Account</div>
-            <button onClick={async () => { await supabase.auth.signOut(); window.location.href = '/login'; }} className="btn btn-secondary text-red-400 border-red-900/40">Sign Out Everywhere</button>
+            <button onClick={async () => { const s = getSupabaseClient(); await s.auth.signOut(); window.location.href = '/login'; }} className="btn btn-secondary text-red-400 border-red-900/40">Sign Out Everywhere</button>
           </div>
 
           <div className="text-xs text-[var(--text3)] pt-2 border-t border-[var(--border)]">
