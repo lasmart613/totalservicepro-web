@@ -27,6 +27,8 @@ export default function CompanySignup() {
   const [numTechs, setNumTechs] = useState('');
   const [taxId, setTaxId] = useState('');
   const [bio, setBio] = useState('');
+  const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [engineers, setEngineers] = useState<Array<{fullName: string, title: string, contact: string, timeZone: string, yearsExp: string, territories: string, competencies: string}>>([{fullName:'', title:'', contact:'', timeZone:'', yearsExp:'', territories:'', competencies:''}]);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -246,6 +248,32 @@ export default function CompanySignup() {
                 <label className="label">Tax ID / EIN (optional)</label>
                 <input className="input" value={taxId} onChange={e => setTaxId(e.target.value)} placeholder="XX-XXXXXXX" />
               </div>
+            </div>
+
+            <div>
+              <label className="label">Company Logo (upload later in Company if needed)</label>
+              <input type="file" accept="image/*" onChange={e => setLogoFile(e.target.files?.[0] || null)} className="block w-full text-sm" />
+            </div>
+
+            <div>
+              <label className="label">Service Engineers Details</label>
+              <p className="text-xs text-[var(--text3)] mb-1">Add key info for each engineer (profile pics and more in /company)</p>
+              {engineers.map((eng, i) => (
+                <div key={i} className="mb-2 p-2 border border-[var(--border)] rounded text-xs space-y-1">
+                  <input className="input text-xs py-1" placeholder="Full Name" value={eng.fullName} onChange={e=>{const c=[...engineers]; c[i].fullName=e.target.value; setEngineers(c);}} />
+                  <div className="grid grid-cols-2 gap-1">
+                    <input className="input text-xs py-1" placeholder="Title" value={eng.title} onChange={e=>{const c=[...engineers]; c[i].title=e.target.value; setEngineers(c);}} />
+                    <input className="input text-xs py-1" placeholder="Contact" value={eng.contact} onChange={e=>{const c=[...engineers]; c[i].contact=e.target.value; setEngineers(c);}} />
+                  </div>
+                  <input className="input text-xs py-1" placeholder="Time Zone" value={eng.timeZone} onChange={e=>{const c=[...engineers]; c[i].timeZone=e.target.value; setEngineers(c);}} />
+                  <div className="grid grid-cols-2 gap-1">
+                    <input className="input text-xs py-1" placeholder="Years Exp" value={eng.yearsExp} onChange={e=>{const c=[...engineers]; c[i].yearsExp=e.target.value; setEngineers(c);}} />
+                    <input className="input text-xs py-1" placeholder="Territories" value={eng.territories} onChange={e=>{const c=[...engineers]; c[i].territories=e.target.value; setEngineers(c);}} />
+                  </div>
+                  <input className="input text-xs py-1" placeholder="Competencies (makes/models)" value={eng.competencies} onChange={e=>{const c=[...engineers]; c[i].competencies=e.target.value; setEngineers(c);}} />
+                </div>
+              ))}
+              <button type="button" onClick={() => setEngineers([...engineers, {fullName:'',title:'',contact:'',timeZone:'',yearsExp:'',territories:'',competencies:''}])} className="text-[10px] text-[var(--gold)]">+ Add Engineer</button>
             </div>
 
             <div>

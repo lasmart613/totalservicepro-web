@@ -24,6 +24,7 @@ export default function FSESignup() {
   const [linkedin, setLinkedin] = useState('');
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [testEquipment, setTestEquipment] = useState<Array<{type: string, make: string, model: string, sn: string, calibDate: string, assetTag: string, nextDue: string, agency: string, notes: string}>>([{type:'', make:'', model:'', sn:'', calibDate:'', assetTag:'', nextDue:'', agency:'', notes:''}]);
   const router = useRouter();
   const supabase = getSupabaseClient();
 
@@ -196,6 +197,34 @@ export default function FSESignup() {
             <div>
               <label className="label">LinkedIn or Resume Link (optional)</label>
               <input className="input" type="url" value={linkedin} onChange={e => setLinkedin(e.target.value)} placeholder="https://linkedin.com/in/yourname" />
+            </div>
+
+            <div>
+              <label className="label">Test Equipment (for FSE)</label>
+              <p className="text-[10px] text-[var(--text3)] mb-1">List your test gear. Multiple entries supported.</p>
+              {testEquipment.map((eq, i) => (
+                <div key={i} className="border border-[var(--border)] p-2 mb-1 rounded text-xs space-y-1">
+                  <select className="input text-xs py-0.5" value={eq.type} onChange={e => {const c=[...testEquipment]; c[i].type=e.target.value; setTestEquipment(c);}}>
+                    <option value="">Select Type</option>
+                    {['DMM', 'Energy/Power Meter Display', 'Energy/Power Meter Sensor', 'Oscilloscope', 'Temperature Probe', 'HV Probe', 'Electrical Safety Tester', 'Monochrometer', 'Other'].map(t => <option key={t} value={t}>{t}</option>)}
+                  </select>
+                  <div className="grid grid-cols-2 gap-1">
+                    <input className="input text-xs py-0.5" placeholder="Make" value={eq.make} onChange={e=>{const c=[...testEquipment]; c[i].make=e.target.value; setTestEquipment(c);}} />
+                    <input className="input text-xs py-0.5" placeholder="Model" value={eq.model} onChange={e=>{const c=[...testEquipment]; c[i].model=e.target.value; setTestEquipment(c);}} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <input className="input text-xs py-0.5" placeholder="SN" value={eq.sn} onChange={e=>{const c=[...testEquipment]; c[i].sn=e.target.value; setTestEquipment(c);}} />
+                    <input className="input text-xs py-0.5" placeholder="Asset Tag" value={eq.assetTag} onChange={e=>{const c=[...testEquipment]; c[i].assetTag=e.target.value; setTestEquipment(c);}} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    <input className="input text-xs py-0.5" type="date" placeholder="Calib Date" value={eq.calibDate} onChange={e=>{const c=[...testEquipment]; c[i].calibDate=e.target.value; setTestEquipment(c);}} />
+                    <input className="input text-xs py-0.5" type="date" placeholder="Next Due" value={eq.nextDue} onChange={e=>{const c=[...testEquipment]; c[i].nextDue=e.target.value; setTestEquipment(c);}} />
+                  </div>
+                  <input className="input text-xs py-0.5" placeholder="Calibration Agency" value={eq.agency} onChange={e=>{const c=[...testEquipment]; c[i].agency=e.target.value; setTestEquipment(c);}} />
+                  <input className="input text-xs py-0.5" placeholder="Notes" value={eq.notes} onChange={e=>{const c=[...testEquipment]; c[i].notes=e.target.value; setTestEquipment(c);}} />
+                </div>
+              ))}
+              <button type="button" onClick={() => setTestEquipment([...testEquipment, {type:'',make:'',model:'',sn:'',calibDate:'',assetTag:'',nextDue:'',agency:'',notes:''}])} className="text-[10px] text-[var(--gold)]">+ Add Equipment</button>
             </div>
 
             <button

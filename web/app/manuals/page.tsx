@@ -168,12 +168,11 @@ export default function ManualsLibrary() {
               <div key={brand} className="shelf-container">
                 {/* Books with 3D Perspective */}
                 <div className="perspective-container overflow-x-auto pb-2 scrollbar-hide" style={{ perspective: '1200px' }}>
-                  <div className="flex gap-3 min-w-max px-2" style={{ transformStyle: 'preserve-3d' }}>
+                  <div className="flex gap-[1px] min-w-max px-1 -space-x-[2px]" style={{ transformStyle: 'preserve-3d' }}>
                     {brandManuals.map((m, index) => (
                       <div
                         key={index}
-                        onClick={() => openManual(m)}
-                        className="book w-[92px] flex-shrink-0 cursor-pointer group"
+                        className="book w-[92px] flex-shrink-0 group"
                         title={m.title}
                         style={{
                           transform: 'perspective(1000px) rotateY(-6deg)',
@@ -182,7 +181,8 @@ export default function ManualsLibrary() {
                         }}
                       >
                         <div
-                          className="book-spine h-44 w-full rounded-sm flex flex-col justify-between p-2.5 text-white shadow-2xl transition-all duration-200 group-hover:-translate-y-0.5 group-hover:rotateY(-2deg)"
+                          onClick={() => openManual(m)}
+                          className="book-spine h-44 w-full rounded-sm flex flex-col justify-between p-2.5 text-white shadow-2xl transition-all duration-200 cursor-pointer group-hover:-translate-y-0.5 group-hover:rotateY(-2deg) group-hover:scale-[1.02]"
                           style={{
                             background: getBookColor(m),
                             boxShadow: `

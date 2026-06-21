@@ -106,7 +106,7 @@ export function Header() {
                 </div>
 
                 <Link href="/profile" className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]" onClick={() => setDropdownOpen(false)}>
-                  <UserIcon size={16} /> Profile
+                  <UserIcon size={16} /> User Profile
                 </Link>
                 <Link href="/company" className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]" onClick={() => setDropdownOpen(false)}>
                   <Building2 size={16} /> Company Profile

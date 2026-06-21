@@ -26,8 +26,8 @@ export default function SignupIndex() {
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
               <Building2 size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
-            <div className="font-bold text-xl mb-1">Service Company</div>
-            <div className="text-sm text-[var(--text3)] mb-4">Teams &amp; businesses offering laser service. Creates organization. Role: company_admin (or service_manager)</div>
+            <div className="font-bold text-xl mb-1">Service Organization</div>
+            <div className="text-sm text-[var(--text3)] mb-4">Employs at least one Service Engineer. Creates organization. Role: company_admin (or service_manager)</div>
             <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
               <li>• Company name, address, website</li>
               <li>• Services offered (PM, Repair, Install...)</li>
@@ -42,7 +42,7 @@ export default function SignupIndex() {
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
               <Hospital size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
-            <div className="font-bold text-xl mb-1">Laser Owner / Facility</div>
+            <div className="font-bold text-xl mb-1">Laser Clinic / Medical Practice</div>
             <div className="text-sm text-[var(--text3)] mb-4">Hospitals, Med Spas, Clinics, Private Practices. Role: owner / customer. Creates customer org.</div>
             <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
               <li>• Facility details &amp; contact</li>
@@ -59,7 +59,7 @@ export default function SignupIndex() {
               <Package size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
             <div className="font-bold text-xl mb-1">Parts Supplier</div>
-            <div className="text-[13px] text-[var(--text3)] mb-4 break-words hyphens-auto break-all leading-tight">Suppliers of consumables, handpieces, optics. Creates organization. Role: parts_supplier</div>
+            <div className="text-[13px] text-[var(--text3)] mb-4 break-words hyphens-auto break-all leading-tight">OEM or 3rd party parts for medical laser systems. Creates organization. Role: parts_supplier</div>
             <ul className="text-[13px] space-y-1.5 mb-5 text-[var(--text2)] break-words break-all leading-tight">
               <li>• Consumables, handpieces, optics</li>
               <li>• Staff &amp; business details</li>

@@ -1,16 +1,74 @@
 'use client';
 
-import React from 'react';
+import React, { useState } from 'react';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 
 export default function Settings() {
   const supabase = getSupabaseClient();
 
+  // Persist settings with localStorage
+  const [defaultScheduleView, setDefaultScheduleView] = useState(() => localStorage.getItem('defaultScheduleView') || 'Month');
+  const [weekStartsOn, setWeekStartsOn] = useState(() => localStorage.getItem('weekStartsOn') || 'Sunday');
+  const [showCompleted, setShowCompleted] = useState(() => localStorage.getItem('showCompletedTickets') !== 'false');
+  const [showCancelled, setShowCancelled] = useState(() => localStorage.getItem('showCancelledTickets') !== 'false');
+  const [timeFormat, setTimeFormat] = useState(() => localStorage.getItem('timeFormat') || '12h');
+  const [timeZone, setTimeZone] = useState(() => localStorage.getItem('timeZone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
+  const [browserNotif, setBrowserNotif] = useState(() => localStorage.getItem('browserNotifications') !== 'false');
+  const [sound, setSound] = useState(() => localStorage.getItem('notificationSound') !== 'false');
+
+  const save = (key: string, value: any) => {
+    localStorage.setItem(key, String(value));
+  };
+
   const toggleTheme = () => {
     const html = document.documentElement;
     const isLight = html.classList.toggle('light');
     localStorage.setItem('tsp_theme', isLight ? 'light' : 'dark');
+  };
+
+  const updateScheduleView = (val: string) => {
+    setDefaultScheduleView(val);
+    save('defaultScheduleView', val);
+  };
+
+  const updateWeekStart = (val: string) => {
+    setWeekStartsOn(val);
+    save('weekStartsOn', val);
+  };
+
+  const toggleCompleted = () => {
+    const next = !showCompleted;
+    setShowCompleted(next);
+    save('showCompletedTickets', next);
+  };
+
+  const toggleCancelled = () => {
+    const next = !showCancelled;
+    setShowCancelled(next);
+    save('showCancelledTickets', next);
+  };
+
+  const updateTimeFormat = (val: string) => {
+    setTimeFormat(val);
+    save('timeFormat', val);
+  };
+
+  const updateTimeZone = (val: string) => {
+    setTimeZone(val);
+    save('timeZone', val);
+  };
+
+  const toggleBrowserNotif = () => {
+    const next = !browserNotif;
+    setBrowserNotif(next);
+    save('browserNotifications', next);
+  };
+
+  const toggleSound = () => {
+    const next = !sound;
+    setSound(next);
+    save('notificationSound', next);
   };
 
   return (
@@ -20,10 +78,82 @@ export default function Settings() {
         <h1 className="text-xl font-bold mb-4">⚙️ Settings</h1>
 
         <div className="card p-5 space-y-6 text-sm">
+          {/* Theme */}
           <div>
             <div className="font-semibold mb-2">Theme</div>
             <button onClick={toggleTheme} className="btn btn-secondary">Toggle Light / Dark</button>
             <div className="text-xs text-[var(--text3)] mt-1">Follows system preference by default (persisted).</div>
+          </div>
+
+          {/* Schedule */}
+          <div>
+            <div className="font-semibold mb-2">Default Schedule View</div>
+            <div className="flex gap-2">
+              {['Month', 'Week', 'Day', 'Agenda'].map(v => (
+                <button key={v} onClick={() => updateScheduleView(v)} className={`btn btn-secondary text-xs px-3 py-1 ${defaultScheduleView === v ? 'bg-[var(--gold)] text-black' : ''}`}>{v}</button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="font-semibold mb-2">Week Starts On</div>
+            <div className="flex gap-2">
+              {['Sunday', 'Monday'].map(v => (
+                <button key={v} onClick={() => updateWeekStart(v)} className={`btn btn-secondary text-xs px-3 py-1 ${weekStartsOn === v ? 'bg-[var(--gold)] text-black' : ''}`}>{v}</button>
+              ))}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>Show Completed Tickets</div>
+            <button onClick={toggleCompleted} className={`px-3 py-1 rounded text-xs ${showCompleted ? 'bg-green-600' : 'bg-[var(--surface)] border'}`}>
+              {showCompleted ? 'ON' : 'OFF'}
+            </button>
+          </div>
+
+          <div className="flex items-center justify-between">
+            <div>Show Cancelled Tickets</div>
+            <button onClick={toggleCancelled} className={`px-3 py-1 rounded text-xs ${showCancelled ? 'bg-green-600' : 'bg-[var(--surface)] border'}`}>
+              {showCancelled ? 'ON' : 'OFF'}
+            </button>
+          </div>
+
+          {/* Date & Time */}
+          <div>
+            <div className="font-semibold mb-2">Date & Time Format</div>
+            <div className="flex gap-2 mb-2">
+              <span className="text-xs self-center">Time:</span>
+              {['12h', '24h'].map(v => (
+                <button key={v} onClick={() => updateTimeFormat(v)} className={`btn btn-secondary text-xs px-3 py-1 ${timeFormat === v ? 'bg-[var(--gold)] text-black' : ''}`}>{v}</button>
+              ))}
+            </div>
+            <div>
+              <label className="text-xs">Time Zone</label>
+              <input 
+                type="text" 
+                value={timeZone} 
+                onChange={e => updateTimeZone(e.target.value)} 
+                className="input text-xs mt-1" 
+                placeholder="e.g. America/New_York"
+              />
+            </div>
+          </div>
+
+          {/* Notifications */}
+          <div>
+            <div className="font-semibold mb-2">Notifications</div>
+            <div className="flex items-center justify-between mb-1">
+              <div>Browser Notifications</div>
+              <button onClick={toggleBrowserNotif} className={`px-3 py-1 rounded text-xs ${browserNotif ? 'bg-green-600' : 'bg-[var(--surface)] border'}`}>
+                {browserNotif ? 'ON' : 'OFF'}
+              </button>
+            </div>
+            <div className="flex items-center justify-between">
+              <div>Sound</div>
+              <button onClick={toggleSound} className={`px-3 py-1 rounded text-xs ${sound ? 'bg-green-600' : 'bg-[var(--surface)] border'}`}>
+                {sound ? 'ON' : 'OFF'}
+              </button>
+            </div>
           </div>
 
           <div>
@@ -33,7 +163,7 @@ export default function Settings() {
 
           <div className="text-xs text-[var(--text3)] pt-2 border-t border-[var(--border)]">
             Web build of Total Service Pro. All data lives in Supabase — fully shared with the Android app.
-            <br />Offline support, advanced calculators, and additional modules coming in later phases.
+            <br />Preferences saved locally for now.
           </div>
         </div>
       </div>
