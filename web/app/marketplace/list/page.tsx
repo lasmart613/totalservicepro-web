@@ -384,6 +384,16 @@ function MarketplaceListContent() {
                 </div>
               </div>
 
+              <div>
+                <label className="label">Wavelength / Lasing Medium</label>
+                <input
+                  className="input"
+                  value={formData.wavelength || (MODELS[formData.model]?.wavelengths?.[0]?.name ?? '')}
+                  onChange={e => handleInputChange('wavelength', e.target.value)}
+                  placeholder="e.g. 10600 nm (CO₂)"
+                />
+              </div>
+
               {/* ... rest of your used system form (keep exactly as you had it) ... */}
 
               <div>
@@ -395,7 +405,19 @@ function MarketplaceListContent() {
                 />
               </div>
 
-              {/* Add all your other used system fields here (shot counts, maintenance, etc.) */}
+              {!(formData.model?.toLowerCase().includes('co2') || formData.model?.toLowerCase().includes('acupulse') || (formData.wavelength || '').includes('10600') || (formData.wavelength || '').includes('10,600') || (formData.wavelength || '').toLowerCase().includes('co2')) && (
+                <div>
+                  <label className="label">Pulse / Shot Counts</label>
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-1">
+                    <div><input className="input" placeholder="System Total" value={formData.totalSystemShots} onChange={e => handleInputChange('totalSystemShots', e.target.value)} /></div>
+                    <div><input className="input" placeholder="Head / Resonator" value={formData.headPulses} onChange={e => handleInputChange('headPulses', e.target.value)} /></div>
+                    <div><input className="input" placeholder="Lamp Pulses" value={formData.lampPulses} onChange={e => handleInputChange('lampPulses', e.target.value)} /></div>
+                    <div><input className="input" placeholder="Handpiece(s)" value={formData.handpieceShots} onChange={e => handleInputChange('handpieceShots', e.target.value)} /></div>
+                  </div>
+                </div>
+              )}
+
+              {/* Add all your other used system fields here (maintenance, etc.) */}
             </div>
           )}
 

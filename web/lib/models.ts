@@ -72,9 +72,7 @@ export const MODELS: Record<string, ModelDef> = {
     mfg: 'Lumenis',
     label: 'AcuPulse Duo CO₂',
     wavelengths: [
-      { name: '1064 nm', mode: 'PR', sets: [10, 35, 50, 90, 120], unit: 'W' },
-      { name: '2940 nm', mode: 'PR', sets: [5, 10, 20, 40, 60, 80], unit: 'W' },
-      { name: '980-1470 nm', mode: 'PR', sets: [20, 40, 60, 90], unit: 'W' }
+      { name: '10600 nm (10.6 μm CO₂)', mode: 'CW', sets: [5, 10, 15, 20, 25, 30, 40, 50, 60], unit: 'W' }
     ],
     params: []
   },

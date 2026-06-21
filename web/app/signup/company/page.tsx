@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -31,8 +31,20 @@ export default function CompanySignup() {
   const [engineers, setEngineers] = useState<Array<{fullName: string, title: string, contact: string, timeZone: string, yearsExp: string, territories: string, competencies: string}>>([{fullName:'', title:'', contact:'', timeZone:'', yearsExp:'', territories:'', competencies:''}]);
   const [message, setMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [isExistingAuth, setIsExistingAuth] = useState(false);
   const router = useRouter();
   const supabase = getSupabaseClient();
+
+  useEffect(() => {
+    (async () => {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        setIsExistingAuth(true);
+        setEmail(user.email || '');
+        // optionally prefill names if in metadata
+      }
+    })();
+  }, [supabase]);
 
   const toggleService = (svc: string) => {
     setSelectedServices(prev =>
@@ -43,34 +55,45 @@ export default function CompanySignup() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage('');
-    if (!companyName || !firstName || !lastName || !email || !password) {
-      setMessage('Company name, contact name, email and password are required.');
+    if (!companyName || !firstName || !lastName || !email || (!isExistingAuth && !password)) {
+      setMessage('Company name, contact name, email' + (!isExistingAuth ? ' and password' : '') + ' are required.');
       return;
     }
-    if (password.length < 6) {
-      setMessage('Password must be at least 6 characters.');
-      return;
-    }
-    if (password !== confirmPassword) {
-      setMessage('Passwords do not match.');
-      return;
+    if (!isExistingAuth) {
+      if (password.length < 6) {
+        setMessage('Password must be at least 6 characters.');
+        return;
+      }
+      if (password !== confirmPassword) {
+        setMessage('Passwords do not match.');
+        return;
+      }
     }
     setLoading(true);
 
     try {
-      // 1. Sign up the user (contact person becomes manager)
-      const { data: authData, error: authError } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { first_name: firstName, last_name: lastName, company: companyName } }
-      });
-      if (authError) throw authError;
+      let authData: any = {};
+      let userId: string;
 
-      const userId = authData.user?.id;
-      if (!userId) {
-        setMessage('Account created! Check email to confirm. Then sign in to complete company profile.');
-        setLoading(false);
-        return;
+      if (isExistingAuth) {
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error('No authenticated user');
+        userId = user.id;
+      } else {
+        // 1. Sign up the user (contact person becomes manager)
+        const { data, error: authError } = await supabase.auth.signUp({
+          email,
+          password,
+          options: { data: { first_name: firstName, last_name: lastName, company: companyName } }
+        });
+        if (authError) throw authError;
+        authData = data;
+        userId = authData.user?.id;
+        if (!userId) {
+          setMessage('Account created! Check email to confirm. Then sign in to complete company profile.');
+          setLoading(false);
+          return;
+        }
       }
 
       // 2. Create organization (type service_company)
@@ -127,7 +150,7 @@ export default function CompanySignup() {
         console.warn('Profile upsert warning:', profileErr);
       }
 
-      if (authData.session) {
+      if (isExistingAuth || authData.session) {
         // Redirect to /company which now robustly loads (or falls back to create on save) the org for new signups
         router.push('/company');
       } else {
@@ -183,19 +206,22 @@ export default function CompanySignup() {
 
             <div>
               <label className="label">Contact Email *</label>
-              <input type="email" className="input" value={email} onChange={e => setEmail(e.target.value)} required />
+              <input type="email" className="input" value={email} onChange={e => setEmail(e.target.value)} required readOnly={isExistingAuth} />
+              {isExistingAuth && <p className="text-xs text-[var(--text3)]">Using your existing account email.</p>}
             </div>
 
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="label">Password * (min 6)</label>
-                <input type="password" className="input" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
+            {!isExistingAuth && (
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Password * (min 6)</label>
+                  <input type="password" className="input" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
+                </div>
+                <div>
+                  <label className="label">Confirm Password *</label>
+                  <input type="password" className="input" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required minLength={6} />
+                </div>
               </div>
-              <div>
-                <label className="label">Confirm Password *</label>
-                <input type="password" className="input" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required minLength={6} />
-              </div>
-            </div>
+            )}
 
             <div>
               <label className="label">Company Phone</label>

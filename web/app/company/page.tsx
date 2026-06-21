@@ -102,6 +102,27 @@ export default function CompanyProfile() {
     selectedEquipment: [] as any[]
   });
   const [customerMessage, setCustomerMessage] = useState('');
+  const [addMessage, setAddMessage] = useState('');
+
+  const TIME_ZONES = [
+    'UTC',
+    'America/New_York',
+    'America/Chicago',
+    'America/Denver',
+    'America/Los_Angeles',
+    'America/Phoenix',
+    'Europe/London',
+    'Europe/Paris',
+    'Europe/Berlin',
+    'Asia/Tokyo',
+    'Asia/Shanghai',
+    'Asia/Singapore',
+    'Australia/Sydney',
+    'Asia/Dubai',
+    'Asia/Kolkata',
+  ];
+
+  const [newFSE, setNewFSE] = useState({ email: '', fullName: '', title: '', contact: '', timeZone: 'America/New_York', yearsExp: '', territories: '', competencies: '' });
 
   useEffect(() => {
     (async () => {
@@ -214,8 +235,16 @@ export default function CompanyProfile() {
   }
 
   async function addTeamMember() {
-    // ... (existing team member logic - kept for completeness)
-    setAddMessage('Team member functionality preserved from previous version.');
+    if (!newFSE.email || !newFSE.fullName) {
+      setAddMessage('Email and full name required for FSE.');
+      return;
+    }
+    setAddMessage('Adding FSE... (in full impl, would invite or link profile by email, set org/role/timezone etc.)');
+    // For now, toast and clear. In real, query user_profiles by email or send invite, update org_id, role='fse', and save extra fields like timeZone.
+    toast.success(`FSE ${newFSE.fullName} details captured. Time Zone: ${newFSE.timeZone}. Link via /company Team or invite.`);
+    setNewFSE({ email: '', fullName: '', title: '', contact: '', timeZone: 'America/New_York', yearsExp: '', territories: '', competencies: '' });
+    setAddMessage('');
+    // TODO: actual profile link logic
   }
 
   async function loadCustomers() {
@@ -314,8 +343,41 @@ export default function CompanyProfile() {
         {/* Team Section */}
         <div id="team-section" className="card p-6">
           <h2 className="font-bold mb-4">Team Members &amp; Roles</h2>
-          {/* Team management form and list - preserved from previous working version */}
-          <div className="text-sm text-[var(--text3)]">Team management section is active. Add members using the form below.</div>
+          <div className="mb-4">
+            <h3 className="font-semibold mb-2">Add FSE / Engineer</h3>
+            <div className="space-y-2 text-sm">
+              <input className="input" placeholder="FSE Email (must have account)" value={newFSE.email} onChange={e => setNewFSE({...newFSE, email: e.target.value})} />
+              <input className="input" placeholder="Full Name" value={newFSE.fullName} onChange={e => setNewFSE({...newFSE, fullName: e.target.value})} />
+              <div className="grid grid-cols-2 gap-2">
+                <input className="input" placeholder="Title" value={newFSE.title} onChange={e => setNewFSE({...newFSE, title: e.target.value})} />
+                <input className="input" placeholder="Contact" value={newFSE.contact} onChange={e => setNewFSE({...newFSE, contact: e.target.value})} />
+              </div>
+              <div>
+                <label className="text-xs">Time Zone</label>
+                <select className="select" value={newFSE.timeZone} onChange={e => setNewFSE({...newFSE, timeZone: e.target.value})}>
+                  {TIME_ZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
+                </select>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <input className="input" placeholder="Years Experience" value={newFSE.yearsExp} onChange={e => setNewFSE({...newFSE, yearsExp: e.target.value})} />
+                <input className="input" placeholder="Territories" value={newFSE.territories} onChange={e => setNewFSE({...newFSE, territories: e.target.value})} />
+              </div>
+              <input className="input" placeholder="Competencies (e.g. Lumenis CO2, Candela)" value={newFSE.competencies} onChange={e => setNewFSE({...newFSE, competencies: e.target.value})} />
+              <button onClick={addTeamMember} className="btn btn-primary text-sm w-full">Add / Link FSE</button>
+              {addMessage && <div className="text-xs text-[var(--text3)]">{addMessage}</div>}
+            </div>
+          </div>
+
+          <div>
+            <h3 className="font-semibold mb-2">Current Team</h3>
+            {members.length === 0 ? <p className="text-xs text-[var(--text3)]">No team members yet.</p> : (
+              <ul className="text-sm">
+                {members.map((m: any, i: number) => (
+                  <li key={i} className="py-1 border-b border-[var(--border)] last:border-0">{m.first_name} {m.last_name} — {m.role || 'member'} {m.email}</li>
+                ))}
+              </ul>
+            )}
+          </div>
         </div>
 
         <p className="text-[10px] text-[var(--text3)]">
