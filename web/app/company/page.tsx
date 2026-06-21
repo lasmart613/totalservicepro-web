@@ -44,10 +44,8 @@ export default function CompanyProfile() {
   const [members, setMembers] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
-  const [newMember, setNewMember] = useState({ email: '', firstName: '', lastName: '', role: 'fse' });
   const [addMessage, setAddMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const initialTeamMessageShownRef = useRef(false);
   const supabase = getSupabaseClient();
   const [userRole, setUserRole] = useState('');
   const [loadingOrg, setLoadingOrg] = useState(true);
@@ -102,7 +100,6 @@ export default function CompanyProfile() {
     selectedEquipment: [] as any[]
   });
   const [customerMessage, setCustomerMessage] = useState('');
-  const [addMessage, setAddMessage] = useState('');
 
   const TIME_ZONES = [
     'UTC',
