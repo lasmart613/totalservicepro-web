@@ -8,13 +8,13 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
+const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+
 let supabaseInstance: SupabaseClient | null = null;
 
 export function getSupabaseClient(): SupabaseClient {
   if (supabaseInstance) return supabaseInstance;
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
   if (!supabaseUrl || !supabaseAnonKey) {
     throw new Error(
@@ -38,7 +38,8 @@ export function getSupabaseClient(): SupabaseClient {
 
 // Helper to get the configured Supabase URL (useful for constructing function URLs etc.)
 export function getSupabaseUrl(): string {
-  return supabaseUrl || '';
+  // Always read directly so it works even if the lazy client hasn't been initialized yet
+  return process.env.NEXT_PUBLIC_SUPABASE_URL || '';
 }
 
 // Types for common rows (expand as needed; or use Supabase generated types later)

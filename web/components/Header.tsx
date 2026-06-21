@@ -60,7 +60,8 @@ export function Header() {
         </Link>
 
         {/* Desktop Navigation */}
-        <nav className="ml-6 hidden md:flex items-center gap-5 text-sm font-medium text-[var(--text2)]">
+        <nav className="ml-6 hidden md:flex items-center gap-5 text-base font-medium text-[var(--text2)]">
+          <Link href="/" className="hover:text-[var(--gold)]">Dashboard</Link>
           <Link href="/reports" className="hover:text-[var(--gold)]">Reports</Link>
           <Link href="/manuals" className="hover:text-[var(--gold)]">Manuals</Link>
           <Link href="/hub" className="hover:text-[var(--gold)]">Tech Hub</Link>
@@ -129,7 +130,10 @@ export function Header() {
       {/* Mobile Navigation Menu */}
       {mobileMenuOpen && (
         <div className="md:hidden absolute top-[60px] left-0 right-0 bg-[var(--surface3)] border-b border-[var(--border)] z-[90] shadow-lg">
-          <nav className="flex flex-col px-4 py-2 text-sm font-medium">
+          <nav className="flex flex-col px-4 py-2 text-base font-medium">
+            <Link href="/" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
+              Dashboard
+            </Link>
             <Link href="/reports" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
               Reports
             </Link>

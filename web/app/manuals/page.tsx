@@ -20,7 +20,6 @@ export default function ManualsLibrary() {
   const [tab, setTab] = useState<'browse' | 'library'>('browse');
   const [loading, setLoading] = useState(true);
   const [selectedWavelength, setSelectedWavelength] = useState('');
-  const supabase = getSupabaseClient();
 
   useEffect(() => {
     loadData();
@@ -28,6 +27,7 @@ export default function ManualsLibrary() {
 
   async function loadData() {
     setLoading(true);
+    const supabase = getSupabaseClient();
     try {
       const { data: all } = await supabase.from('manuals').select('*').order('brand').order('title');
       setManuals(all || []);
@@ -49,8 +49,12 @@ export default function ManualsLibrary() {
 
   async function openManual(m: any) {
     try {
+      const supabase = getSupabaseClient();
       const { data: { session } } = await supabase.auth.getSession();
       const supabaseUrl = getSupabaseUrl();
+      if (!supabaseUrl) {
+        throw new Error('Supabase URL is not configured. Check your NEXT_PUBLIC_SUPABASE_URL env var.');
+      }
       const resp = await fetch(`${supabaseUrl}/functions/v1/get-manual-url`, {
         method: 'POST',
         headers: {
