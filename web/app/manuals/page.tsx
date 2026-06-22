@@ -52,9 +52,9 @@ export default function ManualsLibrary() {
       const supabase = getSupabaseClient();
       const { data: { session } } = await supabase.auth.getSession();
       const supabaseUrl = getSupabaseUrl();
-      if (!supabaseUrl) {
-        throw new Error('Supabase URL is not configured. Check your NEXT_PUBLIC_SUPABASE_URL env var.');
-      }
+
+      if (!supabaseUrl) throw new Error('Supabase URL not configured');
+
       const resp = await fetch(`${supabaseUrl}/functions/v1/get-manual-url`, {
         method: 'POST',
         headers: {
@@ -63,11 +63,12 @@ export default function ManualsLibrary() {
         },
         body: JSON.stringify({ storage_path: m.storage_path }),
       });
+
       const json = await resp.json();
       if (json.url) {
         window.open(json.url, '_blank');
       } else {
-        alert('Access denied or error: ' + (json.error || 'Unknown'));
+        alert('Could not open manual: ' + (json.error || 'Unknown error'));
       }
     } catch (e: any) {
       alert('Failed to open manual: ' + e.message);
@@ -78,15 +79,12 @@ export default function ManualsLibrary() {
     if (!wavelength) return true;
     const title = (manual.title || '').toLowerCase();
 
-    if (wavelength === 'multi') {
-      return title.includes('multi') || title.includes('combination') || title.includes('dual');
-    }
-    if (wavelength === '532' && (title.includes('532') || title.includes('ktp'))) return true;
-    if (wavelength === '755' && (title.includes('755') || title.includes('alex'))) return true;
-    if (wavelength === '1064' && (title.includes('1064') || title.includes('nd:yag') || title.includes('ndyag'))) return true;
-    if (wavelength === '10600' && (title.includes('co2') || title.includes('10600'))) return true;
-    if (wavelength === '595' && (title.includes('595') || title.includes('dye') || title.includes('pdl'))) return true;
-
+    if (wavelength === 'multi') return title.includes('multi') || title.includes('combination');
+    if (wavelength === '532') return title.includes('532') || title.includes('ktp');
+    if (wavelength === '755') return title.includes('755') || title.includes('alex');
+    if (wavelength === '1064') return title.includes('1064') || title.includes('nd:yag');
+    if (wavelength === '10600') return title.includes('co2') || title.includes('10600');
+    if (wavelength === '595') return title.includes('595') || title.includes('dye') || title.includes('pdl');
     return false;
   };
 
@@ -118,12 +116,14 @@ export default function ManualsLibrary() {
       <Header />
 
       <div className="max-w-7xl mx-auto w-full px-4 py-6">
+        {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
           <div>
             <h1 className="text-3xl font-extrabold">📚 Service Manuals</h1>
-            <p className="text-sm text-[var(--text3)]">Bookshelf view • Filter by wavelength • 3D spines</p>
+            <p className="text-sm text-[var(--text3)]">Bookshelf view • Filter by wavelength</p>
           </div>
 
+          {/* Wavelength Filter */}
           <div className="flex flex-wrap gap-2">
             {WAVELENGTH_OPTIONS.map((option) => (
               <button
@@ -141,7 +141,8 @@ export default function ManualsLibrary() {
           </div>
         </div>
 
-        <div className="flex border-b border-[var(--border)] mb-6">
+        {/* Tabs */}
+        <div className="flex border-b border-[var(--border)] mb-8">
           <button
             onClick={() => setTab('browse')}
             className={`px-6 py-2 text-sm font-semibold ${tab === 'browse' ? 'border-b-2 border-[var(--gold)] text-[var(--gold)]' : 'text-[var(--text3)]'}`}
@@ -159,81 +160,66 @@ export default function ManualsLibrary() {
         {loading ? (
           <div className="p-12 text-center text-[var(--text3)]">Loading bookshelf...</div>
         ) : (
-          <div className="space-y-14">
+          <div className="space-y-12">
             {Object.keys(groupedManuals).length === 0 && (
-              <div className="text-center py-12 text-[var(--text3)]">No manuals found for the selected filter.</div>
+              <div className="text-center py-12 text-[var(--text3)]">No manuals found for this filter.</div>
             )}
 
             {Object.entries(groupedManuals).map(([brand, brandManuals]) => (
-              <div key={brand} className="shelf-container">
-                {/* Books with 3D Perspective */}
-                <div className="perspective-container overflow-x-auto pb-2 scrollbar-hide" style={{ perspective: '1200px' }}>
-                  <div className="flex gap-[1px] min-w-max px-1 -space-x-[2px]" style={{ transformStyle: 'preserve-3d' }}>
-                    {brandManuals.map((m, index) => (
+              <div key={brand}>
+                {/* Books Row */}
+                <div className="flex gap-2 overflow-x-auto pb-3 scrollbar-hide">
+                  {brandManuals.map((m, index) => (
+                    <div
+                      key={index}
+                      onClick={() => openManual(m)}
+                      className="group relative w-[88px] flex-shrink-0 cursor-pointer"
+                      title={m.title}
+                    >
                       <div
-                        key={index}
-                        className="book w-[92px] flex-shrink-0 group"
-                        title={m.title}
+                        className="book-spine h-48 w-full rounded-sm flex flex-col justify-between p-3 text-white shadow-xl transition-all duration-200 group-hover:-translate-y-0.5 group-hover:scale-[1.03]"
                         style={{
-                          transform: 'perspective(1000px) rotateY(-6deg)',
-                          transformStyle: 'preserve-3d',
-                          transition: 'transform 0.2s ease',
+                          background: getBookColor(m),
+                          boxShadow: `
+                            inset 0 0 30px rgba(0,0,0,0.5),
+                            inset -10px 0 15px rgba(255,255,255,0.1),
+                            6px 8px 14px rgba(0,0,0,0.55)
+                          `,
+                          borderLeft: '4px solid rgba(0,0,0,0.3)',
                         }}
                       >
-                        <div
-                          onClick={() => openManual(m)}
-                          className="book-spine h-44 w-full rounded-sm flex flex-col justify-between p-2.5 text-white shadow-2xl transition-all duration-200 cursor-pointer group-hover:-translate-y-0.5 group-hover:rotateY(-2deg) group-hover:scale-[1.02]"
+                        {/* Subtle texture */}
+                        <div 
+                          className="absolute inset-0 rounded-sm pointer-events-none"
                           style={{
-                            background: getBookColor(m),
-                            boxShadow: `
-                              inset 0 0 35px rgba(0,0,0,0.45),
-                              inset -12px 0 20px rgba(255,255,255,0.12),
-                              8px 10px 18px rgba(0,0,0,0.6)
-                            `,
-                            borderLeft: '3px solid rgba(0,0,0,0.25)',
+                            background: `repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(255,255,255,0.06) 2px, rgba(255,255,255,0.06) 3px)`
                           }}
-                        >
-                          {/* Spine Texture Lines */}
-                          <div 
-                            className="absolute inset-0 pointer-events-none rounded-sm"
-                            style={{
-                              background: `repeating-linear-gradient(
-                                90deg,
-                                transparent,
-                                transparent 3px,
-                                rgba(0,0,0,0.08) 3px,
-                                rgba(0,0,0,0.08) 4px
-                              )`,
-                            }}
-                          />
+                        />
 
-                          <div className="text-[11px] font-semibold leading-tight line-clamp-5 relative z-10 drop-shadow-[0_1px_2px_rgba(0,0,0,0.85)]">
-                            {m.title}
-                          </div>
-
-                          <div className="h-1 w-full bg-black/30 rounded relative z-10 mt-auto" />
+                        <div className="text-[10px] font-semibold leading-tight line-clamp-6 relative z-10 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+                          {m.title}
                         </div>
+
+                        <div className="h-[3px] w-full bg-black/40 rounded relative z-10 mt-auto" />
                       </div>
-                    ))}
-                  </div>
+                    </div>
+                  ))}
                 </div>
 
-                {/* Wooden Shelf Bar */}
-                <div className="relative mt-1">
-                  <div 
-                    className="h-6 rounded-md flex items-center px-4 shadow-inner"
-                    style={{
-                      background: 'linear-gradient(to bottom, #854d0e 0%, #5c3311 40%, #3f230c 100%)',
-                      boxShadow: 'inset 0 2px 4px rgba(255,255,255,0.15), inset 0 -2px 4px rgba(0,0,0,0.5)',
-                    }}
-                  >
-                    <span className="text-sm font-bold text-[#f5d9a0] tracking-wide drop-shadow-sm">
-                      {brand}
-                    </span>
-                    <span className="ml-auto text-xs text-[#d4af37]/70">
-                      {brandManuals.length} books
-                    </span>
-                  </div>
+                {/* Wooden Shelf */}
+                <div 
+                  className="h-7 rounded-md flex items-center px-4 mt-1 shadow-inner"
+                  style={{
+                    background: 'linear-gradient(to bottom, #854d0e 0%, #5c3311 45%, #3f230c 100%)',
+                    boxShadow: 'inset 0 2px 3px rgba(255,255,255,0.2), inset 0 -2px 4px rgba(0,0,0,0.6)',
+                  }}
+                >
+                  <span className="text-sm font-bold text-[#f5d9a0] tracking-wider">
+                    {brand}
+                  </span>
+                  <span className="ml-auto text-xs text-[#d4af37]/70">
+                    {brandManuals.length} manuals
+                  </span>
                 </div>
               </div>
             ))}

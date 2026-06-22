@@ -34,18 +34,15 @@ export default function LoginPage() {
           options: { data: { first_name: firstName, last_name: lastName } }
         });
         if (error) throw error;
+
         if (data.session) {
-          // Auto logged in
-          // Create profile row
           await supabase.from('user_profiles').upsert({
             id: data.user!.id,
             first_name: firstName,
             last_name: lastName,
             email,
-            // role intentionally not set here - direct users to org-type signup flows (/signup/company etc) for proper onboarding. FSE role assigned when added to Service Company org. (see /signup/fse for individuals)
             onboarding_completed: false,
           }, { onConflict: 'id' });
-          // After quick signup, send to role selection for robust onboarding
           router.push('/signup');
         } else {
           setMessage('Account created! Check your email to confirm, then sign in.');
@@ -57,11 +54,7 @@ export default function LoginPage() {
       }
     } catch (err: any) {
       const msg = err.message || 'Authentication failed';
-      if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('user already exists') || msg.toLowerCase().includes('duplicate')) {
-        setMessage('An account with this email already exists. Please check your email (including spam) for a confirmation link from a previous signup attempt. If a prior signup failed after auth, a partial auth user may remain – try a different email or ask an admin to clean up the auth.users table in Supabase. You can also try signing in.');
-      } else {
-        setMessage(msg);
-      }
+      setMessage(msg);
     } finally {
       setLoading(false);
     }
@@ -90,7 +83,9 @@ export default function LoginPage() {
         </div>
 
         <div className="card p-8">
-          <h1 className="text-2xl font-bold mb-6" style={{ color: 'var(--gold)' }}>{isSignUp ? 'Create Account' : 'Sign In'}</h1>
+          <h1 className="text-2xl font-bold mb-6" style={{ color: 'var(--gold)' }}>
+            {isSignUp ? 'Create Account' : 'Sign In'}
+          </h1>
 
           {message && (
             <div className={`mb-4 p-3 rounded text-sm ${message.includes('sent') || message.includes('created') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
@@ -149,17 +144,28 @@ export default function LoginPage() {
           Web version of Total Service Pro • Shares data with the mobile app via Supabase
         </p>
 
-        {/* Professional multi-type sign up links (marketplace vision) */}
+        {/* Cleaned up signup options - No FSE self-signup */}
         <div className="mt-8 card p-5 text-sm">
-          <div className="font-bold mb-3 text-center" style={{ color: 'var(--gold)' }}>Join the Laser Service Network</div>
-          <p className="text-center text-xs text-[var(--text3)] mb-4">Sign up by org type first (Service Company, Owner/Facility, Parts Supplier). FSE is a role added inside a Service Company (by its admin via /company Team). Owners post needs; Service Companies + FSEs bid &amp; fulfill (live at /marketplace).</p>
+          <div className="font-bold mb-3 text-center" style={{ color: 'var(--gold)' }}>
+            Join as a Service Organization, Laser Clinic, or Parts Supplier
+          </div>
+          <p className="text-center text-xs text-[var(--text3)] mb-4">
+            FSEs are added by Service Organizations through their Team section. 
+            There is no individual FSE signup.
+          </p>
           <div className="grid grid-cols-1 gap-2">
-            <Link href="/company" className="btn btn-secondary w-full justify-center text-sm py-2">Sign up as Service Organization</Link>
-            <Link href="/signup/owner" className="btn btn-secondary w-full justify-center text-sm py-2">Sign up as Laser Owner / Facility</Link>
-            <Link href="/signup/fse" className="btn btn-secondary w-full justify-center text-sm py-2">Sign up as FSE (to be added to Service Company)</Link>
+            <Link href="/company" className="btn btn-secondary w-full justify-center text-sm py-2">
+              Sign up as Service Organization
+            </Link>
+            <Link href="/signup/owner" className="btn btn-secondary w-full justify-center text-sm py-2">
+              Sign up as Laser Owner / Facility
+            </Link>
+            <Link href="/signup/supplier" className="btn btn-secondary w-full justify-center text-sm py-2">
+              Sign up as Parts Supplier
+            </Link>
           </div>
           <div className="text-center mt-3">
-            <Link href="/signup" className="text-[var(--gold)] text-xs hover:underline">Or view all options →</Link>
+            <Link href="/signup" className="text-[var(--gold)] text-xs hover:underline">View all options →</Link>
           </div>
         </div>
       </div>
