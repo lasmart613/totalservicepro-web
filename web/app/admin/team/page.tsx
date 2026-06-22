@@ -26,7 +26,6 @@ export default function TeamManagement() {
   const [adding, setAdding] = useState(false);
   const supabase = getSupabaseClient();
 
-  // Fetch current team members
   const fetchTeam = async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
@@ -57,7 +56,6 @@ export default function TeamManagement() {
     fetchTeam();
   }, []);
 
-  // Add new team member
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMember.email) {
@@ -71,7 +69,6 @@ export default function TeamManagement() {
       const { data: { user: currentUser } } = await supabase.auth.getUser();
       if (!currentUser) throw new Error('Not logged in');
 
-      // Get current user's organization
       const { data: currentProfile } = await supabase
         .from('user_profiles')
         .select('organization_id')
@@ -82,7 +79,6 @@ export default function TeamManagement() {
         throw new Error('You are not part of an organization');
       }
 
-      // Check if user already exists
       const { data: existingUser } = await supabase
         .from('user_profiles')
         .select('id')
@@ -90,7 +86,6 @@ export default function TeamManagement() {
         .single();
 
       if (existingUser) {
-        // Link existing user to organization
         const { error } = await supabase
           .from('user_profiles')
           .update({
@@ -103,7 +98,6 @@ export default function TeamManagement() {
         if (error) throw error;
         toast.success('Existing user linked to your organization');
       } else {
-        // Create new profile (user will need to sign up)
         const { error } = await supabase.from('user_profiles').insert({
           email: newMember.email.toLowerCase(),
           first_name: newMember.firstName || null,
@@ -118,7 +112,6 @@ export default function TeamManagement() {
         toast.success('Team member added. They will need to sign up with this email.');
       }
 
-      // Reset form and refresh list
       setNewMember({
         email: '',
         firstName: '',
@@ -141,7 +134,7 @@ export default function TeamManagement() {
         Manage your team members and their roles at Luxor Photonix.
       </p>
 
-      {/* Add New Team Member */}
+      {/* Add New Team Member Form */}
       <div className="card p-6 mb-10">
         <h2 className="font-bold text-xl mb-4">Add New Team Member</h2>
         <form onSubmit={handleAddMember} className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -227,4 +220,33 @@ export default function TeamManagement() {
                   <th className="py-3 px-4">Name</th>
                   <th className="py-3 px-4">Email</th>
                   <th className="py-3 px-4">Role</th>
-                  <th class
+                  <th className="py-3 px-4">Job Title</th>
+                  <th className="py-3 px-4">Joined</th>
+                </tr>
+              </thead>
+              <tbody>
+                {teamMembers.map((member) => (
+                  <tr key={member.id} className="border-b border-[var(--border)] hover:bg-[var(--surface3)]">
+                    <td className="py-3 px-4 font-medium">
+                      {member.first_name} {member.last_name}
+                    </td>
+                    <td className="py-3 px-4 text-sm">{member.email}</td>
+                    <td className="py-3 px-4">
+                      <span className="px-2 py-1 text-xs rounded-full bg-[var(--surface3)] capitalize">
+                        {member.role}
+                      </span>
+                    </td>
+                    <td className="py-3 px-4 text-sm text-[var(--text3)]">{member.job_title || '—'}</td>
+                    <td className="py-3 px-4 text-sm text-[var(--text3)]">
+                      {new Date(member.created_at).toLocaleDateString()}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
