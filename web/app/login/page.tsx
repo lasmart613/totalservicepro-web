@@ -154,7 +154,7 @@ export default function LoginPage() {
           <div className="font-bold mb-3 text-center" style={{ color: 'var(--gold)' }}>Join the Laser Service Network</div>
           <p className="text-center text-xs text-[var(--text3)] mb-4">Sign up by org type first (Service Company, Owner/Facility, Parts Supplier). FSE is a role added inside a Service Company (by its admin via /company Team). Owners post needs; Service Companies + FSEs bid &amp; fulfill (live at /marketplace).</p>
           <div className="grid grid-cols-1 gap-2">
-            <Link href="/signup/company" className="btn btn-secondary w-full justify-center text-sm py-2">Sign up as Service Company</Link>
+            <Link href="/company" className="btn btn-secondary w-full justify-center text-sm py-2">Sign up as Service Organization</Link>
             <Link href="/signup/owner" className="btn btn-secondary w-full justify-center text-sm py-2">Sign up as Laser Owner / Facility</Link>
             <Link href="/signup/fse" className="btn btn-secondary w-full justify-center text-sm py-2">Sign up as FSE (to be added to Service Company)</Link>
           </div>

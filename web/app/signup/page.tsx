@@ -22,7 +22,7 @@ export default function SignupIndex() {
         {/* Centered 3-tile grid */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
           {/* Company Card */}
-          <Link href="/signup/company" className="card p-6 hover:border-[var(--gold-border)] group flex flex-col min-w-0">
+          <Link href="/company" className="card p-6 hover:border-[var(--gold-border)] group flex flex-col min-w-0">
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
               <Building2 size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
@@ -34,7 +34,7 @@ export default function SignupIndex() {
               <li>• # of techs / business details</li>
               <li>• Manage team, bid on needs, accept contracts</li>
             </ul>
-            <div className="btn btn-primary w-full text-center">Sign Up as Company →</div>
+            <div className="btn btn-primary w-full text-center">Create Service Organization →</div>
           </Link>
 
           {/* Owner Card */}

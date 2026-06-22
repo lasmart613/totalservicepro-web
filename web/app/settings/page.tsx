@@ -19,6 +19,37 @@ export default function Settings() {
   const [browserNotif, setBrowserNotif] = useState(true);
   const [sound, setSound] = useState(true);
 
+  const TIME_ZONES = [
+    'UTC',
+    'America/New_York',
+    'America/Chicago',
+    'America/Denver',
+    'America/Los_Angeles',
+    'America/Phoenix',
+    'America/Anchorage',
+    'Pacific/Honolulu',
+    'Europe/London',
+    'Europe/Paris',
+    'Europe/Berlin',
+    'Europe/Madrid',
+    'Europe/Rome',
+    'Europe/Moscow',
+    'Asia/Tokyo',
+    'Asia/Shanghai',
+    'Asia/Singapore',
+    'Asia/Dubai',
+    'Asia/Kolkata',
+    'Asia/Seoul',
+    'Asia/Hong_Kong',
+    'Australia/Sydney',
+    'Australia/Melbourne',
+    'Australia/Perth',
+    'America/Toronto',
+    'America/Vancouver',
+    'America/Sao_Paulo',
+    'America/Mexico_City',
+  ];
+
   // Load from localStorage only on client
   useEffect(() => {
     if (typeof window !== 'undefined') {
@@ -148,13 +179,19 @@ export default function Settings() {
             </div>
             <div>
               <label className="text-xs">Time Zone</label>
-              <input 
-                type="text" 
-                value={timeZone} 
-                onChange={e => updateTimeZone(e.target.value)} 
-                className="input text-xs mt-1" 
-                placeholder="e.g. America/New_York"
-              />
+              <select
+                value={timeZone}
+                onChange={e => updateTimeZone(e.target.value)}
+                className="select text-xs mt-1 w-full"
+              >
+                {TIME_ZONES.map(tz => (
+                  <option key={tz} value={tz}>{tz}</option>
+                ))}
+                {/* If a custom value was previously saved and is not in the list, still allow it to display */}
+                {timeZone && !TIME_ZONES.includes(timeZone) && (
+                  <option value={timeZone}>{timeZone} (custom)</option>
+                )}
+              </select>
             </div>
           </div>
 
