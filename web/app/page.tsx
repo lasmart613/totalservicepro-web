@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { Calendar, Wrench, Package, FileText } from 'lucide-react';
 import AdBanner from '@/components/AdBanner';
+import { getSupabaseClient } from '@/lib/supabase/client';
 
 export default function HomePage() {
   const [user, setUser] = useState<any>(null);
