@@ -9,28 +9,31 @@ export default async function AdminLayout({
 }) {
   const supabase = getSupabaseClient();
 
-  const { data: { user } } = await supabase.auth.getUser();
+  const { data: { user }, error: userError } = await supabase.auth.getUser();
 
-  if (!user) {
+  if (userError || !user) {
     redirect('/login');
   }
 
-  const { data: profile } = await supabase
+  const { data: profile, error: profileError } = await supabase
     .from('user_profiles')
     .select('role')
     .eq('id', user.id)
     .single();
 
+  if (profileError || !profile) {
+    redirect('/login');
+  }
+
   const allowedRoles = ['admin', 'company_admin'];
-  if (!profile || !allowedRoles.includes(profile.role)) {
-    redirect('/'); // Non-admins are sent back to the main dashboard
+  if (!allowedRoles.includes(profile.role)) {
+    redirect('/');
   }
 
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="flex flex-1">
-        {/* Admin Sidebar */}
         <aside className="w-64 bg-[var(--surface)] border-r border-[var(--border)] p-6 hidden lg:block">
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-[var(--gold)]">Admin Portal</h2>

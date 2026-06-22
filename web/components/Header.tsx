@@ -9,14 +9,16 @@ import { LogOut, User as UserIcon, Settings, Building2, Menu, X } from 'lucide-r
 export function Header() {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const supabase = getSupabaseClient();
 
   useEffect(() => {
-    const load = async () => {
+    const loadUser = async () => {
       const { data: { user: u } } = await supabase.auth.getUser();
       setUser(u);
+
       if (u) {
         const { data: prof } = await supabase
           .from('user_profiles')
@@ -25,13 +27,26 @@ export function Header() {
           .maybeSingle();
         setProfile(prof);
       }
+      setLoading(false);
     };
-    load();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_e, session) => {
+    loadUser();
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
-      if (!session?.user) setProfile(null);
+      if (session?.user) {
+        // Re-fetch profile when auth state changes
+        supabase
+          .from('user_profiles')
+          .select('first_name, last_name, role, organizations(name)')
+          .eq('id', session.user.id)
+          .maybeSingle()
+          .then(({ data }) => setProfile(data));
+      } else {
+        setProfile(null);
+      }
     });
+
     return () => subscription.unsubscribe();
   }, [supabase]);
 
@@ -51,6 +66,18 @@ export function Header() {
   const initials = (profile?.first_name?.[0] || user?.email?.[0] || 'U').toUpperCase() + 
                    (profile?.last_name?.[0] || '').toUpperCase();
 
+  // Show loading state to prevent "logged out" flash
+  if (loading) {
+    return (
+      <header className="header px-4 py-3 flex items-center justify-between">
+        <Link href="/" className="font-extrabold text-xl" style={{ color: 'var(--gold)' }}>
+          Total Service Pro
+        </Link>
+        <div className="w-8 h-8 rounded-full bg-[var(--surface3)] animate-pulse" />
+      </header>
+    );
+  }
+
   return (
     <header className="header px-4 py-3 flex items-center justify-between">
       <div className="flex items-center gap-3">
@@ -59,7 +86,7 @@ export function Header() {
           <span className="text-[10px] font-medium tracking-[1.5px] text-[var(--text3)] uppercase -mt-0.5">Laser Equipment Service</span>
         </Link>
 
-        {/* Desktop Navigation */}
+        {/* Desktop Nav */}
         <nav className="ml-6 hidden md:flex items-center gap-5 text-base font-medium text-[var(--text2)]">
           <Link href="/" className="hover:text-[var(--gold)]">Dashboard</Link>
           <Link href="/reports" className="hover:text-[var(--gold)]">Reports</Link>
@@ -70,7 +97,7 @@ export function Header() {
       </div>
 
       <div className="flex items-center gap-3">
-        {/* Mobile Hamburger Button */}
+        {/* Mobile Menu Button */}
         <button
           onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
           className="md:hidden p-2 text-[var(--text)] hover:text-[var(--gold)]"
@@ -79,7 +106,7 @@ export function Header() {
           {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
         </button>
 
-        {/* User Account */}
+        {/* Auth Section */}
         {!user ? (
           <div className="flex items-center gap-2">
             <Link href="/login" className="btn btn-primary text-sm px-4 py-1.5">Sign In</Link>
@@ -127,25 +154,15 @@ export function Header() {
         )}
       </div>
 
-      {/* Mobile Navigation Menu */}
+      {/* Mobile Menu */}
       {mobileMenuOpen && (
         <div className="md:hidden absolute top-[60px] left-0 right-0 bg-[var(--surface3)] border-b border-[var(--border)] z-[90] shadow-lg">
           <nav className="flex flex-col px-4 py-2 text-base font-medium">
-            <Link href="/" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
-              Dashboard
-            </Link>
-            <Link href="/reports" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
-              Reports
-            </Link>
-            <Link href="/manuals" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
-              Manuals
-            </Link>
-            <Link href="/hub" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
-              Tech Hub
-            </Link>
-            <Link href="/marketplace" className="py-3 hover:text-[var(--gold)]" onClick={closeMobileMenu}>
-              Marketplace
-            </Link>
+            <Link href="/" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Dashboard</Link>
+            <Link href="/reports" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Reports</Link>
+            <Link href="/manuals" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Manuals</Link>
+            <Link href="/hub" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Tech Hub</Link>
+            <Link href="/marketplace" className="py-3 hover:text-[var(--gold)]" onClick={closeMobileMenu}>Marketplace</Link>
           </nav>
         </div>
       )}
