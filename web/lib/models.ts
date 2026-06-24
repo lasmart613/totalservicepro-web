@@ -208,6 +208,124 @@ export const MODELS: Record<string, ModelDef> = {
       'Bubble Sense HP Full', 'Bubble Sense HP Empty', 'Bubble Sense Can Full', 'Bubble Sense Can Empty'
     ]
   },
+  'Candela GentleMAX_PRO': {
+    mfg: 'Candela',
+    label: 'GentleMAX PRO (755 + 1064 nm)',
+    wavelengths: [
+      {
+        name: '755 nm Alexandrite',
+        mode: 'SP',
+        sets: [6, 8, 10, 12, 14, 16, 18, 20, 22, 24, 26, 28, 30],
+        unit: 'J/cm²',
+        spotMm: 15,
+        tolLabel: 'Tol ±10%'
+      },
+      {
+        name: '1064 nm Nd:YAG @ 6mm',
+        mode: 'SP',
+        sets: [20, 40, 60, 80, 100, 120, 150, 200, 250, 300],
+        unit: 'J/cm²',
+        spotMm: 6,
+        tolLabel: 'Tol ±10%'
+      },
+      {
+        name: '1064 nm Nd:YAG @ 10mm',
+        mode: 'SP',
+        sets: [10, 20, 30, 40, 50, 60, 70, 80, 100, 120],
+        unit: 'J/cm²',
+        spotMm: 10,
+        tolLabel: 'Tol ±10%'
+      },
+      {
+        name: '1064 nm Nd:YAG @ 12mm',
+        mode: 'SP',
+        sets: [10, 15, 20, 25, 30, 35, 40, 50, 60],
+        unit: 'J/cm²',
+        spotMm: 12,
+        tolLabel: 'Tol ±10%'
+      },
+      {
+        name: '1064 nm Nd:YAG @ 15mm',
+        mode: 'SP',
+        sets: [8, 10, 15, 18, 20, 25, 30, 35, 40],
+        unit: 'J/cm²',
+        spotMm: 15,
+        tolLabel: 'Tol ±10%'
+      },
+      {
+        name: '1064 nm Nd:YAG @ 18mm',
+        mode: 'SP',
+        sets: [5, 8, 10, 12, 15, 18, 20, 25, 30, 35],
+        unit: 'J/cm²',
+        spotMm: 18,
+        tolLabel: 'Tol ±10%'
+      }
+    ],
+    params: [
+      'Total System Shots',
+      'Handpiece Shots',
+      'Lamp Shots',
+      'DCD Canister Shots',
+      'DCD Delay Set (ms)',
+      'DCD Delay Measured (ms)',
+      'DCD Duration Set (ms)',
+      'DCD Duration Measured (ms)',
+      'HV @ Reference Fluence (VDC)',
+      'Fiber Transmission %',
+      'DI Water Temp (°C)',
+      'DI Conductivity (µS/cm)',
+      'DI Flow Rate (L/min)',
+      'Bubble Sense HP Full',
+      'Bubble Sense HP Empty',
+      'Bubble Sense Can Full',
+      'Bubble Sense Can Empty'
+    ]
+  },
+
+  PicoWay: {
+    mfg: 'Candela',
+    label: 'PicoWay Picosecond Laser',
+    wavelengths: [
+      {
+        name: '1064 nm (Zoom / Resolve)',
+        mode: 'SP',
+        sets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.2, 1.5, 2.0],
+        unit: 'J/cm²',
+        spotMm: 10,
+        tolLabel: 'Tol ±10%'
+      },
+      {
+        name: '532 nm (Zoom)',
+        mode: 'SP',
+        sets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0],
+        unit: 'J/cm²',
+        spotMm: 6,
+        tolLabel: 'Tol ±10%'
+      },
+      {
+        name: '785 nm (Resolve)',
+        mode: 'SP',
+        sets: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2],
+        unit: 'J/cm²',
+        spotMm: 4,
+        tolLabel: 'Tol ±10%',
+        optional: true,
+        optionalLabel: '785nm handpiece installed'
+      }
+    ],
+    params: [
+      'Total System Shots',
+      'Handpiece Shots',
+      'Lamp Shots',
+      'HV @ Reference Fluence (VDC)',
+      'Fiber Transmission %',
+      'DI Water Temp (°C)',
+      'DI Conductivity (µS/cm)',
+      'Cooling Temp Set (°C)',
+      'Cooling Temp Measured (°C)'
+    ]
+  },
+
   'Sciton Profile': {
     mfg: 'Sciton',
     label: 'Profile Er:YAG / Nd:YAG',
