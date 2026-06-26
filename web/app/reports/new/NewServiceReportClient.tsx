@@ -98,14 +98,14 @@ export default function NewServiceReport() {
     })();
   }, [router, supabase]);
 
-    async function loadMyCustomers(orgId: number) {
+  async function loadMyCustomers(orgId: number) {
     console.log('🔍 Loading customers for org:', orgId);
 
     const { data, error } = await supabase
       .from('organization_customers')
       .select(`
         customer_organization_id,
-        organizations:customer_organization_id (
+        organizations (
           id,
           name,
           address,
@@ -119,15 +119,18 @@ export default function NewServiceReport() {
       console.error('❌ Customer load error:', error);
     } else if (data) {
       console.log('✅ Loaded customers:', data.length);
-      const customers = data.map((item: any) => ({
-        id: item.customer_organization_id,
-        name: item.organizations?.name || 'Unnamed Customer',
-        address: item.organizations?.address || '',
-        city: item.organizations?.city || '',
-        state: item.organizations?.state || '',
-      }));
-      // Sort in JS instead
-      customers.sort((a, b) => a.name.localeCompare(b.name));
+      const customers = data
+        .map((item: any) => ({
+          id: item.customer_organization_id,
+          name: item.organizations?.name || 'Unnamed Customer',
+          address: item.organizations?.address || '',
+          city: item.organizations?.city || '',
+          state: item.organizations?.state || '',
+        }))
+        .filter(c => c.name !== 'Unnamed Customer') // clean up any bad joins
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      console.log('Processed customers:', customers.map(c => c.name));
       setCustomerOptions(customers);
     }
   }
