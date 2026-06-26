@@ -98,39 +98,39 @@ export default function NewServiceReport() {
     })();
   }, [router, supabase]);
 
-  async function loadMyCustomers(orgId: number) {
-  console.log('🔍 Loading customers for org:', orgId);
+    async function loadMyCustomers(orgId: number) {
+    console.log('🔍 Loading customers for org:', orgId);
 
-  const { data, error } = await supabase
-    .from('organization_customers')
-    .select(`
-      customer_organization_id,
-      organizations:customer_organization_id (
-        id,
-        name,
-        address,
-        city,
-        state
-      )
-    `)
-    .eq('service_organization_id', orgId)
-    .order('organizations.name');
+    const { data, error } = await supabase
+      .from('organization_customers')
+      .select(`
+        customer_organization_id,
+        organizations:customer_organization_id (
+          id,
+          name,
+          address,
+          city,
+          state
+        )
+      `)
+      .eq('service_organization_id', orgId);
 
-  if (error) {
-    console.error('❌ Customer load error:', error);
-  } else if (data) {
-    console.log('✅ Loaded customers:', data.length);
-    const customers = data.map((item: any) => ({
-      id: item.customer_organization_id,
-      name: item.organizations?.name || 'Unnamed Customer',
-      address: item.organizations?.address || '',
-      city: item.organizations?.city || '',
-      state: item.organizations?.state || '',
-    }));
-    setCustomerOptions(customers);
+    if (error) {
+      console.error('❌ Customer load error:', error);
+    } else if (data) {
+      console.log('✅ Loaded customers:', data.length);
+      const customers = data.map((item: any) => ({
+        id: item.customer_organization_id,
+        name: item.organizations?.name || 'Unnamed Customer',
+        address: item.organizations?.address || '',
+        city: item.organizations?.city || '',
+        state: item.organizations?.state || '',
+      }));
+      // Sort in JS instead
+      customers.sort((a, b) => a.name.localeCompare(b.name));
+      setCustomerOptions(customers);
+    }
   }
-}
-
   async function loadEquipmentForCustomer(orgId: number) {
     if (!orgId) return;
     const { data } = await supabase
