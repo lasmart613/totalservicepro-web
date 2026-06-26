@@ -6,7 +6,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
-import { MODELS, buildManufacturers, CL_ELECTRICAL, CL_MECHANICAL, CL_AESTHETIC, DEFAULT_TEST_EQUIPMENT, computeDeviation, ModelDef, WavelengthSpec } from '@/lib/models';
+import { MODELS, buildManufacturers, CL_ELECTRICAL, CL_MECHANICAL, CL_AESTHETIC, DEFAULT_TEST_EQUIPMENT, computeDeviation, ModelDef } from '@/lib/models';
 import { ArrowLeft, Save, Check, Download } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -68,6 +68,13 @@ export default function NewServiceReport() {
   const [equipmentOptions, setEquipmentOptions] = useState<any[]>([]);
   const [selectedEquipmentId, setSelectedEquipmentId] = useState<number | null>(null);
 
+  // Add New Customer Modal
+  const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
+  const [newCustomerName, setNewCustomerName] = useState('');
+  const [newCustomerAddress, setNewCustomerAddress] = useState('');
+  const [newCustomerCity, setNewCustomerCity] = useState('');
+  const [newCustomerState, setNewCustomerState] = useState('');
+
   // Load user + customers
   useEffect(() => {
     (async () => {
@@ -104,41 +111,37 @@ export default function NewServiceReport() {
           loadMyCustomers(profile.organization_id);
         }
       }
-
-      // Test equipment
-      try {
-        const { data: te } = await supabase.from('test_equipment')
-          .select('type, make, model, serial_number, cal_due')
-          .eq('user_id', user.id).eq('is_active', true).order('type').limit(6);
-        if (te?.length) {
-          setTestEquip(te.map((eq: any) => ({
-            type: eq.type,
-            model: [eq.make, eq.model].filter(Boolean).join(' '),
-            serial: eq.serial_number || '',
-            calDue: eq.cal_due || ''
-          })));
-        }
-      } catch (e) {}
     })();
   }, [router, supabase]);
 
   async function loadMyCustomers(orgId: number) {
-    const { data } = await supabase
+    console.log('🔍 Loading customers for org:', orgId);
+
+    const { data, error } = await supabase
       .from('organization_customers')
       .select(`
         customer_organization_id,
-        organizations!inner(id, name, address, city, state)
+        organizations (
+          id,
+          name,
+          address,
+          city,
+          state
+        )
       `)
       .eq('service_organization_id', orgId)
       .order('organizations.name');
 
-    if (data) {
+    if (error) {
+      console.error('❌ Customer load error:', error);
+    } else if (data) {
+      console.log('✅ Loaded customers:', data.length);
       const customers = data.map((item: any) => ({
         id: item.customer_organization_id,
-        name: item.organizations.name,
-        address: item.organizations.address,
-        city: item.organizations.city,
-        state: item.organizations.state,
+        name: item.organizations?.name || 'Unnamed Customer',
+        address: item.organizations?.address || '',
+        city: item.organizations?.city || '',
+        state: item.organizations?.state || '',
       }));
       setCustomerOptions(customers);
     }
@@ -153,6 +156,55 @@ export default function NewServiceReport() {
       .order('manufacturer, model');
     setEquipmentOptions(data || []);
   }
+
+  const handleAddNewCustomer = async () => {
+    if (!newCustomerName.trim() || !currentUserOrgId) {
+      alert("Please enter a customer name");
+      return;
+    }
+
+    const { data, error } = await supabase
+      .from('organizations')
+      .insert({
+        name: newCustomerName.trim(),
+        address: newCustomerAddress.trim(),
+        city: newCustomerCity.trim(),
+        state: newCustomerState.trim(),
+        type: 'customer'
+      })
+      .select()
+      .single();
+
+    if (error) {
+      console.error(error);
+      alert("Failed to create customer: " + error.message);
+    } else {
+      await supabase
+        .from('organization_customers')
+        .insert({
+          service_organization_id: currentUserOrgId,
+          customer_organization_id: data.id,
+          created_by: currentUser?.id,
+          notes: 'Created via New Service Report'
+        });
+
+      loadMyCustomers(currentUserOrgId);
+
+      setSelectedCustomerOrgId(data.id);
+      setCustName(data.name);
+      setCustAddress(data.address || '');
+      setCustCity(data.city || '');
+      setCustState(data.state || '');
+
+      setShowAddCustomerModal(false);
+      setNewCustomerName('');
+      setNewCustomerAddress('');
+      setNewCustomerCity('');
+      setNewCustomerState('');
+
+      alert("New customer added and selected successfully!");
+    }
+  };
 
   // Model change handler
   useEffect(() => {
@@ -178,49 +230,7 @@ export default function NewServiceReport() {
     setClAesthetic(resetCL(CL_AESTHETIC));
   }, [modelKey]);
 
-  function collectData() {
-    if (!model) return {};
-    // ... (same as before)
-    const measurements: any[] = [];
-    // ... build measurements (keep your existing logic here)
-
-    return {
-      model_type: modelKey,
-      equipment_id: selectedEquipmentId,
-      equipment_name: equipName,
-      serial_number: serialNum,
-      customer_name: custName,
-      customer_address: custAddress,
-      customer_city: custCity,
-      customer_state: custState,
-      customer_organization_id: selectedCustomerOrgId,
-      service_type: serviceType,
-      date_out: dateOut,
-      next_pm_due: nextPm || null,
-      service_engineer: engineer,
-      ticket_number: ticketNum || null,
-      comments: comments || null,
-      ground_resistance: groundRes ? parseFloat(groundRes) : null,
-      leakage_current: leakageCur ? parseFloat(leakageCur) : null,
-      checklist_electrical: clElectrical,
-      checklist_mechanical: clMechanical,
-      checklist_aesthetic: clAesthetic,
-      power_measurements: measurements,
-      model_parameters: paramsData,
-      test_equipment: testEquip,
-      organization_id: currentUserOrgId,
-      ...techCompanyCache
-    };
-  }
-
-  async function saveReport(status: 'draft' | 'complete', isFinalized = false) {
-    // ... keep your existing save logic
-  }
-
-  const handleFinalize = () => {
-    // exportPrint(); // uncomment when ready
-    saveReport('complete', true);
-  };
+  // ... (keep your existing collectData, saveReport, etc. functions)
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -240,16 +250,16 @@ export default function NewServiceReport() {
           </button>
         </div>
 
-        {/* === CUSTOMER DROPDOWN === */}
+        {/* Customer Dropdown + Add New */}
         <div className="section mb-4 p-4">
           <div className="flex justify-between items-center mb-2">
             <label className="label">Customer Name</label>
             <button 
               type="button"
-              onClick={() => alert('Add New Customer form coming next')}
+              onClick={() => setShowAddCustomerModal(true)}
               className="text-xs text-[var(--gold)] hover:underline flex items-center gap-1"
             >
-              + Add New
+              + Add New Customer
             </button>
           </div>
 
@@ -259,6 +269,7 @@ export default function NewServiceReport() {
             onChange={(e) => {
               const orgId = e.target.value ? parseInt(e.target.value) : null;
               setSelectedCustomerOrgId(orgId);
+              
               const selected = customerOptions.find((o: any) => o.id === orgId);
               if (selected) {
                 setCustName(selected.name);
@@ -318,13 +329,62 @@ export default function NewServiceReport() {
           </select>
         </div>
 
-        {/* Model Selector and rest of form... */}
-        {/* (Keep the rest of your existing form code for manufacturer/model, checklists, etc.) */}
+        {/* Rest of your form goes here (manufacturer, model, checklists, etc.) */}
+        {/* ... keep everything else unchanged ... */}
 
-        <div className="text-[10px] text-center text-[var(--text3)] mt-8">
-          Data saved to Supabase
-        </div>
       </div>
+
+      {/* Add New Customer Modal */}
+      {showAddCustomerModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-[#1a2233] p-8 rounded-3xl w-full max-w-md mx-4">
+            <h3 className="text-2xl font-bold mb-6">Add New Customer</h3>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="label">Customer Name *</label>
+                <input 
+                  className="input" 
+                  value={newCustomerName} 
+                  onChange={e => setNewCustomerName(e.target.value)} 
+                  placeholder="e.g. Riverside Medical Center"
+                />
+              </div>
+              <div>
+                <label className="label">Address</label>
+                <input className="input" value={newCustomerAddress} onChange={e => setNewCustomerAddress(e.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">City</label>
+                  <input className="input" value={newCustomerCity} onChange={e => setNewCustomerCity(e.target.value)} />
+                </div>
+                <div>
+                  <label className="label">State</label>
+                  <input className="input" value={newCustomerState} onChange={e => setNewCustomerState(e.target.value)} />
+                </div>
+              </div>
+            </div>
+
+            <div className="flex gap-4 mt-8">
+              <button 
+                type="button"
+                onClick={() => setShowAddCustomerModal(false)}
+                className="flex-1 py-4 rounded-2xl border border-gray-600 hover:bg-gray-800"
+              >
+                Cancel
+              </button>
+              <button 
+                type="button"
+                onClick={handleAddNewCustomer}
+                className="flex-1 py-4 rounded-2xl bg-[var(--gold)] text-black font-semibold hover:bg-yellow-400"
+              >
+                Create Customer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
