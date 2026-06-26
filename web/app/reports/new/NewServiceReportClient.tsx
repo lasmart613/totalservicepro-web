@@ -98,7 +98,7 @@ export default function NewServiceReport() {
     })();
   }, [router, supabase]);
 
-  async function loadMyCustomers(orgId: number) {
+   async function loadMyCustomers(orgId: number) {
     console.log('🔍 Loading customers for org:', orgId);
 
     const { data, error } = await supabase
