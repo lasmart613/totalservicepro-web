@@ -104,8 +104,8 @@ export default function NewServiceReport() {
     const { data, error } = await supabase
       .from('organization_customers')
       .select(`
-        customer_organization_id,
-        organizations (
+        *,
+        organizations:customer_organization_id (
           id,
           name,
           address,
@@ -127,13 +127,14 @@ export default function NewServiceReport() {
           city: item.organizations?.city || '',
           state: item.organizations?.state || '',
         }))
-        .filter(c => c.name !== 'Unnamed Customer') // clean up any bad joins
+        .filter(c => c.name && c.name !== 'Unnamed Customer')
         .sort((a, b) => a.name.localeCompare(b.name));
 
       console.log('Processed customers:', customers.map(c => c.name));
       setCustomerOptions(customers);
     }
   }
+
   async function loadEquipmentForCustomer(orgId: number) {
     if (!orgId) return;
     const { data } = await supabase
