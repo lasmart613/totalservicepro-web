@@ -42,10 +42,9 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-[var(--bg)] text-[var(--text)]">
         <Providers>
           <div className="flex-1 flex flex-col">
-            {/* Main Content Wrapper - Desktop friendly */}
-            <main className="flex-1 max-w-[1400px] mx-auto w-full px-6 lg:px-8 py-6">
-              {children}
-            </main>
+		<main className="flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 max-w-screen-2xl">
+		{children}
+		</main>
           </div>
         </Providers>
 
