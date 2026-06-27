@@ -1,60 +1,24 @@
 'use client';
 
-export const dynamic = 'force-dynamic';
-
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
-import { MODELS, buildManufacturers, CL_ELECTRICAL, CL_MECHANICAL, CL_AESTHETIC, DEFAULT_TEST_EQUIPMENT, ModelDef } from '@/lib/models';
-import { ArrowLeft, Save, Check, Download } from 'lucide-react';
-import { useRouter, useSearchParams } from 'next/navigation';
-
-const MANUFACTURERS = buildManufacturers();
-
-type ChecklistState = Record<string, 'Pass' | 'Fail' | ''>;
+import { ArrowLeft, Check } from 'lucide-react';
+import { useRouter } from 'next/navigation';
 
 export default function NewServiceReport() {
   const router = useRouter();
-  const search = useSearchParams();
   const supabase = getSupabaseClient();
 
-  const [currentUser, setCurrentUser] = useState<any>(null);
   const [currentUserOrgId, setCurrentUserOrgId] = useState<number | null>(null);
-  const [techCompanyCache, setTechCompanyCache] = useState<any>({});
-
-  // Form state
-  const [modelKey, setModelKey] = useState('');
-  const [model, setModel] = useState<ModelDef | null>(null);
-
+  const [customerOptions, setCustomerOptions] = useState<any[]>([]);
+  const [selectedCustomerOrgId, setSelectedCustomerOrgId] = useState<number | null>(null);
   const [custName, setCustName] = useState('');
   const [custAddress, setCustAddress] = useState('');
   const [custCity, setCustCity] = useState('');
   const [custState, setCustState] = useState('');
-  const [equipName, setEquipName] = useState('');
-  const [serialNum, setSerialNum] = useState('');
-  const [dateOut, setDateOut] = useState(new Date().toISOString().slice(0, 10));
-  const [nextPm, setNextPm] = useState('');
-  const [engineer, setEngineer] = useState('');
-  const [ticketNum, setTicketNum] = useState('');
-  const [comments, setComments] = useState('');
 
-  const [serviceType, setServiceType] = useState('PM');
-  const [clElectrical, setClElectrical] = useState<ChecklistState>({});
-  const [clMechanical, setClMechanical] = useState<ChecklistState>({});
-  const [clAesthetic, setClAesthetic] = useState<ChecklistState>({});
-  const [groundRes, setGroundRes] = useState<string>('');
-  const [leakageCur, setLeakageCur] = useState<string>('');
-
-  const [testEquip, setTestEquip] = useState<any[]>(DEFAULT_TEST_EQUIPMENT);
-
-  // Customer & Equipment
-  const [customerOptions, setCustomerOptions] = useState<any[]>([]);
-  const [selectedCustomerOrgId, setSelectedCustomerOrgId] = useState<number | null>(null);
-  const [equipmentOptions, setEquipmentOptions] = useState<any[]>([]);
-  const [selectedEquipmentId, setSelectedEquipmentId] = useState<number | null>(null);
-
-  // Add New Customer Modal
   const [showAddCustomerModal, setShowAddCustomerModal] = useState(false);
   const [newCustomerName, setNewCustomerName] = useState('');
   const [newCustomerAddress, setNewCustomerAddress] = useState('');
@@ -69,37 +33,19 @@ export default function NewServiceReport() {
         router.push('/login');
         return;
       }
-      setCurrentUser(user);
 
       const { data: profile } = await supabase
         .from('user_profiles')
-        .select('first_name, last_name, organization_id, organizations(name, address, city, state, phone, logo_url)')
+        .select('organization_id')
         .eq('id', user.id)
         .maybeSingle();
 
-      if (profile) {
-        const org = profile.organizations || {};
-        const techName = [profile.first_name, profile.last_name].filter(Boolean).join(' ');
-        setEngineer(techName || user.email || '');
-
-        setTechCompanyCache({
-          tech_name: techName,
-          company_name: org.name || '',
-          company_address: org.address || '',
-          company_city: org.city || '',
-          company_state: org.state || '',
-        });
-
-        if (profile.organization_id) {
-          setCurrentUserOrgId(profile.organization_id);
-          loadMyCustomers(profile.organization_id);
-        }
+      if (profile?.organization_id) {
+        setCurrentUserOrgId(profile.organization_id);
+        loadMyCustomers(profile.organization_id);
       }
     })();
   }, [router, supabase]);
-
-
-
 
   async function loadMyCustomers(orgId: number) {
     console.log('🔍 Loading customers for org:', orgId);
@@ -122,38 +68,21 @@ export default function NewServiceReport() {
       console.error('❌ Customer load error:', error);
     } else if (data) {
       console.log('✅ Loaded customers:', data.length);
-      
+
       const customers = data
-        .map((item: any) => {
-          const org = item.organizations;
-          return {
-            id: item.customer_organization_id,
-            name: org?.name || 'Unnamed Customer',
-            address: org?.address || '',
-            city: org?.city || '',
-            state: org?.state || '',
-          };
-        })
-        .filter(c => c.name && c.name !== 'Unnamed Customer')
+        .map((item: any) => ({
+          id: item.customer_organization_id,
+          name: item.organizations?.name || '',
+          address: item.organizations?.address || '',
+          city: item.organizations?.city || '',
+          state: item.organizations?.state || '',
+        }))
+        .filter(c => c.name)
         .sort((a, b) => a.name.localeCompare(b.name));
 
       console.log('Processed customers:', customers.map(c => c.name));
       setCustomerOptions(customers);
     }
-  }
-
-
-
-
-
-  async function loadEquipmentForCustomer(orgId: number) {
-    if (!orgId) return;
-    const { data } = await supabase
-      .from('equipment')
-      .select('id, manufacturer, model, serial_number')
-      .eq('customer_organization_id', orgId)
-      .order('manufacturer, model');
-    setEquipmentOptions(data || []);
   }
 
   const handleAddNewCustomer = async () => {
@@ -175,17 +104,13 @@ export default function NewServiceReport() {
       .single();
 
     if (error) {
-      console.error(error);
       alert("Failed to create customer: " + error.message);
     } else {
-      await supabase
-        .from('organization_customers')
-        .insert({
-          service_organization_id: currentUserOrgId,
-          customer_organization_id: data.id,
-          created_by: currentUser?.id,
-          notes: 'Created via New Service Report'
-        });
+      await supabase.from('organization_customers').insert({
+        service_organization_id: currentUserOrgId,
+        customer_organization_id: data.id,
+        notes: 'Created via New Service Report'
+      });
 
       loadMyCustomers(currentUserOrgId);
 
@@ -205,55 +130,46 @@ export default function NewServiceReport() {
     }
   };
 
-  // Model change handler (simplified)
-  useEffect(() => {
-    if (!modelKey) return;
-    const m = MODELS[modelKey];
-    setModel(m);
-  }, [modelKey]);
-
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-[820px] mx-auto w-full px-4 py-5">
-        <div className="flex items-center gap-3 mb-5">
+      <div className="max-w-7xl mx-auto w-full px-8 py-8">   {/* ← Wider desktop layout */}
+        <div className="flex items-center gap-3 mb-6">
           <Link href="/reports" className="text-[var(--gold)] flex items-center gap-1">
             <ArrowLeft size={18} /> Back
           </Link>
-          <div className="font-bold text-xl flex-1">New Service Report</div>
-          <button className="btn btn-secondary text-sm">Save Draft</button>
-          <button className="btn btn-primary text-sm flex items-center gap-2">
+          <div className="font-bold text-2xl flex-1">New Service Report</div>
+          <button className="btn btn-secondary">Save Draft</button>
+          <button className="btn btn-primary flex items-center gap-2">
             <Check size={16} /> Submit
           </button>
         </div>
 
         {/* Customer Section */}
-        <div className="section mb-4 p-4">
-          <div className="flex justify-between items-center mb-2">
-            <label className="label">Customer Name</label>
+        <div className="section mb-6 p-6">
+          <div className="flex justify-between items-center mb-3">
+            <label className="label text-lg">Customer Name</label>
             <button 
               type="button"
               onClick={() => setShowAddCustomerModal(true)}
-              className="text-xs text-[var(--gold)] hover:underline flex items-center gap-1"
+              className="text-sm text-[var(--gold)] hover:underline"
             >
               + Add New Customer
             </button>
           </div>
 
           <select 
-            className="select w-full"
+            className="select w-full text-lg py-3"
             value={selectedCustomerOrgId || ''}
             onChange={(e) => {
               const orgId = e.target.value ? parseInt(e.target.value) : null;
               setSelectedCustomerOrgId(orgId);
-              
               const selected = customerOptions.find((o: any) => o.id === orgId);
               if (selected) {
                 setCustName(selected.name);
                 setCustAddress(selected.address || '');
                 setCustCity(selected.city || '');
                 setCustState(selected.state || '');
-                loadEquipmentForCustomer(orgId!);
               }
             }}
           >
@@ -281,40 +197,43 @@ export default function NewServiceReport() {
           </div>
         </div>
 
-        {/* Add New Customer Modal */}
-        {showAddCustomerModal && (
-          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
-            <div className="bg-[#1a2233] p-8 rounded-3xl w-full max-w-md mx-4">
-              <h3 className="text-2xl font-bold mb-6">Add New Customer</h3>
-              <div className="space-y-4">
-                <div>
-                  <label className="label">Customer Name *</label>
-                  <input className="input" value={newCustomerName} onChange={e => setNewCustomerName(e.target.value)} placeholder="e.g. Riverside Medical Center" />
-                </div>
-                <div>
-                  <label className="label">Address</label>
-                  <input className="input" value={newCustomerAddress} onChange={e => setNewCustomerAddress(e.target.value)} />
-                </div>
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="label">City</label>
-                    <input className="input" value={newCustomerCity} onChange={e => setNewCustomerCity(e.target.value)} />
-                  </div>
-                  <div>
-                    <label className="label">State</label>
-                    <input className="input" value={newCustomerState} onChange={e => setNewCustomerState(e.target.value)} />
-                  </div>
-                </div>
-              </div>
+        {/* Add your other form sections here (model, checklists, etc.) */}
 
-              <div className="flex gap-4 mt-8">
-                <button onClick={() => setShowAddCustomerModal(false)} className="flex-1 py-4 rounded-2xl border border-gray-600">Cancel</button>
-                <button onClick={handleAddNewCustomer} className="flex-1 py-4 rounded-2xl bg-[var(--gold)] text-black font-semibold">Create Customer</button>
+      </div>
+
+      {/* Add New Customer Modal */}
+      {showAddCustomerModal && (
+        <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+          <div className="bg-[#1a2233] p-8 rounded-3xl w-full max-w-md mx-4">
+            <h3 className="text-2xl font-bold mb-6">Add New Customer</h3>
+            <div className="space-y-4">
+              <div>
+                <label className="label">Customer Name *</label>
+                <input className="input" value={newCustomerName} onChange={e => setNewCustomerName(e.target.value)} placeholder="e.g. Acquire Med LLC" />
+              </div>
+              <div>
+                <label className="label">Address</label>
+                <input className="input" value={newCustomerAddress} onChange={e => setNewCustomerAddress(e.target.value)} />
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="label">City</label>
+                  <input className="input" value={newCustomerCity} onChange={e => setNewCustomerCity(e.target.value)} />
+                </div>
+                <div>
+                  <label className="label">State</label>
+                  <input className="input" value={newCustomerState} onChange={e => setNewCustomerState(e.target.value)} />
+                </div>
               </div>
             </div>
+
+            <div className="flex gap-4 mt-8">
+              <button onClick={() => setShowAddCustomerModal(false)} className="flex-1 py-4 rounded-2xl border border-gray-600">Cancel</button>
+              <button onClick={handleAddNewCustomer} className="flex-1 py-4 rounded-2xl bg-[var(--gold)] text-black font-semibold">Create Customer</button>
+            </div>
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }

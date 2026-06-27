@@ -40,13 +40,16 @@ export default function RootLayout({
       className={`${geistSans.variable} ${geistMono.variable} ${dmSans.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-[var(--bg)] text-[var(--text)]">
-        <Providers>{children}</Providers>
+        <Providers>
+          <div className="flex-1 flex flex-col">
+            {/* Main Content Wrapper - Desktop friendly */}
+            <main className="flex-1 max-w-[1400px] mx-auto w-full px-6 lg:px-8 py-6">
+              {children}
+            </main>
+          </div>
+        </Providers>
 
-        {/* Google AdSense script - provided by user.
-            This is the main loader. It should only be included once in the app.
-            Ad units (the <ins class="adsbygoogle"> blocks) go in the dashboard
-            inside the free-plans conditional (isFSE || isCustomer).
-        */}
+        {/* Google AdSense script */}
         <Script
           async
           src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-5353320292042327"
