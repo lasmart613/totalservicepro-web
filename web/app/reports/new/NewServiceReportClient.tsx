@@ -98,13 +98,16 @@ export default function NewServiceReport() {
     })();
   }, [router, supabase]);
 
-   async function loadMyCustomers(orgId: number) {
+
+
+
+  async function loadMyCustomers(orgId: number) {
     console.log('🔍 Loading customers for org:', orgId);
 
     const { data, error } = await supabase
       .from('organization_customers')
       .select(`
-        *,
+        customer_organization_id,
         organizations:customer_organization_id (
           id,
           name,
@@ -119,14 +122,18 @@ export default function NewServiceReport() {
       console.error('❌ Customer load error:', error);
     } else if (data) {
       console.log('✅ Loaded customers:', data.length);
+      
       const customers = data
-        .map((item: any) => ({
-          id: item.customer_organization_id,
-          name: item.organizations?.name || 'Unnamed Customer',
-          address: item.organizations?.address || '',
-          city: item.organizations?.city || '',
-          state: item.organizations?.state || '',
-        }))
+        .map((item: any) => {
+          const org = item.organizations;
+          return {
+            id: item.customer_organization_id,
+            name: org?.name || 'Unnamed Customer',
+            address: org?.address || '',
+            city: org?.city || '',
+            state: org?.state || '',
+          };
+        })
         .filter(c => c.name && c.name !== 'Unnamed Customer')
         .sort((a, b) => a.name.localeCompare(b.name));
 
@@ -134,6 +141,10 @@ export default function NewServiceReport() {
       setCustomerOptions(customers);
     }
   }
+
+
+
+
 
   async function loadEquipmentForCustomer(orgId: number) {
     if (!orgId) return;
