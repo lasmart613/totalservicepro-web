@@ -67,17 +67,21 @@ export default function ManualsLibrary() {
         body: JSON.stringify({ storage_path: m.storage_path }),
       });
 
-      console.log("Response Status:", resp.status);
       const json = await resp.json();
-      console.log("Response Data:", json);
+      console.log("Response:", json);
+
+      if (json.url) {
+        window.open(json.url, '_blank');
+        return;
+      }
 
       if (json.requires_add) {
-        // Prompt to add
+        const remaining = json.tier === 'free' ? ` (${5 - (myLibrary.length || 0)} slots left)` : '';
         const confirmAdd = window.confirm(
-          json.message || `Add "${m.title}" to My Library?`
+          `Add "${m.title}" to My Library?${remaining}`
         );
+
         if (confirmAdd) {
-          // Retry with action=add
           const addResp = await fetch(`${supabaseUrl}/functions/v1/get-manual-url`, {
             method: 'POST',
             headers: {
@@ -86,28 +90,24 @@ export default function ManualsLibrary() {
             },
             body: JSON.stringify({ storage_path: m.storage_path, action: "add" }),
           });
+
           const addJson = await addResp.json();
           if (addJson.url) {
             window.open(addJson.url, '_blank');
+            loadData(); // Refresh My Library
           } else {
-            alert(addJson.error || 'Failed to add manual');
+            alert(addJson.error || 'Failed to add');
           }
         }
         return;
       }
 
-      if (json.url) {
-        window.open(json.url, '_blank');
-      } else {
-        alert('Could not open manual: ' + (json.error || 'Unknown error'));
-      }
+      alert('Could not open manual: ' + (json.error || 'Unknown error'));
     } catch (e: any) {
       console.error("Full Error:", e);
       alert('Failed to open manual: ' + e.message);
     }
   }
-
-  // ... (rest of your file - groupedManuals, getBookColor, render code remains the same)
 
   const matchesWavelength = (manual: any, wavelength: string) => {
     if (!wavelength) return true;
@@ -157,7 +157,7 @@ export default function ManualsLibrary() {
             <p className="text-sm text-[var(--text3)]">Bookshelf view • Filter by wavelength</p>
           </div>
 
-          {/* Wavelength Filter */}
+          {/* Wavelength Filter Pills */}
           <div className="flex flex-wrap gap-2">
             {WAVELENGTH_OPTIONS.map((option) => (
               <button
@@ -202,56 +202,51 @@ export default function ManualsLibrary() {
             {Object.entries(groupedManuals).map(([brand, brandManuals]) => (
               <div key={brand}>
                 {/* Books Row */}
-                <div className="flex gap-2 overflow-x-auto pb-3 scrollbar-hide">
+                <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide">
                   {brandManuals.map((m, index) => (
                     <div
                       key={index}
                       onClick={() => openManual(m)}
-                      className="group relative w-[88px] flex-shrink-0 cursor-pointer"
+                      className="group relative w-20 flex-shrink-0 cursor-pointer active:scale-95 transition-transform"
                       title={m.title}
                     >
                       <div
-                        className="book-spine h-48 w-full rounded-sm flex flex-col justify-between p-3 text-white shadow-xl transition-all duration-200 group-hover:-translate-y-0.5 group-hover:scale-[1.03]"
+                        className="book-spine h-52 w-full rounded shadow-2xl transition-all duration-200 group-hover:-translate-y-1 group-hover:shadow-xl"
                         style={{
                           background: getBookColor(m),
                           boxShadow: `
-                            inset 0 0 30px rgba(0,0,0,0.5),
-                            inset -10px 0 15px rgba(255,255,255,0.1),
-                            6px 8px 14px rgba(0,0,0,0.55)
+                            inset 0 0 40px rgba(0,0,0,0.6),
+                            inset -12px 0 20px rgba(255,255,255,0.15),
+                            8px 12px 20px rgba(0,0,0,0.6)
                           `,
-                          borderLeft: '4px solid rgba(0,0,0,0.3)',
+                          borderLeft: '5px solid rgba(0,0,0,0.4)',
+                          borderRight: '2px solid rgba(255,255,255,0.1)',
                         }}
                       >
-                        {/* Subtle texture */}
-                        <div 
-                          className="absolute inset-0 rounded-sm pointer-events-none"
-                          style={{
-                            background: `repeating-linear-gradient(90deg, transparent, transparent 2px, rgba(255,255,255,0.06) 2px, rgba(255,255,255,0.06) 3px)`
-                          }}
-                        />
+                        {/* Texture */}
+                        <div className="absolute inset-0 rounded opacity-30" 
+                             style={{ background: 'repeating-linear-gradient(90deg, transparent, transparent 3px, rgba(255,255,255,0.12) 3px, rgba(255,255,255,0.12) 5px)' }} />
 
-                        <div className="text-[10px] font-semibold leading-tight line-clamp-6 relative z-10 drop-shadow-[0_1px_2px_rgba(0,0,0,0.9)]">
+                        <div className="absolute bottom-3 left-3 right-3 text-[10px] font-bold leading-tight text-white drop-shadow-md">
                           {m.title}
                         </div>
-
-                        <div className="h-[3px] w-full bg-black/40 rounded relative z-10 mt-auto" />
                       </div>
                     </div>
                   ))}
                 </div>
 
-                {/* Wooden Shelf */}
+                {/* Shelf */}
                 <div 
-                  className="h-7 rounded-md flex items-center px-4 mt-1 shadow-inner"
+                  className="h-8 -mt-1 rounded-md flex items-center px-5 shadow-inner relative"
                   style={{
-                    background: 'linear-gradient(to bottom, #854d0e 0%, #5c3311 45%, #3f230c 100%)',
-                    boxShadow: 'inset 0 2px 3px rgba(255,255,255,0.2), inset 0 -2px 4px rgba(0,0,0,0.6)',
+                    background: 'linear-gradient(to bottom, #854d0e, #5c3311 40%, #3f230c)',
+                    boxShadow: 'inset 0 4px 6px rgba(255,255,255,0.25), inset 0 -4px 8px rgba(0,0,0,0.7)',
                   }}
                 >
-                  <span className="text-sm font-bold text-[#f5d9a0] tracking-wider">
+                  <span className="text-sm font-bold text-amber-200 tracking-widest drop-shadow">
                     {brand}
                   </span>
-                  <span className="ml-auto text-xs text-[#d4af37]/70">
+                  <span className="ml-auto text-xs text-amber-300/80">
                     {brandManuals.length} manuals
                   </span>
                 </div>
