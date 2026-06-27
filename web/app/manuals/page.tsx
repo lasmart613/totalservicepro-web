@@ -36,7 +36,7 @@ export default function ManualsLibrary() {
       if (user) {
         const { data: owned } = await supabase
           .from('user_manuals')
-          .select('manual_id, manuals(*)')
+          .select('*, manuals(*)')
           .eq('user_id', user.id);
         setMyLibrary((owned || []).map((o: any) => o.manuals).filter(Boolean));
       }
@@ -48,6 +48,9 @@ export default function ManualsLibrary() {
   }
 
   async function openManual(m: any) {
+    console.log("=== OPEN MANUAL DEBUG ===");
+    console.log("Manual:", m.title, "Storage Path:", m.storage_path);
+
     try {
       const supabase = getSupabaseClient();
       const { data: { session } } = await supabase.auth.getSession();
@@ -64,16 +67,47 @@ export default function ManualsLibrary() {
         body: JSON.stringify({ storage_path: m.storage_path }),
       });
 
+      console.log("Response Status:", resp.status);
       const json = await resp.json();
+      console.log("Response Data:", json);
+
+      if (json.requires_add) {
+        // Prompt to add
+        const confirmAdd = window.confirm(
+          json.message || `Add "${m.title}" to My Library?`
+        );
+        if (confirmAdd) {
+          // Retry with action=add
+          const addResp = await fetch(`${supabaseUrl}/functions/v1/get-manual-url`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'Authorization': `Bearer ${session?.access_token || ''}`,
+            },
+            body: JSON.stringify({ storage_path: m.storage_path, action: "add" }),
+          });
+          const addJson = await addResp.json();
+          if (addJson.url) {
+            window.open(addJson.url, '_blank');
+          } else {
+            alert(addJson.error || 'Failed to add manual');
+          }
+        }
+        return;
+      }
+
       if (json.url) {
         window.open(json.url, '_blank');
       } else {
         alert('Could not open manual: ' + (json.error || 'Unknown error'));
       }
     } catch (e: any) {
+      console.error("Full Error:", e);
       alert('Failed to open manual: ' + e.message);
     }
   }
+
+  // ... (rest of your file - groupedManuals, getBookColor, render code remains the same)
 
   const matchesWavelength = (manual: any, wavelength: string) => {
     if (!wavelength) return true;
