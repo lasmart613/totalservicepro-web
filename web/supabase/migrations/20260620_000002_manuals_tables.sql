@@ -17,7 +17,12 @@ CREATE TABLE IF NOT EXISTS public.user_manuals (
   user_id uuid NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
   manual_id uuid NOT NULL REFERENCES public.manuals(id) ON DELETE CASCADE,
   added_at timestamptz DEFAULT now(),
-  UNIQUE (user_id, manual_id)
+  UNIQUE (user_id, manual_id);
+
+-- Additional column for multi-role support (sole proprietors etc). Primary role in user_profiles.role; additional in this jsonb.
+-- Run in Supabase SQL if not present: 
+ALTER TABLE public.user_profiles ADD COLUMN IF NOT EXISTS additional_roles jsonb DEFAULT '[]'::jsonb;
+NOTIFY pgrst, 'reload schema';
 );
 
 -- Enable Row Level Security

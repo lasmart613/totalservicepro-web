@@ -2,11 +2,12 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import { Header } from '@/components/Header';
-import { getSupabaseClient } from '@/lib/supabase/client';
+import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
 import { MODELS } from '@/lib/models';
 import { toast } from 'sonner';
 
-const TEAM_ROLES = ['fse', 'dispatcher', 'service_manager', 'company_admin', 'admin'];
+const TEAM_ROLES = ['company_admin', 'service_manager', 'fse', 'dispatcher', 'billing_manager', 'admin'];
+const ADDITIONAL_ROLES = ['fse', 'dispatcher', 'service_manager', 'billing_manager'];
 const ADMIN_ROLES = ['admin', 'company_admin'];
 
 const MODEL_WAVELENGTHS: { [key: string]: string[] } = {
@@ -34,6 +35,8 @@ async function ensureCreatorIsAdmin(supabase: any, orgId: any) {
         role: 'company_admin'
       }).eq('id', user.id);
     }
+    // Also claim any pending invites for this user (FSEs invited by others)
+    await (await import('@/lib/supabase/client')).claimPendingInvitations?.(supabase, user.id, user.email || '');
   } catch (e) {
     console.warn('ensureCreatorIsAdmin non-fatal:', e);
   }
@@ -132,7 +135,7 @@ export default function CompanyProfile() {
     'America/Mexico_City',
   ];
 
-  const [newFSE, setNewFSE] = useState({ email: '', fullName: '', title: '', contact: '', timeZone: 'America/New_York', yearsExp: '', territories: '', competencies: '' });
+  const [newTeam, setNewTeam] = useState({ email: '', fullName: '', role: 'fse', additional: [] as string[], title: '', contact: '', timeZone: 'America/New_York', yearsExp: '', territories: '', competencies: '' });
 
   useEffect(() => {
     (async () => {
@@ -168,14 +171,14 @@ export default function CompanyProfile() {
     if (!orgId) return;
     const { data: mems } = await supabase
       .from('user_profiles')
-      .select('id, first_name, last_name, email, role, job_title')
+      .select('id, first_name, last_name, email, role, job_title, additional_roles')
       .eq('organization_id', orgId)
       .order('role', { ascending: true });
     let loaded = mems || [];
 
     const { data: { user: currentUser } } = await supabase.auth.getUser();
     if (currentUser && !loaded.some((m: any) => m.id === currentUser.id)) {
-      const { data: selfProf } = await supabase.from('user_profiles').select('id, first_name, last_name, email, role, job_title').eq('id', currentUser.id).maybeSingle();
+      const { data: selfProf } = await supabase.from('user_profiles').select('id, first_name, last_name, email, role, job_title, additional_roles').eq('id', currentUser.id).maybeSingle();
       if (selfProf) loaded = [selfProf, ...loaded];
     }
     setMembers(loaded);
@@ -245,16 +248,60 @@ export default function CompanyProfile() {
   }
 
   async function addTeamMember() {
-    if (!newFSE.email || !newFSE.fullName) {
-      setAddMessage('Email and full name required for FSE.');
+    if (!newTeam.email || !newTeam.fullName) {
+      setAddMessage('Email and full name required.');
       return;
     }
-    setAddMessage('Adding FSE... (in full impl, would invite or link profile by email, set org/role/timezone etc.)');
-    // For now, toast and clear. In real, query user_profiles by email or send invite, update org_id, role='fse', and save extra fields like timeZone.
-    toast.success(`FSE ${newFSE.fullName} details captured. Time Zone: ${newFSE.timeZone}. Link via /company Team or invite.`);
-    setNewFSE({ email: '', fullName: '', title: '', contact: '', timeZone: 'America/New_York', yearsExp: '', territories: '', competencies: '' });
+    setAddMessage('Processing...');
+    try {
+      const { data: { user: cur } } = await supabase.auth.getUser();
+      if (!cur || !org?.id) throw new Error('No org');
+
+      const em = newTeam.email.toLowerCase().trim();
+      const chosenRole = newTeam.role || 'fse';
+      const chosenAddl = newTeam.additional || [];
+      const splitName = newTeam.fullName.trim().split(' ');
+      const fn = splitName[0] || '';
+      const ln = splitName.slice(1).join(' ') || '';
+
+      const { data: existing } = await supabase.from('user_profiles').select('id').eq('email', em).maybeSingle();
+
+      if (existing?.id) {
+        await supabase.from('user_profiles').update({
+          organization_id: org.id,
+          role: chosenRole,
+          additional_roles: chosenAddl.length ? chosenAddl : null,
+          job_title: [chosenRole, ...chosenAddl].join(' + '),
+          first_name: fn,
+          last_name: ln || undefined,
+        }).eq('id', existing.id);
+        toast.success('Existing user linked/updated in org with role(s).');
+      } else {
+        // Best practice per requirements: use invitations, do not pre-create users
+        await supabase.from('engineer_invitations').insert({
+          organization_id: org.id,
+          email: em,
+          role: chosenRole,
+          first_name: fn || null,
+          last_name: ln || null,
+          invited_by: cur.id,
+          accepted: false
+        });
+        toast.success('Invitation created for ' + em + ' (sign up first, then auto assigned to RSP org + roles).');
+      }
+      await loadTeamMembers(org.id);
+    } catch (e: any) {
+      toast.error('Add failed: ' + (e.message || e));
+    }
+    setNewTeam({ email: '', fullName: '', role: 'fse', additional: [], title: '', contact: '', timeZone: 'America/New_York', yearsExp: '', territories: '', competencies: '' });
     setAddMessage('');
-    // TODO: actual profile link logic
+  }
+
+  function toggleNewTeamAddl(r: string) {
+    setNewTeam(prev => ({
+      ...prev,
+      additional: prev.additional.includes(r) ? prev.additional.filter(x => x !== r) : [...prev.additional, r]
+    }));
   }
 
   async function loadCustomers() {
@@ -353,28 +400,39 @@ export default function CompanyProfile() {
         {/* Team Section */}
         <div id="team-section" className="card p-6">
           <h2 className="font-bold mb-4">Team Members &amp; Roles</h2>
+          <p className="text-xs text-[var(--text3)] mb-3">Add or assign people to roles in this RSP org. Creator/admin changeable but always keep &gt;=1 admin. Use invites for new signups (they sign up first using org tiles or login, then get claimed/assigned here).</p>
           <div className="mb-4">
-            <h3 className="font-semibold mb-2">Add FSE / Engineer</h3>
+            <h3 className="font-semibold mb-2">Add / Assign Team Member (general roles)</h3>
             <div className="space-y-2 text-sm">
-              <input className="input" placeholder="FSE Email (must have account)" value={newFSE.email} onChange={e => setNewFSE({...newFSE, email: e.target.value})} />
-              <input className="input" placeholder="Full Name" value={newFSE.fullName} onChange={e => setNewFSE({...newFSE, fullName: e.target.value})} />
+              <input className="input" placeholder="Email" value={newTeam.email} onChange={e => setNewTeam({...newTeam, email: e.target.value})} />
+              <input className="input" placeholder="Full Name" value={newTeam.fullName} onChange={e => setNewTeam({...newTeam, fullName: e.target.value})} />
               <div className="grid grid-cols-2 gap-2">
-                <input className="input" placeholder="Title" value={newFSE.title} onChange={e => setNewFSE({...newFSE, title: e.target.value})} />
-                <input className="input" placeholder="Contact" value={newFSE.contact} onChange={e => setNewFSE({...newFSE, contact: e.target.value})} />
+                <select className="select" value={newTeam.role} onChange={e => setNewTeam({...newTeam, role: e.target.value})}>
+                  {TEAM_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                </select>
+                <input className="input" placeholder="Job Title override" value={newTeam.title} onChange={e => setNewTeam({...newTeam, title: e.target.value})} />
               </div>
               <div>
-                <label className="text-xs">Time Zone</label>
-                <select className="select" value={newFSE.timeZone} onChange={e => setNewFSE({...newFSE, timeZone: e.target.value})}>
+                <div className="text-[10px] mb-1">Additional Roles (for multi-role members)</div>
+                <div className="flex flex-wrap gap-1 mb-1">
+                  {ADDITIONAL_ROLES.map(ar => (
+                    <button key={ar} type="button" onClick={() => toggleNewTeamAddl(ar)} className={`text-[10px] px-1.5 py-px border rounded ${newTeam.additional.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{ar}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-2">
+                <input className="input" placeholder="Contact Phone" value={newTeam.contact} onChange={e => setNewTeam({...newTeam, contact: e.target.value})} />
+                <select className="select" value={newTeam.timeZone} onChange={e => setNewTeam({...newTeam, timeZone: e.target.value})}>
                   {TIME_ZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-2">
-                <input className="input" placeholder="Years Experience" value={newFSE.yearsExp} onChange={e => setNewFSE({...newFSE, yearsExp: e.target.value})} />
-                <input className="input" placeholder="Territories" value={newFSE.territories} onChange={e => setNewFSE({...newFSE, territories: e.target.value})} />
+                <input className="input" placeholder="Years Exp" value={newTeam.yearsExp} onChange={e => setNewTeam({...newTeam, yearsExp: e.target.value})} />
+                <input className="input" placeholder="Territories / Competencies" value={newTeam.competencies || newTeam.territories} onChange={e => setNewTeam({...newTeam, competencies: e.target.value})} />
               </div>
-              <input className="input" placeholder="Competencies (e.g. Lumenis CO2, Candela)" value={newFSE.competencies} onChange={e => setNewFSE({...newFSE, competencies: e.target.value})} />
-              <button onClick={addTeamMember} className="btn btn-primary text-sm w-full">Add / Link FSE</button>
+              <button onClick={addTeamMember} className="btn btn-primary text-sm w-full">Add / Link by Email (or create invite)</button>
               {addMessage && <div className="text-xs text-[var(--text3)]">{addMessage}</div>}
+              <div className="text-[10px] text-[var(--text3)]">Existing account? Assigned immediately. New? Invitation record created (they sign up using 3 org tiles or login, then claim on signin).</div>
             </div>
           </div>
 
@@ -383,7 +441,7 @@ export default function CompanyProfile() {
             {members.length === 0 ? <p className="text-xs text-[var(--text3)]">No team members yet.</p> : (
               <ul className="text-sm">
                 {members.map((m: any, i: number) => (
-                  <li key={i} className="py-1 border-b border-[var(--border)] last:border-0">{m.first_name} {m.last_name} — {m.role || 'member'} {m.email}</li>
+                  <li key={i} className="py-1 border-b border-[var(--border)] last:border-0">{m.first_name} {m.last_name} — {m.role || 'member'}{m.additional_roles?.length ? ' + ' + (Array.isArray(m.additional_roles)?m.additional_roles.join('+') : m.additional_roles) : ''} {m.email}</li>
                 ))}
               </ul>
             )}

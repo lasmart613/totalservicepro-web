@@ -51,6 +51,7 @@ export type UserProfile = {
   phone?: string | null;
   job_title?: string | null;
   role?: 'engineer' | 'fse' | 'dispatcher' | 'service_manager' | 'company_admin' | 'parts_supplier' | 'billing_manager' | 'crm' | 'admin' | 'owner' | 'customer' | string;
+  additional_roles?: string[] | null;  // jsonb for multi-role support (sole prop etc); primary always in role field
   organization_id?: string | number | null;
   avatar_url?: string | null;
   notification_prefs?: any;
@@ -174,3 +175,39 @@ export type ServiceContract = {
   status?: string;
   created_at?: string;
 };
+
+/**
+ * Claims any pending engineer_invitations for this email (by exact email match).
+ * If found and not accepted, applies organization_id + role to the profile,
+ * marks invitation accepted. Called after signups / onboarding to auto-assign
+ * FSEs invited during RSP org setup. (Auto-apply recommended UX.)
+ */
+export async function claimPendingInvitations(supabase: SupabaseClient, userId: string, email: string) {
+  if (!email || !userId) return;
+  try {
+    const { data: invites } = await supabase
+      .from('engineer_invitations')
+      .select('*')
+      .eq('email', email.toLowerCase().trim())
+      .eq('accepted', false)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    if (invites && invites.length > 0) {
+      const inv = invites[0];
+      const update: any = {
+        organization_id: inv.organization_id,
+        role: inv.role || 'fse',
+      };
+      if (inv.first_name) update.first_name = inv.first_name;
+      if (inv.last_name) update.last_name = inv.last_name;
+      await supabase.from('user_profiles').update(update).eq('id', userId);
+      await supabase.from('engineer_invitations').update({
+        accepted: true,
+        accepted_at: new Date().toISOString()
+      }).eq('id', inv.id);
+      console.log('[TSP] Claimed pending invitation for', email);
+    }
+  } catch (e) {
+    console.warn('claimPendingInvitations non-fatal:', e);
+  }
+}
