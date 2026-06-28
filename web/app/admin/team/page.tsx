@@ -98,18 +98,19 @@ export default function TeamManagement() {
         if (error) throw error;
         toast.success('Existing user linked to your organization');
       } else {
-        const { error } = await supabase.from('user_profiles').insert({
+        // Best practice (matches onboarding + security/RLS): create pending invitation instead of stub profile row.
+        // User signs up via the 3 org tiles; auto-claim (in claimPendingInvitations) will assign org/role.
+        const { error } = await supabase.from('engineer_invitations').insert({
+          organization_id: currentProfile.organization_id,
           email: newMember.email.toLowerCase(),
+          role: newMember.role,
           first_name: newMember.firstName || null,
           last_name: newMember.lastName || null,
-          role: newMember.role,
-          job_title: newMember.jobTitle || null,
-          organization_id: currentProfile.organization_id,
-          onboarding_completed: false,
+          invited_by: currentUser.id,
+          accepted: false,
         });
-
         if (error) throw error;
-        toast.success('Team member added. They will need to sign up with this email.');
+        toast.success('Invitation recorded. They sign up (choose org type) then get auto-assigned on login.');
       }
 
       setNewMember({

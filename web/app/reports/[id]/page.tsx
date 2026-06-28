@@ -12,7 +12,7 @@ export default function ReportDetail() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-3xl mx-auto p-6">
+      <div className="max-w-6xl mx-auto p-6">
         <Link href="/reports" className="text-[var(--gold)]">← Back to list</Link>
         <h1 className="text-2xl font-bold mt-4 mb-2">Service Report {id}</h1>
 

@@ -82,7 +82,7 @@ export default function Marketplace() {
     <div className="min-h-screen flex flex-col">
       <Header />
 
-      <div className="max-w-5xl mx-auto w-full px-4 py-8">
+      <div className="max-w-7xl mx-auto w-full px-4 py-8">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
           <div>
             <h1 className="text-3xl font-extrabold">Marketplace</h1>

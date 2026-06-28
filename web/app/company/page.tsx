@@ -336,7 +336,7 @@ export default function CompanyProfile() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-4xl mx-auto w-full p-6 space-y-8">
+      <div className="max-w-7xl mx-auto w-full p-6 space-y-8">
         {loadingOrg && <div className="mb-4 text-center text-xs py-1.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text3)]">Loading company profile…</div>}
         <h1 className="text-2xl font-extrabold">🏢 Company Management</h1>
 

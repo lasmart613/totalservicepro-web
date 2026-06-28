@@ -392,7 +392,7 @@ export default function Onboarding() {
   return (
     <div className="min-h-screen bg-[var(--bg)]">
       <Header />
-      <div className="max-w-4xl mx-auto px-6 py-8">
+      <div className="max-w-6xl mx-auto px-6 py-8">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold">Complete Your Setup</h1>
           <p className="text-[var(--text2)]">RSPs: add your team and roles now (sole props supported).</p>

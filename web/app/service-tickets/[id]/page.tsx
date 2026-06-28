@@ -135,7 +135,7 @@ export default function ServiceTicketDetail() {
     <div className="min-h-screen flex flex-col">
       <Header />
 
-      <div className="max-w-5xl mx-auto w-full px-4 py-8">
+      <div className="max-w-7xl mx-auto w-full px-4 py-8">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-4">
             <Link href="/service-schedule" className="btn btn-secondary p-3">

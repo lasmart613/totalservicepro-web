@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
@@ -9,12 +9,11 @@ import { useRouter } from 'next/navigation';
 import { MODELS } from '@/lib/models';
 
 export default function NewServiceReport() {
-  /* Full functional Service Report matching Android service_report.html (source of truth).
-     - Uses direct organizations (type='customer') like Android + company page (not only junction).
-     - Dynamic MODELS, checklists (Electrical/Mech/Aesthetic), performance measurements with deviation,
-       params, safety, test equip, comments, signatures snapshot.
-     - Save draft / complete to service_reports + ensures.
-     - Creator/admin + FSEs in RSP can use.
+  /* Full functional Service Report matching Android service_report.html (source of truth - do not change Android SR).
+     - Direct orgs type='customer' + ensure (with contacts) + equipment ensure.
+     - Exact CL_* arrays, model-driven perf (seeded + deviation), canvas sig pad, snapshots.
+     - Draft / complete, print/PDF via browser, full payload.
+     - Matches Android checklists, perf dev logic, sig capture, customer/equip flow.
   */
 
   const router = useRouter();
@@ -64,6 +63,83 @@ export default function NewServiceReport() {
   const [techSig, setTechSig] = useState('');
   const [techSigDate, setTechSigDate] = useState('');
 
+  // Canvas signature pad (full match to Android SR canvas behavior)
+  const sigCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const [sigPadReady, setSigPadReady] = useState(false);
+
+  function initSigCanvas() {
+    const canvas = sigCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+    canvas.width = 320;
+    canvas.height = 90;
+    ctx.strokeStyle = '#111';
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+    setSigPadReady(true);
+  }
+
+  function getSigPos(e: any) {
+    const canvas = sigCanvasRef.current;
+    if (!canvas) return { x: 0, y: 0 };
+    const rect = canvas.getBoundingClientRect();
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return {
+      x: clientX - rect.left,
+      y: clientY - rect.top
+    };
+  }
+
+  function startDraw(e: any) {
+    const canvas = sigCanvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!ctx || !canvas) return;
+    setIsDrawing(true);
+    const pos = getSigPos(e);
+    ctx.beginPath();
+    ctx.moveTo(pos.x, pos.y);
+  }
+
+  function draw(e: any) {
+    if (!isDrawing) return;
+    const canvas = sigCanvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!ctx || !canvas) return;
+    const pos = getSigPos(e);
+    ctx.lineTo(pos.x, pos.y);
+    ctx.stroke();
+  }
+
+  function endDraw() {
+    if (!isDrawing) return;
+    setIsDrawing(false);
+    const canvas = sigCanvasRef.current;
+    if (canvas) {
+      try {
+        const dataUrl = canvas.toDataURL('image/png');
+        setTechSig(dataUrl);
+      } catch {}
+    }
+  }
+
+  function clearSig() {
+    const canvas = sigCanvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (ctx && canvas) {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+    }
+    setTechSig('');
+  }
+
+  // init canvas on mount
+  useEffect(() => {
+    initSigCanvas();
+  }, []);
+
   const [saving, setSaving] = useState(false);
   const [currentReportId, setCurrentReportId] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
@@ -71,10 +147,35 @@ export default function NewServiceReport() {
   const modelKeys = Object.keys(MODELS);
   const currentModel = selectedModelKey ? (MODELS as any)[selectedModelKey] : null;
 
-  // Shared checklists from Android (port exact)
-  const CL_ELECTRICAL = ['Power Cord Condition', 'Ground Integrity', 'Interlock Function', 'Emergency Stop', 'Fuse / Breaker', 'Control Panel', 'Footswitch Operation'];
-  const CL_MECHANICAL = ['Cooling System / Fans', 'Water / DI Level', 'Fiber / Delivery Integrity', 'Handpiece Condition', 'Mirrors / Optics Visual', 'Gas Pressure / Canister', 'Moving Parts Lubricated'];
-  const CL_AESTHETIC = ['Housing / Paint', 'Labels / Markings', 'Casters / Feet', 'Covers Secure', 'No Damage / Dents', 'Cleanliness'];
+  // Shared checklists EXACT from Android service_report.html (source of truth for parity). When updating here also note models.ts guidance for Android sync if MODELS change.
+  const CL_ELECTRICAL = [
+    'Power Cord & Plug integrity',
+    'Foot Pedal & Strain Relief function',
+    'Circuit Breaker function',
+    'Key Switch test',
+    'E-Stop Button operates properly',
+    'Display functioning properly',
+    'High/Low Supplies correct voltage',
+    'Faults/Errors documented & cleared'
+  ];
+  const CL_MECHANICAL = [
+    'Aiming Beam brightness',
+    'Wheels & Castors integrity',
+    'Optics inspected & cleaned',
+    'Full Alignment Check',
+    'Coolant flushed & topped off',
+    'DI & Coolant Filters changed',
+    'Interior dust & pollutant free',
+    'Servos/Gears/Solenoids to spec'
+  ];
+  const CL_AESTHETIC = [
+    'Condition of Skins',
+    'Foot Pedal inspection',
+    'Screen condition',
+    'Control Panel condition',
+    'Accessory Cables',
+    'Accessories of the Unit'
+  ];
 
   useEffect(() => {
     (async () => {
@@ -186,6 +287,18 @@ export default function NewServiceReport() {
       m.params.forEach((param: string) => { p[param] = ''; });
       setModelParams(p);
     }
+    // Seed perf rows from model wavelengths + first set (closer Android model-driven perf table parity)
+    if (m && m.wavelengths?.length) {
+      const seeded = m.wavelengths.map((w: any) => ({
+        wavelength: w.name,
+        setting: (w.sets && w.sets[0]) || '',
+        measured: '',
+        unit: w.unit || 'W',
+        pass: true,
+        deviation: ''
+      }));
+      setPowerMeasurements(seeded);
+    }
   }
 
   function setChecklist(setter: any, item: string, val: string) {
@@ -235,12 +348,19 @@ export default function NewServiceReport() {
   async function ensureCustomerOrg() {
     if (selectedCustomer?.id) return selectedCustomer.id;
     if (!searchTerm.trim()) return null;
-    // create like Android ensureCustomerOrganization
+    // create like Android ensureCustomerOrganization (with available contact fields)
     const { data: exist } = await supabase.from('organizations').select('id').eq('name', searchTerm.trim()).eq('type', 'customer').maybeSingle();
     if (exist) return exist.id;
     const { data: newC } = await supabase.from('organizations').insert({
       name: searchTerm.trim(),
-      type: 'customer'
+      type: 'customer',
+      address: null,
+      city: null,
+      state: null,
+      phone: null,
+      email: null,
+      contact_name: null,
+      created_by: currentUser?.id || null
     }).select('id').single();
     return newC?.id || null;
   }
@@ -265,6 +385,11 @@ export default function NewServiceReport() {
     if (!currentUser || !currentUserOrgId) { alert('No org or user'); return; }
     setSaving(true);
     try {
+      // Force latest canvas capture for sig (Android parity)
+      const canvas = sigCanvasRef.current;
+      if (canvas && !techSig) {
+        try { setTechSig(canvas.toDataURL('image/png')); } catch {}
+      }
       const custId = await ensureCustomerOrg();
       const equipId = await ensureEquipment(custId || currentUserOrgId);
 
@@ -368,6 +493,7 @@ export default function NewServiceReport() {
           <div className="flex gap-3">
             <button onClick={() => saveReport('draft')} disabled={saving} className="btn btn-secondary flex items-center gap-2"><Save size={16}/> Save Draft</button>
             <button onClick={() => saveReport('complete')} disabled={saving || isSubmitted} className="btn btn-primary flex items-center gap-2"><Check size={18} /> Submit Complete</button>
+            <button onClick={() => window.print()} className="btn btn-ghost flex items-center gap-2 text-xs">Print / Save PDF</button>
           </div>
         </div>
 
@@ -481,20 +607,40 @@ export default function NewServiceReport() {
           <textarea className="input w-full h-24" value={comments} onChange={e=>setComments(e.target.value)} placeholder="Observations, parts, follow-up..." />
         </div>
 
-        {/* Signatures */}
+        {/* Signatures - Canvas pad matching Android SR exactly (touch/mouse + snapshot dataURL + fallback to profile) */}
         <div className="section mb-6 p-6">
           <h3 className="font-semibold mb-2">✍️ Signatures</h3>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             <div>
-              <label className="label">Technician Signature (type name or paste data url)</label>
-              <input className="input" placeholder="Sign here or paste sig image url" value={techSig} onChange={e=>setTechSig(e.target.value)} />
+              <label className="label">Technician Signature (draw below)</label>
+              <div style={{ border: '1px solid var(--border)', borderRadius: 8, background: '#fff', padding: 4, touchAction: 'none' }}>
+                <canvas
+                  ref={sigCanvasRef}
+                  onMouseDown={startDraw}
+                  onMouseMove={draw}
+                  onMouseUp={endDraw}
+                  onMouseLeave={endDraw}
+                  onTouchStart={startDraw}
+                  onTouchMove={draw}
+                  onTouchEnd={endDraw}
+                  style={{ width: '100%', maxWidth: 320, height: 90, display: 'block', background: '#fff', borderRadius: 4 }}
+                />
+              </div>
+              <div className="flex gap-2 mt-1">
+                <button type="button" onClick={clearSig} className="text-xs px-2 py-0.5 border rounded">Clear</button>
+                <button type="button" onClick={() => {
+                  const c = sigCanvasRef.current;
+                  if (c) { try { setTechSig(c.toDataURL('image/png')); } catch {} }
+                }} className="text-xs px-2 py-0.5 border rounded">Capture</button>
+                <span className="text-[10px] text-[var(--text3)] self-center">Draw with mouse or finger</span>
+              </div>
             </div>
             <div>
               <label className="label">Date Signed</label>
               <input type="datetime-local" className="input" value={techSigDate} onChange={e=>setTechSigDate(e.target.value)} />
+              <div className="text-[10px] text-[var(--text3)] mt-2">If blank on complete, profile signature_data will be used (Android parity).</div>
             </div>
           </div>
-          <div className="text-xs text-[var(--text3)] mt-1">Snapshot of profile sig used on submit if blank (matches Android).</div>
         </div>
 
         {isSubmitted && <div className="text-center text-green-400 mb-4">Submitted! You can re-edit from Reports list.</div>}

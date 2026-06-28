@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import { getSupabaseClient } from '@/lib/supabase/client';
+import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
 import { MODELS } from '@/lib/models';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -139,6 +139,8 @@ export default function OwnerSignup() {
       };
 
       await supabase.from('user_profiles').upsert(profileData, { onConflict: 'id' });
+
+      await claimPendingInvitations(supabase, userId, email);
 
       // 4. Insert individual equipment records (if any were added)
       if (newOrgId && equipmentList.length > 0) {

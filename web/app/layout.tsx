@@ -42,7 +42,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col bg-[var(--bg)] text-[var(--text)]">
         <Providers>
           <div className="flex-1 flex flex-col">
-		<main className="flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 max-w-screen-2xl">
+		<main className="flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 max-w-full">
 		{children}
 		</main>
           </div>

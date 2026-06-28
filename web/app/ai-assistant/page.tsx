@@ -78,7 +78,7 @@ export default function AIAssistant() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-3xl mx-auto w-full px-4 py-6">
+      <div className="max-w-6xl mx-auto w-full px-4 py-6">
         <h1 className="text-2xl font-extrabold mb-1">🤖 AI Assistant</h1>
         <p className="text-sm text-[var(--text3)] mb-6">Laser service guidance &amp; troubleshooting (operational stub matching Android ai_assistant.html style)</p>
 

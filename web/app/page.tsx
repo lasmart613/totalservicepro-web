@@ -122,7 +122,7 @@ export default function HomePage() {
     <div className="min-h-screen flex flex-col">
       <Header />
 
-      <div className="max-w-5xl mx-auto w-full px-4 py-8">
+      <div className="max-w-7xl mx-auto w-full px-4 py-8">
         <h1 className="text-4xl font-extrabold tracking-tight">
           Welcome back, {profile?.first_name || 'Tech'}!
         </h1>

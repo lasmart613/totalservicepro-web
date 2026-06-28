@@ -26,7 +26,7 @@ export default function PartDetail() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-4xl mx-auto w-full px-4 py-8">
+      <div className="max-w-6xl mx-auto w-full px-4 py-8">
         <Link href="/marketplace/parts" className="inline-flex items-center gap-2 text-[var(--gold)] mb-6 hover:underline">
           <ArrowLeft size={18} /> Back to Parts Marketplace
         </Link>

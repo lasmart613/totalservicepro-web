@@ -109,7 +109,7 @@ export default function ReportsList() {
     <div className="min-h-screen flex flex-col">
       <Header />
 
-      <div className="page max-w-4xl mx-auto w-full px-4 py-6">
+      <div className="page max-w-7xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-6">
           <div>
             <h1 className="text-2xl font-extrabold">📋 Service Reports</h1>

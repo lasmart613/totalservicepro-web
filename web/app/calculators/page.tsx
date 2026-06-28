@@ -747,7 +747,7 @@ export default function CalculatorsPage() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-xl mx-auto w-full px-4 py-6">
+      <div className="max-w-7xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-2">
           <div>
             <h1 className="text-2xl font-extrabold tracking-tight">Calculators</h1>

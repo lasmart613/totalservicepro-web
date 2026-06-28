@@ -1,7 +1,7 @@
 ﻿'use client';
 
 import React, { useState } from 'react';
-import { getSupabaseClient } from '@/lib/supabase/client';
+import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -123,6 +123,8 @@ export default function SupplierSignup() {
       if (profileErr) {
         console.warn('Profile upsert warning:', profileErr);
       }
+
+      await claimPendingInvitations(supabase, userId, email);
 
       if (authData.session) {
         router.push('/');

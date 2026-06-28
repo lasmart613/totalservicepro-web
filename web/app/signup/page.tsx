@@ -10,7 +10,7 @@ export default function SignupIndex() {
     <div className="min-h-screen flex flex-col">
       <Header />
 
-      <div className="max-w-5xl mx-auto w-full px-4 py-10">
+      <div className="max-w-7xl mx-auto w-full px-4 py-10">
         <div className="text-center mb-10">
           <Link href="/" className="inline-block mb-2">
             <span className="font-extrabold text-3xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
@@ -23,7 +23,7 @@ export default function SignupIndex() {
         </div>
 
         {/* Centered 3-tile grid */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-6 max-w-7xl mx-auto">
           {/* Service Organization Card */}
           <Link href="/signup/company" className="card p-6 hover:border-[var(--gold-border)] group flex flex-col min-w-0">
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">

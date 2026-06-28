@@ -317,7 +317,7 @@ function MarketplaceListContent() {
     <div className="min-h-screen flex flex-col">
       <Header />
 
-      <div className="max-w-2xl mx-auto w-full px-4 py-8">
+      <div className="max-w-7xl mx-auto w-full px-4 py-8">
         <h1 className="text-3xl font-extrabold mb-6">Post a Marketplace Listing</h1>
 
         <div className="flex gap-2 mb-8">

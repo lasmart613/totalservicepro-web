@@ -94,7 +94,7 @@ export default function CustomersDirectory() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-5xl mx-auto w-full px-4 py-6">
+      <div className="max-w-7xl mx-auto w-full px-4 py-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
           <div>
             <h1 className="text-2xl font-extrabold">👥 Customer Directory</h1>

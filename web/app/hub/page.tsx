@@ -18,11 +18,11 @@ export default function TechHub() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-xl mx-auto w-full px-4 py-6">
+      <div className="max-w-7xl mx-auto w-full px-4 py-6">
         <h1 className="text-2xl font-extrabold mb-1">🛠️ Tech Hub</h1>
         <p className="text-sm text-[var(--text3)] mb-6">Professional laser service resources & reference tools</p>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
           {cards.map((c, i) => (
             <Link key={i} href={c.href} className="card p-5 text-center hover:border-[var(--gold)]">
               <div className="text-4xl mb-2">{c.icon}</div>

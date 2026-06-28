@@ -327,7 +327,7 @@ body {
 /* Photometry Calculators (ported from Android density_calculator.html, fluence.html, duty_cycle etc. + tsp.css) */
 .calc-page {
   padding: 16px 0 40px;
-  max-width: 600px;
+  max-width: 100%;
   margin: 0 auto;
 }
 
