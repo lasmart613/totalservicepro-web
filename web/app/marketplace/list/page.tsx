@@ -6,6 +6,7 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { MODELS, buildManufacturers } from '@/lib/models';
 import { toast } from 'sonner';
+import { canPostMarketplaceNeed, isPro, isSupplier, isOwnerish } from '@/lib/roles';
 
 type ListingType = 'part' | 'used' | 'request';
 
@@ -20,6 +21,8 @@ function MarketplaceListContent() {
   const [featuredIndex, setFeaturedIndex] = useState(0);
   const [locations, setLocations] = useState<any[]>([]);
   const [manufacturers, setManufacturers] = useState<string[]>([]);
+  const [userRole, setUserRole] = useState<string>('');
+  const [orgType, setOrgType] = useState<string | null>(null);
 
   // Pre-select type from ?type= query
   useEffect(() => {
@@ -96,7 +99,7 @@ function MarketplaceListContent() {
   const showGentleYAGHV = isGentleYAG;
   const showGMAXCurrents = isGMAX;
 
-  // Fetch locations
+  // Fetch locations + role
   useEffect(() => {
     const fetchLocations = async () => {
       const { data: { user } } = await getSupabaseClient().auth.getUser();
@@ -104,11 +107,27 @@ function MarketplaceListContent() {
 
       const { data: profile } = await getSupabaseClient()
         .from('user_profiles')
-        .select('organization_id')
+        .select('organization_id, role')
         .eq('id', user.id)
         .single();
 
+      setUserRole(profile?.role || '');
+
       if (profile?.organization_id) {
+        const { data: org } = await getSupabaseClient()
+          .from('organizations')
+          .select('type')
+          .eq('id', profile.organization_id)
+          .maybeSingle();
+        setOrgType(org?.type || null);
+
+        // Default listing type for suppliers → parts; owners → request
+        if (isSupplier(profile?.role, org?.type) && !searchParams.get('type')) {
+          setListingType('part');
+        } else if (isOwnerish(profile?.role, org?.type) && !searchParams.get('type')) {
+          setListingType('request');
+        }
+
         const { data: locs } = await getSupabaseClient()
           .from('locations')
           .select('*')
@@ -121,19 +140,33 @@ function MarketplaceListContent() {
       }
     };
     fetchLocations();
-  }, []);
+  }, [searchParams]);
 
-  // Fetch manufacturers from parts_catalog
+  // Fetch manufacturers - prefer dedicated tables, fallback
   useEffect(() => {
     const fetchManufacturers = async () => {
-      const { data, error } = await getSupabaseClient()
-        .from('parts_catalog')
-        .select('brand')
-        .not('brand', 'is', null);
-
-      if (!error && data) {
-        const unique = [...new Set(data.map((d: any) => d.brand).filter(Boolean))].sort();
-        setManufacturers([...unique, 'Other']);
+      try {
+        const { data: m } = await getSupabaseClient().from('manufacturers').select('name').order('name');
+        if (m?.length) {
+          setManufacturers(m.map((d:any)=>d.name));
+          return;
+        }
+        const { data: lm } = await getSupabaseClient().from('laser_models').select('manufacturer');
+        if (lm?.length) {
+          const u = [...new Set(lm.map((d:any)=>d.manufacturer).filter(Boolean))].sort();
+          setManufacturers([...u, 'Other']);
+          return;
+        }
+      } catch {}
+      // parts fallback or static
+      try {
+        const { data } = await getSupabaseClient().from('parts_catalog').select('brand').not('brand','is',null);
+        if (data) {
+          const unique = [...new Set(data.map((d: any) => d.brand).filter(Boolean))].sort();
+          setManufacturers([...unique, 'Other']);
+        }
+      } catch {
+        setManufacturers(Object.values(MODELS).map((m:any)=>m.mfg).filter(Boolean));
       }
     };
     fetchManufacturers();
@@ -186,6 +219,19 @@ function MarketplaceListContent() {
       const { data: { user } } = await getSupabaseClient().auth.getUser();
       if (!user?.id) {
         toast.error('You must be logged in to create a listing');
+        setLoading(false);
+        return;
+      }
+
+      // Guard marketplace need posts (owners/suppliers). Service pros can still list parts/used.
+      if (listingType === 'request' && !canPostMarketplaceNeed(userRole, orgType)) {
+        toast.error('Only facility owners and suppliers can post marketplace needs.');
+        setLoading(false);
+        return;
+      }
+      // Suppliers may post parts; pros may list too (non-breaking for service companies)
+      if (listingType === 'part' && !isSupplier(userRole, orgType) && !isPro(userRole) && !canPostMarketplaceNeed(userRole, orgType)) {
+        toast.error('You do not have permission to post parts listings.');
         setLoading(false);
         return;
       }

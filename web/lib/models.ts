@@ -1,16 +1,20 @@
 /**
  * Total Service Pro - Shared Laser Service Models & Constants
  *
- * This is the canonical definition of supported laser models for dynamic Service Report forms.
- * PERFORMANCE DATA, wavelengths, power/fluence sets, extra params, special flags (dye, bbl, gas, fiber, wlTest, etc.)
+ * This is the canonical definition of supported laser models for *rich performance data* in Service Report forms.
+ * (wavelengths, sets, params, special test flags etc.)
+ *
+ * Dropdown population for manufacturers / laser models now comes from Supabase tables:
+ *   - manufacturers (id, name)
+ *   - laser_models (id, name, label, manufacturer_id)
+ *
+ * The tables drive selects in NewServiceReportClient, company equipment, service-tickets editing, etc.
+ * MODELS object kept for the detailed perf testing UI (can be synced to laser_models json columns later).
  *
  * SHARED STRATEGY:
- * - Source of truth here (TypeScript) for the web app.
- * - For coexistence with Android WebView app: any additions/changes to MODELS or CL_* checklists
- *   MUST be ported manually to app/src/main/assets/service_report.html (the MODELS const and CL_ arrays).
- * - Recommendation to parent/Android dev: extract this to a root `shared/models.ts` (or JSON + codegen)
- *   in future so both platforms consume same (web TS import, Android can bundle the JS output or duplicate for now).
- * - Checklists and model metadata also affect reports_list filtering, PDF generation, etc.
+ * - Web now prefers DB tables for basic make/model dropdowns.
+ * - For coexistence with Android: port DB-driven population to the assets HTML (service_report.html etc.).
+ * - Rich MODELS data still used for perf tables / deviation calcs.
  *
  * Adding a new model:
  * 1. Add entry here with mfg, label, wavelengths[], params[], and any flags (wlTest, dyeParams, gasTest, fiberTest, bbl*, customChecklist, optional wavelengths).
@@ -401,6 +405,7 @@ export const MODELS: Record<string, ModelDef> = {
 
 // Build manufacturer grouping (used for selects)
 export function buildManufacturers() {
+  // Legacy static builder. Prefer querying 'manufacturers' + 'laser_models' tables directly for current dropdowns.
   const MANUFACTURERS: Record<string, Array<{ key: string; label: string }>> = {};
   Object.entries(MODELS).forEach(([key, m]) => {
     if (!MANUFACTURERS[m.mfg]) MANUFACTURERS[m.mfg] = [];

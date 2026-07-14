@@ -4,15 +4,33 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { canPostMarketplaceNeed, isPro, isSupplier } from '@/lib/roles';
 
 export default function Marketplace() {
   const [notifications, setNotifications] = useState<any[]>([]);
+  const [userRole, setUserRole] = useState('');
+  const [orgType, setOrgType] = useState<string | null>(null);
   const supabase = getSupabaseClient();
 
   useEffect(() => {
     const fetchNotifications = async () => {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
+
+      const { data: prof } = await supabase
+        .from('user_profiles')
+        .select('role, organization_id')
+        .eq('id', user.id)
+        .maybeSingle();
+      setUserRole(prof?.role || '');
+      if (prof?.organization_id) {
+        const { data: org } = await supabase
+          .from('organizations')
+          .select('type')
+          .eq('id', prof.organization_id)
+          .maybeSingle();
+        setOrgType(org?.type || null);
+      }
 
       const notifs: any[] = [];
 
@@ -89,12 +107,20 @@ export default function Marketplace() {
             <p className="text-[var(--text3)]">Buy, sell, and connect in the laser service ecosystem</p>
           </div>
 
-          <Link 
-            href="/marketplace/list" 
-            className="btn btn-primary whitespace-nowrap"
-          >
-            + Create New Listing
-          </Link>
+          {(canPostMarketplaceNeed(userRole, orgType) || isPro(userRole) || isSupplier(userRole, orgType)) && (
+            <Link
+              href={
+                isSupplier(userRole, orgType)
+                  ? '/marketplace/list?type=part'
+                  : canPostMarketplaceNeed(userRole, orgType)
+                    ? '/marketplace/list?type=request'
+                    : '/marketplace/list'
+              }
+              className="btn btn-primary whitespace-nowrap"
+            >
+              + {canPostMarketplaceNeed(userRole, orgType) && !isPro(userRole) ? 'Post Need / Listing' : 'Create New Listing'}
+            </Link>
+          )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">

@@ -63,6 +63,12 @@ export default function NewServiceReport() {
   const [techSig, setTechSig] = useState('');
   const [techSigDate, setTechSigDate] = useState('');
 
+  // New DB-driven manufacturers and laser_models for dropdowns (populates selects in reports/tickets)
+  const [dbManufacturers, setDbManufacturers] = useState<any[]>([]);
+  const [dbLaserModels, setDbLaserModels] = useState<any[]>([]);
+  const [selectedDbMfr, setSelectedDbMfr] = useState('');
+  const [selectedDbModel, setSelectedDbModel] = useState('');
+
   // Canvas signature pad (full match to Android SR canvas behavior)
   const sigCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -145,7 +151,14 @@ export default function NewServiceReport() {
   const [isSubmitted, setIsSubmitted] = useState(false);
 
   const modelKeys = Object.keys(MODELS);
-  const currentModel = selectedModelKey ? (MODELS as any)[selectedModelKey] : null;
+  const filteredDbModels = selectedDbMfr 
+    ? dbLaserModels.filter((m: any) => String(m.manufacturer_id) === String(selectedDbMfr) || m.manufacturer === selectedDbMfr)
+    : dbLaserModels;
+
+  // resolved for perf data (lookup in static MODELS by key or label)
+  const resolvedModelKey = selectedDbModel || selectedModelKey;
+  const currentModel = resolvedModelKey ? (MODELS as any)[resolvedModelKey] || 
+    Object.values(MODELS).find((m: any) => m.label === resolvedModelKey || m.mfg === resolvedModelKey) : null;
 
   // Shared checklists EXACT from Android service_report.html (source of truth for parity). When updating here also note models.ts guidance for Android sync if MODELS change.
   const CL_ELECTRICAL = [
@@ -203,12 +216,46 @@ export default function NewServiceReport() {
           company_phone: profile.organizations?.phone || '',
           company_logo_url: profile.organizations?.logo_url || ''
         });
-        await loadCustomers(profile.organization_id as any);
       }
+      // Always load customers for dropdown (type=customer)
+      await loadCustomers(profile?.organization_id || null);
       // default date
       if (!dateOut) setDateOut(new Date().toISOString().slice(0,10));
     })();
   }, [router, supabase]);
+
+  // Load manufacturers and laser_models from Supabase for dynamic dropdowns in reports (and tickets)
+  useEffect(() => {
+    (async () => {
+      try {
+        // Flexible select to handle different possible column names
+        const { data: mfrsRaw } = await supabase
+          .from('manufacturers')
+          .select('*')
+          .order('name');
+        const normalizedMfrs = (mfrsRaw || []).map((row: any) => ({
+          id: row.id || row.manufacturer_id,
+          name: row.name || row.manufacturer_name || row.manufacturer || String(row.id || '')
+        })).filter(r => r.name);
+        setDbManufacturers(normalizedMfrs);
+
+        const { data: lmsRaw } = await supabase
+          .from('laser_models')
+          .select('*')
+          .order('name');
+        const normalizedModels = (lmsRaw || []).map((row: any) => ({
+          id: row.id,
+          name: row.name || row.model_name || row.model || '',
+          label: row.label || row.name || row.model_name || '',
+          manufacturer_id: row.manufacturer_id || row.manufacturer || row.manufacturer_name || ''
+        }));
+        setDbLaserModels(normalizedModels);
+      } catch (e) {
+        console.warn('Failed to load manufacturers/laser_models tables (will fallback to static MODELS):', e);
+        // Fallback static will be used in render
+      }
+    })();
+  }, [supabase]);
 
   async function loadCustomers(orgId: any) {
     // Prefer direct customer orgs (align to Android + CRM), also fall back to junction if used
@@ -278,6 +325,7 @@ export default function NewServiceReport() {
 
   function selectModel(key: string) {
     setSelectedModelKey(key);
+    setSelectedDbModel(key);
     // reset dynamic
     setCheckElectrical({}); setCheckMechanical({}); setCheckAesthetic({});
     setPowerMeasurements([]); setModelParams({});
@@ -298,6 +346,30 @@ export default function NewServiceReport() {
         deviation: ''
       }));
       setPowerMeasurements(seeded);
+    }
+  }
+
+  function selectDbManufacturer(mfr: string) {
+    setSelectedDbMfr(mfr);
+    setSelectedDbModel('');
+    setSelectedModelKey('');
+    setCheckElectrical({}); setCheckMechanical({}); setCheckAesthetic({});
+    setPowerMeasurements([]); setModelParams({});
+  }
+
+  function selectDbModelValue(modelVal: string) {
+    setSelectedDbModel(modelVal);
+    // resolve to MODELS key if possible for rich perf data
+    const found = Object.keys(MODELS).find(k => 
+      k === modelVal || (MODELS as any)[k]?.label === modelVal || (MODELS as any)[k]?.mfg === modelVal
+    ) || modelVal;
+    selectModel(found);
+    // auto-fill equipment name
+    const m = (MODELS as any)[found];
+    if (m) {
+      setEquipName(`${m.mfg || ''} ${m.label || modelVal}`.trim());
+    } else if (modelVal) {
+      setEquipName(modelVal);
     }
   }
 
@@ -497,28 +569,47 @@ export default function NewServiceReport() {
           </div>
         </div>
 
-        {/* Customer Info - full like Android */}
+        {/* Customer Info - dropdown with + add new (requested) */}
         <div className="section mb-6 p-6">
           <h3 className="text-xl font-semibold mb-4">🏥 Customer Info</h3>
-          <div className="relative mb-3">
-            <input type="text" placeholder="Search customer or type to add new..." className="input w-full text-lg py-3" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
-            {searchTerm && (
-              <div className="absolute z-50 w-full bg-[var(--surface3)] border border-[var(--gold)] rounded mt-1 max-h-60 overflow-auto">
-                {filteredCustomers.length ? filteredCustomers.map((c:any)=>(
-                  <div key={c.id} className="p-2 hover:bg-[var(--surface)] cursor-pointer" onClick={()=>handleSelectCustomer(c)}>{c.name} {c.city && '('+c.city+')'}</div>
-                )) : <div className="p-3 text-sm">No match — use "Add New"</div>}
-              </div>
-            )}
+          <div className="flex gap-2 items-end mb-2">
+            <div className="flex-1">
+              <label className="text-xs text-[var(--text3)]">Select Customer</label>
+              <select 
+                className="input w-full text-lg py-3" 
+                value={selectedCustomer ? selectedCustomer.id : ''}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === '__new__') {
+                    setShowAddModal(true);
+                  } else if (val) {
+                    const cust = customerOptions.find((c:any) => String(c.id) === val);
+                    if (cust) handleSelectCustomer(cust);
+                  } else {
+                    setSelectedCustomer(null);
+                    setSearchTerm('');
+                  }
+                }}
+              >
+                <option value="">-- Select Customer --</option>
+                {customerOptions.map((c:any) => (
+                  <option key={c.id} value={c.id}>{c.name}{c.city ? ` (${c.city})` : ''}</option>
+                ))}
+                <option value="__new__">+ Add New Customer</option>
+              </select>
+            </div>
+            <button onClick={()=>setShowAddModal(true)} className="btn btn-secondary text-sm py-3">+ Add</button>
           </div>
-          <button onClick={()=>setShowAddModal(true)} className="text-[var(--gold)] flex items-center gap-1 text-sm"><Plus size={14}/> Add New Customer</button>
 
           {selectedCustomer && (
-            <div className="mt-4 grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
+            <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
               <div><span className="text-[var(--text3)]">Customer:</span> {selectedCustomer.name}</div>
               <div>{[selectedCustomer.city, selectedCustomer.state].filter(Boolean).join(', ')}</div>
               <div>{selectedCustomer.contact_name || selectedCustomer.phone}</div>
             </div>
           )}
+          {/* Optional free text for quick custom (creates on save if needed) */}
+          <input type="text" placeholder="Or enter custom name (optional)" className="input w-full mt-1 text-sm" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
         </div>
 
         {/* Report Info */}
@@ -534,18 +625,72 @@ export default function NewServiceReport() {
           </div>
         </div>
 
-        {/* Model select + dynamic */}
+        {/* Model select + dynamic - now prefers DB tables "manufacturers" + "laser_models" for dropdowns */}
         <div className="section mb-6 p-6">
-          <h3 className="text-xl font-semibold mb-4">⚙️ Equipment Model</h3>
-          <select className="input mb-4" value={selectedModelKey} onChange={e => selectModel(e.target.value)}>
-            <option value="">-- Select Model --</option>
-            {modelKeys.map(k => <option key={k} value={k}>{k} — {(MODELS as any)[k].label}</option>)}
-          </select>
-          {currentModel && <div className="text-sm text-[var(--text3)]">Mfg: {currentModel.mfg}</div>}
+          <h3 className="text-xl font-semibold mb-4">⚙️ Equipment Model (from DB tables)</h3>
+
+          {/* Manufacturer from manufacturers table */}
+          <div className="mb-2 flex gap-2 items-end">
+            <div className="flex-1">
+              <label className="text-xs text-[var(--text3)]">Manufacturer</label>
+              <select 
+                className="input mb-1 w-full" 
+                value={selectedDbMfr} 
+                onChange={e => selectDbManufacturer(e.target.value)}
+              >
+                <option value="">-- Select Manufacturer --</option>
+                {dbManufacturers.length > 0 
+                  ? dbManufacturers.map((m: any) => (
+                      <option key={m.id || m.name} value={m.id || m.name}>{m.name}</option>
+                    ))
+                  : [...new Set(Object.values(MODELS).map((m: any) => m.mfg || 'Unknown'))].map((mfg, i) => (
+                      <option key={i} value={mfg}>{mfg}</option>
+                    ))
+                }
+              </select>
+            </div>
+            <button 
+              type="button"
+              onClick={async () => {
+                const name = prompt('New manufacturer name:');
+                if (name && name.trim()) {
+                  try {
+                    const { data } = await supabase.from('manufacturers').insert({name: name.trim()}).select().single();
+                    if (data) {
+                      setDbManufacturers(prev => [...prev, {id: data.id, name: data.name}]);
+                      selectDbManufacturer(data.id || data.name);
+                    }
+                  } catch(e){ alert('Failed to add manufacturer: ' + (e as any).message); }
+                }
+              }}
+              className="btn btn-secondary text-xs py-1">+ Add Mfr
+            </button>
+          </div>
+
+          {/* Laser Model from laser_models table */}
+          <div>
+            <label className="text-xs text-[var(--text3)]">Model</label>
+            <select 
+              className="input mb-1 w-full" 
+              value={selectedDbModel || selectedModelKey} 
+              onChange={e => selectDbModelValue(e.target.value)}
+            >
+              <option value="">-- Select Model --</option>
+              {filteredDbModels.length > 0 
+                ? filteredDbModels.map((m: any) => (
+                    <option key={m.id || m.name} value={m.name || m.label}>{m.label || m.name}</option>
+                  ))
+                : modelKeys.map(k => <option key={k} value={k}>{k} — {(MODELS as any)[k].label}</option>)
+              }
+            </select>
+          </div>
+
+          {currentModel && <div className="text-sm text-[var(--text3)] mt-1">Mfg: {currentModel.mfg}</div>}
+          <div className="text-[10px] text-[var(--text3)] mt-1">Data from manufacturers + laser_models tables (fallback to static MODELS if empty). Use +Add for new.</div>
         </div>
 
         {/* Checklists - full port from Android */}
-        {selectedModelKey && (
+        {(selectedModelKey || selectedDbModel) && (
           <>
             {renderChecklist(CL_ELECTRICAL, checkElectrical, setCheckElectrical, '⚡ Electrical Checklist')}
             {renderChecklist(CL_MECHANICAL, checkMechanical, setCheckMechanical, '🔧 Mechanical & Optical')}

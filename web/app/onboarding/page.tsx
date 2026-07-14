@@ -2,9 +2,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { Header } from '@/components/Header';
-import { Upload, Users, Zap, Package, ArrowRight, Check, X } from 'lucide-react';
+import { Upload, ArrowRight, Check } from 'lucide-react';
 import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
+import { isOwnerish, isSupplier } from '@/lib/roles';
 
 type OrgType = 'service' | 'clinic' | 'supplier';
 type TeamMember = {
@@ -17,7 +18,26 @@ type TeamMember = {
   isCreator?: boolean;
 };
 
+type LaserDraft = {
+  id: string;
+  manufacturer: string;
+  model: string;
+  serial_number: string;
+  notes: string;
+};
+
 const BRANDS = ['Candela','Lumenis','Cynosure','Cutera','Sciton','Syneron','Fotona','Alma','Quanta','HOYA ConBio','Iridex','Coherent','InMode','Lutronic'];
+const SUPPLIER_CATEGORIES = [
+  'Consumables (tips, fibers, dyes)',
+  'Handpieces & Rebuild Kits',
+  'Optics, Lenses, Mirrors',
+  'Electronics / Boards / Power Supplies',
+  'Gas, Coolant, DI Systems',
+  'Safety / Interlock / E-Stop Parts',
+  'Fibers & Delivery Systems',
+  'Full Systems / Refurbs',
+  'Other / Specialty Parts',
+];
 const TEAM_ROLES = ['company_admin', 'service_manager', 'fse', 'dispatcher', 'billing_manager', 'admin'];
 const ADDITIONAL_ROLES = ['fse', 'dispatcher', 'service_manager', 'billing_manager'];
 const ADMIN_ROLES = ['company_admin', 'admin'];
@@ -31,18 +51,29 @@ export default function Onboarding() {
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [existingOrgId, setExistingOrgId] = useState<number | null>(null);
+  const [profileRole, setProfileRole] = useState<string>('');
 
-  // Team state (ported + enhanced from Android onboarding + vision for RSP)
+  // Team state (service company)
   const [teamMembers, setTeamMembers] = useState<TeamMember[]>([]);
   const [isSoleProp, setIsSoleProp] = useState(false);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
-  const [teamEmail, setTeamEmail] = useState(''); 
+  const [teamEmail, setTeamEmail] = useState('');
   const [teamFirst, setTeamFirst] = useState('');
   const [teamLast, setTeamLast] = useState('');
   const [teamRole, setTeamRole] = useState('fse');
   const [teamAdditional, setTeamAdditional] = useState<string[]>([]);
+
+  // Clinic lasers (owner)
+  const [lasers, setLasers] = useState<LaserDraft[]>([]);
+  const [laserMfr, setLaserMfr] = useState('');
+  const [laserModel, setLaserModel] = useState('');
+  const [laserSerial, setLaserSerial] = useState('');
+  const [laserNotes, setLaserNotes] = useState('');
+
+  // Supplier categories
+  const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
 
   // Prefill from profile / auth on mount
   useEffect(() => {
@@ -62,6 +93,7 @@ export default function Onboarding() {
         .maybeSingle();
 
       const meta = user.user_metadata || {};
+      setProfileRole(profile?.role || '');
       setFormData((prev: any) => ({
         ...prev,
         firstName: profile?.first_name || meta.first_name || '',
@@ -90,7 +122,9 @@ export default function Onboarding() {
         if (o.logo_url) setLogoPreview(o.logo_url);
       } else {
         const initialRole = profile?.role || '';
-        if (initialRole === 'company_admin' || initialRole.includes('admin')) {
+        if (initialRole === 'owner' || initialRole === 'customer') setOrgType('clinic');
+        else if (initialRole === 'parts_supplier' || initialRole === 'supplier') setOrgType('supplier');
+        else if (initialRole === 'company_admin' || initialRole.includes('admin') || initialRole === 'fse') {
           setOrgType('service');
         }
       }
@@ -100,18 +134,33 @@ export default function Onboarding() {
     })();
   }, [supabase, router]);
 
+  // Auto-skip org type choice (step 1) if we already know from signup/org
+  useEffect(() => {
+    if (orgType && step === 1 && existingOrgId) {
+      setStep(2);
+    }
+  }, [orgType, existingOrgId, step]);
+
   function initTeamFromProfile(profile: any, user: any) {
     const first = profile?.first_name || user?.user_metadata?.first_name || 'You';
     const last = profile?.last_name || user?.user_metadata?.last_name || '';
     const email = user?.email || '';
     const currentRole = profile?.role || 'company_admin';
 
+    // Preserve owner / supplier roles — only force admin for service creators
+    let role = currentRole;
+    if (isOwnerish(currentRole)) role = currentRole === 'customer' ? 'owner' : currentRole;
+    else if (isSupplier(currentRole)) role = currentRole === 'supplier' ? 'parts_supplier' : currentRole;
+    else if (!ADMIN_ROLES.includes(currentRole) && !['fse', 'service_manager', 'dispatcher', 'billing_manager'].includes(currentRole)) {
+      role = 'company_admin';
+    }
+
     const creator: TeamMember = {
       id: 'creator',
       email,
       firstName: first,
       lastName: last,
-      role: ADMIN_ROLES.includes(currentRole) ? currentRole : 'company_admin',
+      role,
       additionalRoles: [],
       isCreator: true
     };
@@ -127,7 +176,6 @@ export default function Onboarding() {
     setFormData((prev: any) => ({ ...prev, [key]: value }));
   };
 
-  // ===== Team & Roles (core for RSP onboarding) =====
   function toggleSoleProp() {
     const newVal = !isSoleProp;
     setIsSoleProp(newVal);
@@ -145,16 +193,6 @@ export default function Onboarding() {
       }
       return updated;
     });
-  }
-
-  // Legacy kept for compat in old code paths
-  function changeCreatorRole(newRole: string) {
-    changeMemberRole( teamMembers.findIndex(m => m.isCreator) , newRole);
-  }
-
-  function toggleCreatorAdditional(role: string) {
-    const idx = teamMembers.findIndex(m => m.isCreator);
-    if (idx >= 0) toggleMemberAdditional(idx, role);
   }
 
   function addTeamMember() {
@@ -192,8 +230,8 @@ export default function Onboarding() {
 
   function validateTeam(): boolean {
     if (teamMembers.length === 0) return false;
-    const hasAdmin = teamMembers.some(m => 
-      ADMIN_ROLES.includes(m.role) || 
+    const hasAdmin = teamMembers.some(m =>
+      ADMIN_ROLES.includes(m.role) ||
       m.additionalRoles.some(r => ADMIN_ROLES.includes(r))
     );
     return hasAdmin;
@@ -257,12 +295,56 @@ export default function Onboarding() {
     setSelectedBrands(prev => prev.includes(b) ? prev.filter(x=>x!==b) : [...prev, b]);
   }
 
+  function toggleCategory(c: string) {
+    setSelectedCategories(prev => prev.includes(c) ? prev.filter(x => x !== c) : [...prev, c]);
+  }
+
+  function addLaserDraft() {
+    if (!laserMfr.trim() || !laserModel.trim()) {
+      alert('Manufacturer and model are required');
+      return;
+    }
+    setLasers(prev => [...prev, {
+      id: 'l-' + Date.now(),
+      manufacturer: laserMfr.trim(),
+      model: laserModel.trim(),
+      serial_number: laserSerial.trim(),
+      notes: laserNotes.trim(),
+    }]);
+    setLaserMfr(''); setLaserModel(''); setLaserSerial(''); setLaserNotes('');
+  }
+
+  function removeLaserDraft(id: string) {
+    setLasers(prev => prev.filter(l => l.id !== id));
+  }
+
+  /** Resolve profile role without overwriting owner / parts_supplier to admin */
+  function resolveCreatorRole(): string {
+    if (orgType === 'clinic') {
+      if (isOwnerish(profileRole)) return profileRole === 'customer' ? 'owner' : (profileRole || 'owner');
+      return 'owner';
+    }
+    if (orgType === 'supplier') {
+      if (isSupplier(profileRole)) return profileRole === 'supplier' ? 'parts_supplier' : (profileRole || 'parts_supplier');
+      return 'parts_supplier';
+    }
+    // service company
+    const creator = teamMembers.find(m => m.isCreator) || teamMembers[0];
+    if (isOwnerish(creator?.role) || isSupplier(creator?.role)) {
+      // Safety: never keep owner role on service org path if user switched type
+      return creator?.role && ADMIN_ROLES.includes(creator.role) ? creator.role : 'company_admin';
+    }
+    return creator?.role || 'company_admin';
+  }
+
   async function saveOnboarding() {
     if (!currentUser) return;
     setLoading(true);
     try {
       let orgId = existingOrgId;
-      const companyName = formData.companyName || 'My Service Company';
+      const companyName = formData.companyName || (
+        orgType === 'clinic' ? 'My Facility' : orgType === 'supplier' ? 'My Supplier Co' : 'My Service Company'
+      );
 
       let oType = 'service_company';
       if (orgType === 'clinic') oType = 'customer';
@@ -291,6 +373,11 @@ export default function Onboarding() {
         logo_url: logoUrl || null,
       };
 
+      // Supplier categories stored in specialties if column exists (best-effort)
+      if (orgType === 'supplier' && selectedCategories.length) {
+        orgPayload.specialties = selectedCategories;
+      }
+
       if (orgId) {
         await supabase.from('organizations').update(orgPayload).eq('id', orgId);
       } else {
@@ -299,11 +386,12 @@ export default function Onboarding() {
         if (newOrg) orgId = newOrg.id;
       }
 
-      // Team save (matches Android + best practices). Use invitations for non-existing (security). Support additional_roles (jsonb).
+      const creatorRole = resolveCreatorRole();
       const creator = teamMembers.find(m => m.isCreator) || teamMembers[0];
-      const creatorRole = creator?.role || 'company_admin';
-      const creatorAddl = creator?.additionalRoles || [];
-      let finalJob = formData.jobTitle || 'Company Admin';
+      const creatorAddl = orgType === 'service' ? (creator?.additionalRoles || []) : [];
+      let finalJob = formData.jobTitle || (
+        orgType === 'clinic' ? 'Facility Manager' : orgType === 'supplier' ? 'Parts Supplier' : 'Company Admin'
+      );
       if (creatorAddl.length > 0) {
         finalJob = `${finalJob} + ${creatorAddl.map(r => r).join(' + ')}`;
       }
@@ -322,43 +410,58 @@ export default function Onboarding() {
         onboarding_completed_at: new Date().toISOString(),
       }, { onConflict: 'id' });
 
-      for (const m of teamMembers) {
-        if (m.isCreator) continue;
-        try {
-          const { data: existing } = await supabase
-            .from('user_profiles')
-            .select('id')
-            .eq('email', m.email.toLowerCase())
-            .maybeSingle();
+      // Team invites only for service company
+      if (orgType === 'service') {
+        for (const m of teamMembers) {
+          if (m.isCreator) continue;
+          try {
+            const { data: existing } = await supabase
+              .from('user_profiles')
+              .select('id')
+              .eq('email', m.email.toLowerCase())
+              .maybeSingle();
 
-          if (existing?.id) {
-            await supabase.from('user_profiles').update({
-              organization_id: orgId,
-              role: m.role,
-              additional_roles: m.additionalRoles.length ? m.additionalRoles : null,
-              first_name: m.firstName || null,
-              last_name: m.lastName || null,
-              job_title: [m.role, ...m.additionalRoles].filter(Boolean).join(' + ')
-            }).eq('id', existing.id);
-          } else {
-            await supabase.from('engineer_invitations').insert({
-              organization_id: orgId,
-              email: m.email,
-              role: m.role,
-              first_name: m.firstName || null,
-              last_name: m.lastName || null,
-              invited_by: currentUser.id,
-              accepted: false
-              // Note: additional roles can be extended in invitation table if needed, or set after claim
-            });
-          }
-        } catch (te) { console.warn('Team member save skipped', te); }
+            if (existing?.id) {
+              await supabase.from('user_profiles').update({
+                organization_id: orgId,
+                role: m.role,
+                additional_roles: m.additionalRoles.length ? m.additionalRoles : null,
+                first_name: m.firstName || null,
+                last_name: m.lastName || null,
+                job_title: [m.role, ...m.additionalRoles].filter(Boolean).join(' + ')
+              }).eq('id', existing.id);
+            } else {
+              await supabase.from('engineer_invitations').insert({
+                organization_id: orgId,
+                email: m.email,
+                role: m.role,
+                first_name: m.firstName || null,
+                last_name: m.lastName || null,
+                invited_by: currentUser.id,
+                accepted: false
+              });
+            }
+          } catch (te) { console.warn('Team member save skipped', te); }
+        }
+      }
+
+      // Clinic lasers → equipment
+      if (orgType === 'clinic' && orgId && lasers.length > 0) {
+        const rows = lasers.map(l => ({
+          customer_organization_id: orgId,
+          manufacturer: l.manufacturer,
+          model: l.model,
+          serial_number: l.serial_number || '',
+          notes: l.notes || null,
+        }));
+        const { error: eqErr } = await supabase.from('equipment').insert(rows);
+        if (eqErr) console.warn('equipment insert', eqErr);
       }
 
       await claimPendingInvitations(supabase, currentUser.id, currentUser.email);
       await supabase.auth.updateUser({ data: { first_name: formData.firstName, last_name: formData.lastName } });
 
-      router.push('/company');
+      router.push('/company?justSetup=true');
     } catch (e: any) {
       console.error('saveOnboarding error', e);
       alert('Save had issues: ' + (e.message || e) + ' — edit in Company page.');
@@ -395,7 +498,13 @@ export default function Onboarding() {
       <div className="max-w-6xl mx-auto px-6 py-8">
         <div className="text-center mb-8">
           <h1 className="text-3xl font-bold">Complete Your Setup</h1>
-          <p className="text-[var(--text2)]">RSPs: add your team and roles now (sole props supported).</p>
+          <p className="text-[var(--text2)]">
+            {orgType === 'clinic'
+              ? 'Register your facility and lasers.'
+              : orgType === 'supplier'
+                ? 'Set up supplier categories and brands.'
+                : 'RSPs: add your team and roles now (sole props supported).'}
+          </p>
           <div className="flex justify-center gap-2 mt-4">
             {[1,2,3,4,5,6].map(s => <div key={s} className={`w-2.5 h-2.5 rounded-full ${step >= s ? 'bg-[var(--gold)]' : 'bg-[var(--surface3)]'}`} />)}
           </div>
@@ -420,12 +529,14 @@ export default function Onboarding() {
 
         {step === 2 && (
           <div className="max-w-xl mx-auto space-y-6">
-            <h2 className="text-2xl font-bold">Your Details &amp; Company</h2>
+            <h2 className="text-2xl font-bold">Review &amp; Complete Your Details</h2>
+            <p className="text-sm text-[var(--text3)] -mt-3">Prefilled from your signup. Edit only if needed — these save to your profile and company record.</p>
             <div className="grid grid-cols-2 gap-4">
               <div><label className="label">First Name *</label><input className="input" value={formData.firstName||''} onChange={e=>updateForm('firstName',e.target.value)} /></div>
               <div><label className="label">Last Name *</label><input className="input" value={formData.lastName||''} onChange={e=>updateForm('lastName',e.target.value)} /></div>
             </div>
-            <div><label className="label">Company Name *</label><input className="input" value={formData.companyName||''} onChange={e=>updateForm('companyName',e.target.value)} /></div>
+            <div><label className="label">Job Title</label><input className="input" value={formData.jobTitle||''} onChange={e=>updateForm('jobTitle',e.target.value)} /></div>
+            <div><label className="label">{orgType==='clinic' ? 'Facility Name *' : 'Company Name *'}</label><input className="input" value={formData.companyName||''} onChange={e=>updateForm('companyName',e.target.value)} /></div>
             <div><label className="label">Address</label><input className="input" value={formData.address||''} onChange={e=>updateForm('address',e.target.value)} /></div>
             <div className="grid grid-cols-2 gap-4">
               <div><label className="label">City</label><input className="input" value={formData.city||''} onChange={e=>updateForm('city',e.target.value)} /></div>
@@ -438,6 +549,7 @@ export default function Onboarding() {
           </div>
         )}
 
+        {/* Step 3: service team OR clinic lasers OR supplier skip note */}
         {step === 3 && orgType === 'service' && (
           <div>
             <h2 className="text-2xl font-bold mb-2">Team Members &amp; Roles</h2>
@@ -472,7 +584,7 @@ export default function Onboarding() {
                   </div>
                 </div>
                 <button onClick={addTeamMember} className="btn btn-secondary mt-3 w-full text-sm">+ Add Team Member</button>
-                <div className="text-[10px] text-[var(--text3)] mt-1">If they don't have an account yet, an invitation is created. They sign up then get assigned (auto-claim on their login). Use invitations (not pre-create accounts) for security.</div>
+                <div className="text-[10px] text-[var(--text3)] mt-1">If they don&apos;t have an account yet, an invitation is created. They sign up then get assigned (auto-claim on their login).</div>
               </div>
             )}
 
@@ -480,13 +592,72 @@ export default function Onboarding() {
           </div>
         )}
 
-        {step === 3 && orgType !== 'service' && (
-          <div>Team setup is primarily for Service Providers (RSP). You can manage later in Company page if applicable.</div>
+        {step === 3 && orgType === 'clinic' && (
+          <div className="max-w-xl mx-auto">
+            <h2 className="text-2xl font-bold mb-2">Lasers you own</h2>
+            <p className="text-sm text-[var(--text3)] mb-4">Add systems registered to your facility (optional now — you can manage later in My Lasers).</p>
+
+            <div className="card p-4 space-y-3 mb-4">
+              <div>
+                <label className="label">Manufacturer *</label>
+                <input className="input" list="obMfr" value={laserMfr} onChange={e=>setLaserMfr(e.target.value)} placeholder="Candela" />
+                <datalist id="obMfr">{BRANDS.map(b => <option key={b} value={b} />)}</datalist>
+              </div>
+              <div>
+                <label className="label">Model *</label>
+                <input className="input" value={laserModel} onChange={e=>setLaserModel(e.target.value)} placeholder="GentleMax Pro" />
+              </div>
+              <div>
+                <label className="label">Serial #</label>
+                <input className="input" value={laserSerial} onChange={e=>setLaserSerial(e.target.value)} placeholder="Optional" />
+              </div>
+              <div>
+                <label className="label">Notes</label>
+                <input className="input" value={laserNotes} onChange={e=>setLaserNotes(e.target.value)} placeholder="Location, handpiece…" />
+              </div>
+              <button type="button" onClick={addLaserDraft} className="btn btn-secondary w-full text-sm">+ Add laser</button>
+            </div>
+
+            {lasers.length > 0 && (
+              <ul className="space-y-2 mb-4">
+                {lasers.map(l => (
+                  <li key={l.id} className="card p-3 flex justify-between items-center text-sm">
+                    <div>
+                      <div className="font-bold text-[var(--gold)]">{l.manufacturer} {l.model}</div>
+                      <div className="text-xs text-[var(--text3)]">{l.serial_number ? `SN ${l.serial_number}` : 'No serial'}{l.notes ? ` · ${l.notes}` : ''}</div>
+                    </div>
+                    <button type="button" className="text-red-400 text-xs" onClick={() => removeLaserDraft(l.id)}>Remove</button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        {step === 3 && orgType === 'supplier' && (
+          <div className="max-w-xl mx-auto">
+            <h2 className="text-2xl font-bold mb-2">Parts categories</h2>
+            <p className="text-sm text-[var(--text3)] mb-4">Select categories you supply (optional — refine later on Supplier Profile).</p>
+            <div className="flex flex-wrap gap-2">
+              {SUPPLIER_CATEGORIES.map(c => (
+                <button
+                  key={c}
+                  type="button"
+                  onClick={() => toggleCategory(c)}
+                  className={`px-3 py-1.5 rounded-full border text-sm ${selectedCategories.includes(c) ? 'bg-[var(--gold)] text-black border-[var(--gold)]' : 'border-[var(--border)]'}`}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+          </div>
         )}
 
         {step === 4 && (
           <div className="max-w-md mx-auto">
-            <h2 className="text-2xl font-bold mb-4">Company Logo (optional)</h2>
+            <h2 className="text-2xl font-bold mb-4">
+              {orgType === 'clinic' ? 'Facility Logo (optional)' : 'Company Logo (optional)'}
+            </h2>
             <div className="border-2 border-dashed p-8 text-center rounded-2xl cursor-pointer" onClick={() => document.getElementById('logoInput')?.click()}>
               {logoPreview ? <img src={logoPreview} alt="logo" className="max-h-20 mx-auto" /> : <Upload size={48} className="mx-auto mb-3" />}
               <div>Tap to choose logo (PNG/JPG)</div>
@@ -498,13 +669,23 @@ export default function Onboarding() {
 
         {step === 5 && (
           <div>
-            <h2 className="text-2xl font-bold mb-4">Specialties / Brands you service</h2>
+            <h2 className="text-2xl font-bold mb-4">
+              {orgType === 'supplier'
+                ? 'Brands you stock'
+                : orgType === 'clinic'
+                  ? 'Brands at your facility (optional)'
+                  : 'Specialties / Brands you service'}
+            </h2>
             <div className="flex flex-wrap gap-2">
               {BRANDS.map(b => (
                 <button key={b} type="button" onClick={() => toggleBrand(b)} className={`px-3 py-1 rounded-full border text-sm ${selectedBrands.includes(b) ? 'bg-[var(--gold)] text-black border-[var(--gold)]' : 'border-[var(--border)]'}`}>{b}</button>
               ))}
             </div>
-            <p className="text-xs mt-3 text-[var(--text3)]">Used for manual library, AI, and Marketplace targeting.</p>
+            <p className="text-xs mt-3 text-[var(--text3)]">
+              {orgType === 'supplier'
+                ? 'Used for marketplace demand matching and catalog targeting.'
+                : 'Used for manual library, AI, and Marketplace targeting.'}
+            </p>
           </div>
         )}
 
@@ -512,7 +693,13 @@ export default function Onboarding() {
           <div className="text-center">
             <Check className="mx-auto mb-4 text-[var(--gold)]" size={64} />
             <h2 className="text-3xl font-bold">Ready to go!</h2>
-            <p className="my-4">Your org, profile, and team (if RSP) will be saved. You can always edit from Company page or Settings.</p>
+            <p className="my-4">
+              {orgType === 'clinic'
+                ? 'Your facility profile and lasers will be saved. Role stays owner.'
+                : orgType === 'supplier'
+                  ? 'Your supplier profile, categories, and brands will be saved. Role stays parts_supplier.'
+                  : 'Your org, profile, and team (if RSP) will be saved. You can always edit from Company page or Settings.'}
+            </p>
             <button onClick={saveOnboarding} disabled={loading} className="btn btn-primary px-10">Finish &amp; Continue →</button>
           </div>
         )}

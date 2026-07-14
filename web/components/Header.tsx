@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { getSupabaseClient } from '../lib/supabase/client';
 import { User } from '@supabase/supabase-js';
 import { LogOut, User as UserIcon, Settings, Building2, Menu, X } from 'lucide-react';
+import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
 
 export function Header() {
   const [user, setUser] = useState<User | null>(null);
@@ -22,7 +23,7 @@ export function Header() {
       if (u) {
         const { data: prof } = await supabase
           .from('user_profiles')
-          .select('first_name, last_name, role, organizations(name)')
+          .select('first_name, last_name, role, organizations(name, type)')
           .eq('id', u.id)
           .maybeSingle();
         setProfile(prof);
@@ -37,7 +38,7 @@ export function Header() {
       if (session?.user) {
         supabase
           .from('user_profiles')
-          .select('first_name, last_name, role, organizations(name)')
+          .select('first_name, last_name, role, organizations(name, type)')
           .eq('id', session.user.id)
           .maybeSingle()
           .then(({ data }) => setProfile(data));
@@ -65,6 +66,19 @@ export function Header() {
   const initials = (profile?.first_name?.[0] || user?.email?.[0] || 'U').toUpperCase() + 
                    (profile?.last_name?.[0] || '').toUpperCase();
 
+  const orgType = (profile?.organizations as any)?.type || null;
+  const ownerMode = isOwnerish(profile?.role, orgType);
+  const supplierMode = isSupplier(profile?.role, orgType);
+  const companyLabel = ownerMode ? 'Facility Profile' : supplierMode ? 'Supplier Profile' : 'Company Profile';
+  // Service pros see Tech Hub / Reports; owners get My Lasers instead of hub emphasis
+  const showServiceNav = !ownerMode && !supplierMode;
+  const canBusinessNav =
+    showServiceNav &&
+    (isAdmin(profile?.role) ||
+      ['service_manager', 'dispatcher', 'scheduler', 'billing_manager'].includes(
+        (profile?.role || '').toLowerCase()
+      ));
+
   if (loading) {
     return (
       <header className="header px-4 py-3 flex items-center justify-between">
@@ -86,9 +100,12 @@ export function Header() {
 
         <nav className="ml-6 hidden md:flex items-center gap-5 text-base font-medium text-[var(--text2)]">
           <Link href="/" className="hover:text-[var(--gold)]">Dashboard</Link>
-          <Link href="/reports" className="hover:text-[var(--gold)]">Reports</Link>
-          <Link href="/manuals" className="hover:text-[var(--gold)]">Manuals</Link>
-          <Link href="/hub" className="hover:text-[var(--gold)]">Tech Hub</Link>
+          {ownerMode && <Link href="/my-lasers" className="hover:text-[var(--gold)]">My Lasers</Link>}
+          <Link href="/reports" className="hover:text-[var(--gold)]">{ownerMode ? 'History' : 'Reports'}</Link>
+          {showServiceNav && <Link href="/manuals" className="hover:text-[var(--gold)]">Manuals</Link>}
+          {showServiceNav && <Link href="/hub" className="hover:text-[var(--gold)]">Tech Hub</Link>}
+          {canBusinessNav && <Link href="/customers" className="hover:text-[var(--gold)]">Customers</Link>}
+          {supplierMode && <Link href="/parts" className="hover:text-[var(--gold)]">Parts</Link>}
           <Link href="/marketplace" className="hover:text-[var(--gold)]">Marketplace</Link>
         </nav>
       </div>
@@ -131,7 +148,7 @@ export function Header() {
                   <UserIcon size={16} /> User Profile
                 </Link>
                 <Link href="/company" className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]" onClick={() => setDropdownOpen(false)}>
-                  <Building2 size={16} /> Company Profile
+                  <Building2 size={16} /> {companyLabel}
                 </Link>
                 <Link href="/settings" className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]" onClick={() => setDropdownOpen(false)}>
                   <Settings size={16} /> Settings
@@ -153,9 +170,12 @@ export function Header() {
         <div className="md:hidden absolute top-[60px] left-0 right-0 bg-[var(--surface3)] border-b border-[var(--border)] z-[90] shadow-lg">
           <nav className="flex flex-col px-4 py-2 text-base font-medium">
             <Link href="/" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Dashboard</Link>
-            <Link href="/reports" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Reports</Link>
-            <Link href="/manuals" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Manuals</Link>
-            <Link href="/hub" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Tech Hub</Link>
+            {ownerMode && <Link href="/my-lasers" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>My Lasers</Link>}
+            <Link href="/reports" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>{ownerMode ? 'History' : 'Reports'}</Link>
+            {showServiceNav && <Link href="/manuals" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Manuals</Link>}
+            {showServiceNav && <Link href="/hub" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Tech Hub</Link>}
+            {canBusinessNav && <Link href="/customers" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Customers</Link>}
+            {supplierMode && <Link href="/parts" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Parts</Link>}
             <Link href="/marketplace" className="py-3 hover:text-[var(--gold)]" onClick={closeMobileMenu}>Marketplace</Link>
           </nav>
         </div>

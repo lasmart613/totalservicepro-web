@@ -19,7 +19,31 @@ export default function ServiceTicketDetail() {
   const [saving, setSaving] = useState(false);
   const [organizations, setOrganizations] = useState<any[]>([]);
 
+  // DB dropdowns for equipment
+  const [dbMfrs, setDbMfrs] = useState<any[]>([]);
+  const [dbLaserModels, setDbLaserModels] = useState<any[]>([]);
+
   const supabase = getSupabaseClient();
+
+  // Load DB manufacturers and models for dropdowns (independent of ticket)
+  useEffect(() => {
+    (async () => {
+      try {
+        const { data: m } = await supabase.from('manufacturers').select('*').order('name');
+        const norm = (m||[]).map((r:any) => ({id: r.id, name: r.name || r.manufacturer_name || r.manufacturer || ''})).filter(r=>r.name);
+        setDbMfrs(norm);
+
+        const { data: lm } = await supabase.from('laser_models').select('*').order('name');
+        const normLm = (lm||[]).map((r:any) => ({
+          id: r.id, 
+          name: r.name || r.model_name || r.model || '', 
+          label: r.label || r.name || r.model_name || '',
+          manufacturer_id: r.manufacturer_id || r.manufacturer || ''
+        }));
+        setDbLaserModels(normLm);
+      } catch(e){ console.warn('db mfr/models load warn', e); }
+    })();
+  }, [supabase]);
 
   // Fetch ticket + organizations
   useEffect(() => {
@@ -47,6 +71,14 @@ export default function ServiceTicketDetail() {
           .order('name');
 
         setOrganizations(orgData || []);
+
+        // Load reference data for equipment dropdowns
+        try {
+          const { data: m } = await supabase.from('manufacturers').select('id, name').order('name');
+          setDbMfrs(m || []);
+          const { data: lm } = await supabase.from('laser_models').select('id, name, label, manufacturer_id').order('name');
+          setDbLaserModels(lm || []);
+        } catch (e) { /* fallback to free text ok */ }
       } catch (err) {
         console.error('Error fetching data:', err);
       } finally {
@@ -225,8 +257,25 @@ export default function ServiceTicketDetail() {
           <div className="card p-6">
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Equipment Information</h2>
             <div className="space-y-4">
-              <Field label="Make" value={isEditing ? <input className="input" value={formData.equipment_make || ''} onChange={(e) => handleInputChange('equipment_make', e.target.value)} /> : ticket.equipment_make} />
-              <Field label="Model" value={isEditing ? <input className="input" value={formData.equipment_model || ''} onChange={(e) => handleInputChange('equipment_model', e.target.value)} /> : ticket.equipment_model} />
+              <Field label="Make" value={isEditing ? (
+                dbMfrs.length > 0 ? (
+                  <select className="input" value={formData.equipment_make || ''} onChange={(e) => handleInputChange('equipment_make', e.target.value)}>
+                    <option value="">-- Select --</option>
+                    {dbMfrs.map((m:any) => <option key={m.id} value={m.name}>{m.name}</option>)}
+                  </select>
+                ) : <input className="input" value={formData.equipment_make || ''} onChange={(e) => handleInputChange('equipment_make', e.target.value)} />
+              ) : ticket.equipment_make} />
+
+              <Field label="Model" value={isEditing ? (
+                dbLaserModels.length > 0 ? (
+                  <select className="input" value={formData.equipment_model || ''} onChange={(e) => handleInputChange('equipment_model', e.target.value)}>
+                    <option value="">-- Select --</option>
+                    {dbLaserModels
+                      .filter((m:any) => !formData.equipment_make || String(m.manufacturer_id) === String(formData.equipment_make) || m.manufacturer === formData.equipment_make)
+                      .map((m:any) => <option key={m.id} value={m.name || m.label}>{m.label || m.name}</option>)}
+                  </select>
+                ) : <input className="input" value={formData.equipment_model || ''} onChange={(e) => handleInputChange('equipment_model', e.target.value)} />
+              ) : ticket.equipment_model} />
               <Field label="Equipment Type" value={isEditing ? <input className="input" value={formData.equipment_type || ''} onChange={(e) => handleInputChange('equipment_type', e.target.value)} /> : ticket.equipment_type} />
               <Field label="Serial Number" value={isEditing ? <input className="input" value={formData.serial_number || ''} onChange={(e) => handleInputChange('serial_number', e.target.value)} /> : ticket.serial_number} />
               <Field label="PM Due Date" value={isEditing ? <input type="date" className="input" value={formData.service_date || ''} onChange={(e) => handleInputChange('service_date', e.target.value)} /> : ticket.service_date} />

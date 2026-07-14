@@ -1,41 +1,18 @@
-[[plugins]]
-  package = "@netlify/plugin-nextjs"
+# Monorepo root — site base is web/
+# Catch-all redirects removed (they broke Next.js Runtime → 404).
 
 [build]
   base = "web"
   command = "npm run build"
-  publish = ".next"
+  # publish intentionally omitted — @netlify/plugin-nextjs manages it
 
-  [build.environment]
-
-[[headers]]
-for = "/*"
-
-  [headers.values]
-  X-Frame-Options = "SAMEORIGIN"
-  X-Content-Type-Options = "nosniff"
-  Referrer-Policy = "strict-origin-when-cross-origin"
-  X-XSS-Protection = "1; mode=block"
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
 
 [[headers]]
-for = "/_next/static/*"
-
+  for = "/*"
   [headers.values]
-  Cache-Control = "public, max-age=31536000, immutable"
-
-[[redirects]]
-  from = "/_next/static/*"
-  to = "/static/:splat"
-  status = 200
-
-
-[[redirects]]
-  from = "/*"
-  to = "/.netlify/functions/___netlify-server-handler"
-  status = 200
-  force = true
-
-
-
-
-# (Cleaned duplicate _ipx/image redirect. Routing handled by generated .next/_redirects from the build + plugin.)
+    X-Frame-Options = "SAMEORIGIN"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    X-XSS-Protection = "1; mode=block"

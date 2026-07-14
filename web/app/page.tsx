@@ -3,18 +3,39 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
-import { Calendar, Wrench, Package, FileText } from 'lucide-react';
+import { Calendar, Wrench, Package, FileText, Zap, Building2, Settings } from 'lucide-react';
 import AdBanner from '@/components/AdBanner';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import {
+  isAdmin,
+  getDashboardPersona,
+  type DashboardPersona,
+} from '@/lib/roles';
 
 export default function HomePage() {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
+  const [orgType, setOrgType] = useState<string | null>(null);
+  const [persona, setPersona] = useState<DashboardPersona>('service');
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
     openTickets: 0,
+    todayCalls: 0,
     completedReports: 0,
     totalReports: 0,
+  });
+  const [statsError, setStatsError] = useState<string | null>(null);
+  const [ownerStats, setOwnerStats] = useState({
+    lasers: 0,
+    openRequests: 0,
+    serviceHistory: 0,
+    bidsReceived: 0,
+  });
+  const [supplierStats, setSupplierStats] = useState({
+    catalog: 0,
+    listings: 0,
+    openDemand: 0,
+    brands: 0,
   });
   const [fseStats, setFseStats] = useState<any[]>([]);
 
@@ -30,71 +51,296 @@ export default function HomePage() {
         return;
       }
 
-      const { data: prof } = await supabase
+      const { data: prof, error: profErr } = await supabase
         .from('user_profiles')
         .select('first_name, role, organization_id')
         .eq('id', u.id)
-        .single();
+        .maybeSingle();
 
+      if (profErr) {
+        console.warn('profile load', profErr);
+        setStatsError(profErr.message);
+      }
       setProfile(prof);
 
       if (!prof?.organization_id) {
+        setPersona(getDashboardPersona(prof?.role));
         setLoading(false);
         return;
       }
 
       const orgId = prof.organization_id;
 
-      const { data: reports } = await supabase
-        .from('service_reports')
-        .select('status, assigned_to')
-        .eq('organization_id', orgId);
-
-      if (reports) {
-        setStats({
-          openTickets: reports.filter(r => r.status === 'draft' || r.status === 'open').length,
-          completedReports: reports.filter(r => r.status === 'complete').length,
-          totalReports: reports.length,
-        });
-
-        if (prof.role === 'admin' || prof.role === 'company_admin') {
-          const fseMap: { [key: string]: { name: string; open: number; completed: number } } = {};
-
-          const fseIds = [...new Set(reports.map(r => r.assigned_to).filter(Boolean))];
-          if (fseIds.length > 0) {
-            const { data: fseUsers } = await supabase
-              .from('user_profiles')
-              .select('id, first_name, last_name')
-              .in('id', fseIds);
-
-            fseUsers?.forEach(fse => {
-              fseMap[fse.id] = {
-                name: `${fse.first_name || ''} ${fse.last_name || ''}`.trim(),
-                open: 0,
-                completed: 0,
-              };
-            });
-          }
-
-          reports.forEach(report => {
-            if (report.assigned_to && fseMap[report.assigned_to]) {
-              if (report.status === 'complete') {
-                fseMap[report.assigned_to].completed++;
-              } else {
-                fseMap[report.assigned_to].open++;
-              }
-            }
-          });
-
-          setFseStats(Object.values(fseMap));
-        }
+      let oType: string | null = null;
+      try {
+        const { data: org } = await supabase
+          .from('organizations')
+          .select('type, supported_brands')
+          .eq('id', orgId)
+          .maybeSingle();
+        oType = org?.type || null;
+        setOrgType(oType);
+      } catch {
+        /* ignore */
       }
 
+      const dashPersona = getDashboardPersona(prof.role, oType);
+      setPersona(dashPersona);
+
+      if (dashPersona === 'owner') {
+        await loadOwnerStats(orgId, u.id);
+        setLoading(false);
+        return;
+      }
+
+      if (dashPersona === 'supplier') {
+        await loadSupplierStats(orgId, u.id);
+        setLoading(false);
+        return;
+      }
+
+      // Service company dashboard — tickets + reports (not reports masquerading as tickets)
+      let kpiError: string | null = null;
+      let openTickets = 0;
+      let todayCalls = 0;
+      let completedReports = 0;
+      let totalReports = 0;
+
+      try {
+        const today = (() => {
+          const n = new Date();
+          return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+        })();
+
+        const { data: tickets, error: tErr } = await supabase
+          .from('service_tickets')
+          .select('id, status, service_date, assigned_to')
+          .eq('organization_id', orgId)
+          .limit(500);
+
+        if (tErr) {
+          console.warn('tickets KPI', tErr);
+          kpiError = tErr.message;
+        } else {
+          const list = tickets || [];
+          const isClosed = (s: string | null | undefined) => {
+            const x = (s || '').toLowerCase();
+            return ['completed', 'cancelled', 'canceled', 'complete'].includes(x);
+          };
+          openTickets = list.filter((t) => !isClosed(t.status)).length;
+          todayCalls = list.filter(
+            (t) => String(t.service_date || '').slice(0, 10) === today && !isClosed(t.status)
+          ).length;
+        }
+      } catch (e: any) {
+        console.warn('tickets load failed', e);
+        kpiError = e?.message || 'ticket load failed';
+      }
+
+      try {
+        const { data: reports, error: rErr } = await supabase
+          .from('service_reports')
+          .select('status, assigned_to, created_by')
+          .eq('organization_id', orgId)
+          .limit(500);
+
+        if (rErr) {
+          console.warn('reports KPI', rErr);
+          if (!kpiError) kpiError = rErr.message;
+        } else if (reports) {
+          totalReports = reports.length;
+          completedReports = reports.filter(
+            (r) => (r.status || '').toLowerCase() === 'complete'
+          ).length;
+
+          if (isAdmin(prof.role)) {
+            const fseMap: { [key: string]: { name: string; open: number; completed: number } } = {};
+            const fseIds = [
+              ...new Set(
+                reports
+                  .map((r) => r.assigned_to || r.created_by)
+                  .filter(Boolean)
+              ),
+            ] as string[];
+            if (fseIds.length > 0) {
+              const { data: fseUsers } = await supabase
+                .from('user_profiles')
+                .select('id, first_name, last_name')
+                .in('id', fseIds);
+              fseUsers?.forEach((fse) => {
+                fseMap[fse.id] = {
+                  name: `${fse.first_name || ''} ${fse.last_name || ''}`.trim() || 'Tech',
+                  open: 0,
+                  completed: 0,
+                };
+              });
+            }
+            reports.forEach((report) => {
+              const uid = report.assigned_to || report.created_by;
+              if (uid && fseMap[uid]) {
+                if ((report.status || '').toLowerCase() === 'complete') {
+                  fseMap[uid].completed++;
+                } else {
+                  fseMap[uid].open++;
+                }
+              }
+            });
+            setFseStats(Object.values(fseMap));
+          }
+        }
+      } catch (e) {
+        console.warn('reports load failed', e);
+      }
+
+      setStats({ openTickets, todayCalls, completedReports, totalReports });
+      setStatsError(kpiError);
       setLoading(false);
     };
 
     loadData();
   }, [supabase]);
+
+  async function loadOwnerStats(orgId: any, _userId: string) {
+    let lasers = 0;
+    let openRequests = 0;
+    let serviceHistory = 0;
+    let bidsReceived = 0;
+
+    try {
+      const { count } = await supabase
+        .from('equipment')
+        .select('id', { count: 'exact', head: true })
+        .eq('customer_organization_id', orgId);
+      lasers = count || 0;
+    } catch { /* ignore */ }
+
+    try {
+      const { data: reqs } = await supabase
+        .from('service_requests')
+        .select('id, status')
+        .eq('organization_id', orgId)
+        .eq('status', 'open');
+      openRequests = (reqs || []).length;
+    } catch {
+      try {
+        const { data: reqs2 } = await supabase
+          .from('marketplace_requests')
+          .select('id, status, created_by')
+          .eq('status', 'open')
+          .limit(100);
+        // Fallback: count open marketplace requests loosely
+        openRequests = (reqs2 || []).length;
+      } catch { /* ignore */ }
+    }
+
+    try {
+      const { data: reps } = await supabase
+        .from('service_reports')
+        .select('id, status, serial_number, customer_organization_id')
+        .eq('status', 'complete')
+        .limit(200);
+      let list = reps || [];
+      const byOrg = list.filter(
+        r => r.customer_organization_id != null && String(r.customer_organization_id) === String(orgId)
+      );
+      if (byOrg.length) {
+        list = byOrg;
+      } else {
+        const { data: eq } = await supabase
+          .from('equipment')
+          .select('serial_number')
+          .eq('customer_organization_id', orgId);
+        const serials = (eq || []).map(e => (e.serial_number || '').toLowerCase()).filter(Boolean);
+        if (serials.length) {
+          list = list.filter(r => serials.includes((r.serial_number || '').toLowerCase()));
+        } else {
+          list = [];
+        }
+      }
+      serviceHistory = list.length;
+    } catch { /* ignore */ }
+
+    try {
+      const { data: myReqs } = await supabase
+        .from('service_requests')
+        .select('id')
+        .eq('organization_id', orgId);
+      const ids = (myReqs || []).map(r => r.id);
+      if (ids.length) {
+        const { count } = await supabase
+          .from('bids')
+          .select('id', { count: 'exact', head: true })
+          .in('request_id', ids);
+        bidsReceived = count || 0;
+      }
+    } catch { /* ignore */ }
+
+    setOwnerStats({ lasers, openRequests, serviceHistory, bidsReceived });
+  }
+
+  async function loadSupplierStats(orgId: any, userId: string) {
+    let catalog = 0;
+    let listings = 0;
+    let openDemand = 0;
+    let brands = 0;
+
+    try {
+      let q = supabase.from('parts_catalog').select('id, brand, manufacturer', { count: 'exact' });
+      if (userId) q = q.eq('created_by', userId);
+      const { data: parts, count } = await q;
+      catalog = count != null ? count : (parts || []).length;
+      const brandSet = new Set<string>();
+      (parts || []).forEach((p: any) => {
+        const b = p.brand || p.manufacturer;
+        if (b) brandSet.add(String(b).toLowerCase());
+      });
+      brands = brandSet.size;
+    } catch { /* ignore */ }
+
+    try {
+      const { data: myList } = await supabase
+        .from('marketplace_listings')
+        .select('id, status')
+        .eq('seller_id', userId)
+        .limit(200);
+      listings = (myList || []).filter(
+        (r: any) => !r.status || r.status === 'open' || r.status === 'active'
+      ).length;
+    } catch {
+      try {
+        const { data: myList2 } = await supabase
+          .from('service_requests')
+          .select('id, status, category, posted_by')
+          .eq('posted_by', userId)
+          .in('category', ['parts', 'consumables', 'equipment']);
+        listings = (myList2 || []).filter(
+          (r: any) => !r.status || r.status === 'open' || r.status === 'active'
+        ).length;
+      } catch { /* ignore */ }
+    }
+
+    try {
+      const { data: dem } = await supabase
+        .from('service_requests')
+        .select('id, status, category')
+        .eq('status', 'open')
+        .in('category', ['parts', 'consumables']);
+      openDemand = (dem || []).length;
+    } catch { /* ignore */ }
+
+    if (!brands && orgId) {
+      try {
+        const { data: org } = await supabase
+          .from('organizations')
+          .select('supported_brands')
+          .eq('id', orgId)
+          .maybeSingle();
+        if (Array.isArray(org?.supported_brands)) brands = org.supported_brands.length;
+      } catch { /* ignore */ }
+    }
+
+    setSupplierStats({ catalog, listings, openDemand, brands });
+  }
 
   if (loading) {
     return <div className="min-h-screen flex items-center justify-center">Loading dashboard...</div>;
@@ -118,140 +364,276 @@ export default function HomePage() {
     );
   }
 
+  const role = profile?.role;
+  const greetName = profile?.first_name || (persona === 'owner' || persona === 'supplier' ? 'there' : 'Tech');
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
 
       <div className="max-w-7xl mx-auto w-full px-4 py-8">
         <h1 className="text-4xl font-extrabold tracking-tight">
-          Welcome back, {profile?.first_name || 'Tech'}!
+          Welcome back, {greetName}!
         </h1>
-        <p className="text-[var(--text3)]">Role: <span className="capitalize">{profile?.role}</span></p>
+        <p className="text-[var(--text3)]">
+          Role: <span className="capitalize">{role}</span>
+          {orgType ? <span> · Org: {orgType}</span> : null}
+        </p>
 
         <AdBanner />
 
-        {/* KPIs */}
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mt-8">
-          <div className="card p-5 text-center">
-            <div className="text-4xl font-extrabold text-[var(--gold)]">{stats.openTickets}</div>
-            <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">OPEN TICKETS</div>
-          </div>
-          <div className="card p-5 text-center">
-            <div className="text-4xl font-extrabold text-green-400">{stats.completedReports}</div>
-            <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">COMPLETED REPORTS</div>
-          </div>
-          <div className="card p-5 text-center">
-            <div className="text-4xl font-extrabold text-[var(--blue)]">{stats.totalReports}</div>
-            <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">TOTAL REPORTS</div>
-          </div>
-        </div>
-
-        {/* FSE Performance (only for admins) */}
-        {(profile?.role === 'admin' || profile?.role === 'company_admin') && fseStats.length > 0 && (
-          <div className="mt-10">
-            <h3 className="font-bold text-lg mb-4">FSE Performance (Organization)</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              {fseStats.map((fse, index) => (
-                <div key={index} className="card p-5">
-                  <div className="font-semibold mb-2">{fse.name || 'Unassigned FSE'}</div>
-                  <div className="flex justify-between text-sm">
-                    <span>Open:</span>
-                    <span className="font-bold text-[var(--gold)]">{fse.open}</span>
-                  </div>
-                  <div className="flex justify-between text-sm">
-                    <span>Completed:</span>
-                    <span className="font-bold text-green-400">{fse.completed}</span>
-                  </div>
-                </div>
-              ))}
+        {/* ── Owner / facility KPIs ── */}
+        {persona === 'owner' && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
+              <Link href="/my-lasers" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-[var(--gold)]">{ownerStats.lasers}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">MY LASERS</div>
+              </Link>
+              <Link href="/marketplace" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-[var(--blue)]">{ownerStats.openRequests}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">OPEN REQUESTS</div>
+              </Link>
+              <Link href="/reports" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-green-400">{ownerStats.serviceHistory}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">SERVICE HISTORY</div>
+              </Link>
+              <Link href="/marketplace" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-purple-400">{ownerStats.bidsReceived}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">BIDS RECEIVED</div>
+              </Link>
             </div>
-          </div>
+
+            <div className="mt-12">
+              <h3 className="font-bold text-lg mb-4">Clinic Dashboard</h3>
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+                <Link href="/my-lasers" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Zap size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">My Lasers</div>
+                </Link>
+                <Link href="/marketplace" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Marketplace</div>
+                </Link>
+                <Link href="/reports" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <FileText size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Service History</div>
+                </Link>
+                <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Facility Profile</div>
+                </Link>
+                <Link href="/settings" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Settings size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Settings</div>
+                </Link>
+              </div>
+            </div>
+          </>
         )}
 
-        {/* Upcoming Service Calls */}
-        <div className="mt-10">
-          <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-            <Calendar size={20} /> Upcoming Service Calls
-          </h3>
-          <div className="card p-6">
-            <p className="text-[var(--text3)]">Check the Service Schedule for upcoming calls.</p>
-            <Link href="/service-schedule" className="text-[var(--gold)] mt-4 inline-block hover:underline">
-              View Full Schedule →
-            </Link>
-          </div>
-        </div>
-
-        {/* Quick Access */}
-        <div className="mt-12">
-          <h3 className="font-bold text-lg mb-4">Quick Access</h3>
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-            <Link href="/hub" className="card p-6 text-center hover:border-[var(--gold)]">
-              <Wrench size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-              <div className="font-bold">Tech Hub</div>
-            </Link>
-
-            <Link href="/service-schedule" className="card p-6 text-center hover:border-[var(--gold)]">
-              <Calendar size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-              <div className="font-bold">Service Schedule</div>
-            </Link>
-
-            <Link href="/marketplace" className="card p-6 text-center hover:border-[var(--gold)]">
-              <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-              <div className="font-bold">Marketplace</div>
-            </Link>
-
-            <Link href="/reports" className="card p-6 text-center hover:border-[var(--gold)]">
-              <FileText size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-              <div className="font-bold">Reports</div>
-            </Link>
-
-            {/* Admin Portal - Only visible to admins */}
-            {(profile?.role === 'admin' || profile?.role === 'company_admin') && (
-              <Link 
-                href="/admin" 
-                className="card p-6 text-center hover:border-[var(--gold)] border-2 border-[var(--gold)]/50"
-              >
-                <div className="text-3xl mb-2">🛡️</div>
-                <div className="font-bold">Admin Portal</div>
-                <div className="text-xs text-[var(--text3)] mt-1">Team, Customers & Settings</div>
+        {/* ── Supplier KPIs ── */}
+        {persona === 'supplier' && (
+          <>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
+              <Link href="/parts" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-[var(--gold)]">{supplierStats.catalog}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">CATALOG ITEMS</div>
               </Link>
+              <Link href="/marketplace/my-listings" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-[var(--blue)]">{supplierStats.listings}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">MY LISTINGS</div>
+              </Link>
+              <Link href="/marketplace" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-purple-400">{supplierStats.openDemand}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">OPEN DEMAND</div>
+              </Link>
+              <Link href="/company" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-green-400">{supplierStats.brands}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">BRANDS STOCKED</div>
+              </Link>
+            </div>
+
+            <div className="mt-12">
+              <h3 className="font-bold text-lg mb-4">Supplier Dashboard</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Link href="/parts" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Parts Catalog</div>
+                </Link>
+                <Link href="/marketplace" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Marketplace</div>
+                </Link>
+                <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Supplier Profile</div>
+                </Link>
+                <Link href="/settings" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Settings size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Settings</div>
+                </Link>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── Service company KPIs + tools (unchanged structure) ── */}
+        {persona === 'service' && (
+          <>
+            {statsError && (
+              <div className="mt-4 p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs text-amber-200">
+                Some dashboard data could not load: {statsError}
+              </div>
             )}
-          </div>
-        </div>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
+              <Link href="/service-schedule" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-[var(--gold)]">{stats.openTickets}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">OPEN TICKETS</div>
+              </Link>
+              <Link href="/service-schedule" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-[var(--blue)]">{stats.todayCalls}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">TODAY&apos;S CALLS</div>
+              </Link>
+              <Link href="/reports" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-green-400">{stats.completedReports}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">COMPLETED REPORTS</div>
+              </Link>
+              <Link href="/reports" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-purple-400">{stats.totalReports}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">TOTAL REPORTS</div>
+              </Link>
+            </div>
 
-        {/* Marketplace Section */}
-        <div className="mt-12">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="font-bold text-lg">Marketplace</h3>
-            <Link href="/marketplace" className="text-sm text-[var(--gold)] hover:underline">Browse all →</Link>
-          </div>
+            {isAdmin(role) && fseStats.length > 0 && (
+              <div className="mt-10">
+                <h3 className="font-bold text-lg mb-4">FSE Performance (Organization)</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                  {fseStats.map((fse, index) => (
+                    <div key={index} className="card p-5">
+                      <div className="font-semibold mb-2">{fse.name || 'Unassigned FSE'}</div>
+                      <div className="flex justify-between text-sm">
+                        <span>Open:</span>
+                        <span className="font-bold text-[var(--gold)]">{fse.open}</span>
+                      </div>
+                      <div className="flex justify-between text-sm">
+                        <span>Completed:</span>
+                        <span className="font-bold text-green-400">{fse.completed}</span>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
 
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-            <Link href="/marketplace/parts" className="card p-6 hover:border-[var(--gold)] group">
-              <div className="text-3xl mb-3">🔩</div>
-              <div className="font-bold text-lg mb-1">Parts</div>
-              <div className="text-sm text-[var(--text3)]">Parts listed for sale by suppliers</div>
-            </Link>
+            <div className="mt-10">
+              <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
+                <Calendar size={20} /> Upcoming Service Calls
+              </h3>
+              <div className="card p-6">
+                <p className="text-[var(--text3)]">Check the Service Schedule for upcoming calls.</p>
+                <Link href="/service-schedule" className="text-[var(--gold)] mt-4 inline-block hover:underline">
+                  View Full Schedule →
+                </Link>
+              </div>
+            </div>
 
-            <Link href="/marketplace/used-systems" className="card p-6 hover:border-[var(--gold)] group">
-              <div className="text-3xl mb-3">🖥️</div>
-              <div className="font-bold text-lg mb-1">Used Laser Systems</div>
-              <div className="text-sm text-[var(--text3)]">Buy or sell pre-owned equipment</div>
-            </Link>
+            <div className="mt-12">
+              <h3 className="font-bold text-lg mb-4">Quick Access · Tech</h3>
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                <Link href="/calculators" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <div className="text-3xl mb-2">🔬</div>
+                  <div className="font-bold">Photometry Tools</div>
+                </Link>
 
-            <Link href="/marketplace/consumables" className="card p-6 hover:border-[var(--gold)] group">
-              <div className="text-3xl mb-3">🧴</div>
-              <div className="font-bold text-lg mb-1">Consumables</div>
-              <div className="text-sm text-[var(--text3)]">Handpieces, fibers, tips & more</div>
-            </Link>
+                <Link href="/hub" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Wrench size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Tech Hub</div>
+                </Link>
 
-            <Link href="/marketplace/requests" className="card p-6 hover:border-[var(--gold)] group">
-              <div className="text-3xl mb-3">🛠️</div>
-              <div className="font-bold text-lg mb-1">Service Requests / Needs</div>
-              <div className="text-sm text-[var(--text3)]">Post or browse service needs</div>
-            </Link>
-          </div>
-        </div>
+                <Link href="/service-schedule" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Calendar size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Service Schedule</div>
+                </Link>
+
+                <Link href="/marketplace" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Marketplace</div>
+                </Link>
+
+                <Link href="/reports" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <FileText size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Reports</div>
+                </Link>
+
+                {isAdmin(role) && (
+                  <Link
+                    href="/admin"
+                    className="card p-6 text-center hover:border-[var(--gold)] border-2 border-[var(--gold)]/50"
+                  >
+                    <div className="text-3xl mb-2">🛡️</div>
+                    <div className="font-bold">Admin Portal</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">Team & Settings</div>
+                  </Link>
+                )}
+              </div>
+            </div>
+
+            {(isAdmin(role) ||
+              ['service_manager', 'dispatcher', 'scheduler', 'billing_manager'].includes(
+                (role || '').toLowerCase()
+              )) && (
+              <div className="mt-12">
+                <h3 className="font-bold text-lg mb-4">💼 Business Management</h3>
+                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                  <Link href="/customers" className="card p-6 text-center hover:border-[var(--gold)]">
+                    <div className="text-3xl mb-2">👥</div>
+                    <div className="font-bold">Customers</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">Directory & profiles</div>
+                  </Link>
+                  <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
+                    <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                    <div className="font-bold">Company Profile</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">Org, team & branding</div>
+                  </Link>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-12">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-bold text-lg">Marketplace</h3>
+                <Link href="/marketplace" className="text-sm text-[var(--gold)] hover:underline">Browse all →</Link>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+                <Link href="/marketplace/parts" className="card p-6 hover:border-[var(--gold)] group">
+                  <div className="text-3xl mb-3">🔩</div>
+                  <div className="font-bold text-lg mb-1">Parts</div>
+                  <div className="text-sm text-[var(--text3)]">Parts listed for sale by suppliers</div>
+                </Link>
+
+                <Link href="/marketplace/used-systems" className="card p-6 hover:border-[var(--gold)] group">
+                  <div className="text-3xl mb-3">🖥️</div>
+                  <div className="font-bold text-lg mb-1">Used Laser Systems</div>
+                  <div className="text-sm text-[var(--text3)]">Buy or sell pre-owned equipment</div>
+                </Link>
+
+                <Link href="/marketplace/consumables" className="card p-6 hover:border-[var(--gold)] group">
+                  <div className="text-3xl mb-3">🧴</div>
+                  <div className="font-bold text-lg mb-1">Consumables</div>
+                  <div className="text-sm text-[var(--text3)]">Handpieces, fibers, tips & more</div>
+                </Link>
+
+                <Link href="/marketplace/requests" className="card p-6 hover:border-[var(--gold)] group">
+                  <div className="text-3xl mb-3">🛠️</div>
+                  <div className="font-bold text-lg mb-1">Service Requests / Needs</div>
+                  <div className="text-sm text-[var(--text3)]">Post or browse service needs</div>
+                </Link>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

@@ -14,8 +14,15 @@ export default function Profile() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) return;
       const { data } = await supabase.from('user_profiles').select('*').eq('id', user.id).maybeSingle();
-      if (data) setProfile(data);
-      else setProfile({ first_name: user.user_metadata?.first_name || '', last_name: user.user_metadata?.last_name || '', email: user.email });
+      if (data) {
+        setProfile(data);
+      } else {
+        setProfile({ first_name: user.user_metadata?.first_name || '', last_name: user.user_metadata?.last_name || '', email: user.email });
+      }
+      // If phone/job missing but we have auth meta or later org, at least have basics
+      if (!data?.phone && user.user_metadata?.phone) {
+        setProfile((p: any) => ({ ...p, phone: user.user_metadata.phone }));
+      }
     })();
   }, []);
 
@@ -42,7 +49,7 @@ export default function Profile() {
           </div>
           <div><label className="label">Phone</label><input className="input" value={profile.phone || ''} onChange={e => setProfile({ ...profile, phone: e.target.value })} /></div>
           <div><label className="label">Job Title</label><input className="input" value={profile.job_title || ''} onChange={e => setProfile({ ...profile, job_title: e.target.value })} /></div>
-          <div><label className="label">Role (read-only for now)</label><input className="input" value={profile.role || 'Not set (set during signup)'} disabled /></div>
+          <div><label className="label">Role (set during signup/onboarding)</label><input className="input" value={profile.role || 'company_admin (default for RSP creators)'} disabled /></div>
           <p className="text-[10px] text-[var(--text3)] mt-1">Signup is by org type first: Service Company signups get role company_admin (you create the org, pre-populated as admin); Owner gets 'owner'; Parts gets 'parts_supplier'. FSEs sign up via the FSE flow (role 'fse', no org initially) and are added to a Service Company by its admin (via /company Team add people and roles to the organization, which sets organization_id + role). Roster allows editing roles (incl creator) with at least 1 admin enforced. Sole props supported. If role/org incorrect, contact support or have admin update via Team.</p>
         </div>
 

@@ -1,32 +1,83 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { Calendar as CalendarIcon, Clock, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { isAdmin, isPro } from '@/lib/roles';
+
+/** YYYY-MM-DD in local calendar (avoids UTC shift from toISOString) */
+function toLocalYmd(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
+function parseYmd(ymd: string | null | undefined): { y: number; m: number; d: number } | null {
+  if (!ymd || typeof ymd !== 'string') return null;
+  // Accept YYYY-MM-DD or ISO timestamps
+  const part = ymd.slice(0, 10);
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(part);
+  if (!m) return null;
+  return { y: +m[1], m: +m[2], d: +m[3] };
+}
+
+function ymdEqualsDay(ymd: string | null | undefined, year: number, month1: number, day: number): boolean {
+  const p = parseYmd(ymd);
+  if (!p) return false;
+  return p.y === year && p.m === month1 && p.d === day;
+}
+
+function isOpenTicketStatus(status: string | null | undefined): boolean {
+  const s = (status || '').toLowerCase();
+  return !['completed', 'cancelled', 'canceled', 'complete'].includes(s);
+}
 
 export default function ServiceSchedule() {
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
-  const [currentMonth, setCurrentMonth] = useState(6);
-  const [weekOffset, setWeekOffset] = useState(0);
-  const [dayOffset, setDayOffset] = useState(0);
+  // Full date cursor (fixes hardcoded June + wrong year)
+  const [cursor, setCursor] = useState(() => {
+    const n = new Date();
+    return new Date(n.getFullYear(), n.getMonth(), 1);
+  });
   const [serviceCalls, setServiceCalls] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string>('');
 
   const supabase = getSupabaseClient();
   const router = useRouter();
 
-  // Fetch real data from Supabase
+  const year = cursor.getFullYear();
+  const month0 = cursor.getMonth(); // 0-11
+  const month1 = month0 + 1;
+
   useEffect(() => {
     const fetchServiceCalls = async () => {
       setLoading(true);
+      setLoadError(null);
       try {
         const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+        if (!user) {
+          setServiceCalls([]);
+          return;
+        }
 
-        const { data, error } = await supabase
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('role, organization_id')
+          .eq('id', user.id)
+          .maybeSingle();
+
+        setUserRole(profile?.role || '');
+        const orgId = profile?.organization_id;
+        const role = profile?.role || '';
+
+        // Prefer org-wide tickets for dispatch/admin; assigned-only for pure FSE
+        let query = supabase
           .from('service_tickets')
           .select(`
             id,
@@ -36,38 +87,57 @@ export default function ServiceSchedule() {
             service_type,
             customer_name,
             equipment_model,
-            status
+            equipment_make,
+            status,
+            organization_id,
+            assigned_to,
+            priority
           `)
-          .eq('assigned_to', user.id)
-          .in('status', ['Scheduled', 'En Route', 'On Site'])
           .order('service_date', { ascending: true });
 
+        if (orgId != null) {
+          query = query.eq('organization_id', orgId);
+          // Field techs: still show org calendar but we could filter — match Android org scope for managers
+          if (!isAdmin(role) && !isPro(role) && role === 'fse') {
+            // FSEs see all org tickets (common for schedule awareness); tighten if needed:
+            // query = query.eq('assigned_to', user.id);
+          }
+        } else {
+          query = query.eq('assigned_to', user.id);
+        }
+
+        const { data, error } = await query.limit(500);
         if (error) throw error;
 
         const formatted = (data || []).map((ticket: any) => {
           const start = ticket.scheduled_time;
           const end = ticket.end_time;
-
           let duration = 60;
           if (start && end) {
-            const [sh, sm] = start.split(':').map(Number);
-            const [eh, em] = end.split(':').map(Number);
-            duration = (eh * 60 + em) - (sh * 60 + sm);
+            const [sh, sm] = String(start).split(':').map(Number);
+            const [eh, em] = String(end).split(':').map(Number);
+            duration = eh * 60 + em - (sh * 60 + sm);
           }
-
+          // Normalize date to YYYY-MM-DD string
+          let dateStr = ticket.service_date;
+          if (dateStr && typeof dateStr === 'string' && dateStr.length > 10) {
+            dateStr = dateStr.slice(0, 10);
+          }
           return {
             id: ticket.id,
-            date: ticket.service_date,
-            time: start || '09:00',
+            date: dateStr,
+            time: (start && String(start).slice(0, 5)) || '09:00',
             duration: duration > 0 ? duration : 60,
-            title: `${ticket.service_type || 'Service'} - ${ticket.customer_name}`,
-            equipment_model: ticket.equipment_model || '',
+            title: `${ticket.service_type || 'Service'} - ${ticket.customer_name || 'Customer'}`,
+            equipment_model: [ticket.equipment_make, ticket.equipment_model].filter(Boolean).join(' ') || '',
+            status: ticket.status,
           };
         });
 
         setServiceCalls(formatted);
-      } catch (err) {
+      } catch (err: any) {
         console.error('Error fetching service calls:', err);
+        setLoadError(err?.message || 'Failed to load tickets');
         setServiceCalls([]);
       } finally {
         setLoading(false);
@@ -77,33 +147,43 @@ export default function ServiceSchedule() {
     fetchServiceCalls();
   }, [supabase]);
 
-  const currentDate = new Date();
-  currentDate.setDate(currentDate.getDate() + dayOffset);
+  const monthName = cursor.toLocaleString('default', { month: 'long' });
 
-  const monthName = new Date(2026, currentMonth - 1, 1).toLocaleString('default', { month: 'long' });
+  const nextMonth = () => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
+  const prevMonth = () => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
 
-  const nextMonth = () => setCurrentMonth(prev => (prev === 12 ? 1 : prev + 1));
-  const prevMonth = () => setCurrentMonth(prev => (prev === 1 ? 12 : prev - 1));
+  const nextWeek = () => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() + 7));
+  const prevWeek = () => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() - 7));
 
-  const nextWeek = () => setWeekOffset(prev => prev + 1);
-  const prevWeek = () => setWeekOffset(prev => prev - 1);
+  const nextDay = () => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() + 1));
+  const prevDay = () => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() - 1));
 
-  const nextDay = () => setDayOffset(prev => prev + 1);
-  const prevDay = () => setDayOffset(prev => prev - 1);
+  const goToday = () => {
+    const n = new Date();
+    if (view === 'month') setCursor(new Date(n.getFullYear(), n.getMonth(), 1));
+    else setCursor(new Date(n.getFullYear(), n.getMonth(), n.getDate()));
+  };
 
-  // Calendar generation
-  const firstDay = new Date(2026, currentMonth - 1, 1).getDay();
-  const daysInMonth = new Date(2026, currentMonth, 0).getDate();
-  const calendarDays = Array(firstDay).fill(null).concat(Array.from({ length: daysInMonth }, (_, i) => i + 1));
+  // Calendar grid for current month
+  const firstDay = new Date(year, month0, 1).getDay();
+  const daysInMonth = new Date(year, month0 + 1, 0).getDate();
+  const calendarDays = Array(firstDay).fill(null).concat(
+    Array.from({ length: daysInMonth }, (_, i) => i + 1)
+  );
+
+  // Week starts Sunday containing cursor
+  const weekStart = useMemo(() => {
+    const d = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate());
+    d.setDate(d.getDate() - d.getDay());
+    return d;
+  }, [cursor]);
 
   const timeSlots = Array.from({ length: 16 }, (_, i) => 6 + i);
 
-  // Click handler → Open full ticket
-  const handleEventClick = (callId: number) => {
+  const handleEventClick = (callId: string | number) => {
     router.push(`/service-tickets/${callId}`);
   };
 
-  // Drag & Drop handlers (Week + Day views)
   const handleDragStart = (e: React.DragEvent, call: any) => {
     e.dataTransfer.setData('text/plain', JSON.stringify(call));
   };
@@ -112,16 +192,12 @@ export default function ServiceSchedule() {
     e.preventDefault();
     const draggedCall = JSON.parse(e.dataTransfer.getData('text/plain'));
 
-    // Update locally
-    setServiceCalls(prev =>
-      prev.map(call =>
-        call.id === draggedCall.id
-          ? { ...call, date: newDate, time: newTime }
-          : call
+    setServiceCalls((prev) =>
+      prev.map((call) =>
+        call.id === draggedCall.id ? { ...call, date: newDate, time: newTime } : call
       )
     );
 
-    // Update in Supabase
     try {
       await supabase
         .from('service_tickets')
@@ -140,46 +216,107 @@ export default function ServiceSchedule() {
     e.preventDefault();
   };
 
+  const dayYmd = toLocalYmd(cursor);
+  const todayYmd = toLocalYmd(new Date());
+
+  const agendaCalls = useMemo(() => {
+    return [...serviceCalls]
+      .filter((c) => c.date && c.date >= todayYmd)
+      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.time).localeCompare(String(b.time)));
+  }, [serviceCalls, todayYmd]);
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
 
       <div className="max-w-7xl mx-auto w-full px-4 py-8">
-        <div className="flex items-center justify-between mb-8">
+        <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <CalendarIcon size={32} className="text-[var(--gold)]" />
             <h1 className="text-4xl font-extrabold">Service Schedule</h1>
           </div>
-          <Link href="/" className="text-[var(--gold)] hover:underline">← Back to Dashboard</Link>
+          <div className="flex items-center gap-3">
+            <button type="button" onClick={goToday} className="btn btn-secondary text-sm">
+              Today
+            </button>
+            <Link href="/" className="text-[var(--gold)] hover:underline">
+              ← Back to Dashboard
+            </Link>
+          </div>
         </div>
 
-        <div className="flex gap-2 mb-8">
-          <button onClick={() => setView('month')} className={`btn ${view === 'month' ? 'btn-primary' : ''}`}>Month</button>
-          <button onClick={() => setView('week')} className={`btn ${view === 'week' ? 'btn-primary' : ''}`}>Week</button>
-          <button onClick={() => setView('day')} className={`btn ${view === 'day' ? 'btn-primary' : ''}`}>Day</button>
-          <button onClick={() => setView('agenda')} className={`btn ${view === 'agenda' ? 'btn-primary' : ''}`}>Agenda</button>
+        {loadError && (
+          <div className="mb-4 p-3 rounded-lg border border-red-500/40 bg-red-500/10 text-sm text-red-300">
+            {loadError}
+          </div>
+        )}
+        {loading && (
+          <div className="mb-4 text-sm text-[var(--text3)]">Loading tickets…</div>
+        )}
+        {!loading && (
+          <div className="mb-4 text-xs text-[var(--text3)]">
+            {serviceCalls.length} ticket{serviceCalls.length === 1 ? '' : 's'} loaded
+            {userRole ? ` · role ${userRole}` : ''}
+          </div>
+        )}
+
+        <div className="flex gap-2 mb-8 flex-wrap">
+          <button onClick={() => setView('month')} className={`btn ${view === 'month' ? 'btn-primary' : ''}`}>
+            Month
+          </button>
+          <button onClick={() => setView('week')} className={`btn ${view === 'week' ? 'btn-primary' : ''}`}>
+            Week
+          </button>
+          <button onClick={() => setView('day')} className={`btn ${view === 'day' ? 'btn-primary' : ''}`}>
+            Day
+          </button>
+          <button onClick={() => setView('agenda')} className={`btn ${view === 'agenda' ? 'btn-primary' : ''}`}>
+            Agenda
+          </button>
         </div>
 
         {/* MONTH VIEW */}
         {view === 'month' && (
           <div className="card p-6">
             <div className="flex justify-between items-center mb-6">
-              <button onClick={prevMonth} className="btn btn-secondary p-3"><ChevronLeft size={20} /></button>
-              <div className="text-3xl font-bold">{monthName} 2026</div>
-              <button onClick={nextMonth} className="btn btn-secondary p-3"><ChevronRight size={20} /></button>
+              <button type="button" onClick={prevMonth} className="btn btn-secondary p-3" aria-label="Previous month">
+                <ChevronLeft size={20} />
+              </button>
+              <div className="text-3xl font-bold">
+                {monthName} {year}
+              </div>
+              <button type="button" onClick={nextMonth} className="btn btn-secondary p-3" aria-label="Next month">
+                <ChevronRight size={20} />
+              </button>
             </div>
 
             <div className="grid grid-cols-7 gap-px bg-[var(--border)]">
-              {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map(d => (
-                <div key={d} className="bg-[var(--surface)] py-3 text-center font-medium text-sm">{d}</div>
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
+                <div key={d} className="bg-[var(--surface)] py-3 text-center font-medium text-sm">
+                  {d}
+                </div>
               ))}
               {calendarDays.map((day, i) => {
-                const dayCalls = serviceCalls.filter(c => parseInt(c.date.split('-')[2]) === day);
+                // CRITICAL: match full YYYY-MM-DD for this cell, not day-of-month only
+                const dayCalls = day
+                  ? serviceCalls.filter((c) => ymdEqualsDay(c.date, year, month1, day))
+                  : [];
+                const cellYmd = day
+                  ? `${year}-${String(month1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
+                  : '';
+                const isToday = cellYmd === todayYmd;
                 return (
-                  <div key={i} className="bg-[var(--surface)] min-h-[130px] p-2 border border-[var(--border)] hover:bg-[var(--surface3)] relative overflow-hidden">
+                  <div
+                    key={i}
+                    className={`bg-[var(--surface)] min-h-[130px] p-2 border border-[var(--border)] hover:bg-[var(--surface3)] relative overflow-hidden ${
+                      isToday ? 'ring-1 ring-[var(--gold)]' : ''
+                    }`}
+                  >
                     {day && (
                       <>
-                        <div className="text-sm font-medium mb-1">{day}</div>
+                        <div className={`text-sm font-medium mb-1 ${isToday ? 'text-[var(--gold)]' : ''}`}>
+                          {day}
+                        </div>
                         {dayCalls.length > 0 && (
                           <div className="text-[10px] leading-snug text-[var(--gold)] space-y-0.5">
                             {dayCalls.slice(0, 3).map((call, idx) => (
@@ -207,74 +344,49 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* WEEK VIEW with Drag & Drop */}
+        {/* WEEK VIEW */}
         {view === 'week' && (
           <div className="card p-6 overflow-x-auto">
             <div className="flex justify-between items-center mb-4">
-              <button onClick={prevWeek} className="btn btn-secondary p-3"><ChevronLeft size={20} /></button>
-              <div className="text-xl font-bold">Week View</div>
-              <button onClick={nextWeek} className="btn btn-secondary p-3"><ChevronRight size={20} /></button>
+              <button type="button" onClick={prevWeek} className="btn btn-secondary p-3">
+                <ChevronLeft size={20} />
+              </button>
+              <div className="text-xl font-bold">
+                Week of {weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+              </div>
+              <button type="button" onClick={nextWeek} className="btn btn-secondary p-3">
+                <ChevronRight size={20} />
+              </button>
             </div>
 
             <div className="grid grid-cols-8 gap-px bg-[var(--border)] min-w-[1100px]">
-              <div className="bg-[var(--surface)]">
-                <div className="h-12"></div>
-                {timeSlots.map(h => (
-                  <div key={h} className="h-12 border-b border-[var(--border)] px-2 text-xs text-[var(--text3)] flex items-center">
-                    {h}:00
-                  </div>
-                ))}
-              </div>
-
-              {['Sun','Mon','Tue','Wed','Thu','Fri','Sat'].map((dayName, idx) => {
-                const dayDate = new Date(2026, 5, 14 + (weekOffset * 7) + idx);
-                const dayStr = dayDate.toISOString().split('T')[0];
-
+              <div className="bg-[var(--surface)]" />
+              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((dayName, idx) => {
+                const dayDate = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + idx);
+                const dayStr = toLocalYmd(dayDate);
                 return (
-                  <div
-                    key={idx}
-                    className="bg-[var(--surface)] relative border-l border-[var(--border)]"
-                    onDragOver={handleDragOver}
-                    onDrop={(e) => handleDrop(e, dayStr, '09:00')}
-                  >
-                    <div className="h-12 flex flex-col items-center justify-center border-b border-[var(--border)]">
-                      <div className="font-medium">{dayName}</div>
-                      <div className="text-xs text-[var(--text3)]">{dayDate.getDate()}</div>
-                    </div>
-
-                    {timeSlots.map((hour, slotIdx) => {
-                      const timeStr = `${hour.toString().padStart(2, '0')}:00`;
-                      return (
-                        <div
-                          key={slotIdx}
-                          className="h-12 border-b border-[var(--border)] relative"
-                          onDragOver={handleDragOver}
-                          onDrop={(e) => handleDrop(e, dayStr, timeStr)}
-                        />
-                      );
-                    })}
-
-                    {serviceCalls
-                      .filter(c => c.date === dayStr)
-                      .map(call => {
-                        const startHour = parseInt(call.time.split(':')[0]);
-                        const top = (startHour - 6) * 48;
-                        const height = ((call.duration || 60) / 60) * 48;
-
-                        return (
+                  <div key={dayName} className="bg-[var(--surface)] p-2 text-center">
+                    <div className="font-medium">{dayName}</div>
+                    <div className="text-xs text-[var(--text3)]">{dayDate.getDate()}</div>
+                    <div
+                      className="mt-2 min-h-[200px] space-y-1"
+                      onDragOver={handleDragOver}
+                      onDrop={(e) => handleDrop(e, dayStr, '09:00')}
+                    >
+                      {serviceCalls
+                        .filter((c) => c.date === dayStr)
+                        .map((call) => (
                           <div
                             key={call.id}
                             draggable
                             onDragStart={(e) => handleDragStart(e, call)}
                             onClick={() => handleEventClick(call.id)}
-                            className="absolute left-1 right-1 bg-[var(--gold)] text-black text-xs p-1 rounded overflow-hidden z-10 cursor-move"
-                            style={{ top: `${top}px`, height: `${height}px` }}
-                            title={`${call.time} • ${call.title}${call.equipment_model ? ` • ${call.equipment_model}` : ''}`}
+                            className="text-[10px] p-1 rounded bg-[var(--gold)]/20 text-[var(--gold)] cursor-pointer"
                           >
                             {call.time} {call.title}
                           </div>
-                        );
-                      })}
+                        ))}
+                    </div>
                   </div>
                 );
               })}
@@ -282,86 +394,69 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* DAY VIEW with Drag & Drop */}
+        {/* DAY VIEW */}
         {view === 'day' && (
-          <div className="card p-6 overflow-x-auto">
-            <div className="flex justify-between items-center mb-6">
-              <button onClick={prevDay} className="btn btn-secondary p-3"><ChevronLeft size={20} /></button>
-              <div className="text-2xl font-bold">
-                {currentDate.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric' })}
+          <div className="card p-6">
+            <div className="flex justify-between items-center mb-4">
+              <button type="button" onClick={prevDay} className="btn btn-secondary p-3">
+                <ChevronLeft size={20} />
+              </button>
+              <div className="text-xl font-bold">
+                {cursor.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
               </div>
-              <button onClick={nextDay} className="btn btn-secondary p-3"><ChevronRight size={20} /></button>
+              <button type="button" onClick={nextDay} className="btn btn-secondary p-3">
+                <ChevronRight size={20} />
+              </button>
             </div>
-
-            <div className="grid grid-cols-[70px_1fr] gap-px bg-[var(--border)] min-w-[600px]">
-              <div className="bg-[var(--surface)]">
-                {timeSlots.map(h => (
-                  <div key={h} className="h-12 border-b border-[var(--border)] px-2 text-xs text-[var(--text3)] flex items-center">
-                    {h}:00
+            <div className="space-y-2">
+              {serviceCalls.filter((c) => c.date === dayYmd).length === 0 && (
+                <div className="text-[var(--text3)] text-sm py-8 text-center">No tickets scheduled this day.</div>
+              )}
+              {serviceCalls
+                .filter((c) => c.date === dayYmd)
+                .map((call) => (
+                  <div
+                    key={call.id}
+                    className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] cursor-pointer"
+                    onClick={() => handleEventClick(call.id)}
+                  >
+                    <div className="font-semibold text-[var(--gold)]">
+                      {call.time} · {call.title}
+                    </div>
+                    {call.equipment_model && (
+                      <div className="text-xs text-[var(--text3)] mt-1">{call.equipment_model}</div>
+                    )}
                   </div>
                 ))}
-              </div>
-
-              <div className="bg-[var(--surface)] relative" onDragOver={handleDragOver} onDrop={(e) => handleDrop(e, currentDate.toISOString().split('T')[0], '09:00')}>
-                {timeSlots.map(h => {
-                  const timeStr = `${h.toString().padStart(2, '0')}:00`;
-                  return (
-                    <div
-                      key={h}
-                      className="h-12 border-b border-[var(--border)] relative"
-                      onDragOver={handleDragOver}
-                      onDrop={(e) => handleDrop(e, currentDate.toISOString().split('T')[0], timeStr)}
-                    />
-                  );
-                })}
-
-                {serviceCalls
-                  .filter(c => c.date === currentDate.toISOString().split('T')[0])
-                  .map(call => {
-                    const startHour = parseInt(call.time.split(':')[0]);
-                    const top = (startHour - 6) * 48;
-                    const height = ((call.duration || 60) / 60) * 48;
-
-                    return (
-                      <div
-                        key={call.id}
-                        draggable
-                        onDragStart={(e) => handleDragStart(e, call)}
-                        onClick={() => handleEventClick(call.id)}
-                        className="absolute left-2 right-2 bg-[var(--gold)] text-black text-sm p-2 rounded overflow-hidden cursor-move"
-                        style={{ top: `${top}px`, height: `${height}px` }}
-                        title={`${call.time} • ${call.title}${call.equipment_model ? ` • ${call.equipment_model}` : ''}`}
-                      >
-                        {call.time} — {call.title}
-                      </div>
-                    );
-                  })}
-              </div>
             </div>
           </div>
         )}
 
-        {/* AGENDA VIEW */}
+        {/* AGENDA */}
         {view === 'agenda' && (
-          <div className="card p-6 space-y-6">
-            <h3 className="font-bold text-xl mb-4">Upcoming Service Calls</h3>
-            {serviceCalls.length === 0 ? (
-              <p className="text-[var(--text3)]">No upcoming service calls found.</p>
-            ) : (
-              serviceCalls.map(call => (
+          <div className="card p-6">
+            <h2 className="text-xl font-bold mb-4">Upcoming</h2>
+            {agendaCalls.length === 0 && (
+              <div className="text-[var(--text3)] text-sm py-8 text-center">No upcoming tickets.</div>
+            )}
+            <div className="space-y-2">
+              {agendaCalls.map((call) => (
                 <div
                   key={call.id}
+                  className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] cursor-pointer flex justify-between gap-3"
                   onClick={() => handleEventClick(call.id)}
-                  className="bg-[var(--surface3)] p-5 rounded-xl cursor-pointer hover:bg-[var(--surface)]"
                 >
-                  <div className="font-medium text-lg">
-                    {call.time} — {call.title}
-                    {call.equipment_model && ` • ${call.equipment_model}`}
+                  <div>
+                    <div className="font-semibold">{call.title}</div>
+                    <div className="text-xs text-[var(--text3)]">
+                      {call.date} · {call.time}
+                      {call.equipment_model ? ` · ${call.equipment_model}` : ''}
+                    </div>
                   </div>
-                  <div className="text-sm text-[var(--text3)]">{call.date}</div>
+                  <div className="text-xs text-[var(--gold)]">{call.status}</div>
                 </div>
-              ))
-            )}
+              ))}
+            </div>
           </div>
         )}
       </div>

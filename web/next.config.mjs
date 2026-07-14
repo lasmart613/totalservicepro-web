@@ -9,14 +9,8 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  output: "standalone",
+  // Netlify Next Runtime packages the app — do not use standalone
   outputFileTracingRoot: path.join(__dirname),
-  outputFileTracingIncludes: {
-    "**/*": [
-      "node_modules/caniuse-lite/data/features/*.js",
-      "node_modules/caniuse-lite/**/*",
-    ],
-  },
   images: {
     unoptimized: true,
   },

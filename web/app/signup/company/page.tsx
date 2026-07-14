@@ -235,7 +235,7 @@ export default function CompanySignup() {
             <Link href="/login" className="text-[var(--gold)] hover:underline">Already have an account? Sign in</Link>
           </div>
           <div className="mt-3 text-xs text-[var(--text3)] text-center">
-            After signup you will complete company details + add team/roles (incl. sole proprietorship support) in Onboarding.
+            Signup creates your account and basic org. Next: Onboarding will let you review details, add team/roles (FSEs etc), logo &amp; brands. Then Company page for ongoing management.
           </div>
         </div>
       </div>
