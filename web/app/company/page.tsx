@@ -219,7 +219,7 @@ function CompanyProfile() {
           // Team + CRM only for service company admins
           if (isServiceCompany(prof.role, orgData.type) && (isAdmin(prof.role) || prof.role === 'service_manager')) {
             await loadTeamMembers(prof.organization_id);
-            await loadCustomers();
+            await loadCustomers(prof.organization_id);
           }
         }
       }
@@ -371,13 +371,49 @@ function CompanyProfile() {
     }));
   }
 
-  async function loadCustomers() {
-    const { data: custs } = await supabase.from('organizations').select('*').eq('type', 'customer').order('name');
+  async function loadCustomers(serviceOrgId?: any) {
+    const sid = serviceOrgId ?? org?.id;
+    if (!sid) {
+      setCustomers([]);
+      return;
+    }
+    // Scope to customers linked to this service org only
+    const { data: links, error: linkErr } = await supabase
+      .from('organization_customers')
+      .select('customer_organization_id')
+      .eq('service_organization_id', sid)
+      .limit(500);
+
+    if (linkErr) {
+      console.warn('organization_customers load failed:', linkErr);
+      setCustomers([]);
+      return;
+    }
+
+    const ids = Array.from(
+      new Set(
+        (links || [])
+          .map((r: any) => r.customer_organization_id)
+          .filter((id: any) => id != null)
+      )
+    );
+    if (ids.length === 0) {
+      setCustomers([]);
+      return;
+    }
+
+    const { data: custs } = await supabase
+      .from('organizations')
+      .select('*')
+      .in('id', ids)
+      .in('type', ['customer', 'laser_clinic'])
+      .order('name');
     setCustomers(custs || []);
   }
 
   async function addCustomer() {
     if (!newCustomer.name) { setCustomerMessage('Customer name is required.'); return; }
+    if (!org?.id) { setCustomerMessage('Your organization is not loaded yet.'); return; }
     try {
       const customerInsert: any = {
         name: newCustomer.name,
@@ -391,10 +427,27 @@ function CompanyProfile() {
           : null,
         facility_type: 'Clinic',
       };
-      await supabase.from('organizations').insert(customerInsert);
+      const { data: created, error: insErr } = await supabase
+        .from('organizations')
+        .insert(customerInsert)
+        .select('id')
+        .single();
+      if (insErr) throw insErr;
+
+      // Link to this service company so Customer Directory / CRM only show MY customers
+      if (created?.id) {
+        const { error: linkErr } = await supabase.from('organization_customers').insert({
+          service_organization_id: org.id,
+          customer_organization_id: created.id,
+        });
+        if (linkErr && !/duplicate|unique|23505/i.test(linkErr.message || '')) {
+          console.warn('organization_customers link failed:', linkErr);
+        }
+      }
+
       setCustomerMessage('Customer added successfully.');
       setNewCustomer({ name: '', contactName: '', contactPhone: '', contactEmail: '', address: '', city: '', state: '', notes: '', selectedEquipment: [] });
-      await loadCustomers();
+      await loadCustomers(org.id);
     } catch (err: any) {
       setCustomerMessage('Failed to add customer: ' + (err.message || err));
     }

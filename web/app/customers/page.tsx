@@ -30,33 +30,63 @@ export default function CustomersDirectory() {
         .eq('id', user.id)
         .maybeSingle();
 
-      if (prof?.organization_id) {
-        const { data: org } = await supabase
-          .from('organizations')
-          .select('type, name')
-          .eq('id', prof.organization_id)
-          .maybeSingle();
-
-        const orgType = org?.type || '';
-        setUserOrgType(orgType);
-
-        const allowed = orgType === 'service_company' || orgType === 'parts_supplier';
-        if (!allowed) {
-          setAccessDenied(true);
-          setLoading(false);
-          return;
-        }
-      } else {
+      if (!prof?.organization_id) {
         setAccessDenied(true);
         setLoading(false);
         return;
       }
 
-      // Fetch customers (all type=customer for now; in future can scope further to org)
+      const serviceOrgId = prof.organization_id;
+
+      const { data: org } = await supabase
+        .from('organizations')
+        .select('type, name')
+        .eq('id', serviceOrgId)
+        .maybeSingle();
+
+      const orgType = org?.type || '';
+      setUserOrgType(orgType);
+
+      const allowed = orgType === 'service_company' || orgType === 'parts_supplier';
+      if (!allowed) {
+        setAccessDenied(true);
+        setLoading(false);
+        return;
+      }
+
+      // Only customers linked to THIS service org via organization_customers
+      const { data: links, error: linkErr } = await supabase
+        .from('organization_customers')
+        .select('customer_organization_id')
+        .eq('service_organization_id', serviceOrgId)
+        .limit(500);
+
+      if (linkErr) {
+        console.warn('organization_customers load failed:', linkErr);
+        setCustomers([]);
+        setLoading(false);
+        return;
+      }
+
+      const customerIds = Array.from(
+        new Set(
+          (links || [])
+            .map((r: any) => r.customer_organization_id)
+            .filter((id: any) => id != null)
+        )
+      );
+
+      if (customerIds.length === 0) {
+        setCustomers([]);
+        setLoading(false);
+        return;
+      }
+
       const { data: custs } = await supabase
         .from('organizations')
-        .select('id, name, address, city, state, phone, email, laser_models, facility_type')
-        .eq('type', 'customer')
+        .select('id, name, address, city, state, phone, email, laser_models, facility_type, type')
+        .in('id', customerIds)
+        .in('type', ['customer', 'laser_clinic'])
         .order('name', { ascending: true });
 
       setCustomers(custs || []);
@@ -148,7 +178,7 @@ export default function CustomersDirectory() {
         )}
 
         <div className="mt-8 text-xs text-[var(--text3)]">
-          Showing customers of type "customer" in the organizations table. Access limited to service companies and parts suppliers.
+          Showing only customers linked to your organization. Access limited to service companies and parts suppliers.
         </div>
       </div>
     </div>

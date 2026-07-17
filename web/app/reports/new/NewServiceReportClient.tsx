@@ -258,28 +258,34 @@ export default function NewServiceReport() {
   }, [supabase]);
 
   async function loadCustomers(orgId: any) {
-    // Prefer direct customer orgs (align to Android + CRM), also fall back to junction if used
+    // Only customers linked to this service org via organization_customers
     try {
-      const { data: direct } = await supabase
-        .from('organizations')
-        .select('id, name, address, city, state, phone, email, contact_name')
-        .eq('type', 'customer')
-        .order('name');
-      let opts = (direct || []) as any[];
-
-      // Also pull from junction if any legacy
-      try {
-        const { data: junc } = await supabase
-          .from('organization_customers')
-          .select(`organizations:customer_organization_id (id, name, address, city, state, phone, email, contact_name)`)
-          .eq('service_organization_id', orgId);
-        if (junc) {
-          const extra = junc.map((j: any) => j.organizations).filter(Boolean);
-          const seen = new Set(opts.map(o => o.id));
-          extra.forEach((e: any) => { if (e && !seen.has(e.id)) opts.push(e); });
-        }
-      } catch {}
-      setCustomerOptions(opts);
+      if (!orgId) {
+        setCustomerOptions([]);
+        return;
+      }
+      const { data: junc, error } = await supabase
+        .from('organization_customers')
+        .select(`organizations:customer_organization_id (id, name, address, city, state, phone, email, contact_name)`)
+        .eq('service_organization_id', orgId)
+        .limit(500);
+      if (error) {
+        console.warn('organization_customers load failed:', error);
+        setCustomerOptions([]);
+        return;
+      }
+      const opts = (junc || [])
+        .map((j: any) => j.organizations)
+        .filter(Boolean);
+      // de-dupe by id
+      const seen = new Set<any>();
+      setCustomerOptions(
+        opts.filter((o: any) => {
+          if (!o?.id || seen.has(o.id)) return false;
+          seen.add(o.id);
+          return true;
+        })
+      );
     } catch (e) { console.warn(e); }
   }
 
