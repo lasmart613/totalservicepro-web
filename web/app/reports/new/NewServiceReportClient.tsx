@@ -450,10 +450,14 @@ export default function NewServiceReport() {
       if (error) throw error;
 
       // Also link via junction for compatibility
-      await supabase.from('organization_customers').insert({
-        service_organization_id: currentUserOrgId,
-        customer_organization_id: org.id
-      }).catch(() => {});
+      try {
+        await supabase.from('organization_customers').insert({
+          service_organization_id: currentUserOrgId,
+          customer_organization_id: org.id
+        });
+      } catch {
+        /* ignore link failure */
+      }
 
       await loadCustomers(currentUserOrgId);
       handleSelectCustomer(org);

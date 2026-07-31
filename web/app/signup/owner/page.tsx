@@ -178,8 +178,8 @@ export default function OwnerSignup() {
         for (const item of equipmentList) {
           const payload = {
             customer_organization_id: newOrgId,
-            manufacturer: MODELS[item.modelKey]?.manufacturer || 'Unknown',
-            model: MODELS[item.modelKey]?.label || item.modelKey,
+            manufacturer: (MODELS as any)[item.modelKey]?.mfg || (MODELS as any)[item.modelKey]?.manufacturer || 'Unknown',
+            model: (MODELS as any)[item.modelKey]?.label || item.modelKey,
             serial_number: (item.serialNumber || '').trim() || 'TBD',
           };
           const { error: equipError } = await supabase.from('equipment').insert(payload);

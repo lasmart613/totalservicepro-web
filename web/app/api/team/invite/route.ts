@@ -233,22 +233,23 @@ export async function POST(req: NextRequest) {
     const buildActionLink = async (preferInvite: boolean): Promise<string | null> => {
       try {
         const type = preferInvite ? 'invite' : 'recovery';
+        // Cast: supabase-js GenerateLinkParams typing is stricter than runtime invite/recovery payloads
         const { data, error } = await admin.auth.admin.generateLink({
-          type: type as 'invite' | 'recovery',
+          type,
           email,
           options: {
             redirectTo,
             data: inviteMeta,
           },
-        });
+        } as any);
         if (error) {
           // Try the other type
           const alt = preferInvite ? 'recovery' : 'invite';
           const { data: d2, error: e2 } = await admin.auth.admin.generateLink({
-            type: alt as 'invite' | 'recovery',
+            type: alt,
             email,
             options: { redirectTo, data: inviteMeta },
-          });
+          } as any);
           if (e2) {
             console.warn('generateLink failed', error.message, e2.message);
             return null;
