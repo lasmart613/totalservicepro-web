@@ -148,7 +148,7 @@ export function Header() {
           {canBusinessNav && <Link href="/estimates" className="hover:text-[var(--gold)]">Estimates</Link>}
           {canBusinessNav && <Link href="/invoices" className="hover:text-[var(--gold)]">Invoices</Link>}
           {supplierMode && <Link href="/parts" className="hover:text-[var(--gold)]">Parts</Link>}
-          <Link href="/directory" className="hover:text-[var(--gold)]">Directory</Link>}
+          <Link href="/directory" className="hover:text-[var(--gold)]">Directory</Link>
           <Link href="/marketplace" className="hover:text-[var(--gold)]">Marketplace</Link>
         </nav>
       </div>
@@ -258,7 +258,7 @@ export function Header() {
             {canBusinessNav && <Link href="/estimates" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Estimates</Link>}
             {canBusinessNav && <Link href="/invoices" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Invoices</Link>}
             {supplierMode && <Link href="/parts" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Parts</Link>}
-            <Link href="/directory" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>TSP Directory</Link>}
+            <Link href="/directory" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>TSP Directory</Link>
             <Link href="/marketplace" className="py-3 hover:text-[var(--gold)]" onClick={closeMobileMenu}>Marketplace</Link>
           </nav>
         </div>
