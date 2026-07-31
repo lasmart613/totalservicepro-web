@@ -9,11 +9,13 @@
 # (Build hooks / git push). Leave Publish directory EMPTY in the Netlify UI.
 
 [build]
-  command = "npm run build"
+  # Verbose fail to surface errors in Netlify UI if plugin log is empty
+  command = "npm run build || (echo '=== BUILD FAILED ===' && node -v && npm -v && ls -la && exit 1)"
   # publish intentionally omitted — plugin manages it
 
 [build.environment]
   NODE_VERSION = "20"
+  NPM_FLAGS = "--no-audit --no-fund"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"

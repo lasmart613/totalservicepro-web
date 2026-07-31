@@ -3,11 +3,12 @@
 
 [build]
   base = "web"
-  command = "npm run build"
+  command = "npm run build || (echo '=== BUILD FAILED ===' && node -v && npm -v && ls -la && exit 1)"
   # publish intentionally omitted — @netlify/plugin-nextjs manages it
 
 [build.environment]
   NODE_VERSION = "20"
+  NPM_FLAGS = "--no-audit --no-fund"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
