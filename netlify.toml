@@ -6,6 +6,9 @@
   command = "npm run build"
   # publish intentionally omitted — @netlify/plugin-nextjs manages it
 
+[build.environment]
+  NODE_VERSION = "20"
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 

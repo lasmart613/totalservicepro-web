@@ -1,8 +1,8 @@
 # Next.js Runtime (@netlify/plugin-nextjs) owns publish path + routing.
 #
 # CRITICAL — site-wide 404 root causes we hit:
-# 1) Netlify UI "Publish directory" set to ".next"  → no server function routes
-# 2) Local Windows `netlify deploy --prod --build`  → often uploads 0 functions
+# 1) Netlify UI "Publish directory" set to ".next" → no server function routes
+# 2) Local Windows `netlify deploy --prod --build` → often uploads 0 functions
 #    or a win32-bundled handler that 502s on Linux
 #
 # Prefer: trigger a Netlify cloud (Linux) build from the linked GitHub repo
@@ -11,6 +11,9 @@
 [build]
   command = "npm run build"
   # publish intentionally omitted — plugin manages it
+
+[build.environment]
+  NODE_VERSION = "20"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
