@@ -127,12 +127,27 @@ export const MODELS: Record<string, ModelDef> = {
     mfg: 'Candela',
     label: 'VBeam Perfecta (Pulsed Dye)',
     wavelengths: [
-      { name: '593.5 nm', mode: 'SP', sets: [4, 6, 8, 10], unit: 'J/cm²', spotMm: 10 }
+      { name: '595 nm', mode: 'SP', sets: [4, 6, 8, 10, 12], unit: 'J/cm²', spotMm: 10 }
     ],
     dyeParams: true,
-    params: ['Total Pulses', 'Head Pulses', 'Lamp Pulses', 'Dye Pulses', 'Dye Kit S/N', 'WL Filter Correction',
-             'Bubble Sense (HP Full)', 'Bubble Sense (HP Empty)', 'Bubble Sense (Can Full)', 'Bubble Sense (Can Empty)',
-             'HV Final (VDC)', 'Fiber Transmission %', 'Wavelength'],
+    params: [
+      'Total Pulses',
+      'Head Pulses',
+      'Lamp Pulses',
+      'Dye Pulses',
+      'Dye Kit S/N',
+      'WL Filter Correction',
+      'Bubble Sense (HP Full)',
+      'Bubble Sense (HP Empty)',
+      'Bubble Sense (Can Full)',
+      'Bubble Sense (Can Empty)',
+      'HV Final (VDC)',
+      'Fiber Transmission %',
+      'Wavelength (nm)',
+      'Calibration Energy (J)',
+      'DI Conductivity',
+      'Coolant Level / Status',
+    ],
     wlTest: true
   },
   V_Beam_1: {
@@ -402,6 +417,65 @@ export const MODELS: Record<string, ModelDef> = {
     params: []
   }
 };
+
+/**
+ * Map DB model names / free text to a static MODELS entry (Android resolveModelDef parity).
+ * Critical for VBeam Perfecta: DB often says "VBeam Perfecta" while key is Perfecta.
+ */
+export function resolveModelDef(
+  modelKey: string | null | undefined,
+  equipName?: string | null
+): ModelDef | null {
+  if (!modelKey && !equipName) return null;
+  if (modelKey && MODELS[modelKey]) return MODELS[modelKey];
+
+  const raw = String(modelKey || '');
+  const hay = `${equipName || ''} ${raw}`
+    .toLowerCase()
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (/v[\s-]*beam|perfecta|vbeam|pulsed\s*dye/i.test(hay)) {
+    if (/perfecta/i.test(hay) && MODELS.Perfecta) return MODELS.Perfecta;
+    if (/\bv[\s-]*beam\s*1\b|\bvbeam\s*1\b|v-beam 1/i.test(hay) && MODELS.V_Beam_1)
+      return MODELS.V_Beam_1;
+    if (MODELS.Perfecta) return MODELS.Perfecta;
+    if (MODELS.V_Beam_1) return MODELS.V_Beam_1;
+  }
+
+  if (/gentle\s*max|gmax|gentlemax/i.test(hay)) {
+    if (/pro/i.test(hay) && MODELS['Candela GentleMAX_PRO']) return MODELS['Candela GentleMAX_PRO'];
+    if (MODELS['Candela GentleMAX']) return MODELS['Candela GentleMAX'];
+    if (MODELS['Candela GentleMAX_PRO']) return MODELS['Candela GentleMAX_PRO'];
+  }
+
+  let bestKey: string | null = null;
+  let bestScore = 0;
+  Object.keys(MODELS).forEach((k) => {
+    const mk = MODELS[k];
+    const lab = (mk.label || k || '').toLowerCase().replace(/[_-]+/g, ' ');
+    const kn = k.toLowerCase().replace(/[_-]+/g, ' ');
+    if (!hay || !lab) return;
+    let score = 0;
+    if (hay === lab || hay === kn) score = 100;
+    else if (hay.includes(lab)) score = 40 + lab.length;
+    else if (lab.includes(hay)) score = 30 + hay.length;
+    else if (hay.includes(kn)) score = 20 + kn.length;
+    const tokens = hay.split(' ').filter((t) => t.length > 2);
+    const labTokens = lab.split(' ').filter((t) => t.length > 2);
+    const overlap = tokens.filter((t) =>
+      labTokens.some((lt) => lt.includes(t) || t.includes(lt))
+    ).length;
+    if (overlap) score = Math.max(score, 15 + overlap * 12);
+    if (score > bestScore) {
+      bestScore = score;
+      bestKey = k;
+    }
+  });
+  if (bestKey && bestScore >= 20) return MODELS[bestKey];
+  return null;
+}
 
 // Build manufacturer grouping (used for selects)
 export function buildManufacturers() {

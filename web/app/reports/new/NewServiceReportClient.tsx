@@ -7,7 +7,7 @@ import { Header } from '@/components/Header';
 import { ArrowLeft, Check, Plus, Save } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
-import { MODELS } from '@/lib/models';
+import { MODELS, resolveModelDef } from '@/lib/models';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
@@ -35,6 +35,32 @@ function canEditServiceEngineer(profile: any): boolean {
       (r && (r.includes('admin') || r.includes('owner') || r.includes('manager')))
   );
 }
+
+/** Android service_report.html uses PASS / FAIL / N/A (not Pass). Normalize for load + highlight. */
+function normalizeChecklistVal(val: any): string {
+  if (val == null || val === '') return '';
+  const v = String(val).trim().toUpperCase().replace(/\s+/g, '');
+  if (v === 'PASS' || v === 'P' || v === 'OK' || v === '✓' || v === '✔') return 'PASS';
+  if (v === 'FAIL' || v === 'F' || v === 'FAILED' || v === '✗' || v === '✘') return 'FAIL';
+  if (v === 'N/A' || v === 'NA' || v === 'NONE' || v === '-') return 'N/A';
+  // already exact-ish
+  const raw = String(val).trim();
+  if (/^pass$/i.test(raw)) return 'PASS';
+  if (/^fail$/i.test(raw)) return 'FAIL';
+  if (/^n\/?a$/i.test(raw)) return 'N/A';
+  return raw;
+}
+
+function normalizeChecklistMap(data: any): Record<string, string> {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return {};
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(data)) {
+    out[k] = normalizeChecklistVal(v);
+  }
+  return out;
+}
+
+const CL_BUTTONS = ['PASS', 'FAIL', 'N/A'] as const;
 
 export default function NewServiceReport() {
   /* Full functional Service Report matching Android service_report.html (source of truth - do not change Android SR).
@@ -77,8 +103,18 @@ export default function NewServiceReport() {
   // Equipment in report
   const [equipName, setEquipName] = useState('');
   const [serialNumber, setSerialNumber] = useState('');
+  const [sku, setSku] = useState('');
 
-  // Checklists state: {item: 'Pass' | 'Fail' | 'N/A'}
+  // Editable customer fields (Android has full form, not read-only summary)
+  const [custAddress, setCustAddress] = useState('');
+  const [custCity, setCustCity] = useState('');
+  const [custState, setCustState] = useState('');
+  const [custContactName, setCustContactName] = useState('');
+  const [custPhone, setCustPhone] = useState('');
+  const [custEmail, setCustEmail] = useState('');
+  const [custWebsite, setCustWebsite] = useState('');
+
+  // Checklists state: {item: 'PASS' | 'FAIL' | 'N/A'} — Android parity
   const [checkElectrical, setCheckElectrical] = useState<Record<string, string>>({});
   const [checkMechanical, setCheckMechanical] = useState<Record<string, string>>({});
   const [checkAesthetic, setCheckAesthetic] = useState<Record<string, string>>({});
@@ -91,8 +127,10 @@ export default function NewServiceReport() {
   const [groundPass, setGroundPass] = useState<boolean | null>(null);
   const [leakagePass, setLeakagePass] = useState<boolean | null>(null);
 
-  // Test equipment simple list
-  const [testEquipment, setTestEquipment] = useState<any[]>([{ name: '', id: '' }]);
+  // Test equipment (Android: type / make-model / serial / cal due + used checkbox)
+  const [testEquipment, setTestEquipment] = useState<
+    { type: string; model: string; serial: string; calDue: string; used: boolean; name?: string; id?: string }[]
+  >([]);
 
   // Signatures (snapshot like Android)
   const [techSig, setTechSig] = useState('');
@@ -190,10 +228,20 @@ export default function NewServiceReport() {
     ? dbLaserModels.filter((m: any) => String(m.manufacturer_id) === String(selectedDbMfr) || m.manufacturer === selectedDbMfr)
     : dbLaserModels;
 
-  // resolved for perf data (lookup in static MODELS by key or label)
+  // Resolve DB names (e.g. "VBeam Perfecta") → static MODELS (Perfecta) for params + perf
   const resolvedModelKey = selectedDbModel || selectedModelKey;
-  const currentModel = resolvedModelKey ? (MODELS as any)[resolvedModelKey] || 
-    Object.values(MODELS).find((m: any) => m.label === resolvedModelKey || m.mfg === resolvedModelKey) : null;
+  const currentModel = resolvedModelKey
+    ? resolveModelDef(resolvedModelKey, equipName) ||
+      (MODELS as any)[resolvedModelKey] ||
+      Object.values(MODELS).find(
+        (m: any) =>
+          m.label === resolvedModelKey ||
+          m.mfg === resolvedModelKey ||
+          (m.label &&
+            String(resolvedModelKey).toLowerCase().includes(String(m.label).toLowerCase().split('(')[0].trim()))
+      ) ||
+      null
+    : null;
 
   // Shared checklists EXACT from Android service_report.html (source of truth for parity). When updating here also note models.ts guidance for Android sync if MODELS change.
   const CL_ELECTRICAL = [
@@ -303,6 +351,7 @@ export default function NewServiceReport() {
         if (r.next_pm_due) setNextPm(String(r.next_pm_due).slice(0, 10));
         if (r.serial_number) setSerialNumber(r.serial_number);
         if (r.equipment_name) setEquipName(r.equipment_name);
+        if (r.sku) setSku(r.sku);
         if (r.comments) setComments(r.comments);
         // Prefer saved service_engineer; never clobber with profile after load
         if (r.service_engineer) setServiceEngineer(r.service_engineer);
@@ -318,33 +367,67 @@ export default function NewServiceReport() {
               phone: r.customer_phone,
               email: r.customer_email,
               contact_name: r.customer_contact_name,
+              website: r.customer_website || null,
             }
           );
         }
-        if (r.model_type) {
-          setSelectedModelKey(r.model_type);
-          setSelectedDbModel(r.model_type);
+        setCustAddress(r.customer_address || '');
+        setCustCity(r.customer_city || '');
+        setCustState(r.customer_state || '');
+        setCustContactName(r.customer_contact_name || '');
+        setCustPhone(r.customer_phone || '');
+        setCustEmail(r.customer_email || '');
+        setCustWebsite(r.customer_website || '');
+        // Always restore model keys so checklists / params stay editable (gate removed but keys still needed)
+        if (r.model_type || r.equipment_name) {
+          const mt = r.model_type || r.equipment_name || '';
+          setSelectedModelKey(mt);
+          setSelectedDbModel(mt);
+          // Best-effort manufacturer restore for dropdowns
+          const resolved = resolveModelDef(mt, r.equipment_name || mt);
+          if (resolved?.mfg) {
+            setSelectedDbMfr((prev) => prev || resolved.mfg);
+          }
         }
+        // Normalize PASS/FAIL so button highlight matches Android-saved reports
         if (r.checklist_electrical && typeof r.checklist_electrical === 'object') {
-          setCheckElectrical(r.checklist_electrical);
+          setCheckElectrical(normalizeChecklistMap(r.checklist_electrical));
         }
         if (r.checklist_mechanical && typeof r.checklist_mechanical === 'object') {
-          setCheckMechanical(r.checklist_mechanical);
+          setCheckMechanical(normalizeChecklistMap(r.checklist_mechanical));
         }
         if (r.checklist_aesthetic && typeof r.checklist_aesthetic === 'object') {
-          setCheckAesthetic(r.checklist_aesthetic);
+          setCheckAesthetic(normalizeChecklistMap(r.checklist_aesthetic));
         }
-        if (Array.isArray(r.power_measurements)) setPowerMeasurements(r.power_measurements);
+        if (Array.isArray(r.power_measurements)) {
+          setPowerMeasurements(
+            r.power_measurements.map((pm: any) => ({
+              wavelength: pm.wavelength || pm.name || '',
+              setting: pm.setting ?? pm.set ?? '',
+              measured: pm.measured ?? pm.actual ?? '',
+              unit: pm.unit || 'W',
+              pass: pm.pass === true || pm.result === 'PASS' || pm.result === 'Pass',
+              deviation: pm.deviation || '',
+            }))
+          );
+        }
         if (r.model_parameters && typeof r.model_parameters === 'object') setModelParams(r.model_parameters);
         if (r.ground_resistance != null) setGroundResistance(r.ground_resistance);
         if (r.leakage_current != null) setLeakageCurrent(r.leakage_current);
         if (r.ground_resistance_pass != null) setGroundPass(!!r.ground_resistance_pass);
         if (r.leakage_current_pass != null) setLeakagePass(!!r.leakage_current_pass);
         if (Array.isArray(r.test_equipment) && r.test_equipment.length) {
-          setTestEquipment(r.test_equipment.map((t: any) => ({
-            name: t.name || t.model || t.type || '',
-            id: t.id || t.serial || '',
-          })));
+          setTestEquipment(
+            r.test_equipment.map((t: any) => ({
+              type: t.type || t.name || 'Instrument',
+              model: t.model || t.name || '',
+              serial: t.serial || t.id || t.serial_number || '',
+              calDue: t.calDue || t.cal_due || '',
+              used: t.used !== false,
+              name: t.name || t.model || t.type || '',
+              id: t.id || t.serial || '',
+            }))
+          );
         }
         if (r.tech_signature) setTechSig(r.tech_signature);
         if (r.signed_date) setTechSigDate(String(r.signed_date).slice(0, 10));
@@ -392,6 +475,68 @@ export default function NewServiceReport() {
     })();
   }, [supabase]);
 
+  // Load user's test equipment catalog for *new* reports only (Android loadTestEquipment parity).
+  // When editing an existing report, TE comes from the saved report payload.
+  useEffect(() => {
+    if (!currentUser || editReportId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data } = await supabase
+          .from('test_equipment')
+          .select('type, make, model, serial_number, cal_date, cal_due, is_active')
+          .eq('user_id', currentUser.id)
+          .eq('is_active', true)
+          .order('type');
+        if (cancelled) return;
+        if (data && data.length) {
+          setTestEquipment(
+            data.map((eq: any) => ({
+              type: eq.type || 'Instrument',
+              model: [eq.make, eq.model].filter(Boolean).join(' '),
+              serial: eq.serial_number || '',
+              calDue: eq.cal_due || '',
+              used: true,
+              name: [eq.make, eq.model].filter(Boolean).join(' ') || eq.type || '',
+              id: eq.serial_number || '',
+            }))
+          );
+        } else {
+          setTestEquipment([
+            { type: 'Electrical Safety Tester', model: '', serial: '', calDue: '', used: true },
+            { type: 'Energy Detector / Power Meter', model: '', serial: '', calDue: '', used: true },
+            { type: 'Digital Multimeter', model: '', serial: '', calDue: '', used: true },
+            { type: 'Oscilloscope', model: '', serial: '', calDue: '', used: true },
+          ]);
+        }
+      } catch (e) {
+        console.warn('Test equipment load error:', e);
+        if (!cancelled) {
+          setTestEquipment([
+            { type: 'Electrical Safety Tester', model: '', serial: '', calDue: '', used: true },
+            { type: 'Energy Detector / Power Meter', model: '', serial: '', calDue: '', used: true },
+          ]);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [currentUser, supabase, editReportId]);
+
+  // After manufacturers load, try to match selected mfr id for restored model
+  useEffect(() => {
+    if (!selectedDbModel || selectedDbMfr || !dbManufacturers.length) return;
+    const resolved = resolveModelDef(selectedDbModel, equipName || selectedDbModel);
+    const mfgName = resolved?.mfg;
+    if (!mfgName) return;
+    const match = dbManufacturers.find(
+      (m: any) => String(m.name).toLowerCase() === String(mfgName).toLowerCase()
+    );
+    if (match) setSelectedDbMfr(match.id || match.name);
+    else setSelectedDbMfr(mfgName);
+  }, [dbManufacturers, selectedDbModel, selectedDbMfr, equipName]);
+
   async function loadCustomers(orgId: any) {
     // Only customers linked to this service org via organization_customers
     try {
@@ -431,7 +576,13 @@ export default function NewServiceReport() {
   const handleSelectCustomer = (customer: any) => {
     setSelectedCustomer(customer);
     setSearchTerm(customer.name || '');
-    // prefill equip if known
+    setCustAddress(customer.address || '');
+    setCustCity(customer.city || '');
+    setCustState(customer.state || '');
+    setCustContactName(customer.contact_name || '');
+    setCustPhone(customer.phone || '');
+    setCustEmail(customer.email || '');
+    setCustWebsite(customer.website || '');
   };
 
   const handleAddNewCustomer = async () => {
@@ -504,13 +655,26 @@ export default function NewServiceReport() {
 
   function selectDbModelValue(modelVal: string) {
     setSelectedDbModel(modelVal);
-    // resolve to MODELS key if possible for rich perf data
-    const found = Object.keys(MODELS).find(k => 
-      k === modelVal || (MODELS as any)[k]?.label === modelVal || (MODELS as any)[k]?.mfg === modelVal
-    ) || modelVal;
+    // Fuzzy resolve DB names → static MODELS keys (VBeam Perfecta → Perfecta)
+    let found =
+      Object.keys(MODELS).find(
+        (k) =>
+          k === modelVal ||
+          (MODELS as any)[k]?.label === modelVal ||
+          (MODELS as any)[k]?.mfg === modelVal
+      ) || '';
+    if (!found) {
+      const resolved = resolveModelDef(modelVal, modelVal);
+      if (resolved) {
+        found =
+          Object.keys(MODELS).find((k) => MODELS[k] === resolved) || modelVal;
+      } else {
+        found = modelVal;
+      }
+    }
     selectModel(found);
     // Derive equipment_name from manufacturer + model dropdowns (no free-text field)
-    const m = (MODELS as any)[found];
+    const m = resolveModelDef(found, modelVal) || (MODELS as any)[found];
     if (m) {
       setEquipName(`${m.mfg || ''} ${m.label || modelVal}`.trim());
     } else if (modelVal) {
@@ -529,20 +693,50 @@ export default function NewServiceReport() {
   }
 
   function setChecklist(setter: any, item: string, val: string) {
-    setter((prev: any) => ({ ...prev, [item]: val }));
+    setter((prev: any) => ({ ...prev, [item]: normalizeChecklistVal(val) }));
+  }
+
+  function markAllPass(items: string[], setter: any) {
+    const next: Record<string, string> = {};
+    items.forEach((item) => {
+      next[item] = 'PASS';
+    });
+    setter((prev: any) => ({ ...prev, ...next }));
   }
 
   function addPerfRow() {
-    if (!currentModel) return;
-    const firstWl = currentModel.wavelengths?.[0];
-    setPowerMeasurements(prev => [...prev, {
-      wavelength: firstWl?.name || '',
-      setting: firstWl?.sets?.[0] || '',
-      measured: '',
-      unit: firstWl?.unit || 'W',
-      pass: true,
-      deviation: ''
-    }]);
+    const firstWl = currentModel?.wavelengths?.[0];
+    setPowerMeasurements((prev) => [
+      ...prev,
+      {
+        wavelength: firstWl?.name || 'Output',
+        setting: (firstWl?.sets && firstWl.sets[0]) || '',
+        measured: '',
+        unit: firstWl?.unit || 'W',
+        pass: true,
+        deviation: '',
+      },
+    ]);
+  }
+
+  /** Auto PASS/FAIL for electrical safety (Android checkSafety: ground ≤0.2Ω, leakage ≤300µA) */
+  function updateGroundResistance(val: string) {
+    if (val === '') {
+      setGroundResistance('');
+      return;
+    }
+    const n = parseFloat(val);
+    setGroundResistance(isNaN(n) ? '' : n);
+    if (!isNaN(n)) setGroundPass(n <= 0.2);
+  }
+  function updateLeakageCurrent(val: string) {
+    if (val === '') {
+      setLeakageCurrent('');
+      return;
+    }
+    const n = parseFloat(val);
+    setLeakageCurrent(isNaN(n) ? '' : n);
+    if (!isNaN(n)) setLeakagePass(n <= 300);
   }
 
   function updatePerf(idx: number, key: string, val: any) {
@@ -569,7 +763,22 @@ export default function NewServiceReport() {
   }
 
   function addTestEquip() {
-    setTestEquipment(prev => [...prev, { name: '', id: '' }]);
+    setTestEquipment((prev) => [
+      ...prev,
+      { type: 'Instrument', model: '', serial: '', calDue: '', used: true, name: '', id: '' },
+    ]);
+  }
+
+  function updateTestEquip(idx: number, key: string, val: any) {
+    setTestEquipment((prev) => {
+      const cp = [...prev];
+      cp[idx] = { ...cp[idx], [key]: val };
+      if (key === 'model' || key === 'type') {
+        cp[idx].name = [cp[idx].type, cp[idx].model].filter(Boolean).join(' — ');
+      }
+      if (key === 'serial') cp[idx].id = val;
+      return cp;
+    });
   }
 
   async function ensureCustomerOrg() {
@@ -669,13 +878,15 @@ export default function NewServiceReport() {
             .join(' ') ||
           selectedDbModel ||
           null,
+        sku: sku || null,
         serial_number: serialNumber || null,
         customer_name: selectedCustomer?.name || searchTerm || null,
-        customer_address: selectedCustomer?.address || null,
-        customer_city: selectedCustomer?.city || null,
-        customer_state: selectedCustomer?.state || null,
-        customer_phone: selectedCustomer?.phone || null,
-        customer_email: selectedCustomer?.email || null,
+        customer_address: custAddress || selectedCustomer?.address || null,
+        customer_city: custCity || selectedCustomer?.city || null,
+        customer_state: custState || selectedCustomer?.state || null,
+        customer_phone: custPhone || selectedCustomer?.phone || null,
+        customer_email: custEmail || selectedCustomer?.email || null,
+        customer_contact_name: custContactName || selectedCustomer?.contact_name || null,
         date_out: dateOut || null,
         next_pm_due: nextPm || null,
         ticket_number: ticketNum || null,
@@ -689,7 +900,17 @@ export default function NewServiceReport() {
         checklist_aesthetic: checkAesthetic,
         power_measurements: powerMeasurements,
         model_parameters: modelParams,
-        test_equipment: testEquipment.filter(t => t.name),
+        test_equipment: testEquipment
+          .filter((t) => t.used !== false && (t.model || t.type || t.name || t.serial))
+          .map((t) => ({
+            type: t.type || '',
+            model: t.model || t.name || '',
+            name: t.name || t.model || t.type || '',
+            serial: t.serial || t.id || '',
+            id: t.serial || t.id || '',
+            calDue: t.calDue || '',
+            used: true,
+          })),
         tech_name: techCompanyCache.tech_name,
         tech_phone: techCompanyCache.tech_phone,
         tech_email: techCompanyCache.tech_email,
@@ -761,18 +982,52 @@ export default function NewServiceReport() {
   function renderChecklist(items: string[], state: Record<string, string>, setter: any, title: string) {
     return (
       <div className="section mb-4">
-        <div className="section-hdr"><h3>{title}</h3></div>
+        <div className="section-hdr flex items-center justify-between gap-2 flex-wrap">
+          <h3>{title}</h3>
+          <button
+            type="button"
+            onClick={() => markAllPass(items, setter)}
+            className="text-[11px] font-bold text-[var(--gold)] hover:underline"
+          >
+            Mark all PASS
+          </button>
+        </div>
         <div className="section-body">
-          {items.map(item => (
-            <div key={item} className="checklist-item">
-              <div className="checklist-label">{item}</div>
-              <div className="checklist-btns">
-                {['Pass','Fail','N/A'].map(v => (
-                  <button key={v} onClick={() => setChecklist(setter, item, v)} className={`px-2 py-0.5 text-xs rounded border ${state[item]===v ? 'bg-[var(--gold)] text-black' : ''}`}>{v}</button>
-                ))}
+          {items.map((item) => {
+            const active = normalizeChecklistVal(state[item]);
+            return (
+              <div key={item} className="checklist-item flex items-center justify-between gap-2 py-2 border-b border-[var(--border)] last:border-0">
+                <div className="checklist-label text-sm text-[var(--text2)] flex-1 pr-2">{item}</div>
+                <div className="checklist-btns flex gap-1 shrink-0">
+                  {CL_BUTTONS.map((v) => {
+                    const isActive = active === v;
+                    const color =
+                      v === 'PASS'
+                        ? isActive
+                          ? 'bg-green-600 text-white border-green-600'
+                          : 'border-green-700/50 text-green-400'
+                        : v === 'FAIL'
+                          ? isActive
+                            ? 'bg-red-600 text-white border-red-600'
+                            : 'border-red-700/50 text-red-400'
+                          : isActive
+                            ? 'bg-[var(--gold)] text-black border-[var(--gold)]'
+                            : 'border-[var(--border)] text-[var(--text3)]';
+                    return (
+                      <button
+                        key={v}
+                        type="button"
+                        onClick={() => setChecklist(setter, item, v)}
+                        className={`px-2 py-0.5 text-xs rounded border font-semibold ${color}`}
+                      >
+                        {v}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
     );
@@ -796,10 +1051,10 @@ export default function NewServiceReport() {
           </div>
         </div>
 
-        {/* Customer Info - dropdown with + add new (requested) */}
+        {/* Customer Info — full editable fields (Android parity) */}
         <div className="section mb-6 p-6">
           <h3 className="text-xl font-semibold mb-4">🏥 Customer Info</h3>
-          <div className="flex gap-2 items-end mb-2">
+          <div className="flex gap-2 items-end mb-3">
             <div className="flex-1">
               <label className="text-xs text-[var(--text3)]">Select Customer</label>
               <select 
@@ -815,6 +1070,8 @@ export default function NewServiceReport() {
                   } else {
                     setSelectedCustomer(null);
                     setSearchTerm('');
+                    setCustAddress(''); setCustCity(''); setCustState('');
+                    setCustContactName(''); setCustPhone(''); setCustEmail(''); setCustWebsite('');
                   }
                 }}
               >
@@ -828,27 +1085,72 @@ export default function NewServiceReport() {
             <button onClick={()=>setShowAddModal(true)} className="btn btn-secondary text-sm py-3">+ Add</button>
           </div>
 
-          {selectedCustomer && (
-            <div className="mt-2 grid grid-cols-2 md:grid-cols-3 gap-3 text-sm">
-              <div><span className="text-[var(--text3)]">Customer:</span> {selectedCustomer.name}</div>
-              <div>{[selectedCustomer.city, selectedCustomer.state].filter(Boolean).join(', ')}</div>
-              <div>{selectedCustomer.contact_name || selectedCustomer.phone}</div>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="md:col-span-2">
+              <label className="label">Customer Name</label>
+              <input type="text" className="input w-full" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} placeholder="Clinic / facility name" />
             </div>
-          )}
-          {/* Optional free text for quick custom (creates on save if needed) */}
-          <input type="text" placeholder="Or enter custom name (optional)" className="input w-full mt-1 text-sm" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
+            <div className="md:col-span-2">
+              <label className="label">Address</label>
+              <input className="input w-full" value={custAddress} onChange={e=>setCustAddress(e.target.value)} placeholder="123 Main St" />
+            </div>
+            <div>
+              <label className="label">City</label>
+              <input className="input w-full" value={custCity} onChange={e=>setCustCity(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">State</label>
+              <input className="input w-full" value={custState} onChange={e=>setCustState(e.target.value)} maxLength={2} placeholder="CA" />
+            </div>
+            <div>
+              <label className="label">Contact Name</label>
+              <input className="input w-full" value={custContactName} onChange={e=>setCustContactName(e.target.value)} placeholder="John Doe" />
+            </div>
+            <div>
+              <label className="label">Contact Phone</label>
+              <input className="input w-full" type="tel" value={custPhone} onChange={e=>setCustPhone(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Contact Email</label>
+              <input className="input w-full" type="email" value={custEmail} onChange={e=>setCustEmail(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Website / URL</label>
+              <input className="input w-full" type="url" value={custWebsite} onChange={e=>setCustWebsite(e.target.value)} placeholder="https://" />
+            </div>
+          </div>
         </div>
 
-        {/* Report Info — equipment name/model lives only in the dropdown section below */}
+        {/* Report Info */}
         <div className="section mb-6 p-6">
           <h3 className="text-xl font-semibold mb-4">📋 Report Info</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <div><label className="label">Service Type</label><select className="input" value={serviceType} onChange={e=>setServiceType(e.target.value)}><option>PM</option><option>Repair</option><option>Install</option><option>Cal</option></select></div>
+            <div>
+              <label className="label">Equipment Name</label>
+              <input className="input" value={equipName} onChange={e=>setEquipName(e.target.value)} placeholder="Auto-filled from model" />
+            </div>
+            <div>
+              <label className="label">SKU #</label>
+              <input className="input" value={sku} onChange={e=>setSku(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Serial Number</label>
+              <input className="input" value={serialNumber} onChange={e=>setSerialNumber(e.target.value)} />
+            </div>
+            <div>
+              <label className="label">Service Type</label>
+              <select className="input" value={serviceType} onChange={e=>setServiceType(e.target.value)}>
+                <option value="PM">PM</option>
+                <option value="Repair">Repair</option>
+                <option value="PM+Repair">PM + Repair</option>
+                <option value="Install">Install</option>
+                <option value="Cal">Cal</option>
+              </select>
+            </div>
             <div><label className="label">Date Out</label><input type="date" className="input" value={dateOut} onChange={e=>setDateOut(e.target.value)} /></div>
             <div><label className="label">Next PM Due</label><input type="date" className="input" value={nextPm} onChange={e=>setNextPm(e.target.value)} /></div>
             <div><label className="label">Ticket #</label><input className="input" value={ticketNum} onChange={e=>setTicketNum(e.target.value)} /></div>
             <div><label className="label">Report #</label><input className="input" value={reportNumber} onChange={e=>setReportNumber(e.target.value)} placeholder="Auto: PREFIX-SR-YYYYMMDD-NN" /></div>
-            <div><label className="label">Serial Number</label><input className="input" value={serialNumber} onChange={e=>setSerialNumber(e.target.value)} /></div>
             <div className="md:col-span-2">
               <label className="label">
                 Service Engineer{' '}
@@ -926,6 +1228,18 @@ export default function NewServiceReport() {
               onChange={e => selectDbModelValue(e.target.value)}
             >
               <option value="">-- Select Model --</option>
+              {/* Preserve loaded model_type even if not in filtered list (report open / DB name mismatch) */}
+              {(selectedDbModel || selectedModelKey) &&
+                !(filteredDbModels.length > 0
+                  ? filteredDbModels.some(
+                      (m: any) =>
+                        (m.name || m.label) === (selectedDbModel || selectedModelKey)
+                    )
+                  : modelKeys.includes(selectedDbModel || selectedModelKey)) && (
+                  <option value={selectedDbModel || selectedModelKey}>
+                    {selectedDbModel || selectedModelKey}
+                  </option>
+                )}
               {filteredDbModels.length > 0 
                 ? filteredDbModels.map((m: any) => (
                     <option key={m.id || m.name} value={m.name || m.label}>{m.label || m.name}</option>
@@ -939,62 +1253,219 @@ export default function NewServiceReport() {
           <div className="text-[10px] text-[var(--text3)] mt-1">Data from manufacturers + laser_models tables (fallback to static MODELS if empty). Use +Add for new.</div>
         </div>
 
-        {/* Checklists - full port from Android */}
-        {(selectedModelKey || selectedDbModel) && (
-          <>
-            {renderChecklist(CL_ELECTRICAL, checkElectrical, setCheckElectrical, '⚡ Electrical Checklist')}
-            {renderChecklist(CL_MECHANICAL, checkMechanical, setCheckMechanical, '🔧 Mechanical & Optical')}
-            {renderChecklist(CL_AESTHETIC, checkAesthetic, setCheckAesthetic, '🎨 Aesthetic Condition')}
-          </>
-        )}
+        {/* Checklists — always visible & editable (Android always renders once form open) */}
+        {renderChecklist(CL_ELECTRICAL, checkElectrical, setCheckElectrical, '⚡ Electrical Checklist')}
+        {renderChecklist(CL_MECHANICAL, checkMechanical, setCheckMechanical, '🔧 Mechanical & Optical')}
+        {renderChecklist(CL_AESTHETIC, checkAesthetic, setCheckAesthetic, '🎨 Aesthetic Condition')}
 
-        {/* Performance Testing */}
-        {currentModel && currentModel.wavelengths?.length > 0 && (
-          <div className="section mb-6">
-            <div className="section-hdr"><h3>📊 Performance Testing</h3></div>
-            <div className="section-body">
-              <button onClick={addPerfRow} className="btn btn-secondary text-sm mb-3">+ Add Measurement Row</button>
-              {powerMeasurements.map((row, i) => (
-                <div key={i} className="grid grid-cols-5 gap-2 mb-2 items-center text-sm">
+        {/* Performance Testing — always available (generic rows if no OEM wavelengths) */}
+        <div className="section mb-6">
+          <div className="section-hdr"><h3>📊 Performance Testing</h3></div>
+          <div className="section-body p-4">
+            <p className="text-[10px] text-[var(--text3)] mb-2">
+              {currentModel?.wavelengths?.length
+                ? 'Model-seeded wavelengths available in the dropdown; add rows as needed.'
+                : 'No OEM wavelength table for this model — enter freeform measurements.'}
+            </p>
+            <button type="button" onClick={addPerfRow} className="btn btn-secondary text-sm mb-3">+ Add Measurement Row</button>
+            {powerMeasurements.length === 0 && (
+              <div className="text-sm text-[var(--text3)] mb-2">No measurements yet. Add a row to record set vs actual.</div>
+            )}
+            {powerMeasurements.map((row, i) => (
+              <div key={i} className="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-2 items-center text-sm">
+                {currentModel?.wavelengths?.length ? (
                   <select className="input" value={row.wavelength} onChange={e=>updatePerf(i,'wavelength',e.target.value)}>
+                    <option value="">— Wavelength —</option>
                     {currentModel.wavelengths.map((w:any) => <option key={w.name} value={w.name}>{w.name}</option>)}
+                    {row.wavelength && !currentModel.wavelengths.some((w:any)=>w.name===row.wavelength) && (
+                      <option value={row.wavelength}>{row.wavelength}</option>
+                    )}
                   </select>
-                  <input className="input" placeholder="Set" value={row.setting} onChange={e=>updatePerf(i,'setting',e.target.value)} />
-                  <input className="input" placeholder="Measured" value={row.measured} onChange={e=>updatePerf(i,'measured',e.target.value)} />
-                  <div className="text-xs">{row.deviation} {row.pass ? '✓' : '✗'}</div>
-                  <button onClick={()=>removePerf(i)} className="text-red-400 text-xs">×</button>
+                ) : (
+                  <input className="input" placeholder="Wavelength / channel" value={row.wavelength} onChange={e=>updatePerf(i,'wavelength',e.target.value)} />
+                )}
+                <input className="input" placeholder="Set" value={row.setting} onChange={e=>updatePerf(i,'setting',e.target.value)} />
+                <input className="input" placeholder="Measured" value={row.measured} onChange={e=>updatePerf(i,'measured',e.target.value)} />
+                <input className="input" placeholder="Unit" value={row.unit || ''} onChange={e=>updatePerf(i,'unit',e.target.value)} />
+                <div className={`text-xs font-bold ${row.pass === false ? 'text-red-400' : row.pass ? 'text-green-400' : 'text-[var(--text3)]'}`}>
+                  {row.deviation || '—'} {row.pass === true ? 'PASS' : row.pass === false ? 'FAIL' : ''}
+                </div>
+                <button type="button" onClick={()=>removePerf(i)} className="text-red-400 text-xs">× Remove</button>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        {/* System Parameters — show when model has params OR saved modelParams keys exist */}
+        {(currentModel?.params?.length > 0 || Object.keys(modelParams).filter(k => !k.startsWith('__') && !k.startsWith('wlt_') && !k.startsWith('gas_') && !k.startsWith('fiber_')).length > 0) && (
+          <div className="section mb-6 p-6">
+            <h3 className="font-semibold mb-2 text-[var(--gold)]">🔬 System Parameters</h3>
+            <p className="text-[10px] text-[var(--text3)] mb-3">
+              Model-specific counters and voltages (e.g. VBeam Perfecta: pulses, dye, HV Final, bubble sense).
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {(currentModel?.params?.length
+                ? currentModel.params
+                : Object.keys(modelParams).filter((k) => !k.startsWith('__') && !/^wlt_|^gas_|^fiber_/.test(k))
+              ).map((p: string) => (
+                <div key={p}>
+                  <label className="text-xs font-semibold text-[var(--text2)]">{p}</label>
+                  <input
+                    className="input"
+                    inputMode={/s\/n|serial|kit|status|level/i.test(p) ? 'text' : 'decimal'}
+                    value={modelParams[p] || ''}
+                    onChange={(e) => setModelParams({ ...modelParams, [p]: e.target.value })}
+                    placeholder={p}
+                  />
                 </div>
               ))}
             </div>
-          </div>
-        )}
-
-        {/* Params, Safety, etc. */}
-        {currentModel && currentModel.params?.length > 0 && (
-          <div className="section mb-6 p-6">
-            <h3 className="font-semibold mb-2">🔬 System Parameters</h3>
-            {currentModel.params.map((p: string) => (
-              <div key={p} className="mb-2"><label className="text-xs">{p}</label><input className="input" value={modelParams[p]||''} onChange={e=>setModelParams({...modelParams, [p]: e.target.value})} /></div>
-            ))}
+            {(currentModel?.wlTest || ['wlt_nofilter','wlt_hd1_pre','wlt_ophir_pre','wlt_filter','wlt_hd1_post','wlt_ophir_post'].some(k => modelParams[k] != null && modelParams[k] !== '')) && (
+              <div className="mt-4 pt-4 border-t border-[var(--border)]">
+                <h4 className="text-sm font-bold text-[var(--gold)] mb-2">Wavelength Test</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {[
+                    ['wlt_nofilter', 'No Filter'],
+                    ['wlt_hd1_pre', 'HD 1 (pre)'],
+                    ['wlt_ophir_pre', 'Ophir (pre)'],
+                    ['wlt_filter', 'Filter'],
+                    ['wlt_hd1_post', 'HD 1 (post)'],
+                    ['wlt_ophir_post', 'Ophir (post)'],
+                  ].map(([id, lab]) => (
+                    <div key={id}>
+                      <label className="text-xs">{lab}</label>
+                      <input
+                        className="input"
+                        inputMode="decimal"
+                        value={modelParams[id] || ''}
+                        onChange={(e) => setModelParams({ ...modelParams, [id]: e.target.value })}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {(currentModel?.gasTest || ['gas_0','gas_10','gas_50','gas_70','gas_120'].some(k => modelParams[k] != null && modelParams[k] !== '')) && (
+              <div className="mt-4 pt-4 border-t border-[var(--border)]">
+                <h4 className="text-sm font-bold text-[var(--gold)] mb-2">Gas PSI Values</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {[
+                    ['gas_0', '0 PSI (spec ±0)'],
+                    ['gas_10', '10 PSI (spec ±5)'],
+                    ['gas_50', '50 PSI (spec ±5)'],
+                    ['gas_70', '70 PSI (spec ±5)'],
+                    ['gas_120', '120 PSI (spec ±5)'],
+                  ].map(([id, lab]) => (
+                    <div key={id}>
+                      <label className="text-xs">{lab}</label>
+                      <input
+                        className="input"
+                        inputMode="decimal"
+                        value={modelParams[id] || ''}
+                        onChange={(e) => setModelParams({ ...modelParams, [id]: e.target.value })}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {(currentModel?.fiberTest || Object.keys(modelParams).some((k) => k.startsWith('fiber_'))) && (
+              <div className="mt-4 pt-4 border-t border-[var(--border)]">
+                <h4 className="text-sm font-bold text-[var(--gold)] mb-2">Ferrule / Fiber Testing</h4>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                  {Object.keys(modelParams)
+                    .filter((k) => k.startsWith('fiber_'))
+                    .concat(
+                      !Object.keys(modelParams).some((k) => k.startsWith('fiber_'))
+                        ? ['fiber_1', 'fiber_2', 'fiber_3', 'fiber_4']
+                        : []
+                    )
+                    .filter((v, i, a) => a.indexOf(v) === i)
+                    .map((id) => (
+                      <div key={id}>
+                        <label className="text-xs">{id.replace(/^fiber_/, 'Fiber ')}</label>
+                        <input
+                          className="input"
+                          inputMode="decimal"
+                          value={modelParams[id] || ''}
+                          onChange={(e) => setModelParams({ ...modelParams, [id]: e.target.value })}
+                        />
+                      </div>
+                    ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
 
         <div className="section mb-6 p-6">
           <h3 className="font-semibold mb-2">🛡️ Electrical Safety</h3>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label>Ground Resistance (Ω)</label><input type="number" className="input" value={groundResistance} onChange={e=>setGroundResistance(e.target.value===''?'':parseFloat(e.target.value))} /></div>
-            <div><label>Leakage Current (mA)</label><input type="number" className="input" value={leakageCurrent} onChange={e=>setLeakageCurrent(e.target.value===''?'':parseFloat(e.target.value))} /></div>
-            <div className="flex gap-2"><button onClick={()=>setGroundPass(true)} className={`px-3 py-1 rounded ${groundPass===true?'bg-green-600':''}`}>Ground PASS</button><button onClick={()=>setGroundPass(false)} className={`px-3 py-1 rounded ${groundPass===false?'bg-red-600':''}`}>FAIL</button></div>
-            <div className="flex gap-2"><button onClick={()=>setLeakagePass(true)} className={`px-3 py-1 rounded ${leakagePass===true?'bg-green-600':''}`}>Leakage PASS</button><button onClick={()=>setLeakagePass(false)} className={`px-3 py-1 rounded ${leakagePass===false?'bg-red-600':''}`}>FAIL</button></div>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <label className="label">Ground Resistance (Ω) — spec ≤ 0.2Ω</label>
+              <input type="number" step="0.001" className="input" value={groundResistance} onChange={e=>updateGroundResistance(e.target.value)} />
+              <div className="flex gap-2 mt-2 items-center">
+                <button type="button" onClick={()=>setGroundPass(true)} className={`px-3 py-1 rounded text-xs border ${groundPass===true?'bg-green-600 text-white border-green-600':'border-[var(--border)]'}`}>PASS</button>
+                <button type="button" onClick={()=>setGroundPass(false)} className={`px-3 py-1 rounded text-xs border ${groundPass===false?'bg-red-600 text-white border-red-600':'border-[var(--border)]'}`}>FAIL</button>
+                {groundPass === true && <span className="text-green-400 text-xs font-bold">✓ PASS</span>}
+                {groundPass === false && <span className="text-red-400 text-xs font-bold">✗ FAIL</span>}
+              </div>
+            </div>
+            <div>
+              <label className="label">Leakage Current (µA) — spec ≤ 300µA</label>
+              <input type="number" step="0.1" className="input" value={leakageCurrent} onChange={e=>updateLeakageCurrent(e.target.value)} />
+              <div className="flex gap-2 mt-2 items-center">
+                <button type="button" onClick={()=>setLeakagePass(true)} className={`px-3 py-1 rounded text-xs border ${leakagePass===true?'bg-green-600 text-white border-green-600':'border-[var(--border)]'}`}>PASS</button>
+                <button type="button" onClick={()=>setLeakagePass(false)} className={`px-3 py-1 rounded text-xs border ${leakagePass===false?'bg-red-600 text-white border-red-600':'border-[var(--border)]'}`}>FAIL</button>
+                {leakagePass === true && <span className="text-green-400 text-xs font-bold">✓ PASS</span>}
+                {leakagePass === false && <span className="text-red-400 text-xs font-bold">✗ FAIL</span>}
+              </div>
+            </div>
           </div>
         </div>
 
         <div className="section mb-6 p-6">
-          <h3 className="font-semibold mb-2">🧰 Test Equipment</h3>
+          <div className="flex items-center justify-between mb-2">
+            <h3 className="font-semibold">🧰 Test Equipment</h3>
+            <Link href="/test-equipment" className="text-[11px] font-bold text-[var(--gold)]">Manage ›</Link>
+          </div>
+          {testEquipment.length === 0 && (
+            <p className="text-sm text-[var(--text3)] mb-2">No test equipment on file. Add instruments below or manage your catalog.</p>
+          )}
           {testEquipment.map((te, i) => (
-            <div key={i} className="flex gap-2 mb-1"><input className="input" placeholder="Meter / Tool" value={te.name} onChange={e=>{const cp=[...testEquipment]; cp[i].name=e.target.value; setTestEquipment(cp);}} /></div>
+            <div key={i} className="mb-3 pb-3 border-b border-[var(--border)] last:border-0">
+              <label className="flex items-center gap-2 text-xs font-bold text-[var(--gold)] mb-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={te.used !== false}
+                  onChange={(e) => updateTestEquip(i, 'used', e.target.checked)}
+                  className="accent-[var(--gold)]"
+                />
+                <input
+                  className="input flex-1 text-sm font-bold"
+                  value={te.type}
+                  onChange={(e) => updateTestEquip(i, 'type', e.target.value)}
+                  placeholder="Type (e.g. Digital Multimeter)"
+                />
+                <span className="font-normal text-[var(--text3)]">(used on this call)</span>
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div>
+                  <label className="text-[10px] text-[var(--text3)]">Make / Model</label>
+                  <input className="input" value={te.model || ''} onChange={(e) => updateTestEquip(i, 'model', e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-[10px] text-[var(--text3)]">Serial #</label>
+                  <input className="input" value={te.serial || ''} onChange={(e) => updateTestEquip(i, 'serial', e.target.value)} />
+                </div>
+                <div>
+                  <label className="text-[10px] text-[var(--text3)]">Cal Due</label>
+                  <input type="date" className="input" value={te.calDue || ''} onChange={(e) => updateTestEquip(i, 'calDue', e.target.value)} />
+                </div>
+              </div>
+            </div>
           ))}
-          <button onClick={addTestEquip} className="text-xs text-[var(--gold)]">+ Add</button>
+          <button type="button" onClick={addTestEquip} className="text-xs text-[var(--gold)] font-bold">+ Add instrument</button>
         </div>
 
         <div className="section mb-6 p-6">
