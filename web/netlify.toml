@@ -1,6 +1,12 @@
 # Next.js Runtime (@netlify/plugin-nextjs) owns publish path + routing.
-# Do NOT set publish = ".next" and do NOT add catch-all redirects —
-# those produce site-wide 404s with App Router + the OpenNext/Netlify handler.
+#
+# CRITICAL — site-wide 404 root causes we hit:
+# 1) Netlify UI "Publish directory" set to ".next"  → no server function routes
+# 2) Local Windows `netlify deploy --prod --build`  → often uploads 0 functions
+#    or a win32-bundled handler that 502s on Linux
+#
+# Prefer: trigger a Netlify cloud (Linux) build from the linked GitHub repo
+# (Build hooks / git push). Leave Publish directory EMPTY in the Netlify UI.
 
 [build]
   command = "npm run build"

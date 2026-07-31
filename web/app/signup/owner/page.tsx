@@ -3,10 +3,26 @@
 import React, { useState } from 'react';
 import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
 import { MODELS } from '@/lib/models';
+import {
+  OWNER_ORG_TYPE_SIGNUP_OPTIONS,
+  defaultJobTitleForOwnerOrgType,
+  ownerOrgTypeLabel,
+  type OwnerOrgType,
+} from '@/lib/org-types';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
-const FACILITY_TYPES = ['Hospital', 'Med Spa', 'Clinic', 'Private Practice', 'Surgery Center', 'Research / University', 'Other'];
+const FACILITY_TYPES = [
+  'Hospital',
+  'Med Spa',
+  'Clinic',
+  'Private Practice',
+  'Surgery Center',
+  'Research / University',
+  'Rental fleet',
+  'Reseller inventory',
+  'Other',
+];
 
 const PREFERRED_SERVICE_OPTIONS = [
   'Preventive Maintenance (PM)', 'Emergency / On-Call Repair', 'Install / Deinstall',
@@ -21,6 +37,7 @@ interface EquipmentItem {
 }
 
 export default function OwnerSignup() {
+  const [orgKind, setOrgKind] = useState<OwnerOrgType>('customer');
   const [facilityName, setFacilityName] = useState('');
   const [firstName, setFirstName] = useState('');
   const [lastName, setLastName] = useState('');
@@ -42,6 +59,13 @@ export default function OwnerSignup() {
   const [loading, setLoading] = useState(false);
   const router = useRouter();
   const supabase = getSupabaseClient();
+
+  const nameLabel =
+    orgKind === 'laser_rental'
+      ? 'Rental company name'
+      : orgKind === 'laser_reseller'
+        ? 'Reseller company name'
+        : 'Facility name';
 
   const toggleService = (svc: string) => {
     setSelectedServices(prev =>
@@ -69,7 +93,7 @@ export default function OwnerSignup() {
     setMessage('');
 
     if (!facilityName || !firstName || !lastName || !email || !password) {
-      setMessage('Facility name, contact name, email and password are required.');
+      setMessage(`${nameLabel}, contact name, email and password are required.`);
       return;
     }
     if (password.length < 6) {
@@ -85,10 +109,15 @@ export default function OwnerSignup() {
 
     try {
       // 1. Create auth user
+      const origin =
+        typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { first_name: firstName, last_name: lastName, facility: facilityName } }
+        options: {
+          data: { first_name: firstName, last_name: lastName, facility: facilityName },
+          emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
+        },
       });
       if (authError) throw authError;
 
@@ -99,10 +128,10 @@ export default function OwnerSignup() {
         return;
       }
 
-      // 2. Create organization (Laser Clinic / Customer)
+      // 2. Create organization (owner-side: clinic / rental / reseller)
       const orgInsert: any = {
         name: facilityName,
-        type: 'customer',
+        type: orgKind, // customer | laser_rental | laser_reseller
         address: address || null,
         city: city || null,
         state: state || null,
@@ -132,7 +161,7 @@ export default function OwnerSignup() {
         email,
         phone: phone || null,
         role: 'owner',
-        job_title: 'Facility / Equipment Manager',
+        job_title: defaultJobTitleForOwnerOrgType(orgKind),
         organization_id: newOrgId,
         onboarding_completed: false,
         bio: bio || null,
@@ -142,26 +171,39 @@ export default function OwnerSignup() {
 
       await claimPendingInvitations(supabase, userId, email);
 
-      // 4. Insert individual equipment records (if any were added)
+      // 4. Insert facility lasers (column is customer_organization_id, NOT organization_id)
+      let lasersSaved = 0;
+      const laserErrors: string[] = [];
       if (newOrgId && equipmentList.length > 0) {
-        const equipmentRows = equipmentList.map(item => ({
-          organization_id: newOrgId,
-          manufacturer: MODELS[item.modelKey]?.manufacturer || 'Unknown',
-          model: MODELS[item.modelKey]?.label || item.modelKey,
-          serial_number: item.serialNumber,
-          status: 'Active',
-        }));
-
-        const { error: equipError } = await supabase.from('equipment').insert(equipmentRows);
-        if (equipError) {
-          console.warn('Equipment insert warning:', equipError);
+        for (const item of equipmentList) {
+          const payload = {
+            customer_organization_id: newOrgId,
+            manufacturer: MODELS[item.modelKey]?.manufacturer || 'Unknown',
+            model: MODELS[item.modelKey]?.label || item.modelKey,
+            serial_number: (item.serialNumber || '').trim() || 'TBD',
+          };
+          const { error: equipError } = await supabase.from('equipment').insert(payload);
+          if (equipError) {
+            console.error('Equipment insert failed', equipError);
+            laserErrors.push(payload.model + ': ' + equipError.message);
+          } else {
+            lasersSaved++;
+          }
         }
       }
 
       if (authData.session) {
-        router.push('/marketplace');
+        if (laserErrors.length) {
+          setMessage(
+            `Account created. ${lasersSaved} laser(s) saved; ${laserErrors.length} failed. Finish under My Lasers.`
+          );
+        }
+        // Dashboard preferred (not Marketplace)
+        router.push(lasersSaved > 0 ? '/my-lasers?justSetup=1' : '/?justSetup=1');
       } else {
-        setMessage('Account created! Check your email to confirm, then sign in and visit Marketplace to post service needs.');
+        setMessage(
+          'Account created! Check your email to confirm, then sign in. Your facility lasers will appear under My Lasers after confirmation.'
+        );
       }
     } catch (err: any) {
       const msg = err.message || 'Owner sign up failed.';
@@ -179,8 +221,10 @@ export default function OwnerSignup() {
           <div className="mt-2">
             <span className="font-extrabold text-2xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </div>
-          <h1 className="text-2xl font-bold mt-1">Sign Up as Laser Owner / Facility</h1>
-          <p className="text-sm text-[var(--text3)]">Hospitals, Med Spas, Clinics &amp; Practices • Post service needs in the marketplace</p>
+          <h1 className="text-2xl font-bold mt-1">Sign Up as Laser Owner</h1>
+          <p className="text-sm text-[var(--text3)]">
+            Clinics, rental companies, and resellers — My Lasers, service needs, and marketplace awards
+          </p>
         </div>
 
         <div className="card p-6">
@@ -191,9 +235,44 @@ export default function OwnerSignup() {
           )}
 
           <form onSubmit={handleSubmit} className="space-y-4">
-            {/* Facility & Contact Info - kept same */}
             <div>
-              <label className="label">Facility / Company Name *</label>
+              <label className="label">Organization type *</label>
+              <div className="space-y-2">
+                {OWNER_ORG_TYPE_SIGNUP_OPTIONS.map((opt) => (
+                  <label
+                    key={opt.value}
+                    className={
+                      'flex gap-3 p-3 rounded-lg border cursor-pointer ' +
+                      (orgKind === opt.value
+                        ? 'border-[var(--gold)] bg-[var(--gold)]/10'
+                        : 'border-[var(--border)] hover:border-[var(--gold)]/50')
+                    }
+                  >
+                    <input
+                      type="radio"
+                      name="orgKind"
+                      className="mt-1"
+                      checked={orgKind === opt.value}
+                      onChange={() => {
+                        setOrgKind(opt.value);
+                        if (opt.value === 'laser_rental') setFacilityType('Rental fleet');
+                        else if (opt.value === 'laser_reseller') setFacilityType('Reseller inventory');
+                        else if (facilityType === 'Rental fleet' || facilityType === 'Reseller inventory') {
+                          setFacilityType('Clinic');
+                        }
+                      }}
+                    />
+                    <span>
+                      <span className="font-semibold text-sm block">{opt.label}</span>
+                      <span className="text-xs text-[var(--text3)]">{opt.description}</span>
+                    </span>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            <div>
+              <label className="label">{nameLabel} *</label>
               <input className="input" value={facilityName} onChange={e => setFacilityName(e.target.value)} required />
             </div>
 

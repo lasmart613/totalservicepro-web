@@ -1,12 +1,40 @@
 'use client';
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { ArrowLeft, Check, Plus, Save } from 'lucide-react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { toast } from 'sonner';
 import { MODELS } from '@/lib/models';
+import { generateDocNumber } from '@/lib/billing/doc-numbers';
+import { ensureEquipment } from '@/lib/equipment-ensure';
+import { isAdmin, normalizeRole } from '@/lib/roles';
+
+/** Admin / manager roles may edit Service Engineer (Android parity). */
+function canEditServiceEngineer(profile: any): boolean {
+  const role = normalizeRole(profile?.role);
+  let extras: any = profile?.additional_roles;
+  if (typeof extras === 'string') {
+    try {
+      extras = JSON.parse(extras);
+    } catch {
+      extras = [];
+    }
+  }
+  if (!Array.isArray(extras)) extras = [];
+  const all = [role, ...extras.map((r: any) => normalizeRole(r))];
+  return all.some(
+    (r) =>
+      isAdmin(r) ||
+      r === 'owner' ||
+      r === 'service_manager' ||
+      r === 'billing_manager' ||
+      r === 'manager' ||
+      (r && (r.includes('admin') || r.includes('owner') || r.includes('manager')))
+  );
+}
 
 export default function NewServiceReport() {
   /* Full functional Service Report matching Android service_report.html (source of truth - do not change Android SR).
@@ -14,9 +42,12 @@ export default function NewServiceReport() {
      - Exact CL_* arrays, model-driven perf (seeded + deviation), canvas sig pad, snapshots.
      - Draft / complete, print/PDF via browser, full payload.
      - Matches Android checklists, perf dev logic, sig capture, customer/equip flow.
+     - Service Engineer field + role lock (Sprint A parity).
   */
 
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const editReportId = searchParams?.get('id') || null;
   const supabase = getSupabaseClient();
 
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -37,6 +68,10 @@ export default function NewServiceReport() {
   const [dateOut, setDateOut] = useState('');
   const [nextPm, setNextPm] = useState('');
   const [ticketNum, setTicketNum] = useState('');
+  /** Universal: {ORG_PREFIX}-SR-YYYYMMDD-NN */
+  const [reportNumber, setReportNumber] = useState('');
+  /** Service Engineer / FSE — Android #engineer parity */
+  const [serviceEngineer, setServiceEngineer] = useState('');
   const [comments, setComments] = useState('');
 
   // Equipment in report
@@ -196,26 +231,44 @@ export default function NewServiceReport() {
       if (!user) return router.push('/login');
       setCurrentUser(user);
 
-      const { data: profile } = await supabase
-        .from('user_profiles')
-        .select('organization_id, first_name, last_name, phone, email, job_title, signature_data, organizations(name, address, city, state, phone, logo_url)')
-        .eq('id', user.id)
-        .maybeSingle();
+      // signature_data / role / additional_roles optional; fall back if not migrated yet
+      let profile: any = null;
+      {
+        const withSig = await supabase
+          .from('user_profiles')
+          .select('organization_id, first_name, last_name, phone, email, job_title, role, additional_roles, signature_data, organizations(name, address, city, state, phone, logo_url)')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (withSig.error && /signature_data|additional_roles|role/i.test(withSig.error.message || '')) {
+          const bare = await supabase
+            .from('user_profiles')
+            .select('organization_id, first_name, last_name, phone, email, job_title, role, organizations(name, address, city, state, phone, logo_url)')
+            .eq('id', user.id)
+            .maybeSingle();
+          profile = bare.data;
+        } else {
+          profile = withSig.data;
+        }
+      }
 
       if (profile?.organization_id) {
         setCurrentUserOrgId(profile.organization_id as any);
         setCurrentProfile(profile);
+        const org = Array.isArray(profile.organizations) ? profile.organizations[0] : profile.organizations;
+        const techName = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || user.email || '';
         setTechCompanyCache({
-          tech_name: [profile.first_name, profile.last_name].filter(Boolean).join(' '),
+          tech_name: techName,
           tech_phone: profile.phone || '',
           tech_email: user.email || '',
-          company_name: profile.organizations?.name || '',
-          company_address: profile.organizations?.address || '',
-          company_city: profile.organizations?.city || '',
-          company_state: profile.organizations?.state || '',
-          company_phone: profile.organizations?.phone || '',
-          company_logo_url: profile.organizations?.logo_url || ''
+          company_name: org?.name || '',
+          company_address: org?.address || '',
+          company_city: org?.city || '',
+          company_state: org?.state || '',
+          company_phone: org?.phone || '',
+          company_logo_url: org?.logo_url || ''
         });
+        // Default Service Engineer to signed-in tech (Android applyEngineerFieldAccess)
+        setServiceEngineer((prev) => (prev && prev.trim() ? prev : techName));
       }
       // Always load customers for dropdown (type=customer)
       await loadCustomers(profile?.organization_id || null);
@@ -223,6 +276,88 @@ export default function NewServiceReport() {
       if (!dateOut) setDateOut(new Date().toISOString().slice(0,10));
     })();
   }, [router, supabase]);
+
+  const engineerEditable = useMemo(() => canEditServiceEngineer(currentProfile), [currentProfile]);
+
+  // Load existing report when opened via /reports/new?id=… (Android loadReport parity — minimal fields + engineer)
+  useEffect(() => {
+    if (!editReportId || !currentUser) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data: r, error } = await supabase
+          .from('service_reports')
+          .select('*')
+          .eq('id', editReportId)
+          .maybeSingle();
+        if (cancelled || error || !r) {
+          if (error) toast.error('Could not load report: ' + error.message);
+          return;
+        }
+        setCurrentReportId(r.id);
+        if (r.status === 'complete') setIsSubmitted(true);
+        if (r.report_number) setReportNumber(r.report_number);
+        if (r.ticket_number) setTicketNum(r.ticket_number);
+        if (r.service_type) setServiceType(r.service_type);
+        if (r.date_out) setDateOut(String(r.date_out).slice(0, 10));
+        if (r.next_pm_due) setNextPm(String(r.next_pm_due).slice(0, 10));
+        if (r.serial_number) setSerialNumber(r.serial_number);
+        if (r.equipment_name) setEquipName(r.equipment_name);
+        if (r.comments) setComments(r.comments);
+        // Prefer saved service_engineer; never clobber with profile after load
+        if (r.service_engineer) setServiceEngineer(r.service_engineer);
+        if (r.customer_name) {
+          setSearchTerm(r.customer_name);
+          setSelectedCustomer((prev: any) =>
+            prev || {
+              id: r.customer_organization_id || null,
+              name: r.customer_name,
+              address: r.customer_address,
+              city: r.customer_city,
+              state: r.customer_state,
+              phone: r.customer_phone,
+              email: r.customer_email,
+              contact_name: r.customer_contact_name,
+            }
+          );
+        }
+        if (r.model_type) {
+          setSelectedModelKey(r.model_type);
+          setSelectedDbModel(r.model_type);
+        }
+        if (r.checklist_electrical && typeof r.checklist_electrical === 'object') {
+          setCheckElectrical(r.checklist_electrical);
+        }
+        if (r.checklist_mechanical && typeof r.checklist_mechanical === 'object') {
+          setCheckMechanical(r.checklist_mechanical);
+        }
+        if (r.checklist_aesthetic && typeof r.checklist_aesthetic === 'object') {
+          setCheckAesthetic(r.checklist_aesthetic);
+        }
+        if (Array.isArray(r.power_measurements)) setPowerMeasurements(r.power_measurements);
+        if (r.model_parameters && typeof r.model_parameters === 'object') setModelParams(r.model_parameters);
+        if (r.ground_resistance != null) setGroundResistance(r.ground_resistance);
+        if (r.leakage_current != null) setLeakageCurrent(r.leakage_current);
+        if (r.ground_resistance_pass != null) setGroundPass(!!r.ground_resistance_pass);
+        if (r.leakage_current_pass != null) setLeakagePass(!!r.leakage_current_pass);
+        if (Array.isArray(r.test_equipment) && r.test_equipment.length) {
+          setTestEquipment(r.test_equipment.map((t: any) => ({
+            name: t.name || t.model || t.type || '',
+            id: t.id || t.serial || '',
+          })));
+        }
+        if (r.tech_signature) setTechSig(r.tech_signature);
+        if (r.signed_date) setTechSigDate(String(r.signed_date).slice(0, 10));
+        toast.success(r.status === 'complete' ? 'Report loaded' : 'Draft loaded');
+      } catch (e: any) {
+        console.warn('load report', e);
+        toast.error('Failed to load report');
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [editReportId, currentUser, supabase]);
 
   // Load manufacturers and laser_models from Supabase for dynamic dropdowns in reports (and tickets)
   useEffect(() => {
@@ -325,7 +460,7 @@ export default function NewServiceReport() {
       setShowAddModal(false);
       setNewCustomer({ name: '', address: '', city: '', state: '', phone: '', email: '', contactName: '' });
     } catch (e: any) {
-      alert('Failed to create customer: ' + (e.message || e));
+      toast.error('Failed to create customer: ' + (e.message || e));
     }
   };
 
@@ -370,12 +505,22 @@ export default function NewServiceReport() {
       k === modelVal || (MODELS as any)[k]?.label === modelVal || (MODELS as any)[k]?.mfg === modelVal
     ) || modelVal;
     selectModel(found);
-    // auto-fill equipment name
+    // Derive equipment_name from manufacturer + model dropdowns (no free-text field)
     const m = (MODELS as any)[found];
     if (m) {
       setEquipName(`${m.mfg || ''} ${m.label || modelVal}`.trim());
     } else if (modelVal) {
-      setEquipName(modelVal);
+      const mfrRow = dbManufacturers.find((x: any) => String(x.id) === String(selectedDbMfr) || x.name === selectedDbMfr);
+      const mfrName = mfrRow?.name || selectedDbMfr || '';
+      setEquipName([mfrName, modelVal].filter(Boolean).join(' ').trim());
+    }
+    // Assign report number once when equipment is chosen
+    if (!reportNumber && currentUserOrgId) {
+      generateDocNumber(supabase, {
+        orgId: currentUserOrgId,
+        kind: 'SR',
+        date: dateOut || new Date(),
+      }).then((n) => setReportNumber(n)).catch(() => {});
     }
   }
 
@@ -443,33 +588,63 @@ export default function NewServiceReport() {
     return newC?.id || null;
   }
 
-  async function ensureEquipment(orgId: any) {
-    if (!orgId || !equipName) return null;
-    try {
-      const { data: exist } = await supabase.from('equipment').select('id').eq('organization_id', orgId).eq('serial_number', serialNumber || '').maybeSingle();
-      if (exist?.id) return exist.id;
-      const { data: ins } = await supabase.from('equipment').insert({
-        organization_id: orgId,
-        name: equipName,
-        model: selectedModelKey || equipName,
-        serial_number: serialNumber || null,
-        manufacturer: currentModel?.mfg || null
-      }).select('id').single();
-      return ins?.id;
-    } catch (e) { return null; }
+  async function ensureLinkedEquipment(orgId: any) {
+    if (!orgId) return null;
+    const mfrRow = dbManufacturers.find(
+      (x: any) => String(x.id) === String(selectedDbMfr) || x.name === selectedDbMfr
+    );
+    const mfrName = currentModel?.mfg || mfrRow?.name || selectedDbMfr || '';
+    const modelName =
+      currentModel?.label || selectedDbModel || selectedModelKey || equipName || '';
+    return ensureEquipment({
+      client: supabase,
+      customerOrgId: orgId,
+      manufacturer: mfrName,
+      model: modelName,
+      serial: serialNumber,
+      name: equipName || [mfrName, modelName].filter(Boolean).join(' '),
+    });
   }
 
   async function saveReport(status: 'draft' | 'complete') {
-    if (!currentUser || !currentUserOrgId) { alert('No org or user'); return; }
+    if (!currentUser || !currentUserOrgId) {
+      toast.error('Sign in with an organization to save reports');
+      return;
+    }
     setSaving(true);
     try {
       // Force latest canvas capture for sig (Android parity)
       const canvas = sigCanvasRef.current;
-      if (canvas && !techSig) {
-        try { setTechSig(canvas.toDataURL('image/png')); } catch {}
+      let latestSig = techSig;
+      if (canvas && !latestSig) {
+        try {
+          latestSig = canvas.toDataURL('image/png');
+          setTechSig(latestSig);
+        } catch {}
       }
       const custId = await ensureCustomerOrg();
-      const equipId = await ensureEquipment(custId || currentUserOrgId);
+      const linkedEquipmentId = await ensureLinkedEquipment(custId || null);
+
+      let rn = reportNumber;
+      if (!rn) {
+        try {
+          rn = await generateDocNumber(supabase, {
+            orgId: currentUserOrgId,
+            kind: 'SR',
+            date: dateOut || new Date(),
+          });
+          setReportNumber(rn);
+        } catch {
+          rn = '';
+        }
+      }
+
+      const engineerName =
+        (serviceEngineer && serviceEngineer.trim()) ||
+        techCompanyCache.tech_name ||
+        [currentProfile?.first_name, currentProfile?.last_name].filter(Boolean).join(' ') ||
+        currentUser.email ||
+        null;
 
       // collect data mirroring Android
       const reportData: any = {
@@ -478,7 +653,18 @@ export default function NewServiceReport() {
         status,
         service_type: serviceType,
         model_type: selectedModelKey,
-        equipment_name: equipName || currentModel?.label || null,
+        report_number: rn || reportNumber || null,
+        service_engineer: engineerName,
+        customer_organization_id: custId || null,
+        equipment_id: linkedEquipmentId || null,
+        equipment_name:
+          equipName ||
+          currentModel?.label ||
+          [dbManufacturers.find((x: any) => String(x.id) === String(selectedDbMfr) || x.name === selectedDbMfr)?.name, selectedDbModel]
+            .filter(Boolean)
+            .join(' ') ||
+          selectedDbModel ||
+          null,
         serial_number: serialNumber || null,
         customer_name: selectedCustomer?.name || searchTerm || null,
         customer_address: selectedCustomer?.address || null,
@@ -509,31 +695,60 @@ export default function NewServiceReport() {
         tech_company_state: techCompanyCache.company_state,
         tech_company_phone: techCompanyCache.company_phone,
         tech_company_logo_url: techCompanyCache.company_logo_url,
-        // snapshot sig
-        signature_data: techSig || currentProfile?.signature_data || null,
-        signed_at: techSigDate || (status === 'complete' ? new Date().toISOString() : null)
+        // Android parity: service_reports.tech_signature + signed_date (NOT signature_data / signed_at)
+        tech_signature: latestSig || currentProfile?.signature_data || null,
+        signed_date:
+          (techSigDate && String(techSigDate).slice(0, 10)) ||
+          (status === 'complete' ? new Date().toISOString().slice(0, 10) : null),
       };
 
+      // Retry without columns PostgREST says are missing (schema drift / unapplied migrations)
+      async function writeReport(payload: Record<string, any>, id: any) {
+        let body = { ...payload };
+        for (let attempt = 0; attempt < 6; attempt++) {
+          if (id) {
+            const { error } = await supabase.from('service_reports').update(body).eq('id', id);
+            if (!error) return { id, error: null as any };
+            const m = String(error.message || '');
+            const col = m.match(/Could not find the '([^']+)' column/i)?.[1];
+            if (col && col in body) {
+              console.warn('service_reports missing column, retry without:', col);
+              delete body[col];
+              continue;
+            }
+            return { id, error };
+          }
+          const { data: ins, error } = await supabase.from('service_reports').insert(body).select('id').single();
+          if (!error && ins?.id) return { id: ins.id, error: null as any };
+          const m = String(error?.message || '');
+          const col = m.match(/Could not find the '([^']+)' column/i)?.[1];
+          if (col && col in body) {
+            console.warn('service_reports missing column, retry without:', col);
+            delete body[col];
+            continue;
+          }
+          return { id: null, error };
+        }
+        return { id: null, error: new Error('Could not save report after schema retries') };
+      }
+
       let savedId = currentReportId;
-      if (savedId) {
-        await supabase.from('service_reports').update(reportData).eq('id', savedId);
-      } else {
-        const { data: ins, error } = await supabase.from('service_reports').insert(reportData).select('id').single();
-        if (error) throw error;
-        savedId = ins.id;
+      const result = await writeReport(reportData, savedId);
+      if (result.error) throw result.error;
+      if (!savedId && result.id) {
+        savedId = result.id;
         setCurrentReportId(savedId);
       }
 
       if (status === 'complete') {
         setIsSubmitted(true);
-        alert('Report submitted!');
+        toast.success('Report submitted!');
       } else {
-        alert('Draft saved.');
+        toast.success('Draft saved.');
       }
-      // optionally navigate
     } catch (e: any) {
       console.error(e);
-      alert('Save error: ' + (e.message || e));
+      toast.error('Save error: ' + (e.message || e));
     } finally {
       setSaving(false);
     }
@@ -566,7 +781,9 @@ export default function NewServiceReport() {
         <div className="flex items-center justify-between mb-6">
           <div className="flex items-center gap-3">
             <Link href="/reports" className="text-[var(--gold)]"><ArrowLeft size={24} /></Link>
-            <h1 className="text-3xl font-bold">New Service Report</h1>
+            <h1 className="text-3xl font-bold">
+              {currentReportId ? (isSubmitted ? 'Service Report' : 'Edit Draft Report') : 'New Service Report'}
+            </h1>
           </div>
           <div className="flex gap-3">
             <button onClick={() => saveReport('draft')} disabled={saving} className="btn btn-secondary flex items-center gap-2"><Save size={16}/> Save Draft</button>
@@ -618,7 +835,7 @@ export default function NewServiceReport() {
           <input type="text" placeholder="Or enter custom name (optional)" className="input w-full mt-1 text-sm" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} />
         </div>
 
-        {/* Report Info */}
+        {/* Report Info — equipment name/model lives only in the dropdown section below */}
         <div className="section mb-6 p-6">
           <h3 className="text-xl font-semibold mb-4">📋 Report Info</h3>
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
@@ -626,14 +843,37 @@ export default function NewServiceReport() {
             <div><label className="label">Date Out</label><input type="date" className="input" value={dateOut} onChange={e=>setDateOut(e.target.value)} /></div>
             <div><label className="label">Next PM Due</label><input type="date" className="input" value={nextPm} onChange={e=>setNextPm(e.target.value)} /></div>
             <div><label className="label">Ticket #</label><input className="input" value={ticketNum} onChange={e=>setTicketNum(e.target.value)} /></div>
-            <div className="md:col-span-2"><label className="label">Equipment Name / Model</label><input className="input" placeholder="e.g. Candela VBeam" value={equipName} onChange={e=>setEquipName(e.target.value)} /></div>
+            <div><label className="label">Report #</label><input className="input" value={reportNumber} onChange={e=>setReportNumber(e.target.value)} placeholder="Auto: PREFIX-SR-YYYYMMDD-NN" /></div>
             <div><label className="label">Serial Number</label><input className="input" value={serialNumber} onChange={e=>setSerialNumber(e.target.value)} /></div>
+            <div className="md:col-span-2">
+              <label className="label">
+                Service Engineer{' '}
+                <span className="font-normal text-[var(--text3)] text-[11px]">
+                  {engineerEditable ? '(admin — editable)' : '(locked to your profile)'}
+                </span>
+              </label>
+              <input
+                className="input"
+                value={serviceEngineer}
+                onChange={(e) => {
+                  if (engineerEditable) setServiceEngineer(e.target.value);
+                }}
+                readOnly={!engineerEditable}
+                style={{ opacity: engineerEditable ? 1 : 0.85 }}
+                title={
+                  engineerEditable
+                    ? 'Admins can set which FSE performed the work'
+                    : 'Locked to signed-in tech for FSE roles'
+                }
+                placeholder="Field service engineer name"
+              />
+            </div>
           </div>
         </div>
 
-        {/* Model select + dynamic - now prefers DB tables "manufacturers" + "laser_models" for dropdowns */}
+        {/* Manufacturer + Model dropdowns (sole equipment name source for draft/save) */}
         <div className="section mb-6 p-6">
-          <h3 className="text-xl font-semibold mb-4">⚙️ Equipment Model (from DB tables)</h3>
+          <h3 className="text-xl font-semibold mb-4">⚙️ Equipment Name / Model</h3>
 
           {/* Manufacturer from manufacturers table */}
           <div className="mb-2 flex gap-2 items-end">
@@ -666,7 +906,7 @@ export default function NewServiceReport() {
                       setDbManufacturers(prev => [...prev, {id: data.id, name: data.name}]);
                       selectDbManufacturer(data.id || data.name);
                     }
-                  } catch(e){ alert('Failed to add manufacturer: ' + (e as any).message); }
+                  } catch(e){ toast.error('Failed to add manufacturer: ' + (e as any).message); }
                 }
               }}
               className="btn btn-secondary text-xs py-1">+ Add Mfr
@@ -789,7 +1029,7 @@ export default function NewServiceReport() {
             <div>
               <label className="label">Date Signed</label>
               <input type="datetime-local" className="input" value={techSigDate} onChange={e=>setTechSigDate(e.target.value)} />
-              <div className="text-[10px] text-[var(--text3)] mt-2">If blank on complete, profile signature_data will be used (Android parity).</div>
+              <div className="text-[10px] text-[var(--text3)] mt-2">If blank on complete, profile signature will be used (Android parity). Saved as tech_signature on the report.</div>
             </div>
           </div>
         </div>

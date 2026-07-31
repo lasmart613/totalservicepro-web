@@ -72,6 +72,8 @@ async function ensureServiceCreatorLinked(supabase: any, orgId: any, orgType?: s
 function CompanyProfile() {
   const [org, setOrg] = useState<any>({});
   const [members, setMembers] = useState<any[]>([]);
+  const [pendingInvites, setPendingInvites] = useState<any[]>([]);
+  const [inviteHistory, setInviteHistory] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [addMessage, setAddMessage] = useState('');
@@ -229,19 +231,109 @@ function CompanyProfile() {
 
   async function loadTeamMembers(orgId: any) {
     if (!orgId) return;
-    const { data: mems } = await supabase
+
+    // Prefer server list (bypasses RLS that only allows reading your own profile)
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        // Sync links first, then list
+        await fetch('/api/team/sync', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        }).catch(() => null);
+
+        const listRes = await fetch('/api/team/list', {
+          method: 'GET',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+          },
+        });
+        if (listRes.ok) {
+          const json = await listRes.json();
+          if (Array.isArray(json.members)) setMembers(json.members);
+          if (Array.isArray(json.pendingInvites)) setPendingInvites(json.pendingInvites);
+          if (Array.isArray(json.invites)) setInviteHistory(json.invites);
+          return;
+        } else {
+          const errBody = await listRes.json().catch(() => ({}));
+          console.warn('team list failed', listRes.status, errBody);
+          toast.error(
+            errBody.error ||
+              'Could not load full team roster (server). Showing limited list.'
+          );
+        }
+      }
+    } catch (e) {
+      console.warn('team list non-fatal', e);
+    }
+
+    // Fallback: client query (may only return yourself under strict RLS)
+    const { data: mems, error: memErr } = await supabase
       .from('user_profiles')
       .select('id, first_name, last_name, email, role, job_title, additional_roles')
-      .eq('organization_id', orgId)
-      .order('role', { ascending: true });
-    let loaded = mems || [];
+      .eq('organization_id', orgId);
+    if (memErr) console.warn('team members client query', memErr);
 
+    let loaded = mems || [];
     const { data: { user: currentUser } } = await supabase.auth.getUser();
     if (currentUser && !loaded.some((m: any) => m.id === currentUser.id)) {
-      const { data: selfProf } = await supabase.from('user_profiles').select('id, first_name, last_name, email, role, job_title, additional_roles').eq('id', currentUser.id).maybeSingle();
+      const { data: selfProf } = await supabase
+        .from('user_profiles')
+        .select('id, first_name, last_name, email, role, job_title, additional_roles')
+        .eq('id', currentUser.id)
+        .maybeSingle();
       if (selfProf) loaded = [selfProf, ...loaded];
     }
     setMembers(loaded);
+
+    // Fallback pending invites (often empty under RLS)
+    try {
+      const { data: invs } = await supabase
+        .from('engineer_invitations')
+        .select('id, email, role, first_name, last_name, created_at, accepted')
+        .eq('organization_id', orgId)
+        .eq('accepted', false)
+        .order('created_at', { ascending: false });
+      setPendingInvites(invs || []);
+      setInviteHistory(invs || []);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function resendInviteEmail(email: string, role?: string) {
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) throw new Error('Not signed in');
+      const res = await fetch('/api/team/invite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({ email, role: role || 'fse' }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Resend failed');
+      if (json.inviteUrl && navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(json.inviteUrl);
+          toast.message('Invite link copied to clipboard');
+        } catch {
+          /* ignore */
+        }
+      }
+      if (json.emailed) toast.success(`Invite email sent to ${email}`);
+      else if (json.rateLimited) {
+        toast.error(json.message || 'Email rate limit — use the copied link', { duration: 12000 });
+      } else toast.message(json.message || 'Invite processed', { duration: 10000 });
+      await loadTeamMembers(org.id);
+    } catch (e: any) {
+      toast.error(e?.message || 'Resend failed');
+    }
   }
 
   async function saveOrg() {
@@ -262,8 +354,21 @@ function CompanyProfile() {
           state: currentOrg.state ?? null,
           phone: currentOrg.phone ?? null,
           website: currentOrg.website ?? null,
+          list_in_directory: !!currentOrg.list_in_directory,
         };
-        const { data: newOrgData } = await supabase.from('organizations').insert(orgInsert).select('id').single();
+        let { data: newOrgData, error: insErr } = await supabase
+          .from('organizations')
+          .insert(orgInsert)
+          .select('id')
+          .single();
+        if (insErr && /list_in_directory|column/i.test(insErr.message || '')) {
+          delete orgInsert.list_in_directory;
+          ({ data: newOrgData, error: insErr } = await supabase
+            .from('organizations')
+            .insert(orgInsert)
+            .select('id')
+            .single());
+        }
         if (newOrgData?.id) {
           currentOrg = { ...currentOrg, id: newOrgData.id, type: inferredType };
           setOrg(currentOrg);
@@ -274,15 +379,30 @@ function CompanyProfile() {
         }
       }
 
-      const updateData = {
+      const updateData: any = {
         name: currentOrg.name ?? null,
         address: currentOrg.address ?? null,
         city: currentOrg.city ?? null,
         state: currentOrg.state ?? null,
         phone: currentOrg.phone ?? null,
         website: currentOrg.website ?? null,
+        list_in_directory: !!currentOrg.list_in_directory,
       };
-      await supabase.from('organizations').update(updateData).eq('id', currentOrg.id);
+      let { error: upErr } = await supabase
+        .from('organizations')
+        .update(updateData)
+        .eq('id', currentOrg.id);
+      if (upErr && /list_in_directory|column/i.test(upErr.message || '')) {
+        delete updateData.list_in_directory;
+        ({ error: upErr } = await supabase
+          .from('organizations')
+          .update(updateData)
+          .eq('id', currentOrg.id));
+        if (!upErr) {
+          toast.message('Saved (directory column not available yet)');
+        }
+      }
+      if (upErr) throw upErr;
       toast.success('Details saved.');
       if (serviceAdminMode) setShowTeamPrompt(true);
     } catch (err: any) {
@@ -319,42 +439,57 @@ function CompanyProfile() {
       setAddMessage('Email and full name required.');
       return;
     }
-    setAddMessage('Processing...');
+    setAddMessage('Sending invite…');
     try {
-      const { data: { user: cur } } = await supabase.auth.getUser();
-      if (!cur || !org?.id) throw new Error('No org');
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token || !org?.id) throw new Error('No org / not signed in');
 
       const em = newTeam.email.toLowerCase().trim();
       const chosenRole = newTeam.role || 'fse';
-      const chosenAddl = newTeam.additional || [];
       const splitName = newTeam.fullName.trim().split(' ');
       const fn = splitName[0] || '';
       const ln = splitName.slice(1).join(' ') || '';
 
-      const { data: existing } = await supabase.from('user_profiles').select('id').eq('email', em).maybeSingle();
-
-      if (existing?.id) {
-        await supabase.from('user_profiles').update({
-          organization_id: org.id,
-          role: chosenRole,
-          additional_roles: chosenAddl.length ? chosenAddl : null,
-          job_title: [chosenRole, ...chosenAddl].join(' + '),
-          first_name: fn,
-          last_name: ln || undefined,
-        }).eq('id', existing.id);
-        toast.success('Existing user linked/updated in org with role(s).');
-      } else {
-        // Best practice per requirements: use invitations, do not pre-create users
-        await supabase.from('engineer_invitations').insert({
-          organization_id: org.id,
+      const res = await fetch('/api/team/invite', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${session.access_token}`,
+        },
+        body: JSON.stringify({
           email: em,
           role: chosenRole,
-          first_name: fn || null,
-          last_name: ln || null,
-          invited_by: cur.id,
-          accepted: false
+          firstName: fn,
+          lastName: ln,
+          jobTitle: newTeam.title || [chosenRole, ...(newTeam.additional || [])].join(' + '),
+        }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || 'Invite failed');
+
+      if (json.inviteUrl && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+        try {
+          await navigator.clipboard.writeText(json.inviteUrl);
+        } catch {
+          /* ignore */
+        }
+      }
+
+      if (json.emailed) {
+        toast.success(json.message || `Invite email sent to ${em}`);
+      } else if (json.linked) {
+        toast.success(json.message || 'Existing user linked to your org');
+      } else if (json.rateLimited) {
+        toast.error(
+          json.message ||
+            'Email rate limit — copy/share the invite link from the clipboard (or try again in ~1 hour).',
+          { duration: 15000 }
+        );
+      } else {
+        toast.message(json.message || 'Invitation saved (email may not have been sent)', {
+          description: json.inviteUrl || json.signupUrl || undefined,
+          duration: 12000,
         });
-        toast.success('Invitation created for ' + em + ' (sign up first, then auto assigned to RSP org + roles).');
       }
       await loadTeamMembers(org.id);
     } catch (e: any) {
@@ -406,7 +541,7 @@ function CompanyProfile() {
       .from('organizations')
       .select('*')
       .in('id', ids)
-      .in('type', ['customer', 'laser_clinic'])
+      .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'])
       .order('name');
     setCustomers(custs || []);
   }
@@ -524,6 +659,24 @@ function CompanyProfile() {
                 <label className="label">Website</label>
                 <input className="input" value={org.website || ''} onChange={e => setOrg({ ...org, website: e.target.value })} />
               </div>
+              <label className="flex items-start gap-3 cursor-pointer mt-2">
+                <input
+                  type="checkbox"
+                  className="mt-1 w-4 h-4 accent-[var(--gold)]"
+                  checked={!!org.list_in_directory}
+                  onChange={(e) => setOrg({ ...org, list_in_directory: e.target.checked })}
+                />
+                <span className="text-sm font-semibold leading-snug">
+                  List my organization in the Total Service Pro directory for free
+                  <span className="block text-[11px] font-normal text-[var(--text3)] mt-0.5">
+                    Appears in the{' '}
+                    <a href="/directory" className="text-[var(--gold)] hover:underline">
+                      TSP Directory
+                    </a>{' '}
+                    so others can find you. Change anytime. Free for all org types.
+                  </span>
+                </span>
+              </label>
             </div>
 
             {/* Logo Upload */}
@@ -591,16 +744,118 @@ function CompanyProfile() {
                 </div>
               </div>
 
-              <div>
-                <h3 className="font-semibold mb-2">Current Team</h3>
+              <div className="mb-6">
+                <div className="flex items-center justify-between mb-2 gap-2">
+                  <h3 className="font-semibold">Current Team</h3>
+                  <button
+                    type="button"
+                    className="btn btn-secondary text-xs"
+                    onClick={async () => {
+                      setAddMessage('Syncing team…');
+                      await loadTeamMembers(org.id);
+                      setAddMessage('');
+                      toast.success('Team list refreshed');
+                    }}
+                  >
+                    Refresh / sync invites
+                  </button>
+                </div>
+                <p className="text-xs text-[var(--text3)] mb-2">{members.length} member(s)</p>
                 {members.length === 0 ? <p className="text-xs text-[var(--text3)]">No team members yet.</p> : (
                   <ul className="text-sm">
                     {members.map((m: any, i: number) => (
-                      <li key={i} className="py-1 border-b border-[var(--border)] last:border-0">{m.first_name} {m.last_name} — {m.role || 'member'}{m.additional_roles?.length ? ' + ' + (Array.isArray(m.additional_roles)?m.additional_roles.join('+') : m.additional_roles) : ''} {m.email}</li>
+                      <li key={m.id || i} className="py-2 border-b border-[var(--border)] last:border-0">
+                        <div className="font-medium">
+                          {[m.first_name, m.last_name].filter(Boolean).join(' ') || '—'}
+                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-[var(--surface3)] capitalize">
+                            {(m.role || 'member').replace(/_/g, ' ')}
+                          </span>
+                        </div>
+                        <div className="text-xs text-[var(--text3)]">{m.email || 'no email'}</div>
+                        {m.job_title && (
+                          <div className="text-xs text-[var(--text3)]">{m.job_title}</div>
+                        )}
+                      </li>
                     ))}
                   </ul>
                 )}
               </div>
+
+              <div className="mb-6">
+                <h3 className="font-semibold mb-2">
+                  Pending invites ({pendingInvites.length})
+                </h3>
+                <p className="text-[10px] text-[var(--text3)] mb-2">
+                  Invites that are still open, or accepted but not yet on the roster. Once someone finishes
+                  setup they move to Current Team (not pending).
+                </p>
+                {pendingInvites.length === 0 ? (
+                  <p className="text-xs text-[var(--text3)]">No pending invites.</p>
+                ) : (
+                  <ul className="text-sm">
+                    {pendingInvites.map((inv: any) => (
+                      <li
+                        key={inv.id}
+                        className="py-2 border-b border-[var(--border)] last:border-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2"
+                      >
+                        <div>
+                          <div className="font-medium">{inv.email}</div>
+                          <div className="text-xs text-[var(--text3)] capitalize">
+                            {(inv.role || 'fse').replace(/_/g, ' ')}
+                            {inv.created_at
+                              ? ` · invited ${new Date(inv.created_at).toLocaleDateString()}`
+                              : ''}
+                            {inv.accepted ? ' · marked accepted' : ' · waiting'}
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          className="btn btn-secondary text-xs self-start"
+                          onClick={() => resendInviteEmail(inv.email, inv.role)}
+                        >
+                          Resend / copy link
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
+
+              {inviteHistory.length > 0 && (
+                <div>
+                  <h3 className="font-semibold mb-2">Invite history</h3>
+                  <p className="text-[10px] text-[var(--text3)] mb-2">
+                    All invite records for your organization (including completed).
+                  </p>
+                  <ul className="text-xs text-[var(--text2)] max-h-48 overflow-y-auto">
+                    {inviteHistory.map((inv: any) => {
+                      const onTeam = members.some(
+                        (m: any) =>
+                          (m.email || '').toLowerCase() === (inv.email || '').toLowerCase()
+                      );
+                      return (
+                        <li
+                          key={inv.id}
+                          className="py-1.5 border-b border-[var(--border)] last:border-0 flex justify-between gap-2"
+                        >
+                          <span className="truncate">{inv.email}</span>
+                          <span className="shrink-0 text-[var(--text3)]">
+                            {onTeam
+                              ? 'on team'
+                              : inv.accepted
+                                ? 'accepted'
+                                : 'pending'}
+                            {' · '}
+                            {inv.created_at
+                              ? new Date(inv.created_at).toLocaleDateString()
+                              : '—'}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              )}
             </div>
 
             <p className="text-[10px] text-[var(--text3)]">

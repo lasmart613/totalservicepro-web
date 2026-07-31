@@ -7,8 +7,9 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "deploy": "netlify deploy --prod",
-    "deploy:preview": "netlify deploy"
+    "deploy": "netlify build && netlify deploy --prod --no-build",
+    "deploy:preview": "netlify build && netlify deploy --no-build",
+    "deploy:remote": "netlify build --context production"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

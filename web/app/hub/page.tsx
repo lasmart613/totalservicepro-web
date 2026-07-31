@@ -51,30 +51,41 @@ export default function TechHub() {
   // Tech Hub = field / technical tools only (no CRM customers)
   const techCards: HubCard[] = owner
     ? [
-        { href: '/my-lasers', icon: '⚡', label: 'My Lasers', desc: 'Facility equipment inventory' },
-        { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Post needs & review bids' },
+        { href: '/my-lasers', icon: '⚡', label: 'My Lasers', desc: 'Inventory & laser profiles' },
+        { href: '/service-requests', icon: '🛠️', label: 'Service Requests', desc: 'Request repair / PM for your systems' },
+        { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Parts, used systems & consumables' },
         { href: '/reports', icon: '📋', label: 'Service History', desc: 'Completed work on your systems' },
         { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Reference bookshelf' },
+        { href: '/directory', icon: '📒', label: 'TSP Directory', desc: 'Find service companies (free listings)' },
       ]
     : supplier
       ? [
           { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Master list & listings' },
           { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Demand & your listings' },
           { href: '/company', icon: '🏢', label: 'Supplier Profile', desc: 'Company & brands' },
+          { href: '/directory', icon: '📒', label: 'TSP Directory', desc: 'Listed organizations (free)' },
         ]
       : [
           { href: '/service-schedule', icon: '📅', label: 'Service Schedule', desc: 'Tickets, assignments & scheduling' },
+          { href: '/service-requests', icon: '🛠️', label: 'Repair Requests', desc: 'Open laser repair jobs from clinics' },
+          { href: '/bids', icon: '📝', label: 'My Bids', desc: 'View, edit, or withdraw your submitted bids' },
+          { href: '/accepted-bids', icon: '✓', label: 'Accepted Bids', desc: 'Jobs you won + customer contacts' },
+          { href: '/test-equipment', icon: '🔧', label: 'Test Equipment', desc: 'Meters by org, owner, and assigned FSE' },
           { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Master list of parts, specs & cross-references' },
           { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Full digital bookshelf' },
           { href: '/reports', icon: '📋', label: 'Service Reports', desc: 'Performance & safety documentation' },
           { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Intelligent service guidance (beta)' },
           { href: '/calculators', icon: '🔬', label: 'Photometry Tools', desc: 'Fluence, Irradiance, Duty Cycle, Avg Power, Wavelength' },
-          { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Bid on jobs & network demand' },
+          { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Parts, used systems & consumables' },
+          { href: '/directory', icon: '📒', label: 'TSP Directory', desc: 'Service cos, clinics & suppliers (free listings)' },
         ];
 
   // Business Management — CRM / money (permissioned roles only)
+  // Android order: Customers, Estimates, Invoices (+ Company on web)
   const businessCards: HubCard[] = [
     { href: '/customers', icon: '👥', label: 'Customers', desc: 'Directory & customer profiles' },
+    { href: '/estimates', icon: '📝', label: 'Estimates', desc: 'Quotes & service estimates' },
+    { href: '/invoices', icon: '🧾', label: 'Invoices', desc: 'Billing & collections' },
     { href: '/company', icon: '🏢', label: 'Company Profile', desc: 'Org settings, team & branding' },
   ];
 

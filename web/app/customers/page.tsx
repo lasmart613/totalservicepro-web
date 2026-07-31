@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { isOwnerish, isServiceCompany, isSupplier } from '@/lib/roles';
 
 export default function CustomersDirectory() {
   const [customers, setCustomers] = useState<any[]>([]);
@@ -17,16 +18,17 @@ export default function CustomersDirectory() {
     const load = async () => {
       setLoading(true);
 
-      const { data: { user } } = await supabase.auth.getUser();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
       if (!user) {
         setLoading(false);
         return;
       }
 
-      // Get user's organization and type
       const { data: prof } = await supabase
         .from('user_profiles')
-        .select('organization_id')
+        .select('organization_id, role')
         .eq('id', user.id)
         .maybeSingle();
 
@@ -45,9 +47,22 @@ export default function CustomersDirectory() {
         .maybeSingle();
 
       const orgType = org?.type || '';
+      const role = prof.role || '';
       setUserOrgType(orgType);
 
-      const allowed = orgType === 'service_company' || orgType === 'parts_supplier';
+      // Owners denied; service companies + suppliers allowed
+      if (isOwnerish(role, orgType)) {
+        setAccessDenied(true);
+        setLoading(false);
+        return;
+      }
+
+      const allowed =
+        isServiceCompany(role, orgType) ||
+        isSupplier(role, orgType) ||
+        orgType === 'service_company' ||
+        orgType === 'parts_supplier';
+
       if (!allowed) {
         setAccessDenied(true);
         setLoading(false);
@@ -86,7 +101,7 @@ export default function CustomersDirectory() {
         .from('organizations')
         .select('id, name, address, city, state, phone, email, laser_models, facility_type, type')
         .in('id', customerIds)
-        .in('type', ['customer', 'laser_clinic'])
+        .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'])
         .order('name', { ascending: true });
 
       setCustomers(custs || []);
@@ -96,10 +111,11 @@ export default function CustomersDirectory() {
     load();
   }, [supabase]);
 
-  const filtered = customers.filter(c => 
-    (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.city || '').toLowerCase().includes(search.toLowerCase()) ||
-    (c.state || '').toLowerCase().includes(search.toLowerCase())
+  const filtered = customers.filter(
+    (c) =>
+      (c.name || '').toLowerCase().includes(search.toLowerCase()) ||
+      (c.city || '').toLowerCase().includes(search.toLowerCase()) ||
+      (c.state || '').toLowerCase().includes(search.toLowerCase())
   );
 
   if (accessDenied) {
@@ -112,9 +128,12 @@ export default function CustomersDirectory() {
             <div className="text-5xl mb-4">🔒</div>
             <div className="font-bold text-xl mb-3">Access Restricted</div>
             <p className="text-[var(--text3)]">
-              The Customer Directory is only available for <strong>Service Companies</strong> and <strong>Parts Suppliers</strong>.
+              The Customer Directory is only available for{' '}
+              <strong>Service Companies</strong> and <strong>Parts Suppliers</strong>.
             </p>
-            <Link href="/" className="btn btn-primary mt-6 inline-block">Go to Dashboard</Link>
+            <Link href="/" className="btn btn-primary mt-6 inline-block">
+              Go to Dashboard
+            </Link>
           </div>
         </div>
       </div>
@@ -130,7 +149,9 @@ export default function CustomersDirectory() {
             <h1 className="text-2xl font-extrabold">👥 Customer Directory</h1>
             <p className="text-sm text-[var(--text3)]">Customers managed by your organization</p>
           </div>
-          <Link href="/company" className="btn btn-secondary text-sm">+ Add Customer (via Company)</Link>
+          <Link href="/company" className="btn btn-secondary text-sm">
+            + Add Customer (via Company)
+          </Link>
         </div>
 
         <div className="mb-4">
@@ -147,14 +168,32 @@ export default function CustomersDirectory() {
           <div className="card p-8 text-center text-[var(--text3)]">Loading customers...</div>
         ) : filtered.length === 0 ? (
           <div className="card p-8 text-center">
-            <p className="text-[var(--text3)]">No customers found.</p>
-            <p className="text-xs mt-2 text-[var(--text3)]">Add customers from the Company page.</p>
+            <div className="text-4xl mb-3">👥</div>
+            <p className="font-semibold mb-1">
+              {search.trim() ? 'No customers match your search' : 'No customers yet'}
+            </p>
+            <p className="text-sm text-[var(--text3)] mb-4">
+              {search.trim()
+                ? 'Try a different name, city, or state.'
+                : 'Add customers from the Company page to build your CRM directory.'}
+            </p>
+            {!search.trim() && (
+              <Link href="/company" className="btn btn-primary inline-block">
+                + Add Customer
+              </Link>
+            )}
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
             {filtered.map((c) => (
-              <div key={c.id} className="card p-5">
-                <div className="font-semibold text-lg mb-1">{c.name || 'Unnamed Customer'}</div>
+              <Link
+                key={c.id}
+                href={`/customers/${c.id}`}
+                className="card p-5 block transition-colors hover:border-[var(--gold-border)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)]"
+              >
+                <div className="font-semibold text-lg mb-1 text-[var(--text)]">
+                  {c.name || 'Unnamed Customer'}
+                </div>
                 <div className="text-sm text-[var(--text3)] mb-2">
                   {[c.city, c.state].filter(Boolean).join(', ') || '—'}
                 </div>
@@ -164,7 +203,9 @@ export default function CustomersDirectory() {
 
                 {c.laser_models && (
                   <div className="mt-3 pt-3 border-t border-[var(--border)]">
-                    <div className="text-xs uppercase tracking-widest text-[var(--text3)] mb-1">Equipment</div>
+                    <div className="text-xs uppercase tracking-widest text-[var(--text3)] mb-1">
+                      Equipment
+                    </div>
                     <div className="text-sm text-[var(--text)] line-clamp-2">{c.laser_models}</div>
                   </div>
                 )}
@@ -172,13 +213,17 @@ export default function CustomersDirectory() {
                 {c.facility_type && (
                   <div className="mt-2 text-xs text-[var(--text3)]">Type: {c.facility_type}</div>
                 )}
-              </div>
+
+                <div className="mt-3 text-xs font-semibold text-[var(--gold)]">View profile →</div>
+              </Link>
             ))}
           </div>
         )}
 
         <div className="mt-8 text-xs text-[var(--text3)]">
-          Showing only customers linked to your organization. Access limited to service companies and parts suppliers.
+          Showing only customers linked to your organization
+          {userOrgType ? ` (${userOrgType})` : ''}. Access limited to service companies and parts
+          suppliers.
         </div>
       </div>
     </div>

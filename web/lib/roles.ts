@@ -1,7 +1,17 @@
 /**
  * Role helpers for Total Service Pro web (Android WebView parity).
  * Treat admin ≡ company_admin.
+ *
+ * Owner-side org types (same product persona — My Lasers, post service needs):
+ *   customer | laser_clinic | laser_rental | laser_reseller
+ * See lib/org-types.ts.
  */
+
+import {
+  isOwnerOrgType,
+  isServiceOrgType,
+  isSupplierOrgType,
+} from '@/lib/org-types';
 
 export type RoleLike = string | null | undefined;
 export type OrgTypeLike = string | null | undefined;
@@ -31,31 +41,34 @@ export function isPro(role?: RoleLike): boolean {
     r === 'company_admin' ||
     r === 'service_manager' ||
     r === 'fse' ||
-    r === 'engineer'
+    r === 'engineer' ||
+    r === 'dispatcher' ||
+    r === 'scheduler'
   );
 }
 
-/** Facility owner / laser clinic user */
+/**
+ * Facility / equipment holder persona:
+ * clinics, practices, laser rental companies, laser resellers.
+ * Role owner/customer OR org.type in OWNER_ORG_TYPES.
+ */
 export function isOwnerish(role?: RoleLike, orgType?: OrgTypeLike): boolean {
   const r = normalizeRole(role);
   if (r === 'owner' || r === 'customer') return true;
-  const t = normalizeOrgType(orgType);
-  return t === 'customer';
+  return isOwnerOrgType(orgType);
 }
 
 /** Parts supplier / vendor */
 export function isSupplier(role?: RoleLike, orgType?: OrgTypeLike): boolean {
   const r = normalizeRole(role);
   if (r === 'parts_supplier' || r === 'supplier') return true;
-  const t = normalizeOrgType(orgType);
-  return t === 'parts_supplier' || t === 'vendor';
+  return isSupplierOrgType(orgType);
 }
 
-/** Service company (RSP) — not owner/clinic and not supplier */
+/** Service company (RSP) — not owner-side and not supplier */
 export function isServiceCompany(role?: RoleLike, orgType?: OrgTypeLike): boolean {
   if (isOwnerish(role, orgType) || isSupplier(role, orgType)) return false;
-  const t = normalizeOrgType(orgType);
-  if (t === 'service_company') return true;
+  if (isServiceOrgType(orgType)) return true;
   const r = normalizeRole(role);
   return (
     isPro(role) ||

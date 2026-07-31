@@ -107,18 +107,21 @@ export default function Marketplace() {
             <p className="text-[var(--text3)]">Buy, sell, and connect in the laser service ecosystem</p>
           </div>
 
-          {(canPostMarketplaceNeed(userRole, orgType) || isPro(userRole) || isSupplier(userRole, orgType)) && (
+          {(isPro(userRole) || isSupplier(userRole, orgType)) && (
             <Link
               href={
                 isSupplier(userRole, orgType)
                   ? '/marketplace/list?type=part'
-                  : canPostMarketplaceNeed(userRole, orgType)
-                    ? '/marketplace/list?type=request'
-                    : '/marketplace/list'
+                  : '/marketplace/list'
               }
               className="btn btn-primary whitespace-nowrap"
             >
-              + {canPostMarketplaceNeed(userRole, orgType) && !isPro(userRole) ? 'Post Need / Listing' : 'Create New Listing'}
+              + Create New Listing
+            </Link>
+          )}
+          {canPostMarketplaceNeed(userRole, orgType) && !isPro(userRole) && (
+            <Link href="/service-requests" className="btn btn-primary whitespace-nowrap">
+              Post Service Request
             </Link>
           )}
         </div>
@@ -145,11 +148,13 @@ export default function Marketplace() {
             <p className="text-sm text-[var(--text3)] flex-1">Handpieces, fibers, tips, gels, and common consumables</p>
           </Link>
 
-          {/* Service Requests */}
-          <Link href="/marketplace/requests" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+          {/* Service section lives outside marketplace sales lanes */}
+          <Link href="/service-requests" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
             <div className="text-4xl mb-4">🛠️</div>
             <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Service Requests</h3>
-            <p className="text-sm text-[var(--text3)] flex-1">Post or browse service needs and emergency repairs</p>
+            <p className="text-sm text-[var(--text3)] flex-1">
+              Dedicated repair / PM board (not a marketplace listing). Owners post from My Lasers or here.
+            </p>
           </Link>
 
           {/* My Bids - New */}

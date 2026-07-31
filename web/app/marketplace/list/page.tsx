@@ -318,22 +318,15 @@ function MarketplaceListContent() {
       }
 
       if (listingType === 'request') {
-        tableName = 'marketplace_requests';
-        const requestTitle = formData.description.substring(0, 80) || 'Service Request';
-        payload = {
-          title: requestTitle,
-          description: formData.description,
-          urgency: formData.urgency,
-          preferred_date: formData.preferredDate || null,
-          error_codes: formData.errorCodes,
-          location_id: formData.location_id || null,
-          manufacturer: finalManufacturer,
-          model: formData.model,
-          serial_number: formData.serialNumber,
-          images: imageUrls,
-          created_by: user.id,
-          created_at: new Date().toISOString(),
-        };
+        // Laser repair needs are no longer marketplace listings — use My Lasers → service_requests
+        toast.message('Service requests moved', {
+          description: 'Post laser repair needs from My Lasers, not the marketplace.',
+        });
+        if (typeof window !== 'undefined') {
+          window.location.href = '/my-lasers';
+        }
+        setLoading(false);
+        return;
       }
 
       const { error } = await getSupabaseClient().from(tableName).insert(payload);

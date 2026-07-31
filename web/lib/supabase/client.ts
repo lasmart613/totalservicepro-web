@@ -115,12 +115,12 @@ export type ServiceReport = {
   // plus any other snapshot or relation fields
 };
 
-// Marketplace types for the web app (marketplace_requests + bids used for service request bidding)
+// Laser repair needs: service_requests (+ bids). Marketplace no longer stores repair posts.
 export type ServiceRequest = {
   id: string;
   organization_id?: string | number | null;
   created_by?: string;
-  posted_by?: string; // legacy
+  posted_by?: string;
   title?: string | null;
   description?: string | null;
   urgency?: string | null;
@@ -136,6 +136,8 @@ export type ServiceRequest = {
   images?: string[] | null;
   service_type?: string | null;
   model_type?: string | null;
+  equipment_id?: number | null;
+  category?: string | null;
   budget_max?: number | null;
   budget_min?: number | null;
   status?: 'open' | 'bidding' | 'awarded' | 'closed' | string;
@@ -158,10 +160,12 @@ export type Bid = {
   status?: 'pending' | 'accepted' | 'rejected' | string;
   created_at?: string;
   // joined for display
-  marketplace_requests?: {
+  service_requests?: {
     title?: string | null;
     description?: string | null;
     urgency?: string | null;
+    manufacturer?: string | null;
+    model?: string | null;
   } | null;
 };
 
@@ -185,28 +189,70 @@ export type ServiceContract = {
 export async function claimPendingInvitations(supabase: SupabaseClient, userId: string, email: string) {
   if (!email || !userId) return;
   try {
-    const { data: invites } = await supabase
+    const clean = email.toLowerCase().trim();
+    // Prefer server claim (bypasses RLS) when we have a session
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token && typeof fetch !== 'undefined') {
+        const res = await fetch('/api/team/claim', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${session.access_token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        if (res.ok) {
+          console.log('[TSP] Claimed invitation via API for', clean);
+          return;
+        }
+      }
+    } catch (apiErr) {
+      console.warn('claim API fallback to client', apiErr);
+    }
+
+    const { data: invites, error: selErr } = await supabase
       .from('engineer_invitations')
       .select('*')
-      .eq('email', email.toLowerCase().trim())
+      .ilike('email', clean)
       .eq('accepted', false)
       .order('created_at', { ascending: false })
       .limit(1);
-    if (invites && invites.length > 0) {
-      const inv = invites[0];
-      const update: any = {
-        organization_id: inv.organization_id,
-        role: inv.role || 'fse',
-      };
-      if (inv.first_name) update.first_name = inv.first_name;
-      if (inv.last_name) update.last_name = inv.last_name;
-      await supabase.from('user_profiles').update(update).eq('id', userId);
+    if (selErr) console.warn('claimPendingInvitations select', selErr);
+
+    let inv = invites?.[0];
+    // Also try metadata from auth user
+    const { data: { user } } = await supabase.auth.getUser();
+    const meta = user?.user_metadata || {};
+    const orgId = inv?.organization_id ?? meta.organization_id ?? null;
+    if (!orgId) {
+      console.warn('[TSP] No invitation/org to claim for', clean);
+      return;
+    }
+
+    const update: any = {
+      organization_id: orgId,
+      role: inv?.role || meta.role || 'fse',
+      onboarding_completed: true,
+    };
+    if (inv?.first_name || meta.first_name) update.first_name = inv?.first_name || meta.first_name;
+    if (inv?.last_name || meta.last_name) update.last_name = inv?.last_name || meta.last_name;
+
+    const { error: upErr } = await supabase.from('user_profiles').update(update).eq('id', userId);
+    if (upErr) {
+      // Profile may not exist yet
+      await supabase.from('user_profiles').upsert({
+        id: userId,
+        email: clean,
+        ...update,
+      }, { onConflict: 'id' });
+    }
+    if (inv?.id) {
       await supabase.from('engineer_invitations').update({
         accepted: true,
         accepted_at: new Date().toISOString()
       }).eq('id', inv.id);
-      console.log('[TSP] Claimed pending invitation for', email);
     }
+    console.log('[TSP] Claimed pending invitation for', clean, 'org', orgId);
   } catch (e) {
     console.warn('claimPendingInvitations non-fatal:', e);
   }

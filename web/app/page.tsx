@@ -23,6 +23,7 @@ export default function HomePage() {
     todayCalls: 0,
     completedReports: 0,
     totalReports: 0,
+    openServiceRequests: 0,
   });
   const [statsError, setStatsError] = useState<string | null>(null);
   const [ownerStats, setOwnerStats] = useState({
@@ -192,7 +193,25 @@ export default function HomePage() {
         console.warn('reports load failed', e);
       }
 
-      setStats({ openTickets, todayCalls, completedReports, totalReports });
+      // Open laser repair jobs (owners post via My Lasers → service_requests)
+      let openServiceRequests = 0;
+      try {
+        const { data: openJobs, error: jobErr } = await supabase
+          .from('service_requests')
+          .select('id, status, category')
+          .in('status', ['open', 'bidding'])
+          .or('category.eq.service,category.is.null')
+          .limit(500);
+        if (jobErr) {
+          console.warn('service_requests KPI', jobErr);
+        } else {
+          openServiceRequests = (openJobs || []).length;
+        }
+      } catch (e) {
+        console.warn('service_requests load failed', e);
+      }
+
+      setStats({ openTickets, todayCalls, completedReports, totalReports, openServiceRequests });
       setStatsError(kpiError);
       setLoading(false);
     };
@@ -217,21 +236,12 @@ export default function HomePage() {
     try {
       const { data: reqs } = await supabase
         .from('service_requests')
-        .select('id, status')
+        .select('id, status, category')
         .eq('organization_id', orgId)
-        .eq('status', 'open');
+        .eq('status', 'open')
+        .or('category.eq.service,category.is.null');
       openRequests = (reqs || []).length;
-    } catch {
-      try {
-        const { data: reqs2 } = await supabase
-          .from('marketplace_requests')
-          .select('id, status, created_by')
-          .eq('status', 'open')
-          .limit(100);
-        // Fallback: count open marketplace requests loosely
-        openRequests = (reqs2 || []).length;
-      } catch { /* ignore */ }
-    }
+    } catch { /* ignore */ }
 
     try {
       const { data: reps } = await supabase
@@ -390,7 +400,7 @@ export default function HomePage() {
                 <div className="text-4xl font-extrabold text-[var(--gold)]">{ownerStats.lasers}</div>
                 <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">MY LASERS</div>
               </Link>
-              <Link href="/marketplace" className="card p-5 text-center hover:border-[var(--gold)]">
+              <Link href="/service-requests" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-[var(--blue)]">{ownerStats.openRequests}</div>
                 <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">OPEN REQUESTS</div>
               </Link>
@@ -398,7 +408,7 @@ export default function HomePage() {
                 <div className="text-4xl font-extrabold text-green-400">{ownerStats.serviceHistory}</div>
                 <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">SERVICE HISTORY</div>
               </Link>
-              <Link href="/marketplace" className="card p-5 text-center hover:border-[var(--gold)]">
+              <Link href="/service-requests" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-purple-400">{ownerStats.bidsReceived}</div>
                 <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">BIDS RECEIVED</div>
               </Link>
@@ -410,6 +420,10 @@ export default function HomePage() {
                 <Link href="/my-lasers" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Zap size={32} className="mx-auto mb-3 text-[var(--gold)]" />
                   <div className="font-bold">My Lasers</div>
+                </Link>
+                <Link href="/service-requests" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Wrench size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Service Requests</div>
                 </Link>
                 <Link href="/marketplace" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
@@ -486,7 +500,7 @@ export default function HomePage() {
                 Some dashboard data could not load: {statsError}
               </div>
             )}
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-8">
               <Link href="/service-schedule" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-[var(--gold)]">{stats.openTickets}</div>
                 <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">OPEN TICKETS</div>
@@ -494,6 +508,10 @@ export default function HomePage() {
               <Link href="/service-schedule" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-[var(--blue)]">{stats.todayCalls}</div>
                 <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">TODAY&apos;S CALLS</div>
+              </Link>
+              <Link href="/service-requests" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-orange-400">{stats.openServiceRequests}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">REPAIR REQUESTS</div>
               </Link>
               <Link href="/reports" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-green-400">{stats.completedReports}</div>
@@ -561,6 +579,12 @@ export default function HomePage() {
                   <div className="font-bold">Marketplace</div>
                 </Link>
 
+                <Link href="/directory" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <div className="text-3xl mb-2">📒</div>
+                  <div className="font-bold">TSP Directory</div>
+                  <div className="text-xs text-[var(--text3)] mt-1">Free listings</div>
+                </Link>
+
                 <Link href="/reports" className="card p-6 text-center hover:border-[var(--gold)]">
                   <FileText size={32} className="mx-auto mb-3 text-[var(--gold)]" />
                   <div className="font-bold">Reports</div>
@@ -585,11 +609,21 @@ export default function HomePage() {
               )) && (
               <div className="mt-12">
                 <h3 className="font-bold text-lg mb-4">💼 Business Management</h3>
-                <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <Link href="/customers" className="card p-6 text-center hover:border-[var(--gold)]">
                     <div className="text-3xl mb-2">👥</div>
                     <div className="font-bold">Customers</div>
                     <div className="text-xs text-[var(--text3)] mt-1">Directory & profiles</div>
+                  </Link>
+                  <Link href="/estimates" className="card p-6 text-center hover:border-[var(--gold)]">
+                    <div className="text-3xl mb-2">📝</div>
+                    <div className="font-bold">Estimates</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">Quotes & service estimates</div>
+                  </Link>
+                  <Link href="/invoices" className="card p-6 text-center hover:border-[var(--gold)]">
+                    <div className="text-3xl mb-2">🧾</div>
+                    <div className="font-bold">Invoices</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">Billing & collections</div>
                   </Link>
                   <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
                     <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />
@@ -625,10 +659,12 @@ export default function HomePage() {
                   <div className="text-sm text-[var(--text3)]">Handpieces, fibers, tips & more</div>
                 </Link>
 
-                <Link href="/marketplace/requests" className="card p-6 hover:border-[var(--gold)] group">
+                <Link href="/service-requests" className="card p-6 hover:border-[var(--gold)] group">
                   <div className="text-3xl mb-3">🛠️</div>
-                  <div className="font-bold text-lg mb-1">Service Requests / Needs</div>
-                  <div className="text-sm text-[var(--text3)]">Post or browse service needs</div>
+                  <div className="font-bold text-lg mb-1">Laser Repair Jobs</div>
+                  <div className="text-sm text-[var(--text3)]">
+                    Open repair requests ({stats.openServiceRequests}) — bid from here
+                  </div>
                 </Link>
               </div>
             </div>

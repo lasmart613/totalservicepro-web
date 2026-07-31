@@ -26,7 +26,8 @@
   --purple: #a855f7;
   --orange: #f59e0b;
 
-  --font-sans: var(--font-geist-sans);
+  /* DM Sans primary for Android visual parity (Sprint C) */
+  --font-sans: var(--font-dm-sans), var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
@@ -58,14 +59,14 @@ html.light {
 @theme inline {
   --color-background: var(--bg);
   --color-foreground: var(--text);
-  --font-sans: var(--font-geist-sans);
+  --font-sans: var(--font-dm-sans), var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
 }
 
 body {
   background: var(--bg);
   color: var(--text);
-  font-family: var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  font-family: var(--font-dm-sans), var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 /* Professional components matching original TSP aesthetic */

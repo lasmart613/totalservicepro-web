@@ -1,0 +1,1 @@
+Welcome to {{ if .Data.organization_name }}{{ .Data.organization_name }}{{ else }}Total Service Pro{{ end }}.

@@ -1,11 +1,12 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Header } from '@/components/Header';
 import { Upload, ArrowRight, Check } from 'lucide-react';
 import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { isOwnerish, isSupplier } from '@/lib/roles';
+import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 
 type OrgType = 'service' | 'clinic' | 'supplier';
 type TeamMember = {
@@ -26,7 +27,7 @@ type LaserDraft = {
   notes: string;
 };
 
-const BRANDS = ['Candela','Lumenis','Cynosure','Cutera','Sciton','Syneron','Fotona','Alma','Quanta','HOYA ConBio','Iridex','Coherent','InMode','Lutronic'];
+const BRANDS = listManufacturers();
 const SUPPLIER_CATEGORIES = [
   'Consumables (tips, fibers, dyes)',
   'Handpieces & Rebuild Kits',
@@ -69,8 +70,10 @@ export default function Onboarding() {
   const [lasers, setLasers] = useState<LaserDraft[]>([]);
   const [laserMfr, setLaserMfr] = useState('');
   const [laserModel, setLaserModel] = useState('');
+  const [laserModelOther, setLaserModelOther] = useState('');
   const [laserSerial, setLaserSerial] = useState('');
   const [laserNotes, setLaserNotes] = useState('');
+  const laserModelsForMfr = useMemo(() => listModelsForManufacturer(laserMfr), [laserMfr]);
 
   // Supplier categories
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
@@ -106,8 +109,17 @@ export default function Onboarding() {
         const o = profile.organizations;
         setExistingOrgId(o.id);
         let t: OrgType = 'service';
-        if (o.type === 'customer') t = 'clinic';
-        else if (o.type === 'parts_supplier' || o.type === 'vendor') t = 'supplier';
+        // Owner-side: clinic, legacy laser_clinic, rental, reseller
+        if (
+          o.type === 'customer' ||
+          o.type === 'laser_clinic' ||
+          o.type === 'laser_rental' ||
+          o.type === 'laser_reseller'
+        ) {
+          t = 'clinic';
+        } else if (o.type === 'parts_supplier' || o.type === 'vendor') {
+          t = 'supplier';
+        }
         setOrgType(t);
         setFormData((prev: any) => ({
           ...prev,
@@ -300,18 +312,24 @@ export default function Onboarding() {
   }
 
   function addLaserDraft() {
-    if (!laserMfr.trim() || !laserModel.trim()) {
+    const modelVal =
+      laserModel === OTHER_MODEL ? laserModelOther.trim() : laserModel.trim();
+    if (!laserMfr.trim() || !modelVal) {
       alert('Manufacturer and model are required');
       return;
     }
     setLasers(prev => [...prev, {
       id: 'l-' + Date.now(),
       manufacturer: laserMfr.trim(),
-      model: laserModel.trim(),
+      model: modelVal,
       serial_number: laserSerial.trim(),
       notes: laserNotes.trim(),
     }]);
-    setLaserMfr(''); setLaserModel(''); setLaserSerial(''); setLaserNotes('');
+    setLaserMfr('');
+    setLaserModel('');
+    setLaserModelOther('');
+    setLaserSerial('');
+    setLaserNotes('');
   }
 
   function removeLaserDraft(id: string) {
@@ -371,6 +389,8 @@ export default function Onboarding() {
         website: formData.website || null,
         supported_brands: selectedBrands.length ? selectedBrands : null,
         logo_url: logoUrl || null,
+        // Free TSP Directory opt-in (product: free for all; no paywall)
+        list_in_directory: !!formData.listInDirectory,
       };
 
       // Supplier categories stored in specialties if column exists (best-effort)
@@ -379,10 +399,26 @@ export default function Onboarding() {
       }
 
       if (orgId) {
-        await supabase.from('organizations').update(orgPayload).eq('id', orgId);
+        let { error: uErr } = await supabase.from('organizations').update(orgPayload).eq('id', orgId);
+        if (uErr && /list_in_directory|column/i.test(uErr.message || '')) {
+          delete orgPayload.list_in_directory;
+          await supabase.from('organizations').update(orgPayload).eq('id', orgId);
+        }
       } else {
         orgPayload.created_by = currentUser.id;
-        const { data: newOrg } = await supabase.from('organizations').insert(orgPayload).select('id').single();
+        let { data: newOrg, error: iErr } = await supabase
+          .from('organizations')
+          .insert(orgPayload)
+          .select('id')
+          .single();
+        if (iErr && /list_in_directory|column/i.test(iErr.message || '')) {
+          delete orgPayload.list_in_directory;
+          ({ data: newOrg, error: iErr } = await supabase
+            .from('organizations')
+            .insert(orgPayload)
+            .select('id')
+            .single());
+        }
         if (newOrg) orgId = newOrg.id;
       }
 
@@ -396,7 +432,7 @@ export default function Onboarding() {
         finalJob = `${finalJob} + ${creatorAddl.map(r => r).join(' + ')}`;
       }
 
-      await supabase.from('user_profiles').upsert({
+      const { error: profErr } = await supabase.from('user_profiles').upsert({
         id: currentUser.id,
         first_name: formData.firstName,
         last_name: formData.lastName,
@@ -409,6 +445,24 @@ export default function Onboarding() {
         onboarding_completed: true,
         onboarding_completed_at: new Date().toISOString(),
       }, { onConflict: 'id' });
+      if (profErr) {
+        console.error('profile upsert', profErr);
+        // Force-link org even if full upsert fails
+        await supabase
+          .from('user_profiles')
+          .update({ organization_id: orgId, role: creatorRole })
+          .eq('id', currentUser.id);
+      }
+
+      // Re-read linked org id so equipment RLS sees membership
+      const { data: linked } = await supabase
+        .from('user_profiles')
+        .select('organization_id')
+        .eq('id', currentUser.id)
+        .maybeSingle();
+      if (linked?.organization_id != null) {
+        orgId = linked.organization_id;
+      }
 
       // Team invites only for service company
       if (orgType === 'service') {
@@ -445,27 +499,75 @@ export default function Onboarding() {
         }
       }
 
-      // Clinic lasers → equipment
+      // Clinic lasers → equipment (must use customer_organization_id — not organization_id)
+      let laserSaveErrors: string[] = [];
+      let lasersSaved = 0;
       if (orgType === 'clinic' && orgId && lasers.length > 0) {
-        const rows = lasers.map(l => ({
-          customer_organization_id: orgId,
-          manufacturer: l.manufacturer,
-          model: l.model,
-          serial_number: l.serial_number || '',
-          notes: l.notes || null,
-        }));
-        const { error: eqErr } = await supabase.from('equipment').insert(rows);
-        if (eqErr) console.warn('equipment insert', eqErr);
+        // Ensure org.created_by is this user (helps RLS for just-created facilities)
+        try {
+          await supabase
+            .from('organizations')
+            .update({ created_by: currentUser.id })
+            .eq('id', orgId)
+            .is('created_by', null);
+        } catch { /* ignore */ }
+
+        for (const l of lasers) {
+          const payload: any = {
+            customer_organization_id: orgId,
+            manufacturer: l.manufacturer,
+            model: l.model,
+            serial_number: (l.serial_number || '').trim() || 'TBD',
+            notes: l.notes || null,
+          };
+          let { error: eqErr } = await supabase.from('equipment').insert(payload);
+          if (eqErr) {
+            // Retry minimal columns if optional fields missing
+            const slim = {
+              customer_organization_id: orgId,
+              manufacturer: payload.manufacturer,
+              model: payload.model,
+              serial_number: payload.serial_number,
+            };
+            const r2 = await supabase.from('equipment').insert(slim);
+            if (r2.error) {
+              laserSaveErrors.push(`${l.manufacturer} ${l.model}: ${r2.error.message}`);
+              console.error('equipment insert failed', r2.error);
+            } else {
+              lasersSaved++;
+            }
+          } else {
+            lasersSaved++;
+          }
+        }
       }
 
       await claimPendingInvitations(supabase, currentUser.id, currentUser.email);
       await supabase.auth.updateUser({ data: { first_name: formData.firstName, last_name: formData.lastName } });
 
-      router.push('/company?justSetup=true');
+      if (laserSaveErrors.length) {
+        alert(
+          `Setup saved, but ${laserSaveErrors.length} laser(s) failed to save:\n` +
+            laserSaveErrors.slice(0, 4).join('\n') +
+            '\n\nAdd them under My Lasers.'
+        );
+      } else if (orgType === 'clinic' && lasers.length > 0) {
+        // Soft confirm
+        console.log(`Saved ${lasersSaved}/${lasers.length} facility lasers`);
+      }
+
+      // Clinic / supplier → Dashboard; service company → company profile to review team
+      if (orgType === 'clinic') {
+        router.push(lasersSaved > 0 ? '/my-lasers?justSetup=1' : '/?justSetup=1');
+      } else if (orgType === 'supplier') {
+        router.push('/?justSetup=1');
+      } else {
+        router.push('/company?justSetup=true');
+      }
     } catch (e: any) {
       console.error('saveOnboarding error', e);
       alert('Save had issues: ' + (e.message || e) + ' — edit in Company page.');
-      router.push('/company');
+      router.push(orgType === 'clinic' ? '/' : '/company');
     } finally {
       setLoading(false);
     }
@@ -518,7 +620,7 @@ export default function Onboarding() {
               {(['service','clinic','supplier'] as OrgType[]).map(t => (
                 <button key={t} onClick={() => handleTypeSelect(t)} className={`card p-6 text-left hover:border-[var(--gold)] ${orgType===t ? 'border-[var(--gold)]' : ''}`}>
                   <div className="text-2xl mb-2">{t==='service'?'👷':t==='clinic'?'🏥':'📦'}</div>
-                  <div className="font-bold">{t==='service' ? 'Repair Service Provider (RSP)' : t==='clinic' ? 'Laser Owner / Clinic' : 'Parts Supplier'}</div>
+                  <div className="font-bold">{t==='service' ? 'Repair Service Provider (RSP)' : t==='clinic' ? 'Laser Owner (Clinic / Rental / Reseller)' : 'Parts Supplier'}</div>
                   <div className="text-sm text-[var(--text3)]">Click to select</div>
                 </button>
               ))}
@@ -546,6 +648,20 @@ export default function Onboarding() {
               <div><label className="label">Phone</label><input className="input" value={formData.phone||''} onChange={e=>updateForm('phone',e.target.value)} /></div>
               <div><label className="label">Website</label><input className="input" value={formData.website||''} onChange={e=>updateForm('website',e.target.value)} /></div>
             </div>
+            <label className="flex items-start gap-3 cursor-pointer card p-4">
+              <input
+                type="checkbox"
+                className="mt-1 w-4 h-4 accent-[var(--gold)]"
+                checked={!!formData.listInDirectory}
+                onChange={(e) => updateForm('listInDirectory', e.target.checked)}
+              />
+              <span className="text-sm leading-snug">
+                <strong>List my organization in the Total Service Pro directory for free</strong>
+                <span className="block text-xs text-[var(--text3)] mt-1 font-normal">
+                  Appears in the TSP Directory so other users can find you. Change anytime in Company Profile. Free for all org types.
+                </span>
+              </span>
+            </label>
           </div>
         )}
 
@@ -600,20 +716,52 @@ export default function Onboarding() {
             <div className="card p-4 space-y-3 mb-4">
               <div>
                 <label className="label">Manufacturer *</label>
-                <input className="input" list="obMfr" value={laserMfr} onChange={e=>setLaserMfr(e.target.value)} placeholder="Candela" />
-                <datalist id="obMfr">{BRANDS.map(b => <option key={b} value={b} />)}</datalist>
+                <select
+                  className="input"
+                  value={laserMfr}
+                  onChange={(e) => {
+                    setLaserMfr(e.target.value);
+                    setLaserModel('');
+                    setLaserModelOther('');
+                  }}
+                >
+                  <option value="">Select brand…</option>
+                  {BRANDS.map((b) => (
+                    <option key={b} value={b}>{b}</option>
+                  ))}
+                  <option value="Other">Other</option>
+                </select>
               </div>
               <div>
                 <label className="label">Model *</label>
-                <input className="input" value={laserModel} onChange={e=>setLaserModel(e.target.value)} placeholder="GentleMax Pro" />
+                <select
+                  className="input"
+                  value={laserModel}
+                  onChange={(e) => setLaserModel(e.target.value)}
+                  disabled={!laserMfr}
+                >
+                  <option value="">{laserMfr ? 'Select model…' : 'Select manufacturer first'}</option>
+                  {laserModelsForMfr.map((m) => (
+                    <option key={m} value={m}>{m}</option>
+                  ))}
+                  <option value={OTHER_MODEL}>Other / not listed…</option>
+                </select>
+                {laserModel === OTHER_MODEL && (
+                  <input
+                    className="input mt-2"
+                    value={laserModelOther}
+                    onChange={(e) => setLaserModelOther(e.target.value)}
+                    placeholder="Enter model name"
+                  />
+                )}
               </div>
               <div>
                 <label className="label">Serial #</label>
                 <input className="input" value={laserSerial} onChange={e=>setLaserSerial(e.target.value)} placeholder="Optional" />
               </div>
               <div>
-                <label className="label">Notes</label>
-                <input className="input" value={laserNotes} onChange={e=>setLaserNotes(e.target.value)} placeholder="Location, handpiece…" />
+                <label className="label">Room / notes</label>
+                <input className="input" value={laserNotes} onChange={e=>setLaserNotes(e.target.value)} placeholder="Room, handpiece…" />
               </div>
               <button type="button" onClick={addLaserDraft} className="btn btn-secondary w-full text-sm">+ Add laser</button>
             </div>

@@ -63,10 +63,15 @@ export default function SupplierSignup() {
 
     try {
       // 1. Sign up the user
+      const origin =
+        typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
-        options: { data: { first_name: firstName, last_name: lastName, company: companyName } }
+        options: {
+          data: { first_name: firstName, last_name: lastName, company: companyName },
+          emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
+        },
       });
       if (authError) throw authError;
 

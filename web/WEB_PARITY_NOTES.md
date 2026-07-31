@@ -34,7 +34,7 @@ Date: 2026-07-12
 ## Residual risks
 
 1. **RLS**: Owner equipment CRUD and bid accept depend on Supabase RLS policies allowing `customer_organization_id` access and bid updates by post owners. If RLS is incomplete, UI will show errors.
-2. **Dual request tables**: Android often uses `service_requests`; web list form uses `marketplace_requests`. Owner open-request KPIs try `service_requests` then fall back. Counts may diverge until tables unify.
+2. **Service requests unified (2026-07-14)**: Laser repair needs use `service_requests` only. Owners post from **My Lasers**. Service orgs browse/bid under Marketplace → Laser Repair Jobs (`/marketplace/requests`). Migration `20260714_000000_unify_service_requests.sql` copies `marketplace_requests` → `service_requests`.
 3. **Owner signup equipment**: `/signup/owner` still inserts with `organization_id` (legacy) rather than `customer_organization_id` — onboarding path is correct; signup path may need a follow-up fix.
 4. **`specialties` column**: Supplier categories written to `organizations.specialties` if present; ignored if column missing.
 5. **FSE Performance**: Still admin-only (not all isPro) to avoid noise for field techs.

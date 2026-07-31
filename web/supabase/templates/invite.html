@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Welcome to Total Service Pro</title>
+</head>
+<body style="margin:0;padding:0;background:#0f1115;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e8eaed;">
+  <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0f1115;padding:32px 12px;">
+    <tr>
+      <td align="center">
+        <table role="presentation" width="100%" style="max-width:560px;background:#1a1d24;border:1px solid #2a2f3a;border-radius:12px;overflow:hidden;">
+          <tr>
+            <td style="padding:28px 28px 8px;text-align:center;">
+              <div style="font-size:22px;font-weight:800;color:#d4a017;letter-spacing:0.02em;">Total Service Pro</div>
+              <div style="font-size:12px;color:#9aa0a6;margin-top:6px;">Professional laser service tools for your whole team</div>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:8px 28px 24px;">
+              <h1 style="margin:0 0 12px;font-size:22px;line-height:1.3;color:#f1f3f4;">
+                Welcome{{ if .Data.first_name }} {{ .Data.first_name }}{{ end }}!
+              </h1>
+
+              <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#c4c7cc;">
+                You've been invited to join
+                <strong style="color:#f1f3f4;">{{ if .Data.organization_name }}{{ .Data.organization_name }}{{ else }}your service organization{{ end }}</strong>
+                on <strong style="color:#d4a017;">Total Service Pro</strong>.
+              </p>
+
+              <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#c4c7cc;">
+                Total Service Pro helps laser service companies and clinics run day-to-day operations in one place:
+                customer directory, service scheduling, field reports, estimates, equipment history, manuals, marketplace bids, and team coordination.
+              </p>
+
+              <p style="margin:0 0 14px;font-size:15px;line-height:1.55;color:#c4c7cc;">
+                {{ if .Data.organization_name }}<strong style="color:#f1f3f4;">{{ .Data.organization_name }}</strong>{{ else }}Your organization{{ end }}
+                is using Total Service Pro to keep service work organized—so your team can schedule jobs, document repairs,
+                track equipment, and collaborate without juggling spreadsheets and separate tools.
+              </p>
+
+              {{ if .Data.role_label }}
+              <p style="margin:0 0 18px;font-size:15px;line-height:1.55;color:#c4c7cc;">
+                Your role on the team will be:
+                <strong style="color:#f1f3f4;">{{ .Data.role_label }}</strong>.
+              </p>
+              {{ end }}
+
+              <p style="margin:0 0 8px;font-size:15px;line-height:1.55;color:#c4c7cc;">
+                Click the button below to accept the invitation, set your password, and finish a short team setup.
+              </p>
+
+              <table role="presentation" cellspacing="0" cellpadding="0" style="margin:22px 0;">
+                <tr>
+                  <td align="center" style="border-radius:8px;background:#d4a017;">
+                    <a href="{{ .ConfirmationURL }}"
+                       style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;">
+                      Accept invitation &amp; set password
+                    </a>
+                  </td>
+                </tr>
+              </table>
+
+              <p style="margin:0 0 10px;font-size:13px;line-height:1.5;color:#9aa0a6;">
+                This link is unique to you ({{ .Email }}) and expires after a limited time. If the button doesn't work, copy and paste this URL into your browser:
+              </p>
+              <p style="margin:0 0 18px;font-size:12px;line-height:1.4;word-break:break-all;color:#7a8088;">
+                {{ .ConfirmationURL }}
+              </p>
+
+              <p style="margin:0;font-size:13px;line-height:1.5;color:#9aa0a6;">
+                If you weren't expecting this invite, you can ignore this email.
+              </p>
+            </td>
+          </tr>
+          <tr>
+            <td style="padding:16px 28px 24px;border-top:1px solid #2a2f3a;text-align:center;">
+              <div style="font-size:11px;color:#6b7280;">
+                Sent by Total Service Pro · <a href="https://repairplanet.net" style="color:#d4a017;text-decoration:none;">repairplanet.net</a>
+              </div>
+            </td>
+          </tr>
+        </table>
+      </td>
+    </tr>
+  </table>
+</body>
+</html>

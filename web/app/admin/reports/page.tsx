@@ -37,11 +37,11 @@ export default function AdminReports() {
         .select('*', { count: 'exact', head: true })
         .eq('organization_id', orgId);
 
-      // Get customer count (organizations of type 'customer')
+      // Customers linked to THIS service org only (organization_customers)
       const { count: customerCount } = await supabase
-        .from('organizations')
+        .from('organization_customers')
         .select('*', { count: 'exact', head: true })
-        .eq('type', 'customer');
+        .eq('service_organization_id', orgId);
 
       // Get service reports stats
       const { data: reports } = await supabase
@@ -82,6 +82,7 @@ export default function AdminReports() {
         <div className="card p-6">
           <div className="text-sm text-[var(--text3)]">Total Customers</div>
           <div className="text-4xl font-extrabold mt-2">{stats.totalCustomers}</div>
+          <div className="text-xs text-[var(--text3)] mt-1">Linked to your organization</div>
         </div>
 
         <div className="card p-6">
