@@ -1,14 +1,12 @@
-# Monorepo root — site base is web/
-# Catch-all redirects removed (they broke Next.js Runtime → 404).
+# Monorepo root — Netlify base directory is web/
 
 [build]
   base = "web"
-  command = "npm run build || (echo '=== BUILD FAILED ===' && node -v && npm -v && ls -la && exit 1)"
-  # publish intentionally omitted — @netlify/plugin-nextjs manages it
+  command = "npm run build"
+  publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
-  NPM_FLAGS = "--no-audit --no-fund"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
@@ -20,3 +18,8 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
     X-XSS-Protection = "1; mode=block"
+
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

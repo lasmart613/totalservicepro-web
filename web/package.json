@@ -1,10 +1,10 @@
 {
   "name": "web",
-  "version": "0.1.0",
+  "version": "0.3.50",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build --webpack",
+    "build": "next build --webpack && node -e \"const fs=require('fs');fs.writeFileSync('.next/_redirects','/_next/static/* /static/:splat 200\\n/_next/image/* /static/:splat 200\\n/* /.netlify/functions/___netlify-server-handler 200!\\n/_next/image /.netlify/images?url=:url&w=:width&q=:quality 200\\n/_ipx/* /.netlify/images?url=:url&w=:width&q=:quality 200\\n');console.log('Wrote .next/_redirects for Netlify routing')\"",
     "start": "next start",
     "lint": "eslint",
     "deploy": "netlify build && netlify deploy --prod --no-build",
