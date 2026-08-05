@@ -74,7 +74,7 @@ export default function TechHub() {
           { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Master list of parts, specs & cross-references' },
           { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Full digital bookshelf' },
           { href: '/reports', icon: '📋', label: 'Service Reports', desc: 'Performance & safety documentation' },
-          { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Intelligent service guidance (beta)' },
+          { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Fault codes & manuals (same engine as mobile)' },
           { href: '/calculators', icon: '🔬', label: 'Photometry Tools', desc: 'Fluence, Irradiance, Duty Cycle, Avg Power, Wavelength' },
           { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Parts, used systems & consumables' },
           { href: '/directory', icon: '📒', label: 'TSP Directory', desc: 'Service cos, clinics & suppliers (free listings)' },
