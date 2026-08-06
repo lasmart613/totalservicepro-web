@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
+import { buildEstimateHtml, type DocCompany } from '@/lib/billing/doc-html';
+import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
   coerceOrgId,
   emptyLineItem,
@@ -47,6 +49,8 @@ export default function EstimateFormClient() {
   const [userId, setUserId] = useState<string | null>(null);
   const [docNumber, setDocNumber] = useState('');
   const [status, setStatus] = useState('draft');
+  const [company, setCompany] = useState<DocCompany>({});
+  const [emailing, setEmailing] = useState(false);
 
   // Customer
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
@@ -350,11 +354,32 @@ export default function EstimateFormClient() {
         setUserId(user.id);
         const { data: profile } = await supabase
           .from('user_profiles')
-          .select('organization_id')
+          .select(
+            'organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url, slogan)'
+          )
           .eq('id', user.id)
           .maybeSingle();
         const orgId = coerceOrgId(profile?.organization_id);
         setUserOrgId(orgId);
+        const org = Array.isArray((profile as any)?.organizations)
+          ? (profile as any).organizations[0]
+          : (profile as any)?.organizations;
+        const techName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ');
+        if (org || techName) {
+          setCompany({
+            company_name: org?.name || '',
+            address: org?.address || '',
+            city: org?.city || '',
+            state: org?.state || '',
+            zip: org?.zip || '',
+            phone: org?.phone || '',
+            email: org?.email || '',
+            website: org?.website || '',
+            logo_url: org?.logo_url || '',
+            slogan: org?.slogan || '',
+            tech_name: techName,
+          });
+        }
         if (orgId) await loadCustomers(orgId);
         await loadParts();
 
@@ -429,11 +454,14 @@ export default function EstimateFormClient() {
       .slice(0, 8);
   }
 
-  async function saveEstimate(nextStatus: string) {
+  async function saveEstimate(
+    nextStatus: string,
+    opts?: { quiet?: boolean }
+  ): Promise<string | number | null> {
     const name = customerName.trim() || custSearch.trim();
     if (!name) {
       toast.error('Customer name is required');
-      return;
+      return null;
     }
     setSaving(true);
     try {
@@ -597,15 +625,18 @@ export default function EstimateFormClient() {
         }
       }
 
-      if (nextStatus === 'draft') {
-        toast.success(
-          'Estimate draft saved. Valid for 30 days from today, then marked Expired (not deleted).'
-        );
-      } else if (nextStatus === 'pending' || nextStatus === 'sent') {
-        toast.success('Estimate marked as sent.');
-      } else {
-        toast.success('Estimate saved.');
+      if (!opts?.quiet) {
+        if (nextStatus === 'draft') {
+          toast.success(
+            'Estimate draft saved. Valid for 30 days from today, then marked Expired (not deleted).'
+          );
+        } else if (nextStatus === 'pending' || nextStatus === 'sent') {
+          toast.success('Estimate marked as sent (no email sent).');
+        } else {
+          toast.success('Estimate saved.');
+        }
       }
+      return result.id || savedId;
     } catch (err: any) {
       const em = err?.message || String(err);
       if (/service_estimates|schema cache|does not exist/i.test(em)) {
@@ -615,9 +646,120 @@ export default function EstimateFormClient() {
       } else {
         toast.error(`Save failed: ${em}`);
       }
+      return null;
     } finally {
       setSaving(false);
     }
+  }
+
+  function buildEstimateEmailHtml() {
+    const modelName = model === '__other__' ? customModel.trim() : model;
+    const svcLabels = services.map((s) => SERVICE_TYPE_LABELS[s] || s);
+    if (otherService.trim()) svcLabels.push(otherService.trim());
+    const partsLines = partLines
+      .filter((p) => p.part_number || p.description || p.ext)
+      .map(
+        (p) =>
+          `${p.part_number || ''} ${p.description || ''} ×${p.qty || 1} @ $${Number(p.unit_price || 0).toFixed(2)} = $${Number(p.ext || 0).toFixed(2)}`
+      );
+    return buildEstimateHtml({
+      company,
+      customer: {
+        name: customerName.trim() || custSearch.trim(),
+        address: custAddress,
+        city: custCity,
+        state: custState,
+        zip: custZip,
+        contact: custContact,
+        phone: custPhone,
+        email: custEmail,
+      },
+      estNumber: docNumber || 'Draft',
+      dateStr: new Date().toLocaleDateString(),
+      manufacturer,
+      model: modelName,
+      serial,
+      pulseCount,
+      miles,
+      urgency,
+      services: svcLabels,
+      issues,
+      laborHours,
+      laborRate,
+      labor: totals.labor,
+      travelRate,
+      travel: totals.mileage,
+      diagFee,
+      reimbTravel,
+      reimbLodging,
+      reimbGround,
+      reimbOther,
+      perDiem: totals.perDiem,
+      perDiemRate,
+      perDiemDays,
+      partsLines,
+      partsTotal: totals.partsTotal,
+      subtotal: totals.subtotal,
+      taxRate,
+      tax: totals.tax,
+      total: totals.grandTotal,
+      deposit: totals.depositAmt,
+      balanceDue: totals.balanceDue,
+      validDays: 30,
+    });
+  }
+
+  async function finalizeAndEmailEstimate() {
+    if (!custEmail.trim() && !customerOrgId) {
+      toast.error('Add a customer email on the form or CRM profile before emailing.');
+      return;
+    }
+    setEmailing(true);
+    try {
+      const id = await saveEstimate('draft', { quiet: true });
+      if (!id) return;
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        toast.error('Session expired — sign in again');
+        return;
+      }
+      const result = await sendBillingDocEmail({
+        kind: 'estimate',
+        accessToken: session.access_token,
+        payload: {
+          estimate_id: id,
+          to_email: custEmail.trim() || undefined,
+          estimate_number: docNumber,
+          customer_organization_id: customerOrgId,
+          reply_to: company.email || undefined,
+          html: buildEstimateEmailHtml(),
+        },
+      });
+      if (!result.emailSent) {
+        toast.error(
+          result.error ||
+            'Email was not sent. Estimate remains a draft. Fix Resend/domain or use “Mark sent without email”.'
+        );
+        return;
+      }
+      await saveEstimate('pending', { quiet: true });
+      toast.success(`Estimate emailed to ${result.to}.`);
+    } finally {
+      setEmailing(false);
+    }
+  }
+
+  function markSentWithoutEmail() {
+    if (
+      !confirm(
+        'Mark this estimate as sent WITHOUT emailing the customer?\n\nUse only if you already shared a PDF yourself.'
+      )
+    ) {
+      return;
+    }
+    saveEstimate('pending');
   }
 
   function convertToInvoice() {
@@ -1102,27 +1244,40 @@ export default function EstimateFormClient() {
           </div>
         </section>
 
-        <div className="flex flex-wrap gap-3 sticky bottom-4 z-10">
-          <Link href="/estimates" className="btn btn-secondary flex-1 min-w-[100px] text-center">
+        <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
+          <Link href="/estimates" className="btn btn-secondary min-w-[80px] text-center">
             Cancel
           </Link>
           <button
             type="button"
-            className="btn btn-secondary flex-1 min-w-[120px]"
-            disabled={saving}
+            className="btn btn-secondary min-w-[100px]"
+            disabled={saving || emailing}
             onClick={() => saveEstimate('draft')}
           >
             {saving ? 'Saving…' : 'Save Draft'}
           </button>
           <button
             type="button"
-            className="btn btn-primary flex-1 min-w-[120px]"
-            disabled={saving}
-            onClick={() => saveEstimate('pending')}
+            className="btn btn-primary min-w-[140px]"
+            disabled={saving || emailing}
+            onClick={() => finalizeAndEmailEstimate()}
           >
-            {saving ? 'Saving…' : 'Mark Sent'}
+            {emailing ? 'Emailing…' : 'Finalize & Email'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary min-w-[100px] text-xs"
+            disabled={saving || emailing}
+            onClick={() => markSentWithoutEmail()}
+            title="Sets status to sent without calling Resend"
+          >
+            Mark sent (no email)
           </button>
         </div>
+        <p className="text-[10px] text-[var(--text3)] mt-2">
+          Finalize &amp; Email only marks the estimate sent after Resend accepts the message.
+          Requires customer email and a verified From domain.
+        </p>
 
         {!isValidOrgId(userOrgId) && (
           <p className="text-xs text-amber-400 mt-4">

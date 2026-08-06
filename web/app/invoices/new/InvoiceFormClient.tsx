@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
+import { buildInvoiceHtml, type DocCompany } from '@/lib/billing/doc-html';
+import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
   coerceOrgId,
   emptyLineItem,
@@ -54,6 +56,8 @@ export default function InvoiceFormClient() {
   const [userId, setUserId] = useState<string | null>(null);
   const [docNumber, setDocNumber] = useState('');
   const [status, setStatus] = useState('draft');
+  const [company, setCompany] = useState<DocCompany>({});
+  const [emailing, setEmailing] = useState(false);
 
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
   const [custSearch, setCustSearch] = useState('');
@@ -356,11 +360,32 @@ export default function InvoiceFormClient() {
         setUserId(user.id);
         const { data: profile } = await supabase
           .from('user_profiles')
-          .select('organization_id')
+          .select(
+            'organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url, slogan)'
+          )
           .eq('id', user.id)
           .maybeSingle();
         const orgId = coerceOrgId(profile?.organization_id);
         setUserOrgId(orgId);
+        const org = Array.isArray((profile as any)?.organizations)
+          ? (profile as any).organizations[0]
+          : (profile as any)?.organizations;
+        const techName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ');
+        if (org || techName) {
+          setCompany({
+            company_name: org?.name || '',
+            address: org?.address || '',
+            city: org?.city || '',
+            state: org?.state || '',
+            zip: org?.zip || '',
+            phone: org?.phone || '',
+            email: org?.email || '',
+            website: org?.website || '',
+            logo_url: org?.logo_url || '',
+            slogan: org?.slogan || '',
+            tech_name: techName,
+          });
+        }
         if (orgId) await loadCustomers(orgId);
         await loadParts();
 
@@ -422,11 +447,14 @@ export default function InvoiceFormClient() {
       .slice(0, 8);
   }
 
-  async function saveInvoice(nextStatus: string) {
+  async function saveInvoice(
+    nextStatus: string,
+    opts?: { quiet?: boolean }
+  ): Promise<string | number | null> {
     const name = customerName.trim() || custSearch.trim();
     if (!name) {
       toast.error('Customer name is required');
-      return;
+      return null;
     }
     setSaving(true);
     try {
@@ -522,10 +550,14 @@ export default function InvoiceFormClient() {
         }
       }
 
-      if (nextStatus === 'draft') toast.success('Invoice draft saved!');
-      else if (nextStatus === 'sent') toast.success('Invoice marked as sent.');
-      else if (nextStatus === 'paid') toast.success('Invoice marked as paid.');
-      else toast.success('Invoice saved.');
+      if (!opts?.quiet) {
+        if (nextStatus === 'draft') toast.success('Invoice draft saved!');
+        else if (nextStatus === 'sent')
+          toast.success('Invoice marked as sent (no email sent).');
+        else if (nextStatus === 'paid') toast.success('Invoice marked as paid.');
+        else toast.success('Invoice saved.');
+      }
+      return result.id || savedId;
     } catch (err: any) {
       const em = err?.message || String(err);
       if (/service_invoices|schema cache|does not exist/i.test(em)) {
@@ -535,9 +567,154 @@ export default function InvoiceFormClient() {
       } else {
         toast.error(`Save failed: ${em}`);
       }
+      return null;
     } finally {
       setSaving(false);
     }
+  }
+
+  function buildInvoiceEmailHtml() {
+    return buildInvoiceHtml({
+      company,
+      customer: {
+        name: customerName.trim() || custSearch.trim(),
+        address: custAddress,
+        city: custCity,
+        state: custState,
+        zip: custZip,
+        contact: custContact,
+        phone: custPhone,
+        email: custEmail,
+      },
+      invNumber: docNumber || 'Draft',
+      invoiceDate: invoiceDate || todayYmd(),
+      dueDate: dueDate || undefined,
+      description: description || undefined,
+      preparedBy: company.tech_name,
+      fromEstimateId: sourceEstimateId,
+      lines: lineItems,
+      subtotal,
+      tax: Number(tax) || 0,
+      total,
+      deposit: Number(deposit) || 0,
+      depositDate: depositDate || undefined,
+      depositMethod: depositMethod || undefined,
+      balanceDue,
+    });
+  }
+
+  /** Save draft, email via Resend, only set status=sent when email actually delivered. */
+  async function finalizeAndEmail() {
+    if (!custEmail.trim() && !customerOrgId) {
+      toast.error('Add a customer email on the form or CRM profile before emailing.');
+      return;
+    }
+    setEmailing(true);
+    try {
+      const id = await saveInvoice('draft', { quiet: true });
+      if (!id) return;
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        toast.error('Session expired — sign in again');
+        return;
+      }
+
+      const html = buildInvoiceEmailHtml();
+      const result = await sendBillingDocEmail({
+        kind: 'invoice',
+        accessToken: session.access_token,
+        payload: {
+          invoice_id: id,
+          to_email: custEmail.trim() || undefined,
+          invoice_number: docNumber,
+          balance_due: balanceDue,
+          total,
+          customer_organization_id: customerOrgId,
+          company_name: company.company_name,
+          reply_to: company.email || undefined,
+          html,
+          include_payment_link: true,
+        },
+      });
+
+      if (!result.emailSent) {
+        toast.error(
+          result.error ||
+            'Email was not sent. Invoice remains a draft. Fix email/Resend domain or use “Mark sent without email”.'
+        );
+        if (result.needsConfig) {
+          toast.message(
+            'Server needs RESEND_API_KEY and a verified From domain (medicalrepairnetwork.com).'
+          );
+        }
+        return;
+      }
+
+      // Only now mark sent
+      await saveInvoice('sent', { quiet: true });
+      const payNote = result.paymentUrl
+        ? ' Stripe pay link included.'
+        : result.stripeSkippedReason
+          ? ` (${result.stripeSkippedReason})`
+          : '';
+      toast.success(`Invoice emailed to ${result.to}.${payNote}`);
+    } finally {
+      setEmailing(false);
+    }
+  }
+
+  async function resendEmail() {
+    if (!savedId) {
+      toast.error('Save the invoice first');
+      return;
+    }
+    setEmailing(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        toast.error('Session expired — sign in again');
+        return;
+      }
+      const result = await sendBillingDocEmail({
+        kind: 'invoice',
+        accessToken: session.access_token,
+        payload: {
+          invoice_id: savedId,
+          to_email: custEmail.trim() || undefined,
+          invoice_number: docNumber,
+          balance_due: balanceDue,
+          total,
+          customer_organization_id: customerOrgId,
+          company_name: company.company_name,
+          reply_to: company.email || undefined,
+          html: buildInvoiceEmailHtml(),
+          include_payment_link: true,
+        },
+      });
+      if (!result.emailSent) {
+        toast.error(result.error || 'Resend failed');
+        return;
+      }
+      toast.success(`Invoice re-sent to ${result.to}`);
+    } finally {
+      setEmailing(false);
+    }
+  }
+
+  function markSentWithoutEmail() {
+    if (
+      !confirm(
+        'Mark this invoice as sent WITHOUT emailing the customer?\n\nUse this only if you already emailed a PDF yourself.'
+      )
+    ) {
+      return;
+    }
+    saveInvoice('sent');
   }
 
   if (loading) {
@@ -935,35 +1112,58 @@ export default function InvoiceFormClient() {
           </div>
         </section>
 
-        <div className="flex flex-wrap gap-3 sticky bottom-4 z-10">
-          <Link href="/invoices" className="btn btn-secondary flex-1 min-w-[90px] text-center">
+        <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
+          <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">
             Cancel
           </Link>
           <button
             type="button"
-            className="btn btn-secondary flex-1 min-w-[100px]"
-            disabled={saving}
+            className="btn btn-secondary min-w-[100px]"
+            disabled={saving || emailing}
             onClick={() => saveInvoice('draft')}
           >
             {saving ? 'Saving…' : 'Save Draft'}
           </button>
           <button
             type="button"
-            className="btn btn-secondary flex-1 min-w-[100px]"
-            disabled={saving}
-            onClick={() => saveInvoice('sent')}
+            className="btn btn-primary min-w-[140px]"
+            disabled={saving || emailing}
+            onClick={() => finalizeAndEmail()}
           >
-            Mark Sent
+            {emailing ? 'Emailing…' : 'Finalize & Email'}
+          </button>
+          {status === 'sent' && (
+            <button
+              type="button"
+              className="btn btn-secondary min-w-[110px]"
+              disabled={saving || emailing}
+              onClick={() => resendEmail()}
+            >
+              Resend Email
+            </button>
+          )}
+          <button
+            type="button"
+            className="btn btn-secondary min-w-[100px] text-xs"
+            disabled={saving || emailing}
+            onClick={() => markSentWithoutEmail()}
+            title="Sets status to sent without calling Resend"
+          >
+            Mark sent (no email)
           </button>
           <button
             type="button"
-            className="btn btn-primary flex-1 min-w-[100px]"
-            disabled={saving}
+            className="btn btn-secondary min-w-[100px]"
+            disabled={saving || emailing}
             onClick={() => saveInvoice('paid')}
           >
             Mark Paid
           </button>
         </div>
+        <p className="text-[10px] text-[var(--text3)] mt-2">
+          Finalize &amp; Email only sets status to <strong>sent</strong> after Resend accepts the
+          message. Requires customer email + verified From domain (contact@medicalrepairnetwork.com).
+        </p>
 
         {!isValidOrgId(userOrgId) && (
           <p className="text-xs text-amber-400 mt-4">
