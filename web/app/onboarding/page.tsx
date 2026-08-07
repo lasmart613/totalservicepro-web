@@ -447,11 +447,31 @@ export default function Onboarding() {
       }, { onConflict: 'id' });
       if (profErr) {
         console.error('profile upsert', profErr);
-        // Force-link org even if full upsert fails
-        await supabase
+        // Force-link org even if full upsert fails — still mark onboarding done
+        // (previously omitted the flag → users look "incomplete" despite finishing the wizard)
+        const { error: forceErr } = await supabase
           .from('user_profiles')
-          .update({ organization_id: orgId, role: creatorRole })
+          .update({
+            organization_id: orgId,
+            role: creatorRole,
+            first_name: formData.firstName || null,
+            last_name: formData.lastName || null,
+            job_title: finalJob || null,
+            onboarding_completed: true,
+            onboarding_completed_at: new Date().toISOString(),
+          })
           .eq('id', currentUser.id);
+        if (forceErr) {
+          console.error('profile force-link failed', forceErr);
+          // Last resort: at least set the completion flag alone
+          await supabase
+            .from('user_profiles')
+            .update({
+              onboarding_completed: true,
+              onboarding_completed_at: new Date().toISOString(),
+            })
+            .eq('id', currentUser.id);
+        }
       }
 
       // Re-read linked org id so equipment RLS sees membership
