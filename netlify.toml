@@ -1,9 +1,12 @@
 # Monorepo root — Netlify base directory is web/
+#
+# Do NOT set publish = ".next". @netlify/plugin-nextjs owns the publish
+# directory. Forcing publish=.next causes /_next/static/* 404s.
 
 [build]
   base = "web"
   command = "npm run build"
-  publish = ".next"
+  # publish left unset — Next.js plugin sets it at build time.
 
 [build.environment]
   NODE_VERSION = "20"
