@@ -72,14 +72,17 @@ export async function POST(req: NextRequest) {
       'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status',
     ];
 
-    async function loadEstimateRow(client: SupabaseClient, id: string | number) {
+    async function loadEstimateRow(
+      client: SupabaseClient,
+      id: string | number
+    ): Promise<Record<string, any> | null> {
       for (const cols of EST_SELECTS) {
         const { data, error } = await client
           .from('service_estimates')
           .select(cols)
           .eq('id', id)
           .maybeSingle();
-        if (!error && data) return data;
+        if (!error && data) return data as Record<string, any>;
         if (error && !/column|schema cache|does not exist/i.test(error.message || '')) break;
       }
       return null;
