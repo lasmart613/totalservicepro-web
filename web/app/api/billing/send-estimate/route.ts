@@ -1,6 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { ensureEstimateActionCtas } from '@/lib/billing/doc-html';
+import {
+  generateEstimateActionToken,
+  persistEstimateActionToken,
+  readExistingActionToken,
+} from '@/lib/billing/estimate-action';
+import { estimateActionUrl } from '@/lib/share';
 
 /**
  * POST /api/billing/send-estimate
@@ -60,26 +67,33 @@ export async function POST(req: NextRequest) {
           ? Number(rawId)
           : rawId;
 
+    const EST_SELECTS = [
+      'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action_token',
+      'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status',
+    ];
+
+    async function loadEstimateRow(
+      client: SupabaseClient,
+      id: string | number
+    ): Promise<Record<string, any> | null> {
+      for (const cols of EST_SELECTS) {
+        const { data, error } = await client
+          .from('service_estimates')
+          .select(cols)
+          .eq('id', id)
+          .maybeSingle();
+        if (!error && data) return data as Record<string, any>;
+        if (error && !/column|schema cache|does not exist/i.test(error.message || '')) break;
+      }
+      return null;
+    }
+
     let est: any = null;
     if (estimateId != null) {
-      const { data } = await supabase
-        .from('service_estimates')
-        .select(
-          'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status'
-        )
-        .eq('id', estimateId)
-        .maybeSingle();
-      est = data;
+      est = await loadEstimateRow(supabase, estimateId);
       if (!est && hasServiceRole()) {
         try {
-          const admin = getSupabaseAdmin();
-          const { data: row } = await admin
-            .from('service_estimates')
-            .select(
-              'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status'
-            )
-            .eq('id', estimateId)
-            .maybeSingle();
+          const row = await loadEstimateRow(getSupabaseAdmin(), estimateId);
           if (row) {
             const owns =
               (row.created_by && String(row.created_by) === String(user.id)) ||
@@ -206,6 +220,19 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    let actionToken: string | null = null;
+    if (estimateId != null && est) {
+      actionToken = readExistingActionToken(est);
+      if (!actionToken) actionToken = generateEstimateActionToken();
+      const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
+      try {
+        await persistEstimateActionToken(writer, estimateId, actionToken, est.estimate_data);
+      } catch (e) {
+        console.warn('could not persist estimate action token', e);
+      }
+      html = ensureEstimateActionCtas(html, estimateActionUrl(actionToken));
+    }
+
     const wrapped = `
 <!DOCTYPE html>
 <html><head><meta charset="utf-8"/><title>${subject.replace(/</g, '')}</title></head>
@@ -259,6 +286,7 @@ export async function POST(req: NextRequest) {
       to: toEmail,
       emailSource,
       estimateId,
+      actionToken,
     });
   } catch (e: any) {
     console.error('send-estimate', e);

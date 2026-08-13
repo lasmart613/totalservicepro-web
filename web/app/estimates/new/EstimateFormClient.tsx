@@ -9,8 +9,11 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { buildEstimateHtml, type DocCompany } from '@/lib/billing/doc-html';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
+import { estimateActionUrl } from '@/lib/share';
 import {
   coerceOrgId,
+  customerActionFromEstimate,
+  customerActionLabel,
   emptyLineItem,
   isValidOrgId,
   lineItemsSubtotal,
@@ -20,6 +23,7 @@ import {
   SERVICE_TYPE_LABELS,
   SERVICE_TYPES,
   writeWithColumnRetry,
+  type CustomerActionKind,
   type LineItem,
 } from '@/lib/billing/save-helpers';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
@@ -51,6 +55,10 @@ export default function EstimateFormClient() {
   const [status, setStatus] = useState('draft');
   const [company, setCompany] = useState<DocCompany>({});
   const [emailing, setEmailing] = useState(false);
+  const [customerAction, setCustomerAction] = useState<CustomerActionKind | null>(null);
+  const [customerActionAt, setCustomerActionAt] = useState<string | null>(null);
+  const [customerActionNote, setCustomerActionNote] = useState<string | null>(null);
+  const [customerActionToken, setCustomerActionToken] = useState<string | null>(null);
 
   // Customer
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
@@ -261,6 +269,11 @@ export default function EstimateFormClient() {
       }
       setSavedId(data.id);
       setStatus(data.status || 'draft');
+      const custAct = customerActionFromEstimate(data);
+      setCustomerAction(custAct.action);
+      setCustomerActionAt(custAct.at);
+      setCustomerActionNote(custAct.note);
+      setCustomerActionToken(custAct.token);
       setCustomerName(data.customer_name || '');
       setCustSearch(data.customer_name || '');
       setCustomerOrgId(data.customer_organization_id || null);
@@ -446,7 +459,7 @@ export default function EstimateFormClient() {
 
   async function saveEstimate(
     nextStatus: string,
-    opts?: { quiet?: boolean }
+    opts?: { quiet?: boolean; actionToken?: string | null }
   ): Promise<string | number | null> {
     const name = customerName.trim() || custSearch.trim();
     if (!name) {
@@ -477,6 +490,7 @@ export default function EstimateFormClient() {
 
       const svcList = [...services];
       if (otherService.trim()) svcList.push(`Other: ${otherService.trim()}`);
+      const actionToken = opts?.actionToken || customerActionToken;
 
       const payload: Record<string, any> = {
         customer_name: name,
@@ -586,6 +600,12 @@ export default function EstimateFormClient() {
           custContact,
           estimate_number: estNum,
           estNumber: estNum,
+          company_name: company.company_name || '',
+          company_email: company.email || '',
+          ...(actionToken ? { customer_action_token: actionToken } : {}),
+          ...(customerAction ? { customer_action: customerAction } : {}),
+          ...(customerActionAt ? { customer_action_at: customerActionAt } : {}),
+          ...(customerActionNote ? { customer_action_note: customerActionNote } : {}),
         },
       };
 
@@ -694,6 +714,7 @@ export default function EstimateFormClient() {
       deposit: totals.depositAmt,
       balanceDue: totals.balanceDue,
       validDays: 30,
+      actionUrl: customerActionToken ? estimateActionUrl(customerActionToken) : null,
     });
   }
 
@@ -732,7 +753,8 @@ export default function EstimateFormClient() {
         );
         return;
       }
-      await saveEstimate('pending', { quiet: true });
+      if (result.actionToken) setCustomerActionToken(result.actionToken);
+      await saveEstimate('pending', { quiet: true, actionToken: result.actionToken || customerActionToken });
       toast.success(`Estimate emailed to ${result.to}.`);
     } finally {
       setEmailing(false);
@@ -790,7 +812,26 @@ export default function EstimateFormClient() {
               >
                 {(status || 'draft').toUpperCase()}
               </span>
+              {customerAction && (
+                <span
+                  className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                    customerAction === 'approved'
+                      ? 'bg-green-900/40 text-green-200 border-green-700'
+                      : 'bg-amber-900/40 text-amber-200 border-amber-700'
+                  }`}
+                >
+                  {customerActionLabel(customerAction)}
+                  {customerActionAt
+                    ? ` · ${new Date(customerActionAt).toLocaleDateString()}`
+                    : ''}
+                </span>
+              )}
             </div>
+            {customerAction === 'changes_requested' && customerActionNote && (
+              <p className="text-xs text-amber-200/90 mt-2 max-w-xl">
+                Customer note: {customerActionNote}
+              </p>
+            )}
           </div>
           {savedId && status !== 'invoiced' && status !== 'expired' && (
             <button type="button" className="btn btn-primary text-sm" onClick={convertToInvoice}>
