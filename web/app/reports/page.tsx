@@ -122,11 +122,11 @@ export default function ReportsList() {
 
         <div className="grid grid-cols-2 gap-3 mb-5">
           <div className="stat-card card p-4 text-center">
-            <div className="text-3xl font-extrabold text-[var(--gold)]">{drafts}</div>
+            <div className="text-3xl font-extrabold text-[var(--gold)]">{loading ? '—' : drafts}</div>
             <div className="text-xs font-semibold tracking-wider text-[var(--text3)] mt-1">DRAFTS</div>
           </div>
           <div className="stat-card card p-4 text-center">
-            <div className="text-3xl font-extrabold text-[var(--green)]">{completes}</div>
+            <div className="text-3xl font-extrabold text-[var(--green)]">{loading ? '—' : completes}</div>
             <div className="text-xs font-semibold tracking-wider text-[var(--text3)] mt-1">COMPLETED</div>
           </div>
         </div>

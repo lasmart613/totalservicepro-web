@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isAdmin, isOwnerish, isSupplier } from '@/lib/roles';
@@ -10,6 +11,7 @@ type HubCard = { href: string; icon: string; label: string; desc: string };
 
 export default function TechHub() {
   const supabase = getSupabaseClient();
+  const router = useRouter();
   const [role, setRole] = useState<string>('');
   const [orgType, setOrgType] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -19,7 +21,7 @@ export default function TechHub() {
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
-          setLoaded(true);
+          router.replace('/login?next=/hub');
           return;
         }
         const { data: prof } = await supabase

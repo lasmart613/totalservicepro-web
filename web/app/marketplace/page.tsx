@@ -62,13 +62,6 @@ export default function Marketplace() {
         }
       }
 
-      // Static "posted" example (easy to extend or replace with a notifications table later)
-      notifs.push({
-        id: 'posted',
-        message: 'Your listing was posted successfully.',
-        time: 'just now'
-      });
-
       // Real view counts from your listings (functional counter)
       const { data: myListingsWithViews } = await supabase
         .from('marketplace_listings')
@@ -186,7 +179,6 @@ export default function Marketplace() {
               ))}
             </ul>
           )}
-          <p className="text-xs mt-2 text-[var(--text3)]">To add new notification types in the future, extend the fetchNotifications logic or add a notifications table.</p>
         </div>
 
         <div className="mt-10 text-xs text-[var(--text3)]">

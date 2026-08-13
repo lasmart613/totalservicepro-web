@@ -39,3 +39,8 @@ Thumbs.db
 *.tmp
 # Local Netlify folder
 .netlify
+
+# Env files (keep .env.example)
+.env
+.env.*
+!.env.example

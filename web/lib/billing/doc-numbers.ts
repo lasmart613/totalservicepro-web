@@ -313,12 +313,48 @@ export async function generateDocNumber(
   return stem + String(seq).padStart(pad, '0');
 }
 
+function uniqueViolation(err: any): boolean {
+  const code = String(err?.code || '');
+  const msg = String(err?.message || err?.details || '').toLowerCase();
+  return code === '23505' || msg.includes('duplicate') || msg.includes('unique');
+}
+
+/**
+ * Allocate a number at insert time (never on form mount).
+ * Re-scans after each collision so two tabs cannot both stamp -01.
+ */
+export async function allocateDocNumber(
+  client: DocNumberClient,
+  opts: Omit<GenerateDocNumberOpts, 'existing' | 'client'>
+): Promise<string> {
+  let last = '';
+  for (let i = 0; i < 8; i++) {
+    last = await generateDocNumber(client, { ...opts, existing: null });
+    const kind = String(opts.kind || 'INV').toUpperCase();
+    const table =
+      kind === 'EST' ? 'service_estimates' : kind === 'INV' ? 'service_invoices' : kind === 'TKT' ? 'service_tickets' : 'service_reports';
+    const col =
+      kind === 'EST' ? 'estimate_number' : kind === 'INV' ? 'invoice_number' : kind === 'TKT' ? 'ticket_number' : 'report_number';
+    try {
+      const q = client.from(table).select('id').eq(col, last).limit(1);
+      const { data } = await q;
+      if (!data || data.length === 0) return last;
+    } catch {
+      return last;
+    }
+  }
+  return last;
+}
+
+export { uniqueViolation };
+
 const DocNumbers = {
   KIND: DOC_KIND,
   ymdFrom,
   sanitizePrefix,
   getOrgDocPrefix,
   generateDocNumber,
+  allocateDocNumber,
 };
 
 export default DocNumbers;

@@ -331,18 +331,31 @@ export function Header() {
 
         {/* Desktop: limited top-level items + hover dropdowns */}
         <nav className="ml-6 hidden md:flex items-center gap-5 text-base font-medium text-[var(--text2)]">
-          <Link href="/" className="hover:text-[var(--gold)] py-1">
-            Dashboard
-          </Link>
-          <NavDropdown group={hubGroup} openId={navOpenId} setOpenId={setNavOpenId} />
-          <NavDropdown group={marketplaceGroup} openId={navOpenId} setOpenId={setNavOpenId} />
-          {businessGroup && (
-            <NavDropdown group={businessGroup} openId={navOpenId} setOpenId={setNavOpenId} />
-          )}
-          {canAdminPortal && (
-            <Link href="/admin" className="hover:text-[var(--gold)] py-1">
-              Admin Portal
-            </Link>
+          {user ? (
+            <>
+              <Link href="/" className="hover:text-[var(--gold)] py-1">
+                Dashboard
+              </Link>
+              <NavDropdown group={hubGroup} openId={navOpenId} setOpenId={setNavOpenId} />
+              <NavDropdown group={marketplaceGroup} openId={navOpenId} setOpenId={setNavOpenId} />
+              {businessGroup && (
+                <NavDropdown group={businessGroup} openId={navOpenId} setOpenId={setNavOpenId} />
+              )}
+              {canAdminPortal && (
+                <Link href="/admin" className="hover:text-[var(--gold)] py-1">
+                  Admin Portal
+                </Link>
+              )}
+            </>
+          ) : (
+            <>
+              <Link href="/directory" className="hover:text-[var(--gold)] py-1">
+                Directory
+              </Link>
+              <Link href="/marketplace" className="hover:text-[var(--gold)] py-1">
+                Marketplace
+              </Link>
+            </>
           )}
         </nav>
       </div>
@@ -452,6 +465,7 @@ export function Header() {
       {mobileMenuOpen && (
         <div className="md:hidden absolute top-full left-0 right-0 bg-[var(--surface3)] border-b border-[var(--border)] z-[90] shadow-lg max-h-[75vh] overflow-y-auto">
           <nav className="flex flex-col px-4 py-2 text-base font-medium">
+            {user ? (
             <Link
               href="/"
               className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
@@ -459,8 +473,26 @@ export function Header() {
             >
               Dashboard
             </Link>
+            ) : (
+              <>
+                <Link
+                  href="/directory"
+                  className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+                  onClick={closeMobileMenu}
+                >
+                  Directory
+                </Link>
+                <Link
+                  href="/marketplace"
+                  className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+                  onClick={closeMobileMenu}
+                >
+                  Marketplace
+                </Link>
+              </>
+            )}
 
-            {[hubGroup, marketplaceGroup, businessGroup]
+            {user && [hubGroup, marketplaceGroup, businessGroup]
               .filter(Boolean)
               .map((g) => {
                 const group = g as NavGroup;

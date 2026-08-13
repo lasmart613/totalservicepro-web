@@ -24,14 +24,14 @@ export default function NotFound() {
         <h1 className="text-3xl font-extrabold">404</h1>
         <p className="text-[var(--text3)] mt-2 mb-6">This page could not be found.</p>
         <div className="flex flex-wrap gap-2 justify-center">
-          <Link href="/" className="btn btn-primary">
-            Dashboard
+          <Link href="/login" className="btn btn-primary">
+            Sign In
           </Link>
-          <Link href="/accepted-bids" className="btn btn-secondary">
-            Accepted Bids
+          <Link href="/signup" className="btn btn-secondary">
+            Sign Up
           </Link>
-          <Link href="/notifications" className="btn btn-secondary">
-            Notifications
+          <Link href="/directory" className="btn btn-secondary">
+            Directory
           </Link>
         </div>
       </div>

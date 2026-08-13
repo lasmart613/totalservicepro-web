@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { generateDocNumber } from '@/lib/billing/doc-numbers';
+import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { buildInvoiceHtml, type DocCompany } from '@/lib/billing/doc-html';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
@@ -393,30 +393,8 @@ export default function InvoiceFormClient() {
           await loadInvoice(editIdParam);
         } else if (fromEstimateParam) {
           await prefillFromEstimate(fromEstimateParam);
-          if (orgId) {
-            try {
-              const num = await generateDocNumber(supabase, {
-                orgId,
-                kind: 'INV',
-                date: invoiceDate || new Date(),
-              });
-              setDocNumber(num);
-            } catch (e) {
-              console.warn(e);
-            }
-          }
-        } else if (orgId) {
-          try {
-            const num = await generateDocNumber(supabase, {
-              orgId,
-              kind: 'INV',
-              date: invoiceDate || new Date(),
-            });
-            setDocNumber(num);
-          } catch (e) {
-            console.warn(e);
-          }
         }
+        // Allocate invoice numbers at save, not on form open.
       } catch (e) {
         console.error(e);
       } finally {
@@ -458,19 +436,17 @@ export default function InvoiceFormClient() {
     }
     setSaving(true);
     try {
-      let invNum = docNumber;
+      let invNum = editIdParam ? docNumber : '';
       if (!invNum && userOrgId) {
-        invNum = await generateDocNumber(supabase, {
+        invNum = await allocateDocNumber(supabase, {
           orgId: userOrgId,
           kind: 'INV',
           date: invoiceDate || new Date(),
-          existing: docNumber || null,
         });
         setDocNumber(invNum);
       }
       if (!invNum) {
-        invNum = `TSP-INV-${(invoiceDate || todayYmd()).replace(/-/g, '')}-01`;
-        setDocNumber(invNum);
+        throw new Error('Could not allocate an invoice number. Try again.');
       }
 
       const items = lineItems.filter(

@@ -237,25 +237,25 @@ export default function EstimatesListPage() {
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
           <div className="stat-card card p-3 text-center">
-            <div className="text-2xl font-extrabold text-[var(--gold)]">{drafts}</div>
+            <div className="text-2xl font-extrabold text-[var(--gold)]">{loading ? '—' : drafts}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
               DRAFTS
             </div>
           </div>
           <div className="stat-card card p-3 text-center">
-            <div className="text-2xl font-extrabold text-blue-300">{sent}</div>
+            <div className="text-2xl font-extrabold text-blue-300">{loading ? '—' : sent}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
               SENT
             </div>
           </div>
           <div className="stat-card card p-3 text-center">
-            <div className="text-2xl font-extrabold text-purple-300">{invoiced}</div>
+            <div className="text-2xl font-extrabold text-purple-300">{loading ? '—' : invoiced}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
               INVOICED
             </div>
           </div>
           <div className="stat-card card p-3 text-center">
-            <div className="text-2xl font-extrabold text-red-300">{expired}</div>
+            <div className="text-2xl font-extrabold text-red-300">{loading ? '—' : expired}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
               EXPIRED
             </div>

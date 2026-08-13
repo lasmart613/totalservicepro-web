@@ -237,7 +237,7 @@ New dedicated professional signups and marketplace were added (see README for fu
 
 **New routes**:
 - `/signup` (overview + cards)
-- `/signup/fse`
+- `/signup/fse` (interstitial: FSEs are invited via Team)
 - `/signup/company`
 - `/signup/supplier` (new: Parts Supplier, type=`parts_supplier`, role=`parts_supplier`)
 - `/signup/owner`

@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { generateDocNumber } from '@/lib/billing/doc-numbers';
+import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { buildEstimateHtml, type DocCompany } from '@/lib/billing/doc-html';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
@@ -396,18 +396,8 @@ export default function EstimateFormClient() {
 
         if (editIdParam) {
           await loadEstimate(editIdParam);
-        } else if (orgId) {
-          try {
-            const num = await generateDocNumber(supabase, {
-              orgId,
-              kind: 'EST',
-              date: new Date(),
-            });
-            setDocNumber(num);
-          } catch (e) {
-            console.warn('doc number', e);
-          }
         }
+        // Do not allocate estimate numbers on form open — two tabs would both get -01.
       } catch (e) {
         console.error(e);
       } finally {
@@ -465,19 +455,17 @@ export default function EstimateFormClient() {
     }
     setSaving(true);
     try {
-      let estNum = docNumber;
+      let estNum = editIdParam ? docNumber : '';
       if (!estNum && userOrgId) {
-        estNum = await generateDocNumber(supabase, {
+        estNum = await allocateDocNumber(supabase, {
           orgId: userOrgId,
           kind: 'EST',
           date: new Date(),
-          existing: docNumber || null,
         });
         setDocNumber(estNum);
       }
       if (!estNum) {
-        estNum = `TSP-EST-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-01`;
-        setDocNumber(estNum);
+        throw new Error('Could not allocate an estimate number. Try again.');
       }
 
       const modelName = model === '__other__' ? customModel.trim() : model;

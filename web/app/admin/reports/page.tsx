@@ -2,12 +2,14 @@
 
 import React, { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { isClosedTicketStatus, isCompleteReport, isOpenReport } from '@/lib/tickets';
 
 export default function AdminReports() {
   const [stats, setStats] = useState({
     totalTeam: 0,
     totalCustomers: 0,
     openTickets: 0,
+    openReports: 0,
     completedReports: 0,
   });
   const [loading, setLoading] = useState(true);
@@ -49,13 +51,20 @@ export default function AdminReports() {
         .select('status')
         .eq('organization_id', orgId);
 
-      const open = reports?.filter(r => r.status === 'draft' || r.status === 'open').length || 0;
-      const completed = reports?.filter(r => r.status === 'complete').length || 0;
+      const { data: tickets } = await supabase
+        .from('service_tickets')
+        .select('status')
+        .eq('organization_id', orgId);
+
+      const openTickets = tickets?.filter((t) => !isClosedTicketStatus(t.status)).length || 0;
+      const openReports = reports?.filter((r) => isOpenReport(r.status)).length || 0;
+      const completed = reports?.filter((r) => isCompleteReport(r.status)).length || 0;
 
       setStats({
         totalTeam: teamCount || 0,
         totalCustomers: customerCount || 0,
-        openTickets: open,
+        openTickets,
+        openReports,
         completedReports: completed,
       });
 
@@ -88,6 +97,11 @@ export default function AdminReports() {
         <div className="card p-6">
           <div className="text-sm text-[var(--text3)]">Open Tickets</div>
           <div className="text-4xl font-extrabold mt-2 text-[var(--gold)]">{stats.openTickets}</div>
+        </div>
+
+        <div className="card p-6">
+          <div className="text-sm text-[var(--text3)]">Open / Draft Reports</div>
+          <div className="text-4xl font-extrabold mt-2 text-[var(--gold)]">{stats.openReports}</div>
         </div>
 
         <div className="card p-6">

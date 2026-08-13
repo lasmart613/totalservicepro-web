@@ -61,11 +61,14 @@ export default function PartsCatalog() {
   // Get unique brands for filter dropdown
   const brands = [...new Set(parts.map(p => p.brand).filter(Boolean))].sort();
 
-  if (loading) {
+  function partImage(part: any): string | null {
     return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div>Loading Parts Catalog...</div>
-      </div>
+      part.image_url ||
+      part.image ||
+      part.photo_url ||
+      part.thumbnail_url ||
+      part.photo ||
+      null
     );
   }
 
@@ -102,7 +105,19 @@ export default function PartsCatalog() {
           </div>
         </div>
 
-        {filteredParts.length === 0 ? (
+        {loading ? (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+            {Array.from({ length: 8 }).map((_, i) => (
+              <div key={i} className="card overflow-hidden">
+                <div className="w-full h-48 bg-[var(--surface3)] animate-pulse" />
+                <div className="p-5 space-y-2">
+                  <div className="h-5 bg-[var(--surface3)] rounded animate-pulse" />
+                  <div className="h-4 w-2/3 bg-[var(--surface3)] rounded animate-pulse" />
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : filteredParts.length === 0 ? (
           <div className="card p-8 text-center">
             <p>No parts found matching your search.</p>
           </div>
@@ -110,15 +125,17 @@ export default function PartsCatalog() {
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
             {filteredParts.map((part) => (
               <div key={part.id} className="card overflow-hidden hover:border-[var(--gold)] transition-colors">
-                {part.image_url ? (
+                {partImage(part) ? (
                   <img 
-                    src={part.image_url} 
+                    src={partImage(part)!} 
                     alt={part.name} 
                     className="w-full h-48 object-cover" 
                   />
                 ) : (
                   <div className="w-full h-48 bg-[var(--surface3)] flex items-center justify-center">
-                    <span className="text-[var(--text3)]">No image</span>
+                    <span className="text-4xl font-extrabold text-[var(--gold)]/40">
+                      {(part.brand || part.name || 'P').toString().charAt(0).toUpperCase()}
+                    </span>
                   </div>
                 )}
 

@@ -11,6 +11,13 @@ import {
   getDashboardPersona,
   type DashboardPersona,
 } from '@/lib/roles';
+import {
+  isClosedTicketStatus,
+  isCompleteReport,
+  ticketDateYmd,
+  toLocalYmd,
+  upcomingOpenTickets,
+} from '@/lib/tickets';
 
 export default function HomePage() {
   const [user, setUser] = useState<any>(null);
@@ -39,6 +46,7 @@ export default function HomePage() {
     brands: 0,
   });
   const [fseStats, setFseStats] = useState<any[]>([]);
+  const [upcoming, setUpcoming] = useState<any[]>([]);
 
   const supabase = getSupabaseClient();
 
@@ -108,14 +116,11 @@ export default function HomePage() {
       let totalReports = 0;
 
       try {
-        const today = (() => {
-          const n = new Date();
-          return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
-        })();
+        const today = toLocalYmd(new Date());
 
         const { data: tickets, error: tErr } = await supabase
           .from('service_tickets')
-          .select('id, status, service_date, assigned_to')
+          .select('id, status, service_date, assigned_to, customer_name, service_type, scheduled_time')
           .eq('organization_id', orgId)
           .limit(500);
 
@@ -124,14 +129,11 @@ export default function HomePage() {
           kpiError = tErr.message;
         } else {
           const list = tickets || [];
-          const isClosed = (s: string | null | undefined) => {
-            const x = (s || '').toLowerCase();
-            return ['completed', 'cancelled', 'canceled', 'complete'].includes(x);
-          };
-          openTickets = list.filter((t) => !isClosed(t.status)).length;
+          openTickets = list.filter((t) => !isClosedTicketStatus(t.status)).length;
           todayCalls = list.filter(
-            (t) => String(t.service_date || '').slice(0, 10) === today && !isClosed(t.status)
+            (t) => ticketDateYmd(t.service_date) === today && !isClosedTicketStatus(t.status)
           ).length;
+          setUpcoming(upcomingOpenTickets(list, today, 5));
         }
       } catch (e: any) {
         console.warn('tickets load failed', e);
@@ -151,9 +153,7 @@ export default function HomePage() {
           if (!kpiError) kpiError = rErr.message;
         } else if (reports) {
           totalReports = reports.length;
-          completedReports = reports.filter(
-            (r) => (r.status || '').toLowerCase() === 'complete'
-          ).length;
+          completedReports = reports.filter((r) => isCompleteReport(r.status)).length;
 
           if (isAdmin(prof.role)) {
             const fseMap: { [key: string]: { name: string; open: number; completed: number } } = {};
@@ -180,7 +180,7 @@ export default function HomePage() {
             reports.forEach((report: any) => {
               const uid = report.created_by;
               if (uid && fseMap[uid]) {
-                if ((report.status || '').toLowerCase() === 'complete') {
+                if (isCompleteReport(report.status)) {
                   fseMap[uid].completed++;
                 } else {
                   fseMap[uid].open++;
@@ -532,11 +532,11 @@ export default function HomePage() {
                     <div key={index} className="card p-5">
                       <div className="font-semibold mb-2">{fse.name || 'Unassigned FSE'}</div>
                       <div className="flex justify-between text-sm">
-                        <span>Open:</span>
+                        <span>Open reports:</span>
                         <span className="font-bold text-[var(--gold)]">{fse.open}</span>
                       </div>
                       <div className="flex justify-between text-sm">
-                        <span>Completed:</span>
+                        <span>Completed reports:</span>
                         <span className="font-bold text-green-400">{fse.completed}</span>
                       </div>
                     </div>
@@ -549,11 +549,41 @@ export default function HomePage() {
               <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
                 <Calendar size={20} /> Upcoming Service Calls
               </h3>
-              <div className="card p-6">
-                <p className="text-[var(--text3)]">Check the Service Schedule for upcoming calls.</p>
-                <Link href="/service-schedule" className="text-[var(--gold)] mt-4 inline-block hover:underline">
-                  View Full Schedule →
-                </Link>
+              <div className="card p-0 overflow-hidden">
+                {upcoming.length === 0 ? (
+                  <div className="p-6">
+                    <p className="text-[var(--text3)]">No upcoming scheduled calls.</p>
+                    <Link href="/service-schedule" className="text-[var(--gold)] mt-4 inline-block hover:underline">
+                      View Full Schedule →
+                    </Link>
+                  </div>
+                ) : (
+                  <ul>
+                    {upcoming.map((t) => (
+                      <li key={t.id} className="border-b border-[var(--border)] last:border-0">
+                        <Link
+                          href={`/service-tickets/${t.id}`}
+                          className="block px-5 py-3 hover:bg-[var(--surface3)]"
+                        >
+                          <div className="font-semibold">
+                            {(t.service_type || 'Service') + ' — ' + (t.customer_name || 'Customer')}
+                          </div>
+                          <div className="text-xs text-[var(--text3)] mt-0.5">
+                            {ticketDateYmd(t.service_date)}
+                            {t.scheduled_time ? ` · ${String(t.scheduled_time).slice(0, 5)}` : ''}
+                          </div>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+                {upcoming.length > 0 && (
+                  <div className="px-5 py-3">
+                    <Link href="/service-schedule" className="text-sm text-[var(--gold)] hover:underline">
+                      View Full Schedule →
+                    </Link>
+                  </div>
+                )}
               </div>
             </div>
 

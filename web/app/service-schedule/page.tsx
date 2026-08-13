@@ -8,34 +8,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { isAdmin, isPro } from '@/lib/roles';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
-
-/** YYYY-MM-DD in local calendar (avoids UTC shift from toISOString) */
-function toLocalYmd(d: Date): string {
-  const y = d.getFullYear();
-  const m = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
-/**
- * Normalize any DB date (date / timestamptz / ISO) to YYYY-MM-DD.
- * Without this, month/day filters miss tickets when service_date includes time.
- */
-function ticketDateYmd(raw: unknown): string {
-  if (raw == null || raw === '') return '';
-  if (raw instanceof Date && !isNaN(raw.getTime())) return toLocalYmd(raw);
-  const s = String(raw).trim();
-  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
-  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
-  if (m) return m[1];
-  try {
-    const d = new Date(s);
-    if (!isNaN(d.getTime())) return toLocalYmd(d);
-  } catch {
-    /* ignore */
-  }
-  return s.slice(0, 10);
-}
+import { ticketDateYmd, toLocalYmd } from '@/lib/tickets';
 
 function parseYmd(ymd: string | null | undefined): { y: number; m: number; d: number } | null {
   const part = ticketDateYmd(ymd);
@@ -436,13 +409,26 @@ export default function ServiceSchedule() {
 
   const agendaCalls = useMemo(() => {
     return [...serviceCalls]
-      .filter((c) => c.date && c.date >= todayYmd)
+      .filter((c) => c.date && /^\d{4}-\d{2}-\d{2}$/.test(c.date) && c.date >= todayYmd)
       .sort(
         (a, b) =>
           String(a.date).localeCompare(String(b.date)) ||
           String(a.time).localeCompare(String(b.time))
       );
   }, [serviceCalls, todayYmd]);
+
+  const unscheduledCalls = useMemo(
+    () => serviceCalls.filter((c) => !c.date || !/^\d{4}-\d{2}-\d{2}$/.test(c.date)),
+    [serviceCalls]
+  );
+  const datedThisMonth = useMemo(
+    () =>
+      serviceCalls.filter((c) => {
+        const p = parseYmd(c.date);
+        return p && p.y === year && p.m === month1;
+      }).length,
+    [serviceCalls, year, month1]
+  );
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -483,9 +469,12 @@ export default function ServiceSchedule() {
           <div className="mb-4 text-xs text-[var(--text3)] flex flex-wrap items-center gap-2">
             <span>
               {serviceCalls.length} ticket{serviceCalls.length === 1 ? '' : 's'} loaded
+              {' · '}
+              {datedThisMonth} dated this month
+              {' · '}
+              {unscheduledCalls.length} unscheduled
               {userRole ? ` · role ${userRole}` : ''}
-              {orgId != null ? ` · org ${orgId}` : ''}
-              {!canCreate && userId ? ' · read-only (cannot create tickets)' : ''}
+              {!canCreate && userId ? ' · read-only' : ''}
             </span>
             <button
               type="button"
@@ -605,19 +594,17 @@ export default function ServiceSchedule() {
                         </div>
                         {dayCalls.length > 0 && (
                           <div className="text-[10px] leading-snug text-[var(--gold)] space-y-0.5">
-                            {dayCalls.slice(0, 3).map((call, idx) => (
-                              <div
-                                key={idx}
-                                className="break-words cursor-pointer hover:underline"
-                                onClick={(ev) => {
-                                  ev.stopPropagation();
-                                  handleEventClick(call.id);
-                                }}
+                            {dayCalls.slice(0, 3).map((call) => (
+                              <Link
+                                key={call.id}
+                                href={`/service-tickets/${call.id}`}
+                                className="block break-words hover:underline"
+                                onClick={(ev) => ev.stopPropagation()}
                                 title={`${call.time} • ${call.title}${call.equipment_model ? ` • ${call.equipment_model}` : ''}`}
                               >
                                 {call.time} {call.title}
                                 {call.equipment_model && ` • ${call.equipment_model}`}
-                              </div>
+                              </Link>
                             ))}
                             {dayCalls.length > 3 && (
                               <div className="text-[var(--text3)] text-[9px]">
@@ -681,12 +668,19 @@ export default function ServiceSchedule() {
                         .map((call) => (
                           <div
                             key={call.id}
-                            draggable
-                            onDragStart={(e) => handleDragStart(e, call)}
-                            onClick={() => handleEventClick(call.id)}
-                            className="text-[10px] p-1 rounded bg-[var(--gold)]/20 text-[var(--gold)] cursor-pointer"
+                            className="text-[10px] p-1 rounded bg-[var(--gold)]/20 text-[var(--gold)] flex items-start gap-1"
                           >
-                            {call.time} {call.title}
+                            <span
+                              className="cursor-grab select-none opacity-70"
+                              draggable
+                              onDragStart={(e) => handleDragStart(e, call)}
+                              title="Drag to reschedule"
+                            >
+                              ⋮⋮
+                            </span>
+                            <Link href={`/service-tickets/${call.id}`} className="hover:underline flex-1">
+                              {call.time} {call.title}
+                            </Link>
                           </div>
                         ))}
                     </div>
@@ -733,10 +727,10 @@ export default function ServiceSchedule() {
               {serviceCalls
                 .filter((c) => c.date === dayYmd)
                 .map((call) => (
-                  <div
+                  <Link
                     key={call.id}
-                    className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] cursor-pointer"
-                    onClick={() => handleEventClick(call.id)}
+                    href={`/service-tickets/${call.id}`}
+                    className="block p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)]"
                   >
                     <div className="font-semibold text-[var(--gold)]">
                       {call.time} · {call.title}
@@ -744,7 +738,7 @@ export default function ServiceSchedule() {
                     {call.equipment_model && (
                       <div className="text-xs text-[var(--text3)] mt-1">{call.equipment_model}</div>
                     )}
-                  </div>
+                  </Link>
                 ))}
             </div>
           </div>
@@ -765,10 +759,10 @@ export default function ServiceSchedule() {
             )}
             <div className="space-y-2">
               {agendaCalls.map((call) => (
-                <div
+                <Link
                   key={call.id}
-                  className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] cursor-pointer flex justify-between gap-3"
-                  onClick={() => handleEventClick(call.id)}
+                  href={`/service-tickets/${call.id}`}
+                  className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] flex justify-between gap-3"
                 >
                   <div>
                     <div className="font-semibold">{call.title}</div>
@@ -778,9 +772,31 @@ export default function ServiceSchedule() {
                     </div>
                   </div>
                   <div className="text-xs text-[var(--gold)]">{call.status}</div>
-                </div>
+                </Link>
               ))}
             </div>
+            {unscheduledCalls.length > 0 && (
+              <div className="mt-8">
+                <h3 className="text-sm font-bold text-[var(--text3)] uppercase tracking-wide mb-2">
+                  Unscheduled ({unscheduledCalls.length})
+                </h3>
+                <div className="space-y-2">
+                  {unscheduledCalls.map((call) => (
+                    <Link
+                      key={call.id}
+                      href={`/service-tickets/${call.id}`}
+                      className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] flex justify-between gap-3"
+                    >
+                      <div>
+                        <div className="font-semibold">{call.title}</div>
+                        <div className="text-xs text-[var(--text3)]">No service date</div>
+                      </div>
+                      <div className="text-xs text-[var(--gold)]">{call.status}</div>
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
