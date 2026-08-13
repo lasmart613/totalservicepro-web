@@ -432,7 +432,8 @@ export default function Onboarding() {
         finalJob = `${finalJob} + ${creatorAddl.map(r => r).join(' + ')}`;
       }
 
-      const { error: profErr } = await supabase.from('user_profiles').upsert({
+      // Profile upsert — additional_roles / onboarding_completed_at may not exist on older DBs
+      const profilePayload: any = {
         id: currentUser.id,
         first_name: formData.firstName,
         last_name: formData.lastName,
@@ -440,36 +441,56 @@ export default function Onboarding() {
         phone: formData.phone || null,
         job_title: finalJob,
         role: creatorRole,
-        additional_roles: creatorAddl.length ? creatorAddl : null,
         organization_id: orgId,
         onboarding_completed: true,
         onboarding_completed_at: new Date().toISOString(),
-      }, { onConflict: 'id' });
+      };
+      if (creatorAddl.length) profilePayload.additional_roles = creatorAddl;
+
+      let { error: profErr } = await supabase
+        .from('user_profiles')
+        .upsert(profilePayload, { onConflict: 'id' });
+
+      // Retry without optional columns if schema lags
+      if (profErr && /additional_roles|onboarding_completed_at|column/i.test(profErr.message || '')) {
+        console.warn('profile upsert retry without optional cols', profErr.message);
+        const slim = { ...profilePayload };
+        delete slim.additional_roles;
+        delete slim.onboarding_completed_at;
+        ({ error: profErr } = await supabase
+          .from('user_profiles')
+          .upsert(slim, { onConflict: 'id' }));
+      }
       if (profErr) {
         console.error('profile upsert', profErr);
         // Force-link org even if full upsert fails — still mark onboarding done
-        // (previously omitted the flag → users look "incomplete" despite finishing the wizard)
-        const { error: forceErr } = await supabase
+        const forcePayload: any = {
+          organization_id: orgId,
+          role: creatorRole,
+          first_name: formData.firstName || null,
+          last_name: formData.lastName || null,
+          job_title: finalJob || null,
+          onboarding_completed: true,
+        };
+        let { error: forceErr } = await supabase
           .from('user_profiles')
-          .update({
-            organization_id: orgId,
-            role: creatorRole,
-            first_name: formData.firstName || null,
-            last_name: formData.lastName || null,
-            job_title: finalJob || null,
-            onboarding_completed: true,
-            onboarding_completed_at: new Date().toISOString(),
-          })
+          .update(forcePayload)
           .eq('id', currentUser.id);
-        if (forceErr) {
-          console.error('profile force-link failed', forceErr);
-          // Last resort: at least set the completion flag alone
-          await supabase
+        if (forceErr && /column|additional_roles|onboarding_completed/i.test(forceErr.message || '')) {
+          ({ error: forceErr } = await supabase
             .from('user_profiles')
             .update({
+              organization_id: orgId,
+              role: creatorRole,
               onboarding_completed: true,
-              onboarding_completed_at: new Date().toISOString(),
             })
+            .eq('id', currentUser.id));
+        }
+        if (forceErr) {
+          console.error('profile force-link failed', forceErr);
+          await supabase
+            .from('user_profiles')
+            .update({ onboarding_completed: true })
             .eq('id', currentUser.id);
         }
       }
@@ -496,14 +517,19 @@ export default function Onboarding() {
               .maybeSingle();
 
             if (existing?.id) {
-              await supabase.from('user_profiles').update({
+              const teamUpdate: any = {
                 organization_id: orgId,
                 role: m.role,
-                additional_roles: m.additionalRoles.length ? m.additionalRoles : null,
                 first_name: m.firstName || null,
                 last_name: m.lastName || null,
-                job_title: [m.role, ...m.additionalRoles].filter(Boolean).join(' + ')
-              }).eq('id', existing.id);
+                job_title: [m.role, ...m.additionalRoles].filter(Boolean).join(' + '),
+              };
+              if (m.additionalRoles.length) teamUpdate.additional_roles = m.additionalRoles;
+              let { error: tErr } = await supabase.from('user_profiles').update(teamUpdate).eq('id', existing.id);
+              if (tErr && /additional_roles|column/i.test(tErr.message || '')) {
+                delete teamUpdate.additional_roles;
+                await supabase.from('user_profiles').update(teamUpdate).eq('id', existing.id);
+              }
             } else {
               await supabase.from('engineer_invitations').insert({
                 organization_id: orgId,

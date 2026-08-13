@@ -139,9 +139,10 @@ export default function HomePage() {
       }
 
       try {
+        // service_reports has created_by (not assigned_to — that column is on service_tickets only)
         const { data: reports, error: rErr } = await supabase
           .from('service_reports')
-          .select('status, assigned_to, created_by')
+          .select('status, created_by, service_engineer')
           .eq('organization_id', orgId)
           .limit(500);
 
@@ -159,7 +160,7 @@ export default function HomePage() {
             const fseIds = [
               ...new Set(
                 reports
-                  .map((r) => r.assigned_to || r.created_by)
+                  .map((r: any) => r.created_by)
                   .filter(Boolean)
               ),
             ] as string[];
@@ -176,8 +177,8 @@ export default function HomePage() {
                 };
               });
             }
-            reports.forEach((report) => {
-              const uid = report.assigned_to || report.created_by;
+            reports.forEach((report: any) => {
+              const uid = report.created_by;
               if (uid && fseMap[uid]) {
                 if ((report.status || '').toLowerCase() === 'complete') {
                   fseMap[uid].completed++;

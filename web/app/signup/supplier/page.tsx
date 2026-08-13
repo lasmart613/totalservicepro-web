@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
+import AuthOtpBox from '@/components/AuthOtpBox';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -34,7 +35,10 @@ export default function SupplierSignup() {
   const [taxId, setTaxId] = useState('');
   const [bio, setBio] = useState('');
   const [message, setMessage] = useState('');
+  const [messageOk, setMessageOk] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const router = useRouter();
   const supabase = getSupabaseClient();
 
@@ -44,9 +48,59 @@ export default function SupplierSignup() {
     );
   };
 
+  async function completeSupplierSetup(userId: string) {
+    const orgInsert = {
+      name: companyName,
+      type: 'parts_supplier',
+      address: address || null,
+      city: city || null,
+      state: state || null,
+      phone: phone || null,
+      website: website || null,
+      num_techs: numStaff ? parseInt(numStaff, 10) : null,
+      tax_id: taxId || null,
+      services_offered: selectedParts.length ? selectedParts.join(' | ') : null,
+    };
+
+    const { data: orgData, error: orgError } = await supabase
+      .from('organizations')
+      .insert(orgInsert)
+      .select('id')
+      .single();
+
+    if (orgError) {
+      console.error('Org create error (check RLS):', orgError);
+    }
+
+    const newOrgId = orgData?.id ?? null;
+
+    const { error: profileErr } = await supabase.from('user_profiles').upsert(
+      {
+        id: userId,
+        first_name: firstName,
+        last_name: lastName,
+        email,
+        phone: phone || null,
+        role: 'parts_supplier',
+        job_title: 'Parts Supplier / Account Manager',
+        organization_id: newOrgId,
+        onboarding_completed: false,
+        bio: bio || null,
+      },
+      { onConflict: 'id' }
+    );
+    if (profileErr) {
+      console.warn('Profile upsert warning:', profileErr);
+    }
+
+    await claimPendingInvitations(supabase, userId, email);
+    router.push('/');
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage('');
+    setMessageOk(false);
     if (!companyName || !firstName || !lastName || !email || !password) {
       setMessage('Company name, contact name, email and password are required.');
       return;
@@ -62,7 +116,6 @@ export default function SupplierSignup() {
     setLoading(true);
 
     try {
-      // 1. Sign up the user
       const origin =
         typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
       const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -76,66 +129,26 @@ export default function SupplierSignup() {
       if (authError) throw authError;
 
       const userId = authData.user?.id;
-      if (!userId) {
-        setMessage('Account created! Check email to confirm. Then sign in to complete supplier profile.');
+
+      if (authData.user && Array.isArray((authData.user as any).identities) && (authData.user as any).identities.length === 0) {
+        throw new Error(
+          'An account with this email already exists. Sign in at Login, or use Forgot password / Email me a sign-in code.'
+        );
+      }
+
+      // Confirm email ON: signUp already sent the email — show OTP, do not resend immediately
+      if (!authData.session || !userId) {
+        setPendingUserId(userId || null);
+        setAwaitingConfirm(true);
+        setMessageOk(true);
+        setMessage(
+          'Account created! Check your email (and spam) for a confirmation code or link. Enter the code below.'
+        );
         setLoading(false);
         return;
       }
 
-      // 2. Create organization (type parts_supplier)
-      // IMPORTANT: omit 'bio' from org insert to avoid schema cache errors if 'bio' column not yet added to organizations table.
-      // (Bio collected here is saved to user_profiles.bio instead. Org-level bio requires the migration.)
-      const orgInsert = {
-        name: companyName,
-        type: 'parts_supplier',
-        address: address || null,
-        city: city || null,
-        state: state || null,
-        phone: phone || null,
-        website: website || null,
-        num_techs: numStaff ? parseInt(numStaff, 10) : null,
-        tax_id: taxId || null,
-        services_offered: selectedParts.length ? selectedParts.join(' | ') : null,
-      };
-
-      const { data: orgData, error: orgError } = await supabase
-        .from('organizations')
-        .insert(orgInsert)
-        .select('id')
-        .single();
-
-      if (orgError) {
-        console.error('Org create error (check RLS):', orgError);
-      }
-
-      const newOrgId = orgData?.id ?? null;
-
-      // 3. Upsert user profile
-      const profileData: any = {
-        id: userId,
-        first_name: firstName,
-        last_name: lastName,
-        email,
-        phone: phone || null,
-        role: 'parts_supplier',
-        job_title: 'Parts Supplier / Account Manager',
-        organization_id: newOrgId,
-        onboarding_completed: false,
-        bio: bio || null,
-      };
-
-      const { error: profileErr } = await supabase.from('user_profiles').upsert(profileData, { onConflict: 'id' });
-      if (profileErr) {
-        console.warn('Profile upsert warning:', profileErr);
-      }
-
-      await claimPendingInvitations(supabase, userId, email);
-
-      if (authData.session) {
-        router.push('/');
-      } else {
-        setMessage('Account created! Check your email to confirm, then sign in. Your parts supplier organization was created.');
-      }
+      await completeSupplierSetup(userId);
     } catch (err: any) {
       const msg = err.message || 'Parts supplier sign up failed.';
       if (msg.toLowerCase().includes('already registered') || msg.toLowerCase().includes('user already exists') || msg.toLowerCase().includes('duplicate')) {
@@ -143,6 +156,7 @@ export default function SupplierSignup() {
       } else {
         setMessage(msg);
       }
+      setMessageOk(false);
     } finally {
       setLoading(false);
     }
@@ -162,12 +176,38 @@ export default function SupplierSignup() {
 
         <div className="card p-6">
           {message && (
-            <div className={`mb-4 p-3 rounded text-sm ${message.includes('created') || message.includes('Check') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+            <div className={`mb-4 p-3 rounded text-sm ${messageOk || message.includes('created') || message.includes('Check') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
               {message}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          {awaitingConfirm ? (
+            <AuthOtpBox
+              email={email}
+              password={password}
+              mode="signup"
+              onVerified={async () => {
+                const { data: { user } } = await supabase.auth.getUser();
+                const uid = user?.id || pendingUserId;
+                if (!uid) {
+                  setMessage('Verified, but session is missing. Please sign in at Login.');
+                  setMessageOk(false);
+                  return;
+                }
+                setLoading(true);
+                try {
+                  await completeSupplierSetup(uid);
+                } catch (err: any) {
+                  setMessage(err?.message || 'Verified, but setup failed. Sign in to finish.');
+                  setMessageOk(false);
+                } finally {
+                  setLoading(false);
+                }
+              }}
+            />
+          ) : null}
+
+          <form onSubmit={handleSubmit} className={`space-y-4 ${awaitingConfirm ? 'opacity-60 pointer-events-none' : ''}`}>
             <div>
               <label className="label">Company / Supplier Name *</label>
               <input className="input" value={companyName} onChange={e => setCompanyName(e.target.value)} required />
@@ -258,13 +298,15 @@ export default function SupplierSignup() {
               <textarea className="input" rows={3} value={bio} onChange={e => setBio(e.target.value)} placeholder="Years supplying laser parts, specialties, coverage areas, notable OEMs..." />
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
-            >
-              {loading ? 'Creating supplier account...' : 'Create Parts Supplier Account & Organization'}
-            </button>
+            {!awaitingConfirm && (
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
+              >
+                {loading ? 'Creating supplier account...' : 'Create Parts Supplier Account & Organization'}
+              </button>
+            )}
           </form>
 
           <div className="mt-5 text-center text-sm">

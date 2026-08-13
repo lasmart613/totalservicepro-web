@@ -9,6 +9,7 @@ import {
   ownerOrgTypeLabel,
   type OwnerOrgType,
 } from '@/lib/org-types';
+import AuthOtpBox from '@/components/AuthOtpBox';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 
@@ -56,7 +57,10 @@ export default function OwnerSignup() {
   const [selectedServices, setSelectedServices] = useState<string[]>([]);
   const [bio, setBio] = useState('');
   const [message, setMessage] = useState('');
+  const [messageOk, setMessageOk] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [awaitingConfirm, setAwaitingConfirm] = useState(false);
+  const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const router = useRouter();
   const supabase = getSupabaseClient();
 
@@ -88,9 +92,82 @@ export default function OwnerSignup() {
     setEquipmentList(prev => prev.filter((_, i) => i !== index));
   };
 
+  async function completeOwnerSetup(userId: string) {
+    const orgInsert: any = {
+      name: facilityName,
+      type: orgKind,
+      address: address || null,
+      city: city || null,
+      state: state || null,
+      phone: phone || null,
+      facility_type: facilityType,
+      num_lasers: numLasers ? parseInt(numLasers, 10) : null,
+      preferred_services: selectedServices.length ? selectedServices.join(' | ') : null,
+    };
+
+    const { data: orgData, error: orgError } = await supabase
+      .from('organizations')
+      .insert(orgInsert)
+      .select('id')
+      .single();
+
+    if (orgError) {
+      console.error('Organization creation error:', orgError);
+    }
+
+    const newOrgId = orgData?.id ?? null;
+
+    await supabase.from('user_profiles').upsert(
+      {
+        id: userId,
+        first_name: firstName,
+        last_name: lastName,
+        email,
+        phone: phone || null,
+        role: 'owner',
+        job_title: defaultJobTitleForOwnerOrgType(orgKind),
+        organization_id: newOrgId,
+        onboarding_completed: false,
+        bio: bio || null,
+      },
+      { onConflict: 'id' }
+    );
+
+    await claimPendingInvitations(supabase, userId, email);
+
+    let lasersSaved = 0;
+    const laserErrors: string[] = [];
+    if (newOrgId && equipmentList.length > 0) {
+      for (const item of equipmentList) {
+        const payload = {
+          customer_organization_id: newOrgId,
+          manufacturer: (MODELS as any)[item.modelKey]?.mfg || (MODELS as any)[item.modelKey]?.manufacturer || 'Unknown',
+          model: (MODELS as any)[item.modelKey]?.label || item.modelKey,
+          serial_number: (item.serialNumber || '').trim() || 'TBD',
+        };
+        const { error: equipError } = await supabase.from('equipment').insert(payload);
+        if (equipError) {
+          console.error('Equipment insert failed', equipError);
+          laserErrors.push(payload.model + ': ' + equipError.message);
+        } else {
+          lasersSaved++;
+        }
+      }
+    }
+
+    if (laserErrors.length) {
+      setMessage(
+        `Account created. ${lasersSaved} laser(s) saved; ${laserErrors.length} failed. Finish under My Lasers.`
+      );
+      setMessageOk(true);
+    }
+    router.push(lasersSaved > 0 ? '/my-lasers?justSetup=1' : '/?justSetup=1');
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setMessage('');
+    setMessageOk(false);
 
     if (!facilityName || !firstName || !lastName || !email || !password) {
       setMessage(`${nameLabel}, contact name, email and password are required.`);
@@ -108,7 +185,6 @@ export default function OwnerSignup() {
     setLoading(true);
 
     try {
-      // 1. Create auth user
       const origin =
         typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
       const { data: authData, error: authError } = await supabase.auth.signUp({
@@ -122,92 +198,30 @@ export default function OwnerSignup() {
       if (authError) throw authError;
 
       const userId = authData.user?.id;
-      if (!userId) {
-        setMessage('Account created! Check your email to confirm, then sign in to post service needs.');
+
+      if (authData.user && Array.isArray((authData.user as any).identities) && (authData.user as any).identities.length === 0) {
+        throw new Error(
+          'An account with this email already exists. Sign in at Login, or use Forgot password / Email me a sign-in code.'
+        );
+      }
+
+      // Confirm email ON: signUp already sent the email — show OTP, do not resend immediately
+      if (!authData.session || !userId) {
+        setPendingUserId(userId || null);
+        setAwaitingConfirm(true);
+        setMessageOk(true);
+        setMessage(
+          'Account created! Check your email (and spam) for a confirmation code or link. Enter the code below.'
+        );
         setLoading(false);
         return;
       }
 
-      // 2. Create organization (owner-side: clinic / rental / reseller)
-      const orgInsert: any = {
-        name: facilityName,
-        type: orgKind, // customer | laser_rental | laser_reseller
-        address: address || null,
-        city: city || null,
-        state: state || null,
-        phone: phone || null,
-        facility_type: facilityType,
-        num_lasers: numLasers ? parseInt(numLasers, 10) : null,
-        preferred_services: selectedServices.length ? selectedServices.join(' | ') : null,
-      };
-
-      const { data: orgData, error: orgError } = await supabase
-        .from('organizations')
-        .insert(orgInsert)
-        .select('id')
-        .single();
-
-      if (orgError) {
-        console.error('Organization creation error:', orgError);
-      }
-
-      const newOrgId = orgData?.id ?? null;
-
-      // 3. Create user profile as owner
-      const profileData: any = {
-        id: userId,
-        first_name: firstName,
-        last_name: lastName,
-        email,
-        phone: phone || null,
-        role: 'owner',
-        job_title: defaultJobTitleForOwnerOrgType(orgKind),
-        organization_id: newOrgId,
-        onboarding_completed: false,
-        bio: bio || null,
-      };
-
-      await supabase.from('user_profiles').upsert(profileData, { onConflict: 'id' });
-
-      await claimPendingInvitations(supabase, userId, email);
-
-      // 4. Insert facility lasers (column is customer_organization_id, NOT organization_id)
-      let lasersSaved = 0;
-      const laserErrors: string[] = [];
-      if (newOrgId && equipmentList.length > 0) {
-        for (const item of equipmentList) {
-          const payload = {
-            customer_organization_id: newOrgId,
-            manufacturer: (MODELS as any)[item.modelKey]?.mfg || (MODELS as any)[item.modelKey]?.manufacturer || 'Unknown',
-            model: (MODELS as any)[item.modelKey]?.label || item.modelKey,
-            serial_number: (item.serialNumber || '').trim() || 'TBD',
-          };
-          const { error: equipError } = await supabase.from('equipment').insert(payload);
-          if (equipError) {
-            console.error('Equipment insert failed', equipError);
-            laserErrors.push(payload.model + ': ' + equipError.message);
-          } else {
-            lasersSaved++;
-          }
-        }
-      }
-
-      if (authData.session) {
-        if (laserErrors.length) {
-          setMessage(
-            `Account created. ${lasersSaved} laser(s) saved; ${laserErrors.length} failed. Finish under My Lasers.`
-          );
-        }
-        // Dashboard preferred (not Marketplace)
-        router.push(lasersSaved > 0 ? '/my-lasers?justSetup=1' : '/?justSetup=1');
-      } else {
-        setMessage(
-          'Account created! Check your email to confirm, then sign in. Your facility lasers will appear under My Lasers after confirmation.'
-        );
-      }
+      await completeOwnerSetup(userId);
     } catch (err: any) {
       const msg = err.message || 'Owner sign up failed.';
       setMessage(msg);
+      setMessageOk(false);
     } finally {
       setLoading(false);
     }
@@ -229,12 +243,38 @@ export default function OwnerSignup() {
 
         <div className="card p-6">
           {message && (
-            <div className={`mb-4 p-3 rounded text-sm ${message.includes('created') || message.includes('Check') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+            <div className={`mb-4 p-3 rounded text-sm ${messageOk || message.includes('created') || message.includes('Check') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
               {message}
             </div>
           )}
 
-          <form onSubmit={handleSubmit} className="space-y-4">
+          {awaitingConfirm ? (
+            <AuthOtpBox
+              email={email}
+              password={password}
+              mode="signup"
+              onVerified={async () => {
+                const { data: { user } } = await supabase.auth.getUser();
+                const uid = user?.id || pendingUserId;
+                if (!uid) {
+                  setMessage('Verified, but session is missing. Please sign in at Login.');
+                  setMessageOk(false);
+                  return;
+                }
+                setLoading(true);
+                try {
+                  await completeOwnerSetup(uid);
+                } catch (err: any) {
+                  setMessage(err?.message || 'Verified, but setup failed. Sign in to finish.');
+                  setMessageOk(false);
+                } finally {
+                  setLoading(false);
+                }
+              }}
+            />
+          ) : null}
+
+          <form onSubmit={handleSubmit} className={`space-y-4 ${awaitingConfirm ? 'opacity-60 pointer-events-none' : ''}`}>
             <div>
               <label className="label">Organization type *</label>
               <div className="space-y-2">
@@ -413,13 +453,15 @@ export default function OwnerSignup() {
               <textarea className="input" rows={2} value={bio} onChange={e => setBio(e.target.value)} placeholder="Current service provider, contract details..." />
             </div>
 
-            <button
-              type="submit"
-              disabled={loading}
-              className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
-            >
-              {loading ? 'Creating account...' : 'Create Owner Account'}
-            </button>
+            {!awaitingConfirm && (
+              <button
+                type="submit"
+                disabled={loading}
+                className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
+              >
+                {loading ? 'Creating account...' : 'Create Owner Account'}
+              </button>
+            )}
           </form>
 
           <div className="mt-5 text-center text-sm">

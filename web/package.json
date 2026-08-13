@@ -1,18 +1,20 @@
 {
   "name": "web",
-  "version": "0.3.50",
+  "version": "0.3.75",
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build --webpack && node -e \"const fs=require('fs');fs.writeFileSync('.next/_redirects','/_next/static/* /static/:splat 200\\n/_next/image/* /static/:splat 200\\n/* /.netlify/functions/___netlify-server-handler 200!\\n/_next/image /.netlify/images?url=:url&w=:width&q=:quality 200\\n/_ipx/* /.netlify/images?url=:url&w=:width&q=:quality 200\\n');console.log('Wrote .next/_redirects for Netlify routing')\"",
+    "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "deploy": "netlify build && netlify deploy --prod --no-build",
-    "deploy:preview": "netlify build && netlify deploy --no-build",
-    "deploy:remote": "netlify build --context production"
+    "deploy": "netlify deploy --prod",
+    "deploy:preview": "netlify deploy",
+    "deploy:remote": "netlify build --context production",
+    "repair:netlify": "node scripts/repair-netlify-deploy.js fix"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",
+    "@opentelemetry/api": "^1.9.1",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.45.0",
     "@tanstack/react-query": "^5.101.0",
@@ -31,7 +33,7 @@
     "zod": "^3.25.76"
   },
   "devDependencies": {
-    "@netlify/plugin-nextjs": "^5.15.11",
+    "@netlify/plugin-nextjs": "^5.15.13",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

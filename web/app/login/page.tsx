@@ -20,7 +20,11 @@ function LoginInner() {
   const [lastName, setLastName] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [message, setMessage] = useState('');
+  const [messageOk, setMessageOk] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [showOtp, setShowOtp] = useState(false);
+  const [otpCode, setOtpCode] = useState('');
+  const [otpMode, setOtpMode] = useState<'signup' | 'magic'>('signup');
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = safeNextPath(searchParams.get('next'));
@@ -32,31 +36,58 @@ function LoginInner() {
     return /^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?(?:\.[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?)+$/.test(e);
   }
 
+  function setMsg(text: string, ok = false) {
+    setMessage(text);
+    setMessageOk(ok);
+  }
+
+  function authRedirect(path: string) {
+    if (typeof window === 'undefined') return `https://repairplanet.net${path}`;
+    return `${window.location.origin}${path}`;
+  }
+
+  /**
+   * Request confirm-signup email. Returns error message if send failed (so UI can show it).
+   * Supabase only sends this when "Confirm email" is ON and the user is not already confirmed.
+   */
+  async function requestSignupConfirmEmail(cleanEmail: string): Promise<string | null> {
+    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+    const { error } = await supabase.auth.resend({
+      type: 'signup',
+      email: cleanEmail,
+      options: {
+        emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
+      },
+    });
+    if (error) return error.message || 'Could not send confirmation email.';
+    return null;
+  }
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    setMessage('');
+    setMsg('');
     setLoading(true);
 
     try {
       const cleanEmail = email.trim().toLowerCase();
       if (!isValidEmail(cleanEmail)) {
-        setMessage('Enter a valid email address (example: you@company.com).');
+        setMsg('Enter a valid email address (example: you@company.com).');
         setLoading(false);
         return;
       }
       if (isSignUp && password.length < 8) {
-        setMessage('Password must be at least 8 characters.');
+        setMsg('Password must be at least 8 characters.');
         setLoading(false);
         return;
       }
       if (isSignUp) {
         if (!firstName || !lastName) {
-          setMessage('First and last name required for sign up.');
+          setMsg('First and last name required for sign up.');
           setLoading(false);
           return;
         }
         if (password !== confirmPassword) {
-          setMessage('Passwords do not match. Re-enter and confirm your password.');
+          setMsg('Passwords do not match. Re-enter and confirm your password.');
           setLoading(false);
           return;
         }
@@ -67,7 +98,6 @@ function LoginInner() {
           password,
           options: {
             data: { first_name: firstName, last_name: lastName },
-            // Verification link lands here after user proves email ownership
             emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
               nextPath && nextPath !== '/' ? nextPath : '/onboarding'
             )}`,
@@ -76,13 +106,19 @@ function LoginInner() {
         if (error) {
           if (/already|registered|exists/i.test(error.message || '')) {
             throw new Error(
-              'An account with this email already exists (team invites create the account before the first login). Use Sign In, or “Forgot password” if you never set a password.'
+              'An account with this email already exists. Use Sign In, or “Forgot password” if you never set a password. You can also use “Email me a sign-in code”.'
             );
           }
           throw error;
         }
 
-        // Always create/update profile row when we have a user id
+        // Fake success / empty identities = email already registered (Supabase privacy behavior)
+        if (data.user && Array.isArray((data.user as any).identities) && (data.user as any).identities.length === 0) {
+          throw new Error(
+            'An account with this email already exists. Use Sign In, or “Forgot password” / “Email me a sign-in code”.'
+          );
+        }
+
         if (data.user?.id) {
           await supabase.from('user_profiles').upsert(
             {
@@ -96,41 +132,51 @@ function LoginInner() {
           );
         }
 
-        // Prefer verified email before app use:
-        // - If Supabase "Confirm email" is ON → no session until they click the email link
-        // - If Confirm email is OFF → session is returned immediately; we still sign out
-        //   so users must verify ownership via the confirmation / magic link when possible
+        // Session returned = Confirm email is OFF (mailer_autoconfirm) — account is already active.
+        // No confirmation email is sent by Supabase in this mode.
         if (data.session) {
-          try {
-            await supabase.auth.resend({
-              type: 'signup',
-              email: cleanEmail,
-              options: {
-                emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
-              },
-            });
-          } catch {
-            /* ignore resend failures */
-          }
-          try {
-            await supabase.auth.signOut({ scope: 'local' });
-          } catch {
-            /* ignore */
-          }
+          setShowOtp(false);
+          setMsg(
+            'Account created and ready. You are signed in — no confirmation email is required (Confirm email is currently off in project settings).',
+            true
+          );
+          router.push(nextPath && nextPath !== '/' ? nextPath : '/onboarding');
+          return;
         }
 
-        setMessage(
-          'Account created! Check your email (and spam) for a confirmation link to verify you own this address, then sign in.'
+        // Confirm email ON: signUp already sent the confirmation email.
+        // Do NOT call resend here — it hits "only request this after N seconds" and looks like failure.
+        setOtpMode('signup');
+        setShowOtp(true);
+        setOtpCode('');
+        setMsg(
+          'Account created! Check your email (and spam) for a confirmation code or link. Enter the code below, or open the link, then sign in with your password.',
+          true
         );
-        setIsSignUp(false);
-        setConfirmPassword('');
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
         if (error) {
-          // Invited users exist in Auth but have no password until they complete set-password
           if (/invalid login credentials|invalid credentials/i.test(error.message || '')) {
             throw new Error(
-              'Invalid email or password. If you were invited to a team, you may not have set a password yet — use “Forgot password” below (same invite email) to create one. Signup will say “user already exists” because the invite already created your account.'
+              'Invalid email or password. If you were invited to a team, use “Forgot password” to set one. If you just signed up, confirm your email first (code in your inbox).'
+            );
+          }
+          if (/email not confirmed|not confirmed/i.test(error.message || '')) {
+            setOtpMode('signup');
+            setShowOtp(true);
+            const resendErr = await requestSignupConfirmEmail(cleanEmail);
+            if (resendErr && /only request this after|rate|security purposes/i.test(resendErr)) {
+              throw new Error(
+                `Email not confirmed yet. ${resendErr} Enter the code from your inbox below, or open the link.`
+              );
+            }
+            if (resendErr) {
+              throw new Error(
+                `Email not confirmed yet. Could not re-send (${resendErr}). Enter a code you already have, or try Resend in a minute.`
+              );
+            }
+            throw new Error(
+              'Email not confirmed yet. We re-sent a code — enter it below, or open the link in your email.'
             );
           }
           throw error;
@@ -139,7 +185,7 @@ function LoginInner() {
       }
     } catch (err: any) {
       const msg = err.message || 'Authentication failed';
-      setMessage(msg);
+      setMsg(msg);
     } finally {
       setLoading(false);
     }
@@ -147,36 +193,131 @@ function LoginInner() {
 
   const sendMagic = async () => {
     const cleanEmail = email.trim().toLowerCase();
-    if (!isValidEmail(cleanEmail)) return setMessage('Enter a valid email address first.');
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
-    const { error } = await supabase.auth.signInWithOtp({
-      email: cleanEmail,
-      options: { emailRedirectTo: `${origin}/auth/callback?next=/hub` },
-    });
-    setMessage(error ? error.message : 'Check your email for a magic link or sign-in code.');
+    if (!isValidEmail(cleanEmail)) return setMsg('Enter a valid email address first.');
+    setLoading(true);
+    setMsg('');
+    try {
+      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+      const { error } = await supabase.auth.signInWithOtp({
+        email: cleanEmail,
+        options: {
+          shouldCreateUser: false,
+          emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(nextPath || '/hub')}`,
+        },
+      });
+      if (error) throw error;
+      setOtpMode('magic');
+      setShowOtp(true);
+      setOtpCode('');
+      setMsg('Check your email for a sign-in code (or magic link). Enter the code below.', true);
+    } catch (err: any) {
+      setMsg(err?.message || 'Could not send code.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const verifyOtp = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    const token = otpCode.replace(/\s/g, '');
+    if (!isValidEmail(cleanEmail)) return setMsg('Enter your email above first.');
+    if (!token || token.length < 6) return setMsg('Enter the 6–8 digit code from your email.');
+    setLoading(true);
+    setMsg('');
+    try {
+      // Try signup confirmation first, then email/magiclink
+      const types: Array<'signup' | 'email' | 'magiclink'> =
+        otpMode === 'signup' ? ['signup', 'email', 'magiclink'] : ['email', 'magiclink', 'signup'];
+      let lastErr: string | null = null;
+      let sessionOk = false;
+      for (const type of types) {
+        const { data, error } = await supabase.auth.verifyOtp({
+          email: cleanEmail,
+          token,
+          type,
+        });
+        if (!error && data?.session) {
+          sessionOk = true;
+          break;
+        }
+        if (error) lastErr = error.message;
+      }
+      if (!sessionOk) {
+        // Signup confirm sometimes verifies without leaving a session — try password sign-in
+        if (otpMode === 'signup' && password) {
+          const { error: pwErr } = await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password,
+          });
+          if (!pwErr) {
+            setMsg('Email confirmed! Signing you in…', true);
+            router.push(nextPath && nextPath !== '/' ? nextPath : '/onboarding');
+            return;
+          }
+        }
+        throw new Error(lastErr || 'Invalid or expired code. Request a new one.');
+      }
+      setMsg('Verified! Redirecting…', true);
+      router.push(
+        otpMode === 'signup'
+          ? nextPath && nextPath !== '/'
+            ? nextPath
+            : '/onboarding'
+          : nextPath || '/hub'
+      );
+    } catch (err: any) {
+      setMsg(err?.message || 'Verification failed.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const resendCode = async () => {
+    const cleanEmail = email.trim().toLowerCase();
+    if (!isValidEmail(cleanEmail)) return setMsg('Enter your email first.');
+    setLoading(true);
+    try {
+      if (otpMode === 'signup') {
+        const err = await requestSignupConfirmEmail(cleanEmail);
+        if (err) {
+          setMsg(
+            `Could not resend confirmation: ${err}. If Confirm email is off in Supabase, no code is sent — just Sign In with your password.`,
+            false
+          );
+        } else {
+          setMsg('Confirmation code re-sent. Check inbox and spam.', true);
+        }
+      } else {
+        await sendMagic();
+        return;
+      }
+    } catch (err: any) {
+      setMsg(err?.message || 'Could not resend.');
+    } finally {
+      setLoading(false);
+    }
   };
 
   const forgot = async () => {
     const cleanEmail = email.trim().toLowerCase();
-    if (!isValidEmail(cleanEmail)) return setMessage('Enter a valid email address first.');
+    if (!isValidEmail(cleanEmail)) return setMsg('Enter a valid email address first.');
     const origin = typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
-    // Same set-password page used by team invites
     const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
       redirectTo: `${origin}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`,
     });
-    setMessage(
+    setMsg(
       error
         ? error.message
-        : 'Password reset link sent! Open it to choose a password (check spam).'
+        : 'Password reset link sent! Open it to choose a password (check spam).',
+      !error
     );
   };
 
   const signInWithGoogle = async () => {
-    setMessage('');
+    setMsg('');
     setLoading(true);
     try {
       const origin = typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
-      // Pass next destination through callback so Admin Portal (etc.) is restored after Google OAuth
       const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(nextPath || '/')}`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
@@ -189,9 +330,8 @@ function LoginInner() {
         },
       });
       if (error) throw error;
-      // Browser navigates to Google — no further action
     } catch (err: any) {
-      setMessage(err?.message || 'Google sign-in failed. Is Google enabled in Supabase Auth?');
+      setMsg(err?.message || 'Google sign-in failed. Is Google enabled in Supabase Auth?');
       setLoading(false);
     }
   };
@@ -212,7 +352,13 @@ function LoginInner() {
           </h1>
 
           {message && (
-            <div className={`mb-4 p-3 rounded text-sm ${message.includes('sent') || message.includes('created') || message.includes('Check') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
+            <div
+              className={`mb-4 p-3 rounded text-sm ${
+                messageOk || /sent|created|Check|Verified|confirmed|code/i.test(message)
+                  ? 'bg-green-900/30 text-green-400'
+                  : 'bg-red-900/30 text-red-400'
+              }`}
+            >
               {message}
             </div>
           )}
@@ -243,18 +389,18 @@ function LoginInner() {
               <div className="grid grid-cols-2 gap-4">
                 <div>
                   <label className="label">First Name</label>
-                  <input className="input" value={firstName} onChange={e => setFirstName(e.target.value)} required />
+                  <input className="input" value={firstName} onChange={e => setFirstName(e.target.value)} required autoCapitalize="words" />
                 </div>
                 <div>
                   <label className="label">Last Name</label>
-                  <input className="input" value={lastName} onChange={e => setLastName(e.target.value)} required />
+                  <input className="input" value={lastName} onChange={e => setLastName(e.target.value)} required autoCapitalize="words" />
                 </div>
               </div>
             )}
 
             <div>
               <label className="label">Email</label>
-              <input type="email" className="input" value={email} onChange={e => setEmail(e.target.value)} required />
+              <input type="email" className="input" value={email} onChange={e => setEmail(e.target.value)} required autoCapitalize="off" />
             </div>
 
             <div>
@@ -288,8 +434,8 @@ function LoginInner() {
               </div>
             )}
 
-            <button 
-              type="submit" 
+            <button
+              type="submit"
               disabled={loading}
               className="btn btn-primary w-full py-3 text-base disabled:opacity-60"
             >
@@ -297,12 +443,58 @@ function LoginInner() {
             </button>
           </form>
 
+          {showOtp && (
+            <div className="mt-5 p-4 rounded-lg border border-[var(--gold-border,#FBBF2444)] bg-[var(--surface2)] space-y-3">
+              <div className="text-sm font-semibold" style={{ color: 'var(--gold)' }}>
+                Enter verification code
+              </div>
+              <p className="text-xs text-[var(--text3)]">
+                Use the 6–8 digit code from your email (same as the mobile app). You can also open the link in the email.
+              </p>
+              <input
+                type="text"
+                className="input text-center text-xl tracking-widest font-bold"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={8}
+                placeholder="123456"
+                value={otpCode}
+                onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, '').slice(0, 8))}
+              />
+              <button
+                type="button"
+                onClick={verifyOtp}
+                disabled={loading}
+                className="btn btn-primary w-full py-2.5 disabled:opacity-60"
+              >
+                {loading ? 'Verifying…' : 'Verify & continue'}
+              </button>
+              <div className="flex justify-between text-xs">
+                <button type="button" onClick={resendCode} className="text-[var(--gold)] hover:underline">
+                  Resend code
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowOtp(false);
+                    setOtpCode('');
+                  }}
+                  className="text-[var(--text3)] hover:underline"
+                >
+                  Hide
+                </button>
+              </div>
+            </div>
+          )}
+
           <div className="mt-6 space-y-3 text-center text-sm">
             <button
               onClick={() => {
                 setIsSignUp(!isSignUp);
-                setMessage('');
+                setMsg('');
                 setConfirmPassword('');
+                setShowOtp(false);
+                setOtpCode('');
               }}
               className="text-[var(--gold)] hover:underline"
             >
@@ -310,7 +502,9 @@ function LoginInner() {
             </button>
 
             <div>
-              <button onClick={sendMagic} className="text-[var(--text3)] hover:text-[var(--gold)] underline">Sign in with Magic Link</button>
+              <button onClick={sendMagic} className="text-[var(--text3)] hover:text-[var(--gold)] underline">
+                Email me a sign-in code
+              </button>
             </div>
             <div>
               <button onClick={forgot} className="text-[var(--text3)] hover:text-[var(--gold)] underline">Forgot password?</button>
@@ -322,17 +516,16 @@ function LoginInner() {
           Web version of Total Service Pro • Shares data with the mobile app via Supabase
         </p>
 
-        {/* Cleaned up signup options - No FSE self-signup */}
         <div className="mt-8 card p-5 text-sm">
           <div className="font-bold mb-3 text-center" style={{ color: 'var(--gold)' }}>
             Join as a Service Organization, Laser Clinic, or Parts Supplier
           </div>
           <p className="text-center text-xs text-[var(--text3)] mb-4">
-            FSEs are added by Service Organizations through their Team section. 
+            FSEs are added by Service Organizations through their Team section.
             There is no individual FSE signup.
           </p>
           <div className="grid grid-cols-1 gap-2">
-            <Link href="/company" className="btn btn-secondary w-full justify-center text-sm py-2">
+            <Link href="/signup/company" className="btn btn-secondary w-full justify-center text-sm py-2">
               Sign up as Service Organization
             </Link>
             <Link href="/signup/owner" className="btn btn-secondary w-full justify-center text-sm py-2">
@@ -353,13 +546,7 @@ function LoginInner() {
 
 export default function LoginPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center text-[var(--text3)]">
-          Loading…
-        </div>
-      }
-    >
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-[var(--bg)] text-[var(--text3)]">Loading…</div>}>
       <LoginInner />
     </Suspense>
   );

@@ -2,7 +2,9 @@
 
 import React, { useEffect, useState } from 'react';
 import { Header } from '@/components/Header';
+import { ShelfScroller } from '@/components/ShelfScroller';
 import { getSupabaseClient, getSupabaseUrl } from '@/lib/supabase/client';
+import { toast } from 'sonner';
 
 const WAVELENGTH_OPTIONS = [
   { label: 'All Wavelengths', value: '' },
@@ -14,12 +16,17 @@ const WAVELENGTH_OPTIONS = [
   { label: 'Multi-Wavelength', value: 'multi' },
 ];
 
+const DEFAULT_SLOT_LIMIT = 5;
+
 export default function ManualsLibrary() {
   const [manuals, setManuals] = useState<any[]>([]);
   const [myLibrary, setMyLibrary] = useState<any[]>([]);
+  const [ownedIds, setOwnedIds] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<'browse' | 'library'>('browse');
   const [loading, setLoading] = useState(true);
   const [selectedWavelength, setSelectedWavelength] = useState('');
+  const [slotLimit, setSlotLimit] = useState(DEFAULT_SLOT_LIMIT);
+  const [orgId, setOrgId] = useState<string | number | null>(null);
 
   useEffect(() => {
     loadData();
@@ -33,13 +40,59 @@ export default function ManualsLibrary() {
       setManuals(all || []);
 
       const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const { data: owned } = await supabase
-          .from('user_manuals')
-          .select('*, manuals(*)')
-          .eq('user_id', user.id);
-        setMyLibrary((owned || []).map((o: any) => o.manuals).filter(Boolean));
+      if (!user) {
+        setMyLibrary([]);
+        setOwnedIds(new Set());
+        return;
       }
+
+      const { data: prof } = await supabase
+        .from('user_profiles')
+        .select('organization_id, organizations(manual_slots, subscription_tier)')
+        .eq('id', user.id)
+        .maybeSingle();
+      const oId = prof?.organization_id ?? null;
+      setOrgId(oId);
+      const org = (prof as any)?.organizations;
+      if (org?.manual_slots != null) {
+        setSlotLimit(parseInt(String(org.manual_slots), 10) || DEFAULT_SLOT_LIMIT);
+      } else if (org?.subscription_tier && /premium|team|enterprise|pro/i.test(String(org.subscription_tier))) {
+        setSlotLimit(999);
+      } else {
+        setSlotLimit(DEFAULT_SLOT_LIMIT);
+      }
+
+      const ids = new Set<string>();
+      const lib: any[] = [];
+
+      // Company library (preferred)
+      if (oId != null) {
+        const { data: orgOwned, error: omErr } = await supabase
+          .from('organization_manuals')
+          .select('manual_id, manuals(*)')
+          .eq('organization_id', oId);
+        if (!omErr && orgOwned) {
+          orgOwned.forEach((row: any) => {
+            if (row.manual_id != null) ids.add(String(row.manual_id));
+            if (row.manuals) lib.push(row.manuals);
+          });
+        }
+      }
+
+      // Legacy personal library merge
+      const { data: userOwned } = await supabase
+        .from('user_manuals')
+        .select('manual_id, manuals(*)')
+        .eq('user_id', user.id);
+      (userOwned || []).forEach((row: any) => {
+        if (row.manual_id != null) ids.add(String(row.manual_id));
+        if (row.manuals && !lib.some((m) => String(m.id) === String(row.manuals.id))) {
+          lib.push(row.manuals);
+        }
+      });
+
+      setOwnedIds(ids);
+      setMyLibrary(lib);
     } catch (e) {
       console.error(e);
     } finally {
@@ -47,78 +100,239 @@ export default function ManualsLibrary() {
     }
   }
 
-  async function openManual(m: any) {
-    console.log("=== OPEN MANUAL DEBUG ===");
-    console.log("Manual:", m.title, "Storage Path:", m.storage_path);
+  function isOwned(m: any): boolean {
+    return m?.id != null && ownedIds.has(String(m.id));
+  }
 
-    try {
-      const supabase = getSupabaseClient();
-      const { data: { session } } = await supabase.auth.getSession();
-      const supabaseUrl = getSupabaseUrl();
+  async function callGetManualUrl(payload: Record<string, unknown>) {
+    const supabase = getSupabaseClient();
+    const { data: { session } } = await supabase.auth.getSession();
+    const supabaseUrl = getSupabaseUrl();
+    if (!supabaseUrl) throw new Error('Supabase URL not configured');
+    if (!session?.access_token) throw new Error('Please log in first');
 
-      if (!supabaseUrl) throw new Error('Supabase URL not configured');
+    // Edge auth (same as Android pdf_viewer): short anon key in Authorization.
+    // Large ES256 user JWTs in Authorization can get HTML 400 from the gateway
+    // before the function runs. User JWT goes in the JSON body only.
+    const anon =
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
+      '';
+    if (!anon) throw new Error('Supabase anon key not configured');
+    const resp = await fetch(`${supabaseUrl}/functions/v1/get-manual-url`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${anon}`,
+        apikey: anon,
+      },
+      body: JSON.stringify({
+        ...payload,
+        access_token: session.access_token,
+      }),
+    });
+    const json = await resp.json().catch(() => ({}));
+    return { ok: resp.ok, status: resp.status, json };
+  }
 
-      const resp = await fetch(`${supabaseUrl}/functions/v1/get-manual-url`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${session?.access_token || ''}`,
-        },
-        body: JSON.stringify({ storage_path: m.storage_path }),
+  /** Client-side add when edge action=add unavailable; mirrors Android flow */
+  async function addToCompanyLibrary(m: any): Promise<boolean> {
+    const supabase = getSupabaseClient();
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) {
+      toast.error('Please log in first');
+      return false;
+    }
+    if (orgId == null) {
+      toast.error('No service company on your profile — complete onboarding first. Manuals are shared by your organization.');
+      return false;
+    }
+    if (ownedIds.size >= slotLimit) {
+      toast.error(`Library full (${ownedIds.size}/${slotLimit}). Upgrade or remove a manual.`);
+      return false;
+    }
+
+    // Prefer org library
+    let { error } = await supabase.from('organization_manuals').insert({
+      organization_id: orgId,
+      manual_id: m.id,
+      added_by: user.id,
+    });
+    if (error && /duplicate|unique|23505/i.test(error.message || '')) {
+      return true;
+    }
+    if (error && /schema cache|does not exist|relation/i.test(error.message || '')) {
+      // Fallback personal
+      const um = await supabase.from('user_manuals').insert({
+        user_id: user.id,
+        manual_id: m.id,
       });
+      if (um.error && !/duplicate|unique|23505/i.test(um.error.message || '')) {
+        toast.error(um.error.message || 'Could not add manual');
+        return false;
+      }
+      toast.message('Added to personal library (company library table not set up yet)');
+      return true;
+    }
+    if (error) {
+      toast.error(error.message || 'Could not add to company library');
+      return false;
+    }
+    return true;
+  }
 
-      const json = await resp.json();
-      console.log("Response:", json);
+  function openPayloadUrl(json: any, titleHint?: string) {
+    if (json?.url) {
+      window.open(json.url, '_blank');
+      if (Array.isArray(json.chapters) && json.chapters.length > 1) {
+        toast.message(
+          `${titleHint || 'Manual'} has ${json.chapters.length} chapters — opened the default PDF. Re-open from the app for the full chapter list.`
+        );
+      }
+      return true;
+    }
+    if (json?.data_base64) {
+      try {
+        const bin = atob(json.data_base64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const blob = new Blob([bytes], { type: json.content_type || 'application/pdf' });
+        const blobUrl = URL.createObjectURL(blob);
+        window.open(blobUrl, '_blank');
+        return true;
+      } catch (e) {
+        console.error(e);
+      }
+    }
+    // Folder response without auto-resolved URL: open first chapter PDF
+    if (Array.isArray(json?.chapters) && json.chapters.length) {
+      const first = json.chapters.find((c: any) => c?.storage_path) || json.chapters[0];
+      if (first?.storage_path) {
+        // Caller will re-request with chapter path when this returns 'chapter'
+        (openPayloadUrl as any)._pendingChapter = first.storage_path;
+        return 'chapter' as const;
+      }
+    }
+    return false;
+  }
 
-      if (json.url) {
-        window.open(json.url, '_blank');
+  async function openManual(m: any) {
+    try {
+      const payload: Record<string, unknown> = {
+        manual_id: m.id,
+        storage_path: m.storage_path,
+      };
+      const { json, status } = await callGetManualUrl(payload);
+
+      const opened = openPayloadUrl(json, m.title);
+      if (opened === true) return;
+      if (opened === 'chapter') {
+        const chapterPath = (openPayloadUrl as any)._pendingChapter;
+        const chRes = await callGetManualUrl({
+          manual_id: m.id,
+          storage_path: chapterPath,
+        });
+        if (openPayloadUrl(chRes.json, m.title) === true) return;
+        toast.error(chRes.json.error || 'Could not open first chapter');
         return;
       }
 
-      if (json.requires_add) {
-        const remaining = json.tier === 'free' ? ` (${5 - (myLibrary.length || 0)} slots left)` : '';
+      // Not in library → offer to add (Browse All)
+      const needsAdd =
+        json.requires_add === true ||
+        /not in company library|access denied/i.test(String(json.error || ''));
+
+      if (needsAdd) {
+        if (isOwned(m)) {
+          // Ownership out of sync — try force-open after client add
+          toast.message('Refreshing library…');
+          await loadData();
+        }
+        const used = ownedIds.size;
+        const limit = json.slot_limit != null ? Number(json.slot_limit) : slotLimit;
+        const remaining = Math.max(0, limit - used);
+        if (remaining <= 0) {
+          toast.error(`Company library is full (${used}/${limit}). Upgrade for more slots.`);
+          return;
+        }
         const confirmAdd = window.confirm(
-          `Add "${m.title}" to My Library?${remaining}`
+          `Add "${m.title}" to your company library?\n\n` +
+            `Slots used: ${used} of ${limit} (${remaining} left).\n` +
+            `Everyone in your service company can open it after you add it.`
         );
+        if (!confirmAdd) return;
 
-        if (confirmAdd) {
-          const addResp = await fetch(`${supabaseUrl}/functions/v1/get-manual-url`, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${session?.access_token || ''}`,
-            },
-            body: JSON.stringify({ storage_path: m.storage_path, action: "add" }),
-          });
+        // Prefer edge action=add (adds + returns URL)
+        const addRes = await callGetManualUrl({
+          ...payload,
+          action: 'add',
+        });
+        if (openPayloadUrl(addRes.json, m.title) === true) {
+          toast.success('Added to company library');
+          await loadData();
+          return;
+        }
 
-          const addJson = await addResp.json();
-          if (addJson.url) {
-            window.open(addJson.url, '_blank');
-            loadData(); // Refresh My Library
-          } else {
-            alert(addJson.error || 'Failed to add');
-          }
+        // Client-side insert fallback, then open
+        const added = await addToCompanyLibrary(m);
+        if (!added) {
+          if (addRes.json.error) toast.error(addRes.json.error);
+          return;
+        }
+        await loadData();
+        const openRes = await callGetManualUrl(payload);
+        if (openPayloadUrl(openRes.json, m.title) === true) {
+          toast.success('Added to company library');
+        } else {
+          toast.error(openRes.json.error || 'Added, but could not open PDF yet. Try again from My Library.');
         }
         return;
       }
 
-      alert('Could not open manual: ' + (json.error || 'Unknown error'));
+      // Empty storage / missing PDFs (e.g. Sciton placeholders)
+      if (
+        status === 404 ||
+        /no pdf files found|not been uploaded/i.test(String(json.error || ''))
+      ) {
+        toast.error(
+          json.error ||
+            `No PDF uploaded yet for "${m.title}". The catalog entry exists, but files are missing under ${m.storage_path || 'storage'}.`
+        );
+        return;
+      }
+
+      toast.error(json.error || json.hint || 'Could not open manual');
     } catch (e: any) {
-      console.error("Full Error:", e);
-      alert('Failed to open manual: ' + e.message);
+      console.error(e);
+      toast.error(e.message || 'Failed to open manual');
     }
   }
 
+  /** Prefer DB wavelengths[] tags; fall back to title heuristics for older rows. */
   const matchesWavelength = (manual: any, wavelength: string) => {
     if (!wavelength) return true;
-    const title = (manual.title || '').toLowerCase();
 
+    const tags: string[] = Array.isArray(manual?.wavelengths)
+      ? manual.wavelengths.map((w: any) => String(w).toLowerCase())
+      : [];
+
+    if (tags.length) {
+      if (wavelength === 'multi') {
+        // Multi pill: explicit multi tag, or 2+ primary aesthetic wavelengths
+        if (tags.includes('multi')) return true;
+        const primary = ['532', '755', '1064', '10600', '595'];
+        return primary.filter((p) => tags.includes(p)).length >= 2;
+      }
+      return tags.includes(String(wavelength).toLowerCase());
+    }
+
+    // Legacy title fallback (pre-wavelengths column)
+    const title = (manual.title || '').toLowerCase();
     if (wavelength === 'multi') return title.includes('multi') || title.includes('combination');
-    if (wavelength === '532') return title.includes('532') || title.includes('ktp');
-    if (wavelength === '755') return title.includes('755') || title.includes('alex');
-    if (wavelength === '1064') return title.includes('1064') || title.includes('nd:yag');
-    if (wavelength === '10600') return title.includes('co2') || title.includes('10600');
-    if (wavelength === '595') return title.includes('595') || title.includes('dye') || title.includes('pdl');
+    if (wavelength === '532') return title.includes('532') || title.includes('ktp') || title.includes('greenlight');
+    if (wavelength === '755') return title.includes('755') || title.includes('alex') || title.includes('gentlelase');
+    if (wavelength === '1064') return title.includes('1064') || title.includes('nd:yag') || title.includes('gentleyag');
+    if (wavelength === '10600') return title.includes('co2') || title.includes('10600') || title.includes('ultrapulse') || title.includes('acupulse');
+    if (wavelength === '595') return title.includes('595') || title.includes('dye') || title.includes('pdl') || title.includes('vbeam') || title.includes('sclero');
     return false;
   };
 
@@ -135,18 +349,116 @@ export default function ManualsLibrary() {
     return groups;
   }, [manuals, myLibrary, tab, selectedWavelength]);
 
+  /** Light spines so books contrast with the wood shelf; dark text on top */
   const getBookColor = (manual: any) => {
     const title = (manual.title || '').toLowerCase();
-    if (title.includes('alex') || title.includes('755')) return '#166534';
-    if (title.includes('nd:yag') || title.includes('1064')) return '#1e3a8a';
-    if (title.includes('co2') || title.includes('10600')) return '#9f1239';
-    if (title.includes('dye') || title.includes('595')) return '#831843';
-    if (title.includes('multi') || title.includes('combination')) return 'linear-gradient(135deg, #166534, #1e3a8a, #831843)';
-    return '#854d0e';
+    if (title.includes('alex') || title.includes('755')) return 'linear-gradient(90deg, #f5ebe0, #fff, #f5ebe0)';
+    if (title.includes('nd:yag') || title.includes('1064')) return 'linear-gradient(90deg, #e3eefc, #fff, #e3eefc)';
+    if (title.includes('co2') || title.includes('10600')) return 'linear-gradient(90deg, #e6f4ea, #fff, #e6f4ea)';
+    if (title.includes('dye') || title.includes('595') || title.includes('vbeam')) return 'linear-gradient(90deg, #fce8f1, #fff, #fce8f1)';
+    if (title.includes('diode')) return 'linear-gradient(90deg, #fff0e6, #fff, #fff0e6)';
+    if (title.includes('multi') || title.includes('combination')) return 'linear-gradient(90deg, #f0eef8, #fff, #e8f0fa)';
+    return 'linear-gradient(90deg, #f4f1ea, #ffffff, #f4f1ea)';
+  };
+
+  /**
+   * Wavelength → stripe color (bottom of spine). Multi-WL books get one strip per line.
+   * Order is low → high nm for a consistent left-to-right stack.
+   */
+  const WL_STRIPE_COLORS: Record<string, { color: string; label: string; order: number }> = {
+    '450': { color: '#2563eb', label: '450 nm diode', order: 10 },
+    '488': { color: '#0d9488', label: '488 nm argon', order: 15 },
+    argon: { color: '#14b8a6', label: 'Argon', order: 16 },
+    '514': { color: '#0f766e', label: '514 nm argon', order: 17 },
+    '532': { color: '#22c55e', label: '532 nm KTP', order: 20 },
+    '585': { color: '#db2777', label: '585 nm PDL', order: 25 },
+    '595': { color: '#ec4899', label: '595 nm PDL', order: 26 },
+    '694': { color: '#ef4444', label: '694 nm ruby', order: 30 },
+    ruby: { color: '#ef4444', label: 'Ruby', order: 30 },
+    '755': { color: '#7f1d1d', label: '755 nm alexandrite', order: 40 },
+    '810': { color: '#f59e0b', label: '810 nm diode', order: 50 },
+    '940': { color: '#d97706', label: '940 nm diode', order: 55 },
+    '1064': { color: '#1d4ed8', label: '1064 nm Nd:YAG', order: 60 },
+    '1319': { color: '#3730a3', label: '1319 nm Nd:YAG', order: 65 },
+    '1450': { color: '#c2410c', label: '1450 nm diode', order: 70 },
+    '1470': { color: '#a855f7', label: '1470 nm', order: 72 },
+    '1927': { color: '#9333ea', label: '1927 nm', order: 75 },
+    '2013': { color: '#7c3aed', label: '2013 nm thulium', order: 80 },
+    '2100': { color: '#6d28d9', label: '2100 nm holmium', order: 85 },
+    '2940': { color: '#e11d48', label: '2940 nm Er:YAG', order: 90 },
+    '10600': { color: '#15803d', label: '10,600 nm CO₂', order: 100 },
+  };
+
+  const getWavelengthStripes = (manual: any): Array<{ color: string; label: string; key: string }> => {
+    const raw: string[] = Array.isArray(manual?.wavelengths)
+      ? manual.wavelengths.map((w: any) => String(w).toLowerCase().trim())
+      : [];
+    // Prefer concrete wavelengths; ignore bare "multi" when specifics exist
+    const concrete = raw.filter((w) => w && w !== 'multi' && WL_STRIPE_COLORS[w]);
+    let keys = concrete.length ? concrete : raw.filter((w) => WL_STRIPE_COLORS[w]);
+    // Deduplicate + sort by spectral order
+    keys = [...new Set(keys)].sort(
+      (a, b) => (WL_STRIPE_COLORS[a]?.order ?? 999) - (WL_STRIPE_COLORS[b]?.order ?? 999)
+    );
+    if (!keys.length && raw.includes('multi')) {
+      // Platform-only multi with no line tags: show a thin rainbow hint
+      return [
+        { key: 'multi-g', color: '#22c55e', label: 'Multi-wavelength' },
+        { key: 'multi-b', color: '#2563eb', label: 'Multi-wavelength' },
+        { key: 'multi-r', color: '#ef4444', label: 'Multi-wavelength' },
+      ];
+    }
+    return keys.map((k) => ({
+      key: k,
+      color: WL_STRIPE_COLORS[k].color,
+      label: WL_STRIPE_COLORS[k].label,
+    }));
+  };
+
+  /**
+   * Spine label = model / trim only (never brand).
+   * Shelf header already shows the manufacturer (e.g. OmniGuide → spine "FELS-25A").
+   */
+  const getSpineTitle = (fullTitle: string | null | undefined, brand?: string | null) => {
+    if (!fullTitle) return 'Manual';
+    let t = String(fullTitle)
+      .replace(/\bService\s+Manuals?\b/gi, ' ')
+      .replace(/\bOperator'?s?\s+Manuals?\b/gi, ' ')
+      .replace(/\bUser\s+Manuals?\b/gi, ' ')
+      .replace(/\bTechnical\s+Manuals?\b/gi, ' ')
+      .replace(/\bParts\s*(?:and|&)\s*Service\b/gi, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    t = t.replace(/\b(Service|Manuals?|Instructions?)\b$/gi, '').trim();
+
+    const brandRes: RegExp[] = [
+      ...(brand
+        ? [new RegExp(`^\\s*${String(brand).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b[\\s\\-/:]*`, 'i')]
+        : []),
+      /\bomni\s*guide\b[\s\-/:]*|\bomniguide\b[\s\-/:]*|\bo\s*mini\s*guide\b[\s\-/:]*/gi,
+      /\bcandela\b[\s\-/:]*|\bsyneron(?:\s*candela)?\b[\s\-/:]*/gi,
+      /\blumenis\b[\s\-/:]*|\bcoherent\b[\s\-/:]*|\bcynosure\b[\s\-/:]*|\bpalomar\b[\s\-/:]*/gi,
+      /\bcutera\b[\s\-/:]*|\balma\b[\s\-/:]*|\bdeka\b[\s\-/:]*|\bzeiss\b[\s\-/:]*|\bnidek\b[\s\-/:]*/gi,
+      /\bquanta(?:\s*system)?\b[\s\-/:]*|\biridex\b[\s\-/:]*|\blutronic\b[\s\-/:]*|\bjeisys\b[\s\-/:]*/gi,
+      /\bsciton\b[\s\-/:]*|\bfotona\b[\s\-/:]*|\bellex\b[\s\-/:]*|\blightmed\b[\s\-/:]*/gi,
+      /\brohrer(?:\s*aesthetics)?\b[\s\-/:]*/gi,
+    ];
+    for (const re of brandRes) t = t.replace(re, ' ');
+    t = t.replace(/\s{2,}/g, ' ').replace(/^[\s\-–—:/|]+|[\s\-–—:/|]+$/g, '').trim();
+    if (!t) t = String(fullTitle).replace(/\bService\s+Manuals?\b/gi, '').trim() || 'Manual';
+
+    // Model shortcuts (no brand)
+    if (/fels[-\s]?25a|intelliguide/i.test(t) || /fels[-\s]?25a|intelliguide/i.test(fullTitle)) return 'FELS-25A';
+    if (/v-?beam.*perfecta/i.test(t)) return 'VBEAM PF';
+    if (/gentlemax\s*pro/i.test(t)) return 'GENTLEMAX PRO';
+    if (/excel\s*hr/i.test(t)) return 'EXCEL HR';
+
+    if (t.length > 32) t = t.slice(0, 30).trimEnd() + '…';
+    return t;
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-[#111827]">
+    <div className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--text)]">
       <Header />
 
       <div className="max-w-7xl mx-auto w-full px-4 py-6">
@@ -180,16 +492,33 @@ export default function ManualsLibrary() {
           <button
             onClick={() => setTab('browse')}
             className={`px-6 py-2 text-sm font-semibold ${tab === 'browse' ? 'border-b-2 border-[var(--gold)] text-[var(--gold)]' : 'text-[var(--text3)]'}`}
+            title={`${manuals.length} manuals in the catalog`}
           >
-            Browse All
+            Browse All{' '}
+            <span className="ml-1 inline-flex min-w-[1.5rem] items-center justify-center rounded-full bg-[var(--surface3)] px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-[var(--text2,#ccc)] border border-[var(--border2)]">
+              {loading ? '…' : manuals.length}
+            </span>
           </button>
           <button
             onClick={() => setTab('library')}
             className={`px-6 py-2 text-sm font-semibold ${tab === 'library' ? 'border-b-2 border-[var(--gold)] text-[var(--gold)]' : 'text-[var(--text3)]'}`}
           >
-            My Library
+            My Library ({ownedIds.size}/{slotLimit === 999 ? '∞' : slotLimit})
           </button>
         </div>
+
+        {tab === 'browse' && (
+          <p className="text-sm text-[var(--text3)] mb-4">
+            Tap a manual to <strong className="text-[var(--text)]">add it to your company library</strong>
+            {slotLimit < 999 ? ` (${Math.max(0, slotLimit - ownedIds.size)} slots left)` : ''}, then open the PDF.
+            Manuals are shared with everyone in your service company.
+          </p>
+        )}
+        {tab === 'library' && ownedIds.size === 0 && (
+          <p className="text-sm text-[var(--text3)] mb-4">
+            Your company library is empty. Switch to <strong className="text-[var(--gold)]">Browse All</strong> and tap a book to add it.
+          </p>
+        )}
 
         {loading ? (
           <div className="p-12 text-center text-[var(--text3)]">Loading bookshelf...</div>
@@ -200,55 +529,66 @@ export default function ManualsLibrary() {
             )}
 
             {Object.entries(groupedManuals).map(([brand, brandManuals]) => (
-              <div key={brand}>
-                {/* Books Row */}
-                <div className="flex gap-3 overflow-x-auto pb-4 scrollbar-hide">
-                  {brandManuals.map((m, index) => (
-                    <div
-                      key={index}
-                      onClick={() => openManual(m)}
-                      className="group relative w-20 flex-shrink-0 cursor-pointer active:scale-95 transition-transform"
-                      title={m.title}
-                    >
-                      <div
-                        className="book-spine h-52 w-full rounded shadow-2xl transition-all duration-200 group-hover:-translate-y-1 group-hover:shadow-xl"
-                        style={{
-                          background: getBookColor(m),
-                          boxShadow: `
-                            inset 0 0 40px rgba(0,0,0,0.6),
-                            inset -12px 0 20px rgba(255,255,255,0.15),
-                            8px 12px 20px rgba(0,0,0,0.6)
-                          `,
-                          borderLeft: '5px solid rgba(0,0,0,0.4)',
-                          borderRight: '2px solid rgba(255,255,255,0.1)',
-                        }}
-                      >
-                        {/* Texture */}
-                        <div className="absolute inset-0 rounded opacity-30" 
-                             style={{ background: 'repeating-linear-gradient(90deg, transparent, transparent 3px, rgba(255,255,255,0.12) 3px, rgba(255,255,255,0.12) 5px)' }} />
-
-                        <div className="absolute bottom-3 left-3 right-3 text-[10px] font-bold leading-tight text-white drop-shadow-md">
-                          {m.title}
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-
-                {/* Shelf */}
-                <div 
-                  className="h-8 -mt-1 rounded-md flex items-center px-5 shadow-inner relative"
-                  style={{
-                    background: 'linear-gradient(to bottom, #854d0e, #5c3311 40%, #3f230c)',
-                    boxShadow: 'inset 0 4px 6px rgba(255,255,255,0.25), inset 0 -4px 8px rgba(0,0,0,0.7)',
-                  }}
-                >
-                  <span className="text-sm font-bold text-amber-200 tracking-widest drop-shadow">
-                    {brand}
-                  </span>
-                  <span className="ml-auto text-xs text-amber-300/80">
+              <div key={brand} className="space-y-2">
+                <div className="text-xs font-bold uppercase tracking-wider text-[var(--gold)] px-1">
+                  {brand}
+                  <span className="ml-2 font-semibold normal-case tracking-normal text-[var(--text3)]">
                     {brandManuals.length} manuals
                   </span>
+                </div>
+
+                {/* Books sit on the wood ledge; carets scroll the row (no scrollbar) */}
+                <div className="shelf">
+                  <ShelfScroller>
+                    {brandManuals.map((m, index) => {
+                      const stripes = getWavelengthStripes(m);
+                      const wlHint = stripes.map((s) => s.label).filter((v, i, a) => a.indexOf(v) === i).join(' · ');
+                      return (
+                      <div
+                        key={m.id != null ? String(m.id) : index}
+                        onClick={() => openManual(m)}
+                        className="book relative w-12 flex-shrink-0 cursor-pointer active:scale-[0.98]"
+                        title={
+                          (isOwned(m)
+                            ? `${m.title} (in library — tap to open)`
+                            : `${m.title} (tap to add to company library)`) +
+                          (wlHint ? `\n${wlHint}` : '')
+                        }
+                        style={{ width: 50 + (index % 4) * 2 }}
+                      >
+                        <div
+                          className="book-spine w-full"
+                          style={{
+                            background: getBookColor(m),
+                            height: 138 + (index % 5) * 6,
+                          }}
+                        >
+                          <div className="book-title relative z-10 px-0.5 text-neutral-900">
+                            {getSpineTitle(m.title, m.brand)}
+                          </div>
+                          {stripes.length > 0 && (
+                            <div className="wl-stripes" aria-hidden>
+                              {stripes.map((s) => (
+                                <span
+                                  key={s.key}
+                                  className="wl-stripe"
+                                  style={{ background: s.color }}
+                                  title={s.label}
+                                />
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                        {isOwned(m) && (
+                          <div className="absolute -top-1 -right-1 z-10 rounded-full bg-green-600 text-white text-[9px] font-bold px-1.5 py-0.5 shadow">
+                            ✓
+                          </div>
+                        )}
+                      </div>
+                      );
+                    })}
+                  </ShelfScroller>
+                  <div className="shelf-ledge" aria-hidden />
                 </div>
               </div>
             ))}

@@ -1,11 +1,99 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { getSupabaseClient } from '../lib/supabase/client';
 import { User } from '@supabase/supabase-js';
-import { LogOut, User as UserIcon, Settings, Building2, Menu, X, Bell } from 'lucide-react';
+import {
+  LogOut,
+  User as UserIcon,
+  Settings,
+  Building2,
+  Menu,
+  X,
+  Bell,
+  ChevronDown,
+} from 'lucide-react';
 import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
+
+type NavLink = { href: string; label: string };
+type NavGroup = { id: string; label: string; href?: string; items: NavLink[] };
+
+function NavDropdown({
+  group,
+  openId,
+  setOpenId,
+}: {
+  group: NavGroup;
+  openId: string | null;
+  setOpenId: (id: string | null) => void;
+}) {
+  const open = openId === group.id;
+  const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearLeave = () => {
+    if (leaveTimer.current) {
+      clearTimeout(leaveTimer.current);
+      leaveTimer.current = null;
+    }
+  };
+
+  const onEnter = () => {
+    clearLeave();
+    setOpenId(group.id);
+  };
+
+  const onLeave = () => {
+    clearLeave();
+    leaveTimer.current = setTimeout(() => setOpenId(null), 140);
+  };
+
+  return (
+    <div className="relative" onMouseEnter={onEnter} onMouseLeave={onLeave}>
+      {group.href ? (
+        <Link
+          href={group.href}
+          className="inline-flex items-center gap-1 hover:text-[var(--gold)] py-1"
+          onFocus={() => setOpenId(group.id)}
+        >
+          {group.label}
+          <ChevronDown size={14} className={`opacity-70 transition-transform ${open ? 'rotate-180' : ''}`} />
+        </Link>
+      ) : (
+        <button
+          type="button"
+          className="inline-flex items-center gap-1 hover:text-[var(--gold)] py-1 bg-transparent border-0 text-inherit font-medium cursor-pointer"
+          aria-expanded={open}
+          aria-haspopup="true"
+          onClick={() => setOpenId(open ? null : group.id)}
+        >
+          {group.label}
+          <ChevronDown size={14} className={`opacity-70 transition-transform ${open ? 'rotate-180' : ''}`} />
+        </button>
+      )}
+      {open && group.items.length > 0 && (
+        <div
+          className="absolute left-0 top-full pt-2 z-[100]"
+          onMouseEnter={onEnter}
+          onMouseLeave={onLeave}
+        >
+          <div className="min-w-[200px] rounded-xl border border-[var(--gold)] bg-[var(--surface3)] shadow-xl overflow-hidden py-1">
+            {group.items.map((item) => (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="block px-4 py-2.5 text-sm text-[var(--text2)] hover:bg-[var(--surface)] hover:text-[var(--gold)]"
+                onClick={() => setOpenId(null)}
+              >
+                {item.label}
+              </Link>
+            ))}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
 
 export function Header() {
   const [user, setUser] = useState<User | null>(null);
@@ -13,6 +101,8 @@ export function Header() {
   const [loading, setLoading] = useState(true);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const [navOpenId, setNavOpenId] = useState<string | null>(null);
+  const [mobileOpenGroup, setMobileOpenGroup] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
   const supabase = getSupabaseClient();
 
@@ -24,12 +114,13 @@ export function Header() {
         .eq('user_id', uid)
         .eq('is_read', false);
       setUnread(count || 0);
-      // Browser badge if supported
       if (typeof navigator !== 'undefined' && 'setAppBadge' in navigator) {
         try {
           if (count && count > 0) (navigator as any).setAppBadge(count);
           else (navigator as any).clearAppBadge?.();
-        } catch { /* ignore */ }
+        } catch {
+          /* ignore */
+        }
       }
     } catch {
       setUnread(0);
@@ -38,7 +129,9 @@ export function Header() {
 
   useEffect(() => {
     const loadUser = async () => {
-      const { data: { user: u } } = await supabase.auth.getUser();
+      const {
+        data: { user: u },
+      } = await supabase.auth.getUser();
       setUser(u);
 
       if (u) {
@@ -55,7 +148,9 @@ export function Header() {
 
     loadUser();
 
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       setUser(session?.user ?? null);
       if (session?.user) {
         supabase
@@ -71,7 +166,6 @@ export function Header() {
       }
     });
 
-    // Poll notifications lightly
     const t = setInterval(() => {
       supabase.auth.getUser().then(({ data: { user: u } }) => {
         if (u) refreshUnread(u.id);
@@ -84,6 +178,19 @@ export function Header() {
     };
   }, [supabase]);
 
+  // Close nav dropdown on outside click / Escape
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setNavOpenId(null);
+        setDropdownOpen(false);
+        setMobileMenuOpen(false);
+      }
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+
   const handleLogout = async () => {
     setDropdownOpen(false);
     setMobileMenuOpen(false);
@@ -91,20 +198,28 @@ export function Header() {
     window.location.href = '/login';
   };
 
-  const closeMobileMenu = () => setMobileMenuOpen(false);
+  const closeMobileMenu = () => {
+    setMobileMenuOpen(false);
+    setMobileOpenGroup(null);
+  };
 
-  const fullName = profile 
-    ? [profile.first_name, profile.last_name].filter(Boolean).join(' ') || user?.email?.split('@')[0]
+  const fullName = profile
+    ? [profile.first_name, profile.last_name].filter(Boolean).join(' ') ||
+      user?.email?.split('@')[0]
     : user?.email?.split('@')[0] || 'User';
 
-  const initials = (profile?.first_name?.[0] || user?.email?.[0] || 'U').toUpperCase() + 
-                   (profile?.last_name?.[0] || '').toUpperCase();
+  const initials =
+    (profile?.first_name?.[0] || user?.email?.[0] || 'U').toUpperCase() +
+    (profile?.last_name?.[0] || '').toUpperCase();
 
   const orgType = (profile?.organizations as any)?.type || null;
   const ownerMode = isOwnerish(profile?.role, orgType);
   const supplierMode = isSupplier(profile?.role, orgType);
-  const companyLabel = ownerMode ? 'Facility Profile' : supplierMode ? 'Supplier Profile' : 'Company Profile';
-  // Service pros see Tech Hub / Reports; owners get My Lasers instead of hub emphasis
+  const companyLabel = ownerMode
+    ? 'Facility Profile'
+    : supplierMode
+      ? 'Supplier Profile'
+      : 'Company Profile';
   const showServiceNav = !ownerMode && !supplierMode;
   const canBusinessNav =
     showServiceNav &&
@@ -112,6 +227,81 @@ export function Header() {
       ['service_manager', 'dispatcher', 'scheduler', 'billing_manager'].includes(
         (profile?.role || '').toLowerCase()
       ));
+  const canAdminPortal = isAdmin(profile?.role);
+
+  /** Primary hub dropdown — role-aware */
+  const hubGroup: NavGroup = ownerMode
+    ? {
+        id: 'hub',
+        label: 'My Clinic',
+        href: '/my-lasers',
+        items: [
+          { href: '/my-lasers', label: 'My Lasers' },
+          { href: '/service-requests', label: 'Service Requests' },
+          { href: '/accepted-bids', label: 'Accepted Bids' },
+          { href: '/reports', label: 'Service History' },
+          { href: '/directory', label: 'TSP Directory' },
+        ],
+      }
+    : supplierMode
+      ? {
+          id: 'hub',
+          label: 'Supplier Hub',
+          href: '/parts',
+          items: [
+            { href: '/parts', label: 'Parts Catalog' },
+            { href: '/marketplace/parts', label: 'Parts Marketplace' },
+            { href: '/marketplace/consumables', label: 'Consumables' },
+            { href: '/marketplace/my-listings', label: 'My Listings' },
+            { href: '/directory', label: 'TSP Directory' },
+          ],
+        }
+      : {
+          id: 'hub',
+          label: 'Tech Hub',
+          href: '/hub',
+          items: [
+            { href: '/hub', label: 'Hub Home' },
+            { href: '/service-schedule', label: 'Service Schedule' },
+            { href: '/manuals', label: 'Service Manuals' },
+            { href: '/reports', label: 'Service Reports' },
+            { href: '/service-requests', label: 'Repair Jobs' },
+            { href: '/bids', label: 'My Bids' },
+            { href: '/accepted-bids', label: 'Accepted Bids' },
+            { href: '/test-equipment', label: 'Test Equipment' },
+            { href: '/calculators', label: 'Photometry Tools' },
+            { href: '/ai-assistant', label: 'AI Assistant' },
+            { href: '/directory', label: 'TSP Directory' },
+          ],
+        };
+
+  const marketplaceGroup: NavGroup = {
+    id: 'marketplace',
+    label: 'Marketplace',
+    href: '/marketplace',
+    items: [
+      { href: '/marketplace', label: 'Marketplace Home' },
+      { href: '/marketplace/used-systems', label: 'Used Equipment' },
+      { href: '/marketplace/parts', label: 'Parts' },
+      { href: '/marketplace/consumables', label: 'Consumables' },
+      { href: '/marketplace/requests', label: 'Service Requests' },
+      { href: '/marketplace/my-listings', label: 'My Listings' },
+      { href: '/marketplace/list', label: 'Post a Listing' },
+    ],
+  };
+
+  const businessGroup: NavGroup | null = canBusinessNav
+    ? {
+        id: 'business',
+        label: 'Business Management',
+        items: [
+          { href: '/customers', label: 'Customers' },
+          { href: '/estimates', label: 'Estimates' },
+          { href: '/invoices', label: 'Invoices' },
+          { href: '/company', label: 'Company Profile' },
+        ],
+      }
+    : null;
 
   if (loading) {
     return (
@@ -125,35 +315,39 @@ export function Header() {
   }
 
   return (
-    <header className="header px-4 py-3 flex items-center justify-between">
-      <div className="flex items-center gap-3">
-        <Link href="/" className="flex flex-col leading-none">
-          <span className="font-extrabold text-xl tracking-[-0.5px]" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
-          <span className="text-[10px] font-medium tracking-[1.5px] text-[var(--text3)] uppercase -mt-0.5">Laser Equipment Service</span>
+    <header className="header px-4 py-3 flex items-center justify-between relative z-50">
+      <div className="flex items-center gap-3 min-w-0">
+        <Link href="/" className="flex flex-col leading-none shrink-0">
+          <span
+            className="font-extrabold text-xl tracking-[-0.5px]"
+            style={{ color: 'var(--gold)' }}
+          >
+            Total Service Pro
+          </span>
+          <span className="text-[10px] font-medium tracking-[1.5px] text-[var(--text3)] uppercase -mt-0.5">
+            Laser Equipment Service
+          </span>
         </Link>
 
+        {/* Desktop: limited top-level items + hover dropdowns */}
         <nav className="ml-6 hidden md:flex items-center gap-5 text-base font-medium text-[var(--text2)]">
-          <Link href="/" className="hover:text-[var(--gold)]">Dashboard</Link>
-          {ownerMode && <Link href="/my-lasers" className="hover:text-[var(--gold)]">My Lasers</Link>}
-          {ownerMode && <Link href="/service-requests" className="hover:text-[var(--gold)]">Service Requests</Link>}
-          <Link href="/reports" className="hover:text-[var(--gold)]">{ownerMode ? 'History' : 'Reports'}</Link>
-          {showServiceNav && <Link href="/manuals" className="hover:text-[var(--gold)]">Manuals</Link>}
-          {showServiceNav && <Link href="/service-requests" className="hover:text-[var(--gold)]">Repair Jobs</Link>}
-          {showServiceNav && <Link href="/bids" className="hover:text-[var(--gold)]">My Bids</Link>}
-          {showServiceNav && <Link href="/accepted-bids" className="hover:text-[var(--gold)]">Accepted Bids</Link>}
-          {ownerMode && <Link href="/accepted-bids" className="hover:text-[var(--gold)]">Accepted Bids</Link>}
-          {showServiceNav && <Link href="/test-equipment" className="hover:text-[var(--gold)]">Test Equipment</Link>}
-          {showServiceNav && <Link href="/hub" className="hover:text-[var(--gold)]">Tech Hub</Link>}
-          {canBusinessNav && <Link href="/customers" className="hover:text-[var(--gold)]">Customers</Link>}
-          {canBusinessNav && <Link href="/estimates" className="hover:text-[var(--gold)]">Estimates</Link>}
-          {canBusinessNav && <Link href="/invoices" className="hover:text-[var(--gold)]">Invoices</Link>}
-          {supplierMode && <Link href="/parts" className="hover:text-[var(--gold)]">Parts</Link>}
-          <Link href="/directory" className="hover:text-[var(--gold)]">Directory</Link>
-          <Link href="/marketplace" className="hover:text-[var(--gold)]">Marketplace</Link>
+          <Link href="/" className="hover:text-[var(--gold)] py-1">
+            Dashboard
+          </Link>
+          <NavDropdown group={hubGroup} openId={navOpenId} setOpenId={setNavOpenId} />
+          <NavDropdown group={marketplaceGroup} openId={navOpenId} setOpenId={setNavOpenId} />
+          {businessGroup && (
+            <NavDropdown group={businessGroup} openId={navOpenId} setOpenId={setNavOpenId} />
+          )}
+          {canAdminPortal && (
+            <Link href="/admin" className="hover:text-[var(--gold)] py-1">
+              Admin Portal
+            </Link>
+          )}
         </nav>
       </div>
 
-      <div className="flex items-center gap-3">
+      <div className="flex items-center gap-3 shrink-0">
         {user && (
           <Link
             href="/notifications"
@@ -179,19 +373,26 @@ export function Header() {
 
         {!user ? (
           <div className="flex items-center gap-2">
-            <Link href="/login" className="btn btn-primary text-sm px-4 py-1.5">Sign In</Link>
-            <Link href="/signup" className="btn btn-secondary text-sm px-4 py-1.5">Sign Up</Link>
+            <Link href="/login" className="btn btn-primary text-sm px-4 py-1.5">
+              Sign In
+            </Link>
+            <Link href="/signup" className="btn btn-secondary text-sm px-4 py-1.5">
+              Sign Up
+            </Link>
           </div>
         ) : (
           <div className="relative">
             <button
               onClick={() => setDropdownOpen(!dropdownOpen)}
               className="flex items-center gap-2 rounded-full border border-[var(--gold-border)] pl-1 pr-3 py-1 hover:bg-[var(--surface3)]"
+              aria-label="Account menu"
             >
               <div className="w-8 h-8 rounded-full bg-[var(--gold)] text-[#111827] flex items-center justify-center text-xs font-bold border-2 border-[var(--gold)]">
                 {initials}
               </div>
-              <span className="hidden sm:block text-sm font-semibold text-[var(--text)] max-w-[140px] truncate">{fullName}</span>
+              <span className="hidden sm:block text-sm font-semibold text-[var(--text)] max-w-[140px] truncate">
+                {fullName}
+              </span>
             </button>
 
             {dropdownOpen && (
@@ -199,21 +400,44 @@ export function Header() {
                 <div className="px-4 py-3 border-b border-[var(--border)]">
                   <div className="font-semibold text-[var(--gold)]">{fullName}</div>
                   <div className="text-xs text-[var(--text3)] truncate">{user.email}</div>
-                  {profile?.role && <div className="text-[10px] mt-0.5 text-[var(--text3)]">Role: {profile.role}</div>}
+                  {profile?.role && (
+                    <div className="text-[10px] mt-0.5 text-[var(--text3)]">Role: {profile.role}</div>
+                  )}
                 </div>
 
-                <Link href="/profile" className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]" onClick={() => setDropdownOpen(false)}>
+                <Link
+                  href="/profile"
+                  className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"
+                  onClick={() => setDropdownOpen(false)}
+                >
                   <UserIcon size={16} /> User Profile
                 </Link>
-                <Link href="/company" className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]" onClick={() => setDropdownOpen(false)}>
+                <Link
+                  href="/company"
+                  className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"
+                  onClick={() => setDropdownOpen(false)}
+                >
                   <Building2 size={16} /> {companyLabel}
                 </Link>
-                <Link href="/settings" className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]" onClick={() => setDropdownOpen(false)}>
+                <Link
+                  href="/settings"
+                  className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"
+                  onClick={() => setDropdownOpen(false)}
+                >
                   <Settings size={16} /> Settings
                 </Link>
+                {canAdminPortal && (
+                  <Link
+                    href="/admin"
+                    className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"
+                    onClick={() => setDropdownOpen(false)}
+                  >
+                    <Building2 size={16} /> Admin Portal
+                  </Link>
+                )}
 
-                <button 
-                  onClick={handleLogout} 
+                <button
+                  onClick={handleLogout}
                   className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-red-400 hover:bg-[var(--surface)] border-t border-[var(--border)]"
                 >
                   <LogOut size={16} /> Log Out
@@ -224,42 +448,72 @@ export function Header() {
         )}
       </div>
 
+      {/* Mobile: same groups as accordion */}
       {mobileMenuOpen && (
-        <div className="md:hidden absolute top-[60px] left-0 right-0 bg-[var(--surface3)] border-b border-[var(--border)] z-[90] shadow-lg">
+        <div className="md:hidden absolute top-full left-0 right-0 bg-[var(--surface3)] border-b border-[var(--border)] z-[90] shadow-lg max-h-[75vh] overflow-y-auto">
           <nav className="flex flex-col px-4 py-2 text-base font-medium">
-            <Link href="/" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Dashboard</Link>
-            {ownerMode && <Link href="/my-lasers" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>My Lasers</Link>}
-            {ownerMode && <Link href="/service-requests" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Service Requests</Link>}
-            <Link href="/reports" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>{ownerMode ? 'History' : 'Reports'}</Link>
-            {showServiceNav && <Link href="/manuals" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Manuals</Link>}
-            {showServiceNav && <Link href="/service-requests" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Repair Jobs</Link>}
-            {showServiceNav && (
-              <Link href="/bids" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
-                My Bids
-              </Link>
-            )}
-            {(showServiceNav || ownerMode) && (
-              <Link href="/accepted-bids" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
-                Accepted Bids
-              </Link>
-            )}
-            {showServiceNav && (
-              <Link href="/test-equipment" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
-                Test Equipment
+            <Link
+              href="/"
+              className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+              onClick={closeMobileMenu}
+            >
+              Dashboard
+            </Link>
+
+            {[hubGroup, marketplaceGroup, businessGroup]
+              .filter(Boolean)
+              .map((g) => {
+                const group = g as NavGroup;
+                const open = mobileOpenGroup === group.id;
+                return (
+                  <div key={group.id} className="border-b border-[var(--border)]">
+                    <button
+                      type="button"
+                      className="w-full flex items-center justify-between py-3 hover:text-[var(--gold)] bg-transparent border-0 text-inherit font-medium text-left cursor-pointer"
+                      onClick={() => setMobileOpenGroup(open ? null : group.id)}
+                    >
+                      {group.label}
+                      <ChevronDown
+                        size={16}
+                        className={`transition-transform ${open ? 'rotate-180' : ''}`}
+                      />
+                    </button>
+                    {open && (
+                      <div className="pb-2 pl-3 flex flex-col gap-0.5">
+                        {group.items.map((item) => (
+                          <Link
+                            key={item.href}
+                            href={item.href}
+                            className="py-2 text-sm text-[var(--text3)] hover:text-[var(--gold)]"
+                            onClick={closeMobileMenu}
+                          >
+                            {item.label}
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+
+            {canAdminPortal && (
+              <Link
+                href="/admin"
+                className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+                onClick={closeMobileMenu}
+              >
+                Admin Portal
               </Link>
             )}
             {user && (
-              <Link href="/notifications" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>
+              <Link
+                href="/notifications"
+                className="py-3 hover:text-[var(--gold)]"
+                onClick={closeMobileMenu}
+              >
                 Notifications{unread > 0 ? ` (${unread})` : ''}
               </Link>
             )}
-            {showServiceNav && <Link href="/hub" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Tech Hub</Link>}
-            {canBusinessNav && <Link href="/customers" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Customers</Link>}
-            {canBusinessNav && <Link href="/estimates" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Estimates</Link>}
-            {canBusinessNav && <Link href="/invoices" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Invoices</Link>}
-            {supplierMode && <Link href="/parts" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>Parts</Link>}
-            <Link href="/directory" className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]" onClick={closeMobileMenu}>TSP Directory</Link>
-            <Link href="/marketplace" className="py-3 hover:text-[var(--gold)]" onClick={closeMobileMenu}>Marketplace</Link>
           </nav>
         </div>
       )}

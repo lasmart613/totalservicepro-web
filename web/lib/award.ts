@@ -156,7 +156,8 @@ export async function acceptServiceBid(
         message: `Your bid was accepted on "${title}". Customer contact details are now available.`,
         triggered_by: actorUserId,
         is_read: false,
-        link: `/marketplace/requests/${requestId}`,
+        // Winners land on Accepted Bids (contacts). RFQ detail share URL is 403 once awarded.
+        link: `/accepted-bids?id=${encodeURIComponent(requestId)}`,
         data: {
           request_id: requestId,
           bid_id: bidId,
@@ -177,7 +178,7 @@ export async function acceptServiceBid(
         message: `You awarded a bid on "${req.title || 'Service request'}".`,
         triggered_by: actorUserId,
         is_read: false,
-        link: `/marketplace/requests/${requestId}`,
+        link: `/accepted-bids?id=${encodeURIComponent(requestId)}`,
         data: { request_id: requestId, bid_id: bidId, event: 'bid_awarded' },
       });
     } catch {

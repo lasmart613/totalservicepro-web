@@ -37,3 +37,5 @@ assets/debug/
 Thumbs.db
 *.log
 *.tmp
+# Local Netlify folder
+.netlify

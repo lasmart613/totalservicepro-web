@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { Calendar as CalendarIcon, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { isAdmin, isPro } from '@/lib/roles';
+import { generateDocNumber } from '@/lib/billing/doc-numbers';
 
 /** YYYY-MM-DD in local calendar (avoids UTC shift from toISOString) */
 function toLocalYmd(d: Date): string {
@@ -16,10 +17,29 @@ function toLocalYmd(d: Date): string {
   return `${y}-${m}-${day}`;
 }
 
+/**
+ * Normalize any DB date (date / timestamptz / ISO) to YYYY-MM-DD.
+ * Without this, month/day filters miss tickets when service_date includes time.
+ */
+function ticketDateYmd(raw: unknown): string {
+  if (raw == null || raw === '') return '';
+  if (raw instanceof Date && !isNaN(raw.getTime())) return toLocalYmd(raw);
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (m) return m[1];
+  try {
+    const d = new Date(s);
+    if (!isNaN(d.getTime())) return toLocalYmd(d);
+  } catch {
+    /* ignore */
+  }
+  return s.slice(0, 10);
+}
+
 function parseYmd(ymd: string | null | undefined): { y: number; m: number; d: number } | null {
-  if (!ymd || typeof ymd !== 'string') return null;
-  // Accept YYYY-MM-DD or ISO timestamps
-  const part = ymd.slice(0, 10);
+  const part = ticketDateYmd(ymd);
+  if (!part) return null;
   const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(part);
   if (!m) return null;
   return { y: +m[1], m: +m[2], d: +m[3] };
@@ -31,56 +51,136 @@ function ymdEqualsDay(ymd: string | null | undefined, year: number, month1: numb
   return p.y === year && p.m === month1 && p.d === day;
 }
 
-function isOpenTicketStatus(status: string | null | undefined): boolean {
-  const s = (status || '').toLowerCase();
-  return !['completed', 'cancelled', 'canceled', 'complete'].includes(s);
+function coerceOrgId(val: unknown): number | string | null {
+  if (val == null) return null;
+  if (typeof val === 'number' && Number.isFinite(val)) return val;
+  const s = String(val).trim();
+  if (/^\d+$/.test(s)) return parseInt(s, 10);
+  if (s) return s;
+  return null;
 }
+
+type TicketForm = {
+  customer_name: string;
+  service_date: string;
+  scheduled_time: string;
+  end_time: string;
+  service_type: string;
+  priority: string;
+  status: string;
+  equipment_make: string;
+  equipment_model: string;
+  serial_number: string;
+  notes: string;
+  customer_address: string;
+  customer_city: string;
+  customer_state: string;
+  customer_phone: string;
+  customer_email: string;
+};
+
+const EMPTY_FORM = (presetDate?: string): TicketForm => ({
+  customer_name: '',
+  service_date: presetDate || toLocalYmd(new Date()),
+  scheduled_time: '09:00',
+  end_time: '10:00',
+  service_type: 'Repair',
+  priority: 'Medium',
+  status: 'Scheduled',
+  equipment_make: '',
+  equipment_model: '',
+  serial_number: '',
+  notes: '',
+  customer_address: '',
+  customer_city: '',
+  customer_state: '',
+  customer_phone: '',
+  customer_email: '',
+});
 
 export default function ServiceSchedule() {
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
-  // Full date cursor (fixes hardcoded June + wrong year)
+  // Keep full date so Day view and month→day click land on the correct day
   const [cursor, setCursor] = useState(() => {
     const n = new Date();
-    return new Date(n.getFullYear(), n.getMonth(), 1);
+    return new Date(n.getFullYear(), n.getMonth(), n.getDate(), 12, 0, 0);
   });
   const [serviceCalls, setServiceCalls] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>('');
+  const [orgId, setOrgId] = useState<number | string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [showNew, setShowNew] = useState(false);
+  const [form, setForm] = useState<TicketForm>(() => EMPTY_FORM());
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
 
   const supabase = getSupabaseClient();
   const router = useRouter();
 
   const year = cursor.getFullYear();
-  const month0 = cursor.getMonth(); // 0-11
+  const month0 = cursor.getMonth();
   const month1 = month0 + 1;
+  const canCreate = isAdmin(userRole) || isPro(userRole);
 
-  useEffect(() => {
-    const fetchServiceCalls = async () => {
-      setLoading(true);
-      setLoadError(null);
-      try {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) {
-          setServiceCalls([]);
-          return;
-        }
+  const formatTicket = useCallback((ticket: any) => {
+    const start = ticket.scheduled_time;
+    const end = ticket.end_time;
+    let duration = 60;
+    if (start && end) {
+      const [sh, sm] = String(start).split(':').map(Number);
+      const [eh, em] = String(end).split(':').map(Number);
+      duration = eh * 60 + em - (sh * 60 + sm);
+    }
+    const dateStr = ticketDateYmd(ticket.service_date);
+    return {
+      id: ticket.id,
+      ticket_number: ticket.ticket_number,
+      date: dateStr,
+      time: (start && String(start).slice(0, 5)) || '09:00',
+      duration: duration > 0 ? duration : 60,
+      title: `${ticket.service_type || 'Service'} - ${ticket.customer_name || 'Customer'}`,
+      equipment_model:
+        [ticket.equipment_make, ticket.equipment_model].filter(Boolean).join(' ') || '',
+      status: ticket.status,
+      assigned_to: ticket.assigned_to,
+      priority: ticket.priority,
+    };
+  }, []);
 
-        const { data: profile } = await supabase
-          .from('user_profiles')
-          .select('role, organization_id')
-          .eq('id', user.id)
-          .maybeSingle();
+  const fetchServiceCalls = useCallback(async () => {
+    setLoading(true);
+    setLoadError(null);
+    try {
+      // Prefer session (faster / settles after auth callback); fall back to getUser
+      let user =
+        (await supabase.auth.getSession()).data.session?.user ?? null;
+      if (!user) {
+        const gu = await supabase.auth.getUser();
+        user = gu.data.user;
+      }
+      if (!user) {
+        setServiceCalls([]);
+        setUserId(null);
+        setLoadError(null);
+        return;
+      }
+      setUserId(user.id);
 
-        setUserRole(profile?.role || '');
-        const orgId = profile?.organization_id;
-        const role = profile?.role || '';
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('role, organization_id')
+        .eq('id', user.id)
+        .maybeSingle();
 
-        // Prefer org-wide tickets for dispatch/admin; assigned-only for pure FSE
-        let query = supabase
-          .from('service_tickets')
-          .select(`
+      setUserRole(profile?.role || '');
+      const oId = coerceOrgId(profile?.organization_id ?? null);
+      setOrgId(oId);
+
+      const selectCols = `
             id,
+            ticket_number,
             service_date,
             scheduled_time,
             end_time,
@@ -92,93 +192,125 @@ export default function ServiceSchedule() {
             organization_id,
             assigned_to,
             priority
-          `)
-          .order('service_date', { ascending: true });
+          `;
 
-        if (orgId != null) {
-          query = query.eq('organization_id', orgId);
-          // Field techs: still show org calendar but we could filter — match Android org scope for managers
-          if (!isAdmin(role) && !isPro(role) && role === 'fse') {
-            // FSEs see all org tickets (common for schedule awareness); tighten if needed:
-            // query = query.eq('assigned_to', user.id);
-          }
-        } else {
-          query = query.eq('assigned_to', user.id);
+      // Org tickets OR assigned to me (mirrors RLS; avoids empty calendar when org filter is too strict)
+      let data: any[] | null = null;
+      let error: any = null;
+
+      if (oId != null) {
+        const q1 = await supabase
+          .from('service_tickets')
+          .select(selectCols)
+          .or(`organization_id.eq.${oId},assigned_to.eq.${user.id}`)
+          .order('service_date', { ascending: true })
+          .limit(500);
+        data = q1.data;
+        error = q1.error;
+
+        // Fallback: plain org filter if .or() is rejected
+        if (error) {
+          console.warn('schedule or-filter failed, retrying org-only', error);
+          const q2 = await supabase
+            .from('service_tickets')
+            .select(selectCols)
+            .eq('organization_id', oId)
+            .order('service_date', { ascending: true })
+            .limit(500);
+          data = q2.data;
+          error = q2.error;
         }
-
-        const { data, error } = await query.limit(500);
-        if (error) throw error;
-
-        const formatted = (data || []).map((ticket: any) => {
-          const start = ticket.scheduled_time;
-          const end = ticket.end_time;
-          let duration = 60;
-          if (start && end) {
-            const [sh, sm] = String(start).split(':').map(Number);
-            const [eh, em] = String(end).split(':').map(Number);
-            duration = eh * 60 + em - (sh * 60 + sm);
-          }
-          // Normalize date to YYYY-MM-DD string
-          let dateStr = ticket.service_date;
-          if (dateStr && typeof dateStr === 'string' && dateStr.length > 10) {
-            dateStr = dateStr.slice(0, 10);
-          }
-          return {
-            id: ticket.id,
-            date: dateStr,
-            time: (start && String(start).slice(0, 5)) || '09:00',
-            duration: duration > 0 ? duration : 60,
-            title: `${ticket.service_type || 'Service'} - ${ticket.customer_name || 'Customer'}`,
-            equipment_model: [ticket.equipment_make, ticket.equipment_model].filter(Boolean).join(' ') || '',
-            status: ticket.status,
-          };
-        });
-
-        setServiceCalls(formatted);
-      } catch (err: any) {
-        console.error('Error fetching service calls:', err);
-        setLoadError(err?.message || 'Failed to load tickets');
-        setServiceCalls([]);
-      } finally {
-        setLoading(false);
+      } else {
+        const q3 = await supabase
+          .from('service_tickets')
+          .select(selectCols)
+          .eq('assigned_to', user.id)
+          .order('service_date', { ascending: true })
+          .limit(500);
+        data = q3.data;
+        error = q3.error;
       }
-    };
 
+      // Last resort: RLS-only unfiltered (still scoped by policies)
+      if (error) {
+        console.warn('schedule filtered query failed, retrying RLS-only', error);
+        const q4 = await supabase
+          .from('service_tickets')
+          .select(selectCols)
+          .order('service_date', { ascending: true })
+          .limit(500);
+        if (q4.error) throw q4.error;
+        data = q4.data;
+        error = null;
+      }
+
+      if (error) throw error;
+
+      const formatted = (data || []).map(formatTicket);
+      setServiceCalls(formatted);
+    } catch (err: any) {
+      console.error('Error fetching service calls:', err);
+      setLoadError(err?.message || 'Failed to load tickets');
+      setServiceCalls([]);
+    } finally {
+      setLoading(false);
+    }
+  }, [supabase, formatTicket]);
+
+  useEffect(() => {
     fetchServiceCalls();
-  }, [supabase]);
+    // Reload when auth settles (e.g. after hard refresh / magic link)
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED' || event === 'INITIAL_SESSION') {
+        fetchServiceCalls();
+      }
+      if (event === 'SIGNED_OUT') {
+        setServiceCalls([]);
+        setUserId(null);
+      }
+    });
+    return () => subscription.unsubscribe();
+  }, [fetchServiceCalls, supabase]);
 
   const monthName = cursor.toLocaleString('default', { month: 'long' });
 
-  const nextMonth = () => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, 1));
-  const prevMonth = () => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, 1));
-
-  const nextWeek = () => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() + 7));
-  const prevWeek = () => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() - 7));
-
-  const nextDay = () => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() + 1));
-  const prevDay = () => setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() - 1));
+  const nextMonth = () =>
+    setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, Math.min(prev.getDate(), 28), 12, 0, 0));
+  const prevMonth = () =>
+    setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() - 1, Math.min(prev.getDate(), 28), 12, 0, 0));
+  const nextWeek = () =>
+    setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() + 7, 12, 0, 0));
+  const prevWeek = () =>
+    setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() - 7, 12, 0, 0));
+  const nextDay = () =>
+    setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() + 1, 12, 0, 0));
+  const prevDay = () =>
+    setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() - 1, 12, 0, 0));
 
   const goToday = () => {
     const n = new Date();
-    if (view === 'month') setCursor(new Date(n.getFullYear(), n.getMonth(), 1));
-    else setCursor(new Date(n.getFullYear(), n.getMonth(), n.getDate()));
+    setCursor(new Date(n.getFullYear(), n.getMonth(), n.getDate(), 12, 0, 0));
   };
 
-  // Calendar grid for current month
+  /** Open Day view for a calendar day (primary month interaction) */
+  const openDayView = (y: number, m0: number, day: number) => {
+    setCursor(new Date(y, m0, day, 12, 0, 0));
+    setView('day');
+  };
+
   const firstDay = new Date(year, month0, 1).getDay();
   const daysInMonth = new Date(year, month0 + 1, 0).getDate();
-  const calendarDays = Array(firstDay).fill(null).concat(
-    Array.from({ length: daysInMonth }, (_, i) => i + 1)
-  );
+  const calendarDays = Array(firstDay)
+    .fill(null)
+    .concat(Array.from({ length: daysInMonth }, (_, i) => i + 1));
 
-  // Week starts Sunday containing cursor
   const weekStart = useMemo(() => {
     const d = new Date(cursor.getFullYear(), cursor.getMonth(), cursor.getDate());
     d.setDate(d.getDate() - d.getDay());
     return d;
   }, [cursor]);
-
-  const timeSlots = Array.from({ length: 16 }, (_, i) => 6 + i);
 
   const handleEventClick = (callId: string | number) => {
     router.push(`/service-tickets/${callId}`);
@@ -216,13 +348,100 @@ export default function ServiceSchedule() {
     e.preventDefault();
   };
 
+  function openNewModal(presetDate?: string) {
+    setForm(EMPTY_FORM(presetDate));
+    setFormError(null);
+    setShowNew(true);
+  }
+
+  async function createTicket(e: React.FormEvent) {
+    e.preventDefault();
+    setFormError(null);
+    const customer = form.customer_name.trim();
+    if (!customer) {
+      setFormError('Customer name is required.');
+      return;
+    }
+    if (!orgId) {
+      setFormError('Your profile has no organization. Finish company onboarding first.');
+      return;
+    }
+    if (!canCreate) {
+      setFormError('Your role cannot create tickets. Ask a company admin.');
+      return;
+    }
+
+    setSaving(true);
+    try {
+      let ticketNumber: string;
+      try {
+        ticketNumber = await generateDocNumber(supabase as any, {
+          orgId,
+          kind: 'TKT',
+          date: form.service_date ? new Date(form.service_date + 'T12:00:00') : new Date(),
+        });
+      } catch {
+        ticketNumber = `TMP-TKT-${Date.now().toString().slice(-6)}`;
+      }
+
+      let status = form.status || 'Scheduled';
+      if (form.service_date && status === 'Awaiting Scheduling') status = 'Scheduled';
+
+      const payload: Record<string, any> = {
+        ticket_number: ticketNumber,
+        organization_id: orgId,
+        customer_name: customer,
+        customer_address: form.customer_address.trim() || null,
+        customer_city: form.customer_city.trim() || null,
+        customer_state: form.customer_state.trim() || null,
+        customer_phone: form.customer_phone.trim() || null,
+        customer_email: form.customer_email.trim() || null,
+        equipment_make: form.equipment_make.trim() || null,
+        equipment_model: form.equipment_model.trim() || null,
+        serial_number: form.serial_number.trim() || null,
+        service_date: form.service_date || null,
+        scheduled_time: form.scheduled_time || null,
+        end_time: form.end_time || null,
+        service_type: form.service_type || 'Repair',
+        priority: form.priority || 'Medium',
+        status,
+        notes: form.notes.trim() || null,
+        description: form.notes.trim() || null,
+        assigned_to: userId || null,
+      };
+
+      const { data, error } = await supabase
+        .from('service_tickets')
+        .insert([payload])
+        .select('id, ticket_number')
+        .single();
+
+      if (error) throw error;
+
+      setShowNew(false);
+      await fetchServiceCalls();
+      if (data?.id) {
+        // Stay on schedule so user sees the new call; optional deep-link later
+      }
+    } catch (err: any) {
+      console.error('create ticket', err);
+      setFormError(err?.message || 'Failed to create ticket');
+    } finally {
+      setSaving(false);
+    }
+  }
+
   const dayYmd = toLocalYmd(cursor);
   const todayYmd = toLocalYmd(new Date());
 
   const agendaCalls = useMemo(() => {
     return [...serviceCalls]
       .filter((c) => c.date && c.date >= todayYmd)
-      .sort((a, b) => String(a.date).localeCompare(String(b.date)) || String(a.time).localeCompare(String(b.time)));
+      .sort(
+        (a, b) =>
+          String(a.date).localeCompare(String(b.date)) ||
+          String(a.time).localeCompare(String(b.time))
+      );
   }, [serviceCalls, todayYmd]);
 
   return (
@@ -235,7 +454,16 @@ export default function ServiceSchedule() {
             <CalendarIcon size={32} className="text-[var(--gold)]" />
             <h1 className="text-4xl font-extrabold">Service Schedule</h1>
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 flex-wrap">
+            {canCreate && (
+              <button
+                type="button"
+                onClick={() => openNewModal()}
+                className="btn btn-primary text-sm inline-flex items-center gap-1.5"
+              >
+                <Plus size={16} /> New Service Call
+              </button>
+            )}
             <button type="button" onClick={goToday} className="btn btn-secondary text-sm">
               Today
             </button>
@@ -250,42 +478,72 @@ export default function ServiceSchedule() {
             {loadError}
           </div>
         )}
-        {loading && (
-          <div className="mb-4 text-sm text-[var(--text3)]">Loading tickets…</div>
-        )}
+        {loading && <div className="mb-4 text-sm text-[var(--text3)]">Loading tickets…</div>}
         {!loading && (
-          <div className="mb-4 text-xs text-[var(--text3)]">
-            {serviceCalls.length} ticket{serviceCalls.length === 1 ? '' : 's'} loaded
-            {userRole ? ` · role ${userRole}` : ''}
+          <div className="mb-4 text-xs text-[var(--text3)] flex flex-wrap items-center gap-2">
+            <span>
+              {serviceCalls.length} ticket{serviceCalls.length === 1 ? '' : 's'} loaded
+              {userRole ? ` · role ${userRole}` : ''}
+              {orgId != null ? ` · org ${orgId}` : ''}
+              {!canCreate && userId ? ' · read-only (cannot create tickets)' : ''}
+            </span>
+            <button
+              type="button"
+              className="text-[var(--gold)] underline-offset-2 hover:underline"
+              onClick={() => fetchServiceCalls()}
+            >
+              Refresh
+            </button>
           </div>
         )}
 
         <div className="flex gap-2 mb-8 flex-wrap">
-          <button onClick={() => setView('month')} className={`btn ${view === 'month' ? 'btn-primary' : ''}`}>
+          <button
+            onClick={() => setView('month')}
+            className={`btn ${view === 'month' ? 'btn-primary' : ''}`}
+          >
             Month
           </button>
-          <button onClick={() => setView('week')} className={`btn ${view === 'week' ? 'btn-primary' : ''}`}>
+          <button
+            onClick={() => setView('week')}
+            className={`btn ${view === 'week' ? 'btn-primary' : ''}`}
+          >
             Week
           </button>
-          <button onClick={() => setView('day')} className={`btn ${view === 'day' ? 'btn-primary' : ''}`}>
+          <button
+            onClick={() => setView('day')}
+            className={`btn ${view === 'day' ? 'btn-primary' : ''}`}
+          >
             Day
           </button>
-          <button onClick={() => setView('agenda')} className={`btn ${view === 'agenda' ? 'btn-primary' : ''}`}>
+          <button
+            onClick={() => setView('agenda')}
+            className={`btn ${view === 'agenda' ? 'btn-primary' : ''}`}
+          >
             Agenda
           </button>
         </div>
 
-        {/* MONTH VIEW */}
         {view === 'month' && (
           <div className="card p-6">
             <div className="flex justify-between items-center mb-6">
-              <button type="button" onClick={prevMonth} className="btn btn-secondary p-3" aria-label="Previous month">
+              <button
+                type="button"
+                onClick={prevMonth}
+                className="btn btn-secondary p-3"
+                aria-label="Previous month"
+              >
                 <ChevronLeft size={20} />
               </button>
               <div className="text-3xl font-bold">
                 {monthName} {year}
               </div>
-              <button type="button" onClick={nextMonth} className="btn btn-secondary p-3" aria-label="Next month">
+              <button
+                type="button"
+                onClick={nextMonth}
+                className="btn btn-secondary p-3"
+                aria-label="Next month"
+              >
                 <ChevronRight size={20} />
               </button>
             </div>
@@ -297,7 +555,6 @@ export default function ServiceSchedule() {
                 </div>
               ))}
               {calendarDays.map((day, i) => {
-                // CRITICAL: match full YYYY-MM-DD for this cell, not day-of-month only
                 const dayCalls = day
                   ? serviceCalls.filter((c) => ymdEqualsDay(c.date, year, month1, day))
                   : [];
@@ -308,14 +565,43 @@ export default function ServiceSchedule() {
                 return (
                   <div
                     key={i}
-                    className={`bg-[var(--surface)] min-h-[130px] p-2 border border-[var(--border)] hover:bg-[var(--surface3)] relative overflow-hidden ${
+                    className={`bg-[var(--surface)] min-h-[130px] p-2 border border-[var(--border)] hover:bg-[var(--surface3)] relative overflow-hidden cursor-pointer ${
                       isToday ? 'ring-1 ring-[var(--gold)]' : ''
-                    }`}
+                    } ${dayCalls.length ? 'bg-[rgba(251,191,36,0.04)]' : ''}`}
+                    title={day ? (dayCalls.length ? `${dayCalls.length} call(s) — open Day view` : 'Open Day view') : undefined}
+                    onClick={() => {
+                      // Month → Day: click a day opens Day View for that date
+                      if (!day) return;
+                      openDayView(year, month0, day);
+                    }}
+                    onDoubleClick={(ev) => {
+                      if (day && canCreate) {
+                        ev.stopPropagation();
+                        openNewModal(cellYmd);
+                      }
+                    }}
                   >
                     {day && (
                       <>
-                        <div className={`text-sm font-medium mb-1 ${isToday ? 'text-[var(--gold)]' : ''}`}>
-                          {day}
+                        <div className="flex justify-between items-start mb-1">
+                          <div
+                            className={`text-sm font-medium ${isToday ? 'text-[var(--gold)]' : ''}`}
+                          >
+                            {day}
+                          </div>
+                          {canCreate && (
+                            <button
+                              type="button"
+                              title="Add service call"
+                              className="text-[var(--gold)] text-xs opacity-60 hover:opacity-100"
+                              onClick={(ev) => {
+                                ev.stopPropagation();
+                                openNewModal(cellYmd);
+                              }}
+                            >
+                              +
+                            </button>
+                          )}
                         </div>
                         {dayCalls.length > 0 && (
                           <div className="text-[10px] leading-snug text-[var(--gold)] space-y-0.5">
@@ -323,7 +609,10 @@ export default function ServiceSchedule() {
                               <div
                                 key={idx}
                                 className="break-words cursor-pointer hover:underline"
-                                onClick={() => handleEventClick(call.id)}
+                                onClick={(ev) => {
+                                  ev.stopPropagation();
+                                  handleEventClick(call.id);
+                                }}
                                 title={`${call.time} • ${call.title}${call.equipment_model ? ` • ${call.equipment_model}` : ''}`}
                               >
                                 {call.time} {call.title}
@@ -331,7 +620,9 @@ export default function ServiceSchedule() {
                               </div>
                             ))}
                             {dayCalls.length > 3 && (
-                              <div className="text-[var(--text3)] text-[9px]">+{dayCalls.length - 3} more</div>
+                              <div className="text-[var(--text3)] text-[9px]">
+                                +{dayCalls.length - 3} more
+                              </div>
                             )}
                           </div>
                         )}
@@ -341,10 +632,13 @@ export default function ServiceSchedule() {
                 );
               })}
             </div>
+            <p className="text-[10px] text-[var(--text3)] mt-3">
+              Tip: click a day to open Day view
+              {canCreate ? '; use + or double-click to schedule a call on that date.' : '.'}
+            </p>
           </div>
         )}
 
-        {/* WEEK VIEW */}
         {view === 'week' && (
           <div className="card p-6 overflow-x-auto">
             <div className="flex justify-between items-center mb-4">
@@ -352,7 +646,12 @@ export default function ServiceSchedule() {
                 <ChevronLeft size={20} />
               </button>
               <div className="text-xl font-bold">
-                Week of {weekStart.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                Week of{' '}
+                {weekStart.toLocaleDateString('en-US', {
+                  month: 'short',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}
               </div>
               <button type="button" onClick={nextWeek} className="btn btn-secondary p-3">
                 <ChevronRight size={20} />
@@ -362,7 +661,11 @@ export default function ServiceSchedule() {
             <div className="grid grid-cols-8 gap-px bg-[var(--border)] min-w-[1100px]">
               <div className="bg-[var(--surface)]" />
               {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((dayName, idx) => {
-                const dayDate = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + idx);
+                const dayDate = new Date(
+                  weekStart.getFullYear(),
+                  weekStart.getMonth(),
+                  weekStart.getDate() + idx
+                );
                 const dayStr = toLocalYmd(dayDate);
                 return (
                   <div key={dayName} className="bg-[var(--surface)] p-2 text-center">
@@ -394,7 +697,6 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* DAY VIEW */}
         {view === 'day' && (
           <div className="card p-6">
             <div className="flex justify-between items-center mb-4">
@@ -402,15 +704,31 @@ export default function ServiceSchedule() {
                 <ChevronLeft size={20} />
               </button>
               <div className="text-xl font-bold">
-                {cursor.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}
+                {cursor.toLocaleDateString('en-US', {
+                  weekday: 'long',
+                  month: 'long',
+                  day: 'numeric',
+                  year: 'numeric',
+                })}
               </div>
               <button type="button" onClick={nextDay} className="btn btn-secondary p-3">
                 <ChevronRight size={20} />
               </button>
             </div>
+            {canCreate && (
+              <button
+                type="button"
+                className="btn btn-secondary text-sm mb-4"
+                onClick={() => openNewModal(dayYmd)}
+              >
+                + Add call this day
+              </button>
+            )}
             <div className="space-y-2">
               {serviceCalls.filter((c) => c.date === dayYmd).length === 0 && (
-                <div className="text-[var(--text3)] text-sm py-8 text-center">No tickets scheduled this day.</div>
+                <div className="text-[var(--text3)] text-sm py-8 text-center">
+                  No tickets scheduled this day.
+                </div>
               )}
               {serviceCalls
                 .filter((c) => c.date === dayYmd)
@@ -432,10 +750,16 @@ export default function ServiceSchedule() {
           </div>
         )}
 
-        {/* AGENDA */}
         {view === 'agenda' && (
           <div className="card p-6">
-            <h2 className="text-xl font-bold mb-4">Upcoming</h2>
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold">Upcoming</h2>
+              {canCreate && (
+                <button type="button" className="btn btn-primary text-sm" onClick={() => openNewModal()}>
+                  + New
+                </button>
+              )}
+            </div>
             {agendaCalls.length === 0 && (
               <div className="text-[var(--text3)] text-sm py-8 text-center">No upcoming tickets.</div>
             )}
@@ -460,6 +784,208 @@ export default function ServiceSchedule() {
           </div>
         )}
       </div>
+
+      {/* New Service Call modal */}
+      {showNew && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
+          onClick={() => !saving && setShowNew(false)}
+        >
+          <div
+            className="card w-full max-w-lg max-h-[90vh] overflow-y-auto p-6"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex justify-between items-center mb-4">
+              <h2 className="text-xl font-bold" style={{ color: 'var(--gold)' }}>
+                New Service Call
+              </h2>
+              <button
+                type="button"
+                className="text-2xl leading-none text-[var(--text3)] hover:text-[var(--text)]"
+                onClick={() => !saving && setShowNew(false)}
+              >
+                ×
+              </button>
+            </div>
+
+            {formError && (
+              <div className="mb-3 p-2 rounded text-sm bg-red-900/30 text-red-400">{formError}</div>
+            )}
+
+            <form onSubmit={createTicket} className="space-y-3">
+              <div>
+                <label className="label">Customer name *</label>
+                <input
+                  className="input"
+                  value={form.customer_name}
+                  onChange={(e) => setForm({ ...form, customer_name: e.target.value })}
+                  required
+                  autoFocus
+                />
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Service date</label>
+                  <input
+                    type="date"
+                    className="input"
+                    value={form.service_date}
+                    onChange={(e) => setForm({ ...form, service_date: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Priority</label>
+                  <select
+                    className="select"
+                    value={form.priority}
+                    onChange={(e) => setForm({ ...form, priority: e.target.value })}
+                  >
+                    <option>Low</option>
+                    <option>Medium</option>
+                    <option>High</option>
+                    <option>Emergency</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Start time</label>
+                  <input
+                    type="time"
+                    className="input"
+                    value={form.scheduled_time}
+                    onChange={(e) => setForm({ ...form, scheduled_time: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">End time</label>
+                  <input
+                    type="time"
+                    className="input"
+                    value={form.end_time}
+                    onChange={(e) => setForm({ ...form, end_time: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Service type</label>
+                  <select
+                    className="select"
+                    value={form.service_type}
+                    onChange={(e) => setForm({ ...form, service_type: e.target.value })}
+                  >
+                    <option>Repair</option>
+                    <option>PM</option>
+                    <option>Install</option>
+                    <option>Calibration</option>
+                    <option>Training</option>
+                    <option>Other</option>
+                  </select>
+                </div>
+                <div>
+                  <label className="label">Status</label>
+                  <select
+                    className="select"
+                    value={form.status}
+                    onChange={(e) => setForm({ ...form, status: e.target.value })}
+                  >
+                    <option>Scheduled</option>
+                    <option>Awaiting Scheduling</option>
+                    <option>In Progress</option>
+                    <option>Completed</option>
+                  </select>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="label">Equipment make</label>
+                  <input
+                    className="input"
+                    value={form.equipment_make}
+                    onChange={(e) => setForm({ ...form, equipment_make: e.target.value })}
+                    placeholder="e.g. Candela"
+                  />
+                </div>
+                <div>
+                  <label className="label">Model</label>
+                  <input
+                    className="input"
+                    value={form.equipment_model}
+                    onChange={(e) => setForm({ ...form, equipment_model: e.target.value })}
+                    placeholder="e.g. GentleMAX Pro"
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Serial number</label>
+                <input
+                  className="input"
+                  value={form.serial_number}
+                  onChange={(e) => setForm({ ...form, serial_number: e.target.value })}
+                />
+              </div>
+              <div>
+                <label className="label">Address</label>
+                <input
+                  className="input"
+                  value={form.customer_address}
+                  onChange={(e) => setForm({ ...form, customer_address: e.target.value })}
+                />
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <label className="label">City</label>
+                  <input
+                    className="input"
+                    value={form.customer_city}
+                    onChange={(e) => setForm({ ...form, customer_city: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">State</label>
+                  <input
+                    className="input"
+                    value={form.customer_state}
+                    onChange={(e) => setForm({ ...form, customer_state: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Phone</label>
+                  <input
+                    className="input"
+                    value={form.customer_phone}
+                    onChange={(e) => setForm({ ...form, customer_phone: e.target.value })}
+                  />
+                </div>
+              </div>
+              <div>
+                <label className="label">Notes / problem</label>
+                <textarea
+                  className="input"
+                  rows={2}
+                  value={form.notes}
+                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
+                />
+              </div>
+
+              <div className="flex gap-2 pt-2">
+                <button
+                  type="button"
+                  className="btn btn-secondary flex-1"
+                  disabled={saving}
+                  onClick={() => setShowNew(false)}
+                >
+                  Cancel
+                </button>
+                <button type="submit" className="btn btn-primary flex-1" disabled={saving}>
+                  {saving ? 'Creating…' : 'Create ticket'}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

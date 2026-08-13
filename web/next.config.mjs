@@ -14,6 +14,17 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  async redirects() {
+    // Belt-and-suspenders with middleware: old Android asset URLs
+    return [
+      { source: '/accepted_bids.html', destination: '/accepted-bids', permanent: false },
+      { source: '/service_requests.html', destination: '/accepted-bids', permanent: false },
+      { source: '/notifications.html', destination: '/notifications', permanent: false },
+      { source: '/service_schedule.html', destination: '/service-schedule', permanent: false },
+      { source: '/marketplace.html', destination: '/marketplace', permanent: false },
+      { source: '/index.html', destination: '/', permanent: false },
+    ];
+  },
 };
 
 export default nextConfig;

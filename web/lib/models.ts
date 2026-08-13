@@ -415,6 +415,255 @@ export const MODELS: Record<string, ModelDef> = {
     label: 'Non-Laser Equipment',
     wavelengths: [],
     params: []
+  },
+
+  /* ── Rohrer Aesthetics (https://rohreraesthetics.com/devices/) ── */
+  'Rohrer PiXel8': {
+    mfg: 'Rohrer Aesthetics',
+    label: 'PiXel8 (RF Microneedling)',
+    wavelengths: [
+      { name: '4 MHz RF Output', mode: 'CW', sets: [5, 10, 15, 20, 25, 30, 40, 50], unit: 'W', tolLabel: 'Tol ±15%' }
+    ],
+    params: [
+      'Total Treatment Shots / Cycles',
+      'Tip / Cartridge Type',
+      'Tip Serial / Lot',
+      'Needle Depth Cal Check (mm)',
+      'RF Frequency Verified (MHz)',
+      'RF Energy @ Cal Point',
+      'Impedance / Contact Check',
+      'Handpiece Condition',
+      'Firmware Version',
+      'Hours / Usage Counter'
+    ],
+    customChecklist: {
+      items: [
+        'Visual Check (console / handpiece)',
+        'Needle tip seating / sterile barrier',
+        'Depth control mechanism free movement',
+        'RF cable / connector integrity',
+        'Cooling / fan operation',
+        'Touchscreen / UI function',
+        'RF output in expected range'
+      ],
+      interlocks: [
+        'Emergency Off',
+        'Key Switch / Enable',
+        'Handpiece Interlock',
+        'Foot Switch',
+        'Door / Remote Interlock (if equipped)'
+      ]
+    }
+  },
+  'Rohrer PicoLazer': {
+    mfg: 'Rohrer Aesthetics',
+    label: 'PicoLazer (Picosecond 1064/532)',
+    wavelengths: [
+      { name: '1064 nm Picosecond', mode: 'SP', sets: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5, 2.0, 2.5, 3.0], unit: 'J/cm²', spotMm: 6, tolLabel: 'Tol ±10%' },
+      { name: '532 nm Picosecond', mode: 'SP', sets: [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.8, 1.0, 1.2], unit: 'J/cm²', spotMm: 4, tolLabel: 'Tol ±10%' },
+      { name: '1064 nm Fractional / Focus lens', mode: 'SP', sets: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2], unit: 'J/cm²', spotMm: 8, tolLabel: 'Tol ±15%', optional: true, optionalLabel: 'Fractional / telescopic handpiece installed' }
+    ],
+    params: [
+      'Total System Shots',
+      'Handpiece Shots',
+      'Lamp / Pump Shots',
+      'Spot Size Used (mm)',
+      'Pulse Width Verified (ps)',
+      'HV @ Reference Fluence (VDC)',
+      'Aiming Beam Check',
+      'Coolant Level / Status',
+      'Coolant Temp (°C)',
+      'DI Conductivity (µS/cm)',
+      'Firmware Version'
+    ]
+  },
+  'Rohrer Spectrum': {
+    mfg: 'Rohrer Aesthetics',
+    label: 'Spectrum Multi-Platform',
+    wavelengths: [
+      { name: 'IPL Broadband', mode: 'SP', sets: [5, 8, 10, 12, 15, 18, 20, 22, 25, 28, 30], unit: 'J/cm²', bblRect: true, bblWidthMm: 15, bblLengthMm: 40, tolLabel: 'Tol ±15%' },
+      { name: '2940 nm Er:YAG', mode: 'SP', sets: [0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12, 15], unit: 'J/cm²', tolLabel: 'Tol ±15%' },
+      { name: '1064 nm Long-Pulse YAG', mode: 'SP', sets: [10, 20, 30, 40, 50, 60, 80, 100, 120, 150], unit: 'J/cm²', spotMm: 10, tolLabel: 'Tol ±10%' },
+      { name: '1064 nm Q-Switch', mode: 'SP', sets: [0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6], unit: 'J/cm²', spotMm: 4, tolLabel: 'Tol ±10%' },
+      { name: '532 nm Q-Switch', mode: 'SP', sets: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.5, 2.0], unit: 'J/cm²', spotMm: 3, tolLabel: 'Tol ±10%' },
+      { name: '810 nm Diode', mode: 'PR', sets: [10, 20, 30, 40, 50, 60, 80, 100], unit: 'J/cm²', spotMm: 10, tolLabel: 'Tol ±10%' }
+    ],
+    params: [
+      'Total System Shots',
+      'IPL Lamp Shots',
+      'Er:YAG Shots',
+      'LP-YAG Shots',
+      'QS 1064 Shots',
+      'QS 532 Shots',
+      'Diode Shots',
+      'IPL Filter Used (nm)',
+      'Handpiece / Spot Used',
+      'Coolant Level / Status',
+      'Coolant Temp (°C)',
+      'DI Conductivity (µS/cm)',
+      'Firmware Version'
+    ],
+    bblTest: true
+  },
+  'Rohrer PiX:E': {
+    mfg: 'Rohrer Aesthetics',
+    label: 'PiX:E (RF Microneedling + Er:YAG)',
+    wavelengths: [
+      { name: '4 MHz RF Output', mode: 'CW', sets: [5, 10, 15, 20, 25, 30, 40, 50], unit: 'W', tolLabel: 'Tol ±15%' },
+      { name: '2940 nm Er:YAG (Fractional / Ablative)', mode: 'SP', sets: [0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12, 15], unit: 'J/cm²', tolLabel: 'Tol ±15%' }
+    ],
+    params: [
+      'Total RF Cycles',
+      'Total Er:YAG Shots',
+      'RF Tip Type (insulated / non-insulated)',
+      'RF Tip Serial / Lot',
+      'Needle Depth Cal Check (mm)',
+      'RF Frequency Verified (MHz)',
+      'Er:YAG Cal Energy',
+      'Handpiece Condition',
+      'Coolant Level / Status',
+      'Firmware Version'
+    ],
+    customChecklist: {
+      items: [
+        'Visual Check (console / handpieces)',
+        'RF tip seating',
+        'Er:YAG optics cleaned / inspected',
+        'Depth control free movement',
+        'RF + Er:YAG cable integrity',
+        'Cooling / fan operation',
+        'UI / mode switching function'
+      ],
+      interlocks: [
+        'Emergency Off',
+        'Key Switch / Enable',
+        'Handpiece Interlock',
+        'Foot Switch',
+        'Door / Remote Interlock (if equipped)'
+      ]
+    }
+  },
+  'Rohrer Phoenix': {
+    mfg: 'Rohrer Aesthetics',
+    label: 'Phoenix CO₂',
+    wavelengths: [
+      { name: '10600 nm CO₂ CW', mode: 'CW', sets: [1, 2, 5, 10, 15, 20, 25, 30, 40, 50, 60], unit: 'W', tolLabel: 'Tol ±10%' },
+      { name: '10600 nm CO₂ SuperPulse / SP', mode: 'SP', sets: [1, 2, 5, 10, 15, 20, 25, 30], unit: 'W', tolLabel: 'Tol ±10%' },
+      { name: 'SwiftScan / Scanner Pattern Energy', mode: 'SP', sets: [5, 10, 15, 20, 25, 30], unit: 'mJ/spot', tolLabel: 'Tol ±15%', optional: true, optionalLabel: 'SwiftScan / scanner handpiece installed' }
+    ],
+    params: [
+      'Total Lasing Time / Hours',
+      'Total Shots / Pulses',
+      'Articulated Arm Condition',
+      'Aiming Beam Check',
+      'Gas / Tube Status',
+      'Coolant Level / Status',
+      'Coolant Temp (°C)',
+      'Scanner Calibration Check',
+      'Firmware Version'
+    ],
+    gasTest: true
+  },
+  'Rohrer BodyTone': {
+    mfg: 'Rohrer Aesthetics',
+    label: 'BodyTone (Muscle Stimulation)',
+    wavelengths: [],
+    params: [
+      'Session Counter / Total Treatments',
+      'Applicators Connected (count)',
+      'Output Level Channel 1–4',
+      'Output Level Channel 5–8',
+      'Pulse / Program Mode Verified',
+      'Applicator Cable Integrity',
+      'Belt / Strap Condition',
+      'Firmware Version',
+      'Hours of Operation'
+    ],
+    customChecklist: {
+      items: [
+        'Visual Check (console / applicators)',
+        'All applicator pads / electrodes condition',
+        'Cable strain reliefs intact',
+        'Cooling / fan operation',
+        'Touchscreen / UI function',
+        'Output channels respond',
+        'No error codes active'
+      ],
+      interlocks: [
+        'Emergency Off',
+        'Key Switch / Enable (if equipped)',
+        'Applicator Detect / Interlock',
+        'Door / Remote Interlock (if equipped)'
+      ]
+    }
+  },
+  'Rohrer UltraLight': {
+    mfg: 'Rohrer Aesthetics',
+    label: 'UltraLight (LED Therapy)',
+    wavelengths: [
+      { name: 'Red LED Output', mode: 'CW', sets: [20, 40, 60, 80, 100], unit: '%', tolLabel: 'Relative check' },
+      { name: 'Blue LED Output', mode: 'CW', sets: [20, 40, 60, 80, 100], unit: '%', tolLabel: 'Relative check' },
+      { name: 'Green LED Output', mode: 'CW', sets: [20, 40, 60, 80, 100], unit: '%', tolLabel: 'Relative check', optional: true, optionalLabel: 'Green channel equipped' }
+    ],
+    params: [
+      'Total Treatment Hours',
+      'Panel / Head Serial',
+      'Distance / Geometry Check',
+      'Timer Function Verified',
+      'Intensity Control Verified',
+      'Firmware Version'
+    ],
+    customChecklist: {
+      items: [
+        'Visual Check (panel LEDs / housing)',
+        'All LED zones illuminate',
+        'No dead pixels / zones',
+        'Cable / stand integrity',
+        'UI / timer function',
+        'Cooling / fan operation'
+      ],
+      interlocks: [
+        'Emergency Off',
+        'Key Switch / Enable (if equipped)',
+        'Door / Remote Interlock (if equipped)'
+      ]
+    }
+  },
+  'Rohrer ReLumina': {
+    mfg: 'Rohrer Aesthetics',
+    label: 'ReLumina (IPL)',
+    wavelengths: [
+      { name: 'IPL Broadband', mode: 'SP', sets: [5, 8, 10, 12, 15, 18, 20, 22, 25, 28, 30], unit: 'J/cm²', bblRect: true, bblWidthMm: 15, bblLengthMm: 40, tolLabel: 'Tol ±15%' }
+    ],
+    params: [
+      'Total Lamp Shots',
+      'Lamp Serial / Lot',
+      'Filter Used (nm)',
+      'Spot / Crystal Size',
+      'Output @ Cal Point (J/cm²)',
+      'Cooling Temp Set (°C)',
+      'Cooling Temp Measured (°C)',
+      'Pulse Width Verified (ms)',
+      'Firmware Version'
+    ],
+    bblTest: true
+  },
+  'Rohrer ReVive': {
+    mfg: 'Rohrer Aesthetics',
+    label: 'ReVive (Thulium 1927 nm)',
+    wavelengths: [
+      { name: '1927 nm Thulium Fractional', mode: 'SP', sets: [5, 8, 10, 12, 15, 18, 20, 25, 30, 35, 40], unit: 'mJ/spot', tolLabel: 'Tol ±15%' }
+    ],
+    params: [
+      'Total System Shots',
+      'Handpiece / Roller Shots',
+      'Density / Coverage Setting',
+      'Spot Energy @ Cal Point',
+      'Roller / Tip Condition',
+      'Coolant Level / Status',
+      'Coolant Temp (°C)',
+      'Firmware Version'
+    ]
   }
 };
 
@@ -448,6 +697,19 @@ export function resolveModelDef(
     if (/pro/i.test(hay) && MODELS['Candela GentleMAX_PRO']) return MODELS['Candela GentleMAX_PRO'];
     if (MODELS['Candela GentleMAX']) return MODELS['Candela GentleMAX'];
     if (MODELS['Candela GentleMAX_PRO']) return MODELS['Candela GentleMAX_PRO'];
+  }
+
+  // Rohrer Aesthetics catalog
+  if (/pixel\s*8|pixel8|pix\s*el\s*8/i.test(hay) && MODELS['Rohrer PiXel8']) return MODELS['Rohrer PiXel8'];
+  if (/picolazer|pico\s*lazer/i.test(hay) && MODELS['Rohrer PicoLazer']) return MODELS['Rohrer PicoLazer'];
+  if (/spectrum/i.test(hay) && /rohrer/i.test(hay) && MODELS['Rohrer Spectrum']) return MODELS['Rohrer Spectrum'];
+  if (/pix\s*:\s*e|pixe\b|pix\s*e\b/i.test(hay) && MODELS['Rohrer PiX:E']) return MODELS['Rohrer PiX:E'];
+  if (/phoenix/i.test(hay) && MODELS['Rohrer Phoenix']) return MODELS['Rohrer Phoenix'];
+  if (/body\s*tone|bodytone/i.test(hay) && MODELS['Rohrer BodyTone']) return MODELS['Rohrer BodyTone'];
+  if (/ultra\s*light|ultralight/i.test(hay) && MODELS['Rohrer UltraLight']) return MODELS['Rohrer UltraLight'];
+  if (/relumina|re\s*lumina/i.test(hay) && MODELS['Rohrer ReLumina']) return MODELS['Rohrer ReLumina'];
+  if (/revive|re\s*vive/i.test(hay) && (/rohrer|thulium|1927/i.test(hay) || /revive/i.test(raw)) && MODELS['Rohrer ReVive']) {
+    return MODELS['Rohrer ReVive'];
   }
 
   let bestKey: string | null = null;

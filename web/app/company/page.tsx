@@ -260,10 +260,13 @@ function CompanyProfile() {
         } else {
           const errBody = await listRes.json().catch(() => ({}));
           console.warn('team list failed', listRes.status, errBody);
-          toast.error(
-            errBody.error ||
-              'Could not load full team roster (server). Showing limited list.'
-          );
+          // Don't scare users after onboarding for optional-column schema lag
+          if (!/additional_roles/i.test(String(errBody.error || ''))) {
+            toast.error(
+              errBody.error ||
+                'Could not load full team roster (server). Showing limited list.'
+            );
+          }
         }
       }
     } catch (e) {
@@ -271,20 +274,36 @@ function CompanyProfile() {
     }
 
     // Fallback: client query (may only return yourself under strict RLS)
-    const { data: mems, error: memErr } = await supabase
+    // additional_roles is optional — older DBs may not have the column yet
+    const teamColsFull = 'id, first_name, last_name, email, role, job_title, additional_roles';
+    const teamColsSafe = 'id, first_name, last_name, email, role, job_title';
+    let { data: mems, error: memErr } = await supabase
       .from('user_profiles')
-      .select('id, first_name, last_name, email, role, job_title, additional_roles')
+      .select(teamColsFull)
       .eq('organization_id', orgId);
+    if (memErr && /additional_roles|column/i.test(memErr.message || '')) {
+      ({ data: mems, error: memErr } = await supabase
+        .from('user_profiles')
+        .select(teamColsSafe)
+        .eq('organization_id', orgId));
+    }
     if (memErr) console.warn('team members client query', memErr);
 
     let loaded = mems || [];
     const { data: { user: currentUser } } = await supabase.auth.getUser();
     if (currentUser && !loaded.some((m: any) => m.id === currentUser.id)) {
-      const { data: selfProf } = await supabase
+      let { data: selfProf, error: selfErr } = await supabase
         .from('user_profiles')
-        .select('id, first_name, last_name, email, role, job_title, additional_roles')
+        .select(teamColsFull)
         .eq('id', currentUser.id)
         .maybeSingle();
+      if (selfErr && /additional_roles|column/i.test(selfErr.message || '')) {
+        ({ data: selfProf } = await supabase
+          .from('user_profiles')
+          .select(teamColsSafe)
+          .eq('id', currentUser.id)
+          .maybeSingle());
+      }
       if (selfProf) loaded = [selfProf, ...loaded];
     }
     setMembers(loaded);

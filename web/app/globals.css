@@ -247,15 +247,119 @@ body {
   touch-action: none;
 }
 
-/* Manuals bookshelf (adapted from manual_library.html) */
+/* Manuals bookshelf — light books on dark wood, books rest on the ledge */
 .shelf {
-  background: linear-gradient(180deg, #5c4633 0%, #3f2f22 100%);
+  background: linear-gradient(180deg, #5a4634 0%, #3d2e22 55%, #2f241c 100%);
   border: 5px solid #2a2118;
-  border-radius: 14px;
-  padding: 16px 12px 10px;
-  box-shadow: inset 0 0 40px rgba(0,0,0,0.5), 0 6px 16px rgba(0,0,0,0.5);
+  border-radius: 12px;
+  padding: 14px 10px 0;
+  box-shadow: inset 0 0 40px rgba(0,0,0,0.45), 0 6px 16px rgba(0,0,0,0.5);
   position: relative;
   overflow: hidden;
+}
+
+.shelf-ledge {
+  height: 18px;
+  margin: 0 -10px 0;
+  background: linear-gradient(180deg, #8b6914 0%, #6b4f28 35%, #4a3520 100%);
+  border-top: 1px solid rgba(255, 230, 180, 0.22);
+  box-shadow:
+    inset 0 2px 3px rgba(255, 255, 255, 0.12),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.55),
+    0 -2px 6px rgba(0, 0, 0, 0.35);
+  position: relative;
+  z-index: 2;
+}
+
+.books-row {
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: flex-end;
+  gap: 0;
+  overflow-x: auto;
+  padding: 6px 8px 0;
+  position: relative;
+  z-index: 1;
+  /* No visible horizontal scrollbar — use shelf carets */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.books-row::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
+/* Shelf scroller: carets at ends, no scrollbar */
+.shelf-scroller {
+  position: relative;
+  z-index: 1;
+}
+.shelf-scroll-row {
+  /* books-row styles apply; ensure scroll works under carets */
+  scroll-behavior: smooth;
+  -webkit-overflow-scrolling: touch;
+}
+.shelf-caret {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-60%);
+  z-index: 5;
+  width: 34px;
+  height: 48px;
+  border: 1px solid rgba(251, 191, 36, 0.55);
+  border-radius: 10px;
+  background: rgba(20, 16, 12, 0.88);
+  color: var(--gold, #fbbf24);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, background 0.15s ease, transform 0.15s ease;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+}
+.shelf-caret.is-visible {
+  opacity: 1;
+  pointer-events: auto;
+}
+.shelf-caret:hover:not(:disabled) {
+  background: rgba(40, 32, 20, 0.95);
+  border-color: var(--gold, #fbbf24);
+}
+.shelf-caret:disabled {
+  opacity: 0;
+  pointer-events: none;
+}
+.shelf-caret-left {
+  left: 6px;
+}
+.shelf-caret-right {
+  right: 6px;
+}
+/* Fade edges so carets read over books */
+.shelf-scroller::before,
+.shelf-scroller::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 18px; /* leave ledge alone */
+  width: 28px;
+  z-index: 3;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+.shelf-scroller:has(.shelf-caret-left.is-visible)::before {
+  left: 0;
+  opacity: 1;
+  background: linear-gradient(90deg, rgba(45, 34, 24, 0.92), transparent);
+}
+.shelf-scroller:has(.shelf-caret-right.is-visible)::after {
+  right: 0;
+  opacity: 1;
+  background: linear-gradient(270deg, rgba(45, 34, 24, 0.92), transparent);
 }
 
 /* Hide horizontal scrollbar visually on bookshelf but keep scrolling functionality */
@@ -271,38 +375,96 @@ body {
 /* Generic utility if needed elsewhere */
 .scrollbar-hide {
   scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+  width: 0;
+  height: 0;
 }
 
 .book {
-  transition: transform 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+  transition: transform 0.18s ease;
   cursor: pointer;
+  flex-shrink: 0;
+  align-self: flex-end;
+  margin: 0;
 }
 
 .book:hover {
-  transform: translateY(-8px) rotate(1deg);
+  transform: translateY(-6px);
+  z-index: 3;
 }
 
 .book-spine {
-  width: 54px;
-  height: 105px;
-  border-radius: 4px 3px 3px 4px;
+  width: 52px;
+  height: 148px;
+  border-radius: 2px 3px 0 0;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: space-between;
-  padding: 10px 6px 8px;
-  box-shadow: 4px 4px 10px rgba(0,0,0,0.7), inset -3px 0 6px rgba(0,0,0,0.5), inset 1px 0 3px rgba(255,255,255,0.15);
+  justify-content: center;
+  padding: 10px 5px 8px;
+  box-shadow:
+    1px 0 0 rgba(0, 0, 0, 0.12),
+    inset -3px 0 6px rgba(0, 0, 0, 0.08),
+    inset 2px 0 4px rgba(255, 255, 255, 0.65),
+    0 2px 4px rgba(0, 0, 0, 0.25);
   position: relative;
-  color: #f0e6d2;
-  font-weight: 700;
-  font-size: 8.5px;
+  color: #1a1a1a;
+  font-weight: 800;
+  font-size: 11px;
   writing-mode: vertical-rl;
   text-orientation: mixed;
   text-align: center;
   overflow: hidden;
+  border: 1px solid rgba(0, 0, 0, 0.14);
+  border-bottom: none;
+  background: #f4f1ea;
+}
+
+/* Vertical spine text: width ≈ 2 character columns (two “lines”) */
+.book-spine .book-title,
+.book-spine > .relative {
+  font-size: 11px;
+  font-weight: 800;
+  line-height: 1.12;
+  letter-spacing: 0.2px;
+  max-height: 100px;
+  width: 1.85em; /* allow wrap to a second vertical column */
+  white-space: normal;
+  overflow: hidden;
+  word-break: break-word;
+  hyphens: auto;
+}
+
+/* Wavelength indicator strips at bottom of spine (stack for multi-WL) */
+.wl-stripes {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: flex;
+  flex-direction: column;
+  z-index: 2;
+  pointer-events: none;
+  /* dark underlay so colors read on light/dark spines */
+  box-shadow: 0 -1px 0 rgba(0, 0, 0, 0.25);
+}
+
+.wl-stripe {
+  display: block;
+  width: 100%;
+  height: 7px;
+  flex-shrink: 0;
+  box-shadow:
+    inset 0 0 0 0.5px rgba(0, 0, 0, 0.28),
+    0 0 0 0.5px rgba(255, 255, 255, 0.12);
+}
+
+.wl-stripe + .wl-stripe {
+  /* gap so adjacent stripes stay distinct */
+  margin-top: 2px;
 }
 
 /* Status / filter chips */

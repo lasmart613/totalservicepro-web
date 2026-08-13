@@ -148,11 +148,18 @@ export async function POST(req: NextRequest) {
       details.push(`${email}: linked existing profile to org`);
     }
 
-    const { data: members } = await admin
+    let { data: members, error: memErr } = await admin
       .from('user_profiles')
       .select('id, first_name, last_name, email, role, job_title, additional_roles, created_at, onboarding_completed')
       .eq('organization_id', orgId)
       .order('role', { ascending: true });
+    if (memErr && /additional_roles|column/i.test(memErr.message || '')) {
+      ({ data: members } = await admin
+        .from('user_profiles')
+        .select('id, first_name, last_name, email, role, job_title, created_at, onboarding_completed')
+        .eq('organization_id', orgId)
+        .order('role', { ascending: true }));
+    }
 
     return NextResponse.json({
       ok: true,

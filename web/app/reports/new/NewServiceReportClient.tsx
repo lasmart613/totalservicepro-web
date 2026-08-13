@@ -704,15 +704,30 @@ export default function NewServiceReport() {
     setter((prev: any) => ({ ...prev, ...next }));
   }
 
+  /** Standard units for all systems (dropdown only — never free-text) */
+  const PERF_UNITS = [
+    'J/cm²',
+    'W/cm²',
+    'mW/cm²',
+    'J',
+    'mJ',
+    'µJ',
+    'mJ/spot',
+    'W',
+    'mW',
+    '%',
+  ] as const;
+
   function addPerfRow() {
     const firstWl = currentModel?.wavelengths?.[0];
+    const u = firstWl?.unit || 'J/cm²';
     setPowerMeasurements((prev) => [
       ...prev,
       {
         wavelength: firstWl?.name || 'Output',
         setting: (firstWl?.sets && firstWl.sets[0]) || '',
         measured: '',
-        unit: firstWl?.unit || 'W',
+        unit: u,
         pass: true,
         deviation: '',
       },
@@ -1286,7 +1301,32 @@ export default function NewServiceReport() {
                 )}
                 <input className="input" placeholder="Set" value={row.setting} onChange={e=>updatePerf(i,'setting',e.target.value)} />
                 <input className="input" placeholder="Measured" value={row.measured} onChange={e=>updatePerf(i,'measured',e.target.value)} />
-                <input className="input" placeholder="Unit" value={row.unit || ''} onChange={e=>updatePerf(i,'unit',e.target.value)} />
+                {/* Unit: dropdown only for all systems — never free-text */}
+                <select
+                  className="input"
+                  value={
+                    PERF_UNITS.includes(row.unit as (typeof PERF_UNITS)[number])
+                      ? row.unit
+                      : row.unit
+                        ? row.unit
+                        : 'J/cm²'
+                  }
+                  onChange={(e) => updatePerf(i, 'unit', e.target.value)}
+                  aria-label="Unit"
+                  title="Unit"
+                >
+                  <option value="" disabled>
+                    Unit
+                  </option>
+                  {PERF_UNITS.map((u) => (
+                    <option key={u} value={u}>
+                      {u}
+                    </option>
+                  ))}
+                  {row.unit && !PERF_UNITS.includes(row.unit as (typeof PERF_UNITS)[number]) && (
+                    <option value={row.unit}>{row.unit}</option>
+                  )}
+                </select>
                 <div className={`text-xs font-bold ${row.pass === false ? 'text-red-400' : row.pass ? 'text-green-400' : 'text-[var(--text3)]'}`}>
                   {row.deviation || '—'} {row.pass === true ? 'PASS' : row.pass === false ? 'FAIL' : ''}
                 </div>

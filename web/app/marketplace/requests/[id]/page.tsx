@@ -13,6 +13,8 @@ import {
   isServiceCompany,
 } from '@/lib/roles';
 import { acceptServiceBid } from '@/lib/award';
+import { ShareButton } from '@/components/ShareButton';
+import { serviceRequestShareText } from '@/lib/share';
 
 function money(n: number | null | undefined) {
   if (n == null || Number.isNaN(Number(n))) return '—';
@@ -59,6 +61,8 @@ export default function ServiceRequestDetail() {
 
   const fetchRequest = async () => {
     setLoading(true);
+    setRequest(null);
+    setBids([]);
 
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
@@ -71,31 +75,90 @@ export default function ServiceRequestDetail() {
       setUserRole(prof?.role || '');
       setOrgId(prof?.organization_id || null);
       setOrgType((prof?.organizations as any)?.type || null);
+    } else {
+      setUserId(null);
     }
 
-    const { data: reqData, error } = await supabase
-      .from('service_requests')
-      .select('*')
-      .eq('id', id)
-      .single();
+    // Load strategy:
+    // - Guests: public share API first (bypasses RLS via service role on server)
+    // - Signed-in: client Supabase first, then share API fallback
+    let reqData: any = null;
 
-    if (error || !reqData) {
-      toast.error('Request not found');
+    async function loadViaShareApi(): Promise<'ok' | 'closed' | 'miss'> {
+      try {
+        const res = await fetch(`/api/share/request/${encodeURIComponent(id)}`, {
+          method: 'GET',
+          cache: 'no-store',
+          headers: { Accept: 'application/json' },
+        });
+        const json = await res.json().catch(() => ({} as any));
+        if (res.ok && json?.request) {
+          reqData = json.request;
+          if (json.request.organization_name) {
+            setOrgLoc({
+              name: json.request.organization_name,
+              city: json.request.city,
+              state: json.request.state,
+            });
+          }
+          return 'ok';
+        }
+        if (res.status === 403 && json?.closed) {
+          // Awarded RFQs are not public — send parties to Accepted Bids (never a 404)
+          if (typeof window !== 'undefined') {
+            window.location.replace(`/accepted-bids?id=${encodeURIComponent(id)}`);
+          }
+          return 'closed';
+        }
+        console.warn('[RFQ share] API miss', res.status, json);
+        return 'miss';
+      } catch (e) {
+        console.warn('[RFQ share] API failed', e);
+        return 'miss';
+      }
+    }
+
+    if (!user) {
+      const shareResult = await loadViaShareApi();
+      if (shareResult === 'closed') {
+        setLoading(false);
+        return;
+      }
+    } else {
+      const { data: direct, error: directErr } = await supabase
+        .from('service_requests')
+        .select('*')
+        .eq('id', id)
+        .maybeSingle();
+      if (!directErr && direct) {
+        reqData = direct;
+      } else {
+        const shareResult = await loadViaShareApi();
+        if (shareResult === 'closed') {
+          setLoading(false);
+          return;
+        }
+      }
+    }
+
+    if (!reqData) {
+      // Guests: no red toast — friendly empty state below. Signed-in: show error.
+      if (user) toast.error('Request not found');
       setLoading(false);
       return;
     }
 
     setRequest(reqData);
 
-    // Prefer city/state on request; fallback to posting org profile
-    if (reqData.organization_id && !(reqData.city || reqData.state || reqData.location)) {
+    // Prefer city/state on request; fallback to posting org profile (auth only)
+    if (user && reqData.organization_id && !(reqData.city || reqData.state || reqData.location)) {
       const { data: org } = await supabase
         .from('organizations')
         .select('name, city, state')
         .eq('id', reqData.organization_id)
         .maybeSingle();
       if (org) setOrgLoc(org);
-    } else if (reqData.organization_id) {
+    } else if (user && reqData.organization_id) {
       const { data: org } = await supabase
         .from('organizations')
         .select('name, city, state')
@@ -104,17 +167,20 @@ export default function ServiceRequestDetail() {
       if (org) setOrgLoc(org);
     }
 
-    try {
-      const { data: bidRows } = await supabase
-        .from('bids')
-        .select(
-          'id, price, amount, labor_amount, parts_amount, travel_amount, per_diem_amount, other_amount, notes, question, status, bidder_id, bidder_user_id, proposed_date, created_at'
-        )
-        .eq('request_id', id)
-        .order('created_at', { ascending: false });
-      setBids(bidRows || []);
-    } catch {
-      setBids([]);
+    // Bids only for signed-in users (RLS)
+    if (user) {
+      try {
+        const { data: bidRows } = await supabase
+          .from('bids')
+          .select(
+            'id, price, amount, labor_amount, parts_amount, travel_amount, per_diem_amount, other_amount, notes, question, status, bidder_id, bidder_user_id, proposed_date, created_at'
+          )
+          .eq('request_id', id)
+          .order('created_at', { ascending: false });
+        setBids(bidRows || []);
+      } catch {
+        setBids([]);
+      }
     }
 
     setLoading(false);
@@ -288,10 +354,22 @@ export default function ServiceRequestDetail() {
       <div className="min-h-screen flex flex-col">
         <Header />
         <div className="max-w-4xl mx-auto w-full px-4 py-12 text-center">
-          <h1 className="text-2xl font-bold mb-4">Request Not Found</h1>
-          <Link href="/service-requests" className="btn btn-primary">
-            Back to Service Requests
-          </Link>
+          <h1 className="text-2xl font-bold mb-2">Request not available</h1>
+          <p className="text-sm text-[var(--text3)] mb-6 max-w-md mx-auto">
+            This RFQ may be closed, the link may be wrong, or public share preview is not enabled yet.
+            If you were invited, try logging in — or ask the sender to share again after share access is enabled.
+          </p>
+          <div className="flex flex-wrap gap-2 justify-center">
+            <Link href={`/login?next=${encodeURIComponent(`/marketplace/requests/${id}`)}`} className="btn btn-primary">
+              Log in
+            </Link>
+            <Link href={`/signup?next=${encodeURIComponent(`/marketplace/requests/${id}`)}`} className="btn btn-secondary">
+              Sign up free
+            </Link>
+            <Link href="/service-requests" className="btn btn-secondary">
+              Service Requests
+            </Link>
+          </div>
         </div>
       </div>
     );
@@ -310,7 +388,7 @@ export default function ServiceRequestDetail() {
 
         <div className="card p-8">
           <div className="flex justify-between items-start mb-6 gap-3">
-            <div>
+            <div className="min-w-0 flex-1">
               <h1 className="text-3xl font-extrabold mb-2">{request.title || 'Service Request'}</h1>
               <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-[var(--text3)]">
                 <span>
@@ -339,10 +417,47 @@ export default function ServiceRequestDetail() {
                 )}
               </div>
             </div>
-            <span className="text-xs px-3 py-1 rounded-full bg-[var(--surface3)] text-[var(--text3)] shrink-0">
-              {request.created_at ? new Date(request.created_at).toLocaleDateString() : ''}
-            </span>
+            <div className="flex items-center gap-2 shrink-0">
+              <ShareButton
+                {...serviceRequestShareText({
+                  id,
+                  title: request.title,
+                  manufacturer: request.manufacturer,
+                  model: request.model,
+                  urgency: request.urgency,
+                  region: regionLabel,
+                  description: request.description,
+                })}
+              />
+              <span className="text-xs px-3 py-1 rounded-full bg-[var(--surface3)] text-[var(--text3)]">
+                {request.created_at ? new Date(request.created_at).toLocaleDateString() : ''}
+              </span>
+            </div>
           </div>
+
+          {/* Guest invite CTA — shared link for people not yet on TSP */}
+          {!userId && (
+            <div className="mb-6 p-5 rounded-xl border border-[var(--gold)]/40 bg-[var(--gold)]/10">
+              <div className="font-extrabold text-[var(--gold)] mb-1">You&apos;ve been invited to this RFQ</div>
+              <p className="text-sm text-[var(--text2)] mb-4">
+                Create a free Total Service Pro account to submit a bid, message the poster, or manage jobs from the web and Android app.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={`/signup?next=${encodeURIComponent(`/marketplace/requests/${id}`)}`}
+                  className="btn btn-primary"
+                >
+                  Sign up free to bid
+                </Link>
+                <Link
+                  href={`/login?next=${encodeURIComponent(`/marketplace/requests/${id}`)}`}
+                  className="btn btn-secondary"
+                >
+                  Log in
+                </Link>
+              </div>
+            </div>
+          )}
 
           {isAwarded && (
             <div className="mb-6 p-4 rounded-xl border border-green-500/40 bg-green-500/10">
@@ -506,7 +621,25 @@ export default function ServiceRequestDetail() {
           {!isMinePost && !isAwarded && (
             <div className="border-t border-[var(--border2)] pt-6 mt-6">
               <h3 className="font-semibold mb-3 text-lg">Submit a bid</h3>
-              {!canBid ? (
+              {!userId ? (
+                <div className="space-y-3">
+                  <p className="text-sm text-[var(--text3)]">
+                    Create a free account to bid on this RFQ. After signup, choose a service company role to submit bids.
+                  </p>
+                  <Link
+                    href={`/signup?next=${encodeURIComponent(`/marketplace/requests/${id}`)}`}
+                    className="btn btn-primary w-full block text-center"
+                  >
+                    Sign up free to bid
+                  </Link>
+                  <Link
+                    href={`/login?next=${encodeURIComponent(`/marketplace/requests/${id}`)}`}
+                    className="btn btn-secondary w-full block text-center"
+                  >
+                    Already have an account? Log in
+                  </Link>
+                </div>
+              ) : !canBid ? (
                 <p className="text-sm text-[var(--text3)]">
                   Sign in with a service company account to submit bids on this repair request.
                 </p>

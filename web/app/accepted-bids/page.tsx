@@ -1,7 +1,8 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isOwnerish } from '@/lib/roles';
@@ -27,7 +28,24 @@ function money(n: number | null | undefined) {
 }
 
 export default function AcceptedBidsPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex flex-col">
+          <Header />
+          <div className="max-w-4xl mx-auto w-full px-4 py-8 text-[var(--text3)]">Loading…</div>
+        </div>
+      }
+    >
+      <AcceptedBidsInner />
+    </Suspense>
+  );
+}
+
+function AcceptedBidsInner() {
   const supabase = getSupabaseClient();
+  const searchParams = useSearchParams();
+  const focusId = searchParams.get('id') || searchParams.get('request');
   const [loading, setLoading] = useState(true);
   const [rows, setRows] = useState<Row[]>([]);
   const [mode, setMode] = useState<'owner' | 'provider'>('provider');
@@ -48,6 +66,7 @@ export default function AcceptedBidsPage() {
       const owner = isOwnerish(prof?.role, (prof?.organizations as any)?.type);
       setMode(owner ? 'owner' : 'provider');
 
+      let list: Row[] = [];
       if (owner && prof?.organization_id) {
         const { data: reqs } = await supabase
           .from('service_requests')
@@ -56,8 +75,7 @@ export default function AcceptedBidsPage() {
           .eq('status', 'awarded')
           .order('awarded_at', { ascending: false })
           .limit(50);
-        const list = (reqs || []) as Row[];
-        // attach winning bids
+        list = (reqs || []) as Row[];
         for (const r of list) {
           if (r.awarded_bid_id) {
             const { data: b } = await supabase.from('bids').select('*').eq('id', r.awarded_bid_id).maybeSingle();
@@ -72,7 +90,6 @@ export default function AcceptedBidsPage() {
             r.bid = b;
           }
         }
-        setRows(list);
       } else {
         // Provider: bids I won
         const { data: won } = await supabase
@@ -82,7 +99,6 @@ export default function AcceptedBidsPage() {
           .or(`bidder_id.eq.${user.id},bidder_user_id.eq.${user.id}`)
           .order('created_at', { ascending: false })
           .limit(50);
-        const list: Row[] = [];
         for (const b of won || []) {
           if (!b.request_id) continue;
           const { data: req } = await supabase
@@ -92,11 +108,41 @@ export default function AcceptedBidsPage() {
             .maybeSingle();
           if (req) list.push({ ...req, bid: b });
         }
-        setRows(list);
       }
+
+      // Deep-link from bid_accepted notification — ensure job is in the list
+      if (focusId && !list.some((r) => String(r.id) === String(focusId))) {
+        const { data: one } = await supabase
+          .from('service_requests')
+          .select('*')
+          .eq('id', focusId)
+          .maybeSingle();
+        if (one) {
+          let bid: any = null;
+          if (one.awarded_bid_id) {
+            const { data: b } = await supabase.from('bids').select('*').eq('id', one.awarded_bid_id).maybeSingle();
+            bid = b;
+          } else {
+            const { data: b } = await supabase
+              .from('bids')
+              .select('*')
+              .eq('request_id', one.id)
+              .eq('status', 'accepted')
+              .maybeSingle();
+            bid = b;
+          }
+          list = [{ ...one, bid }, ...list];
+        }
+      }
+      if (focusId) {
+        list = [...list].sort((a, b) =>
+          String(a.id) === String(focusId) ? -1 : String(b.id) === String(focusId) ? 1 : 0
+        );
+      }
+      setRows(list);
       setLoading(false);
     })();
-  }, [supabase]);
+  }, [supabase, focusId]);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -129,10 +175,15 @@ export default function AcceptedBidsPage() {
               const total = r.bid?.price ?? r.bid?.amount;
               const contact =
                 mode === 'owner' ? r.provider_contact : r.facility_contact;
+              const focused = focusId && String(r.id) === String(focusId);
               return (
                 <div
                   key={r.id}
-                  className="card p-5 border border-green-500/30 bg-green-500/5"
+                  id={focused ? 'focusCard' : undefined}
+                  className={
+                    'card p-5 border border-green-500/30 bg-green-500/5' +
+                    (focused ? ' ring-2 ring-[var(--gold)]' : '')
+                  }
                 >
                   <div className="flex justify-between gap-2 flex-wrap">
                     <div>

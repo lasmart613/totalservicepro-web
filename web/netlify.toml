@@ -1,12 +1,18 @@
-# Working production config (matches last successful repairplanet.net deploy layout).
-# @netlify/plugin-nextjs + publish=.next + post-build _redirects in package.json.
+# Total Service Pro — Netlify + Next.js Runtime
+#
+# Do NOT set publish = ".next". @netlify/plugin-nextjs owns the publish
+# directory and asset mapping. Forcing publish=.next causes
+# /_next/static/* 404s → browser "This page couldn't load".
 
 [build]
   command = "npm run build"
-  publish = ".next"
+  # Leave publish empty / omit — Next.js plugin sets it at build time.
+  # publish = ""
 
 [build.environment]
   NODE_VERSION = "20"
+  # Ensure client env is available at build if not only in UI
+  # (also set NEXT_PUBLIC_* in Netlify dashboard)
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
@@ -18,3 +24,8 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
     X-XSS-Protection = "1; mode=block"
+
+[[headers]]
+  for = "/_next/static/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"

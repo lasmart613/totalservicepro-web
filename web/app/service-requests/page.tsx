@@ -8,6 +8,8 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { canBidMarketplace, isOwnerish, isPro, isServiceCompany } from '@/lib/roles';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL, OTHER_LASER } from '@/lib/laser-catalog';
+import { ShareButton } from '@/components/ShareButton';
+import { serviceRequestShareText } from '@/lib/share';
 
 type Laser = {
   id: number;
@@ -55,6 +57,7 @@ function ServiceRequestsInner() {
   const [saving, setSaving] = useState(false);
   const [laserPick, setLaserPick] = useState('');
   const [mfr, setMfr] = useState('');
+  const [mfrOther, setMfrOther] = useState('');
   const [model, setModel] = useState('');
   const [modelOther, setModelOther] = useState('');
   const [serial, setSerial] = useState('');
@@ -63,12 +66,15 @@ function ServiceRequestsInner() {
   const [preferred, setPreferred] = useState('');
   const [errorCodes, setErrorCodes] = useState('');
   const [desc, setDesc] = useState('');
+  const [customerSite, setCustomerSite] = useState('');
+  const [budget, setBudget] = useState('');
 
   const mfrOptions = useMemo(() => listManufacturers(), []);
-  const modelOptions = useMemo(() => listModelsForManufacturer(mfr), [mfr]);
+  const modelOptions = useMemo(() => (mfr && mfr !== 'Other' ? listModelsForManufacturer(mfr) : []), [mfr]);
   const ownerView = isOwnerish(userRole, orgType);
   const proView =
     canBidMarketplace(userRole) || isPro(userRole) || isServiceCompany(userRole, orgType);
+  const canPost = ownerView || proView;
 
   useEffect(() => {
     load();
@@ -108,12 +114,22 @@ function ServiceRequestsInner() {
     setOrgState(org?.state || '');
 
     if (oId) {
+      let eqList: Laser[] = [];
       const { data: eq } = await supabase
         .from('equipment')
         .select('id, manufacturer, model, serial_number, room')
         .eq('customer_organization_id', oId)
         .order('manufacturer');
-      setLasers((eq || []) as Laser[]);
+      eqList = (eq || []) as Laser[];
+      if (!eqList.length) {
+        const { data: eq2 } = await supabase
+          .from('equipment')
+          .select('id, manufacturer, model, serial_number, room')
+          .eq('organization_id', oId)
+          .order('manufacturer');
+        eqList = (eq2 || []) as Laser[];
+      }
+      setLasers(eqList);
     }
 
     const owner = isOwnerish(role, oType);
@@ -123,7 +139,7 @@ function ServiceRequestsInner() {
       .from('service_requests')
       .select('*')
       .or('category.eq.service,category.is.null')
-      .in('status', owner ? ['open', 'bidding', 'awarded'] : ['open', 'bidding'])
+      .in('status', owner ? ['open', 'bidding', 'awarded'] : ['open', 'bidding', 'awarded'])
       .order('created_at', { ascending: false })
       .limit(100);
     if (owner && oId != null) q = q.eq('organization_id', oId);
@@ -169,27 +185,42 @@ function ServiceRequestsInner() {
   }
 
   function openPost() {
-    setLaserPick(lasers[0] ? String(lasers[0].id) : OTHER_LASER);
+    const pro = proView && !ownerView;
+    setLaserPick(lasers[0] && !pro ? String(lasers[0].id) : OTHER_LASER);
     setMfr('');
+    setMfrOther('');
     setModel('');
     setModelOther('');
     setSerial('');
-    setServiceType('Emergency Repair');
+    setServiceType(pro ? 'Subcontract Repair' : 'Emergency Repair');
     setUrgency('Medium');
     setPreferred('');
     setErrorCodes('');
     setDesc('');
-    if (lasers[0]) fillFromLaser(String(lasers[0].id));
+    setCustomerSite('');
+    setBudget('');
+    if (lasers[0] && !pro) fillFromLaser(String(lasers[0].id));
     setPostOpen(true);
   }
 
+  async function rememberManufacturer(name: string) {
+    if (!name || name === 'Other') return;
+    try {
+      await supabase.from('manufacturers').upsert({ name }, { onConflict: 'name' });
+    } catch { /* optional table */ }
+  }
+
   async function submitPost() {
-    if (!userId || !orgId) {
-      toast.error('No facility linked');
+    if (!userId) {
+      toast.error('Please sign in again');
+      return;
+    }
+    if (!orgId) {
+      toast.error('No organization linked to your profile');
       return;
     }
     if (!desc.trim()) {
-      toast.error('Please describe the issue');
+      toast.error('Please describe the issue / scope of work');
       return;
     }
 
@@ -198,15 +229,27 @@ function ServiceRequestsInner() {
     let serialVal = '';
     let equipmentId: number | null = null;
     let room = '';
+    const isSub = proView && !ownerView;
 
-    if (laserPick === OTHER_LASER) {
-      manufacturer = mfr.trim();
-      modelVal = model === OTHER_MODEL ? modelOther.trim() : model.trim();
+    if (laserPick === OTHER_LASER || !laserPick) {
+      // Other brand → free-text manufacturer (never store literal "Other")
+      manufacturer = mfr === 'Other' ? mfrOther.trim() : mfr.trim();
+      // Other model or free-text path when brand is Other / no catalog models
+      if (mfr === 'Other' || model === OTHER_MODEL || modelOptions.length === 0) {
+        modelVal = modelOther.trim();
+      } else {
+        modelVal = model.trim();
+      }
       serialVal = serial.trim();
-      if (!manufacturer || !modelVal) {
-        toast.error('Manufacturer and model required for a different laser');
+      if (!manufacturer || manufacturer === 'Other') {
+        toast.error('Enter the manufacturer name (select Other and type the brand, e.g. a new IPL).');
         return;
       }
+      if (!modelVal || modelVal === OTHER_MODEL) {
+        toast.error('Enter the model name (select Other / not listed and type the model).');
+        return;
+      }
+      await rememberManufacturer(manufacturer);
     } else {
       const L = lasers.find((x) => String(x.id) === String(laserPick));
       if (!L) {
@@ -220,8 +263,22 @@ function ServiceRequestsInner() {
       room = L.room || '';
     }
 
-    const title = `${serviceType}: ${[manufacturer, modelVal].filter(Boolean).join(' ')}`;
+    let serviceTypeFinal = serviceType;
+    if (isSub && !/subcontract/i.test(serviceTypeFinal)) {
+      serviceTypeFinal = `Subcontract · ${serviceTypeFinal}`;
+    }
+    const title = `${serviceTypeFinal}: ${[manufacturer, modelVal].filter(Boolean).join(' ')}`;
     let description = desc.trim();
+    if (isSub && !description.startsWith('[Subcontract RFQ]')) {
+      description = `[Subcontract RFQ] ${description}`;
+    }
+    if (isSub && customerSite.trim()) {
+      description += `. Customer/site: ${customerSite.trim()}.`;
+    }
+    const budgetNum = budget !== '' ? parseFloat(budget) : null;
+    if (isSub && budgetNum != null && !isNaN(budgetNum)) {
+      description += ` Sub pay budget: $${budgetNum}.`;
+    }
     if (room && !description.includes(room)) description += ` Room: ${room}.`;
 
     setSaving(true);
@@ -233,7 +290,7 @@ function ServiceRequestsInner() {
         created_by: userId,
         title,
         description,
-        service_type: serviceType,
+        service_type: serviceTypeFinal,
         model_type: modelVal || null,
         manufacturer: manufacturer || null,
         model: modelVal || null,
@@ -248,26 +305,31 @@ function ServiceRequestsInner() {
         location: locationStr,
         status: 'open',
         category: 'service',
+        budget_max: budgetNum != null && !isNaN(budgetNum) ? budgetNum : null,
       };
       let { error } = await supabase.from('service_requests').insert(payload);
       if (error) {
         const slim = {
           organization_id: orgId,
           posted_by: userId,
+          created_by: userId,
           title,
           description,
-          service_type: serviceType,
+          service_type: serviceTypeFinal,
           model_type: modelVal || null,
+          manufacturer: manufacturer || null,
+          model: modelVal || null,
           urgency,
           status: 'open',
+          category: 'service',
         };
         const r2 = await supabase.from('service_requests').insert(slim);
         if (r2.error) throw r2.error;
       }
-      toast.success('Service request posted');
+      toast.success(isSub ? 'Subcontract RFQ posted' : 'Service request posted');
       setPostOpen(false);
-      // Return owners to My Lasers after posting
-      router.push('/my-lasers');
+      await load();
+      if (ownerView) router.push('/my-lasers');
     } catch (e: any) {
       toast.error(e.message || 'Could not post');
     } finally {
@@ -288,7 +350,7 @@ function ServiceRequestsInner() {
             <p className="text-sm text-[var(--text3)] mt-1">
               {ownerView
                 ? 'Request service for your facility lasers. Separate from the marketplace.'
-                : 'Open repair / PM needs from laser owners. Bid from request details.'}
+                : 'Browse open RFQs and bid — or post a subcontract RFQ for overflow work. New makes/models can be typed via Other.'}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -298,9 +360,9 @@ function ServiceRequestsInner() {
             <Link href="/notifications" className="btn btn-secondary text-sm">
               Notifications
             </Link>
-            {(ownerView || !proView) && (
-              <button type="button" className="btn btn-primary" onClick={openPost} disabled={!orgId && ownerView}>
-                ＋ Post Service Request
+            {canPost && (
+              <button type="button" className="btn btn-primary" onClick={openPost} disabled={!orgId}>
+                {proView && !ownerView ? '＋ Post Subcontract RFQ' : '＋ Post Service Request'}
               </button>
             )}
           </div>
@@ -311,9 +373,11 @@ function ServiceRequestsInner() {
         ) : rows.length === 0 ? (
           <div className="card p-10 text-center text-[var(--text3)]">
             {ownerView ? 'No open service requests yet.' : 'No open repair jobs right now.'}
-            {ownerView && (
+            {canPost && (
               <div className="mt-4">
-                <button type="button" className="btn btn-primary" onClick={openPost}>Post Service Request</button>
+                <button type="button" className="btn btn-primary" onClick={openPost}>
+                  {proView && !ownerView ? 'Post Subcontract RFQ' : 'Post Service Request'}
+                </button>
               </div>
             )}
           </div>
@@ -348,13 +412,29 @@ function ServiceRequestsInner() {
                 {r.description && (
                   <p className="text-sm mt-3 line-clamp-3">{r.description}</p>
                 )}
-                <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--border2)]">
+                <div className="flex items-center justify-between mt-4 pt-3 border-t border-[var(--border2)] gap-2 flex-wrap">
                   <span className="text-sm text-[var(--text3)]">
                     <span className="text-[var(--gold)] font-semibold">{r.bid_count || 0}</span> bid{(r.bid_count || 0) !== 1 ? 's' : ''}
                   </span>
-                  <Link href={`/marketplace/requests/${r.id}`} className="btn btn-secondary text-sm">
-                    {proView ? 'View / Bid' : 'View details'}
-                  </Link>
+                  <div className="flex items-center gap-2">
+                    <ShareButton
+                      variant="button"
+                      label="Share"
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[var(--border2)] bg-[var(--surface2)] text-xs font-bold hover:border-[var(--gold)]"
+                      {...serviceRequestShareText({
+                        id: r.id,
+                        title: r.title,
+                        manufacturer: r.manufacturer,
+                        model: r.model,
+                        urgency: r.urgency,
+                        region: [r.city, r.state].filter(Boolean).join(', ') || r.location || '',
+                        description: r.description,
+                      })}
+                    />
+                    <Link href={`/marketplace/requests/${r.id}`} className="btn btn-secondary text-sm">
+                      {proView ? 'View / Bid' : 'View details'}
+                    </Link>
+                  </div>
                 </div>
               </div>
             ))}
@@ -368,9 +448,13 @@ function ServiceRequestsInner() {
             className="bg-[var(--surface)] border border-[var(--border2)] rounded-t-2xl sm:rounded-2xl w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="font-extrabold text-lg text-[var(--gold)] mb-1">Post Service Request</div>
+            <div className="font-extrabold text-lg text-[var(--gold)] mb-1">
+              {proView && !ownerView ? 'Post Subcontract RFQ' : 'Post Service Request'}
+            </div>
             <p className="text-xs text-[var(--text3)] mb-4">
-              Service companies can bid on this request. Not a marketplace listing.
+              {proView && !ownerView
+                ? 'Need overflow help? Describe the laser and work. Use Other to add a make/model not in the catalog.'
+                : 'Service companies can bid on this request. Use Other to type a manufacturer or model not listed yet.'}
             </p>
 
             <div className="space-y-3">
@@ -392,7 +476,7 @@ function ServiceRequestsInner() {
                       {L.room ? ` · ${L.room}` : ''}
                     </option>
                   ))}
-                  <option value={OTHER_LASER}>Different laser (not in My Lasers)…</option>
+                  <option value={OTHER_LASER}>Different laser / not in list…</option>
                 </select>
               </div>
 
@@ -400,43 +484,87 @@ function ServiceRequestsInner() {
                 <>
                   <div>
                     <label className="label">Manufacturer *</label>
-                    <select className="input" value={mfr} onChange={(e) => { setMfr(e.target.value); setModel(''); setModelOther(''); }}>
+                    <select
+                      className="input"
+                      value={mfr}
+                      onChange={(e) => {
+                        setMfr(e.target.value);
+                        setModel('');
+                        setModelOther('');
+                        if (e.target.value !== 'Other') setMfrOther('');
+                      }}
+                    >
                       <option value="">Select brand…</option>
                       {mfrOptions.map((b) => (
                         <option key={b} value={b}>{b}</option>
                       ))}
-                      <option value="Other">Other</option>
+                      <option value="Other">Other (type new brand)…</option>
                     </select>
+                    {mfr === 'Other' && (
+                      <input
+                        className="input mt-2"
+                        value={mfrOther}
+                        onChange={(e) => setMfrOther(e.target.value)}
+                        placeholder="Type manufacturer name (e.g. new IPL brand)"
+                        autoComplete="off"
+                      />
+                    )}
                   </div>
                   <div>
                     <label className="label">Model *</label>
-                    <select className="input" value={model} onChange={(e) => setModel(e.target.value)} disabled={!mfr}>
-                      <option value="">Select model…</option>
-                      {modelOptions.map((m) => (
-                        <option key={m} value={m}>{m}</option>
-                      ))}
-                      <option value={OTHER_MODEL}>Other / not listed…</option>
-                    </select>
-                    {model === OTHER_MODEL && (
-                      <input className="input mt-2" value={modelOther} onChange={(e) => setModelOther(e.target.value)} placeholder="Model name" />
+                    {mfr && mfr !== 'Other' && modelOptions.length > 0 ? (
+                      <>
+                        <select className="input" value={model} onChange={(e) => setModel(e.target.value)} disabled={!mfr}>
+                          <option value="">Select model…</option>
+                          {modelOptions.map((m) => (
+                            <option key={m} value={m}>{m}</option>
+                          ))}
+                          <option value={OTHER_MODEL}>Other / not listed…</option>
+                        </select>
+                        {model === OTHER_MODEL && (
+                          <input
+                            className="input mt-2"
+                            value={modelOther}
+                            onChange={(e) => setModelOther(e.target.value)}
+                            placeholder="Type model name"
+                            autoComplete="off"
+                          />
+                        )}
+                      </>
+                    ) : (
+                      <input
+                        className="input"
+                        value={modelOther}
+                        onChange={(e) => setModelOther(e.target.value)}
+                        placeholder={mfr ? 'Type model name' : 'Select manufacturer first, or Other + type model'}
+                        disabled={!mfr}
+                        autoComplete="off"
+                      />
                     )}
                   </div>
                   <div>
                     <label className="label">Serial #</label>
                     <input className="input" value={serial} onChange={(e) => setSerial(e.target.value)} />
                   </div>
+                  {proView && !ownerView && (
+                    <div>
+                      <label className="label">Customer / site (optional)</label>
+                      <input className="input" value={customerSite} onChange={(e) => setCustomerSite(e.target.value)} placeholder="Clinic or facility name" />
+                    </div>
+                  )}
                 </>
               )}
 
               <div>
                 <label className="label">Service type</label>
                 <select className="input" value={serviceType} onChange={(e) => setServiceType(e.target.value)}>
-                  <option>Emergency Repair</option>
-                  <option>PM</option>
-                  <option>Install / Commission</option>
-                  <option>Calibration</option>
-                  <option>Full Contract</option>
-                  <option>Other</option>
+                  {proView && !ownerView && <option value="Subcontract Repair">Subcontract Repair</option>}
+                  <option value="Emergency Repair">Emergency Repair</option>
+                  <option value="PM">PM</option>
+                  <option value="Install / Commission">Install / Commission</option>
+                  <option value="Calibration">Calibration</option>
+                  <option value="Full Contract">Full Contract</option>
+                  <option value="Other">Other</option>
                 </select>
               </div>
               <div>
@@ -456,16 +584,29 @@ function ServiceRequestsInner() {
                 <label className="label">Error codes</label>
                 <input className="input" value={errorCodes} onChange={(e) => setErrorCodes(e.target.value)} />
               </div>
+              {proView && !ownerView && (
+                <div>
+                  <label className="label">Sub pay budget (optional)</label>
+                  <input className="input" type="number" min={0} value={budget} onChange={(e) => setBudget(e.target.value)} placeholder="What you can pay a sub" />
+                </div>
+              )}
               <div>
                 <label className="label">Description *</label>
-                <textarea className="input min-h-[100px]" value={desc} onChange={(e) => setDesc(e.target.value)} />
+                <textarea
+                  className="input min-h-[100px]"
+                  value={desc}
+                  onChange={(e) => setDesc(e.target.value)}
+                  placeholder={proView && !ownerView
+                    ? 'Scope of work, symptoms, access — what the subcontractor should do…'
+                    : 'Symptoms, timeline, access notes…'}
+                />
               </div>
             </div>
 
             <div className="flex gap-2 mt-5">
               <button type="button" className="btn btn-secondary flex-1" onClick={() => setPostOpen(false)}>Cancel</button>
               <button type="button" className="btn btn-primary flex-[2]" onClick={submitPost} disabled={saving}>
-                {saving ? 'Posting…' : 'Post Service Request'}
+                {saving ? 'Posting…' : (proView && !ownerView ? 'Post Subcontract RFQ' : 'Post Service Request')}
               </button>
             </div>
           </div>

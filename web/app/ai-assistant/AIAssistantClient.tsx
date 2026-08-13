@@ -19,7 +19,12 @@ type ManualRow = {
   brand: string | null;
 };
 
-const STORAGE_KEY = 'tsp_ai_web_v1';
+/** Legacy unscoped key — do not restore across accounts/orgs */
+const LEGACY_STORAGE_KEY = 'tsp_ai_web_v1';
+
+function storageKeyFor(userId: string, orgId: string | number | null | undefined): string {
+  return `tsp_ai_web_v1:u:${userId}:o:${orgId != null && orgId !== '' ? String(orgId) : 'none'}`;
+}
 
 const QUICK_CHIPS: { label: string; prompt: string }[] = [
   { label: '⚡ Fault codes', prompt: 'What are the most common fault codes for this system?' },
@@ -53,6 +58,8 @@ export default function AIAssistantClient() {
 
   const [ready, setReady] = useState(false);
   const [token, setToken] = useState<string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [orgId, setOrgId] = useState<string | number | null>(null);
   const [manuals, setManuals] = useState<ManualRow[]>([]);
   const [brand, setBrand] = useState('');
   const [manualPath, setManualPath] = useState('');
@@ -82,23 +89,38 @@ export default function AIAssistantClient() {
     return m ? `${m.brand || ''} · ${m.title}`.trim() : '';
   }, [manuals, manualPath]);
 
+  const activeStorageKey = useMemo(() => {
+    if (!userId) return null;
+    return storageKeyFor(userId, orgId);
+  }, [userId, orgId]);
+
   const saveState = useCallback(
     (msgs: ChatMessage[], path: string, mfr: string) => {
+      if (!userId) return;
+      const key = storageKeyFor(userId, orgId);
       try {
         localStorage.setItem(
-          STORAGE_KEY,
+          key,
           JSON.stringify({
             msgs: msgs.slice(-40),
             manual: path,
             mfr,
+            userId,
+            orgId: orgId != null ? String(orgId) : null,
             ts: Date.now(),
           })
         );
+        // Remove legacy unscoped blob so it never leaks into another account
+        try {
+          localStorage.removeItem(LEGACY_STORAGE_KEY);
+        } catch {
+          /* ignore */
+        }
       } catch {
         /* ignore quota */
       }
     },
-    []
+    [userId, orgId]
   );
 
   useEffect(() => {
@@ -107,24 +129,64 @@ export default function AIAssistantClient() {
       const {
         data: { session },
       } = await supabase.auth.getSession();
-      if (!session?.access_token) {
+      if (!session?.access_token || !session.user?.id) {
         router.replace('/login?next=/ai-assistant');
         return;
       }
       if (cancelled) return;
       setToken(session.access_token);
+      setUserId(session.user.id);
 
-      // Restore chat / manual
+      // Resolve org for isolation — chat history must not cross organizations
+      let resolvedOrg: string | number | null = null;
       try {
-        const raw = localStorage.getItem(STORAGE_KEY);
-        if (raw) {
-          const s = JSON.parse(raw);
-          if (Array.isArray(s.msgs)) setMessages(s.msgs);
-          if (s.manual) setManualPath(String(s.manual));
-          if (s.mfr) setBrand(String(s.mfr));
-        }
+        const { data: prof } = await supabase
+          .from('user_profiles')
+          .select('organization_id')
+          .eq('id', session.user.id)
+          .maybeSingle();
+        resolvedOrg = prof?.organization_id ?? null;
+      } catch {
+        resolvedOrg = null;
+      }
+      if (cancelled) return;
+      setOrgId(resolvedOrg);
+
+      const key = storageKeyFor(session.user.id, resolvedOrg);
+
+      // Restore ONLY this user+org chat; never the legacy global key
+      try {
+        localStorage.removeItem(LEGACY_STORAGE_KEY);
       } catch {
         /* ignore */
+      }
+      try {
+        const raw = localStorage.getItem(key);
+        if (raw) {
+          const s = JSON.parse(raw);
+          // Defense in depth: reject blobs that claim a different user/org
+          const blobUser = s.userId != null ? String(s.userId) : null;
+          const blobOrg = s.orgId != null ? String(s.orgId) : null;
+          const wantUser = String(session.user.id);
+          const wantOrg = resolvedOrg != null ? String(resolvedOrg) : null;
+          const okUser = !blobUser || blobUser === wantUser;
+          const okOrg = !blobOrg || blobOrg === wantOrg;
+          if (okUser && okOrg) {
+            if (Array.isArray(s.msgs)) setMessages(s.msgs);
+            if (s.manual) setManualPath(String(s.manual));
+            if (s.mfr) setBrand(String(s.mfr));
+          } else {
+            setMessages([]);
+            setManualPath('');
+            setBrand('');
+          }
+        } else {
+          setMessages([]);
+          setManualPath('');
+          setBrand('');
+        }
+      } catch {
+        setMessages([]);
       }
 
       // Manuals catalog
@@ -139,22 +201,16 @@ export default function AIAssistantClient() {
       } else if (!cancelled) {
         const rows = (man || []).filter((m: any) => m.storage_path && m.title) as ManualRow[];
         setManuals(rows);
-        // If restored path has brand, ensure brand select matches
         setBrand((prev) => {
           if (prev) return prev;
-          const path =
-            typeof window !== 'undefined'
-              ? (() => {
-                  try {
-                    return JSON.parse(localStorage.getItem(STORAGE_KEY) || '{}').manual;
-                  } catch {
-                    return '';
-                  }
-                })()
-              : '';
-          if (path) {
-            const hit = rows.find((r) => r.storage_path === path);
-            if (hit?.brand) return hit.brand;
+          try {
+            const path = JSON.parse(localStorage.getItem(key) || '{}').manual;
+            if (path) {
+              const hit = rows.find((r) => r.storage_path === path);
+              if (hit?.brand) return hit.brand;
+            }
+          } catch {
+            /* ignore */
           }
           return prev;
         });

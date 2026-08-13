@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { ShareButton } from '@/components/ShareButton';
+import { listingShareText } from '@/lib/share';
 
 export default function ListingDetail() {
   const params = useParams();
@@ -17,6 +19,7 @@ export default function ListingDetail() {
   const [bidPrice, setBidPrice] = useState('');
   const [bidNotes, setBidNotes] = useState('');
   const [bidQuestion, setBidQuestion] = useState('');
+  const [userId, setUserId] = useState<string | null>(null);
   const supabase = getSupabaseClient();
 
   useEffect(() => {
@@ -25,17 +28,37 @@ export default function ListingDetail() {
 
   const fetchListing = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    setListing(null);
+    const { data: { user } } = await supabase.auth.getUser();
+    setUserId(user?.id || null);
+
+    let data: any = null;
+    const { data: direct, error } = await supabase
       .from('marketplace_listings')
       .select('*')
       .eq('id', id)
-      .single();
-    if (error) {
-      toast.error('Listing not found');
+      .maybeSingle();
+
+    if (!error && direct) {
+      data = direct;
+    } else {
+      try {
+        const res = await fetch(`/api/share/listing/${encodeURIComponent(id)}`, {
+          method: 'GET',
+          cache: 'no-store',
+        });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && json?.listing) data = json.listing;
+      } catch (e) {
+        console.warn('share listing API fallback', e);
+      }
+    }
+
+    if (!data) {
+      if (user) toast.error('Listing not found');
     } else {
       setListing(data);
-      // Increment views (make counter functional). Fire and forget; ignore errors for UX.
-      if (data) {
+      if (user && data.id) {
         const newViews = (data.views || 0) + 1;
         supabase.from('marketplace_listings').update({ views: newViews }).eq('id', id).then(() => {});
       }
@@ -124,7 +147,44 @@ export default function ListingDetail() {
             </div>
           )}
 
-          <h1 className="text-3xl font-extrabold mb-2">{listing.title}</h1>
+          <div className="flex items-start justify-between gap-3 mb-2">
+            <h1 className="text-3xl font-extrabold min-w-0">{listing.title}</h1>
+            <ShareButton
+              {...listingShareText({
+                id,
+                title: listing.title,
+                manufacturer: listing.manufacturer,
+                model: listing.model,
+                price: listing.price,
+                condition: listing.condition,
+                description: listing.description,
+              })}
+            />
+          </div>
+
+          {!userId && (
+            <div className="mb-6 p-5 rounded-xl border border-[var(--gold)]/40 bg-[var(--gold)]/10">
+              <div className="font-extrabold text-[var(--gold)] mb-1">You&apos;ve been invited to this listing</div>
+              <p className="text-sm text-[var(--text2)] mb-4">
+                Create a free account to message the seller or make an offer on Total Service Pro.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Link
+                  href={`/signup?next=${encodeURIComponent(`/marketplace/listing/${id}`)}`}
+                  className="btn btn-primary"
+                >
+                  Sign up free
+                </Link>
+                <Link
+                  href={`/login?next=${encodeURIComponent(`/marketplace/listing/${id}`)}`}
+                  className="btn btn-secondary"
+                >
+                  Log in
+                </Link>
+              </div>
+            </div>
+          )}
+
           {listing.description && <p className="text-[var(--text3)] mb-4 whitespace-pre-wrap">{listing.description}</p>}
 
           {/* PN below name */}
@@ -152,7 +212,19 @@ export default function ListingDetail() {
 
           {/* Bid Form */}
           <div className="border-t pt-6">
-            {!showBidForm ? (
+            {!userId ? (
+              <div className="space-y-3">
+                <p className="text-sm text-[var(--text3)] text-center">
+                  Sign up free to make an offer or ask the seller a question.
+                </p>
+                <Link
+                  href={`/signup?next=${encodeURIComponent(`/marketplace/listing/${id}`)}`}
+                  className="btn btn-primary w-full block text-center"
+                >
+                  Sign up free to offer
+                </Link>
+              </div>
+            ) : !showBidForm ? (
               <button onClick={() => setShowBidForm(true)} className="btn btn-primary w-full">
                 Make Offer / Bid
               </button>

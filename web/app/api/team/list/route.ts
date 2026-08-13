@@ -78,13 +78,25 @@ export async function GET(req: NextRequest) {
       console.warn('list sync light fail', e);
     }
 
-    const { data: members, error } = await admin
+    const teamSelectFull =
+      'id, first_name, last_name, email, role, job_title, additional_roles, created_at, onboarding_completed, organization_id';
+    const teamSelectSafe =
+      'id, first_name, last_name, email, role, job_title, created_at, onboarding_completed, organization_id';
+
+    let { data: members, error } = await admin
       .from('user_profiles')
-      .select(
-        'id, first_name, last_name, email, role, job_title, additional_roles, created_at, onboarding_completed, organization_id'
-      )
+      .select(teamSelectFull)
       .eq('organization_id', orgId)
       .order('first_name', { ascending: true, nullsFirst: false });
+
+    // Older DBs may not have additional_roles yet
+    if (error && /additional_roles|column/i.test(error.message || '')) {
+      ({ data: members, error } = await admin
+        .from('user_profiles')
+        .select(teamSelectSafe)
+        .eq('organization_id', orgId)
+        .order('first_name', { ascending: true, nullsFirst: false }));
+    }
 
     if (error) {
       return NextResponse.json({ error: error.message, members: [] }, { status: 400 });
