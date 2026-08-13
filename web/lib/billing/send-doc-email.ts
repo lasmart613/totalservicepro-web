@@ -11,6 +11,7 @@ export type SendDocResult = {
   paymentUrl?: string | null;
   stripeSkippedReason?: string | null;
   emailSource?: string;
+  actionToken?: string | null;
 };
 
 export async function sendBillingDocEmail(opts: {
@@ -51,6 +52,7 @@ export async function sendBillingDocEmail(opts: {
       paymentUrl: json.paymentUrl ?? null,
       stripeSkippedReason: json.stripeSkippedReason ?? null,
       emailSource: json.emailSource,
+      actionToken: json.actionToken ?? null,
     };
   } catch (e: any) {
     return {

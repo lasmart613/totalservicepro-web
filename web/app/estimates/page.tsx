@@ -8,6 +8,8 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
   coerceOrgId,
+  customerActionFromEstimate,
+  customerActionLabel,
   isEstimateExpired,
   isValidOrgId,
   money,
@@ -35,6 +37,12 @@ function statusBadgeClass(st: string): string {
   if (st === 'pending' || st === 'sent') return 'bg-blue-900/40 text-blue-200 border-blue-700';
   if (st === 'invoiced' || st === 'completed') return 'bg-purple-900/40 text-purple-200 border-purple-700';
   if (st === 'expired') return 'bg-red-900/40 text-red-200 border-red-700';
+  return 'bg-[var(--surface2)] text-[var(--text2)] border-[var(--border2)]';
+}
+
+function customerActionBadgeClass(action: string): string {
+  if (action === 'approved') return 'bg-green-900/40 text-green-200 border-green-700';
+  if (action === 'changes_requested') return 'bg-amber-900/40 text-amber-200 border-amber-700';
   return 'bg-[var(--surface2)] text-[var(--text2)] border-[var(--border2)]';
 }
 
@@ -195,6 +203,7 @@ export default function EstimatesListPage() {
           e.device_model,
           docNumber(e),
           e.status,
+          customerActionLabel(customerActionFromEstimate(e).action),
           String(e.total ?? ''),
         ]
           .filter(Boolean)
@@ -315,6 +324,8 @@ export default function EstimatesListPage() {
               const until = validUntilLabel(est.created_at);
               const num = docNumber(est);
               const canConvert = st !== 'invoiced' && st !== 'cancelled' && st !== 'expired';
+              const custAct = customerActionFromEstimate(est);
+              const custLabel = customerActionLabel(custAct.action);
               return (
                 <div
                   key={String(est.id)}
@@ -342,6 +353,15 @@ export default function EstimatesListPage() {
                       >
                         {st.charAt(0).toUpperCase() + st.slice(1)}
                       </span>
+                      {custLabel && (
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${customerActionBadgeClass(
+                            custAct.action || ''
+                          )}`}
+                        >
+                          {custLabel}
+                        </span>
+                      )}
                       {st === 'expired' ? (
                         <span>· Expired</span>
                       ) : until ? (

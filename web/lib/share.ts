@@ -11,6 +11,13 @@ export function listingShareUrl(id: string): string {
   return `${SITE_ORIGIN}/marketplace/listing/${encodeURIComponent(id)}?utm_source=share&invite=1`;
 }
 
+/** Public, no-login estimate approve / request-changes page. */
+export function estimateActionUrl(token: string, opts?: { changes?: boolean }): string {
+  const origin = String(SITE_ORIGIN || 'https://repairplanet.net').replace(/\/$/, '');
+  const base = `${origin}/e/${encodeURIComponent(token)}`;
+  return opts?.changes ? `${base}?changes=1` : base;
+}
+
 export function serviceRequestShareText(opts: {
   title?: string | null;
   manufacturer?: string | null;
