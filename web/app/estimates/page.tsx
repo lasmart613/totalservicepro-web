@@ -326,13 +326,18 @@ export default function EstimatesListPage() {
               return (
                 <div
                   key={String(est.id)}
-                  className={`card p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 hover:border-[var(--gold-border)] ${
+                  className={`card p-4 flex flex-col gap-3 hover:border-[var(--gold-border)] ${
                     st === 'expired' ? 'opacity-85' : ''
                   }`}
                 >
-                  <Link href={`/estimates/new?id=${est.id}`} className="flex-1 min-w-0 block">
-                    <div className="font-bold text-base truncate">
+                  <Link href={`/estimates/new?id=${est.id}`} className="min-w-0 block">
+                    <div className="flex items-start justify-between gap-3">
+                    <div className="font-bold text-base min-w-0 break-words">
                       {est.customer_name || 'Unknown Customer'}
+                    </div>
+                    <div className="font-bold text-[var(--gold)] text-lg shrink-0">
+                      {money(Number(est.total) || 0)}
+                    </div>
                     </div>
                     <div className="text-xs text-[var(--text3)] mt-1 flex flex-wrap gap-x-2 gap-y-1 items-center">
                       {num && (
@@ -375,11 +380,7 @@ export default function EstimatesListPage() {
                       </div>
                     )}
                   </Link>
-                  <div className="flex items-center gap-3 flex-shrink-0">
-                    <div className="font-bold text-[var(--gold)] text-lg">
-                      {money(Number(est.total) || 0)}
-                    </div>
-                    <div className="flex gap-2 flex-wrap justify-end">
+                  <div className="flex flex-wrap gap-2 justify-start">
                       <Link
                         href={`/estimates/new?id=${est.id}`}
                         className="btn btn-secondary text-xs px-3 py-1.5"
@@ -404,7 +405,6 @@ export default function EstimatesListPage() {
                           Customer page
                         </a>
                       )}
-                    </div>
                   </div>
                 </div>
               );

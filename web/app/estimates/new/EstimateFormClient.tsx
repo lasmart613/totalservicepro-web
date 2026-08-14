@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -48,6 +48,7 @@ export default function EstimateFormClient() {
   const [userOrgId, setUserOrgId] = useState<string | number | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [docNumber, setDocNumber] = useState('');
+  const allocatedNumberRef = useRef('');
   const [status, setStatus] = useState('draft');
   const [company, setCompany] = useState<DocCompany>({});
   const [emailing, setEmailing] = useState(false);
@@ -265,7 +266,9 @@ export default function EstimateFormClient() {
       setCustSearch(data.customer_name || '');
       setCustomerOrgId(data.customer_organization_id || null);
       const ed = parseJsonField(data.estimate_data);
-      setDocNumber(data.estimate_number || ed.estimate_number || ed.estNumber || '');
+      const loadedEst = data.estimate_number || ed.estimate_number || ed.estNumber || '';
+      setDocNumber(loadedEst);
+      allocatedNumberRef.current = loadedEst;
       setManufacturer(ed.manufacturer || '');
       setModel(ed.model || '');
       setSerial(ed.serial || '');
@@ -455,7 +458,9 @@ export default function EstimateFormClient() {
     }
     setSaving(true);
     try {
-      let estNum = editIdParam ? docNumber : '';
+      let estNum =
+        (docNumber && !/^draft$/i.test(docNumber) ? docNumber : '') ||
+        allocatedNumberRef.current;
       if (!estNum && userOrgId) {
         estNum = await allocateDocNumber(supabase, {
           orgId: userOrgId,
@@ -464,6 +469,7 @@ export default function EstimateFormClient() {
         });
         setDocNumber(estNum);
       }
+      if (estNum) allocatedNumberRef.current = estNum;
       if (!estNum) {
         throw new Error('Could not allocate an estimate number. Try again.');
       }
@@ -662,7 +668,10 @@ export default function EstimateFormClient() {
         phone: custPhone,
         email: custEmail,
       },
-      estNumber: docNumber || 'Draft',
+      estNumber:
+        (docNumber && !/^draft$/i.test(docNumber) ? docNumber : '') ||
+        allocatedNumberRef.current ||
+        '',
       dateStr: new Date().toLocaleDateString(),
       manufacturer,
       model: modelName,
@@ -719,7 +728,10 @@ export default function EstimateFormClient() {
         payload: {
           estimate_id: id,
           to_email: custEmail.trim() || undefined,
-          estimate_number: docNumber,
+          estimate_number:
+            (docNumber && !/^draft$/i.test(docNumber) ? docNumber : '') ||
+            allocatedNumberRef.current,
+          company_name: company.company_name,
           customer_organization_id: customerOrgId,
           reply_to: company.email || undefined,
           html: buildEstimateEmailHtml(),
@@ -938,16 +950,19 @@ export default function EstimateFormClient() {
         {/* Service types */}
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Service Type(s)</h2>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+          <div className="grid grid-cols-1 gap-2">
             {SERVICE_TYPES.map((s) => (
-              <label key={s} className="flex items-center gap-2 text-sm cursor-pointer">
+              <label
+                key={s}
+                className="grid grid-cols-[24px_minmax(0,1fr)] items-center gap-x-3 text-sm cursor-pointer rounded-lg border border-[var(--border2)] bg-[var(--surface2)] px-3 py-2.5"
+              >
                 <input
                   type="checkbox"
                   checked={services.includes(s)}
                   onChange={() => toggleService(s)}
-                  className="accent-[var(--gold)]"
+                  className="accent-[var(--gold)] h-5 w-5 m-0 justify-self-center shrink-0"
                 />
-                {SERVICE_TYPE_LABELS[s] || s}
+                <span className="min-w-0 pl-0.5">{SERVICE_TYPE_LABELS[s] || s}</span>
               </label>
             ))}
           </div>

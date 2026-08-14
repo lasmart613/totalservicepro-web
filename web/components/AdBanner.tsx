@@ -5,9 +5,9 @@ import Script from 'next/script';
 import { usePathname } from 'next/navigation';
 import { getSupabaseClient } from '../lib/supabase/client';
 
-/** Same publisher / slot as Android AdMob top banner + existing AdSense client. */
+/** Larry's TSP-Web unit — see ADSENSE_WEB.md. Same publisher as Android AdMob. */
 const ADSENSE_CLIENT = 'ca-pub-5353320292042327';
-const ADSENSE_SLOT = '1955313486';
+const ADSENSE_SLOT = '8443570568';
 
 const HIDDEN_PREFIXES = ['/signup', '/onboarding', '/auth', '/login'];
 
@@ -110,10 +110,10 @@ export default function AdBanner() {
     >
       <ins
         className="adsbygoogle"
-        style={{ display: 'block', width: '100%', minHeight: 50 }}
+        style={{ display: 'block' }}
         data-ad-client={ADSENSE_CLIENT}
         data-ad-slot={ADSENSE_SLOT}
-        data-ad-format="horizontal"
+        data-ad-format="auto"
         data-full-width-responsive="true"
       />
       <Script
