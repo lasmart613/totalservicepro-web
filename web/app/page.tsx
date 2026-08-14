@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { Calendar, Wrench, Package, FileText, Zap, Building2, Settings } from 'lucide-react';
-import AdBanner from '@/components/AdBanner';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
   isAdmin,
@@ -403,8 +402,6 @@ export default function HomePage() {
           Role: <span className="capitalize">{role}</span>
           {orgType ? <span> · Org: {orgType}</span> : null}
         </p>
-
-        <AdBanner />
 
         {/* ── Owner / facility KPIs ── */}
         {persona === 'owner' && (
