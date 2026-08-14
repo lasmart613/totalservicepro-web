@@ -190,6 +190,25 @@ export async function claimPendingInvitations(supabase: SupabaseClient, userId: 
   if (!email || !userId) return;
   try {
     const clean = email.toLowerCase().trim();
+    // Founders who just created an org must not be pulled into a pending FSE invite.
+    const { data: existingProf } = await supabase
+      .from('user_profiles')
+      .select('organization_id, role')
+      .eq('id', userId)
+      .maybeSingle();
+    const { data: { user: authUser } } = await supabase.auth.getUser();
+    const invited = !!(authUser?.user_metadata as any)?.invited_member;
+    const founderRoles = new Set(['company_admin', 'admin', 'owner', 'parts_supplier']);
+    const metaRole = String((authUser?.user_metadata as any)?.role || '').toLowerCase();
+    const signupKind = String((authUser?.user_metadata as any)?.signup_kind || '').toLowerCase();
+    const isFounderSignup =
+      !invited &&
+      (founderRoles.has(String(existingProf?.role || '').toLowerCase()) ||
+        founderRoles.has(metaRole) ||
+        ['company', 'owner', 'supplier'].includes(signupKind));
+    if (isFounderSignup && (existingProf?.organization_id || signupKind || founderRoles.has(metaRole))) {
+      return;
+    }
     // Prefer server claim (bypasses RLS) when we have a session
     try {
       const { data: { session } } = await supabase.auth.getSession();

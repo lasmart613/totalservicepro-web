@@ -1,10 +1,12 @@
 'use client';
 
 import React, { useState } from 'react';
-import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
+import { getSupabaseClient } from '@/lib/supabase/client';
 import AuthOtpBox from '@/components/AuthOtpBox';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
+import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
 
 const SERVICES_OFFERED = [
   'Preventive Maintenance (PM)', 'Emergency / On-Call Repair', 'Install / Deinstall',
@@ -39,47 +41,31 @@ export default function CompanySignup() {
     );
   };
 
-  async function completeCompanySetup(userId: string) {
-    const orgInsert: any = {
+  function pendingPayload(): PendingSignup {
+    return {
+      kind: 'company',
       name: companyName,
-      type: 'service_company',
+      firstName,
+      lastName,
+      email,
+      phone: phone || null,
       address: address || null,
       city: city || null,
       state: state || null,
-      phone: phone || null,
       website: website || null,
-      services_offered: selectedServices.length ? selectedServices.join(' | ') : null,
-      num_techs: numTechs ? parseInt(numTechs, 10) : null,
-    };
-
-    const { data: orgData, error: orgError } = await supabase
-      .from('organizations')
-      .insert(orgInsert)
-      .select('id')
-      .single();
-
-    if (orgError) {
-      console.warn('Org creation warning (may be RLS or duplicate):', orgError);
-    }
-    const newOrgId = orgData?.id ?? null;
-
-    await supabase.from('user_profiles').upsert(
-      {
-        id: userId,
-        first_name: firstName,
-        last_name: lastName,
-        email,
-        phone: phone || null,
-        role: 'company_admin',
+      role: 'company_admin',
+      orgType: 'service_company',
+      extra: {
         job_title: 'Company Admin',
-        organization_id: newOrgId,
-        onboarding_completed: false,
+        services_offered: selectedServices.length ? selectedServices.join(' | ') : null,
+        num_techs: numTechs ? parseInt(numTechs, 10) : null,
       },
-      { onConflict: 'id' }
-    );
+    };
+  }
 
-    await claimPendingInvitations(supabase, userId, email);
-    router.push('/onboarding');
+  async function completeCompanySetup(userId: string) {
+    const applied = await applyPendingSignup(supabase, userId, pendingPayload());
+    router.push(applied.dest);
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -90,8 +76,8 @@ export default function CompanySignup() {
       setMessage('Company name, contact name, email and password are required.');
       return;
     }
-    if (password.length < 6) {
-      setMessage('Password must be at least 6 characters.');
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
     if (password !== confirmPassword) {
@@ -103,11 +89,25 @@ export default function CompanySignup() {
     try {
       const origin =
         typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+      savePendingSignup(pendingPayload());
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: { first_name: firstName, last_name: lastName, company: companyName },
+          data: {
+            first_name: firstName,
+            last_name: lastName,
+            company: companyName,
+            role: 'company_admin',
+            organization_type: 'service_company',
+            signup_kind: 'company',
+            address: address || '',
+            city: city || '',
+            state: state || '',
+            phone: phone || '',
+            website: website || '',
+            services_offered: selectedServices.length ? selectedServices.join(' | ') : '',
+          },
           emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
         },
       });
@@ -212,12 +212,12 @@ export default function CompanySignup() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Password * (min 6)</label>
-                <input type="password" className="input" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
+                <label className="label">Password * (min {MIN_PASSWORD_LENGTH})</label>
+                <input type="password" className="input" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} />
               </div>
               <div>
                 <label className="label">Confirm Password *</label>
-                <input type="password" className="input" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required minLength={6} />
+                <input type="password" className="input" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required minLength={8} />
               </div>
             </div>
 

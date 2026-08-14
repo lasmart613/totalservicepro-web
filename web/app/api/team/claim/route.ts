@@ -37,6 +37,27 @@ export async function POST(req: NextRequest) {
     const email = user.email.toLowerCase().trim();
     const meta = user.user_metadata || {};
 
+    const founderRoles = new Set(['company_admin', 'admin', 'owner', 'parts_supplier']);
+    const { data: existingProf } = await userClient
+      .from('user_profiles')
+      .select('organization_id, role, onboarding_completed')
+      .eq('id', user.id)
+      .maybeSingle();
+    const signupKind = String(meta.signup_kind || '').toLowerCase();
+    const alreadyFounder =
+      !meta.invited_member &&
+      (founderRoles.has(String(existingProf?.role || meta.role || '').toLowerCase()) ||
+        ['company', 'owner', 'supplier'].includes(signupKind));
+    if (alreadyFounder && (existingProf?.organization_id || signupKind)) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        organization_id: existingProf.organization_id,
+        role: existingProf.role,
+        needsMemberOnboarding: false,
+      });
+    }
+
     if (!hasServiceRole()) {
       // Best-effort client path (same as before)
       const { data: invites } = await userClient
@@ -68,7 +89,7 @@ export async function POST(req: NextRequest) {
             role,
             first_name: inv?.first_name || meta.first_name || null,
             last_name: inv?.last_name || meta.last_name || null,
-            onboarding_completed: true,
+            onboarding_completed: existingProf?.onboarding_completed === true,
           },
           { onConflict: 'id' }
         );
@@ -97,14 +118,10 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (!inv) {
-      const { data: anyInv } = await admin
-        .from('engineer_invitations')
-        .select('*')
-        .eq('email', email)
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle();
-      inv = anyInv;
+      return NextResponse.json({
+        ok: false,
+        error: 'No pending invitation found for this email.',
+      }, { status: 404 });
     }
 
     const orgId = inv?.organization_id ?? meta.organization_id ?? null;
@@ -117,6 +134,7 @@ export async function POST(req: NextRequest) {
       }, { status: 404 });
     }
 
+    const alreadyDone = existingProf?.onboarding_completed === true;
     // Do not force onboarding_completed here — member onboarding collects name/phone
     const r = await ensureTeamMemberProfile(admin, {
       userId: user.id,
@@ -126,7 +144,7 @@ export async function POST(req: NextRequest) {
       firstName: inv?.first_name || meta.first_name || null,
       lastName: inv?.last_name || meta.last_name || null,
       jobTitle: meta.job_title || null,
-      onboardingCompleted: false,
+      onboardingCompleted: alreadyDone,
     });
 
     if (!r.ok) {
@@ -145,7 +163,7 @@ export async function POST(req: NextRequest) {
       organization_id: orgId,
       role,
       claimed: true,
-      needsMemberOnboarding: true,
+      needsMemberOnboarding: !alreadyDone,
     });
   } catch (e: any) {
     console.error('team claim error', e);

@@ -35,7 +35,7 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
   if (!ok) {
     return (
       <div className="min-h-screen flex flex-col">
-        <Header />
+        <Header authPending />
         <div className="flex-1 flex items-center justify-center text-[var(--text3)]">
           Checking sign-in…
         </div>

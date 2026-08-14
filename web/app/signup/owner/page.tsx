@@ -1,7 +1,9 @@
 'use client';
 
 import React, { useState } from 'react';
-import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
+import { getSupabaseClient } from '@/lib/supabase/client';
+import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
+import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
 import { MODELS } from '@/lib/models';
 import {
   OWNER_ORG_TYPE_SIGNUP_OPTIONS,
@@ -92,48 +94,32 @@ export default function OwnerSignup() {
     setEquipmentList(prev => prev.filter((_, i) => i !== index));
   };
 
-  async function completeOwnerSetup(userId: string) {
-    const orgInsert: any = {
+  function pendingPayload(): PendingSignup {
+    return {
+      kind: 'owner',
       name: facilityName,
-      type: orgKind,
+      firstName,
+      lastName,
+      email,
+      phone: phone || null,
       address: address || null,
       city: city || null,
       state: state || null,
-      phone: phone || null,
-      facility_type: facilityType,
-      num_lasers: numLasers ? parseInt(numLasers, 10) : null,
-      preferred_services: selectedServices.length ? selectedServices.join(' | ') : null,
-    };
-
-    const { data: orgData, error: orgError } = await supabase
-      .from('organizations')
-      .insert(orgInsert)
-      .select('id')
-      .single();
-
-    if (orgError) {
-      console.error('Organization creation error:', orgError);
-    }
-
-    const newOrgId = orgData?.id ?? null;
-
-    await supabase.from('user_profiles').upsert(
-      {
-        id: userId,
-        first_name: firstName,
-        last_name: lastName,
-        email,
-        phone: phone || null,
-        role: 'owner',
+      role: 'owner',
+      orgType: orgKind,
+      extra: {
         job_title: defaultJobTitleForOwnerOrgType(orgKind),
-        organization_id: newOrgId,
-        onboarding_completed: false,
+        facility_type: facilityType,
+        num_lasers: numLasers ? parseInt(numLasers, 10) : null,
+        preferred_services: selectedServices.length ? selectedServices.join(' | ') : null,
         bio: bio || null,
       },
-      { onConflict: 'id' }
-    );
+    };
+  }
 
-    await claimPendingInvitations(supabase, userId, email);
+  async function completeOwnerSetup(userId: string) {
+    const applied = await applyPendingSignup(supabase, userId, pendingPayload());
+    const newOrgId = applied.orgId;
 
     let lasersSaved = 0;
     const laserErrors: string[] = [];
@@ -173,8 +159,8 @@ export default function OwnerSignup() {
       setMessage(`${nameLabel}, contact name, email and password are required.`);
       return;
     }
-    if (password.length < 6) {
-      setMessage('Password must be at least 6 characters.');
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
     if (password !== confirmPassword) {
@@ -187,12 +173,25 @@ export default function OwnerSignup() {
     try {
       const origin =
         typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+      savePendingSignup(pendingPayload());
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: { first_name: firstName, last_name: lastName, facility: facilityName },
-          emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
+          data: {
+            first_name: firstName,
+            last_name: lastName,
+            facility: facilityName,
+            company: facilityName,
+            role: 'owner',
+            organization_type: orgKind,
+            signup_kind: 'owner',
+            address: address || '',
+            city: city || '',
+            state: state || '',
+            phone: phone || '',
+          },
+          emailRedirectTo: `${origin}/auth/callback?next=/my-lasers`,
         },
       });
       if (authError) throw authError;
@@ -335,11 +334,11 @@ export default function OwnerSignup() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">Password * (min 6)</label>
-                <input type="password" className="input" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
+                <input type="password" className="input" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} />
               </div>
               <div>
                 <label className="label">Confirm Password *</label>
-                <input type="password" className="input" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required minLength={6} />
+                <input type="password" className="input" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required minLength={8} />
               </div>
             </div>
 

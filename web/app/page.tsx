@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { Calendar, Wrench, Package, FileText, Zap, Building2, Settings } from 'lucide-react';
 import AdBanner from '@/components/AdBanner';
@@ -20,6 +21,7 @@ import {
 } from '@/lib/tickets';
 
 export default function HomePage() {
+  const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [orgType, setOrgType] = useState<string | null>(null);
@@ -62,7 +64,7 @@ export default function HomePage() {
 
       const { data: prof, error: profErr } = await supabase
         .from('user_profiles')
-        .select('first_name, role, organization_id')
+        .select('first_name, role, organization_id, onboarding_completed')
         .eq('id', u.id)
         .maybeSingle();
 
@@ -71,6 +73,17 @@ export default function HomePage() {
         setStatsError(profErr.message);
       }
       setProfile(prof);
+
+      if (!prof?.organization_id) {
+        router.replace('/onboarding');
+        return;
+      }
+      if (prof.onboarding_completed === false) {
+        const r = String(prof.role || '').toLowerCase();
+        const invited = ['fse', 'engineer', 'dispatcher', 'scheduler', 'technician'].includes(r);
+        router.replace(invited ? '/onboarding/member' : '/onboarding');
+        return;
+      }
 
       if (!prof?.organization_id) {
         setPersona(getDashboardPersona(prof?.role));

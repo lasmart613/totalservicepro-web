@@ -8,6 +8,8 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
   coerceOrgId,
+  customerActionFromEstimate,
+  customerActionLabel,
   isEstimateExpired,
   isValidOrgId,
   money,
@@ -28,6 +30,10 @@ type EstimateRow = {
   organization_id?: any;
   created_by?: string | null;
   device_model?: string | null;
+  customer_action?: string | null;
+  customer_action_at?: string | null;
+  customer_action_note?: string | null;
+  customer_action_token?: string | null;
 };
 
 function statusBadgeClass(st: string): string {
@@ -315,6 +321,8 @@ export default function EstimatesListPage() {
               const until = validUntilLabel(est.created_at);
               const num = docNumber(est);
               const canConvert = st !== 'invoiced' && st !== 'cancelled' && st !== 'expired';
+              const cust = customerActionFromEstimate(est);
+              const actionLabel = customerActionLabel(cust.action);
               return (
                 <div
                   key={String(est.id)}
@@ -349,6 +357,17 @@ export default function EstimatesListPage() {
                       ) : (
                         <span>· Valid 30 days</span>
                       )}
+                      {actionLabel && (
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                            cust.action === 'approved'
+                              ? 'bg-green-900/40 text-green-200 border-green-700'
+                              : 'bg-amber-900/40 text-amber-200 border-amber-700'
+                          }`}
+                        >
+                          {actionLabel}
+                        </span>
+                      )}
                     </div>
                     {est.device_model && (
                       <div className="text-xs text-[var(--text3)] mt-0.5 truncate">
@@ -374,6 +393,16 @@ export default function EstimatesListPage() {
                         >
                           Convert to Invoice
                         </Link>
+                      )}
+                      {cust.token && (
+                        <a
+                          href={`/e/${encodeURIComponent(cust.token)}`}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="btn btn-secondary text-xs px-3 py-1.5"
+                        >
+                          Customer page
+                        </a>
                       )}
                     </div>
                   </div>

@@ -1,7 +1,9 @@
 ﻿'use client';
 
 import React, { useState } from 'react';
-import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
+import { getSupabaseClient } from '@/lib/supabase/client';
+import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
+import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
 import AuthOtpBox from '@/components/AuthOtpBox';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -48,53 +50,33 @@ export default function SupplierSignup() {
     );
   };
 
-  async function completeSupplierSetup(userId: string) {
-    const orgInsert = {
+  function pendingPayload(): PendingSignup {
+    return {
+      kind: 'supplier',
       name: companyName,
-      type: 'parts_supplier',
+      firstName,
+      lastName,
+      email,
+      phone: phone || null,
       address: address || null,
       city: city || null,
       state: state || null,
-      phone: phone || null,
       website: website || null,
-      num_techs: numStaff ? parseInt(numStaff, 10) : null,
-      tax_id: taxId || null,
-      services_offered: selectedParts.length ? selectedParts.join(' | ') : null,
-    };
-
-    const { data: orgData, error: orgError } = await supabase
-      .from('organizations')
-      .insert(orgInsert)
-      .select('id')
-      .single();
-
-    if (orgError) {
-      console.error('Org create error (check RLS):', orgError);
-    }
-
-    const newOrgId = orgData?.id ?? null;
-
-    const { error: profileErr } = await supabase.from('user_profiles').upsert(
-      {
-        id: userId,
-        first_name: firstName,
-        last_name: lastName,
-        email,
-        phone: phone || null,
-        role: 'parts_supplier',
+      role: 'parts_supplier',
+      orgType: 'parts_supplier',
+      extra: {
         job_title: 'Parts Supplier / Account Manager',
-        organization_id: newOrgId,
-        onboarding_completed: false,
+        num_techs: numStaff ? parseInt(numStaff, 10) : null,
+        tax_id: taxId || null,
+        services_offered: selectedParts.length ? selectedParts.join(' | ') : null,
         bio: bio || null,
       },
-      { onConflict: 'id' }
-    );
-    if (profileErr) {
-      console.warn('Profile upsert warning:', profileErr);
-    }
+    };
+  }
 
-    await claimPendingInvitations(supabase, userId, email);
-    router.push('/');
+  async function completeSupplierSetup(userId: string) {
+    const applied = await applyPendingSignup(supabase, userId, pendingPayload());
+    router.push(applied.dest);
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -105,8 +87,8 @@ export default function SupplierSignup() {
       setMessage('Company name, contact name, email and password are required.');
       return;
     }
-    if (password.length < 6) {
-      setMessage('Password must be at least 6 characters.');
+    if (password.length < MIN_PASSWORD_LENGTH) {
+      setMessage(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
       return;
     }
     if (password !== confirmPassword) {
@@ -118,12 +100,25 @@ export default function SupplierSignup() {
     try {
       const origin =
         typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+      savePendingSignup(pendingPayload());
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
         password,
         options: {
-          data: { first_name: firstName, last_name: lastName, company: companyName },
-          emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
+          data: {
+            first_name: firstName,
+            last_name: lastName,
+            company: companyName,
+            role: 'parts_supplier',
+            organization_type: 'parts_supplier',
+            signup_kind: 'supplier',
+            address: address || '',
+            city: city || '',
+            state: state || '',
+            phone: phone || '',
+            website: website || '',
+          },
+          emailRedirectTo: `${origin}/auth/callback?next=/`,
         },
       });
       if (authError) throw authError;
@@ -232,11 +227,11 @@ export default function SupplierSignup() {
             <div className="grid grid-cols-2 gap-3">
               <div>
                 <label className="label">Password * (min 6)</label>
-                <input type="password" className="input" value={password} onChange={e => setPassword(e.target.value)} required minLength={6} />
+                <input type="password" className="input" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} />
               </div>
               <div>
                 <label className="label">Confirm Password *</label>
-                <input type="password" className="input" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required minLength={6} />
+                <input type="password" className="input" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required minLength={8} />
               </div>
             </div>
 

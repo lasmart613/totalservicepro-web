@@ -41,6 +41,49 @@ function money(n: number | undefined | null) {
   return `$${Number(n || 0).toFixed(2)}`;
 }
 
+/** Table-based CTAs so Gmail does not collapse the buttons. Safe for client + email. */
+export function buildEstimateActionCtasHtml(actionUrl: string): string {
+  const approveHref = esc(actionUrl);
+  const changesHref = esc(
+    actionUrl.includes('?') ? `${actionUrl}&changes=1` : `${actionUrl}?changes=1`
+  );
+  return (
+    `<table class="tsp-est-cta" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
+    `style="margin:22px 0 8px;border-collapse:collapse;">` +
+    `<tr><td align="center" style="padding:0 8px 10px;font-size:13px;color:#111;font-weight:700;">` +
+    `Please review this estimate and let us know how to proceed.` +
+    `</td></tr>` +
+    `<tr><td align="center" style="padding:6px 8px;">` +
+    `<a href="${approveHref}" ` +
+    `style="display:inline-block;background:#FBBF24;color:#111827;padding:14px 28px;border-radius:8px;` +
+    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #FBBF24;">` +
+    `Approve Estimate</a>` +
+    `</td></tr>` +
+    `<tr><td align="center" style="padding:6px 8px 4px;">` +
+    `<a href="${changesHref}" ` +
+    `style="display:inline-block;background:#ffffff;color:#111827;padding:12px 24px;border-radius:8px;` +
+    `text-decoration:none;font-weight:700;font-size:14px;border:2px solid #FBBF24;">` +
+    `Request Changes</a>` +
+    `</td></tr>` +
+    `<tr><td align="center" style="padding:8px 8px 0;font-size:10px;color:#666;">` +
+    `No account required. Opens a secure link from RepairPlanet.` +
+    `</td></tr>` +
+    `</table>`
+  );
+}
+
+/** Inject CTAs when the client HTML was built before a token existed. */
+export function ensureEstimateActionCtas(html: string, actionUrl: string): string {
+  if (!html || !actionUrl) return html;
+  if (html.includes('tsp-est-cta') || html.includes(actionUrl)) return html;
+  const cta = buildEstimateActionCtasHtml(actionUrl);
+  const thankYou = html.lastIndexOf('Thank you for choosing');
+  if (thankYou >= 0) {
+    return html.slice(0, thankYou) + cta + html.slice(thankYou);
+  }
+  return html + cta;
+}
+
 /** Top header: logo | company block | title/number/date — matches Android buildDocTopHeader */
 export function buildDocTopHeader(
   company: DocCompany,
@@ -310,6 +353,8 @@ export type EstimateHtmlInput = {
   deposit?: number;
   balanceDue?: number;
   validDays?: number;
+  /** Public no-login action page (https://repairplanet.net/e/[token]). */
+  actionUrl?: string | null;
 };
 
 export function buildEstimateHtml(input: EstimateHtmlInput): string {
@@ -425,6 +470,7 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
     (deposit > 0
       ? `<div style="margin-top:8px;font-size:11px;color:#555;">Scheduling is contingent on receipt of the parts/travel deposit described above.</div>`
       : '') +
+    (input.actionUrl ? buildEstimateActionCtasHtml(input.actionUrl) : '') +
     `<div style="margin-top:12px;">Thank you for choosing ${esc(
       input.company.company_name || 'Total Service Pro'
     )}!</div></div></div>`

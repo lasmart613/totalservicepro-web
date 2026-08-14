@@ -109,11 +109,12 @@ function SetPasswordInner() {
           email: user.email,
           first_name: meta.first_name || null,
           last_name: meta.last_name || null,
-          onboarding_completed: true,
         },
         { onConflict: 'id' }
       );
 
+      let needsMemberOnboarding = false;
+      let claimedOrg = false;
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) {
         const claimRes = await fetch('/api/team/claim', {
@@ -123,37 +124,28 @@ function SetPasswordInner() {
             'Content-Type': 'application/json',
           },
         });
-        if (!claimRes.ok) {
-          // Fallback to client claim
-          if (user.email) {
-            await claimPendingInvitations(supabase, user.id, user.email);
-          }
+        if (claimRes.ok) {
+          const claimJson = await claimRes.json().catch(() => ({}));
+          needsMemberOnboarding = !!claimJson.needsMemberOnboarding;
+          claimedOrg = !!claimJson.organization_id;
+        } else if (user.email) {
+          await claimPendingInvitations(supabase, user.id, user.email);
         }
       } else if (user.email) {
         await claimPendingInvitations(supabase, user.id, user.email);
       }
 
-      // Mark onboarding done if org was claimed
       const { data: prof } = await supabase
         .from('user_profiles')
         .select('organization_id, onboarding_completed')
         .eq('id', user.id)
         .maybeSingle();
 
-      if (prof?.organization_id && !prof.onboarding_completed) {
-        await supabase
-          .from('user_profiles')
-          .update({ onboarding_completed: true })
-          .eq('id', user.id);
-      }
-
-      // Invited members: short onboarding (company/role locked). Full org onboarding only if no org.
+      // Claim API owns the flag. Invited members go to the short form.
       let dest = '/hub';
-      if (prof?.organization_id) {
-        if (!prof.onboarding_completed) {
-          dest = '/onboarding/member';
-        }
-      } else {
+      if (needsMemberOnboarding || (prof?.organization_id && !prof.onboarding_completed)) {
+        dest = '/onboarding/member';
+      } else if (!prof?.organization_id && !claimedOrg) {
         dest = '/onboarding';
       }
 

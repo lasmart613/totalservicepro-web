@@ -233,3 +233,39 @@ export function validUntilLabel(createdAt?: string | null): string {
   d.setDate(d.getDate() + ESTIMATE_VALID_DAYS);
   return d.toLocaleDateString();
 }
+
+export type CustomerActionKind = 'approved' | 'changes_requested';
+
+/** Read customer CTA response without treating it as the estimate status. */
+export function customerActionFromEstimate(est: {
+  customer_action?: string | null;
+  customer_action_at?: string | null;
+  customer_action_note?: string | null;
+  customer_action_token?: string | null;
+  estimate_data?: unknown;
+}): {
+  action: CustomerActionKind | null;
+  at: string | null;
+  note: string | null;
+  token: string | null;
+} {
+  const ed = parseJsonField(est.estimate_data);
+  const raw = String(est.customer_action || ed.customer_action || '').toLowerCase();
+  const action: CustomerActionKind | null =
+    raw === 'approved' || raw === 'changes_requested' ? raw : null;
+  const token = String(est.customer_action_token || ed.customer_action_token || '').trim() || null;
+  const at = est.customer_action_at || ed.customer_action_at || null;
+  const note = est.customer_action_note || ed.customer_action_note || null;
+  return {
+    action,
+    at: at ? String(at) : null,
+    note: note != null && String(note).trim() ? String(note) : null,
+    token,
+  };
+}
+
+export function customerActionLabel(action: CustomerActionKind | null | undefined): string {
+  if (action === 'approved') return 'Approved';
+  if (action === 'changes_requested') return 'Changes requested';
+  return '';
+}

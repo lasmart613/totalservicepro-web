@@ -4,6 +4,7 @@ import React, { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
+import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 
 function safeNextPath(raw: string | null): string {
   if (!raw) return '';
@@ -11,16 +12,34 @@ function safeNextPath(raw: string | null): string {
   return raw;
 }
 
+/** Never dump Supabase project URLs, JWTs, or keys into the UI. */
+function publicAuthMessage(raw: unknown): string {
+  const s = String(raw || '').trim();
+  if (!s) return 'Sign-in failed. Please try again.';
+  if (
+    /supabase\.co|yljztfaj|anon key|service_role|jwt|apikey|NEXT_PUBLIC_|eyJ[A-Za-z0-9_-]{20,}/i.test(
+      s
+    )
+  ) {
+    return 'Sign-in failed. Please try again or use the login page.';
+  }
+  return s;
+}
+
+function isInviteAuthType(authType: string): boolean {
+  return authType === 'invite' || authType === 'recovery' || authType === 'magiclink';
+}
+
 /**
- * OAuth / magic-link return URL for the web app.
- * Supabase redirects here with ?code= (PKCE) or #access_token= (implicit).
- * Optional ?next=/admin restores the page the user tried to open.
+ * OAuth / magic-link / email-confirm return URL.
+ * type=signup is email confirm for a user who already chose a password — never a team invite.
  */
 function AuthCallbackInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const supabase = getSupabaseClient();
   const [message, setMessage] = useState('Completing sign-in…');
+  const [appHandoff, setAppHandoff] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -31,8 +50,9 @@ function AuthCallbackInner() {
         const code = url.searchParams.get('code');
         const err = url.searchParams.get('error_description') || url.searchParams.get('error');
         let next = safeNextPath(searchParams.get('next') || url.searchParams.get('next'));
+        const wantApp =
+          url.searchParams.get('app') === '1' || searchParams.get('app') === '1';
 
-        // Invite / recovery emails put type in query or hash
         const hash = window.location.hash.replace(/^#/, '');
         const hashParams = hash ? new URLSearchParams(hash) : null;
         const authType = (
@@ -40,15 +60,22 @@ function AuthCallbackInner() {
           hashParams?.get('type') ||
           ''
         ).toLowerCase();
+
+        // Confirm-signup emails set type=signup. That is NOT an invite, even if
+        // a stale next=/auth/set-password is present.
+        const isSignupConfirm = authType === 'signup';
         const isInviteOrRecovery =
-          authType === 'invite' ||
-          authType === 'recovery' ||
-          authType === 'signup' ||
-          next === '/auth/set-password' ||
-          next.startsWith('/auth/set-password');
+          !isSignupConfirm &&
+          (isInviteAuthType(authType) ||
+            next === '/auth/set-password' ||
+            next.startsWith('/auth/set-password'));
+
+        if (isSignupConfirm && (next === '/auth/set-password' || next.startsWith('/auth/set-password'))) {
+          next = '/onboarding';
+        }
 
         if (err) {
-          setMessage(err);
+          setMessage(publicAuthMessage(err));
           return;
         }
 
@@ -56,7 +83,6 @@ function AuthCallbackInner() {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
         } else {
-          // Implicit / hash tokens — detectSessionInUrl on client may already have run
           const { data, error } = await supabase.auth.getSession();
           if (error) throw error;
           if (!data.session) {
@@ -84,15 +110,19 @@ function AuthCallbackInner() {
           return;
         }
 
-        // Invited / password-recovery users must set a password (auth user exists, password may not)
-        if (isInviteOrRecovery) {
-          setMessage('Almost done — set your password…');
-          router.replace('/auth/set-password');
-          return;
+        const meta = user.user_metadata || {};
+        const invitedMember = !!(meta as any).invited_member || authType === 'invite';
+
+        // Invited / password-recovery users must set a password.
+        // type=signup never belongs here — they already chose a password at signup.
+        if (isInviteOrRecovery || (invitedMember && !isSignupConfirm && !meta.role?.includes('admin') && meta.role !== 'owner' && meta.role !== 'parts_supplier')) {
+          if (isInviteOrRecovery || invitedMember) {
+            setMessage('Almost done — set your password…');
+            router.replace('/auth/set-password');
+            return;
+          }
         }
 
-        // Ensure profile row for Google first-time users
-        const meta = user.user_metadata || {};
         const full = (meta.full_name || meta.name || '') as string;
         const parts = full.trim().split(/\s+/).filter(Boolean);
         const first = meta.first_name || parts[0] || '';
@@ -109,21 +139,64 @@ function AuthCallbackInner() {
           { onConflict: 'id' }
         );
 
-        // Auto-assign org/role from pending engineer_invitations (team invites)
-        if (user.email) {
+        // Finish org creation from localStorage OR user_metadata (new-tab Gmail confirm).
+        const pending = resolvePendingSignup(user);
+        if (pending && pending.email?.toLowerCase() === (user.email || '').toLowerCase()) {
+          try {
+            setMessage('Creating your organization…');
+            const applied = await applyPendingSignup(supabase, user.id, pending);
+            if (cancelled) return;
+            const dest = applied.dest || '/onboarding';
+            if (wantApp) {
+              await maybeHandoffToAndroid(supabase, dest, setAppHandoff, setMessage);
+              if (cancelled) return;
+            }
+            setMessage('Signed in! Continuing setup…');
+            router.replace(dest);
+            return;
+          } catch (setupErr: any) {
+            console.warn('pending signup apply', setupErr);
+            setMessage(
+              publicAuthMessage(setupErr?.message) ||
+                'Could not finish organization setup. Continue onboarding.'
+            );
+          }
+        }
+
+        // Auto-assign org/role from pending engineer_invitations (team invites only)
+        if (user.email && !isSignupConfirm) {
           await claimPendingInvitations(supabase, user.id, user.email);
         }
 
         let { data: prof } = await supabase
           .from('user_profiles')
-          .select('onboarding_completed, organization_id, role')
+          .select('onboarding_completed, organization_id, role, first_name, last_name')
           .eq('id', user.id)
           .maybeSingle();
 
         if (cancelled) return;
 
-        // Invited team members already have org — skip full org onboarding
-        if (prof?.organization_id && !prof?.onboarding_completed) {
+        const founderRoles = new Set(['company_admin', 'admin', 'owner', 'parts_supplier']);
+        const metaRole = String(meta.role || '').toLowerCase();
+        const isFounder =
+          founderRoles.has(String(prof?.role || '').toLowerCase()) ||
+          founderRoles.has(metaRole) ||
+          meta.organization_type === 'service_company';
+
+        // If trigger defaulted them to fse but metadata says they are a founder, restore role
+        if (
+          isFounder &&
+          prof &&
+          (!prof.role || String(prof.role).toLowerCase() === 'fse') &&
+          metaRole &&
+          founderRoles.has(metaRole)
+        ) {
+          await supabase.from('user_profiles').update({ role: metaRole }).eq('id', user.id);
+          prof = { ...prof, role: metaRole };
+        }
+
+        // Only auto-complete for invitees — founders still need the wizard
+        if (prof?.organization_id && !prof?.onboarding_completed && invitedMember && !isFounder) {
           await supabase
             .from('user_profiles')
             .update({ onboarding_completed: true })
@@ -131,20 +204,24 @@ function AuthCallbackInner() {
           prof = { ...prof, onboarding_completed: true };
         }
 
-        if (!prof?.organization_id && !prof?.onboarding_completed) {
-          setMessage('Signed in! Finishing setup…');
-          router.replace('/onboarding');
-        } else if (next) {
-          setMessage('Signed in! Taking you back…');
-          router.replace(next);
-        } else {
-          setMessage('Signed in! Redirecting…');
-          router.replace('/');
+        let dest = '/';
+        if (!prof?.organization_id || (isFounder && !prof?.onboarding_completed)) {
+          dest = '/onboarding';
+        } else if (next && next !== '/auth/set-password') {
+          dest = next;
         }
+
+        if (wantApp) {
+          await maybeHandoffToAndroid(supabase, dest, setAppHandoff, setMessage);
+          if (cancelled) return;
+        }
+
+        setMessage(dest.startsWith('/onboarding') ? 'Signed in! Finishing setup…' : 'Signed in! Redirecting…');
+        router.replace(dest);
       } catch (e: any) {
         console.error('auth callback', e);
         if (!cancelled) {
-          setMessage(e?.message || 'Sign-in failed. Please try again.');
+          setMessage(publicAuthMessage(e?.message) || 'Sign-in failed. Please try again.');
         }
       }
     })();
@@ -161,12 +238,40 @@ function AuthCallbackInner() {
           Total Service Pro
         </div>
         <p className="text-sm text-[var(--text2)] mb-6">{message}</p>
+        {appHandoff && (
+          <a href={appHandoff} className="btn btn-primary text-sm mb-3 inline-flex">
+            Open in the Total Service Pro app
+          </a>
+        )}
         <Link href="/login" className="btn btn-secondary text-sm">
           Back to login
         </Link>
       </div>
     </div>
   );
+}
+
+async function maybeHandoffToAndroid(
+  supabase: ReturnType<typeof getSupabaseClient>,
+  dest: string,
+  setAppHandoff: (v: string) => void,
+  setMessage: (v: string) => void
+) {
+  try {
+    const { data } = await supabase.auth.getSession();
+    const access = data.session?.access_token;
+    const refresh = data.session?.refresh_token || '';
+    if (!access) return;
+    const deep =
+      `totalservicepro://auth-callback#access_token=${encodeURIComponent(access)}` +
+      `&refresh_token=${encodeURIComponent(refresh)}&next=${encodeURIComponent(dest)}&type=signup`;
+    setAppHandoff(deep);
+    setMessage('Opening the Total Service Pro app… If nothing happens, tap the button below.');
+    window.location.href = deep;
+    await new Promise((r) => setTimeout(r, 900));
+  } catch {
+    /* stay on web */
+  }
 }
 
 export default function AuthCallbackPage() {

@@ -161,26 +161,44 @@ export async function POST(req: NextRequest) {
       site_url: base,
     };
 
-    // Existing profile → link (no email)
+    // Existing profile → link only if they are not already on another org
     const { data: existingProfile } = await admin
       .from('user_profiles')
-      .select('id, email')
+      .select('id, email, organization_id, role')
       .ilike('email', email)
       .maybeSingle();
 
     if (existingProfile?.id) {
-      const { error: upErr } = await admin
-        .from('user_profiles')
-        .update({
-          organization_id: orgId,
-          role: inviteRole,
-          job_title: jobTitle,
-          ...(firstName ? { first_name: firstName } : {}),
-          ...(lastName ? { last_name: lastName } : {}),
-        })
-        .eq('id', existingProfile.id);
-      if (upErr) {
-        return NextResponse.json({ error: upErr.message }, { status: 400 });
+      const existingOrg = existingProfile.organization_id;
+      const existingRole = String(existingProfile.role || '').toLowerCase();
+      const founderLocked = ['company_admin', 'admin', 'owner', 'parts_supplier'].includes(existingRole);
+      if (existingOrg && String(existingOrg) !== String(orgId)) {
+        return NextResponse.json({
+          error: `${email} already belongs to another organization. Ask them to leave that org first, or invite a different email.`,
+        }, { status: 409 });
+      }
+      if (founderLocked && String(existingOrg) === String(orgId) && existingRole !== inviteRole) {
+        return NextResponse.json({
+          ok: true,
+          linked: true,
+          emailed: false,
+          message: `${email} is already a ${existingRole.replace(/_/g, ' ')} in your organization. Role was not overwritten.`,
+        });
+      }
+      if (!existingOrg) {
+        const { error: upErr } = await admin
+          .from('user_profiles')
+          .update({
+            organization_id: orgId,
+            role: inviteRole,
+            job_title: jobTitle,
+            ...(firstName ? { first_name: firstName } : {}),
+            ...(lastName ? { last_name: lastName } : {}),
+          })
+          .eq('id', existingProfile.id);
+        if (upErr) {
+          return NextResponse.json({ error: upErr.message }, { status: 400 });
+        }
       }
       return NextResponse.json({
         ok: true,

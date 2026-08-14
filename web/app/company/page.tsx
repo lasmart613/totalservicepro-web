@@ -13,6 +13,8 @@ import {
   isServiceCompany,
   canAccessCompanyProfile,
 } from '@/lib/roles';
+import { roleLabel } from '@/lib/labels';
+import { listManufacturers } from '@/lib/laser-catalog';
 
 const TEAM_ROLES = ['company_admin', 'service_manager', 'fse', 'dispatcher', 'billing_manager', 'admin'];
 const ADDITIONAL_ROLES = ['fse', 'dispatcher', 'service_manager', 'billing_manager'];
@@ -347,7 +349,7 @@ function CompanyProfile() {
       }
       if (json.emailed) toast.success(`Invite email sent to ${email}`);
       else if (json.rateLimited) {
-        toast.error(json.message || 'Email rate limit — use the copied link', { duration: 12000 });
+        toast.error(json.message || 'Invite email could not be sent. Use the copied link.', { duration: 12000 });
       } else toast.message(json.message || 'Invite processed', { duration: 10000 });
       await loadTeamMembers(org.id);
     } catch (e: any) {
@@ -406,13 +408,15 @@ function CompanyProfile() {
         phone: currentOrg.phone ?? null,
         website: currentOrg.website ?? null,
         list_in_directory: !!currentOrg.list_in_directory,
+        supported_brands: Array.isArray(currentOrg.supported_brands) ? currentOrg.supported_brands : null,
       };
       let { error: upErr } = await supabase
         .from('organizations')
         .update(updateData)
         .eq('id', currentOrg.id);
-      if (upErr && /list_in_directory|column/i.test(upErr.message || '')) {
-        delete updateData.list_in_directory;
+      if (upErr && /list_in_directory|supported_brands|column/i.test(upErr.message || '')) {
+        if (/list_in_directory/i.test(upErr.message || '')) delete updateData.list_in_directory;
+        if (/supported_brands/i.test(upErr.message || '')) delete updateData.supported_brands;
         ({ error: upErr } = await supabase
           .from('organizations')
           .update(updateData)
@@ -501,7 +505,7 @@ function CompanyProfile() {
       } else if (json.rateLimited) {
         toast.error(
           json.message ||
-            'Email rate limit — copy/share the invite link from the clipboard (or try again in ~1 hour).',
+            'Invite email could not be sent. Copy the invite link and send it yourself.',
           { duration: 15000 }
         );
       } else {
@@ -678,6 +682,34 @@ function CompanyProfile() {
                 <label className="label">Website</label>
                 <input className="input" value={org.website || ''} onChange={e => setOrg({ ...org, website: e.target.value })} />
               </div>
+              <div>
+                <label className="label">Brands serviced</label>
+                <div className="flex flex-wrap gap-1.5 mt-1">
+                  {listManufacturers().map((b) => {
+                    const selected = Array.isArray(org.supported_brands) && org.supported_brands.includes(b);
+                    return (
+                      <button
+                        key={b}
+                        type="button"
+                        className={`text-xs px-2 py-1 rounded border ${
+                          selected
+                            ? 'bg-[var(--gold)] text-black border-[var(--gold)]'
+                            : 'border-[var(--border)] text-[var(--text2)]'
+                        }`}
+                        onClick={() => {
+                          const cur = Array.isArray(org.supported_brands) ? [...org.supported_brands] : [];
+                          setOrg({
+                            ...org,
+                            supported_brands: selected ? cur.filter((x) => x !== b) : [...cur, b],
+                          });
+                        }}
+                      >
+                        {b}
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
               <label className="flex items-start gap-3 cursor-pointer mt-2">
                 <input
                   type="checkbox"
@@ -735,7 +767,7 @@ function CompanyProfile() {
                   <input className="input" placeholder="Full Name" value={newTeam.fullName} onChange={e => setNewTeam({...newTeam, fullName: e.target.value})} />
                   <div className="grid grid-cols-2 gap-2">
                     <select className="select" value={newTeam.role} onChange={e => setNewTeam({...newTeam, role: e.target.value})}>
-                      {TEAM_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                      {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                     </select>
                     <input className="input" placeholder="Job Title override" value={newTeam.title} onChange={e => setNewTeam({...newTeam, title: e.target.value})} />
                   </div>
@@ -743,7 +775,7 @@ function CompanyProfile() {
                     <div className="text-[10px] mb-1">Additional Roles (for multi-role members)</div>
                     <div className="flex flex-wrap gap-1 mb-1">
                       {ADDITIONAL_ROLES.map(ar => (
-                        <button key={ar} type="button" onClick={() => toggleNewTeamAddl(ar)} className={`text-[10px] px-1.5 py-px border rounded ${newTeam.additional.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{ar}</button>
+                        <button key={ar} type="button" onClick={() => toggleNewTeamAddl(ar)} className={`text-[10px] px-1.5 py-px border rounded ${newTeam.additional.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{roleLabel(ar)}</button>
                       ))}
                     </div>
                   </div>
@@ -787,7 +819,7 @@ function CompanyProfile() {
                         <div className="font-medium">
                           {[m.first_name, m.last_name].filter(Boolean).join(' ') || '—'}
                           <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-[var(--surface3)] capitalize">
-                            {(m.role || 'member').replace(/_/g, ' ')}
+                            {roleLabel(m.role)}
                           </span>
                         </div>
                         <div className="text-xs text-[var(--text3)]">{m.email || 'no email'}</div>
@@ -820,7 +852,7 @@ function CompanyProfile() {
                         <div>
                           <div className="font-medium">{inv.email}</div>
                           <div className="text-xs text-[var(--text3)] capitalize">
-                            {(inv.role || 'fse').replace(/_/g, ' ')}
+                            {roleLabel(inv.role || 'fse')}
                             {inv.created_at
                               ? ` · invited ${new Date(inv.created_at).toLocaleDateString()}`
                               : ''}

@@ -186,7 +186,7 @@ export default function TeamManagement() {
       } else if (json.rateLimited) {
         toast.error(
           json.message ||
-            'Email rate limit — Supabase only allows a few built-in emails per hour. Copy the invite link and send it yourself.',
+            'Invite email could not be sent right now. Copy the invite link and send it yourself.',
           { duration: 15000 }
         );
       } else {
@@ -251,7 +251,7 @@ export default function TeamManagement() {
       else if (json.rateLimited) {
         toast.error(
           json.message ||
-            'Email rate limit. Use the copied invite link instead.',
+            'Invite email could not be sent. Use the copied invite link instead.',
           { duration: 12000 }
         );
       } else toast.message(json.message || 'Could not send email', { duration: 8000 });
@@ -265,15 +265,13 @@ export default function TeamManagement() {
     <div>
       <h1 className="text-3xl font-extrabold mb-2">Team Management</h1>
       <p className="text-[var(--text3)] mb-8">
-        Invite FSEs and staff. New people get an email from Supabase to join your organization.
+        Invite FSEs and staff. They get an email to join your organization.
       </p>
 
       <div className="card p-6 mb-10">
         <h2 className="font-bold text-xl mb-4">Invite Team Member</h2>
         <p className="text-xs text-[var(--text3)] mb-4">
-          Supabase&apos;s free built-in email only allows a few messages per hour. If the email doesn&apos;t
-          arrive, use the <strong>copyable invite link</strong> (we generate it even when email is blocked).
-          Long-term: configure <strong>custom SMTP</strong> under Supabase → Authentication → SMTP.
+          If the invite email is delayed or doesn&apos;t arrive, copy the invite link and send it to them directly.
         </p>
 
         {lastInviteUrl && (

@@ -41,6 +41,15 @@ function LoginInner() {
     setMessageOk(ok);
   }
 
+  function publicAuthError(raw: unknown): string {
+    const s = String(raw || '').trim();
+    if (!s) return 'Something went wrong. Please try again.';
+    if (/supabase\.co|yljztfaj|anon key|service_role|jwt|apikey|NEXT_PUBLIC_|eyJ[A-Za-z0-9_-]{20,}/i.test(s)) {
+      return 'Sign-in failed. Please try again.';
+    }
+    return s;
+  }
+
   function authRedirect(path: string) {
     if (typeof window === 'undefined') return `https://repairplanet.net${path}`;
     return `${window.location.origin}${path}`;
@@ -184,7 +193,7 @@ function LoginInner() {
         router.push(nextPath || '/');
       }
     } catch (err: any) {
-      const msg = err.message || 'Authentication failed';
+      const msg = publicAuthError(err.message) || 'Authentication failed';
       setMsg(msg);
     } finally {
       setLoading(false);
@@ -211,7 +220,7 @@ function LoginInner() {
       setOtpCode('');
       setMsg('Check your email for a sign-in code (or magic link). Enter the code below.', true);
     } catch (err: any) {
-      setMsg(err?.message || 'Could not send code.');
+      setMsg(publicAuthError(err?.message) || 'Could not send code.');
     } finally {
       setLoading(false);
     }
@@ -266,7 +275,7 @@ function LoginInner() {
           : nextPath || '/hub'
       );
     } catch (err: any) {
-      setMsg(err?.message || 'Verification failed.');
+      setMsg(publicAuthError(err?.message) || 'Verification failed.');
     } finally {
       setLoading(false);
     }
@@ -292,7 +301,7 @@ function LoginInner() {
         return;
       }
     } catch (err: any) {
-      setMsg(err?.message || 'Could not resend.');
+      setMsg(publicAuthError(err?.message) || 'Could not resend.');
     } finally {
       setLoading(false);
     }
@@ -331,7 +340,7 @@ function LoginInner() {
       });
       if (error) throw error;
     } catch (err: any) {
-      setMsg(err?.message || 'Google sign-in failed. Is Google enabled in Supabase Auth?');
+      setMsg(publicAuthError(err?.message) || 'Google sign-in failed.');
       setLoading(false);
     }
   };
@@ -488,18 +497,25 @@ function LoginInner() {
           )}
 
           <div className="mt-6 space-y-3 text-center text-sm">
-            <button
-              onClick={() => {
-                setIsSignUp(!isSignUp);
-                setMsg('');
-                setConfirmPassword('');
-                setShowOtp(false);
-                setOtpCode('');
-              }}
-              className="text-[var(--gold)] hover:underline"
-            >
-              {isSignUp ? 'Already have an account? Sign In' : "Don't have an account? Sign Up"}
-            </button>
+            {isSignUp ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setIsSignUp(false);
+                  setMsg('');
+                  setConfirmPassword('');
+                  setShowOtp(false);
+                  setOtpCode('');
+                }}
+                className="text-[var(--gold)] hover:underline"
+              >
+                Already have an account? Sign In
+              </button>
+            ) : (
+              <Link href="/signup" className="text-[var(--gold)] hover:underline">
+                Don&apos;t have an account? Sign Up
+              </Link>
+            )}
 
             <div>
               <button onClick={sendMagic} className="text-[var(--text3)] hover:text-[var(--gold)] underline">

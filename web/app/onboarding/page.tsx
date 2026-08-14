@@ -3,10 +3,12 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { Header } from '@/components/Header';
 import { Upload, ArrowRight, Check } from 'lucide-react';
-import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
+import { getSupabaseClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { isOwnerish, isSupplier } from '@/lib/roles';
+import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { resolvePendingSignup } from '@/lib/pending-signup';
 
 type OrgType = 'service' | 'clinic' | 'supplier';
 type TeamMember = {
@@ -51,7 +53,8 @@ export default function Onboarding() {
   const [formData, setFormData] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
-  const [existingOrgId, setExistingOrgId] = useState<number | null>(null);
+  const [existingOrgId, setExistingOrgId] = useState<number | string | null>(null);
+  const [existingOrgType, setExistingOrgType] = useState<string | null>(null);
   const [profileRole, setProfileRole] = useState<string>('');
 
   // Team state (service company)
@@ -95,19 +98,62 @@ export default function Onboarding() {
         .eq('id', user.id)
         .maybeSingle();
 
+      if (profile?.onboarding_completed && profile?.organization_id) {
+        const r = String(profile.role || '').toLowerCase();
+        if (isOwnerish(profile.role, profile.organizations?.type)) {
+          router.replace('/my-lasers');
+        } else if (isSupplier(profile.role, profile.organizations?.type)) {
+          router.replace('/');
+        } else if (['fse', 'engineer', 'dispatcher', 'scheduler'].includes(r)) {
+          router.replace('/hub');
+        } else {
+          router.replace('/company');
+        }
+        return;
+      }
+
       const meta = user.user_metadata || {};
-      setProfileRole(profile?.role || '');
+      const pending = resolvePendingSignup(user);
+      const resolvedRole = profile?.role || pending?.role || meta.role || '';
+      setProfileRole(resolvedRole);
       setFormData((prev: any) => ({
         ...prev,
-        firstName: profile?.first_name || meta.first_name || '',
-        lastName: profile?.last_name || meta.last_name || '',
-        phone: profile?.phone || '',
-        jobTitle: profile?.job_title || ''
+        firstName: profile?.first_name || meta.first_name || pending?.firstName || '',
+        lastName: profile?.last_name || meta.last_name || pending?.lastName || '',
+        phone: profile?.phone || meta.phone || pending?.phone || '',
+        jobTitle: profile?.job_title || '',
+        companyName: prev.companyName || pending?.name || meta.company || meta.facility || '',
+        address: pending?.address || meta.address || '',
+        city: pending?.city || meta.city || '',
+        state: pending?.state || meta.state || '',
+        website: pending?.website || meta.website || '',
       }));
 
-      if (profile?.organizations) {
-        const o = profile.organizations;
+      // Header chip: persist names immediately so we don't show the email prefix
+      if ((meta.first_name || pending?.firstName) && !profile?.first_name) {
+        await supabase
+          .from('user_profiles')
+          .update({
+            first_name: meta.first_name || pending?.firstName || null,
+            last_name: meta.last_name || pending?.lastName || null,
+          })
+          .eq('id', user.id);
+      }
+
+      let orgRow = profile?.organizations || null;
+      if (!orgRow && profile?.organization_id) {
+        const { data: fetchedOrg } = await supabase
+          .from('organizations')
+          .select('*')
+          .eq('id', profile.organization_id)
+          .maybeSingle();
+        orgRow = fetchedOrg;
+      }
+
+      if (orgRow) {
+        const o = orgRow;
         setExistingOrgId(o.id);
+        setExistingOrgType(o.type || null);
         let t: OrgType = 'service';
         // Owner-side: clinic, legacy laser_clinic, rental, reseller
         if (
@@ -123,20 +169,33 @@ export default function Onboarding() {
         setOrgType(t);
         setFormData((prev: any) => ({
           ...prev,
-          companyName: o.name || '',
-          address: o.address || '',
-          city: o.city || '',
-          state: o.state || '',
-          phone: o.phone || profile.phone || '',
-          website: o.website || ''
+          companyName: o.name || prev.companyName || '',
+          address: o.address || prev.address || '',
+          city: o.city || prev.city || '',
+          state: o.state || prev.state || '',
+          phone: o.phone || profile.phone || prev.phone || '',
+          website: o.website || prev.website || ''
         }));
         if (o.supported_brands?.length) setSelectedBrands(o.supported_brands);
         if (o.logo_url) setLogoPreview(o.logo_url);
       } else {
-        const initialRole = profile?.role || '';
-        if (initialRole === 'owner' || initialRole === 'customer') setOrgType('clinic');
-        else if (initialRole === 'parts_supplier' || initialRole === 'supplier') setOrgType('supplier');
-        else if (initialRole === 'company_admin' || initialRole.includes('admin') || initialRole === 'fse') {
+        // Prefer signup metadata / pending payload over a trigger-defaulted fse role
+        const metaRole = String(meta.role || pending?.role || '').toLowerCase();
+        const profileRoleNow = String(profile?.role || '').toLowerCase();
+        const triggerDefaultedFse = profileRoleNow === 'fse' && metaRole && metaRole !== 'fse';
+        const initialRole = triggerDefaultedFse ? metaRole : (profileRoleNow || metaRole);
+        const orgKind = String(meta.organization_type || pending?.orgType || '').toLowerCase();
+        if (initialRole === 'owner' || initialRole === 'customer' || orgKind === 'customer' || orgKind === 'laser_rental' || orgKind === 'laser_reseller' || orgKind === 'laser_clinic' || pending?.kind === 'owner') {
+          setOrgType('clinic');
+        } else if (initialRole === 'parts_supplier' || initialRole === 'supplier' || orgKind === 'parts_supplier' || pending?.kind === 'supplier') {
+          setOrgType('supplier');
+        } else if (
+          initialRole === 'company_admin' ||
+          initialRole === 'admin' ||
+          String(initialRole).includes('admin') ||
+          orgKind === 'service_company' ||
+          pending?.kind === 'company'
+        ) {
           setOrgType('service');
         }
       }
@@ -146,26 +205,30 @@ export default function Onboarding() {
     })();
   }, [supabase, router]);
 
-  // Auto-skip org type choice (step 1) if we already know from signup/org
+  // Auto-skip org type choice when signup already chose RSP / clinic / supplier
   useEffect(() => {
-    if (orgType && step === 1 && existingOrgId) {
+    if (orgType && step === 1) {
       setStep(2);
     }
-  }, [orgType, existingOrgId, step]);
+  }, [orgType, step]);
 
   function initTeamFromProfile(profile: any, user: any) {
     const first = profile?.first_name || user?.user_metadata?.first_name || 'You';
     const last = profile?.last_name || user?.user_metadata?.last_name || '';
     const email = user?.email || '';
-    const currentRole = profile?.role || 'company_admin';
+    const currentRole = profile?.role || '';
 
     // Preserve owner / supplier roles — only force admin for service creators
     let role = currentRole;
     if (isOwnerish(currentRole)) role = currentRole === 'customer' ? 'owner' : currentRole;
     else if (isSupplier(currentRole)) role = currentRole === 'supplier' ? 'parts_supplier' : currentRole;
-    else if (!ADMIN_ROLES.includes(currentRole) && !['fse', 'service_manager', 'dispatcher', 'billing_manager'].includes(currentRole)) {
+    else if (!currentRole || currentRole === 'fse' || currentRole === 'pending') {
+      // Email-confirm / trigger defaulted to fse with no org — founder must be admin
+      if (!profile?.organization_id) role = 'company_admin';
+    } else if (!ADMIN_ROLES.includes(currentRole) && !['service_manager', 'dispatcher', 'billing_manager'].includes(currentRole)) {
       role = 'company_admin';
     }
+    if (!role) role = 'company_admin';
 
     const creator: TeamMember = {
       id: 'creator',
@@ -253,18 +316,18 @@ export default function Onboarding() {
     return (
       <div className="space-y-2 mb-4 text-sm">
         {teamMembers.map((m, idx) => {
-          const rolesText = [m.role, ...m.additionalRoles].filter(Boolean).join(' + ');
+          const rolesText = [m.role, ...m.additionalRoles].filter(Boolean).map(roleLabel).join(' + ');
           return (
             <div key={m.id} className="p-3 border border-[var(--border)] rounded bg-[var(--surface3)]">
               <strong>{m.firstName} {m.lastName}</strong> {m.email && '• ' + m.email}<br/>
               <span className="text-[var(--text3)]">Roles: {rolesText}</span>
               <div className="mt-1 flex gap-2 flex-wrap items-center">
                 <select value={m.role} onChange={e => changeMemberRole(idx, e.target.value)} className="input !py-0.5 !text-xs">
-                  {TEAM_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                  {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                 </select>
                 {ADDITIONAL_ROLES.map(ar => (
                   <button key={ar} type="button" onClick={() => toggleMemberAdditional(idx, ar)}
-                    className={`text-[10px] px-1.5 py-px border rounded ${m.additionalRoles.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{ar}</button>
+                    className={`text-[10px] px-1.5 py-px border rounded ${m.additionalRoles.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{roleLabel(ar)}</button>
                 ))}
                 {m.isCreator ? (
                   <span className="text-[10px] text-[var(--gold)]">(creator - must keep &gt;=1 admin)</span>
@@ -357,16 +420,30 @@ export default function Onboarding() {
 
   async function saveOnboarding() {
     if (!currentUser) return;
+    if (!formData.companyName?.trim() || !formData.firstName?.trim()) {
+      alert('Company / facility name and first name are required.');
+      return;
+    }
+    if (orgType === 'service' && !validateTeam()) {
+      alert('At least one admin (company_admin) is required for the organization.');
+      return;
+    }
     setLoading(true);
     try {
       let orgId = existingOrgId;
-      const companyName = formData.companyName || (
-        orgType === 'clinic' ? 'My Facility' : orgType === 'supplier' ? 'My Supplier Co' : 'My Service Company'
-      );
+      const companyName = formData.companyName.trim();
 
+      const metaType = String(currentUser.user_metadata?.organization_type || '');
       let oType = 'service_company';
-      if (orgType === 'clinic') oType = 'customer';
-      else if (orgType === 'supplier') oType = 'parts_supplier';
+      if (orgType === 'clinic') {
+        if (existingOrgType && ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'].includes(existingOrgType)) {
+          oType = existingOrgType;
+        } else if (['laser_rental', 'laser_reseller', 'customer', 'laser_clinic'].includes(metaType)) {
+          oType = metaType;
+        } else {
+          oType = 'customer';
+        }
+      } else if (orgType === 'supplier') oType = 'parts_supplier';
 
       let logoUrl = logoPreview;
       if (logoFile) {
@@ -419,7 +496,10 @@ export default function Onboarding() {
             .select('id')
             .single());
         }
-        if (newOrg) orgId = newOrg.id;
+        if (iErr || !newOrg) {
+          throw new Error(iErr?.message || 'Could not create organization.');
+        }
+        orgId = newOrg.id;
       }
 
       const creatorRole = resolveCreatorRole();
@@ -505,41 +585,32 @@ export default function Onboarding() {
         orgId = linked.organization_id;
       }
 
-      // Team invites only for service company
+      // Team invites only for service company — send real Auth invite emails
       if (orgType === 'service') {
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
         for (const m of teamMembers) {
           if (m.isCreator) continue;
           try {
-            const { data: existing } = await supabase
-              .from('user_profiles')
-              .select('id')
-              .eq('email', m.email.toLowerCase())
-              .maybeSingle();
-
-            if (existing?.id) {
-              const teamUpdate: any = {
-                organization_id: orgId,
-                role: m.role,
-                first_name: m.firstName || null,
-                last_name: m.lastName || null,
-                job_title: [m.role, ...m.additionalRoles].filter(Boolean).join(' + '),
-              };
-              if (m.additionalRoles.length) teamUpdate.additional_roles = m.additionalRoles;
-              let { error: tErr } = await supabase.from('user_profiles').update(teamUpdate).eq('id', existing.id);
-              if (tErr && /additional_roles|column/i.test(tErr.message || '')) {
-                delete teamUpdate.additional_roles;
-                await supabase.from('user_profiles').update(teamUpdate).eq('id', existing.id);
-              }
-            } else {
-              await supabase.from('engineer_invitations').insert({
-                organization_id: orgId,
+            if (!token) throw new Error('Not signed in');
+            const res = await fetch('/api/team/invite', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({
                 email: m.email,
                 role: m.role,
-                first_name: m.firstName || null,
-                last_name: m.lastName || null,
-                invited_by: currentUser.id,
-                accepted: false
-              });
+                firstName: m.firstName,
+                lastName: m.lastName,
+                jobTitle: [m.role, ...m.additionalRoles].filter(Boolean).join(' + '),
+              }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              console.warn('invite failed', m.email, json);
+              alert(`Could not email invite to ${m.email}: ${json.error || res.statusText}`);
             }
           } catch (te) { console.warn('Team member save skipped', te); }
         }
@@ -588,7 +659,7 @@ export default function Onboarding() {
         }
       }
 
-      await claimPendingInvitations(supabase, currentUser.id, currentUser.email);
+      // Do not claim FSE invites onto a founder who just created this org
       await supabase.auth.updateUser({ data: { first_name: formData.firstName, last_name: formData.lastName } });
 
       if (laserSaveErrors.length) {
@@ -612,8 +683,7 @@ export default function Onboarding() {
       }
     } catch (e: any) {
       console.error('saveOnboarding error', e);
-      alert('Save had issues: ' + (e.message || e) + ' — edit in Company page.');
-      router.push(orgType === 'clinic' ? '/' : '/company');
+      alert('Save had issues: ' + (e.message || e) + '. Stay here and try Finish again.');
     } finally {
       setLoading(false);
     }
@@ -733,7 +803,7 @@ export default function Onboarding() {
                   <input className="input" placeholder="First Name" value={teamFirst} onChange={e=>setTeamFirst(e.target.value)} />
                   <input className="input" placeholder="Last Name" value={teamLast} onChange={e=>setTeamLast(e.target.value)} />
                   <select className="select" value={teamRole} onChange={e=>setTeamRole(e.target.value)}>
-                    {TEAM_ROLES.map(r => <option key={r} value={r}>{r}</option>)}
+                    {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                   </select>
                 </div>
                 <div className="mt-2">
@@ -741,7 +811,7 @@ export default function Onboarding() {
                   <div className="flex flex-wrap gap-1">
                     {ADDITIONAL_ROLES.map(ar => (
                       <button key={ar} type="button" onClick={() => toggleTeamAdditional(ar)}
-                        className={`text-[10px] px-2 py-0.5 border rounded ${teamAdditional.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{ar}</button>
+                        className={`text-[10px] px-2 py-0.5 border rounded ${teamAdditional.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{roleLabel(ar)}</button>
                     ))}
                   </div>
                 </div>

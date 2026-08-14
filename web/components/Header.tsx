@@ -15,6 +15,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
+import { roleLabel } from '@/lib/labels';
 
 type NavLink = { href: string; label: string };
 type NavGroup = { id: string; label: string; href?: string; items: NavLink[] };
@@ -95,7 +96,7 @@ function NavDropdown({
   );
 }
 
-export function Header() {
+export function Header({ authPending = false }: { authPending?: boolean }) {
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -150,8 +151,14 @@ export function Header() {
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+    } = supabase.auth.onAuthStateChange((event, session) => {
+      if (event === 'SIGNED_OUT' || !session?.user) {
+        setUser(null);
+        setProfile(null);
+        setUnread(0);
+        return;
+      }
+      setUser(session.user);
       if (session?.user) {
         supabase
           .from('user_profiles')
@@ -194,8 +201,15 @@ export function Header() {
   const handleLogout = async () => {
     setDropdownOpen(false);
     setMobileMenuOpen(false);
-    await supabase.auth.signOut();
-    window.location.href = '/login';
+    setUser(null);
+    setProfile(null);
+    setUnread(0);
+    try {
+      await supabase.auth.signOut();
+    } catch {
+      /* still leave */
+    }
+    window.location.replace('/login');
   };
 
   const closeMobileMenu = () => {
@@ -203,14 +217,19 @@ export function Header() {
     setMobileOpenGroup(null);
   };
 
-  const fullName = profile
-    ? [profile.first_name, profile.last_name].filter(Boolean).join(' ') ||
-      user?.email?.split('@')[0]
-    : user?.email?.split('@')[0] || 'User';
+  const meta = user?.user_metadata || {};
+  const firstName = profile?.first_name || meta.first_name || '';
+  const lastName = profile?.last_name || meta.last_name || '';
+  const fullName =
+    [firstName, lastName].filter(Boolean).join(' ') ||
+    (typeof meta.full_name === 'string' && meta.full_name.trim()) ||
+    (typeof meta.name === 'string' && meta.name.trim()) ||
+    user?.email?.split('@')[0] ||
+    'User';
 
   const initials =
-    (profile?.first_name?.[0] || user?.email?.[0] || 'U').toUpperCase() +
-    (profile?.last_name?.[0] || '').toUpperCase();
+    ((firstName?.[0] || '') + (lastName?.[0] || '')).toUpperCase() ||
+    (user?.email?.[0] || 'U').toUpperCase();
 
   const orgType = (profile?.organizations as any)?.type || null;
   const ownerMode = isOwnerish(profile?.role, orgType);
@@ -303,7 +322,7 @@ export function Header() {
       }
     : null;
 
-  if (loading) {
+  if (loading || authPending) {
     return (
       <header className="header px-4 py-3 flex items-center justify-between">
         <Link href="/" className="font-extrabold text-xl" style={{ color: 'var(--gold)' }}>
@@ -414,7 +433,7 @@ export function Header() {
                   <div className="font-semibold text-[var(--gold)]">{fullName}</div>
                   <div className="text-xs text-[var(--text3)] truncate">{user.email}</div>
                   {profile?.role && (
-                    <div className="text-[10px] mt-0.5 text-[var(--text3)]">Role: {profile.role}</div>
+                    <div className="text-[10px] mt-0.5 text-[var(--text3)]">Role: {roleLabel(profile.role)}</div>
                   )}
                 </div>
 
