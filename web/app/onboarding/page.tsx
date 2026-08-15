@@ -98,6 +98,8 @@ export default function Onboarding() {
         .eq('id', user.id)
         .maybeSingle();
 
+      // Intended: already-onboarded users (org + flag) skip this wizard.
+      // New service orgs keep onboarding_completed=false until Finish (see pending-signup).
       if (profile?.onboarding_completed && profile?.organization_id) {
         const r = String(profile.role || '').toLowerCase();
         if (isOwnerish(profile.role, profile.organizations?.type)) {

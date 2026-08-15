@@ -23,6 +23,8 @@ const nextConfig = {
       { source: '/service_schedule.html', destination: '/service-schedule', permanent: false },
       { source: '/marketplace.html', destination: '/marketplace', permanent: false },
       { source: '/index.html', destination: '/', permanent: false },
+      { source: '/marketplace/service-requests', destination: '/service-requests', permanent: false },
+      { source: '/marketplace/service-requests/:path*', destination: '/marketplace/requests/:path*', permanent: false },
     ];
   },
 };
