@@ -212,6 +212,51 @@ export default function EstimatesListPage() {
     setFiltered(res);
   }
 
+  async function recordCustomerAction(est: EstimateRow, action: 'approved' | 'changes_requested') {
+    let note = '';
+    if (action === 'changes_requested') {
+      note = window.prompt('What changes did the customer request?') || '';
+      if (!note.trim()) return;
+    } else if (!window.confirm('Mark this estimate as approved by the customer?')) {
+      return;
+    }
+    const at = new Date().toISOString();
+    const ed = parseJsonField(est.estimate_data);
+    ed.customer_action = action;
+    ed.customer_action_at = at;
+    ed.customer_action_note = note || null;
+    const body: Record<string, unknown> = {
+      customer_action: action,
+      customer_action_at: at,
+      customer_action_note: note || null,
+      estimate_data: ed,
+    };
+    const { error } = await supabase.from('service_estimates').update(body).eq('id', est.id);
+    if (error && /column|schema cache|does not exist/i.test(error.message || '')) {
+      const r2 = await supabase.from('service_estimates').update({ estimate_data: ed }).eq('id', est.id);
+      if (r2.error) {
+        window.alert('Could not save: ' + (r2.error.message || 'unknown error'));
+        return;
+      }
+    } else if (error) {
+      window.alert('Could not save: ' + (error.message || 'unknown error'));
+      return;
+    }
+    setRows((prev) =>
+      prev.map((row) =>
+        String(row.id) === String(est.id)
+          ? {
+              ...row,
+              customer_action: action,
+              customer_action_at: at,
+              customer_action_note: note || null,
+              estimate_data: ed,
+            }
+          : row
+      )
+    );
+  }
+
   const drafts = rows.filter((r) => effectiveStatus(r) === 'draft').length;
   const sent = rows.filter((r) => {
     const s = effectiveStatus(r);
@@ -326,64 +371,76 @@ export default function EstimatesListPage() {
               return (
                 <div
                   key={String(est.id)}
-                  className={`card p-4 flex flex-col gap-3 hover:border-[var(--gold-border)] ${
+                  className={`card p-4 estimate-list-card hover:border-[var(--gold-border)] ${
                     st === 'expired' ? 'opacity-85' : ''
                   }`}
+                  style={{ display: 'block', overflow: 'visible', minHeight: 140 }}
                 >
-                  <Link href={`/estimates/new?id=${est.id}`} className="min-w-0 block">
-                    <div className="flex items-start justify-between gap-3">
-                    <div className="font-bold text-base min-w-0 break-words">
-                      {est.customer_name || 'Unknown Customer'}
-                    </div>
-                    <div className="font-bold text-[var(--gold)] text-lg shrink-0">
+                  <div
+                    className="estimate-list-head"
+                    style={{ display: 'block', position: 'relative', minHeight: 48, paddingRight: 96 }}
+                  >
+                    <div
+                      className="estimate-list-amount font-bold text-[var(--gold)] text-lg"
+                      style={{ position: 'absolute', top: 0, right: 0, whiteSpace: 'nowrap' }}
+                    >
                       {money(Number(est.total) || 0)}
                     </div>
-                    </div>
-                    <div className="text-xs text-[var(--text3)] mt-1 flex flex-wrap gap-x-2 gap-y-1 items-center">
-                      {num && (
-                        <span className="text-[var(--gold)] font-bold">{num}</span>
-                      )}
-                      <span>
-                        {est.created_at
-                          ? new Date(est.created_at).toLocaleDateString()
-                          : '—'}
-                      </span>
-                      <span
-                        className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusBadgeClass(
-                          st
-                        )}`}
-                      >
-                        {st.charAt(0).toUpperCase() + st.slice(1)}
-                      </span>
-                      {st === 'expired' ? (
-                        <span>· Expired</span>
-                      ) : until ? (
-                        <span>· Valid thru {until}</span>
-                      ) : (
-                        <span>· Valid 30 days</span>
-                      )}
-                      {actionLabel && (
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
-                            cust.action === 'approved'
-                              ? 'bg-green-900/40 text-green-200 border-green-700'
-                              : 'bg-amber-900/40 text-amber-200 border-amber-700'
-                          }`}
-                        >
-                          {actionLabel}
-                        </span>
-                      )}
-                    </div>
-                    {est.device_model && (
-                      <div className="text-xs text-[var(--text3)] mt-0.5 truncate">
-                        {est.device_model}
+                    <Link href={`/estimates/new?id=${est.id}`} className="estimate-list-name" style={{ display: 'block' }}>
+                      <div className="font-bold text-base" style={{ lineHeight: 1.3 }}>
+                        {est.customer_name || 'Unknown Customer'}
                       </div>
-                    )}
-                  </Link>
-                  <div className="flex flex-wrap gap-2 justify-start">
+                      <div className="text-xs text-[var(--text3)] mt-1" style={{ lineHeight: 1.4 }}>
+                        {num && (
+                          <span className="text-[var(--gold)] font-bold">{num} </span>
+                        )}
+                        <span>
+                          {est.created_at
+                            ? new Date(est.created_at).toLocaleDateString()
+                            : '—'}
+                        </span>
+                        {' '}
+                        <span
+                          className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusBadgeClass(
+                            st
+                          )}`}
+                        >
+                          {st.charAt(0).toUpperCase() + st.slice(1)}
+                        </span>
+                        {st === 'expired' ? (
+                          <span> · Expired</span>
+                        ) : until ? (
+                          <span> · Valid thru {until}</span>
+                        ) : (
+                          <span> · Valid 30 days</span>
+                        )}
+                        {actionLabel && (
+                          <span
+                            className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ml-1 ${
+                              cust.action === 'approved'
+                                ? 'bg-green-900/40 text-green-200 border-green-700'
+                                : 'bg-amber-900/40 text-amber-200 border-amber-700'
+                            }`}
+                          >
+                            {actionLabel}
+                          </span>
+                        )}
+                      </div>
+                      {est.device_model && (
+                        <div className="text-xs text-[var(--text3)] mt-0.5 truncate">
+                          {est.device_model}
+                        </div>
+                      )}
+                    </Link>
+                  </div>
+                  <div
+                    className="estimate-list-actions"
+                    style={{ display: 'block', width: '100%', marginTop: 12, minHeight: 40, clear: 'both' }}
+                  >
                       <Link
                         href={`/estimates/new?id=${est.id}`}
                         className="btn btn-secondary text-xs px-3 py-1.5"
+                        style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
                       >
                         View
                       </Link>
@@ -391,9 +448,30 @@ export default function EstimatesListPage() {
                         <Link
                           href={`/invoices/new?fromEstimate=${est.id}`}
                           className="btn btn-primary text-xs px-3 py-1.5"
+                          style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
                         >
                           Convert to Invoice
                         </Link>
+                      )}
+                      {st !== 'expired' && st !== 'invoiced' && st !== 'cancelled' && cust.action !== 'approved' && (
+                        <>
+                          <button
+                            type="button"
+                            className="btn text-xs px-3 py-1.5"
+                            style={{ display: 'inline-block', margin: '0 8px 8px 0', background: '#14532d', color: '#bbf7d0', borderColor: '#166534' }}
+                            onClick={() => recordCustomerAction(est, 'approved')}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="btn btn-secondary text-xs px-3 py-1.5"
+                            style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
+                            onClick={() => recordCustomerAction(est, 'changes_requested')}
+                          >
+                            Request Changes
+                          </button>
+                        </>
                       )}
                       {cust.token && (
                         <a
@@ -401,6 +479,7 @@ export default function EstimatesListPage() {
                           target="_blank"
                           rel="noreferrer"
                           className="btn btn-secondary text-xs px-3 py-1.5"
+                          style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
                         >
                           Customer page
                         </a>

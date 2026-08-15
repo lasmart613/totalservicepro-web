@@ -664,3 +664,66 @@ body {
 }
 
 /* For menu cards in calculators use .card with icon + label/desc like hub */
+
+/*
+ * Galaxy A15 WebView: flex-col + 24px CSS grid still collapsed pending
+ * estimate cards and sat Service Type checkboxes on the first letter.
+ * Reserve space with block + padding + min-height instead.
+ */
+.estimate-list-card {
+  display: block !important;
+  position: relative;
+  overflow: visible !important;
+  min-height: 140px;
+  box-sizing: border-box;
+}
+.estimate-list-head {
+  display: block !important;
+  position: relative;
+  width: 100%;
+  min-height: 48px;
+  padding-right: 96px;
+  box-sizing: border-box;
+}
+.estimate-list-name {
+  display: block;
+  min-width: 0;
+}
+.estimate-list-amount {
+  position: absolute;
+  top: 0;
+  right: 0;
+  white-space: nowrap;
+}
+.estimate-list-actions {
+  display: block !important;
+  width: 100%;
+  margin-top: 12px;
+  min-height: 40px;
+  clear: both;
+}
+.estimate-list-actions > * {
+  display: inline-block;
+  margin: 0 8px 8px 0;
+}
+
+.service-type-row {
+  display: block !important;
+  position: relative !important;
+  padding: 12px 12px 12px 48px !important;
+  min-height: 44px;
+  box-sizing: border-box;
+}
+.service-type-row input[type="checkbox"] {
+  position: absolute !important;
+  left: 14px !important;
+  top: 50%;
+  width: 20px !important;
+  height: 20px !important;
+  margin: -10px 0 0 0 !important;
+  padding: 0;
+}
+.service-type-row .service-type-label {
+  display: block;
+  padding-left: 0;
+}

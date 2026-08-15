@@ -950,19 +950,36 @@ export default function EstimateFormClient() {
         {/* Service types */}
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Service Type(s)</h2>
-          <div className="grid grid-cols-1 gap-2">
+          <div>
             {SERVICE_TYPES.map((s) => (
               <label
                 key={s}
-                className="grid grid-cols-[24px_minmax(0,1fr)] items-center gap-x-3 text-sm cursor-pointer rounded-lg border border-[var(--border2)] bg-[var(--surface2)] px-3 py-2.5"
+                className="service-type-row text-sm cursor-pointer rounded-lg border border-[var(--border2)] bg-[var(--surface2)] mb-2.5"
+                style={{
+                  display: 'block',
+                  position: 'relative',
+                  padding: '12px 12px 12px 48px',
+                  minHeight: 44,
+                  boxSizing: 'border-box',
+                }}
               >
                 <input
                   type="checkbox"
                   checked={services.includes(s)}
                   onChange={() => toggleService(s)}
-                  className="accent-[var(--gold)] h-5 w-5 m-0 justify-self-center shrink-0"
+                  className="accent-[var(--gold)]"
+                  style={{
+                    position: 'absolute',
+                    left: 14,
+                    top: '50%',
+                    width: 20,
+                    height: 20,
+                    margin: '-10px 0 0 0',
+                  }}
                 />
-                <span className="min-w-0 pl-0.5">{SERVICE_TYPE_LABELS[s] || s}</span>
+                <span className="service-type-label" style={{ display: 'block' }}>
+                  {SERVICE_TYPE_LABELS[s] || s}
+                </span>
               </label>
             ))}
           </div>
