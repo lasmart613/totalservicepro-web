@@ -4,8 +4,9 @@
 # directory. Forcing publish=.next causes /_next/static/* 404s.
 
 [build]
+  # App lives in web/. Command works if UI base is empty (repo root) or "web".
   base = "web"
-  command = "npm run build"
+  command = "if [ -f web/package.json ]; then cd web; fi; npm ci && npm run build"
   # publish left unset — Next.js plugin sets it at build time.
 
 [build.environment]

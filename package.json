@@ -1,0 +1,10 @@
+{
+  "name": "totalservicepro",
+  "private": true,
+  "scripts": {
+    "build": "if [ -f web/package.json ]; then cd web && npm ci && npm run build; else npm ci && npm run build; fi"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

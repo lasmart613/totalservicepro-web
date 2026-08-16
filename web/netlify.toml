@@ -5,9 +5,8 @@
 # /_next/static/* 404s → browser "This page couldn't load".
 
 [build]
-  command = "npm run build"
+  command = "if [ -f web/package.json ]; then cd web; fi; npm ci && npm run build"
   # Leave publish empty / omit — Next.js plugin sets it at build time.
-  # publish = ""
 
 [build.environment]
   NODE_VERSION = "20"
