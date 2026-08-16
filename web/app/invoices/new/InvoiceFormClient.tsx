@@ -1123,6 +1123,7 @@ export default function InvoiceFormClient() {
             className="btn btn-secondary min-w-[100px] text-xs"
             disabled={saving || emailing}
             onClick={() => markSentWithoutEmail()}
+            aria-label="Mark sent (no email)"
             title="Sets status to sent without calling Resend"
           >
             Mark sent (no email)

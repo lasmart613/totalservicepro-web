@@ -195,8 +195,8 @@ function SetPasswordInner() {
 
           {noSession ? (
             <div className="space-y-3 text-sm">
-              <Link href="/login" className="btn btn-primary w-full justify-center">
-                Go to login → Forgot password
+              <Link href="/forgot-password" className="btn btn-primary w-full justify-center">
+                Forgot password
               </Link>
               <p className="text-xs text-[var(--text3)] text-center">
                 Enter the same email from the invite. The reset email lets you choose a password.

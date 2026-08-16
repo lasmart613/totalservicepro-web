@@ -64,13 +64,17 @@ function AuthCallbackInner() {
         // Confirm-signup emails set type=signup. That is NOT an invite, even if
         // a stale next=/auth/set-password is present.
         const isSignupConfirm = authType === 'signup';
+        const isPasswordResetDest =
+          next === '/auth/set-password' ||
+          next.startsWith('/auth/set-password') ||
+          next === '/reset-password' ||
+          next.startsWith('/reset-password');
+
         const isInviteOrRecovery =
           !isSignupConfirm &&
-          (isInviteAuthType(authType) ||
-            next === '/auth/set-password' ||
-            next.startsWith('/auth/set-password'));
+          (isInviteAuthType(authType) || isPasswordResetDest);
 
-        if (isSignupConfirm && (next === '/auth/set-password' || next.startsWith('/auth/set-password'))) {
+        if (isSignupConfirm && isPasswordResetDest) {
           next = '/onboarding';
         }
 

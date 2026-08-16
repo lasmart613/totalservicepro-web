@@ -232,6 +232,8 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
     (user?.email?.[0] || 'U').toUpperCase();
 
   const orgType = (profile?.organizations as any)?.type || null;
+  const orgName = String((profile?.organizations as any)?.name || '').trim();
+  const chipLabel = orgName || fullName;
   const ownerMode = isOwnerish(profile?.role, orgType);
   const supplierMode = isSupplier(profile?.role, orgType);
   const companyLabel = ownerMode
@@ -303,7 +305,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       { href: '/marketplace/used-systems', label: 'Used Equipment' },
       { href: '/marketplace/parts', label: 'Parts' },
       { href: '/marketplace/consumables', label: 'Consumables' },
-      { href: '/marketplace/requests', label: 'Service Requests' },
+      { href: '/service-requests', label: 'Service Requests' },
       { href: '/marketplace/my-listings', label: 'My Listings' },
       { href: '/marketplace/list', label: 'Post a Listing' },
     ],
@@ -423,14 +425,17 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 {initials}
               </div>
               <span className="hidden sm:block text-sm font-semibold text-[var(--text)] max-w-[140px] truncate">
-                {fullName}
+                {chipLabel}
               </span>
             </button>
 
             {dropdownOpen && (
               <div className="absolute right-0 mt-2 w-64 rounded-xl border border-[var(--gold)] bg-[var(--surface3)] shadow-xl z-[100] overflow-hidden text-sm">
                 <div className="px-4 py-3 border-b border-[var(--border)]">
-                  <div className="font-semibold text-[var(--gold)]">{fullName}</div>
+                  <div className="font-semibold text-[var(--gold)]">{orgName || fullName}</div>
+                  {orgName ? (
+                    <div className="text-xs text-[var(--text2)] truncate">{fullName}</div>
+                  ) : null}
                   <div className="text-xs text-[var(--text3)] truncate">{user.email}</div>
                   {profile?.role && (
                     <div className="text-[10px] mt-0.5 text-[var(--text3)]">Role: {roleLabel(profile.role)}</div>

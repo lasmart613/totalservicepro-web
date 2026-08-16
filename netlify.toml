@@ -1,15 +1,22 @@
-# Monorepo root — Netlify base directory is web/
+# Netlify: Next.js 16 + @netlify/plugin-nextjs (OpenNext).
 #
-# Do NOT set publish = ".next". @netlify/plugin-nextjs owns the publish
-# directory. Forcing publish=.next causes /_next/static/* 404s.
+# Dashboard already has Base directory = web. Do NOT also set [build].base here —
+# combining UI base=web with toml base=web made the Next plugin treat publish as
+# "web" (same as the site base) and fail with:
+#   "Your publish directory cannot be the same as the base directory of your site"
+#
+# publish = ".next" is relative to the UI base (web/), so the plugin sees
+# web/.next — not the base dir. The plugin remaps this after its check.
+# (Older "do not set publish=.next" notes applied when UI base was empty and
+# the plugin looked at repo-root .next.)
 
 [build]
-  base = "web"
   command = "npm run build"
-  # publish left unset — Next.js plugin sets it at build time.
+  publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
+  SECRETS_SCAN_OMIT_PATHS = "lib/supabase/client.ts,web/lib/supabase/client.ts"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
@@ -17,12 +24,8 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    X-Frame-Options = "SAMEORIGIN"
+    X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    X-XSS-Protection = "1; mode=block"
-
-[[headers]]
-  for = "/_next/static/*"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'"

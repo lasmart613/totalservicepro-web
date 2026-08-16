@@ -12,6 +12,19 @@ import { mapAndroidHtmlPath } from './lib/android-html-routes'
  */
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl
+
+  // Dead sibling of /service-requests (marketplace hub card uses the live path)
+  if (pathname === '/marketplace/service-requests') {
+    const dest = request.nextUrl.clone()
+    dest.pathname = '/service-requests'
+    return NextResponse.redirect(dest)
+  }
+  if (pathname.startsWith('/marketplace/service-requests/')) {
+    const dest = request.nextUrl.clone()
+    dest.pathname = pathname.replace('/marketplace/service-requests', '/marketplace/requests')
+    return NextResponse.redirect(dest)
+  }
+
   const mapped = mapAndroidHtmlPath(pathname, search)
   if (mapped) {
     const dest = request.nextUrl.clone()

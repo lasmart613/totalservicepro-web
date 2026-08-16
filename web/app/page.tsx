@@ -11,6 +11,7 @@ import {
   getDashboardPersona,
   type DashboardPersona,
 } from '@/lib/roles';
+import { orgTypeLabel, roleLabel } from '@/lib/labels';
 import {
   isClosedTicketStatus,
   isCompleteReport,
@@ -399,8 +400,8 @@ export default function HomePage() {
           Welcome back, {greetName}!
         </h1>
         <p className="text-[var(--text3)]">
-          Role: <span className="capitalize">{role}</span>
-          {orgType ? <span> · Org: {orgType}</span> : null}
+          Role: {roleLabel(role)}
+          {orgType ? <span> · Org: {orgTypeLabel(orgType)}</span> : null}
         </p>
 
         {/* ── Owner / facility KPIs ── */}

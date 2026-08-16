@@ -34,7 +34,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
             setDeniedReason('login');
             setReady(true);
             // Preserve intended destination for post-login redirect
-            const next = encodeURIComponent(pathname || '/admin');
+            const search = typeof window !== 'undefined' ? window.location.search : '';
+            const next = encodeURIComponent(`${pathname || '/admin'}${search}`);
             router.replace(`/login?next=${next}`);
           }
           return;
@@ -68,7 +69,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         if (!cancelled) {
           setDeniedReason('login');
           setReady(true);
-          router.replace(`/login?next=${encodeURIComponent(pathname || '/admin')}`);
+          const search = typeof window !== 'undefined' ? window.location.search : '';
+          router.replace(`/login?next=${encodeURIComponent(`${pathname || '/admin'}${search}`)}`);
         }
       }
     })();

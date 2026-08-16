@@ -149,6 +149,16 @@ export default function EstimateFormClient() {
     deposit,
   ]);
 
+  // Keep focused fields (City/State/ZIP) above the fixed action bar
+  useEffect(() => {
+    const root = document.documentElement;
+    const prev = root.style.scrollPaddingBottom;
+    root.style.scrollPaddingBottom = '9rem';
+    return () => {
+      root.style.scrollPaddingBottom = prev;
+    };
+  }, []);
+
   // Auto-suggest deposit when not manually overridden
   useEffect(() => {
     if (!depositManual && depositRequired) {
@@ -784,7 +794,7 @@ export default function EstimateFormClient() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-4xl mx-auto w-full px-4 py-6 pb-28">
+      <div className="max-w-4xl mx-auto w-full px-4 py-6 pb-36 scroll-pb-36">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
             <Link href="/estimates" className="text-sm text-[var(--gold)] hover:underline">
@@ -849,9 +859,23 @@ export default function EstimateFormClient() {
             )}
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
+            <div className="sm:col-span-2">
               <label className="text-xs text-[var(--text3)]">Address</label>
               <input className="input mt-1" value={custAddress} onChange={(e) => setCustAddress(e.target.value)} />
+            </div>
+            <div>
+              <label className="text-xs text-[var(--text3)]">City</label>
+              <input className="input mt-1 scroll-mb-36" value={custCity} onChange={(e) => setCustCity(e.target.value)} />
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <div>
+                <label className="text-xs text-[var(--text3)]">State</label>
+                <input className="input mt-1 scroll-mb-36" maxLength={2} value={custState} onChange={(e) => setCustState(e.target.value)} />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text3)]">ZIP</label>
+                <input className="input mt-1 scroll-mb-36" value={custZip} onChange={(e) => setCustZip(e.target.value)} />
+              </div>
             </div>
             <div>
               <label className="text-xs text-[var(--text3)]">Contact</label>
@@ -861,23 +885,9 @@ export default function EstimateFormClient() {
               <label className="text-xs text-[var(--text3)]">Phone</label>
               <input className="input mt-1" value={custPhone} onChange={(e) => setCustPhone(e.target.value)} />
             </div>
-            <div>
+            <div className="sm:col-span-2">
               <label className="text-xs text-[var(--text3)]">Email</label>
               <input className="input mt-1" type="email" value={custEmail} onChange={(e) => setCustEmail(e.target.value)} />
-            </div>
-            <div>
-              <label className="text-xs text-[var(--text3)]">City</label>
-              <input className="input mt-1" value={custCity} onChange={(e) => setCustCity(e.target.value)} />
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="text-xs text-[var(--text3)]">State</label>
-                <input className="input mt-1" maxLength={2} value={custState} onChange={(e) => setCustState(e.target.value)} />
-              </div>
-              <div>
-                <label className="text-xs text-[var(--text3)]">ZIP</label>
-                <input className="input mt-1" value={custZip} onChange={(e) => setCustZip(e.target.value)} />
-              </div>
             </div>
           </div>
         </section>
@@ -1264,7 +1274,15 @@ export default function EstimateFormClient() {
           </div>
         </section>
 
-        <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
+        {!isValidOrgId(userOrgId) && (
+          <p className="text-xs text-amber-400 mt-4">
+            No organization on your profile — estimate may save without org scope.
+          </p>
+        )}
+      </div>
+
+      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-[var(--gold)] bg-[var(--surface)] px-3 py-2.5">
+        <div className="max-w-4xl mx-auto flex flex-wrap gap-2 justify-center">
           <Link href="/estimates" className="btn btn-secondary min-w-[80px] text-center">
             Cancel
           </Link>
@@ -1289,21 +1307,16 @@ export default function EstimateFormClient() {
             className="btn btn-secondary min-w-[100px] text-xs"
             disabled={saving || emailing}
             onClick={() => markSentWithoutEmail()}
+            aria-label="Mark sent (no email)"
             title="Sets status to sent without calling Resend"
           >
             Mark sent (no email)
           </button>
         </div>
-        <p className="text-[10px] text-[var(--text3)] mt-2">
+        <p className="text-[10px] text-[var(--text3)] mt-1.5 text-center">
           Finalize &amp; Email only marks the estimate sent after Resend accepts the message.
           Requires customer email and a verified From domain.
         </p>
-
-        {!isValidOrgId(userOrgId) && (
-          <p className="text-xs text-amber-400 mt-4">
-            No organization on your profile — estimate may save without org scope.
-          </p>
-        )}
       </div>
     </div>
   );

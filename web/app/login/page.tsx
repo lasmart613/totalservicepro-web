@@ -4,13 +4,7 @@ import React, { useState, Suspense } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
-
-function safeNextPath(raw: string | null): string {
-  if (!raw) return '/';
-  // Only allow internal relative paths
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '/';
-  return raw;
-}
+import { nextPathFromSearchParams } from '@/lib/login-next';
 
 function LoginInner() {
   const [email, setEmail] = useState('');
@@ -27,7 +21,7 @@ function LoginInner() {
   const [otpMode, setOtpMode] = useState<'signup' | 'magic'>('signup');
   const router = useRouter();
   const searchParams = useSearchParams();
-  const nextPath = safeNextPath(searchParams.get('next'));
+  const nextPath = nextPathFromSearchParams(searchParams);
   const supabase = getSupabaseClient();
 
   function isValidEmail(s: string) {
@@ -523,7 +517,19 @@ function LoginInner() {
               </button>
             </div>
             <div>
-              <button onClick={forgot} className="text-[var(--text3)] hover:text-[var(--gold)] underline">Forgot password?</button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isValidEmail(email.trim().toLowerCase())) {
+                    router.push('/forgot-password');
+                    return;
+                  }
+                  forgot();
+                }}
+                className="text-[var(--text3)] hover:text-[var(--gold)] underline"
+              >
+                Forgot password?
+              </button>
             </div>
           </div>
         </div>

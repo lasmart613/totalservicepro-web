@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { loginHref, pathWithSearch } from '@/lib/login-next';
 
 /**
  * Client auth gate. Session lives in localStorage (tsp-auth-token), so Edge
@@ -21,8 +22,8 @@ export function RequireAuth({ children }: { children: React.ReactNode }) {
       const { data } = await supabase.auth.getUser();
       if (cancelled) return;
       if (!data.user) {
-        const next = encodeURIComponent(pathname || '/');
-        router.replace(`/login?next=${next}`);
+        const search = typeof window !== 'undefined' ? window.location.search : '';
+        router.replace(loginHref(pathWithSearch(pathname, search)));
         return;
       }
       setOk(true);
