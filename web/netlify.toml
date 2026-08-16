@@ -1,12 +1,9 @@
-# Total Service Pro — Netlify + Next.js Runtime
-#
-# Do NOT set publish = ".next". @netlify/plugin-nextjs owns the publish
-# directory and asset mapping. Forcing publish=.next causes
-# /_next/static/* 404s → browser "This page couldn't load".
+# Copied into the UI base (web/). Same publish rule as the repo-root file:
+# publish must not equal the site base or @netlify/plugin-nextjs fails.
 
 [build]
-  command = "if [ -f web/package.json ]; then cd web; fi; npm ci && npm run build"
-  # Leave publish empty / omit — Next.js plugin sets it at build time.
+  command = "npm run build"
+  publish = ".next"
 
 [build.environment]
   NODE_VERSION = "20"
@@ -18,12 +15,8 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    X-Frame-Options = "SAMEORIGIN"
+    X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
-    X-XSS-Protection = "1; mode=block"
-
-[[headers]]
-  for = "/_next/static/*"
-  [headers.values]
-    Cache-Control = "public, max-age=31536000, immutable"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+    Content-Security-Policy = "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co; frame-ancestors 'none'"
