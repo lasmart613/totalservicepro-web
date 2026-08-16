@@ -11,8 +11,7 @@
 
 [build.environment]
   NODE_VERSION = "20"
-  # Ensure client env is available at build if not only in UI
-  # (also set NEXT_PUBLIC_* in Netlify dashboard)
+  SECRETS_SCAN_OMIT_PATHS = "lib/supabase/client.ts,web/lib/supabase/client.ts"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"

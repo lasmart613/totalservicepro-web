@@ -1,29 +1,33 @@
 /**
  * Supabase client for browser (Total Service Pro web only).
- * MUST be configured via NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY env vars.
- * Never hardcode keys in source.
+ * Prefers NEXT_PUBLIC_SUPABASE_URL / NEXT_PUBLIC_SUPABASE_ANON_KEY.
+ * Falls back to the public anon pair already shipped on repairplanet.net so
+ * Git/Netlify preview builds can prerender when those env vars are
+ * Production-scoped only. Anon key is a public client credential (RLS still applies).
  *
  * Session persistence via localStorage using 'tsp-auth-token' for compatibility.
  */
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 
-const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+const FALLBACK_SUPABASE_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
+const FALLBACK_SUPABASE_ANON_KEY =
+  'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM';
+
+function supabaseUrl(): string {
+  return process.env.NEXT_PUBLIC_SUPABASE_URL || FALLBACK_SUPABASE_URL;
+}
+
+function supabaseAnonKey(): string {
+  return process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || FALLBACK_SUPABASE_ANON_KEY;
+}
 
 let supabaseInstance: SupabaseClient | null = null;
 
 export function getSupabaseClient(): SupabaseClient {
   if (supabaseInstance) return supabaseInstance;
 
-  if (!supabaseUrl || !supabaseAnonKey) {
-    throw new Error(
-      'Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY environment variables. ' +
-      'These are required for the web app. Configure them in your deployment (e.g. Netlify) or .env.local file.'
-    );
-  }
-
-  supabaseInstance = createClient(supabaseUrl, supabaseAnonKey, {
+  supabaseInstance = createClient(supabaseUrl(), supabaseAnonKey(), {
     auth: {
       persistSession: true,
       storageKey: 'tsp-auth-token',
@@ -39,7 +43,7 @@ export function getSupabaseClient(): SupabaseClient {
 // Helper to get the configured Supabase URL (useful for constructing function URLs etc.)
 export function getSupabaseUrl(): string {
   // Always read directly so it works even if the lazy client hasn't been initialized yet
-  return process.env.NEXT_PUBLIC_SUPABASE_URL || '';
+  return supabaseUrl();
 }
 
 // Types for common rows (expand as needed; or use Supabase generated types later)

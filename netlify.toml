@@ -10,6 +10,8 @@
 
 [build.environment]
   NODE_VERSION = "20"
+  # Public anon JWT lives in lib/supabase/client.ts as a Git-preview fallback.
+  SECRETS_SCAN_OMIT_PATHS = "lib/supabase/client.ts,web/lib/supabase/client.ts"
 
 [[plugins]]
   package = "@netlify/plugin-nextjs"
