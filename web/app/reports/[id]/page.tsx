@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isOwnerish } from '@/lib/roles';
 import { buildServiceReportPrintHTML } from '@/lib/service-report-print';
+import { resolveCustomerEmailOnFile, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import { toast } from 'sonner';
 
 function parseMaybeJson(val: any): any {
@@ -29,6 +30,8 @@ export default function ReportDetail() {
   const [viewOnly, setViewOnly] = useState(false);
   const [report, setReport] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [emailing, setEmailing] = useState(false);
+  const [emailOnFile, setEmailOnFile] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -76,6 +79,26 @@ export default function ReportDetail() {
     })();
   }, [id, supabase]);
 
+  useEffect(() => {
+    if (!report) {
+      setEmailOnFile('');
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      const dest = await resolveCustomerEmailOnFile({
+        supabase,
+        customerOrganizationId: report.customer_organization_id,
+        customerEmail: report.customer_email,
+        customerName: report.customer_name,
+      });
+      if (!cancelled) setEmailOnFile(dest.email);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [report, supabase]);
+
   function openPrint() {
     if (!report) return;
     try {
@@ -100,7 +123,59 @@ export default function ReportDetail() {
     }
   }
 
+  async function emailReportToCustomer() {
+    if (!report || emailing) return;
+    const dest = await resolveCustomerEmailOnFile({
+      supabase,
+      customerOrganizationId: report.customer_organization_id,
+      customerEmail: report.customer_email,
+      customerName: report.customer_name,
+    });
+    setEmailOnFile(dest.email);
+    if (!dest.email) {
+      toast.error('No email on file for this customer. Add one on the customer/clinic profile or the report.');
+      return;
+    }
+
+    setEmailing(true);
+    try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        toast.error('Session expired — sign in again');
+        return;
+      }
+      const html = buildServiceReportPrintHTML(report);
+      const result = await sendBillingDocEmail({
+        kind: 'report',
+        accessToken: session.access_token,
+        payload: {
+          report_id: report.id,
+          to_email: dest.email,
+          report_number: report.report_number || '',
+          customer_organization_id: report.customer_organization_id || undefined,
+          reply_to: report.tech_email || report.tech_company_email || undefined,
+          html,
+          subject: report.report_number
+            ? `Service Report ${report.report_number} from Total Service Pro`
+            : 'Service report from Total Service Pro',
+        },
+      });
+      if (result.emailSent) {
+        toast.success(`Service report emailed to ${result.to || dest.email}`);
+      } else {
+        toast.error(result.error || 'Email was not sent.');
+      }
+    } catch (e: any) {
+      toast.error(e?.message || 'Email failed');
+    } finally {
+      setEmailing(false);
+    }
+  }
+
   const engineer = report?.service_engineer || report?.tech_name || '—';
+  const isComplete = String(report?.status || '').toLowerCase() === 'complete';
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -113,16 +188,37 @@ export default function ReportDetail() {
           <h1 className="text-2xl font-bold">
             Service Report {report?.report_number || id}
           </h1>
-          <div className="flex gap-2">
+          <div className="flex flex-col items-end gap-1">
+            <div className="flex flex-wrap gap-2 justify-end">
+              {report && (
+                <button type="button" className="btn btn-secondary text-sm" onClick={openPrint}>
+                  Print / PDF
+                </button>
+              )}
+              {report && (
+                <button
+                  type="button"
+                  className="btn btn-primary text-sm"
+                  onClick={emailReportToCustomer}
+                  disabled={emailing}
+                >
+                  {emailing ? 'Emailing…' : 'Email report'}
+                </button>
+              )}
+              {!viewOnly && report && (
+                <Link href={`/reports/new?id=${id}`} className="btn btn-secondary text-sm">
+                  Open in Editor
+                </Link>
+              )}
+            </div>
             {report && (
-              <button type="button" className="btn btn-secondary text-sm" onClick={openPrint}>
-                Print / PDF
-              </button>
-            )}
-            {!viewOnly && report && (
-              <Link href={`/reports/new?id=${id}`} className="btn btn-primary text-sm">
-                Open in Editor
-              </Link>
+              <div className="text-xs text-[var(--text3)]">
+                {emailOnFile
+                  ? `Email on file: ${emailOnFile}`
+                  : isComplete
+                    ? 'No email on file for this customer'
+                    : ''}
+              </div>
             )}
           </div>
         </div>
