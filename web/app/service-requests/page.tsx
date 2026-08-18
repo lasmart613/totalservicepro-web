@@ -2,7 +2,7 @@
 
 import React, { Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
@@ -38,7 +38,6 @@ type ReqRow = {
 
 function ServiceRequestsInner() {
   const supabase = getSupabaseClient();
-  const router = useRouter();
   const searchParams = useSearchParams();
   const preLaserId = searchParams.get('laser_id');
   const openedFromQuery = useRef(false);
@@ -329,7 +328,6 @@ function ServiceRequestsInner() {
       toast.success(isSub ? 'Subcontract RFQ posted' : 'Service request posted');
       setPostOpen(false);
       await load();
-      if (ownerView) router.push('/my-lasers');
     } catch (e: any) {
       toast.error(e.message || 'Could not post');
     } finally {

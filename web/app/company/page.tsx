@@ -13,7 +13,7 @@ import {
   isServiceCompany,
   canAccessCompanyProfile,
 } from '@/lib/roles';
-import { roleLabel } from '@/lib/labels';
+import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { listManufacturers } from '@/lib/laser-catalog';
 
 const TEAM_ROLES = ['company_admin', 'service_manager', 'fse', 'dispatcher', 'billing_manager', 'admin'];
@@ -617,12 +617,12 @@ function CompanyProfile() {
     isServiceCompany(userRole, org?.type) &&
     (isAdmin(userRole) || userRole === 'service_manager');
   const profileTitle = ownerMode
-    ? 'Facility Profile'
+    ? ownerProfileLabel(org?.type)
     : supplierMode
       ? 'Supplier Profile'
       : 'Company Management';
   const detailsTitle = ownerMode
-    ? 'Facility Details'
+    ? ownerDetailsLabel(org?.type)
     : supplierMode
       ? 'Supplier Details'
       : 'Company Details';
@@ -742,7 +742,13 @@ function CompanyProfile() {
           </div>
 
           <button onClick={saveOrg} disabled={saving} className="btn btn-primary mt-6 w-full md:w-auto">
-            {saving ? 'Saving...' : ownerMode ? 'Save Facility Details' : supplierMode ? 'Save Supplier Details' : 'Save Company Details'}
+            {saving
+              ? 'Saving...'
+              : ownerMode
+                ? `Save ${ownerDetailsLabel(org?.type)}`
+                : supplierMode
+                  ? 'Save Supplier Details'
+                  : 'Save Company Details'}
           </button>
         </div>
 

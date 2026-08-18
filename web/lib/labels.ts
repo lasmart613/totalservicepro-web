@@ -39,3 +39,33 @@ export function orgTypeLabel(type?: string | null): string {
   if (!t) return '';
   return t.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
 }
+
+/** Clinic copy is wrong for rental/reseller — same owner product, different labels. */
+function isNonClinicOwnerOrg(type?: string | null): boolean {
+  const t = String(type || '').toLowerCase().trim();
+  return t === 'laser_rental' || t === 'laser_reseller';
+}
+
+/** Header hub dropdown (clinic: My Clinic). */
+export function ownerHubNavLabel(type?: string | null): string {
+  if (String(type || '').toLowerCase().trim() === 'laser_rental') return 'My Lasers';
+  if (String(type || '').toLowerCase().trim() === 'laser_reseller') return 'My Lasers';
+  return 'My Clinic';
+}
+
+/** Home dashboard section heading. */
+export function ownerDashboardHeading(type?: string | null): string {
+  const t = String(type || '').toLowerCase().trim();
+  if (t === 'laser_rental') return 'Rental Dashboard';
+  if (t === 'laser_reseller') return 'Reseller Dashboard';
+  return 'Clinic Dashboard';
+}
+
+/** /company link + page title for owner-side orgs. */
+export function ownerProfileLabel(type?: string | null): string {
+  return isNonClinicOwnerOrg(type) ? 'Company Profile' : 'Facility Profile';
+}
+
+export function ownerDetailsLabel(type?: string | null): string {
+  return isNonClinicOwnerOrg(type) ? 'Company Details' : 'Facility Details';
+}

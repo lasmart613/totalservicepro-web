@@ -8,7 +8,6 @@ import { MODELS } from '@/lib/models';
 import {
   OWNER_ORG_TYPE_SIGNUP_OPTIONS,
   defaultJobTitleForOwnerOrgType,
-  ownerOrgTypeLabel,
   type OwnerOrgType,
 } from '@/lib/org-types';
 import AuthOtpBox from '@/components/AuthOtpBox';
@@ -110,44 +109,26 @@ export default function OwnerSignup() {
       extra: {
         job_title: defaultJobTitleForOwnerOrgType(orgKind),
         facility_type: facilityType,
-        num_lasers: numLasers ? parseInt(numLasers, 10) : null,
         preferred_services: selectedServices.length ? selectedServices.join(' | ') : null,
         bio: bio || null,
+        num_laser_systems: numLasers ? parseInt(numLasers, 10) : null,
+        equipment: equipmentList.map((item) => ({
+          manufacturer:
+            (MODELS as any)[item.modelKey]?.mfg ||
+            (MODELS as any)[item.modelKey]?.manufacturer ||
+            'Unknown',
+          model: (MODELS as any)[item.modelKey]?.label || item.modelKey,
+          serial_number: (item.serialNumber || '').trim() || 'TBD',
+        })),
       },
     };
   }
 
   async function completeOwnerSetup(userId: string) {
-    const applied = await applyPendingSignup(supabase, userId, pendingPayload());
-    const newOrgId = applied.orgId;
-
-    let lasersSaved = 0;
-    const laserErrors: string[] = [];
-    if (newOrgId && equipmentList.length > 0) {
-      for (const item of equipmentList) {
-        const payload = {
-          customer_organization_id: newOrgId,
-          manufacturer: (MODELS as any)[item.modelKey]?.mfg || (MODELS as any)[item.modelKey]?.manufacturer || 'Unknown',
-          model: (MODELS as any)[item.modelKey]?.label || item.modelKey,
-          serial_number: (item.serialNumber || '').trim() || 'TBD',
-        };
-        const { error: equipError } = await supabase.from('equipment').insert(payload);
-        if (equipError) {
-          console.error('Equipment insert failed', equipError);
-          laserErrors.push(payload.model + ': ' + equipError.message);
-        } else {
-          lasersSaved++;
-        }
-      }
-    }
-
-    if (laserErrors.length) {
-      setMessage(
-        `Account created. ${lasersSaved} laser(s) saved; ${laserErrors.length} failed. Finish under My Lasers.`
-      );
-      setMessageOk(true);
-    }
-    router.push(lasersSaved > 0 ? '/my-lasers?justSetup=1' : '/?justSetup=1');
+    const pending = pendingPayload();
+    savePendingSignup(pending);
+    const applied = await applyPendingSignup(supabase, userId, pending);
+    router.push(applied.dest || '/my-lasers?justSetup=1');
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -190,6 +171,8 @@ export default function OwnerSignup() {
             city: city || '',
             state: state || '',
             phone: phone || '',
+            facility_type: facilityType,
+            preferred_services: selectedServices.length ? selectedServices.join(' | ') : '',
           },
           emailRedirectTo: `${origin}/auth/callback?next=/my-lasers`,
         },

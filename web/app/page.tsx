@@ -11,7 +11,7 @@ import {
   getDashboardPersona,
   type DashboardPersona,
 } from '@/lib/roles';
-import { orgTypeLabel, roleLabel } from '@/lib/labels';
+import { orgTypeLabel, ownerDashboardHeading, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import {
   isClosedTicketStatus,
   isCompleteReport,
@@ -427,7 +427,7 @@ export default function HomePage() {
             </div>
 
             <div className="mt-12">
-              <h3 className="font-bold text-lg mb-4">Clinic Dashboard</h3>
+              <h3 className="font-bold text-lg mb-4">{ownerDashboardHeading(orgType)}</h3>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <Link href="/my-lasers" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Zap size={32} className="mx-auto mb-3 text-[var(--gold)]" />
@@ -447,7 +447,7 @@ export default function HomePage() {
                 </Link>
                 <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Facility Profile</div>
+                  <div className="font-bold">{ownerProfileLabel(orgType)}</div>
                 </Link>
                 <Link href="/settings" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Settings size={32} className="mx-auto mb-3 text-[var(--gold)]" />

@@ -15,7 +15,7 @@ import {
   ChevronDown,
 } from 'lucide-react';
 import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
-import { roleLabel } from '@/lib/labels';
+import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 
 type NavLink = { href: string; label: string };
 type NavGroup = { id: string; label: string; href?: string; items: NavLink[] };
@@ -237,7 +237,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const ownerMode = isOwnerish(profile?.role, orgType);
   const supplierMode = isSupplier(profile?.role, orgType);
   const companyLabel = ownerMode
-    ? 'Facility Profile'
+    ? ownerProfileLabel(orgType)
     : supplierMode
       ? 'Supplier Profile'
       : 'Company Profile';
@@ -254,7 +254,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const hubGroup: NavGroup = ownerMode
     ? {
         id: 'hub',
-        label: 'My Clinic',
+        label: ownerHubNavLabel(orgType),
         href: '/my-lasers',
         items: [
           { href: '/my-lasers', label: 'My Lasers' },

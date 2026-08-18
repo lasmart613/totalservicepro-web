@@ -69,10 +69,72 @@ export function clearPendingSignup() {
   }
 }
 
-export function destForKind(kind: PendingSignupKind, hasLasers = false): string {
+export function destForKind(kind: PendingSignupKind, _hasLasers = false): string {
   if (kind === 'company') return '/onboarding';
-  if (kind === 'owner') return hasLasers ? '/my-lasers?justSetup=1' : '/?justSetup=1';
+  // Owners (clinic + rental + reseller) need a linked facility so Add Laser works
+  // without repeating onboarding. Always land on My Lasers after verify.
+  if (kind === 'owner') return '/my-lasers?justSetup=1';
   return '/?justSetup=1';
+}
+
+export type PendingEquipmentItem = {
+  manufacturer: string;
+  model: string;
+  serial_number: string;
+};
+
+function isSchemaColumnError(message?: string | null): boolean {
+  const m = String(message || '');
+  return /schema cache|could not find the ['"]|column .* (does not exist|of )/i.test(m);
+}
+
+/** Core org row — never include dropped columns such as organizations.num_lasers. */
+export function organizationInsertFromPending(pending: PendingSignup, userId: string): Record<string, unknown> {
+  const orgInsert: Record<string, unknown> = {
+    name: pending.name,
+    type: pending.orgType,
+    address: pending.address || null,
+    city: pending.city || null,
+    state: pending.state || null,
+    phone: pending.phone || null,
+    website: pending.website || null,
+    created_by: userId,
+  };
+
+  if (pending.kind === 'company') {
+    orgInsert.services_offered = pending.extra?.services_offered || null;
+    orgInsert.num_techs = pending.extra?.num_techs ?? null;
+  }
+  if (pending.kind === 'owner') {
+    orgInsert.facility_type = pending.extra?.facility_type || null;
+    orgInsert.preferred_services = pending.extra?.preferred_services || null;
+    const count = pending.extra?.num_laser_systems ?? pending.extra?.num_lasers;
+    if (count != null && Number.isFinite(Number(count))) {
+      orgInsert.num_laser_systems = Number(count);
+    }
+  }
+  if (pending.kind === 'supplier') {
+    orgInsert.num_techs = pending.extra?.num_techs ?? null;
+    orgInsert.tax_id = pending.extra?.tax_id || null;
+    orgInsert.services_offered = pending.extra?.services_offered || null;
+  }
+
+  // Live PostgREST: organizations.num_lasers is not in the schema cache.
+  delete orgInsert.num_lasers;
+  return orgInsert;
+}
+
+function coreOrganizationInsert(pending: PendingSignup, userId: string): Record<string, unknown> {
+  return {
+    name: pending.name,
+    type: pending.orgType,
+    address: pending.address || null,
+    city: pending.city || null,
+    state: pending.state || null,
+    phone: pending.phone || null,
+    website: pending.website || null,
+    created_by: userId,
+  };
 }
 
 const OWNER_ORG_TYPES = new Set(['customer', 'laser_clinic', 'laser_rental', 'laser_reseller']);
@@ -144,6 +206,8 @@ export function pendingSignupFromMetadata(user: {
       job_title: meta.job_title || null,
       services_offered: meta.services_offered || null,
       facility_type: meta.facility_type || null,
+      preferred_services: meta.preferred_services || null,
+      num_laser_systems: meta.num_laser_systems ?? meta.num_lasers ?? null,
     },
   };
 }
@@ -174,41 +238,29 @@ export async function applyPendingSignup(
     .maybeSingle();
 
   if (existing?.organization_id) {
+    await insertPendingOwnerEquipment(supabase, existing.organization_id, pending);
     clearPendingSignup();
     return { orgId: existing.organization_id, dest: destForKind(pending.kind) };
   }
 
-  const orgInsert: Record<string, any> = {
-    name: pending.name,
-    type: pending.orgType,
-    address: pending.address || null,
-    city: pending.city || null,
-    state: pending.state || null,
-    phone: pending.phone || null,
-    website: pending.website || null,
-    created_by: userId,
-  };
-
-  if (pending.kind === 'company') {
-    orgInsert.services_offered = pending.extra?.services_offered || null;
-    orgInsert.num_techs = pending.extra?.num_techs ?? null;
-  }
-  if (pending.kind === 'owner') {
-    orgInsert.facility_type = pending.extra?.facility_type || null;
-    orgInsert.num_lasers = pending.extra?.num_lasers ?? null;
-    orgInsert.preferred_services = pending.extra?.preferred_services || null;
-  }
-  if (pending.kind === 'supplier') {
-    orgInsert.num_techs = pending.extra?.num_techs ?? null;
-    orgInsert.tax_id = pending.extra?.tax_id || null;
-    orgInsert.services_offered = pending.extra?.services_offered || null;
-  }
-
-  const { data: orgData, error: orgError } = await supabase
+  const orgInsert = organizationInsertFromPending(pending, userId);
+  let { data: orgData, error: orgError } = await supabase
     .from('organizations')
     .insert(orgInsert)
     .select('id')
     .single();
+
+  // Live schema dropped organizations.num_lasers; retry without optional extras
+  // if PostgREST rejects an unknown column so the facility still gets created.
+  if (orgError && isSchemaColumnError(orgError.message)) {
+    const retry = await supabase
+      .from('organizations')
+      .insert(coreOrganizationInsert(pending, userId))
+      .select('id')
+      .single();
+    orgData = retry.data;
+    orgError = retry.error;
+  }
 
   if (orgError || !orgData?.id) {
     throw new Error(
@@ -246,6 +298,41 @@ export async function applyPendingSignup(
     if (forceErr) throw new Error(forceErr.message || 'Organization created but profile link failed.');
   }
 
+  await insertPendingOwnerEquipment(supabase, orgData.id, pending);
+
   clearPendingSignup();
   return { orgId: orgData.id, dest: destForKind(pending.kind) };
+}
+
+async function insertPendingOwnerEquipment(
+  supabase: SupabaseClient,
+  orgId: string | number,
+  pending: PendingSignup
+): Promise<void> {
+  if (pending.kind !== 'owner') return;
+  const items = Array.isArray(pending.extra?.equipment) ? pending.extra.equipment : [];
+  for (const raw of items) {
+    const manufacturer = String(raw?.manufacturer || '').trim() || 'Unknown';
+    const model = String(raw?.model || raw?.modelKey || '').trim();
+    const serial = String(raw?.serial_number || raw?.serialNumber || '').trim() || 'TBD';
+    if (!model) continue;
+    const payload = {
+      customer_organization_id: orgId,
+      manufacturer,
+      model,
+      serial_number: serial,
+    };
+    const { error } = await supabase.from('equipment').insert(payload);
+    if (error) {
+      const r2 = await supabase.from('equipment').insert({
+        customer_organization_id: orgId,
+        manufacturer,
+        model,
+        serial_number: serial,
+      });
+      if (r2.error) {
+        console.error('Signup equipment insert failed', r2.error);
+      }
+    }
+  }
 }
