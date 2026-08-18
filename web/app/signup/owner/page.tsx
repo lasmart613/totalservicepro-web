@@ -128,6 +128,9 @@ export default function OwnerSignup() {
     const pending = pendingPayload();
     savePendingSignup(pending);
     const applied = await applyPendingSignup(supabase, userId, pending);
+    if (!applied.orgId) {
+      throw new Error('Account verified, but a facility was not linked. Try Onboarding or sign in again.');
+    }
     router.push(applied.dest || '/my-lasers?justSetup=1');
   }
 

@@ -34,7 +34,6 @@ export function savePendingSignup(p: PendingSignup) {
     const raw = JSON.stringify(p);
     const store = storage();
     if (store) store.setItem(KEY, raw);
-    // Keep a same-tab copy too (harmless if localStorage works)
     try {
       sessionStorage.setItem(KEY, raw);
     } catch {
@@ -71,8 +70,6 @@ export function clearPendingSignup() {
 
 export function destForKind(kind: PendingSignupKind, _hasLasers = false): string {
   if (kind === 'company') return '/onboarding';
-  // Owners (clinic + rental + reseller) need a linked facility so Add Laser works
-  // without repeating onboarding. Always land on My Lasers after verify.
   if (kind === 'owner') return '/my-lasers?justSetup=1';
   return '/?justSetup=1';
 }
@@ -82,11 +79,6 @@ export type PendingEquipmentItem = {
   model: string;
   serial_number: string;
 };
-
-function isSchemaColumnError(message?: string | null): boolean {
-  const m = String(message || '');
-  return /schema cache|could not find the ['"]|column .* (does not exist|of )/i.test(m);
-}
 
 /** Core org row — never include dropped columns such as organizations.num_lasers. */
 export function organizationInsertFromPending(pending: PendingSignup, userId: string): Record<string, unknown> {
@@ -106,7 +98,7 @@ export function organizationInsertFromPending(pending: PendingSignup, userId: st
     orgInsert.num_techs = pending.extra?.num_techs ?? null;
   }
   if (pending.kind === 'owner') {
-    orgInsert.facility_type = pending.extra?.facility_type || null;
+    orgInsert.facility_type = pending.extra?.facility_type || facilityTypeForOwnerOrg(pending.orgType);
     orgInsert.preferred_services = pending.extra?.preferred_services || null;
     const count = pending.extra?.num_laser_systems ?? pending.extra?.num_lasers;
     if (count != null && Number.isFinite(Number(count))) {
@@ -119,7 +111,6 @@ export function organizationInsertFromPending(pending: PendingSignup, userId: st
     orgInsert.services_offered = pending.extra?.services_offered || null;
   }
 
-  // Live PostgREST: organizations.num_lasers is not in the schema cache.
   delete orgInsert.num_lasers;
   return orgInsert;
 }
@@ -135,6 +126,13 @@ function coreOrganizationInsert(pending: PendingSignup, userId: string): Record<
     website: pending.website || null,
     created_by: userId,
   };
+}
+
+export function facilityTypeForOwnerOrg(orgType?: string | null): string | null {
+  const t = String(orgType || '').toLowerCase().trim();
+  if (t === 'laser_rental') return 'Rental fleet';
+  if (t === 'laser_reseller') return 'Reseller inventory';
+  return null;
 }
 
 const OWNER_ORG_TYPES = new Set(['customer', 'laser_clinic', 'laser_rental', 'laser_reseller']);
@@ -205,7 +203,7 @@ export function pendingSignupFromMetadata(user: {
     extra: {
       job_title: meta.job_title || null,
       services_offered: meta.services_offered || null,
-      facility_type: meta.facility_type || null,
+      facility_type: meta.facility_type || facilityTypeForOwnerOrg(resolvedOrgType),
       preferred_services: meta.preferred_services || null,
       num_laser_systems: meta.num_laser_systems ?? meta.num_lasers ?? null,
     },
@@ -222,9 +220,145 @@ export function resolvePendingSignup(user: {
   return pendingSignupFromMetadata(user);
 }
 
+async function findCreatedOrganization(
+  supabase: SupabaseClient,
+  userId: string,
+  name: string
+): Promise<string | number | null> {
+  const trimmed = (name || '').trim();
+  if (!trimmed) return null;
+  const { data } = await supabase
+    .from('organizations')
+    .select('id')
+    .eq('created_by', userId)
+    .ilike('name', trimmed)
+    .order('id', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  return data?.id ?? null;
+}
+
+function ownerFallbackType(intended: string): string | null {
+  const t = String(intended || '').toLowerCase();
+  if (t === 'laser_rental' || t === 'laser_reseller' || t === 'laser_clinic') return 'customer';
+  return null;
+}
+
+/**
+ * Insert org. Rental/reseller types may be rejected by a live CHECK/enum that
+ * only allows customer | service_company | parts_supplier — fall back to customer
+ * and keep rental identity on facility_type.
+ */
+export async function insertOrganizationForPending(
+  supabase: SupabaseClient,
+  userId: string,
+  pending: PendingSignup
+): Promise<string | number> {
+  const intended = organizationInsertFromPending(pending, userId);
+  const core = coreOrganizationInsert(pending, userId);
+  const attempts: Record<string, unknown>[] = [intended];
+  if (JSON.stringify(intended) !== JSON.stringify(core)) attempts.push(core);
+
+  const fallbackType = pending.kind === 'owner' ? ownerFallbackType(String(pending.orgType || '')) : null;
+  if (fallbackType) {
+    attempts.push({
+      ...core,
+      type: fallbackType,
+      facility_type: pending.extra?.facility_type || facilityTypeForOwnerOrg(pending.orgType),
+    });
+    attempts.push({
+      name: pending.name,
+      type: fallbackType,
+      created_by: userId,
+    });
+  }
+
+  let lastError: { message?: string } | null = null;
+  for (const row of attempts) {
+    delete (row as any).num_lasers;
+    const { data, error } = await supabase.from('organizations').insert(row).select('id').maybeSingle();
+    if (data?.id) return data.id;
+    lastError = error;
+    const found = await findCreatedOrganization(supabase, userId, pending.name);
+    if (found) return found;
+  }
+
+  throw new Error(
+    lastError?.message || 'Could not create your organization. Try again or sign in to finish setup.'
+  );
+}
+
+async function linkFounderProfile(
+  supabase: SupabaseClient,
+  userId: string,
+  orgId: string | number,
+  pending: PendingSignup
+): Promise<void> {
+  const founderComplete = pending.kind !== 'company';
+  const payload = {
+    id: userId,
+    first_name: pending.firstName,
+    last_name: pending.lastName,
+    email: pending.email,
+    phone: pending.phone || null,
+    role: pending.role,
+    job_title: pending.extra?.job_title || null,
+    organization_id: orgId,
+    onboarding_completed: founderComplete,
+    bio: pending.extra?.bio || null,
+  };
+
+  let { error: profErr } = await supabase.from('user_profiles').upsert(payload, { onConflict: 'id' });
+  if (profErr) {
+    const slim = {
+      organization_id: orgId,
+      role: pending.role,
+      first_name: pending.firstName || null,
+      last_name: pending.lastName || null,
+      onboarding_completed: founderComplete,
+    };
+    const { error: forceErr } = await supabase.from('user_profiles').update(slim).eq('id', userId);
+    if (forceErr) {
+      const r2 = await supabase
+        .from('user_profiles')
+        .update({ organization_id: orgId, role: pending.role, onboarding_completed: founderComplete })
+        .eq('id', userId);
+      if (r2.error) throw new Error(r2.error.message || 'Organization created but profile link failed.');
+    }
+  }
+
+  const { data: check } = await supabase
+    .from('user_profiles')
+    .select('organization_id, role, onboarding_completed')
+    .eq('id', userId)
+    .maybeSingle();
+
+  if (!check?.organization_id) {
+    const { error: lastErr } = await supabase
+      .from('user_profiles')
+      .update({
+        organization_id: orgId,
+        role: pending.role,
+        onboarding_completed: founderComplete,
+      })
+      .eq('id', userId);
+    const { data: check2 } = await supabase
+      .from('user_profiles')
+      .select('organization_id')
+      .eq('id', userId)
+      .maybeSingle();
+    if (!check2?.organization_id) {
+      throw new Error(
+        lastErr?.message ||
+          'Organization created but could not link your account. Open Onboarding to finish.'
+      );
+    }
+  }
+}
+
 /**
  * Create org + link founder profile from a pending signup payload.
- * Idempotent: if the user already has an organization_id, do not insert another org.
+ * Does not return success until user_profiles.organization_id is actually set.
  */
 export async function applyPendingSignup(
   supabase: SupabaseClient,
@@ -238,70 +372,25 @@ export async function applyPendingSignup(
     .maybeSingle();
 
   if (existing?.organization_id) {
+    if (pending.kind !== 'company' && existing.role !== pending.role) {
+      await supabase
+        .from('user_profiles')
+        .update({ role: pending.role, onboarding_completed: true })
+        .eq('id', userId);
+    }
     await insertPendingOwnerEquipment(supabase, existing.organization_id, pending);
     clearPendingSignup();
     return { orgId: existing.organization_id, dest: destForKind(pending.kind) };
   }
 
-  const orgInsert = organizationInsertFromPending(pending, userId);
-  let { data: orgData, error: orgError } = await supabase
-    .from('organizations')
-    .insert(orgInsert)
-    .select('id')
-    .single();
+  const orphan = await findCreatedOrganization(supabase, userId, pending.name);
+  const orgId = orphan || (await insertOrganizationForPending(supabase, userId, pending));
 
-  // Live schema dropped organizations.num_lasers; retry without optional extras
-  // if PostgREST rejects an unknown column so the facility still gets created.
-  if (orgError && isSchemaColumnError(orgError.message)) {
-    const retry = await supabase
-      .from('organizations')
-      .insert(coreOrganizationInsert(pending, userId))
-      .select('id')
-      .single();
-    orgData = retry.data;
-    orgError = retry.error;
-  }
-
-  if (orgError || !orgData?.id) {
-    throw new Error(
-      orgError?.message || 'Could not create your organization. Try again or sign in to finish setup.'
-    );
-  }
-
-  const founderComplete = pending.kind !== 'company';
-  const { error: profErr } = await supabase.from('user_profiles').upsert(
-    {
-      id: userId,
-      first_name: pending.firstName,
-      last_name: pending.lastName,
-      email: pending.email,
-      phone: pending.phone || null,
-      role: pending.role,
-      job_title: pending.extra?.job_title || null,
-      organization_id: orgData.id,
-      onboarding_completed: founderComplete,
-      bio: pending.extra?.bio || null,
-    },
-    { onConflict: 'id' }
-  );
-  if (profErr) {
-    const { error: forceErr } = await supabase
-      .from('user_profiles')
-      .update({
-        organization_id: orgData.id,
-        role: pending.role,
-        first_name: pending.firstName || null,
-        last_name: pending.lastName || null,
-        onboarding_completed: founderComplete,
-      })
-      .eq('id', userId);
-    if (forceErr) throw new Error(forceErr.message || 'Organization created but profile link failed.');
-  }
-
-  await insertPendingOwnerEquipment(supabase, orgData.id, pending);
+  await linkFounderProfile(supabase, userId, orgId, pending);
+  await insertPendingOwnerEquipment(supabase, orgId, pending);
 
   clearPendingSignup();
-  return { orgId: orgData.id, dest: destForKind(pending.kind) };
+  return { orgId, dest: destForKind(pending.kind) };
 }
 
 async function insertPendingOwnerEquipment(
@@ -324,12 +413,7 @@ async function insertPendingOwnerEquipment(
     };
     const { error } = await supabase.from('equipment').insert(payload);
     if (error) {
-      const r2 = await supabase.from('equipment').insert({
-        customer_organization_id: orgId,
-        manufacturer,
-        model,
-        serial_number: serial,
-      });
+      const r2 = await supabase.from('equipment').insert(payload);
       if (r2.error) {
         console.error('Signup equipment insert failed', r2.error);
       }

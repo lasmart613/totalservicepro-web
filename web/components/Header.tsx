@@ -138,7 +138,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       if (u) {
         const { data: prof } = await supabase
           .from('user_profiles')
-          .select('first_name, last_name, role, organizations(name, type)')
+          .select('first_name, last_name, role, organizations(name, type, facility_type)')
           .eq('id', u.id)
           .maybeSingle();
         setProfile(prof);
@@ -162,7 +162,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       if (session?.user) {
         supabase
           .from('user_profiles')
-          .select('first_name, last_name, role, organizations(name, type)')
+          .select('first_name, last_name, role, organizations(name, type, facility_type)')
           .eq('id', session.user.id)
           .maybeSingle()
           .then(({ data }) => setProfile(data));
@@ -231,13 +231,18 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
     ((firstName?.[0] || '') + (lastName?.[0] || '')).toUpperCase() ||
     (user?.email?.[0] || 'U').toUpperCase();
 
-  const orgType = (profile?.organizations as any)?.type || null;
+  const orgType =
+    (profile?.organizations as any)?.type ||
+    meta.organization_type ||
+    null;
+  const facilityType = (profile?.organizations as any)?.facility_type || meta.facility_type || null;
   const orgName = String((profile?.organizations as any)?.name || '').trim();
   const chipLabel = orgName || fullName;
-  const ownerMode = isOwnerish(profile?.role, orgType);
-  const supplierMode = isSupplier(profile?.role, orgType);
+  const effectiveRole = profile?.role || meta.role;
+  const ownerMode = isOwnerish(effectiveRole, orgType);
+  const supplierMode = isSupplier(effectiveRole, orgType);
   const companyLabel = ownerMode
-    ? ownerProfileLabel(orgType)
+    ? ownerProfileLabel(orgType, facilityType, meta.organization_type)
     : supplierMode
       ? 'Supplier Profile'
       : 'Company Profile';
@@ -254,7 +259,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const hubGroup: NavGroup = ownerMode
     ? {
         id: 'hub',
-        label: ownerHubNavLabel(orgType),
+        label: ownerHubNavLabel(orgType, facilityType, meta.organization_type),
         href: '/my-lasers',
         items: [
           { href: '/my-lasers', label: 'My Lasers' },

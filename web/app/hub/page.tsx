@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isAdmin, isOwnerish, isSupplier } from '@/lib/roles';
+import { ownerLabelKind } from '@/lib/labels';
 
 type HubCard = { href: string; icon: string; label: string; desc: string };
 
@@ -26,11 +27,16 @@ export default function TechHub() {
         }
         const { data: prof } = await supabase
           .from('user_profiles')
-          .select('role, organization_id, organizations(type)')
+          .select('role, organization_id, organizations(type, facility_type)')
           .eq('id', user.id)
           .maybeSingle();
-        setRole(prof?.role || '');
-        const ot = (prof?.organizations as any)?.type || null;
+        const meta = user.user_metadata || {};
+        setRole(prof?.role || meta.role || '');
+        const ot =
+          (prof?.organizations as any)?.type ||
+          (prof?.organizations as any)?.facility_type ||
+          meta.organization_type ||
+          null;
         setOrgType(ot);
       } catch {
         /* ignore */
@@ -42,6 +48,7 @@ export default function TechHub() {
   const owner = isOwnerish(role, orgType);
   const supplier = isSupplier(role, orgType);
   const service = !owner && !supplier;
+  const rentalOwner = owner && ownerLabelKind(orgType) === 'rental';
   const canBusiness =
     service &&
     (isAdmin(role) ||
@@ -104,10 +111,14 @@ export default function TechHub() {
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="max-w-7xl mx-auto w-full px-4 py-6">
-        <h1 className="text-2xl font-extrabold mb-1">🛠️ Tech Hub</h1>
+        <h1 className="text-2xl font-extrabold mb-1">
+          {owner ? (rentalOwner ? 'My Lasers' : 'Owner Hub') : supplier ? 'Supplier Hub' : '🛠️ Tech Hub'}
+        </h1>
         <p className="text-sm text-[var(--text3)] mb-6">
           {owner
-            ? 'Facility tools & service history'
+            ? rentalOwner
+              ? 'Fleet lasers, service requests, and history'
+              : 'Facility tools & service history'
             : supplier
               ? 'Supplier catalog & marketplace tools'
               : 'Professional laser service resources & reference tools'}

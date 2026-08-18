@@ -617,12 +617,12 @@ function CompanyProfile() {
     isServiceCompany(userRole, org?.type) &&
     (isAdmin(userRole) || userRole === 'service_manager');
   const profileTitle = ownerMode
-    ? ownerProfileLabel(org?.type)
+    ? ownerProfileLabel(org?.type, org?.facility_type)
     : supplierMode
       ? 'Supplier Profile'
       : 'Company Management';
   const detailsTitle = ownerMode
-    ? ownerDetailsLabel(org?.type)
+    ? ownerDetailsLabel(org?.type, org?.facility_type)
     : supplierMode
       ? 'Supplier Details'
       : 'Company Details';
@@ -745,7 +745,7 @@ function CompanyProfile() {
             {saving
               ? 'Saving...'
               : ownerMode
-                ? `Save ${ownerDetailsLabel(org?.type)}`
+                ? `Save ${ownerDetailsLabel(org?.type, org?.facility_type)}`
                 : supplierMode
                   ? 'Save Supplier Details'
                   : 'Save Company Details'}

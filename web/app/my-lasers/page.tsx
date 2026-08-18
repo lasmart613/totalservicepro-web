@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { toast } from 'sonner';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 
@@ -47,12 +48,26 @@ export default function MyLasersPage() {
         setLoading(false);
         return;
       }
-      const { data: prof } = await supabase
+      let { data: prof } = await supabase
         .from('user_profiles')
         .select('organization_id, role')
         .eq('id', user.id)
         .maybeSingle();
       if (!prof?.organization_id) {
+        const pending = resolvePendingSignup(user);
+        if (pending?.kind === 'owner') {
+          try {
+            const applied = await applyPendingSignup(supabase, user.id, pending);
+            if (applied.orgId) {
+              setOrgId(applied.orgId);
+              await load(applied.orgId);
+              setLoading(false);
+              return;
+            }
+          } catch (e) {
+            console.warn('my-lasers owner apply', e);
+          }
+        }
         setLoading(false);
         return;
       }
