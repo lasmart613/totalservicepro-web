@@ -8,7 +8,7 @@ import { useRouter } from 'next/navigation';
 import { isOwnerish, isSupplier } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
-import { resolvePendingSignup } from '@/lib/pending-signup';
+import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 
 type OrgType = 'service' | 'clinic' | 'supplier';
 type TeamMember = {
@@ -100,22 +100,42 @@ export default function Onboarding() {
 
       // Intended: already-onboarded users (org + flag) skip this wizard.
       // New service orgs keep onboarding_completed=false until Finish (see pending-signup).
-      if (profile?.onboarding_completed && profile?.organization_id) {
+      // Owners/suppliers with a linked org should not be trapped here if the flag did not persist.
+      if (profile?.organization_id) {
+        const orgTypeNow = profile.organizations?.type;
         const r = String(profile.role || '').toLowerCase();
-        if (isOwnerish(profile.role, profile.organizations?.type)) {
+        if (isOwnerish(profile.role, orgTypeNow)) {
           router.replace('/my-lasers');
-        } else if (isSupplier(profile.role, profile.organizations?.type)) {
-          router.replace('/');
-        } else if (['fse', 'engineer', 'dispatcher', 'scheduler'].includes(r)) {
-          router.replace('/hub');
-        } else {
-          router.replace('/company');
+          return;
         }
-        return;
+        if (isSupplier(profile.role, orgTypeNow)) {
+          router.replace('/');
+          return;
+        }
+        if (profile.onboarding_completed) {
+          if (['fse', 'engineer', 'dispatcher', 'scheduler'].includes(r)) {
+            router.replace('/hub');
+          } else {
+            router.replace('/company');
+          }
+          return;
+        }
       }
 
       const meta = user.user_metadata || {};
       const pending = resolvePendingSignup(user);
+
+      // Owner/rental first-run: finish facility here if signup verify did not persist the link.
+      if (!profile?.organization_id && pending?.kind === 'owner') {
+        try {
+          await applyPendingSignup(supabase, user.id, pending);
+          router.replace('/my-lasers?justSetup=1');
+          return;
+        } catch (e) {
+          console.warn('onboarding owner apply', e);
+        }
+      }
+
       const resolvedRole = profile?.role || pending?.role || meta.role || '';
       setProfileRole(resolvedRole);
       setFormData((prev: any) => ({
@@ -492,6 +512,22 @@ export default function Onboarding() {
           .single();
         if (iErr && /list_in_directory|column/i.test(iErr.message || '')) {
           delete orgPayload.list_in_directory;
+          ({ data: newOrg, error: iErr } = await supabase
+            .from('organizations')
+            .insert(orgPayload)
+            .select('id')
+            .single());
+        }
+        if ((iErr || !newOrg) && orgType === 'clinic' && oType !== 'customer') {
+          // Live CHECK/enum may only allow customer for owner-side orgs.
+          orgPayload.type = 'customer';
+          orgPayload.facility_type =
+            orgPayload.facility_type ||
+            (metaType === 'laser_rental'
+              ? 'Rental fleet'
+              : metaType === 'laser_reseller'
+                ? 'Reseller inventory'
+                : 'Clinic');
           ({ data: newOrg, error: iErr } = await supabase
             .from('organizations')
             .insert(orgPayload)

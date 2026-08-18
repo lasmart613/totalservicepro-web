@@ -11,7 +11,8 @@ import {
   getDashboardPersona,
   type DashboardPersona,
 } from '@/lib/roles';
-import { orgTypeLabel, roleLabel } from '@/lib/labels';
+import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel, roleLabel } from '@/lib/labels';
+import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import {
   isClosedTicketStatus,
   isCompleteReport,
@@ -25,6 +26,7 @@ export default function HomePage() {
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
   const [orgType, setOrgType] = useState<string | null>(null);
+  const [facilityType, setFacilityType] = useState<string | null>(null);
   const [persona, setPersona] = useState<DashboardPersona>('service');
   const [loading, setLoading] = useState(true);
   const [stats, setStats] = useState({
@@ -75,14 +77,39 @@ export default function HomePage() {
       setProfile(prof);
 
       if (!prof?.organization_id) {
+        const pending = resolvePendingSignup(u);
+        if (pending?.kind === 'owner') {
+          try {
+            await applyPendingSignup(supabase, u.id, pending);
+            router.replace('/my-lasers?justSetup=1');
+            return;
+          } catch (e) {
+            console.warn('owner first-run apply', e);
+          }
+        }
         router.replace('/onboarding');
         return;
       }
       if (prof.onboarding_completed === false) {
         const r = String(prof.role || '').toLowerCase();
         const invited = ['fse', 'engineer', 'dispatcher', 'scheduler', 'technician'].includes(r);
-        router.replace(invited ? '/onboarding/member' : '/onboarding');
-        return;
+        const metaRole = String((u.user_metadata as any)?.role || '').toLowerCase();
+        const ownerOrSupplier =
+          r === 'owner' ||
+          r === 'customer' ||
+          r === 'parts_supplier' ||
+          r === 'supplier' ||
+          metaRole === 'owner' ||
+          metaRole === 'parts_supplier';
+        if (invited && !ownerOrSupplier) {
+          router.replace('/onboarding/member');
+          return;
+        }
+        // Owners/suppliers already have an org — do not send them through RSP onboarding.
+        if (!ownerOrSupplier) {
+          router.replace('/onboarding');
+          return;
+        }
       }
 
       if (!prof?.organization_id) {
@@ -97,11 +124,12 @@ export default function HomePage() {
       try {
         const { data: org } = await supabase
           .from('organizations')
-          .select('type, supported_brands')
+          .select('type, facility_type, supported_brands')
           .eq('id', orgId)
           .maybeSingle();
-        oType = org?.type || null;
+        oType = org?.type || (u.user_metadata as any)?.organization_type || null;
         setOrgType(oType);
+        setFacilityType(org?.facility_type || (u.user_metadata as any)?.facility_type || null);
       } catch {
         /* ignore */
       }
@@ -390,6 +418,9 @@ export default function HomePage() {
 
   const role = profile?.role;
   const greetName = profile?.first_name || (persona === 'owner' || persona === 'supplier' ? 'there' : 'Tech');
+  const labelKind = ownerLabelKind(orgType, facilityType, user?.user_metadata?.organization_type);
+  const displayOrgType =
+    labelKind === 'rental' ? 'laser_rental' : labelKind === 'reseller' ? 'laser_reseller' : orgType;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -401,7 +432,7 @@ export default function HomePage() {
         </h1>
         <p className="text-[var(--text3)]">
           Role: {roleLabel(role)}
-          {orgType ? <span> · Org: {orgTypeLabel(orgType)}</span> : null}
+          {displayOrgType ? <span> · Org: {orgTypeLabel(displayOrgType)}</span> : null}
         </p>
 
         {/* ── Owner / facility KPIs ── */}
@@ -427,7 +458,9 @@ export default function HomePage() {
             </div>
 
             <div className="mt-12">
-              <h3 className="font-bold text-lg mb-4">Clinic Dashboard</h3>
+              <h3 className="font-bold text-lg mb-4">
+                {ownerDashboardHeading(orgType, facilityType, user?.user_metadata?.organization_type)}
+              </h3>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <Link href="/my-lasers" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Zap size={32} className="mx-auto mb-3 text-[var(--gold)]" />
@@ -447,7 +480,9 @@ export default function HomePage() {
                 </Link>
                 <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Facility Profile</div>
+                  <div className="font-bold">
+                    {ownerProfileLabel(orgType, facilityType, user?.user_metadata?.organization_type)}
+                  </div>
                 </Link>
                 <Link href="/settings" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Settings size={32} className="mx-auto mb-3 text-[var(--gold)]" />
