@@ -7,8 +7,19 @@ export function serviceRequestShareUrl(id: string): string {
   return `${SITE_ORIGIN}/marketplace/requests/${encodeURIComponent(id)}?utm_source=share&invite=1`;
 }
 
-export function listingShareUrl(id: string): string {
-  return `${SITE_ORIGIN}/marketplace/listing/${encodeURIComponent(id)}?utm_source=share&invite=1`;
+export function listingShareUrl(
+  id: string,
+  opts?: { listingType?: string | null; category?: string | null }
+): string {
+  const type = String(opts?.listingType || '').toLowerCase();
+  const category = String(opts?.category || '').toLowerCase();
+  const isPart =
+    type === 'part' ||
+    type === 'parts' ||
+    category === 'part' ||
+    category === 'parts';
+  const path = isPart ? `/marketplace/parts/${encodeURIComponent(id)}` : `/marketplace/listing/${encodeURIComponent(id)}`;
+  return `${SITE_ORIGIN}${path}?utm_source=share&invite=1`;
 }
 
 /** Public, no-login estimate approve / request-changes page. */
@@ -55,8 +66,10 @@ export function listingShareText(opts: {
   condition?: string | null;
   description?: string | null;
   id: string;
+  listingType?: string | null;
+  category?: string | null;
 }): { title: string; text: string; url: string } {
-  const url = listingShareUrl(opts.id);
+  const url = listingShareUrl(opts.id, { listingType: opts.listingType, category: opts.category });
   const headline =
     opts.title ||
     [opts.manufacturer, opts.model].filter(Boolean).join(' ') ||

@@ -28,13 +28,19 @@ export async function GET(
     }
 
     const admin = getSupabaseAdmin();
-    const { data, error } = await admin
-      .from('marketplace_listings')
-      .select(
-        'id, title, description, status, condition, price, price_type, manufacturer, model, serial_number, part_number, quantity, listing_type, category, city, state, images, photos, details, created_at, year_manufactured, wavelength'
-      )
-      .eq('id', id)
-      .maybeSingle();
+    const selects = [
+      'id, title, description, status, condition, price, price_type, manufacturer, model, serial_number, part_number, quantity, qty, listing_type, category, city, state, images, photos, details, created_at, year_manufactured, wavelength, organization_id, stripe_product_id, stripe_price_id',
+      'id, title, description, status, condition, price, price_type, manufacturer, model, serial_number, part_number, quantity, listing_type, category, city, state, images, photos, details, created_at, year_manufactured, wavelength',
+    ];
+    let data: Record<string, unknown> | null = null;
+    let error: { message?: string } | null = null;
+    for (const cols of selects) {
+      const res = await admin.from('marketplace_listings').select(cols).eq('id', id).maybeSingle();
+      data = (res.data as Record<string, unknown> | null) || null;
+      error = res.error;
+      if (!error && data) break;
+      if (error && !/column|does not exist|schema cache/i.test(error.message || '')) break;
+    }
 
     if (error) {
       console.error('[share/listing]', error);
@@ -55,7 +61,7 @@ export async function GET(
     // Sanitize details — drop seller contact if present
     let details = data.details;
     if (details && typeof details === 'object') {
-      const d = { ...(details as any) };
+      const d = { ...(details as Record<string, unknown>) };
       delete d.seller_email;
       delete d.seller_phone;
       delete d.contact_email;
@@ -73,8 +79,8 @@ export async function GET(
         _public_share: true,
       },
     });
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('[share/listing]', e);
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : 'Server error' }, { status: 500 });
   }
 }

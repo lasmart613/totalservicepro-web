@@ -4,6 +4,14 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import {
+  formatListingPrice,
+  isPartListing,
+  listingAvailability,
+  listingImages,
+  listingQuantity,
+  partsDetailPath,
+} from '@/lib/marketplace/parts';
 import { toast } from 'sonner';
 
 export default function PartsMarketplace() {
@@ -21,12 +29,31 @@ export default function PartsMarketplace() {
 
   const fetchListings = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('marketplace_listings')
       .select('*')
-      .eq('listing_type', 'part')
+      .or('listing_type.eq.part,listing_type.eq.parts')
       .order('created_at', { ascending: false });
-    if (!error && data) setListings(data);
+    if (error) {
+      const retry = await supabase
+        .from('marketplace_listings')
+        .select('*')
+        .eq('listing_type', 'part')
+        .order('created_at', { ascending: false });
+      data = retry.data;
+      error = retry.error;
+    }
+    let rows = !error && data ? data.filter(isPartListing) : [];
+    if (rows.length === 0) {
+      try {
+        const res = await fetch('/api/marketplace/parts', { cache: 'no-store' });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(json?.listings)) rows = json.listings.filter(isPartListing);
+      } catch (e) {
+        console.warn('public parts catalog fallback', e);
+      }
+    }
+    setListings(rows);
     setLoading(false);
   };
 
@@ -85,25 +112,38 @@ export default function PartsMarketplace() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {listings.map((l) => {
-              const imgs = Array.isArray(l.images) ? l.images : (l.images ? [l.images] : []);
+              const imgs = listingImages(l);
               const featured = imgs[0];
+              const href = partsDetailPath(l.id);
+              const avail = listingAvailability(l);
+              const qty = listingQuantity(l);
               return (
-                <div key={l.id} className="card p-6">
+                <div key={l.id} className="card p-6 text-left">
                   {featured && (
-                    <Link href={`/marketplace/listing/${l.id}`}>
-                      <img src={featured} alt="Featured" className="w-full h-32 object-cover rounded mb-3 cursor-pointer" />
+                    <Link href={href}>
+                      <img src={featured} alt={l.title || 'Part'} className="w-full h-40 object-cover rounded mb-3 cursor-pointer" />
                     </Link>
                   )}
-                  <Link href={`/marketplace/listing/${l.id}`}>
+                  <Link href={href}>
                     <h3 className="font-bold text-xl mb-1 hover:text-[var(--gold)] cursor-pointer">{l.title}</h3>
                   </Link>
-                  <p className="text-sm text-[var(--text3)] mb-1">{l.description}</p>
+                  <p className="text-sm text-[var(--text3)] mb-1 line-clamp-3">{l.description}</p>
                   <p className="text-sm text-[var(--text3)] mb-2">PN: {l.part_number || l.serial_number || 'N/A'}</p>
                   <p className="text-sm mb-1">{l.manufacturer} {l.model} • {l.condition}</p>
-                  <div className="font-semibold text-[var(--gold)] mb-2">${l.price}</div>
+                  <div className="font-semibold text-[var(--gold)] mb-1">{formatListingPrice(l)}</div>
+                  {avail.soldOut ? (
+                    <div className="text-xs text-red-400 mb-3">Sold out</div>
+                  ) : qty != null ? (
+                    <div className="text-xs text-[var(--text3)] mb-3">{qty} available</div>
+                  ) : (
+                    <div className="mb-3" />
+                  )}
+                  <Link href={href} className="btn btn-primary w-full text-sm mb-2">
+                    View details
+                  </Link>
                   <button 
                     onClick={() => { setBiddingOn(l); setBidPrice(''); setBidNotes(''); setBidQuestion(''); }} 
-                    className="btn btn-primary w-full text-sm"
+                    className="btn btn-secondary w-full text-sm"
                   >
                     Make Offer / Bid
                   </button>
