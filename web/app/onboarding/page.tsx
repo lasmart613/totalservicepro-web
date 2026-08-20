@@ -50,6 +50,8 @@ export default function Onboarding() {
   const router = useRouter();
   const [step, setStep] = useState(1);
   const [orgType, setOrgType] = useState<OrgType | null>(null);
+  const [skipTypeStep, setSkipTypeStep] = useState(false);
+  const [signedOut, setSignedOut] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const [loading, setLoading] = useState(true);
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -189,6 +191,8 @@ export default function Onboarding() {
           t = 'supplier';
         }
         setOrgType(t);
+        setSkipTypeStep(true);
+        setStep(2);
         setFormData((prev: any) => ({
           ...prev,
           companyName: o.name || prev.companyName || '',
@@ -209,8 +213,12 @@ export default function Onboarding() {
         const orgKind = String(meta.organization_type || pending?.orgType || '').toLowerCase();
         if (initialRole === 'owner' || initialRole === 'customer' || orgKind === 'customer' || orgKind === 'laser_rental' || orgKind === 'laser_reseller' || orgKind === 'laser_clinic' || pending?.kind === 'owner') {
           setOrgType('clinic');
+          setSkipTypeStep(true);
+          setStep(2);
         } else if (initialRole === 'parts_supplier' || initialRole === 'supplier' || orgKind === 'parts_supplier' || pending?.kind === 'supplier') {
           setOrgType('supplier');
+          setSkipTypeStep(true);
+          setStep(2);
         } else if (
           initialRole === 'company_admin' ||
           initialRole === 'admin' ||
@@ -219,6 +227,8 @@ export default function Onboarding() {
           pending?.kind === 'company'
         ) {
           setOrgType('service');
+          setSkipTypeStep(true);
+          setStep(2);
         }
       }
 
@@ -227,12 +237,20 @@ export default function Onboarding() {
     })();
   }, [supabase, router]);
 
-  // Auto-skip org type choice when signup already chose RSP / clinic / supplier
   useEffect(() => {
-    if (orgType && step === 1) {
-      setStep(2);
-    }
-  }, [orgType, step]);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange((event) => {
+      if (event !== 'SIGNED_OUT') return;
+      setFormData({});
+      setCurrentUser(null);
+      setLasers([]);
+      setTeamMembers([]);
+      setSignedOut(true);
+      router.replace('/login');
+    });
+    return () => subscription.unsubscribe();
+  }, [supabase, router]);
 
   function initTeamFromProfile(profile: any, user: any) {
     const first = profile?.first_name || user?.user_metadata?.first_name || 'You';
@@ -742,8 +760,21 @@ export default function Onboarding() {
     }
   }
 
+  const wizardSteps = skipTypeStep ? [2, 3, 4, 5, 6] : [1, 2, 3, 4, 5, 6];
+  const minStep = wizardSteps[0];
+  const displayStep = Math.max(1, wizardSteps.indexOf(step) + 1);
+  const displayTotal = wizardSteps.length;
+
   function prevStep() {
-    if (step > 1) setStep(step - 1);
+    if (step > minStep) setStep(step - 1);
+  }
+
+  if (signedOut) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-[var(--text3)]">
+        Signing out…
+      </div>
+    );
   }
 
   if (loading) return <div className="min-h-screen flex items-center justify-center"><Header /><div>Loading setup…</div></div>;
@@ -762,9 +793,9 @@ export default function Onboarding() {
                 : 'RSPs: add your team and roles now (sole props supported).'}
           </p>
           <div className="flex justify-center gap-2 mt-4">
-            {[1,2,3,4,5,6].map(s => <div key={s} className={`w-2.5 h-2.5 rounded-full ${step >= s ? 'bg-[var(--gold)]' : 'bg-[var(--surface3)]'}`} />)}
+            {wizardSteps.map(s => <div key={s} className={`w-2.5 h-2.5 rounded-full ${step >= s ? 'bg-[var(--gold)]' : 'bg-[var(--surface3)]'}`} />)}
           </div>
-          <div className="text-xs text-[var(--text3)] mt-1">Step {step} of 6</div>
+          <div className="text-xs text-[var(--text3)] mt-1">Step {displayStep} of {displayTotal}</div>
         </div>
 
         {step === 1 && (
@@ -1007,7 +1038,7 @@ export default function Onboarding() {
         )}
 
         <div className="flex justify-between mt-10 max-w-xl mx-auto">
-          <button onClick={prevStep} disabled={step===1} className="btn btn-secondary">Back</button>
+          <button onClick={prevStep} disabled={step===minStep} className="btn btn-secondary">Back</button>
           {step < 6 && <button onClick={nextStep} className="btn btn-primary flex items-center gap-2">Continue <ArrowRight size={18} /></button>}
         </div>
       </div>
