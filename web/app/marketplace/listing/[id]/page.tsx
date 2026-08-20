@@ -8,6 +8,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { ShareButton } from '@/components/ShareButton';
 import { listingShareText } from '@/lib/share';
+import { listingOfferLoginHref } from '@/lib/marketplace-listings';
 
 export default function ListingDetail() {
   const params = useParams();
@@ -74,7 +75,7 @@ export default function ListingDetail() {
     }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      toast.error('You must be logged in');
+      window.location.assign(listingOfferLoginHref(id));
       return;
     }
     const { error } = await supabase.from('bids').insert({
@@ -215,13 +216,13 @@ export default function ListingDetail() {
             {!userId ? (
               <div className="space-y-3">
                 <p className="text-sm text-[var(--text3)] text-center">
-                  Sign up free to make an offer or ask the seller a question.
+                  Log in to make an offer or ask the seller a question.
                 </p>
                 <Link
-                  href={`/signup?next=${encodeURIComponent(`/marketplace/listing/${id}`)}`}
+                  href={listingOfferLoginHref(id)}
                   className="btn btn-primary w-full block text-center"
                 >
-                  Sign up free to offer
+                  Make Offer / Bid
                 </Link>
               </div>
             ) : !showBidForm ? (
