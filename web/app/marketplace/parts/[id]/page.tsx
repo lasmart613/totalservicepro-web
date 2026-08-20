@@ -8,6 +8,7 @@ import { ShareButton } from '@/components/ShareButton';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { listingShareText } from '@/lib/share';
 import { loginHref } from '@/lib/login-next';
+import { ListingDescription } from '@/components/ListingDescription';
 import {
   formatListingPrice,
   isPartListing,
@@ -358,7 +359,7 @@ export default function PartDetail() {
               {listing.description && (
                 <div className="mt-8">
                   <div className="font-semibold mb-2">Description</div>
-                  <p className="text-[var(--text2)] whitespace-pre-wrap leading-relaxed">{listing.description}</p>
+                  <ListingDescription text={String(listing.description)} />
                 </div>
               )}
 
