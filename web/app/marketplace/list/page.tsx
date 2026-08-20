@@ -506,8 +506,14 @@ function MarketplaceListContent() {
         payload.wavelength = form.wavelength.trim() || null;
       }
 
-      let { error } = await getSupabaseClient().from('marketplace_listings').insert([payload]);
-      if (error) {
+      let createdId: string | null = null;
+      const inserted = await getSupabaseClient()
+        .from('marketplace_listings')
+        .insert([payload])
+        .select('id')
+        .maybeSingle();
+      let created = inserted.data;
+      if (inserted.error) {
         // progressive fallback without optional columns
         const core = { ...payload };
         delete core.details;
@@ -518,14 +524,31 @@ function MarketplaceListContent() {
         delete core.organization_id;
         delete core.wavelength;
         delete core.year_manufactured;
-        const r2 = await getSupabaseClient().from('marketplace_listings').insert([core]);
+        const r2 = await getSupabaseClient()
+          .from('marketplace_listings')
+          .insert([core])
+          .select('id')
+          .maybeSingle();
         if (r2.error) throw r2.error;
+        created = r2.data;
       }
+      createdId = created?.id || null;
 
       toast.success('Listing published!');
       if (listingType === 'used') router.push('/marketplace/used-systems');
       else if (isCons) router.push('/marketplace/consumables');
-      else router.push('/marketplace/parts');
+      else if (createdId) {
+        if (listingType === 'part') {
+          fetch(`/api/marketplace/parts/${encodeURIComponent(createdId)}/checkout`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ syncOnly: true }),
+          }).catch(() => {});
+        }
+        router.push(`/marketplace/parts/${createdId}`);
+      } else {
+        router.push('/marketplace/parts');
+      }
     } catch (err: any) {
       console.error(err);
       toast.error('Failed: ' + (err?.message || 'Could not create listing'));
