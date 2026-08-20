@@ -1,4 +1,4 @@
-import { loginHref } from '@/lib/login-next';
+import { loginHref } from './login-next';
 
 const CONSUMABLE_VALUES = new Set(['consumable', 'consumables']);
 const PART_LIKE_TYPES = new Set(['part', 'parts', 'used', 'equipment']);
