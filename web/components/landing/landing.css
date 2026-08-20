@@ -5,6 +5,10 @@
    heading #F3E8D8 · muted #9CA3AF · font DM Sans
 */
 
+html.landing-mode {
+  scroll-padding-top: 8rem;
+}
+
 html.landing-mode main {
   padding: 0 !important;
   max-width: none !important;
@@ -151,20 +155,34 @@ html.landing-mode body {
   align-items: flex-end;
   overflow: hidden;
   isolation: isolate;
+  scroll-margin-top: 8rem;
 }
 
 .lp-hero {
-  padding: 120px 8vw 88px;
+  padding: 8.5rem 8vw 88px;
 }
 
 .lp-chapter {
-  padding: 140px 8vw 96px;
+  padding: 8.5rem 8vw 96px;
   border-top: 1px solid #FBBF2444;
+}
+
+/* SpaceX-style wash: screenshots stay visible on the right/top; type sits on navy. */
+.lp-hero::before,
+.lp-chapter::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background:
+    linear-gradient(90deg, #111827 0%, #111827f2 34%, #111827a6 58%, #11182740 78%, transparent 100%),
+    linear-gradient(0deg, #111827 0%, #111827e6 26%, #11182766 52%, transparent 74%);
 }
 
 .lp-copy {
   position: relative;
-  z-index: 2;
+  z-index: 3;
   max-width: 760px;
 }
 
@@ -174,6 +192,7 @@ html.landing-mode body {
   letter-spacing: 0.32em;
   text-transform: uppercase;
   color: #FBBF24;
+  scroll-margin-top: 8rem;
 }
 
 .lp-title {
@@ -183,6 +202,7 @@ html.landing-mode body {
   letter-spacing: -0.035em;
   color: #F3E8D8;
   margin: 14px 0 18px;
+  scroll-margin-top: 8rem;
 }
 
 .lp-title-sm {
@@ -309,13 +329,13 @@ html.landing-mode body {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, #111827e0 0%, #1118276b 48%, #11182738 100%),
-    linear-gradient(0deg, #111827 0%, transparent 42%);
+    linear-gradient(90deg, #111827 0%, #111827f5 36%, #111827b3 62%, #11182759 100%),
+    linear-gradient(0deg, #111827 0%, #111827f0 32%, #11182780 58%, transparent 82%);
 }
 
 .lp-media-dim-center {
   background:
-    linear-gradient(180deg, #11182759 0%, #111827c7 70%, #111827 100%);
+    linear-gradient(180deg, #11182799 0%, #111827e8 48%, #111827 100%);
 }
 
 .lp-stage {
@@ -539,7 +559,7 @@ html.landing-mode body {
 
 .lp-join {
   align-items: center;
-  padding-top: 160px;
+  padding-top: 10rem;
 }
 
 .lp-join .lp-copy {
@@ -657,11 +677,17 @@ html.landing-mode body {
 
   .lp-hero,
   .lp-chapter {
-    padding: 110px 22px 72px;
+    padding: 8.5rem 22px 72px;
     min-height: 100svh;
     flex-direction: column;
     align-items: stretch;
     justify-content: flex-end;
+  }
+
+  .lp-hero::before,
+  .lp-chapter::before {
+    background:
+      linear-gradient(0deg, #111827 0%, #111827f2 38%, #1118278c 62%, #11182733 100%);
   }
 
   .lp-stage,
