@@ -18,124 +18,10 @@ export function LandingSplash() {
   );
 }
 
-function DashboardFrame() {
+function Shot({ src, alt = '' }: { src: string; alt?: string }) {
   return (
-    <div className="lp-chrome" aria-hidden="true">
-      <div className="lp-chrome-bar">
-        <div>
-          <div className="lp-chrome-mark">Total Service Pro</div>
-          <div className="lp-chrome-sub">Laser Equipment Service</div>
-        </div>
-        <span className="text-xs text-[var(--text3)]">Tech dashboard</span>
-      </div>
-      <div className="lp-kpi-grid">
-        <div className="lp-kpi">
-          <div className="lp-kpi-n" style={{ color: 'var(--gold)' }}>
-            12
-          </div>
-          <div className="lp-kpi-l">Open tickets</div>
-        </div>
-        <div className="lp-kpi">
-          <div className="lp-kpi-n" style={{ color: 'var(--blue)' }}>
-            4
-          </div>
-          <div className="lp-kpi-l">Today&apos;s calls</div>
-        </div>
-        <div className="lp-kpi">
-          <div className="lp-kpi-n" style={{ color: 'var(--orange)' }}>
-            7
-          </div>
-          <div className="lp-kpi-l">Repair requests</div>
-        </div>
-        <div className="lp-kpi">
-          <div className="lp-kpi-n" style={{ color: 'var(--green)' }}>
-            31
-          </div>
-          <div className="lp-kpi-l">Completed reports</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function OwnerFrame() {
-  return (
-    <div className="lp-chrome" aria-hidden="true">
-      <div className="lp-chrome-bar">
-        <div>
-          <div className="lp-chrome-mark">My Lasers</div>
-          <div className="lp-chrome-sub">Clinic · Rental · Reseller</div>
-        </div>
-      </div>
-      <div className="lp-kpi-grid">
-        <div className="lp-kpi">
-          <div className="lp-kpi-n" style={{ color: 'var(--gold)' }}>
-            8
-          </div>
-          <div className="lp-kpi-l">My lasers</div>
-        </div>
-        <div className="lp-kpi">
-          <div className="lp-kpi-n" style={{ color: 'var(--blue)' }}>
-            2
-          </div>
-          <div className="lp-kpi-l">Open requests</div>
-        </div>
-        <div className="lp-kpi">
-          <div className="lp-kpi-n" style={{ color: 'var(--green)' }}>
-            19
-          </div>
-          <div className="lp-kpi-l">Service history</div>
-        </div>
-        <div className="lp-kpi">
-          <div className="lp-kpi-n" style={{ color: 'var(--purple)' }}>
-            5
-          </div>
-          <div className="lp-kpi-l">Bids received</div>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ReportFrame() {
-  return (
-    <div className="lp-chrome lp-report" aria-hidden="true">
-      <div className="lp-report-top">
-        <div>
-          <h3>Service Report SR-1042</h3>
-          <div className="text-xs text-[var(--text3)] mt-1">
-            Email on file: clinic@example.com
-          </div>
-        </div>
-        <div className="flex gap-2">
-          <span className="lp-btn lp-btn-ghost" style={{ padding: '8px 12px', fontSize: 10 }}>
-            Print / PDF
-          </span>
-          <span className="lp-btn lp-btn-primary" style={{ padding: '8px 12px', fontSize: 10 }}>
-            Email report
-          </span>
-        </div>
-      </div>
-      <div className="text-sm text-[var(--text2)]">
-        Candela GentleMax Pro · serial GM-88421 · PM complete
-      </div>
-    </div>
-  );
-}
-
-function ManualsFrame() {
-  return (
-    <div className="lp-shelf" aria-hidden="true">
-      <div className="lp-books">
-        <div className="lp-book">Lumenis UltraPulse</div>
-        <div className="lp-book">Candela Vbeam</div>
-        <div className="lp-book">Sciton Joule</div>
-        <div className="lp-book">Cynosure Picosure</div>
-        <div className="lp-book">Rohrer Spectrum</div>
-        <div className="lp-book">Iridex OcuLight</div>
-        <div className="lp-book">Coherent VersaPulse</div>
-      </div>
-      <div className="lp-ledge" />
+    <div className="lp-device">
+      <img src={src} alt={alt} width={1400} height={1100} />
     </div>
   );
 }
@@ -162,19 +48,16 @@ export function LandingPage() {
           <span className="lp-brand-name">Total Service Pro</span>
           <span className="lp-brand-sub">Laser Equipment Service</span>
         </Link>
-        <nav className="lp-nav-links" aria-label="Landing">
-          <a href="#service">Service</a>
-          <a href="#owners">Owners</a>
-          <Link href="/marketplace">Marketplace</Link>
-          <a href="#app">App</a>
+        <nav className="lp-nav-links" aria-label="Public">
           <Link href="/directory">Directory</Link>
+          <Link href="/marketplace">Marketplace</Link>
         </nav>
         <div className="lp-nav-cta">
           <Link href="/login" className="lp-btn lp-btn-ghost">
             Sign In
           </Link>
           <Link href="/signup" className="lp-btn lp-btn-primary">
-            Get Started
+            Sign Up
           </Link>
         </div>
       </header>
@@ -188,9 +71,7 @@ export function LandingPage() {
           <div className="lp-pulse" />
         </div>
         <div className="lp-stage" aria-hidden="true">
-          <div className="lp-device">
-            <img src="/landing/signup.webp" alt="" width={960} height={600} />
-          </div>
+          <Shot src="/landing/signup.webp" alt="" />
         </div>
         <div className="lp-copy">
           <p className="lp-kicker">RepairPlanet</p>
@@ -206,7 +87,7 @@ export function LandingPage() {
           </p>
           <div className="lp-actions">
             <Link href="/signup" className="lp-btn lp-btn-primary">
-              Enter the portal
+              Sign Up
             </Link>
             <Link href="/login" className="lp-btn lp-btn-ghost">
               Sign In
@@ -216,51 +97,54 @@ export function LandingPage() {
         <div className="lp-scroll-hint">Scroll</div>
       </section>
 
-      <section className="lp-chapter" id="service">
+      <section className="lp-chapter" id="signup">
         <div className="lp-stage" aria-hidden="true">
-          <DashboardFrame />
+          <Shot src="/landing/signup.webp" alt="" />
         </div>
         <div className="lp-copy">
-          <p className="lp-kicker">Repair service providers</p>
+          <p className="lp-kicker">Join the network</p>
           <h2 className="lp-title lp-title-sm">
-            Keep every
+            One portal.
             <br />
-            laser on the road.
+            Three doors.
           </h2>
           <p className="lp-lede">
-            RSPs run the shop from one portal: service schedule and tickets,
-            today&apos;s calls, FSE performance, customers, estimates, invoices,
-            test equipment, and the Tech Hub — photometry tools, AI assistant,
-            and a parts catalog.
+            Sign up as a Repair Service Provider, laser owner (clinic, rental
+            company, or reseller), or parts supplier. FSEs are invited by their
+            RSP — there is no separate technician signup.
           </p>
           <div className="lp-actions">
-            <Link href="/signup/company" className="lp-btn lp-btn-primary">
-              Create a service organization
+            <Link href="/signup" className="lp-btn lp-btn-primary">
+              Sign Up
             </Link>
           </div>
         </div>
       </section>
 
-      <section className="lp-chapter" id="owners">
+      <section className="lp-chapter" id="service">
         <div className="lp-stage" aria-hidden="true">
-          <OwnerFrame />
+          <Shot src="/landing/login.webp" alt="" />
         </div>
         <div className="lp-copy">
-          <p className="lp-kicker">Clinics · rental · resellers</p>
+          <p className="lp-kicker">Website + field app</p>
           <h2 className="lp-title lp-title-sm">
-            Own the fleet.
+            Service the
             <br />
-            Post the need.
+            installed base.
           </h2>
           <p className="lp-lede">
-            Laser clinics, rental companies, and resellers share the owner path:
-            My Lasers, service requests and RFQs, award bids, and a service
-            history on every system. FSE is a role inside an RSP — not a
-            separate signup.
+            RSPs run schedule and tickets, customers, estimates, invoices, test
+            equipment, manuals, and service reports — including Email report.
+            Owners post RFQs from My Lasers. Same account on the Android
+            technician app: Service Hub plus Photometry Tools (fluence,
+            irradiance, duty cycle, VBeam wavelength, average power).
           </p>
           <div className="lp-actions">
-            <Link href="/signup/owner" className="lp-btn lp-btn-primary">
-              Sign up as laser owner
+            <Link href="/login" className="lp-btn lp-btn-primary">
+              Sign In
+            </Link>
+            <Link href="/signup" className="lp-btn lp-btn-ghost">
+              Sign Up
             </Link>
           </div>
         </div>
@@ -287,66 +171,43 @@ export function LandingPage() {
             Consumables. Jobs.
           </h2>
           <p className="lp-lede">
-            Buy and sell parts, used laser systems, and consumables — handpieces,
-            fibers, tips. Owners post repair and PM requests; RSPs bid. Suppliers
-            list catalog items. Only actively listed inventory appears.
+            Buy and sell parts, used laser systems, and consumables. Owners post
+            repair and PM requests; RSPs bid. Only actively listed inventory
+            appears. The full parts catalog lives in the Tech Hub after Sign In.
           </p>
           <div className="lp-actions">
             <Link href="/marketplace" className="lp-btn lp-btn-primary">
-              Open marketplace
+              Marketplace
             </Link>
-            <Link href="/signup/supplier" className="lp-btn lp-btn-ghost">
-              Sign up as supplier
+            <Link href="/signup" className="lp-btn lp-btn-ghost">
+              Sign Up
             </Link>
           </div>
         </div>
       </section>
 
-      <section className="lp-chapter" id="reports">
-        <div className="lp-stage" aria-hidden="true">
-          <div className="space-y-4">
-            <ReportFrame />
-            <div className="lp-device">
-              <img src="/landing/app-reports.webp" alt="" width={390} height={844} />
-            </div>
-          </div>
+      <section className="lp-chapter" id="directory">
+        <div className="lp-media" aria-hidden="true">
+          <img src="/landing/directory.webp" alt="" />
+          <div className="lp-media-dim" />
         </div>
         <div className="lp-copy">
-          <p className="lp-kicker">Service reports</p>
+          <p className="lp-kicker">TSP Directory</p>
           <h2 className="lp-title lp-title-sm">
-            Write it.
+            Find the
             <br />
-            Email it.
+            network.
           </h2>
           <p className="lp-lede">
-            Performance and safety documentation with Print / PDF and Email
-            report — sent to the CRM org email, primary contact, or the email on
-            the job. Owners see completed history on their systems.
+            Free opt-in listings for service companies, clinics, resellers,
+            rental companies, and parts suppliers. Search by name, city, or
+            state.
           </p>
           <div className="lp-actions">
-            <Link href="/signup" className="lp-btn lp-btn-primary">
-              Get Started
+            <Link href="/directory" className="lp-btn lp-btn-primary">
+              Directory
             </Link>
           </div>
-        </div>
-      </section>
-
-      <section className="lp-chapter" id="manuals">
-        <div className="lp-stage lp-stage-flat" aria-hidden="true">
-          <ManualsFrame />
-        </div>
-        <div className="lp-copy">
-          <p className="lp-kicker">Manuals library</p>
-          <h2 className="lp-title lp-title-sm">
-            The bookshelf
-            <br />
-            in the truck.
-          </h2>
-          <p className="lp-lede">
-            A digital service-manual library with wavelength filters — 532 KTP,
-            755 Alexandrite, 1064 Nd:YAG, 10,600 CO₂, pulsed dye, multi-WL —
-            for Candela, Lumenis, Sciton, Cynosure, and the rest of the bench.
-          </p>
         </div>
       </section>
 
@@ -371,37 +232,14 @@ export function LandingPage() {
           <p className="lp-lede">
             The technician app shares the TSP account: Service Hub, schedule,
             customers, parts catalog, manuals, AI assistant, service reports,
-            and Photometry Tools — fluence, irradiance, duty cycle, VBeam
-            wavelength, and average power.
+            and Photometry Tools.
           </p>
           <div className="lp-actions">
             <Link href="/signup" className="lp-btn lp-btn-primary">
-              Enter the portal
+              Sign Up
             </Link>
-          </div>
-        </div>
-      </section>
-
-      <section className="lp-chapter" id="directory">
-        <div className="lp-media" aria-hidden="true">
-          <img src="/landing/directory.webp" alt="" />
-          <div className="lp-media-dim" />
-        </div>
-        <div className="lp-copy">
-          <p className="lp-kicker">TSP Directory</p>
-          <h2 className="lp-title lp-title-sm">
-            Find the
-            <br />
-            network.
-          </h2>
-          <p className="lp-lede">
-            Free opt-in listings for service companies, clinics, resellers,
-            rental companies, and parts suppliers. Search by name, city, or
-            state. Enable it from Company Profile.
-          </p>
-          <div className="lp-actions">
-            <Link href="/directory" className="lp-btn lp-btn-primary">
-              Browse directory
+            <Link href="/login" className="lp-btn lp-btn-ghost">
+              Sign In
             </Link>
           </div>
         </div>
@@ -415,11 +253,11 @@ export function LandingPage() {
           <div className="lp-media-dim lp-media-dim-center" />
         </div>
         <div className="lp-copy">
-          <p className="lp-kicker">Join the network</p>
-          <h2 className="lp-title lp-title-sm">Choose your path.</h2>
+          <p className="lp-kicker">Total Service Pro</p>
+          <h2 className="lp-title lp-title-sm">Sign Up or Sign In.</h2>
           <p className="lp-lede">
-            Sign up by organization type. Same Total Service Pro portal you
-            already enter from Sign In.
+            Same Total Service Pro routes already on repairplanet.net. No new
+            auth path.
           </p>
           <div className="lp-paths">
             <Link href="/signup/company" className="lp-path">
@@ -434,7 +272,7 @@ export function LandingPage() {
                 <li>Bid on marketplace repair jobs</li>
                 <li>Manuals, reports, photometry tools</li>
               </ul>
-              <span className="lp-btn lp-btn-primary">Create service organization</span>
+              <span className="lp-btn lp-btn-primary">Sign Up</span>
             </Link>
             <Link href="/signup/owner" className="lp-path">
               <p className="lp-kicker">Owner</p>
@@ -448,7 +286,7 @@ export function LandingPage() {
                 <li>Laser rental company</li>
                 <li>Reseller inventory + listings</li>
               </ul>
-              <span className="lp-btn lp-btn-primary">Sign up as laser owner</span>
+              <span className="lp-btn lp-btn-primary">Sign Up</span>
             </Link>
             <Link href="/signup/supplier" className="lp-path">
               <p className="lp-kicker">Supplier</p>
@@ -461,7 +299,12 @@ export function LandingPage() {
                 <li>Respond to open demand</li>
                 <li>Manage supplier profile</li>
               </ul>
-              <span className="lp-btn lp-btn-primary">Sign up as parts supplier</span>
+              <span className="lp-btn lp-btn-primary">Sign Up</span>
+            </Link>
+          </div>
+          <div className="lp-actions" style={{ marginTop: 28 }}>
+            <Link href="/login" className="lp-btn lp-btn-ghost">
+              Already registered? Sign In
             </Link>
           </div>
         </div>
@@ -469,17 +312,18 @@ export function LandingPage() {
 
       <footer className="lp-footer">
         <div>
-          <strong style={{ color: 'var(--gold)' }}>RepairPlanet</strong>
+          <strong style={{ color: '#FBBF24' }}>RepairPlanet</strong>
           {' · '}
           Total Service Pro
           {' · '}
           Laser Equipment Service
         </div>
         <div className="lp-footer-links">
+          <Link href="/">Home</Link>
+          <Link href="/directory">Directory</Link>
+          <Link href="/marketplace">Marketplace</Link>
           <Link href="/login">Sign In</Link>
           <Link href="/signup">Sign Up</Link>
-          <Link href="/marketplace">Marketplace</Link>
-          <Link href="/directory">Directory</Link>
           <Link href="/forgot-password">Forgot password</Link>
         </div>
       </footer>

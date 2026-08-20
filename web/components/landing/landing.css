@@ -1,4 +1,9 @@
-/* RepairPlanet marketing landing — SpaceX-style chapters, TSP brand tokens only. */
+/* RepairPlanet marketing landing — SpaceX-style chapters.
+   Palette locked to live repairplanet.net (do not invent colors):
+   page #111827 · nav #1F2937 · amber #FBBF24 / ink #111827
+   secondary #1A2233 / text #F3E8D8 / border #4B5563
+   heading #F3E8D8 · muted #9CA3AF · font DM Sans
+*/
 
 html.landing-mode main {
   padding: 0 !important;
@@ -10,9 +15,18 @@ html.landing-mode body {
 }
 
 .lp-root {
-  background: var(--bg);
-  color: var(--text);
+  --lp-bg: #111827;
+  --lp-nav: #1F2937;
+  --lp-amber: #FBBF24;
+  --lp-ink: #111827;
+  --lp-secondary: #1A2233;
+  --lp-heading: #F3E8D8;
+  --lp-muted: #9CA3AF;
+  --lp-border: #4B5563;
+  background: #111827;
+  color: #F3E8D8;
   min-height: 100vh;
+  font-family: var(--font-dm-sans), var(--font-geist-sans), system-ui, sans-serif;
 }
 
 .lp-nav {
@@ -32,8 +46,8 @@ html.landing-mode body {
 }
 
 .lp-nav.is-scrolled {
-  background: color-mix(in srgb, var(--bg) 92%, transparent);
-  border-bottom-color: var(--gold);
+  background: #1F2937;
+  border-bottom-color: #FBBF24;
   backdrop-filter: blur(14px);
 }
 
@@ -51,14 +65,14 @@ html.landing-mode body {
   font-weight: 700;
   letter-spacing: 0.28em;
   text-transform: uppercase;
-  color: var(--text3);
+  color: #9CA3AF;
 }
 
 .lp-brand-name {
   font-size: 18px;
   font-weight: 800;
   letter-spacing: -0.4px;
-  color: var(--gold);
+  color: #FBBF24;
   margin-top: 3px;
 }
 
@@ -67,23 +81,23 @@ html.landing-mode body {
   font-weight: 600;
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--text3);
+  color: #9CA3AF;
   margin-top: 3px;
 }
 
 .lp-nav-links {
-  display: none;
+  display: flex;
   align-items: center;
   gap: 26px;
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: var(--text2);
+  color: #F3E8D8;
 }
 
 .lp-nav-links a:hover {
-  color: var(--gold);
+  color: #FBBF24;
 }
 
 .lp-nav-cta {
@@ -110,25 +124,23 @@ html.landing-mode body {
 }
 
 .lp-btn-primary {
-  background: var(--gold);
+  background: #FBBF24;
   color: #111827;
-  border: 1px solid var(--gold);
+  border: 1px solid #FBBF24;
 }
 
 .lp-btn-primary:hover {
-  background: var(--gold-dk);
-  border-color: var(--gold-dk);
+  filter: brightness(0.96);
 }
 
 .lp-btn-ghost {
-  background: transparent;
-  color: var(--text);
-  border: 1px solid color-mix(in srgb, var(--text) 35%, transparent);
+  background: #1A2233;
+  color: #F3E8D8;
+  border: 1px solid #4B5563;
 }
 
 .lp-btn-ghost:hover {
-  border-color: var(--gold);
-  color: var(--gold);
+  border-color: #FBBF24;
 }
 
 .lp-hero,
@@ -147,7 +159,7 @@ html.landing-mode body {
 
 .lp-chapter {
   padding: 140px 8vw 96px;
-  border-top: 1px solid color-mix(in srgb, var(--gold) 18%, transparent);
+  border-top: 1px solid #FBBF2444;
 }
 
 .lp-copy {
@@ -161,7 +173,7 @@ html.landing-mode body {
   font-weight: 700;
   letter-spacing: 0.32em;
   text-transform: uppercase;
-  color: var(--gold);
+  color: #FBBF24;
 }
 
 .lp-title {
@@ -169,7 +181,7 @@ html.landing-mode body {
   font-weight: 800;
   line-height: 0.9;
   letter-spacing: -0.035em;
-  color: var(--text);
+  color: #F3E8D8;
   margin: 14px 0 18px;
 }
 
@@ -180,7 +192,7 @@ html.landing-mode body {
 .lp-lede {
   font-size: clamp(16px, 1.6vw, 20px);
   line-height: 1.45;
-  color: var(--text2);
+  color: #9CA3AF;
   max-width: 34em;
   margin-bottom: 28px;
 }
@@ -199,7 +211,7 @@ html.landing-mode body {
   font-size: 10px;
   letter-spacing: 0.28em;
   text-transform: uppercase;
-  color: var(--text3);
+  color: #9CA3AF;
 }
 
 .lp-scroll-hint::after {
@@ -208,7 +220,7 @@ html.landing-mode body {
   width: 1px;
   height: 36px;
   margin-top: 10px;
-  background: linear-gradient(var(--gold), transparent);
+  background: linear-gradient(#FBBF24, transparent);
   animation: lp-drip 1.8s ease-in-out infinite;
 }
 
@@ -218,17 +230,16 @@ html.landing-mode body {
   inset: 0;
   z-index: 0;
   background:
-    radial-gradient(1200px 700px at 70% 20%, var(--gold-glow), transparent 55%),
-    radial-gradient(900px 500px at 15% 80%, rgba(59, 130, 246, 0.08), transparent 50%),
-    var(--bg);
+    radial-gradient(1200px 700px at 70% 20%, rgba(251, 191, 36, 0.15), transparent 55%),
+    #111827;
 }
 
 .lp-grid {
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(color-mix(in srgb, var(--gold) 8%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in srgb, var(--gold) 8%, transparent) 1px, transparent 1px);
+    linear-gradient(#FBBF2414 1px, transparent 1px),
+    linear-gradient(90deg, #FBBF2414 1px, transparent 1px);
   background-size: 72px 72px;
   mask-image: radial-gradient(ellipse at 60% 40%, #000 20%, transparent 72%);
   opacity: 0.55;
@@ -242,12 +253,12 @@ html.landing-mode body {
   background: linear-gradient(
     90deg,
     transparent,
-    color-mix(in srgb, var(--gold) 15%, transparent),
-    var(--gold),
-    color-mix(in srgb, var(--gold) 15%, transparent),
+    #FBBF2426,
+    #FBBF24,
+    #FBBF2426,
     transparent
   );
-  box-shadow: 0 0 24px var(--gold), 0 0 80px var(--gold-glow);
+  box-shadow: 0 0 24px #FBBF24, 0 0 80px rgba(251, 191, 36, 0.15);
   animation: lp-beam 7s linear infinite;
   opacity: 0.85;
 }
@@ -265,8 +276,8 @@ html.landing-mode body {
   right: 12%;
   top: 22%;
   border-radius: 50%;
-  border: 1px solid var(--gold-border);
-  box-shadow: 0 0 40px var(--gold-glow);
+  border: 1px solid #FBBF2444;
+  box-shadow: 0 0 40px rgba(251, 191, 36, 0.15);
   animation: lp-pulse 5.5s ease-out infinite;
 }
 
@@ -275,7 +286,7 @@ html.landing-mode body {
   position: absolute;
   inset: 22%;
   border-radius: 50%;
-  border: 1px solid color-mix(in srgb, var(--gold) 40%, transparent);
+  border: 1px solid #FBBF2466;
 }
 
 .lp-media {
@@ -298,13 +309,13 @@ html.landing-mode body {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(90deg, color-mix(in srgb, var(--bg) 88%, transparent) 0%, color-mix(in srgb, var(--bg) 42%, transparent) 48%, color-mix(in srgb, var(--bg) 22%, transparent) 100%),
-    linear-gradient(0deg, var(--bg) 0%, transparent 42%);
+    linear-gradient(90deg, #111827e0 0%, #1118276b 48%, #11182738 100%),
+    linear-gradient(0deg, #111827 0%, transparent 42%);
 }
 
 .lp-media-dim-center {
   background:
-    linear-gradient(180deg, color-mix(in srgb, var(--bg) 35%, transparent) 0%, color-mix(in srgb, var(--bg) 78%, transparent) 70%, var(--bg) 100%);
+    linear-gradient(180deg, #11182759 0%, #111827c7 70%, #111827 100%);
 }
 
 .lp-stage {
@@ -324,11 +335,11 @@ html.landing-mode body {
 .lp-device {
   border-radius: 12px;
   overflow: hidden;
-  border: 1px solid var(--gold-border);
+  border: 1px solid #FBBF2444;
   box-shadow:
-    0 30px 80px rgba(0, 0, 0, 0.5),
-    0 0 0 1px color-mix(in srgb, var(--gold) 12%, transparent);
-  background: var(--surface);
+    0 30px 80px rgba(17, 24, 39, 0.5),
+    0 0 0 1px #FBBF241f;
+  background: #1F2937;
 }
 
 .lp-device img {
@@ -348,11 +359,11 @@ html.landing-mode body {
   aspect-ratio: 9 / 19.2;
   border-radius: 34px;
   padding: 10px 8px;
-  background: color-mix(in srgb, var(--surface) 80%, #000);
-  border: 2px solid var(--border2);
+  background: #1F2937;
+  border: 2px solid #4B5563;
   box-shadow:
-    0 28px 70px rgba(0, 0, 0, 0.55),
-    inset 0 0 0 1px var(--gold-border);
+    0 28px 70px rgba(17, 24, 39, 0.55),
+    inset 0 0 0 1px #FBBF2444;
   position: relative;
 }
 
@@ -365,7 +376,7 @@ html.landing-mode body {
   height: 8px;
   transform: translateX(-50%);
   border-radius: 99px;
-  background: #0b1220;
+  background: #111827;
   z-index: 2;
 }
 
@@ -375,15 +386,15 @@ html.landing-mode body {
   object-fit: cover;
   object-position: top center;
   border-radius: 26px;
-  background: var(--surface3);
+  background: #1A2233;
 }
 
 .lp-chrome {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: #1F2937;
+  border: 1px solid #4B5563;
   border-radius: 12px;
   overflow: hidden;
-  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.4);
+  box-shadow: 0 24px 60px rgba(17, 24, 39, 0.4);
 }
 
 .lp-chrome-bar {
@@ -391,13 +402,13 @@ html.landing-mode body {
   align-items: center;
   justify-content: space-between;
   padding: 10px 14px;
-  border-bottom: 1px solid var(--gold);
-  background: var(--surface);
+  border-bottom: 1px solid #FBBF24;
+  background: #1F2937;
 }
 
 .lp-chrome-mark {
   font-weight: 800;
-  color: var(--gold);
+  color: #FBBF24;
   font-size: 13px;
 }
 
@@ -405,7 +416,7 @@ html.landing-mode body {
   font-size: 8px;
   letter-spacing: 0.14em;
   text-transform: uppercase;
-  color: var(--text3);
+  color: #9CA3AF;
 }
 
 .lp-kpi-grid {
@@ -546,8 +557,8 @@ html.landing-mode body {
 .lp-path {
   display: flex;
   flex-direction: column;
-  background: var(--surface2);
-  border: 1px solid var(--border);
+  background: #1A2233;
+  border: 1px solid #4B5563;
   border-radius: 12px;
   padding: 22px 20px 20px;
   text-decoration: none;
@@ -557,7 +568,7 @@ html.landing-mode body {
 }
 
 .lp-path:hover {
-  border-color: var(--gold);
+  border-color: #FBBF24;
   transform: translateY(-3px);
 }
 
@@ -570,7 +581,7 @@ html.landing-mode body {
 .lp-path p,
 .lp-path li {
   font-size: 14px;
-  color: var(--text2);
+  color: #9CA3AF;
   line-height: 1.45;
 }
 
@@ -582,21 +593,21 @@ html.landing-mode body {
 
 .lp-footer {
   padding: 36px 8vw 48px;
-  border-top: 1px solid var(--border);
+  border-top: 1px solid #4B5563;
   display: flex;
   flex-wrap: wrap;
   justify-content: space-between;
   gap: 16px;
-  color: var(--text3);
+  color: #9CA3AF;
   font-size: 12px;
 }
 
 .lp-footer a {
-  color: var(--text2);
+  color: #F3E8D8;
 }
 
 .lp-footer a:hover {
-  color: var(--gold);
+  color: #FBBF24;
 }
 
 .lp-footer-links {
@@ -610,8 +621,8 @@ html.landing-mode body {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: var(--bg);
-  color: var(--text);
+  background: #111827;
+  color: #F3E8D8;
 }
 
 @keyframes lp-beam {
@@ -630,15 +641,18 @@ html.landing-mode body {
   50% { opacity: 1; transform: scaleY(1); }
 }
 
-@media (min-width: 900px) {
-  .lp-nav-links {
-    display: flex;
-  }
-}
-
 @media (max-width: 899px) {
   .lp-nav {
     padding: 12px 16px;
+  }
+
+  .lp-nav-links {
+    gap: 14px;
+    font-size: 11px;
+  }
+
+  .lp-brand-sub {
+    display: none;
   }
 
   .lp-hero,
