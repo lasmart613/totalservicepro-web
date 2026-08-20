@@ -5,8 +5,10 @@
    heading #F3E8D8 · muted #9CA3AF · font DM Sans
 */
 
-html.landing-mode {
-  scroll-padding-top: 8rem;
+html.landing-mode,
+html.landing-mode body {
+  /* Set from measured .lp-nav height + slack in LandingPage. */
+  scroll-padding-top: var(--lp-nav-offset, 10rem);
 }
 
 html.landing-mode main {
@@ -16,6 +18,19 @@ html.landing-mode main {
 
 html.landing-mode body {
   overflow-x: hidden;
+}
+
+/* Mask the band under the three-line nav so titles cannot appear clipped mid-scroll. */
+html.landing-mode .lp-root::before {
+  content: '';
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--lp-nav-height, 5.5rem);
+  background: #1F2937;
+  z-index: 70;
+  pointer-events: none;
 }
 
 .lp-root {
@@ -44,15 +59,8 @@ html.landing-mode body {
   justify-content: space-between;
   gap: 20px;
   padding: 16px 28px;
-  background: transparent;
-  border-bottom: 1px solid transparent;
-  transition: background 0.28s ease, border-color 0.28s ease, backdrop-filter 0.28s ease;
-}
-
-.lp-nav.is-scrolled {
   background: #1F2937;
-  border-bottom-color: #FBBF24;
-  backdrop-filter: blur(14px);
+  border-bottom: 1px solid #FBBF24;
 }
 
 .lp-brand {
@@ -152,18 +160,19 @@ html.landing-mode body {
   position: relative;
   min-height: 100vh;
   display: flex;
-  align-items: flex-end;
-  overflow: hidden;
+  align-items: flex-start;
+  /* overflow visible so sticky titles can pin below the nav */
+  overflow: visible;
   isolation: isolate;
-  scroll-margin-top: 8rem;
+  scroll-margin-top: var(--lp-nav-offset, 10rem);
 }
 
 .lp-hero {
-  padding: 8.5rem 8vw 88px;
+  padding: var(--lp-nav-offset, 10rem) 8vw 88px;
 }
 
 .lp-chapter {
-  padding: 8.5rem 8vw 96px;
+  padding: var(--lp-nav-offset, 10rem) 8vw 96px;
   border-top: 1px solid #FBBF2444;
 }
 
@@ -184,6 +193,16 @@ html.landing-mode body {
   position: relative;
   z-index: 3;
   max-width: 760px;
+  padding-top: 0.5rem;
+}
+
+.lp-heading {
+  position: sticky;
+  top: var(--lp-nav-offset, 10rem);
+  z-index: 4;
+  margin-bottom: 0;
+  padding: 6px 0 14px;
+  background: linear-gradient(180deg, #111827 78%, #11182700);
 }
 
 .lp-kicker {
@@ -192,7 +211,7 @@ html.landing-mode body {
   letter-spacing: 0.32em;
   text-transform: uppercase;
   color: #FBBF24;
-  scroll-margin-top: 8rem;
+  scroll-margin-top: var(--lp-nav-offset, 10rem);
 }
 
 .lp-title {
@@ -202,7 +221,7 @@ html.landing-mode body {
   letter-spacing: -0.035em;
   color: #F3E8D8;
   margin: 14px 0 18px;
-  scroll-margin-top: 8rem;
+  scroll-margin-top: var(--lp-nav-offset, 10rem);
 }
 
 .lp-title-sm {
@@ -227,7 +246,7 @@ html.landing-mode body {
   position: absolute;
   left: 8vw;
   bottom: 28px;
-  z-index: 2;
+  z-index: 3;
   font-size: 10px;
   letter-spacing: 0.28em;
   text-transform: uppercase;
@@ -249,6 +268,7 @@ html.landing-mode body {
   position: absolute;
   inset: 0;
   z-index: 0;
+  overflow: hidden;
   background:
     radial-gradient(1200px 700px at 70% 20%, rgba(251, 191, 36, 0.15), transparent 55%),
     #111827;
@@ -313,6 +333,7 @@ html.landing-mode body {
   position: absolute;
   inset: 0;
   z-index: 0;
+  overflow: hidden;
 }
 
 .lp-media video,
@@ -336,6 +357,25 @@ html.landing-mode body {
 .lp-media-dim-center {
   background:
     linear-gradient(180deg, #11182799 0%, #111827e8 48%, #111827 100%);
+}
+
+/* Join chapter: crush the signup still so card labels cannot be read as live CTAs. */
+.lp-join .lp-media video,
+.lp-join .lp-media img {
+  object-position: 50% 0%;
+  object-fit: cover;
+  transform: scale(1.8);
+  transform-origin: top center;
+  filter: blur(28px) brightness(0.14) saturate(0.25);
+}
+
+.lp-join .lp-media-dim,
+.lp-join .lp-media-dim-center {
+  background: #111827fa;
+}
+
+.lp-join::before {
+  background: #111827f5;
 }
 
 .lp-stage {
@@ -559,7 +599,7 @@ html.landing-mode body {
 
 .lp-join {
   align-items: center;
-  padding-top: 10rem;
+  padding-top: calc(var(--lp-nav-offset, 10rem) + 2rem);
 }
 
 .lp-join .lp-copy {
@@ -677,11 +717,11 @@ html.landing-mode body {
 
   .lp-hero,
   .lp-chapter {
-    padding: 8.5rem 22px 72px;
+    padding: var(--lp-nav-offset, 10rem) 22px 72px;
     min-height: 100svh;
     flex-direction: column;
     align-items: stretch;
-    justify-content: flex-end;
+    justify-content: flex-start;
   }
 
   .lp-hero::before,
