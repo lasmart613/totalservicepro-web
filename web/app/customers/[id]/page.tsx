@@ -136,6 +136,7 @@ export default function CustomerProfilePage() {
 
   // Editable form (same fields as Directory Add Customer)
   const [form, setForm] = useState<CustomerInfoFormValues>(emptyCustomerForm());
+  const [logoFile, setLogoFile] = useState<File | null>(null);
 
   const handleFormChange = useCallback((next: CustomerInfoFormValues) => {
     setForm(next);
@@ -270,7 +271,9 @@ export default function CustomerProfilePage() {
         zip: org.zip || '',
         contact_name: (org as any).contact_name || '',
         specialties: Array.isArray(org.specialties) ? org.specialties : [],
+        logo_url: org.logo_url || '',
       });
+      setLogoFile(null);
       setDirty(false);
 
       await Promise.all([
@@ -439,16 +442,18 @@ export default function CustomerProfilePage() {
     if (!canEdit || !customer?.id) return;
     setSaving(true);
     try {
-      const payload = await updateCustomerOrg(supabase, customer.id, form);
+      const payload = await updateCustomerOrg(supabase, customer.id, form, { logoFile });
       setCustomer((prev) =>
         prev
           ? {
               ...prev,
               ...payload,
               name: form.name.trim(),
+              logo_url: (payload.logo_url as string | null | undefined) ?? prev.logo_url,
             }
           : prev
       );
+      setLogoFile(null);
       setDirty(false);
       toast.success('Customer profile saved');
     } catch (e: any) {
@@ -611,12 +616,12 @@ export default function CustomerProfilePage() {
                 borderColor: 'var(--gold)',
               }}
             >
-              {customer.logo_url ? (
+              {form.logo_url || customer.logo_url ? (
                 // eslint-disable-next-line @next/next/no-img-element
                 <img
-                  src={customer.logo_url}
+                  src={form.logo_url || customer.logo_url || ''}
                   alt=""
-                  className="w-full h-full object-cover rounded-2xl"
+                  className="w-full h-full object-contain rounded-2xl bg-[var(--surface)]"
                 />
               ) : (
                 initials(form.name || customer.name)
@@ -709,7 +714,15 @@ export default function CustomerProfilePage() {
         {/* Overview */}
         {tab === 'overview' && (
           <div className="space-y-4">
-            <CustomerInfoForm value={form} onChange={handleFormChange} disabled={!canEdit} />
+            <CustomerInfoForm
+              value={form}
+              onChange={handleFormChange}
+              disabled={!canEdit}
+              onLogoFileChange={(file) => {
+                setLogoFile(file);
+                setDirty(true);
+              }}
+            />
 
             {canEdit && (
               <div className="pt-2">

@@ -8,6 +8,11 @@ import {
   readExistingActionToken,
 } from '@/lib/billing/estimate-action';
 import { estimateActionUrl } from '@/lib/share';
+import {
+  publicSiteOrigin,
+  resolveFreeAccountUrls,
+  wrapCustomerFacingDocumentEmail,
+} from '@/lib/customer-invite';
 
 /**
  * POST /api/billing/send-estimate
@@ -233,17 +238,20 @@ export async function POST(req: NextRequest) {
       html = ensureEstimateActionCtas(html, estimateActionUrl(actionToken));
     }
 
-    const wrapped = `
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"/><title>${subject.replace(/</g, '')}</title></head>
-<body style="margin:0;padding:16px;background:#f4f4f5;font-family:system-ui,sans-serif;">
-  <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:12px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.06);">
-    ${html}
-  </div>
-  <p style="max-width:720px;margin:16px auto 0;font-size:11px;color:#666;text-align:center;">
-    Sent via Total Service Pro · <a href="https://repairplanet.net">repairplanet.net</a>
-  </p>
-</body></html>`;
+    const companyName = String(est?.customer_name || '').trim();
+    const { signupUrl, loginUrl } = resolveFreeAccountUrls({
+      origin: publicSiteOrigin(req),
+      email: toEmail,
+      companyName,
+      customerOrgId: custOrgId,
+    });
+    const wrapped = wrapCustomerFacingDocumentEmail({
+      subject,
+      documentHtml: html,
+      signupUrl,
+      loginUrl,
+      companyName,
+    });
 
     const rr = await fetch('https://api.resend.com/emails', {
       method: 'POST',

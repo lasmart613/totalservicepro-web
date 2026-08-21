@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { Suspense, useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
 import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
+import { claimCustomerInvite, previewCustomerInvite } from '@/lib/customer-invite-client';
 import { MODELS } from '@/lib/models';
 import {
   OWNER_ORG_TYPE_SIGNUP_OPTIONS,
@@ -12,7 +13,7 @@ import {
 } from '@/lib/org-types';
 import AuthOtpBox from '@/components/AuthOtpBox';
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -38,7 +39,7 @@ interface EquipmentItem {
   serialNumber: string;
 }
 
-export default function OwnerSignup() {
+function OwnerSignupInner() {
   const [orgKind, setOrgKind] = useState<OwnerOrgType>('customer');
   const [facilityName, setFacilityName] = useState('');
   const [firstName, setFirstName] = useState('');
@@ -62,8 +63,31 @@ export default function OwnerSignup() {
   const [loading, setLoading] = useState(false);
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
+  const [claimToken, setClaimToken] = useState<string | null>(null);
+  const [claimLocked, setClaimLocked] = useState(false);
   const router = useRouter();
+  const searchParams = useSearchParams();
   const supabase = getSupabaseClient();
+
+  useEffect(() => {
+    const qCompany = (searchParams.get('company') || '').trim();
+    const qEmail = (searchParams.get('email') || '').trim();
+    const qClaim = (searchParams.get('claim') || '').trim();
+    if (qCompany) setFacilityName(qCompany);
+    if (qEmail) setEmail(qEmail);
+    if (!qClaim) return;
+    setClaimToken(qClaim);
+    let cancelled = false;
+    previewCustomerInvite(qClaim).then((preview) => {
+      if (cancelled || !preview.valid) return;
+      if (preview.companyName) setFacilityName(preview.companyName);
+      if (preview.email) setEmail(preview.email);
+      setClaimLocked(true);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [searchParams]);
 
   const nameLabel =
     orgKind === 'laser_rental'
@@ -112,6 +136,7 @@ export default function OwnerSignup() {
         preferred_services: selectedServices.length ? selectedServices.join(' | ') : null,
         bio: bio || null,
         num_laser_systems: numLasers ? parseInt(numLasers, 10) : null,
+        claimToken: claimToken || null,
         equipment: equipmentList.map((item) => ({
           manufacturer:
             (MODELS as any)[item.modelKey]?.mfg ||
@@ -127,6 +152,19 @@ export default function OwnerSignup() {
   async function completeOwnerSetup(userId: string) {
     const pending = pendingPayload();
     savePendingSignup(pending);
+
+    if (claimToken) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const access = sessionData.session?.access_token;
+      if (access) {
+        const claimed = await claimCustomerInvite(access, claimToken);
+        if (claimed.claimed) {
+          router.push('/my-lasers?justSetup=1');
+          return;
+        }
+      }
+    }
+
     const applied = await applyPendingSignup(supabase, userId, pending);
     if (!applied.orgId) {
       throw new Error('Account verified, but a facility was not linked. Try Onboarding or sign in again.');
@@ -176,6 +214,7 @@ export default function OwnerSignup() {
             phone: phone || '',
             facility_type: facilityType,
             preferred_services: selectedServices.length ? selectedServices.join(' | ') : '',
+            claim_token: claimToken || '',
           },
           emailRedirectTo: `${origin}/auth/callback?next=/my-lasers`,
         },
@@ -220,9 +259,13 @@ export default function OwnerSignup() {
           <div className="mt-2">
             <span className="font-extrabold text-2xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </div>
-          <h1 className="text-2xl font-bold mt-1">Sign Up as Laser Owner</h1>
+          <h1 className="text-2xl font-bold mt-1">
+            {claimLocked ? 'Claim your clinic profile' : 'Sign Up as Laser Owner'}
+          </h1>
           <p className="text-sm text-[var(--text3)]">
-            Clinics, rental companies, and resellers — My Lasers, service needs, and marketplace awards
+            {claimLocked
+              ? `Create a free account for ${facilityName || 'this clinic'} to view service history, upcoming service, and your equipment list.`
+              : 'Clinics, rental companies, and resellers — My Lasers, service needs, and marketplace awards'}
           </p>
         </div>
 
@@ -298,7 +341,13 @@ export default function OwnerSignup() {
 
             <div>
               <label className="label">{nameLabel} *</label>
-              <input className="input" value={facilityName} onChange={e => setFacilityName(e.target.value)} required />
+              <input
+                className="input"
+                value={facilityName}
+                onChange={e => setFacilityName(e.target.value)}
+                required
+                readOnly={claimLocked}
+              />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -314,7 +363,19 @@ export default function OwnerSignup() {
 
             <div>
               <label className="label">Contact Email *</label>
-              <input type="email" className="input" value={email} onChange={e => setEmail(e.target.value)} required />
+              <input
+                type="email"
+                className="input"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                required
+                readOnly={claimLocked}
+              />
+              {claimLocked && (
+                <p className="text-[11px] text-[var(--text3)] mt-1">
+                  This invite is for the email on the clinic record.
+                </p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -444,16 +505,35 @@ export default function OwnerSignup() {
                 disabled={loading}
                 className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
               >
-                {loading ? 'Creating account...' : 'Create Owner Account'}
+                {loading ? 'Creating account...' : claimLocked ? 'Create free account & claim profile' : 'Create Owner Account'}
               </button>
             )}
           </form>
 
           <div className="mt-5 text-center text-sm">
-            <Link href="/login" className="text-[var(--gold)] hover:underline">Already have an account? Sign in</Link>
+            <Link
+              href={claimToken ? `/login?claim=${encodeURIComponent(claimToken)}&next=/my-lasers` : '/login'}
+              className="text-[var(--gold)] hover:underline"
+            >
+              Already have an account? Sign in
+            </Link>
           </div>
         </div>
       </div>
     </div>
+  );
+}
+
+export default function OwnerSignup() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center text-[var(--text3)]">
+          Loading sign up…
+        </div>
+      }
+    >
+      <OwnerSignupInner />
+    </Suspense>
   );
 }

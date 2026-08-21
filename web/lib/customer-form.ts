@@ -5,6 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { isBlobLogoUrl, uploadCustomerLogo } from '@/lib/customer-logo';
 
 export const CUSTOMER_BIZ_TYPES = [
   'Medical Spa',
@@ -48,6 +49,7 @@ export type CustomerInfoFormValues = {
   zip: string;
   contact_name: string;
   specialties: string[];
+  logo_url: string;
 };
 
 export function emptyCustomerForm(): CustomerInfoFormValues {
@@ -64,6 +66,7 @@ export function emptyCustomerForm(): CustomerInfoFormValues {
     zip: '',
     contact_name: '',
     specialties: [],
+    logo_url: '',
   };
 }
 
@@ -85,6 +88,7 @@ const OPTIONAL_ORG_COLUMNS = [
   'created_by',
   'is_active',
   'updated_at',
+  'logo_url',
 ] as const;
 
 export function customerOrgPayload(
@@ -106,6 +110,7 @@ export function customerOrgPayload(
     facility_type: biz,
     specialties: form.specialties,
     contact_name: form.contact_name.trim() || null,
+    logo_url: form.logo_url.trim() && !isBlobLogoUrl(form.logo_url) ? form.logo_url.trim() : null,
     ...extras,
   };
 }
@@ -118,14 +123,29 @@ function missingColumn(message?: string): string | null {
  * Create a customer org and link it to the caller's service company.
  * Same tables as the former Company Profile CRM path: organizations + organization_customers.
  */
+export async function persistCustomerLogo(
+  supabase: SupabaseClient,
+  customerId: string | number,
+  logoFile: File | null | undefined
+): Promise<string | null> {
+  if (!logoFile) return null;
+  const url = await uploadCustomerLogo(supabase, customerId, logoFile);
+  const { error } = await supabase.from('organizations').update({ logo_url: url }).eq('id', customerId);
+  if (error && !missingColumn(error.message)) {
+    throw new Error(error.message || 'Logo uploaded but could not be saved on the customer');
+  }
+  return url;
+}
+
 export async function createLinkedCustomer(
   supabase: SupabaseClient,
   opts: {
     serviceOrgId: string | number;
     form: CustomerInfoFormValues;
     createdBy?: string | null;
+    logoFile?: File | null;
   }
-): Promise<{ id: string | number }> {
+): Promise<{ id: string | number; logoWarning?: string }> {
   const err = validateCustomerForm(opts.form);
   if (err) throw new Error(err);
   if (!opts.serviceOrgId) throw new Error('Your organization is not loaded yet.');
@@ -179,13 +199,24 @@ export async function createLinkedCustomer(
     throw new Error(linkErr.message || 'Customer created but could not be linked to your directory');
   }
 
+  if (opts.logoFile) {
+    try {
+      await persistCustomerLogo(supabase, created.id, opts.logoFile);
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      console.warn('customer logo upload', e);
+      return { id: created.id, logoWarning: message || 'Customer saved, but the logo did not upload.' };
+    }
+  }
+
   return created;
 }
 
 export async function updateCustomerOrg(
   supabase: SupabaseClient,
   customerId: string | number,
-  form: CustomerInfoFormValues
+  form: CustomerInfoFormValues,
+  opts?: { logoFile?: File | null }
 ): Promise<Record<string, unknown>> {
   const err = validateCustomerForm(form);
   if (err) throw new Error(err);
@@ -211,6 +242,12 @@ export async function updateCustomerOrg(
   }
 
   if (lastError) throw new Error(lastError.message || 'Save failed');
+
+  if (opts?.logoFile) {
+    const url = await persistCustomerLogo(supabase, customerId, opts.logoFile);
+    if (url) payload.logo_url = url;
+  }
+
   return payload;
 }
 

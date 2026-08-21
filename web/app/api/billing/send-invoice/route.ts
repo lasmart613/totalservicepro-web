@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createInvoiceCheckoutSession } from '@/lib/billing/stripe-pay';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import {
+  publicSiteOrigin,
+  resolveFreeAccountUrls,
+  wrapCustomerFacingDocumentEmail,
+} from '@/lib/customer-invite';
 
 const INV_SELECT_FULL =
   'id, created_by, organization_id, customer_name, customer_organization_id, total, invoice_data, invoice_number, status';
@@ -362,17 +367,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const wrapped = `
-<!DOCTYPE html>
-<html><head><meta charset="utf-8"/><title>${subject.replace(/</g, '')}</title></head>
-<body style="margin:0;padding:16px;background:#f4f4f5;font-family:system-ui,sans-serif;">
-  <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:12px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.06);">
-    ${html}
-  </div>
-  <p style="max-width:720px;margin:16px auto 0;font-size:11px;color:#666;text-align:center;">
-    Sent via Total Service Pro · <a href="https://repairplanet.net">repairplanet.net</a>
-  </p>
-</body></html>`;
+    const companyName = String(inv?.customer_name || '').trim();
+    const { signupUrl, loginUrl } = resolveFreeAccountUrls({
+      origin: publicSiteOrigin(req),
+      email: toEmail,
+      companyName,
+      customerOrgId: custOrgId,
+    });
+    const wrapped = wrapCustomerFacingDocumentEmail({
+      subject,
+      documentHtml: html,
+      signupUrl,
+      loginUrl,
+      companyName,
+    });
 
     const rr = await fetch('https://api.resend.com/emails', {
       method: 'POST',

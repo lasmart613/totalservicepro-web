@@ -206,6 +206,7 @@ export function pendingSignupFromMetadata(user: {
       facility_type: meta.facility_type || facilityTypeForOwnerOrg(resolvedOrgType),
       preferred_services: meta.preferred_services || null,
       num_laser_systems: meta.num_laser_systems ?? meta.num_lasers ?? null,
+      claimToken: meta.claim_token || null,
     },
   };
 }

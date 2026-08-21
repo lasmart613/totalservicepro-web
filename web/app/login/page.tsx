@@ -5,6 +5,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { nextPathFromSearchParams } from '@/lib/login-next';
+import { claimCustomerInvite } from '@/lib/customer-invite-client';
 
 function LoginInner() {
   const [email, setEmail] = useState('');
@@ -22,7 +23,22 @@ function LoginInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const nextPath = nextPathFromSearchParams(searchParams);
+  const claimToken = (searchParams.get('claim') || '').trim();
   const supabase = getSupabaseClient();
+
+  async function finishLogin(dest: string) {
+    if (claimToken) {
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session?.access_token) {
+        const claimed = await claimCustomerInvite(sessionData.session.access_token, claimToken);
+        if (claimed.claimed) {
+          router.push('/my-lasers?justSetup=1');
+          return;
+        }
+      }
+    }
+    router.push(dest);
+  }
 
   function isValidEmail(s: string) {
     const e = (s || '').trim();
@@ -143,7 +159,7 @@ function LoginInner() {
             'Account created and ready. You are signed in — no confirmation email is required (Confirm email is currently off in project settings).',
             true
           );
-          router.push(nextPath && nextPath !== '/' ? nextPath : '/onboarding');
+          await finishLogin(nextPath && nextPath !== '/' ? nextPath : '/onboarding');
           return;
         }
 
@@ -184,7 +200,7 @@ function LoginInner() {
           }
           throw error;
         }
-        router.push(nextPath || '/');
+        await finishLogin(nextPath || '/');
       }
     } catch (err: any) {
       const msg = publicAuthError(err.message) || 'Authentication failed';
@@ -205,7 +221,9 @@ function LoginInner() {
         email: cleanEmail,
         options: {
           shouldCreateUser: false,
-          emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(nextPath || '/hub')}`,
+          emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(nextPath || '/hub')}${
+            claimToken ? `&claim=${encodeURIComponent(claimToken)}` : ''
+          }`,
         },
       });
       if (error) throw error;
@@ -254,14 +272,14 @@ function LoginInner() {
           });
           if (!pwErr) {
             setMsg('Email confirmed! Signing you in…', true);
-            router.push(nextPath && nextPath !== '/' ? nextPath : '/onboarding');
+            await finishLogin(nextPath && nextPath !== '/' ? nextPath : '/onboarding');
             return;
           }
         }
         throw new Error(lastErr || 'Invalid or expired code. Request a new one.');
       }
       setMsg('Verified! Redirecting…', true);
-      router.push(
+      await finishLogin(
         otpMode === 'signup'
           ? nextPath && nextPath !== '/'
             ? nextPath
