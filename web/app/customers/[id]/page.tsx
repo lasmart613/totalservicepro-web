@@ -6,12 +6,19 @@ import { useParams, useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
+  canAddCustomers,
   isOwnerish,
   isServiceCompany,
   isSupplier,
 } from '@/lib/roles';
 import { ownerOrgTypeLabel } from '@/lib/org-types';
 import { toast } from 'sonner';
+import { CustomerInfoForm } from '@/components/CustomerInfoForm';
+import {
+  emptyCustomerForm,
+  updateCustomerOrg,
+  type CustomerInfoFormValues,
+} from '@/lib/customer-form';
 
 type TabKey = 'overview' | 'equipment' | 'history' | 'contacts';
 
@@ -73,35 +80,6 @@ type ContactRow = {
   is_primary?: boolean | null;
 };
 
-const BIZ_TYPES = [
-  'Medical Spa',
-  'Dermatology Clinic',
-  'Plastic Surgery Center',
-  'Hair Removal Clinic',
-  'Cosmetic Surgery Center',
-  'Wellness Center',
-  'Hospital / Health System',
-  'Other',
-];
-
-const ALL_SPECIALTIES = [
-  'Hair Removal',
-  'Skin Resurfacing',
-  'Tattoo Removal',
-  'Vascular Lesions',
-  'Pigmentation',
-  'Body Contouring',
-  'Anti-aging / Wrinkles',
-  'Acne Treatment',
-  'Scar Revision',
-  'Nail Fungus',
-  'Photodynamic Therapy',
-  'Fractional Laser',
-  'RF Microneedling',
-  'IPL Photofacial',
-  'Laser Lipolysis',
-];
-
 const BRAND_ICONS: Record<string, string> = {
   Lumenis: '🔬',
   Candela: '⚡',
@@ -156,37 +134,11 @@ export default function CustomerProfilePage() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
-  // Editable form
-  const [form, setForm] = useState({
-    name: '',
-    biz_type: '',
-    website: '',
-    notes: '',
-    phone: '',
-    email: '',
-    address: '',
-    city: '',
-    state: '',
-    zip: '',
-    contact_name: '',
-    specialties: [] as string[],
-  });
+  // Editable form (same fields as Directory Add Customer)
+  const [form, setForm] = useState<CustomerInfoFormValues>(emptyCustomerForm());
 
-  const setField = useCallback((key: string, value: any) => {
-    setForm((prev) => ({ ...prev, [key]: value }));
-    setDirty(true);
-  }, []);
-
-  const toggleSpecialty = useCallback((spec: string) => {
-    setForm((prev) => {
-      const has = prev.specialties.includes(spec);
-      return {
-        ...prev,
-        specialties: has
-          ? prev.specialties.filter((s) => s !== spec)
-          : [...prev.specialties, spec],
-      };
-    });
+  const handleFormChange = useCallback((next: CustomerInfoFormValues) => {
+    setForm(next);
     setDirty(true);
   }, []);
 
@@ -255,10 +207,7 @@ export default function CustomerProfilePage() {
       }
 
       // Service company staff can edit; suppliers view-only
-      const editAllowed =
-        isServiceCompany(role, orgType) ||
-        (orgType === 'service_company' && !isSupplier(role, orgType));
-      setCanEdit(!!editAllowed);
+      setCanEdit(canAddCustomers(role, orgType));
 
       // Must be linked via organization_customers
       const { data: link, error: linkErr } = await supabase
@@ -308,6 +257,7 @@ export default function CustomerProfilePage() {
 
       setCustomer(org);
       setForm({
+        ...emptyCustomerForm(),
         name: org.name || '',
         biz_type: org.biz_type || org.facility_type || '',
         website: org.website || '',
@@ -487,58 +437,9 @@ export default function CustomerProfilePage() {
 
   async function saveCustomer() {
     if (!canEdit || !customer?.id) return;
-    if (!form.name.trim()) {
-      toast.error('Business name is required');
-      return;
-    }
     setSaving(true);
     try {
-      const base: Record<string, any> = {
-        name: form.name.trim(),
-        website: form.website.trim() || null,
-        notes: form.notes.trim() || null,
-        phone: form.phone.trim() || null,
-        email: form.email.trim() || null,
-        address: form.address.trim() || null,
-        city: form.city.trim() || null,
-        state: form.state.trim() || null,
-        zip: form.zip.trim() || null,
-        updated_at: new Date().toISOString(),
-      };
-
-      // Optional columns — strip if PostgREST says missing
-      const optional: Record<string, any> = {
-        biz_type: form.biz_type || null,
-        facility_type: form.biz_type || null,
-        specialties: form.specialties,
-        contact_name: form.contact_name.trim() || null,
-      };
-
-      let payload = { ...base, ...optional };
-      let lastError: any = null;
-
-      for (let attempt = 0; attempt < 8; attempt++) {
-        const { error } = await supabase
-          .from('organizations')
-          .update(payload)
-          .eq('id', customer.id);
-        if (!error) {
-          lastError = null;
-          break;
-        }
-        lastError = error;
-        const m = String(error.message || '');
-        const col = m.match(/Could not find the '([^']+)' column/i)?.[1];
-        if (col && col in payload) {
-          delete payload[col];
-          continue;
-        }
-        // RLS / other errors — stop
-        break;
-      }
-
-      if (lastError) throw lastError;
-
+      const payload = await updateCustomerOrg(supabase, customer.id, form);
       setCustomer((prev) =>
         prev
           ? {
@@ -808,201 +709,7 @@ export default function CustomerProfilePage() {
         {/* Overview */}
         {tab === 'overview' && (
           <div className="space-y-4">
-            <div className="section">
-              <div className="flex items-center gap-2 mb-3">
-                <span>🏥</span>
-                <h2 className="text-sm font-bold uppercase tracking-wide text-[var(--gold)]">
-                  Business Info
-                </h2>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                    Business Name *
-                  </label>
-                  <input
-                    className="input w-full"
-                    value={form.name}
-                    disabled={!canEdit}
-                    onChange={(e) => setField('name', e.target.value)}
-                  />
-                </div>
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                      Business Type
-                    </label>
-                    <select
-                      className="input w-full"
-                      value={form.biz_type}
-                      disabled={!canEdit}
-                      onChange={(e) => setField('biz_type', e.target.value)}
-                    >
-                      <option value="">Select…</option>
-                      {BIZ_TYPES.map((b) => (
-                        <option key={b} value={b}>
-                          {b}
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                      Website
-                    </label>
-                    <input
-                      className="input w-full"
-                      type="url"
-                      placeholder="https://"
-                      value={form.website}
-                      disabled={!canEdit}
-                      onChange={(e) => setField('website', e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                    Notes
-                  </label>
-                  <textarea
-                    className="input w-full min-h-[80px]"
-                    placeholder="Account notes, preferences, access details…"
-                    value={form.notes}
-                    disabled={!canEdit}
-                    onChange={(e) => setField('notes', e.target.value)}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div className="section">
-              <div className="flex items-center gap-2 mb-3">
-                <span>📞</span>
-                <h2 className="text-sm font-bold uppercase tracking-wide text-[var(--gold)]">
-                  Contact Info
-                </h2>
-              </div>
-              <div className="space-y-3">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                      Phone
-                    </label>
-                    <input
-                      className="input w-full"
-                      type="tel"
-                      value={form.phone}
-                      disabled={!canEdit}
-                      onChange={(e) => setField('phone', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                      Email
-                    </label>
-                    <input
-                      className="input w-full"
-                      type="email"
-                      value={form.email}
-                      disabled={!canEdit}
-                      onChange={(e) => setField('email', e.target.value)}
-                    />
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                    Contact Name
-                  </label>
-                  <input
-                    className="input w-full"
-                    value={form.contact_name}
-                    disabled={!canEdit}
-                    placeholder="Primary contact person"
-                    onChange={(e) => setField('contact_name', e.target.value)}
-                  />
-                </div>
-                <div>
-                  <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                    Address
-                  </label>
-                  <input
-                    className="input w-full"
-                    value={form.address}
-                    disabled={!canEdit}
-                    onChange={(e) => setField('address', e.target.value)}
-                  />
-                </div>
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-1">
-                    <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                      City
-                    </label>
-                    <input
-                      className="input w-full"
-                      value={form.city}
-                      disabled={!canEdit}
-                      onChange={(e) => setField('city', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                      State
-                    </label>
-                    <input
-                      className="input w-full"
-                      maxLength={2}
-                      value={form.state}
-                      disabled={!canEdit}
-                      onChange={(e) => setField('state', e.target.value)}
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                      ZIP
-                    </label>
-                    <input
-                      className="input w-full"
-                      maxLength={10}
-                      value={form.zip}
-                      disabled={!canEdit}
-                      onChange={(e) => setField('zip', e.target.value)}
-                    />
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="section">
-              <div className="flex items-center gap-2 mb-3">
-                <span>💉</span>
-                <h2 className="text-sm font-bold uppercase tracking-wide text-[var(--gold)]">
-                  Specialties
-                </h2>
-              </div>
-              <div className="flex flex-wrap gap-2">
-                {ALL_SPECIALTIES.map((spec) => {
-                  const active = form.specialties.includes(spec);
-                  return (
-                    <button
-                      key={spec}
-                      type="button"
-                      disabled={!canEdit}
-                      onClick={() => toggleSpecialty(spec)}
-                      className={`px-3 py-1.5 rounded-full text-xs border transition-colors ${
-                        active
-                          ? 'border-[var(--gold)] bg-[var(--gold-glow)] text-[var(--gold)] font-semibold'
-                          : 'border-[var(--border)] text-[var(--text3)] bg-[var(--surface2)]'
-                      } ${!canEdit ? 'opacity-70 cursor-default' : 'cursor-pointer'}`}
-                    >
-                      {spec}
-                    </button>
-                  );
-                })}
-              </div>
-              <p className="text-xs text-[var(--text3)] mt-2">
-                Treatments this facility offers.
-              </p>
-            </div>
+            <CustomerInfoForm value={form} onChange={handleFormChange} disabled={!canEdit} />
 
             {canEdit && (
               <div className="pt-2">
