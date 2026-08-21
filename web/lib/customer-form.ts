@@ -4,6 +4,8 @@
  * Inserts/updates `organizations` (type=customer) and links via `organization_customers`.
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js';
+
 export const CUSTOMER_BIZ_TYPES = [
   'Medical Spa',
   'Dermatology Clinic',
@@ -112,16 +114,12 @@ function missingColumn(message?: string): string | null {
   return message?.match(/Could not find the '([^']+)' column/i)?.[1] || null;
 }
 
-type SupabaseLike = {
-  from: (table: string) => any;
-};
-
 /**
  * Create a customer org and link it to the caller's service company.
  * Same tables as the former Company Profile CRM path: organizations + organization_customers.
  */
 export async function createLinkedCustomer(
-  supabase: SupabaseLike,
+  supabase: SupabaseClient,
   opts: {
     serviceOrgId: string | number;
     form: CustomerInfoFormValues;
@@ -132,7 +130,7 @@ export async function createLinkedCustomer(
   if (err) throw new Error(err);
   if (!opts.serviceOrgId) throw new Error('Your organization is not loaded yet.');
 
-  let payload: Record<string, unknown> = customerOrgPayload(opts.form, {
+  const payload: Record<string, unknown> = customerOrgPayload(opts.form, {
     type: 'customer',
     is_active: true,
     ...(opts.createdBy ? { created_by: opts.createdBy } : {}),
@@ -165,11 +163,16 @@ export async function createLinkedCustomer(
     throw new Error(lastError?.message || 'Failed to add customer');
   }
 
-  const { error: linkErr } = await supabase.from('organization_customers').insert({
+  const linkPayload: Record<string, unknown> = {
     service_organization_id: opts.serviceOrgId,
     customer_organization_id: created.id,
     ...(opts.createdBy ? { created_by: opts.createdBy } : {}),
-  });
+  };
+  let linkErr = (await supabase.from('organization_customers').insert(linkPayload)).error;
+  if (linkErr && missingColumn(linkErr.message) === 'created_by' && 'created_by' in linkPayload) {
+    delete linkPayload.created_by;
+    linkErr = (await supabase.from('organization_customers').insert(linkPayload)).error;
+  }
   if (linkErr && !/duplicate|unique|23505/i.test(linkErr.message || '')) {
     // Customer row exists; still surface the link failure so Directory can show a reason.
     console.warn('organization_customers link failed:', linkErr);
@@ -180,14 +183,14 @@ export async function createLinkedCustomer(
 }
 
 export async function updateCustomerOrg(
-  supabase: SupabaseLike,
+  supabase: SupabaseClient,
   customerId: string | number,
   form: CustomerInfoFormValues
 ): Promise<Record<string, unknown>> {
   const err = validateCustomerForm(form);
   if (err) throw new Error(err);
 
-  let payload: Record<string, unknown> = customerOrgPayload(form, {
+  const payload: Record<string, unknown> = customerOrgPayload(form, {
     updated_at: new Date().toISOString(),
   });
   let lastError: { message?: string } | null = null;

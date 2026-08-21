@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import { toast } from 'sonner';
 import { CustomerInfoForm } from '@/components/CustomerInfoForm';
 import {
@@ -11,25 +11,15 @@ import {
 import { getSupabaseClient } from '@/lib/supabase/client';
 
 type Props = {
-  open: boolean;
   serviceOrgId: string | number | null;
   onClose: () => void;
   onCreated: (id: string | number) => void;
 };
 
-export function AddCustomerModal({ open, serviceOrgId, onClose, onCreated }: Props) {
+export function AddCustomerModal({ serviceOrgId, onClose, onCreated }: Props) {
   const supabase = getSupabaseClient();
   const [form, setForm] = useState<CustomerInfoFormValues>(emptyCustomerForm());
   const [saving, setSaving] = useState(false);
-
-  useEffect(() => {
-    if (open) {
-      setForm(emptyCustomerForm());
-      setSaving(false);
-    }
-  }, [open]);
-
-  if (!open) return null;
 
   async function handleSubmit() {
     if (saving) return;
@@ -46,8 +36,9 @@ export function AddCustomerModal({ open, serviceOrgId, onClose, onCreated }: Pro
       toast.success('Customer added');
       onCreated(created.id);
       onClose();
-    } catch (e: any) {
-      toast.error(e?.message || 'Failed to add customer');
+    } catch (e: unknown) {
+      const message = e instanceof Error ? e.message : String(e);
+      toast.error(message || 'Failed to add customer');
     } finally {
       setSaving(false);
     }

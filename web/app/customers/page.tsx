@@ -247,14 +247,15 @@ export default function CustomersDirectory() {
         </div>
       </div>
 
-      <AddCustomerModal
-        open={showAdd}
-        serviceOrgId={serviceOrgId}
-        onClose={() => setShowAdd(false)}
-        onCreated={() => {
-          loadCustomers();
-        }}
-      />
+      {showAdd && (
+        <AddCustomerModal
+          serviceOrgId={serviceOrgId}
+          onClose={() => setShowAdd(false)}
+          onCreated={() => {
+            loadCustomers();
+          }}
+        />
+      )}
     </div>
   );
 }
