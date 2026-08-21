@@ -15,6 +15,21 @@ import {
 } from '@/lib/roles';
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { listManufacturers } from '@/lib/laser-catalog';
+import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
+import { persistCustomerLogo } from '@/lib/customer-form';
+import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
+
+const FACILITY_TYPES = [
+  'Hospital',
+  'Med Spa',
+  'Clinic',
+  'Private Practice',
+  'Surgery Center',
+  'Research / University',
+  'Rental fleet',
+  'Reseller inventory',
+  'Other',
+];
 
 const TEAM_ROLES = ['company_admin', 'service_manager', 'fse', 'dispatcher', 'billing_manager', 'admin'];
 const ADDITIONAL_ROLES = ['fse', 'dispatcher', 'service_manager', 'billing_manager'];
@@ -87,6 +102,16 @@ function CompanyProfile() {
   const [loadingOrg, setLoadingOrg] = useState(true);
   const [showTeamPrompt, setShowTeamPrompt] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [linkedOrgId, setLinkedOrgId] = useState<string | number | null>(null);
+  const [contacts, setContacts] = useState<any[]>([]);
+  const [newContact, setNewContact] = useState({
+    first_name: '',
+    last_name: '',
+    title: '',
+    phone: '',
+    email: '',
+  });
+  const [savingContact, setSavingContact] = useState(false);
 
   // Chained Equipment + Serial (for customer form)
   const [selectedManufacturer, setSelectedManufacturer] = useState('');
@@ -212,6 +237,7 @@ function CompanyProfile() {
       }
 
       if (prof?.organization_id) {
+        setLinkedOrgId(prof.organization_id);
         const { data: orgData } = await supabase
           .from('organizations')
           .select('*')
@@ -224,6 +250,9 @@ function CompanyProfile() {
           if (isServiceCompany(prof.role, orgData.type) && (isAdmin(prof.role) || prof.role === 'service_manager')) {
             await loadTeamMembers(prof.organization_id);
             await loadCustomers(prof.organization_id);
+          }
+          if (isOwnerish(prof.role, orgData.type)) {
+            await loadFacilityContacts(prof.organization_id);
           }
         }
       }
@@ -400,32 +429,37 @@ function CompanyProfile() {
         }
       }
 
-      const updateData: any = {
+      const saveId = linkedOrgId ?? currentOrg.id;
+      if (!saveId) throw new Error('No facility is linked to this account.');
+      if (linkedOrgId != null && String(currentOrg.id) !== String(linkedOrgId)) {
+        throw new Error('You can only edit your own facility profile.');
+      }
+
+      const updateData: Record<string, unknown> = {
+        id: saveId,
         name: currentOrg.name ?? null,
         address: currentOrg.address ?? null,
         city: currentOrg.city ?? null,
         state: currentOrg.state ?? null,
+        zip: currentOrg.zip ?? null,
         phone: currentOrg.phone ?? null,
+        email: currentOrg.email ?? null,
         website: currentOrg.website ?? null,
+        contact_name: currentOrg.contact_name ?? null,
+        notes: currentOrg.notes ?? null,
+        facility_type: currentOrg.facility_type ?? null,
         list_in_directory: !!currentOrg.list_in_directory,
         supported_brands: Array.isArray(currentOrg.supported_brands) ? currentOrg.supported_brands : null,
       };
-      let { error: upErr } = await supabase
-        .from('organizations')
-        .update(updateData)
-        .eq('id', currentOrg.id);
-      if (upErr && /list_in_directory|supported_brands|column/i.test(upErr.message || '')) {
-        if (/list_in_directory/i.test(upErr.message || '')) delete updateData.list_in_directory;
-        if (/supported_brands/i.test(upErr.message || '')) delete updateData.supported_brands;
-        ({ error: upErr } = await supabase
-          .from('organizations')
-          .update(updateData)
-          .eq('id', currentOrg.id));
-        if (!upErr) {
-          toast.message('Saved (directory column not available yet)');
-        }
-      }
-      if (upErr) throw upErr;
+
+      // Claimed owners: client PATCH is a silent RLS no-op (204, 0 rows).
+      // Same service-role path as invite/claim — only the caller's linked org.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const access = sessionData.session?.access_token;
+      if (!access) throw new Error('Sign-in session missing. Sign in again to save.');
+      const saved = await saveOwnOrganizationProfile(access, updateData);
+      if (!saved.ok || !saved.org) throw new Error(saved.error || 'Save did not persist.');
+      setOrg({ ...currentOrg, ...saved.org, id: saved.org.id ?? saveId });
       toast.success('Details saved.');
       if (serviceAdminMode) setShowTeamPrompt(true);
     } catch (err: any) {
@@ -435,16 +469,29 @@ function CompanyProfile() {
   }
 
   async function uploadLogo(file: File) {
+    const orgId = linkedOrgId ?? org.id;
+    if (!orgId) {
+      toast.error('Save facility details first, then upload a logo.');
+      return;
+    }
+    const invalid = validateLogoFile(file);
+    if (invalid) {
+      toast.error(invalid);
+      return;
+    }
     setUploadingLogo(true);
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `logo-${org.id}-${Date.now()}.${fileExt}`;
-      const filePath = `${org.id}/${fileName}`;
-
-      await supabase.storage.from('logos').upload(filePath, file, { upsert: true });
-      const { data: urlData } = supabase.storage.from('logos').getPublicUrl(filePath);
-      await supabase.from('organizations').update({ logo_url: urlData.publicUrl }).eq('id', org.id);
-      setOrg({ ...org, logo_url: urlData.publicUrl });
+      const url = await persistCustomerLogo(supabase, orgId, file);
+      if (!url) throw new Error('Upload did not return a logo URL');
+      const { data: sessionData } = await supabase.auth.getSession();
+      const access = sessionData.session?.access_token;
+      if (access) {
+        const saved = await saveOwnOrganizationProfile(access, { id: orgId, logo_url: url });
+        if (!saved.ok) throw new Error(saved.error || 'Logo file uploaded but profile did not save.');
+        setOrg({ ...org, ...(saved.org || {}), logo_url: (saved.org?.logo_url as string) || url });
+      } else {
+        setOrg({ ...org, logo_url: url });
+      }
       toast.success('Logo uploaded successfully!');
     } catch (err: any) {
       toast.error('Logo upload failed: ' + (err.message || err));
@@ -569,6 +616,58 @@ function CompanyProfile() {
     setCustomers(custs || []);
   }
 
+  async function loadFacilityContacts(orgId?: string | number | null) {
+    const id = orgId ?? linkedOrgId ?? org?.id;
+    if (!id) {
+      setContacts([]);
+      return;
+    }
+    const { data, error } = await supabase
+      .from('contacts')
+      .select('id, first_name, last_name, title, phone, email, is_primary')
+      .eq('organization_id', id)
+      .order('first_name', { ascending: true })
+      .limit(50);
+    if (error) {
+      console.warn('facility contacts', error);
+      setContacts([]);
+      return;
+    }
+    setContacts(data || []);
+  }
+
+  async function addFacilityContact() {
+    const orgId = linkedOrgId ?? org?.id;
+    if (!orgId) {
+      toast.error('Facility is not linked yet.');
+      return;
+    }
+    const first = newContact.first_name.trim();
+    if (!first) {
+      toast.error('Contact first name is required.');
+      return;
+    }
+    setSavingContact(true);
+    try {
+      const { error } = await supabase.from('contacts').insert({
+        organization_id: orgId,
+        first_name: first,
+        last_name: newContact.last_name.trim() || null,
+        title: newContact.title.trim() || null,
+        phone: newContact.phone.trim() || null,
+        email: newContact.email.trim() || null,
+      });
+      if (error) throw error;
+      setNewContact({ first_name: '', last_name: '', title: '', phone: '', email: '' });
+      toast.success('Contact added');
+      await loadFacilityContacts(orgId);
+    } catch (e: any) {
+      toast.error(e?.message || 'Could not add contact');
+    } finally {
+      setSavingContact(false);
+    }
+  }
+
   async function addCustomer() {
     if (!newCustomer.name) { setCustomerMessage('Customer name is required.'); return; }
     if (!org?.id) { setCustomerMessage('Your organization is not loaded yet.'); return; }
@@ -646,7 +745,9 @@ function CompanyProfile() {
         {loadingOrg && <div className="mb-4 text-center text-xs py-1.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text3)]">Loading company profile…</div>}
         {justSetup && (
           <div className="mb-4 p-4 rounded bg-green-900/20 border border-green-600 text-sm">
-            🎉 Onboarding complete! Your details, team (if added), and logo have been saved. Review or update company info below anytime. Use the Profile page (Settings) for personal phone/job/role. Go to Hub for main navigation.
+            {ownerMode
+              ? 'This is your clinic profile. Edit anything your service company prefilled, add a logo, extra contacts, and lasers. Changes save on this facility only.'
+              : 'Onboarding complete! Your details, team (if added), and logo have been saved. Review or update company info below anytime. Use Settings for personal phone/job/role.'}
           </div>
         )}
         <h1 className="text-2xl font-extrabold">🏢 {profileTitle}</h1>
@@ -675,13 +776,64 @@ function CompanyProfile() {
                 </div>
               </div>
               <div>
+                <label className="label">ZIP</label>
+                <input className="input" value={org.zip || ''} onChange={e => setOrg({ ...org, zip: e.target.value })} />
+              </div>
+              <div>
                 <label className="label">Phone</label>
                 <input className="input" value={org.phone || ''} onChange={e => setOrg({ ...org, phone: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Email</label>
+                <input
+                  className="input"
+                  type="email"
+                  value={org.email || ''}
+                  onChange={e => setOrg({ ...org, email: e.target.value })}
+                />
               </div>
               <div>
                 <label className="label">Website</label>
                 <input className="input" value={org.website || ''} onChange={e => setOrg({ ...org, website: e.target.value })} />
               </div>
+              <div>
+                <label className="label">Primary contact</label>
+                <input
+                  className="input"
+                  value={org.contact_name || ''}
+                  onChange={e => setOrg({ ...org, contact_name: e.target.value })}
+                  placeholder="Name at the front desk / clinic"
+                />
+              </div>
+              {ownerMode && (
+                <div>
+                  <label className="label">Facility type</label>
+                  <select
+                    className="select"
+                    value={org.facility_type || ''}
+                    onChange={e => setOrg({ ...org, facility_type: e.target.value })}
+                  >
+                    <option value="">Select…</option>
+                    {FACILITY_TYPES.map((t) => (
+                      <option key={t} value={t}>{t}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
+              <div>
+                <label className="label">Notes{ownerMode ? ' / hours' : ''}</label>
+                <textarea
+                  className="input min-h-[80px]"
+                  value={org.notes || ''}
+                  onChange={e => setOrg({ ...org, notes: e.target.value })}
+                  placeholder={
+                    ownerMode
+                      ? 'Hours, access notes, parking, preferences…'
+                      : 'Internal notes'
+                  }
+                />
+              </div>
+              {!ownerMode && (
               <div>
                 <label className="label">Brands serviced</label>
                 <div className="flex flex-wrap gap-1.5 mt-1">
@@ -710,6 +862,7 @@ function CompanyProfile() {
                   })}
                 </div>
               </div>
+              )}
               <label className="flex items-start gap-3 cursor-pointer mt-2">
                 <input
                   type="checkbox"
@@ -734,10 +887,11 @@ function CompanyProfile() {
             <div>
               <label className="label">Company Logo</label>
               {org.logo_url && <img src={org.logo_url} alt="Company logo" className="mb-3 max-h-24 rounded border" />}
-              <input type="file" ref={fileInputRef} onChange={handleLogoSelect} accept="image/*" className="block w-full text-sm" disabled={uploadingLogo} />
-              <button onClick={() => fileInputRef.current?.click()} disabled={uploadingLogo} className="btn btn-secondary mt-2 text-sm">
-                {uploadingLogo ? 'Uploading...' : 'Choose & Upload Logo'}
+              <input type="file" ref={fileInputRef} onChange={handleLogoSelect} accept={LOGO_ACCEPT} className="block w-full text-sm" disabled={uploadingLogo} />
+              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadingLogo} className="btn btn-secondary mt-2 text-sm">
+                {uploadingLogo ? 'Uploading...' : org.logo_url ? 'Replace logo' : 'Choose & Upload Logo'}
               </button>
+              <p className="text-xs text-[var(--text3)] mt-2">PNG, JPG, WebP, or SVG. Max 2 MB.</p>
             </div>
           </div>
 
@@ -925,10 +1079,84 @@ function CompanyProfile() {
           </>
         )}
 
+        {ownerMode && (
+          <div className="card p-6 space-y-4">
+            <div className="flex items-start justify-between gap-3 flex-wrap">
+              <div>
+                <h2 className="font-bold">Contacts</h2>
+                <p className="text-xs text-[var(--text3)] mt-1">
+                  Add people at this facility. Extra contacts are in addition to the primary contact above.
+                </p>
+              </div>
+              <a href="/my-lasers" className="btn btn-secondary text-sm">
+                Add / edit lasers
+              </a>
+            </div>
+            {contacts.length === 0 ? (
+              <p className="text-sm text-[var(--text3)]">No extra contacts yet.</p>
+            ) : (
+              <ul className="text-sm divide-y divide-[var(--border)]">
+                {contacts.map((c: any) => (
+                  <li key={c.id} className="py-2 flex justify-between gap-3">
+                    <span>
+                      {[c.first_name, c.last_name].filter(Boolean).join(' ') || '—'}
+                      {c.title ? <span className="text-[var(--text3)]"> · {c.title}</span> : null}
+                    </span>
+                    <span className="text-[var(--text3)] text-xs">
+                      {[c.phone, c.email].filter(Boolean).join(' · ') || ''}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              <input
+                className="input"
+                placeholder="First name *"
+                value={newContact.first_name}
+                onChange={(e) => setNewContact({ ...newContact, first_name: e.target.value })}
+              />
+              <input
+                className="input"
+                placeholder="Last name"
+                value={newContact.last_name}
+                onChange={(e) => setNewContact({ ...newContact, last_name: e.target.value })}
+              />
+              <input
+                className="input"
+                placeholder="Title"
+                value={newContact.title}
+                onChange={(e) => setNewContact({ ...newContact, title: e.target.value })}
+              />
+              <input
+                className="input"
+                placeholder="Phone"
+                value={newContact.phone}
+                onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })}
+              />
+              <input
+                className="input sm:col-span-2"
+                type="email"
+                placeholder="Email"
+                value={newContact.email}
+                onChange={(e) => setNewContact({ ...newContact, email: e.target.value })}
+              />
+            </div>
+            <button
+              type="button"
+              className="btn btn-primary text-sm"
+              disabled={savingContact}
+              onClick={addFacilityContact}
+            >
+              {savingContact ? 'Adding…' : 'Add contact'}
+            </button>
+          </div>
+        )}
+
         {(ownerMode || supplierMode) && (
           <p className="text-sm text-[var(--text3)]">
             {ownerMode
-              ? 'Manage your lasers from My Lasers. Post service needs on the Marketplace.'
+              ? 'You can only edit this facility. Add lasers on My Lasers. Post service needs on the Marketplace.'
               : 'Manage catalog items from Parts and list inventory on the Marketplace.'}
           </p>
         )}

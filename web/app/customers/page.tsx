@@ -105,7 +105,7 @@ export default function CustomersDirectory() {
     const { data: custs } = await supabase
       .from('organizations')
       .select(
-        'id, name, address, city, state, phone, email, laser_models, facility_type, biz_type, type'
+        'id, name, address, city, state, phone, email, laser_models, facility_type, biz_type, type, logo_url'
       )
       .in('id', customerIds)
       .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'])
@@ -211,8 +211,23 @@ export default function CustomersDirectory() {
                 href={`/customers/${c.id}`}
                 className="card p-5 block transition-colors hover:border-[var(--gold-border)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--gold)]"
               >
-                <div className="font-semibold text-lg mb-1 text-[var(--text)]">
-                  {c.name || 'Unnamed Customer'}
+                <div className="flex items-start gap-3 mb-1">
+                  <div className="w-12 h-12 rounded-xl bg-[var(--gold)] text-[#111] font-extrabold flex items-center justify-center overflow-hidden shrink-0">
+                    {c.logo_url ? (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img src={c.logo_url} alt="" className="w-full h-full object-contain bg-[var(--surface)]" />
+                    ) : (
+                      String(c.name || '?')
+                        .split(/\s+/)
+                        .slice(0, 2)
+                        .map((w: string) => w[0] || '')
+                        .join('')
+                        .toUpperCase() || '?'
+                    )}
+                  </div>
+                  <div className="font-semibold text-lg text-[var(--text)] min-w-0 pt-1">
+                    {c.name || 'Unnamed Customer'}
+                  </div>
                 </div>
                 <div className="text-sm text-[var(--text3)] mb-2">
                   {[c.city, c.state].filter(Boolean).join(', ') || '—'}

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
+import { claimCustomerInvite } from '@/lib/customer-invite-client';
 
 function safeNextPath(raw: string | null): string {
   if (!raw) return '';
@@ -142,6 +143,24 @@ function AuthCallbackInner() {
           },
           { onConflict: 'id' }
         );
+
+        // Clinic Directory invite — claim existing customer org before creating a new one.
+        const claimToken =
+          searchParams.get('claim') ||
+          url.searchParams.get('claim') ||
+          String((meta as { claim_token?: string }).claim_token || '');
+        if (claimToken) {
+          const { data: sessionData } = await supabase.auth.getSession();
+          if (sessionData.session?.access_token) {
+            const claimed = await claimCustomerInvite(sessionData.session.access_token, claimToken);
+            if (claimed.claimed) {
+              if (cancelled) return;
+              setMessage('Clinic profile claimed. Continuing…');
+              router.replace('/company?justSetup=1');
+              return;
+            }
+          }
+        }
 
         // Finish org creation from localStorage OR user_metadata (new-tab Gmail confirm).
         const pending = resolvePendingSignup(user);

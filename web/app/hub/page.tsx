@@ -61,6 +61,7 @@ export default function TechHub() {
   const techCards: HubCard[] = owner
     ? [
         { href: '/my-lasers', icon: '⚡', label: 'My Lasers', desc: 'Inventory & laser profiles' },
+        { href: '/company', icon: '🏢', label: 'Facility Profile', desc: 'Edit your clinic details, logo & contacts' },
         { href: '/service-requests', icon: '🛠️', label: 'Service Requests', desc: 'Request repair / PM for your systems' },
         { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Parts, used systems & consumables' },
         { href: '/reports', icon: '📋', label: 'Service History', desc: 'Completed work on your systems' },

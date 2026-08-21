@@ -1,22 +1,52 @@
 'use client';
 
-import React from 'react';
+import React, { useRef, useState } from 'react';
+import { Upload } from 'lucide-react';
 import {
   CUSTOMER_BIZ_TYPES,
   CUSTOMER_SPECIALTIES,
   type CustomerInfoFormValues,
 } from '@/lib/customer-form';
+import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
 
 type Props = {
   value: CustomerInfoFormValues;
   onChange: (next: CustomerInfoFormValues) => void;
   disabled?: boolean;
+  onLogoFileChange?: (file: File | null) => void;
+  /** Show the post-create invite hint under Email (Directory add only). */
+  inviteHint?: boolean;
 };
 
-export function CustomerInfoForm({ value, onChange, disabled }: Props) {
+export function CustomerInfoForm({ value, onChange, disabled, onLogoFileChange, inviteHint }: Props) {
+  const logoInputRef = useRef<HTMLInputElement>(null);
+  const [logoError, setLogoError] = useState<string | null>(null);
+
   const setField = (key: keyof CustomerInfoFormValues, next: string | string[]) => {
     onChange({ ...value, [key]: next });
   };
+
+  function handleLogoPick(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] || null;
+    e.target.value = '';
+    if (!file) return;
+    const invalid = validateLogoFile(file);
+    if (invalid) {
+      setLogoError(invalid);
+      return;
+    }
+    setLogoError(null);
+    const preview = URL.createObjectURL(file);
+    onChange({ ...value, logo_url: preview });
+    onLogoFileChange?.(file);
+  }
+
+  function removeLogo() {
+    setLogoError(null);
+    onChange({ ...value, logo_url: '' });
+    onLogoFileChange?.(null);
+    if (logoInputRef.current) logoInputRef.current.value = '';
+  }
 
   const toggleSpecialty = (spec: string) => {
     const has = value.specialties.includes(spec);
@@ -46,6 +76,61 @@ export function CustomerInfoForm({ value, onChange, disabled }: Props) {
               disabled={disabled}
               autoComplete="organization"
               onChange={(e) => setField('name', e.target.value)}
+            />
+          </div>
+          <div>
+            <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
+              Company Logo
+            </label>
+            <div className="flex items-center gap-4">
+              <button
+                type="button"
+                disabled={disabled}
+                onClick={() => logoInputRef.current?.click()}
+                className="w-16 h-16 rounded-xl border-2 border-dashed border-[var(--border2)] bg-[var(--surface2)] overflow-hidden flex items-center justify-center shrink-0"
+                aria-label="Choose company logo"
+              >
+                {value.logo_url ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img src={value.logo_url} alt="" className="w-full h-full object-contain bg-[var(--surface)]" />
+                ) : (
+                  <Upload size={22} className="text-[var(--text3)]" />
+                )}
+              </button>
+              <div className="min-w-0">
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    className="btn btn-secondary text-xs"
+                    disabled={disabled}
+                    onClick={() => logoInputRef.current?.click()}
+                  >
+                    {value.logo_url ? 'Replace logo' : 'Choose logo'}
+                  </button>
+                  {value.logo_url && (
+                    <button
+                      type="button"
+                      className="text-xs text-red-400 hover:underline"
+                      disabled={disabled}
+                      onClick={removeLogo}
+                    >
+                      Remove
+                    </button>
+                  )}
+                </div>
+                <p className="text-xs text-[var(--text3)] mt-1">
+                  Optional. PNG, JPG, WebP, or SVG. Max 2 MB.
+                </p>
+                {logoError && <p className="text-xs text-red-400 mt-1">{logoError}</p>}
+              </div>
+            </div>
+            <input
+              ref={logoInputRef}
+              type="file"
+              accept={LOGO_ACCEPT}
+              className="hidden"
+              disabled={disabled}
+              onChange={handleLogoPick}
             />
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -121,13 +206,18 @@ export function CustomerInfoForm({ value, onChange, disabled }: Props) {
               <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
                 Email
               </label>
-              <input
-                className="input w-full"
-                type="email"
-                value={value.email}
-                disabled={disabled}
-                onChange={(e) => setField('email', e.target.value)}
-              />
+            <input
+              className="input w-full"
+              type="email"
+              value={value.email}
+              disabled={disabled}
+              onChange={(e) => setField('email', e.target.value)}
+            />
+            {inviteHint && (
+              <p className="text-[11px] text-[var(--text3)] mt-1">
+                After save, a free-account invite is emailed here (skipped if blank).
+              </p>
+            )}
             </div>
           </div>
           <div>

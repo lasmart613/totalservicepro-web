@@ -1,6 +1,8 @@
 /**
  * HTML document builders matching Android estimate_generator / invoice_form PDF layout.
  * Used for on-screen preview and print-to-PDF (same visual quality as the app).
+ * Free-account marketing CTA is email-only — see wrapCustomerFacingDocumentEmail.
+ * Do not add that footer here or PDFs will pick it up.
  */
 
 export type DocCompany = {

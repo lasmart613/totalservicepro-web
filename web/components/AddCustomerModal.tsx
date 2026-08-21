@@ -8,6 +8,7 @@ import {
   emptyCustomerForm,
   type CustomerInfoFormValues,
 } from '@/lib/customer-form';
+import { sendCustomerInviteEmail } from '@/lib/customer-invite-client';
 import { getSupabaseClient } from '@/lib/supabase/client';
 
 type Props = {
@@ -19,6 +20,7 @@ type Props = {
 export function AddCustomerModal({ serviceOrgId, onClose, onCreated }: Props) {
   const supabase = getSupabaseClient();
   const [form, setForm] = useState<CustomerInfoFormValues>(emptyCustomerForm());
+  const [logoFile, setLogoFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
   async function handleSubmit() {
@@ -32,8 +34,33 @@ export function AddCustomerModal({ serviceOrgId, onClose, onCreated }: Props) {
         serviceOrgId: serviceOrgId as string | number,
         form,
         createdBy: user?.id || null,
+        logoFile,
       });
-      toast.success('Customer added');
+
+      const emailOnFile = form.email.trim();
+      if (!emailOnFile) {
+        toast.success(
+          created.logoWarning
+            ? `Customer added. Invite not sent — no email on file. ${created.logoWarning}`
+            : 'Customer added. Invite not sent — no email on file.'
+        );
+      } else {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const access = sessionData.session?.access_token;
+        if (!access) {
+          toast.success('Customer added. Invite was not sent — sign-in session missing.');
+        } else {
+          const invite = await sendCustomerInviteEmail(access, created.id);
+          if (invite.emailed) {
+            toast.success(`Customer added. Invite sent to ${invite.to || emailOnFile}.`);
+          } else {
+            toast.success(
+              `Customer added. Invite was not sent${invite.error ? `: ${invite.error}` : '.'}`
+            );
+          }
+        }
+      }
+
       onCreated(created.id);
       onClose();
     } catch (e: unknown) {
@@ -63,6 +90,7 @@ export function AddCustomerModal({ serviceOrgId, onClose, onCreated }: Props) {
             </h2>
             <p className="text-xs text-[var(--text3)] mt-1">
               Same customer information used on the CRM profile. Linked to your organization only.
+              Optional logo and a free-account invite to the email on file.
             </p>
           </div>
           <button
@@ -75,7 +103,13 @@ export function AddCustomerModal({ serviceOrgId, onClose, onCreated }: Props) {
           </button>
         </div>
 
-        <CustomerInfoForm value={form} onChange={setForm} disabled={saving} />
+        <CustomerInfoForm
+          value={form}
+          onChange={setForm}
+          disabled={saving}
+          onLogoFileChange={setLogoFile}
+          inviteHint
+        />
 
         <div className="flex flex-col-reverse sm:flex-row gap-3 mt-6">
           <button type="button" className="btn btn-secondary flex-1" onClick={onClose} disabled={saving}>

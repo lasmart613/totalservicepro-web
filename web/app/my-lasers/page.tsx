@@ -164,9 +164,10 @@ export default function MyLasersPage() {
         </p>
         {justSetup && (
           <div className="mb-6 p-3 rounded-lg border border-green-500/40 bg-green-500/10 text-sm text-green-300">
-            Facility setup complete. Your registered lasers should appear below. Missing any? Use <strong>Add laser</strong>.
+            Facility setup complete. Your registered lasers should appear below. Missing any? Use <strong>Add</strong>.
             {' '}
-            <Link href="/" className="text-[var(--gold)] underline">Go to Dashboard</Link>
+            Edit clinic details (logo, address, contacts) on{' '}
+            <Link href="/company" className="text-[var(--gold)] underline">Facility Profile</Link>.
           </div>
         )}
 

@@ -1,6 +1,7 @@
 /**
  * Build print-ready HTML for a service report (Android exportPDF layout parity).
  * Uses tables only — reliable across browsers and WebView PDF.
+ * Free-account CTA is added only when /api/billing/send-report wraps email HTML.
  */
 
 export type PrintReportInput = {
