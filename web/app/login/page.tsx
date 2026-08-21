@@ -32,7 +32,7 @@ function LoginInner() {
       if (sessionData.session?.access_token) {
         const claimed = await claimCustomerInvite(sessionData.session.access_token, claimToken);
         if (claimed.claimed) {
-          router.push('/my-lasers?justSetup=1');
+          router.push('/company?justSetup=1');
           return;
         }
       }

@@ -159,7 +159,7 @@ function OwnerSignupInner() {
       if (access) {
         const claimed = await claimCustomerInvite(access, claimToken);
         if (claimed.claimed) {
-          router.push('/my-lasers?justSetup=1');
+          router.push('/company?justSetup=1');
           return;
         }
       }
@@ -216,7 +216,9 @@ function OwnerSignupInner() {
             preferred_services: selectedServices.length ? selectedServices.join(' | ') : '',
             claim_token: claimToken || '',
           },
-          emailRedirectTo: `${origin}/auth/callback?next=/my-lasers`,
+          emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
+            claimToken ? '/company?justSetup=1' : '/my-lasers'
+          )}`,
         },
       });
       if (authError) throw authError;
@@ -512,7 +514,7 @@ function OwnerSignupInner() {
 
           <div className="mt-5 text-center text-sm">
             <Link
-              href={claimToken ? `/login?claim=${encodeURIComponent(claimToken)}&next=/my-lasers` : '/login'}
+              href={claimToken ? `/login?claim=${encodeURIComponent(claimToken)}&next=${encodeURIComponent('/company?justSetup=1')}` : '/login'}
               className="text-[var(--gold)] hover:underline"
             >
               Already have an account? Sign in

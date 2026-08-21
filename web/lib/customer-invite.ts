@@ -204,7 +204,7 @@ export function wrapCustomerFacingDocumentEmail(opts: {
 export function customerInviteLoginUrl(origin: string, token: string | null): string {
   const base = String(origin || 'https://repairplanet.net').replace(/\/$/, '');
   const params = new URLSearchParams();
-  params.set('next', '/my-lasers');
+  params.set('next', '/company?justSetup=1');
   if (token) params.set('claim', token);
   return `${base}/login?${params.toString()}`;
 }

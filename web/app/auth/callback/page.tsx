@@ -156,7 +156,7 @@ function AuthCallbackInner() {
             if (claimed.claimed) {
               if (cancelled) return;
               setMessage('Clinic profile claimed. Continuing…');
-              router.replace('/my-lasers?justSetup=1');
+              router.replace('/company?justSetup=1');
               return;
             }
           }
