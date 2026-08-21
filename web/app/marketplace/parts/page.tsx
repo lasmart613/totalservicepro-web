@@ -2,13 +2,18 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
+import { MarketplaceOfferCta } from '@/components/MarketplaceOfferCta';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { listingOfferLoginHref } from '@/lib/marketplace-listings';
 import { toast } from 'sonner';
 
 export default function PartsMarketplace() {
+  const router = useRouter();
   const [listings, setListings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [userId, setUserId] = useState<string | null>(null);
   const [biddingOn, setBiddingOn] = useState<any>(null);
   const [bidPrice, setBidPrice] = useState('');
   const [bidNotes, setBidNotes] = useState('');
@@ -17,6 +22,7 @@ export default function PartsMarketplace() {
 
   useEffect(() => {
     fetchListings();
+    supabase.auth.getUser().then(({ data }) => setUserId(data.user?.id ?? null));
   }, []);
 
   const fetchListings = async () => {
@@ -30,11 +36,22 @@ export default function PartsMarketplace() {
     setLoading(false);
   };
 
+  const startOffer = (listing: any) => {
+    if (!userId) {
+      router.push(listingOfferLoginHref(listing.id));
+      return;
+    }
+    setBiddingOn(listing);
+    setBidPrice('');
+    setBidNotes('');
+    setBidQuestion('');
+  };
+
   const submitBid = async () => {
     if (!biddingOn || !bidPrice) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      toast.error('Login required');
+      router.push(listingOfferLoginHref(biddingOn.id));
       return;
     }
     const { error } = await supabase.from('bids').insert({
@@ -101,14 +118,13 @@ export default function PartsMarketplace() {
                   <p className="text-sm text-[var(--text3)] mb-2">PN: {l.part_number || l.serial_number || 'N/A'}</p>
                   <p className="text-sm mb-1">{l.manufacturer} {l.model} • {l.condition}</p>
                   <div className="font-semibold text-[var(--gold)] mb-2">${l.price}</div>
-                  <button 
-                    onClick={() => { setBiddingOn(l); setBidPrice(''); setBidNotes(''); setBidQuestion(''); }} 
-                    className="btn btn-primary w-full text-sm"
-                  >
-                    Make Offer / Bid
-                  </button>
+                  <MarketplaceOfferCta
+                    listingId={l.id}
+                    isLoggedIn={!!userId}
+                    onStart={() => startOffer(l)}
+                  />
 
-                  {biddingOn?.id === l.id && (
+                  {userId && biddingOn?.id === l.id && (
                     <div className="mt-3 p-3 bg-[var(--surface3)] rounded">
                       <input 
                         type="number" 

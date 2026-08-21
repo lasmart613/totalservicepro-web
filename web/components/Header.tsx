@@ -198,17 +198,14 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
     return () => document.removeEventListener('keydown', onKey);
   }, []);
 
-  const handleLogout = async () => {
+  const handleLogout = () => {
     setDropdownOpen(false);
     setMobileMenuOpen(false);
     setUser(null);
     setProfile(null);
     setUnread(0);
-    try {
-      await supabase.auth.signOut();
-    } catch {
-      /* still leave */
-    }
+    // Do not await network revoke — leave immediately so PII pages cannot linger.
+    void supabase.auth.signOut().catch(() => {});
     window.location.replace('/login');
   };
 
