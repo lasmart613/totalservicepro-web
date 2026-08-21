@@ -1,115 +1,123 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
+import { AddCustomerModal } from '@/components/AddCustomerModal';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { isOwnerish, isServiceCompany, isSupplier } from '@/lib/roles';
+import { canAddCustomers, isOwnerish, isServiceCompany, isSupplier } from '@/lib/roles';
 
 export default function CustomersDirectory() {
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
   const [userOrgType, setUserOrgType] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState('');
+  const [serviceOrgId, setServiceOrgId] = useState<string | number | null>(null);
   const [accessDenied, setAccessDenied] = useState(false);
+  const [showAdd, setShowAdd] = useState(false);
   const supabase = getSupabaseClient();
 
-  useEffect(() => {
-    const load = async () => {
-      setLoading(true);
+  const loadCustomers = useCallback(async () => {
+    setLoading(true);
 
-      const {
-        data: { user },
-      } = await supabase.auth.getUser();
-      if (!user) {
-        setLoading(false);
-        return;
-      }
-
-      const { data: prof } = await supabase
-        .from('user_profiles')
-        .select('organization_id, role')
-        .eq('id', user.id)
-        .maybeSingle();
-
-      if (!prof?.organization_id) {
-        setAccessDenied(true);
-        setLoading(false);
-        return;
-      }
-
-      const serviceOrgId = prof.organization_id;
-
-      const { data: org } = await supabase
-        .from('organizations')
-        .select('type, name')
-        .eq('id', serviceOrgId)
-        .maybeSingle();
-
-      const orgType = org?.type || '';
-      const role = prof.role || '';
-      setUserOrgType(orgType);
-
-      // Owners denied; service companies + suppliers allowed
-      if (isOwnerish(role, orgType)) {
-        setAccessDenied(true);
-        setLoading(false);
-        return;
-      }
-
-      const allowed =
-        isServiceCompany(role, orgType) ||
-        isSupplier(role, orgType) ||
-        orgType === 'service_company' ||
-        orgType === 'parts_supplier';
-
-      if (!allowed) {
-        setAccessDenied(true);
-        setLoading(false);
-        return;
-      }
-
-      // Only customers linked to THIS service org via organization_customers
-      const { data: links, error: linkErr } = await supabase
-        .from('organization_customers')
-        .select('customer_organization_id')
-        .eq('service_organization_id', serviceOrgId)
-        .limit(500);
-
-      if (linkErr) {
-        console.warn('organization_customers load failed:', linkErr);
-        setCustomers([]);
-        setLoading(false);
-        return;
-      }
-
-      const customerIds = Array.from(
-        new Set(
-          (links || [])
-            .map((r: any) => r.customer_organization_id)
-            .filter((id: any) => id != null)
-        )
-      );
-
-      if (customerIds.length === 0) {
-        setCustomers([]);
-        setLoading(false);
-        return;
-      }
-
-      const { data: custs } = await supabase
-        .from('organizations')
-        .select('id, name, address, city, state, phone, email, laser_models, facility_type, type')
-        .in('id', customerIds)
-        .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'])
-        .order('name', { ascending: true });
-
-      setCustomers(custs || []);
+    const {
+      data: { user },
+    } = await supabase.auth.getUser();
+    if (!user) {
       setLoading(false);
-    };
+      return;
+    }
 
-    load();
+    const { data: prof } = await supabase
+      .from('user_profiles')
+      .select('organization_id, role')
+      .eq('id', user.id)
+      .maybeSingle();
+
+    if (!prof?.organization_id) {
+      setAccessDenied(true);
+      setLoading(false);
+      return;
+    }
+
+    const orgId = prof.organization_id;
+    setServiceOrgId(orgId);
+
+    const { data: org } = await supabase
+      .from('organizations')
+      .select('type, name')
+      .eq('id', orgId)
+      .maybeSingle();
+
+    const orgType = org?.type || '';
+    const role = prof.role || '';
+    setUserOrgType(orgType);
+    setUserRole(role);
+
+    // Owners denied; service companies + suppliers allowed
+    if (isOwnerish(role, orgType)) {
+      setAccessDenied(true);
+      setLoading(false);
+      return;
+    }
+
+    const allowed =
+      isServiceCompany(role, orgType) ||
+      isSupplier(role, orgType) ||
+      orgType === 'service_company' ||
+      orgType === 'parts_supplier';
+
+    if (!allowed) {
+      setAccessDenied(true);
+      setLoading(false);
+      return;
+    }
+
+    // Only customers linked to THIS service org via organization_customers
+    const { data: links, error: linkErr } = await supabase
+      .from('organization_customers')
+      .select('customer_organization_id')
+      .eq('service_organization_id', orgId)
+      .limit(500);
+
+    if (linkErr) {
+      console.warn('organization_customers load failed:', linkErr);
+      setCustomers([]);
+      setLoading(false);
+      return;
+    }
+
+    const customerIds = Array.from(
+      new Set(
+        (links || [])
+          .map((r: any) => r.customer_organization_id)
+          .filter((id: any) => id != null)
+      )
+    );
+
+    if (customerIds.length === 0) {
+      setCustomers([]);
+      setLoading(false);
+      return;
+    }
+
+    const { data: custs } = await supabase
+      .from('organizations')
+      .select(
+        'id, name, address, city, state, phone, email, laser_models, facility_type, biz_type, type'
+      )
+      .in('id', customerIds)
+      .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'])
+      .order('name', { ascending: true });
+
+    setCustomers(custs || []);
+    setLoading(false);
   }, [supabase]);
+
+  useEffect(() => {
+    loadCustomers();
+  }, [loadCustomers]);
 
   const filtered = customers.filter(
     (c) =>
@@ -117,6 +125,11 @@ export default function CustomersDirectory() {
       (c.city || '').toLowerCase().includes(search.toLowerCase()) ||
       (c.state || '').toLowerCase().includes(search.toLowerCase())
   );
+
+  const allowAdd = canAddCustomers(userRole, userOrgType);
+  const addDeniedReason = isSupplier(userRole, userOrgType)
+    ? 'Parts suppliers can view the directory but cannot add customers.'
+    : 'Only service company staff can add customers.';
 
   if (accessDenied) {
     return (
@@ -149,10 +162,15 @@ export default function CustomersDirectory() {
             <h1 className="text-2xl font-extrabold">👥 Customer Directory</h1>
             <p className="text-sm text-[var(--text3)]">Customers managed by your organization</p>
           </div>
-          <Link href="/company" className="btn btn-secondary text-sm">
-            + Add Customer (via Company)
-          </Link>
+          {allowAdd && (
+            <button type="button" className="btn btn-primary text-sm" onClick={() => setShowAdd(true)}>
+              + Add Customer
+            </button>
+          )}
         </div>
+        {!loading && !allowAdd && (
+          <p className="text-xs text-[var(--text3)] mb-4 -mt-2">{addDeniedReason}</p>
+        )}
 
         <div className="mb-4">
           <input
@@ -175,12 +193,14 @@ export default function CustomersDirectory() {
             <p className="text-sm text-[var(--text3)] mb-4">
               {search.trim()
                 ? 'Try a different name, city, or state.'
-                : 'Add customers from the Company page to build your CRM directory.'}
+                : allowAdd
+                  ? 'Add a customer to build your CRM directory.'
+                  : addDeniedReason}
             </p>
-            {!search.trim() && (
-              <Link href="/company" className="btn btn-primary inline-block">
+            {!search.trim() && allowAdd && (
+              <button type="button" className="btn btn-primary inline-block" onClick={() => setShowAdd(true)}>
                 + Add Customer
-              </Link>
+              </button>
             )}
           </div>
         ) : (
@@ -226,6 +246,16 @@ export default function CustomersDirectory() {
           suppliers.
         </div>
       </div>
+
+      {showAdd && (
+        <AddCustomerModal
+          serviceOrgId={serviceOrgId}
+          onClose={() => setShowAdd(false)}
+          onCreated={() => {
+            loadCustomers();
+          }}
+        />
+      )}
     </div>
   );
 }

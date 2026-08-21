@@ -915,8 +915,12 @@ function CompanyProfile() {
               )}
             </div>
 
-            <p className="text-[10px] text-[var(--text3)]">
-              Customer CRM has been moved out of this page per your request (will be added as its own permission-based section).
+            <p className="text-sm text-[var(--text3)]">
+              Add and manage customers from the{' '}
+              <a href="/customers" className="text-[var(--gold)] hover:underline">
+                Customer Directory
+              </a>
+              .
             </p>
           </>
         )}

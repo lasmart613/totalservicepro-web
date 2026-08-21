@@ -79,6 +79,15 @@ export function isServiceCompany(role?: RoleLike, orgType?: OrgTypeLike): boolea
   );
 }
 
+/**
+ * Create or edit CRM customers (Customer Directory).
+ * Service-company staff only — suppliers may view, owners use their own profile.
+ */
+export function canAddCustomers(role?: RoleLike, orgType?: OrgTypeLike): boolean {
+  if (isOwnerish(role, orgType) || isSupplier(role, orgType)) return false;
+  return isServiceCompany(role, orgType) || normalizeOrgType(orgType) === 'service_company';
+}
+
 /** Company / facility / supplier profile access */
 export function canAccessCompanyProfile(role?: RoleLike): boolean {
   const r = normalizeRole(role);
