@@ -17,6 +17,7 @@ import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { listManufacturers } from '@/lib/laser-catalog';
 import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
 import { persistCustomerLogo } from '@/lib/customer-form';
+import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -434,7 +435,8 @@ function CompanyProfile() {
         throw new Error('You can only edit your own facility profile.');
       }
 
-      const updateData: any = {
+      const updateData: Record<string, unknown> = {
+        id: saveId,
         name: currentOrg.name ?? null,
         address: currentOrg.address ?? null,
         city: currentOrg.city ?? null,
@@ -448,28 +450,16 @@ function CompanyProfile() {
         facility_type: currentOrg.facility_type ?? null,
         list_in_directory: !!currentOrg.list_in_directory,
         supported_brands: Array.isArray(currentOrg.supported_brands) ? currentOrg.supported_brands : null,
-        updated_at: new Date().toISOString(),
       };
-      let { error: upErr } = await supabase
-        .from('organizations')
-        .update(updateData)
-        .eq('id', saveId);
-      if (upErr && /column|schema cache|does not exist/i.test(upErr.message || '')) {
-        const optional = ['list_in_directory', 'supported_brands', 'contact_name', 'notes', 'facility_type', 'zip', 'email', 'updated_at'];
-        for (const col of optional) {
-          if (upErr && new RegExp(col, 'i').test(upErr.message || '') && col in updateData) {
-            delete updateData[col];
-            ({ error: upErr } = await supabase
-              .from('organizations')
-              .update(updateData)
-              .eq('id', saveId));
-          }
-        }
-        if (!upErr) {
-          toast.message('Saved (some optional columns are not on this database yet)');
-        }
-      }
-      if (upErr) throw upErr;
+
+      // Claimed owners: client PATCH is a silent RLS no-op (204, 0 rows).
+      // Same service-role path as invite/claim — only the caller's linked org.
+      const { data: sessionData } = await supabase.auth.getSession();
+      const access = sessionData.session?.access_token;
+      if (!access) throw new Error('Sign-in session missing. Sign in again to save.');
+      const saved = await saveOwnOrganizationProfile(access, updateData);
+      if (!saved.ok || !saved.org) throw new Error(saved.error || 'Save did not persist.');
+      setOrg({ ...currentOrg, ...saved.org, id: saved.org.id ?? saveId });
       toast.success('Details saved.');
       if (serviceAdminMode) setShowTeamPrompt(true);
     } catch (err: any) {
@@ -492,7 +482,16 @@ function CompanyProfile() {
     setUploadingLogo(true);
     try {
       const url = await persistCustomerLogo(supabase, orgId, file);
-      if (url) setOrg({ ...org, logo_url: url });
+      if (!url) throw new Error('Upload did not return a logo URL');
+      const { data: sessionData } = await supabase.auth.getSession();
+      const access = sessionData.session?.access_token;
+      if (access) {
+        const saved = await saveOwnOrganizationProfile(access, { id: orgId, logo_url: url });
+        if (!saved.ok) throw new Error(saved.error || 'Logo file uploaded but profile did not save.');
+        setOrg({ ...org, ...(saved.org || {}), logo_url: (saved.org?.logo_url as string) || url });
+      } else {
+        setOrg({ ...org, logo_url: url });
+      }
       toast.success('Logo uploaded successfully!');
     } catch (err: any) {
       toast.error('Logo upload failed: ' + (err.message || err));

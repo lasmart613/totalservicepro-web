@@ -3,7 +3,12 @@
 -- Reuses user_owns_or_created_org() from the equipment onboarding migration.
 -- Does not wipe data. Does not grant access to other clinics.
 --
--- If this PR cannot apply it: Supabase → SQL Editor → paste this file → Run.
+-- Optional hardening on the database. Preview/prod do NOT apply this
+-- automatically. Claimed-owner Facility Profile save goes through
+-- POST /api/org/profile (service role, own org only) so Larry does not
+-- need to paste SQL for the QA fix.
+--
+-- If you later apply it: Supabase → SQL Editor → paste this file → Run.
 
 CREATE OR REPLACE FUNCTION public.get_my_org_id()
 RETURNS bigint
