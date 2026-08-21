@@ -3,6 +3,16 @@
  * Requires STRIPE_SECRET_KEY in the environment (sk_test_… or sk_live_…).
  */
 
+/** Existing RepairPlanet / TSP Stripe secret — never invent a second account. */
+export function getStripeSecret(): string | null {
+  const secret = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET || '';
+  return secret.trim() || null;
+}
+
+export function stripeSiteOrigin(): string {
+  return (process.env.NEXT_PUBLIC_SITE_URL || 'https://repairplanet.net').replace(/\/$/, '');
+}
+
 export type InvoicePayLinkInput = {
   amountCents: number;
   currency?: string;
@@ -21,7 +31,7 @@ export type InvoicePayLinkResult = {
 export async function createInvoiceCheckoutSession(
   input: InvoicePayLinkInput
 ): Promise<InvoicePayLinkResult | null> {
-  const secret = process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET;
+  const secret = getStripeSecret();
   if (!secret) {
     console.warn('createInvoiceCheckoutSession: STRIPE_SECRET_KEY not set');
     return null;
@@ -32,10 +42,7 @@ export async function createInvoiceCheckoutSession(
     return null;
   }
 
-  const site = (process.env.NEXT_PUBLIC_SITE_URL || 'https://repairplanet.net').replace(
-    /\/$/,
-    ''
-  );
+  const site = stripeSiteOrigin();
   const currency = (input.currency || 'usd').toLowerCase();
   const desc =
     input.description ||
