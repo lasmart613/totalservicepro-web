@@ -22,9 +22,9 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "RepairPlanet · Total Service Pro",
+  title: "Total Service Pro · Medical Repair Network",
   description:
-    "RepairPlanet’s Total Service Pro — laser equipment service, parts, marketplace, manuals, service reports, and the technician field app.",
+    "Register for Total Service Pro — Medical Repair Network’s app for aesthetic and medical laser service, parts, and the daily work of clinics, repair companies, and parts sellers.",
   icons: {
     icon: "/favicon.ico",
   },

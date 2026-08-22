@@ -1,5 +1,5 @@
-/* RepairPlanet marketing landing — SpaceX-style chapters.
-   Palette locked to live repairplanet.net (do not invent colors):
+/* Marketing ad for Total Service Pro (Medical Repair Network).
+   SpaceX-style chapters. Palette locked to live repairplanet.net:
    page #111827 · nav #1F2937 · amber #FBBF24 / ink #111827
    secondary #1A2233 / text #F3E8D8 / border #4B5563
    heading #F3E8D8 · muted #9CA3AF · font DM Sans
@@ -75,7 +75,7 @@ html.landing-mode .lp-root::before {
 .lp-brand-biz {
   font-size: 10px;
   font-weight: 700;
-  letter-spacing: 0.28em;
+  letter-spacing: 0.14em;
   text-transform: uppercase;
   color: #9CA3AF;
 }
@@ -234,6 +234,19 @@ html.landing-mode .lp-root::before {
   color: #9CA3AF;
   max-width: 34em;
   margin-bottom: 28px;
+}
+
+.lp-benefits {
+  margin: -8px 0 28px;
+  padding-left: 18px;
+  max-width: 34em;
+}
+
+.lp-benefits li {
+  font-size: clamp(15px, 1.4vw, 17px);
+  line-height: 1.45;
+  color: #9CA3AF;
+  margin: 8px 0;
 }
 
 .lp-actions {
@@ -713,6 +726,10 @@ html.landing-mode .lp-root::before {
 
   .lp-brand-sub {
     display: none;
+  }
+
+  .lp-nav-cta .lp-btn {
+    padding: 10px 14px;
   }
 
   .lp-hero,
