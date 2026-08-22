@@ -89,7 +89,7 @@ export function LandingPage() {
             Sign In
           </Link>
           <Link href="/signup" className="lp-btn lp-btn-primary">
-            Register
+            Register for Total Service Pro
           </Link>
         </div>
       </header>
@@ -334,7 +334,7 @@ export function LandingPage() {
                 <li>Manuals, reports, and photometry tools for the tech</li>
                 <li>Invite your technicians from Team</li>
               </ul>
-              <span className="lp-btn lp-btn-primary">Register</span>
+              <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
             </Link>
             <Link href="/signup/owner" className="lp-path">
               <p className="lp-kicker">Clinic</p>
@@ -349,7 +349,7 @@ export function LandingPage() {
                 <li>Service history that stays with the machine</li>
                 <li>Rental fleets: which box is out, and its last service</li>
               </ul>
-              <span className="lp-btn lp-btn-primary">Register</span>
+              <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
             </Link>
             <Link href="/signup/supplier" className="lp-path">
               <p className="lp-kicker">Parts</p>
@@ -364,7 +364,7 @@ export function LandingPage() {
                 <li>See open demand and respond</li>
                 <li>A supplier profile techs can actually find</li>
               </ul>
-              <span className="lp-btn lp-btn-primary">Register</span>
+              <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
             </Link>
           </div>
           <div className="lp-actions" style={{ marginTop: 28 }}>

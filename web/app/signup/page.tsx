@@ -21,10 +21,11 @@ export default function SignupIndex() {
           <Link href="/" className="inline-block mb-2">
             <span className="font-extrabold text-3xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </Link>
-          <h1 className="text-3xl font-extrabold tracking-tight">Join the Network</h1>
+          <h1 className="text-3xl font-extrabold tracking-tight">Register for Total Service Pro</h1>
           <p className="text-[var(--text3)] mt-2 max-w-lg mx-auto">
-            Sign up by organization type. FSE is a role inside an RSP org (not top-level).
-            Laser clinics, rental companies, and resellers all use the owner product path (My Lasers + Marketplace needs).
+            Pick how you work. Repair companies, clinics and laser owners (including
+            rental fleets), and parts sellers each get their own door. Technicians
+            are invited by their shop — they do not register alone.
           </p>
         </div>
 
@@ -35,17 +36,18 @@ export default function SignupIndex() {
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
               <Building2 size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
-            <div className="font-bold text-xl mb-1">Repair Service Provider (RSP)</div>
+            <div className="font-bold text-xl mb-1">Service company / repair company</div>
             <div className="text-sm text-[var(--text3)] mb-4">
-              The organization that provides service (employs FSEs/techs etc.). Creates the org. First user is admin by default (changeable).
+              Independent techs and shops that service aesthetic and medical lasers.
+              First user is admin. Invite technicians from Team.
             </div>
             <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
-              <li>• Company name, address, website</li>
-              <li>• Services offered (PM, Repair, Install...)</li>
-              <li>• Add team members + roles (FSEs etc) during onboarding or via Team; sole props supported</li>
-              <li>• Bid on service needs in Marketplace</li>
+              <li>• Dispatch and schedule without a whiteboard</li>
+              <li>• Estimates and invoices on the same customer</li>
+              <li>• Bid on clinic repair work when it is posted</li>
+              <li>• Manuals, reports, and photometry tools for the tech</li>
             </ul>
-            <div className="btn btn-primary w-full text-center">Create Service Organization →</div>
+            <div className="btn btn-primary w-full text-center">Register for Total Service Pro →</div>
           </Link>
 
           {/* Laser owner family: clinic, rental, reseller */}
@@ -53,17 +55,17 @@ export default function SignupIndex() {
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
               <Hospital size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
-            <div className="font-bold text-xl mb-1">Laser Owner</div>
+            <div className="font-bold text-xl mb-1">Clinic / laser owner</div>
             <div className="text-sm text-[var(--text3)] mb-4">
-              Clinics, <strong>rental companies</strong>, and <strong>resellers</strong> who own or hold laser systems. Role: owner.
+              Med spas, practices, and rental fleets that own or hold the machines.
             </div>
             <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
-              <li>• Clinic / medical practice</li>
-              <li>• Laser rental company (fleet owner)</li>
-              <li>• Laser reseller (inventory + marketplace listings)</li>
-              <li>• My Lasers • Post service needs • Award bids</li>
+              <li>• Every laser and serial in one list</li>
+              <li>• Post a repair or preventive visit and take bids</li>
+              <li>• Service history that stays with the machine</li>
+              <li>• Rental fleets: which box is out, and its last service</li>
             </ul>
-            <div className="btn btn-primary w-full text-center">Sign Up as Laser Owner →</div>
+            <div className="btn btn-primary w-full text-center">Register for Total Service Pro →</div>
           </Link>
 
           {/* Parts Supplier Card */}
@@ -71,16 +73,17 @@ export default function SignupIndex() {
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
               <Package size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
-            <div className="font-bold text-xl mb-1">Parts Supplier</div>
+            <div className="font-bold text-xl mb-1">Parts seller</div>
             <div className="text-sm text-[var(--text3)] mb-4">
-              OEM or 3rd-party suppliers of laser parts and consumables. Role: parts_supplier.
+              OEM or third-party parts and consumables for the installed base.
             </div>
             <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
-              <li>• List parts, consumables, handpieces, and optics</li>
-              <li>• Respond to service needs (beta)</li>
-              <li>• Manage your supplier profile</li>
+              <li>• List parts, handpieces, optics, and consumables</li>
+              <li>• Public product pages with checkout</li>
+              <li>• See open demand and respond</li>
+              <li>• A supplier profile techs can actually find</li>
             </ul>
-            <div className="btn btn-primary w-full text-center">Sign Up as Parts Supplier →</div>
+            <div className="btn btn-primary w-full text-center">Register for Total Service Pro →</div>
           </Link>
         </div>
 
@@ -91,8 +94,8 @@ export default function SignupIndex() {
         </div>
 
         <div className="mt-8 p-4 bg-[var(--surface3)] border border-[var(--border)] rounded-xl text-xs text-[var(--text3)]">
-          <strong>Org model:</strong> RSP · Laser Owner (clinic / rental / reseller) · Parts Supplier.
-          Rental and reseller are owner-side types (not service companies). FSE is a role inside an RSP.
+          Repair company · Clinic / laser owner (including rental fleets) · Parts seller.
+          Technicians join through their shop.
         </div>
       </div>
     </div>
