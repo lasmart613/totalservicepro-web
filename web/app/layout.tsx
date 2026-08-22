@@ -24,7 +24,7 @@ const dmSans = DM_Sans({
 export const metadata: Metadata = {
   title: "Total Service Pro · Medical Repair Network",
   description:
-    "Register for Total Service Pro — Medical Repair Network’s app for aesthetic and medical laser service, parts, and the daily work of clinics, repair companies, and parts sellers.",
+    "Total Service Pro from Medical Repair Network. Reduce laser downtime. Maximize your equipment’s uptime.",
   icons: {
     icon: "/favicon.ico",
   },

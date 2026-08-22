@@ -153,8 +153,8 @@ export default function CompanySignup() {
           <div className="mt-2">
             <span className="font-extrabold text-2xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </div>
-          <h1 className="text-2xl font-bold mt-1">Sign Up as Repair Service Provider (RSP)</h1>
-          <p className="text-sm text-[var(--text3)]">Company/org that employs FSEs/techs. You become the admin; add team + roles (incl. sole prop) in next onboarding step.</p>
+          <h1 className="text-2xl font-bold mt-1">Register as a repair company</h1>
+          <p className="text-sm text-[var(--text3)]">Shops and independent techs that service aesthetic and medical lasers. First user is admin. Invite field engineers from Team.</p>
         </div>
 
         <div className="card p-6">
@@ -266,7 +266,7 @@ export default function CompanySignup() {
             </div>
 
             <div>
-              <label className="label"># of Techs / FSEs (approx)</label>
+              <label className="label"># of technicians (approx)</label>
               <input type="number" className="input" value={numTechs} onChange={e => setNumTechs(e.target.value)} />
             </div>
 
@@ -285,7 +285,7 @@ export default function CompanySignup() {
             <Link href="/login" className="text-[var(--gold)] hover:underline">Already have an account? Sign in</Link>
           </div>
           <div className="mt-3 text-xs text-[var(--text3)] text-center">
-            Signup creates your account and basic org. Next: Onboarding will let you review details, add team/roles (FSEs etc), logo &amp; brands. Then Company page for ongoing management.
+            Signup creates your account and shop. Next you can review details, add your team, logo, and brands. Use Company for ongoing management.
           </div>
         </div>
       </div>
