@@ -312,7 +312,7 @@ export default function SupplierSignup() {
         </div>
 
         <p className="text-center text-xs text-[var(--text3)] mt-6">
-          Your supplier profile is created and linked to this account. List parts after you sign in. Technicians belong to repair companies — they do not register here.
+          Organization of type <code>parts_supplier</code> will be created and linked to your profile (role: parts_supplier). FSEs and other roles are within Service Company orgs (added by admins in /company). You can manage supplier profile and list parts after login.
         </p>
       </div>
     </div>
