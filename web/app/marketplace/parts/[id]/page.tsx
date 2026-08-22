@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
@@ -21,7 +21,7 @@ import {
 import { toast } from 'sonner';
 import { ArrowLeft, Image as ImageIcon, Package } from 'lucide-react';
 
-export default function PartDetail() {
+function PartDetail() {
   const params = useParams();
   const searchParams = useSearchParams();
   const id = params.id as string;
@@ -442,5 +442,20 @@ export default function PartDetail() {
         </div>
       </div>
     </div>
+  );
+}
+
+/** Next.js requires Suspense around useSearchParams for static generation */
+export default function PartDetailPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center text-[var(--text3)]">
+          Loading part…
+        </div>
+      }
+    >
+      <PartDetail />
+    </Suspense>
   );
 }
