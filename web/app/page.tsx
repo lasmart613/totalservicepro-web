@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
-import { LandingPage, LandingSplash } from '@/components/landing/LandingPage';
+import { LandingPage } from '@/components/landing/LandingPage';
 import { Calendar, Wrench, Package, FileText, Zap, Building2, Settings } from 'lucide-react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
@@ -395,12 +395,14 @@ export default function HomePage() {
     setSupplierStats({ catalog, listings, openDemand, brands });
   }
 
-  if (loading) {
-    return <LandingSplash />;
-  }
-
+  // Logged-out visitors see the marketing page immediately. Do not block `/`
+  // on getUser() — a hung auth check would leave a dead-end splash.
   if (!user) {
     return <LandingPage />;
+  }
+
+  if (loading) {
+    return <div className="min-h-screen flex items-center justify-center">Loading dashboard...</div>;
   }
 
   const role = profile?.role;
