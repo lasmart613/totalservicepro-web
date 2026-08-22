@@ -236,6 +236,19 @@ html.landing-mode .lp-root::before {
   margin-bottom: 28px;
 }
 
+.lp-benefits {
+  margin: -8px 0 28px;
+  padding-left: 18px;
+  max-width: 34em;
+}
+
+.lp-benefits li {
+  font-size: clamp(15px, 1.4vw, 17px);
+  line-height: 1.45;
+  color: #9CA3AF;
+  margin: 8px 0;
+}
+
 .lp-actions {
   display: flex;
   flex-wrap: wrap;
