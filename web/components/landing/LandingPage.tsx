@@ -44,14 +44,14 @@ const AUDIENCES: {
 }[] = [
   {
     id: 'shop',
-    label: 'Laser repair companies',
+    label: 'Repair companies',
     signup: '/signup/company',
     lines: [
       'Run the schedule',
       'Dispatch the engineer',
       'History on every job',
       'Manuals in one place',
-      'Bid on open requests',
+      'Bid on open jobs',
     ],
     shot: {
       src: '/landing/dashboard.webp',
@@ -61,12 +61,12 @@ const AUDIENCES: {
   },
   {
     id: 'clinic',
-    label: 'Medical / aesthetic clinics',
+    label: 'Clinics',
     signup: '/signup/owner',
     lines: [
-      'Find the best shop',
+      'Find a shop',
       'Take competing bids',
-      'History and cost on every serial',
+      'History and cost on every box',
     ],
     shot: {
       src: '/landing/reports.webp',
@@ -76,7 +76,7 @@ const AUDIENCES: {
   },
   {
     id: 'parts',
-    label: 'Parts suppliers',
+    label: 'Parts sellers',
     signup: '/signup/supplier',
     lines: [
       'Reach shops and owners',
@@ -90,6 +90,225 @@ const AUDIENCES: {
     },
   },
 ];
+
+const HERO_SLIDES: {
+  audience: string;
+  title: string;
+  shot: { src: string; alt: string; caption: string };
+}[] = [
+  {
+    audience: 'Repair companies',
+    title: 'Run the schedule',
+    shot: {
+      src: '/landing/dashboard.webp',
+      alt: 'Shop dashboard with open tickets and upcoming calls',
+      caption: 'Shop dashboard',
+    },
+  },
+  {
+    audience: 'Repair companies',
+    title: 'Dispatch the engineer',
+    shot: {
+      src: '/landing/dashboard.webp',
+      alt: 'Shop dashboard used to send the next call',
+      caption: 'Dispatch',
+    },
+  },
+  {
+    audience: 'Clinics',
+    title: 'Find a shop',
+    shot: {
+      src: '/landing/marketplace.webp',
+      alt: 'Marketplace home for parts, used systems, and service needs',
+      caption: 'Marketplace',
+    },
+  },
+  {
+    audience: 'Clinics',
+    title: 'Take competing bids',
+    shot: {
+      src: '/landing/reports.webp',
+      alt: 'Service reports list with drafts and completed work',
+      caption: 'Service history',
+    },
+  },
+  {
+    audience: 'Clinics',
+    title: 'History and cost on file',
+    shot: {
+      src: '/landing/reports.webp',
+      alt: 'Service history that stays with each laser',
+      caption: 'History and cost',
+    },
+  },
+  {
+    audience: 'Parts sellers',
+    title: 'Reach shops and owners',
+    shot: {
+      src: '/landing/parts.webp',
+      alt: 'Parts marketplace with live listings and prices',
+      caption: 'Parts for sale',
+    },
+  },
+];
+
+const HERO_AUTO_MS = 7000;
+
+function HeroCarousel() {
+  const n = HERO_SLIDES.length;
+  const [i, setI] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [hold, setHold] = useState(false);
+  const start = React.useRef<{ x: number; y: number } | null>(null);
+
+  const go = (dir: number) => setI((x) => (x + dir + n) % n);
+  const goTo = (idx: number) => setI(((idx % n) + n) % n);
+
+  useEffect(() => {
+    if (paused || hold) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const id = window.setInterval(() => {
+      if (document.hidden) return;
+      setI((x) => (x + 1) % n);
+    }, HERO_AUTO_MS);
+    return () => window.clearInterval(id);
+  }, [paused, hold, i, n]);
+
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    start.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!start.current) return;
+    const dx = e.clientX - start.current.x;
+    const dy = e.clientY - start.current.y;
+    start.current = null;
+    if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy)) {
+      go(dx < 0 ? 1 : -1);
+    }
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      go(-1);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      go(1);
+    }
+  };
+
+  const slide = HERO_SLIDES[i];
+
+  return (
+    <section
+      className="lp-hero-carousel"
+      aria-roledescription="carousel"
+      aria-label="Who Total Service Pro is for"
+      onMouseEnter={() => setHold(true)}
+      onMouseLeave={() => setHold(false)}
+      onFocusCapture={() => setHold(true)}
+      onBlurCapture={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setHold(false);
+        }
+      }}
+    >
+      <div
+        className="lp-hero-viewport"
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        onPointerDown={onPointerDown}
+        onPointerUp={onPointerUp}
+        onPointerCancel={() => {
+          start.current = null;
+        }}
+      >
+        <div
+          className="lp-hero-track"
+          style={{ transform: `translateX(-${i * 100}%)` }}
+        >
+          {HERO_SLIDES.map((s, idx) => (
+            <div
+              key={`${s.audience}-${s.title}`}
+              className="lp-hero-slide"
+              role="group"
+              aria-roledescription="slide"
+              aria-label={`${idx + 1} of ${n}: ${s.audience}. ${s.title}`}
+              aria-hidden={idx !== i}
+              inert={idx !== i ? true : undefined}
+            >
+              <div className="lp-hero-copy">
+                <p className="lp-kicker">{s.audience}</p>
+                {idx === i ? (
+                  <h1 className="lp-title">{s.title}</h1>
+                ) : (
+                  <p className="lp-title">{s.title}</p>
+                )}
+              </div>
+              <Shot src={s.shot.src} alt={s.shot.alt} caption={s.shot.caption} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <p className="lp-sr" aria-live="polite">
+        {slide.audience}. {slide.title}.
+      </p>
+
+      <div className="lp-hero-bar">
+        <div className="lp-hero-controls">
+          <button
+            type="button"
+            className="lp-hero-arrow"
+            aria-label="Previous slide"
+            onClick={() => go(-1)}
+          >
+            <span aria-hidden="true">‹</span>
+          </button>
+          <div className="lp-hero-dots" role="group" aria-label="Slides">
+            {HERO_SLIDES.map((s, idx) => (
+              <button
+                key={`${s.audience}-${s.title}-dot`}
+                type="button"
+                className={`lp-hero-dot${idx === i ? ' is-on' : ''}`}
+                aria-label={`${s.audience}: ${s.title}`}
+                aria-current={idx === i ? 'true' : undefined}
+                onClick={() => goTo(idx)}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            className="lp-hero-arrow"
+            aria-label="Next slide"
+            onClick={() => go(1)}
+          >
+            <span aria-hidden="true">›</span>
+          </button>
+          <button
+            type="button"
+            className="lp-hero-pause"
+            aria-pressed={paused}
+            aria-label={paused ? 'Play slides' : 'Pause slides'}
+            onClick={() => setPaused((p) => !p)}
+          >
+            {paused ? 'Play' : 'Pause'}
+          </button>
+        </div>
+        <div className="lp-actions">
+          <Link href="/signup" className="lp-btn lp-btn-primary">
+            Register for Total Service Pro
+          </Link>
+          <Link href="/login" className="lp-btn lp-btn-ghost">
+            Sign in
+          </Link>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
@@ -128,26 +347,7 @@ export function LandingPage() {
         </div>
       </header>
 
-      <section className="lp-hero" aria-label="Hero">
-        <div className="lp-hero-copy">
-          <p className="lp-kicker">Medical Repair Network · Total Service Pro</p>
-          <h1 className="lp-title">Reduce laser downtime</h1>
-          <p className="lp-lede">Maximize your equipment’s uptime.</p>
-          <div className="lp-actions">
-            <Link href="/signup" className="lp-btn lp-btn-primary">
-              Register for Total Service Pro
-            </Link>
-            <Link href="/login" className="lp-btn lp-btn-ghost">
-              Sign in
-            </Link>
-          </div>
-        </div>
-        <Shot
-          src="/landing/dashboard.webp"
-          alt="Total Service Pro shop dashboard with open tickets and upcoming calls"
-          caption="Shop dashboard"
-        />
-      </section>
+      <HeroCarousel />
 
       <section className="lp-gallery" aria-label="Product screens">
         <Shot
@@ -174,7 +374,7 @@ export function LandingPage() {
 
       <section className="lp-section" id="features">
         <h2 className="lp-h2">What you get</h2>
-        <p className="lp-lede">Repair shop, clinic, or parts seller.</p>
+        <p className="lp-lede">Repair company, clinic, or parts seller.</p>
         <div className="lp-role-cols">
           {AUDIENCES.map((r) => (
             <article key={r.id} className="lp-role-col">
