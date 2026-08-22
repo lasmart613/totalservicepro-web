@@ -26,8 +26,8 @@ export function roleLabel(role?: string | null): string {
 export function orgTypeLabel(type?: string | null): string {
   const t = String(type || '').toLowerCase().trim();
   const map: Record<string, string> = {
-    service_company: 'Repair Service Provider',
-    service: 'Repair Service Provider',
+    service_company: 'Repair company',
+    service: 'Repair company',
     parts_supplier: 'Parts Supplier',
     vendor: 'Parts Supplier',
     customer: 'Laser Clinic / Practice',

@@ -774,7 +774,7 @@ export default function Onboarding() {
               {(['service','clinic','supplier'] as OrgType[]).map(t => (
                 <button key={t} onClick={() => handleTypeSelect(t)} className={`card p-6 text-left hover:border-[var(--gold)] ${orgType===t ? 'border-[var(--gold)]' : ''}`}>
                   <div className="text-2xl mb-2">{t==='service'?'👷':t==='clinic'?'🏥':'📦'}</div>
-                  <div className="font-bold">{t==='service' ? 'Repair Service Provider (RSP)' : t==='clinic' ? 'Laser Owner (Clinic / Rental / Reseller)' : 'Parts Supplier'}</div>
+                  <div className="font-bold">{t==='service' ? 'Repair company' : t==='clinic' ? 'Laser Owner (Clinic / Rental / Reseller)' : 'Parts Supplier'}</div>
                   <div className="text-sm text-[var(--text3)]">Click to select</div>
                 </button>
               ))}
