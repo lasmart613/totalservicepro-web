@@ -55,6 +55,22 @@ export async function ensureTeamMemberProfile(
   if (input.lastName) row.last_name = input.lastName;
   if (input.jobTitle) row.job_title = input.jobTitle;
 
+  const { data: existing } = await admin
+    .from('user_profiles')
+    .select('id, organization_id')
+    .eq('id', input.userId)
+    .maybeSingle();
+
+  if (
+    existing?.organization_id != null &&
+    String(existing.organization_id) !== String(input.organizationId)
+  ) {
+    return {
+      ok: false,
+      error: 'This account already belongs to another organization.',
+    };
+  }
+
   const { error } = await admin.from('user_profiles').upsert(row, { onConflict: 'id' });
   if (error) {
     console.error('ensureTeamMemberProfile', error);

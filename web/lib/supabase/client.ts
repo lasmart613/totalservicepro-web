@@ -242,19 +242,23 @@ export async function claimPendingInvitations(supabase: SupabaseClient, userId: 
       .limit(1);
     if (selErr) console.warn('claimPendingInvitations select', selErr);
 
-    let inv = invites?.[0];
-    // Also try metadata from auth user
-    const { data: { user } } = await supabase.auth.getUser();
-    const meta = user?.user_metadata || {};
-    const orgId = inv?.organization_id ?? meta.organization_id ?? null;
+    if (existingProf?.organization_id) {
+      return;
+    }
+
+    const inv = invites?.[0];
+    // Only a real invitation row may attach org/role. Never trust user_metadata.organization_id.
+    const orgId = inv?.organization_id ?? null;
     if (!orgId) {
       console.warn('[TSP] No invitation/org to claim for', clean);
       return;
     }
 
+    const { data: { user } } = await supabase.auth.getUser();
+    const meta = user?.user_metadata || {};
     const update: any = {
       organization_id: orgId,
-      role: inv?.role || meta.role || 'fse',
+      role: inv?.role || 'fse',
       onboarding_completed: true,
     };
     if (inv?.first_name || meta.first_name) update.first_name = inv?.first_name || meta.first_name;

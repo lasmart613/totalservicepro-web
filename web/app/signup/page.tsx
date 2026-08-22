@@ -1,11 +1,17 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { Building2, Hospital, Package } from 'lucide-react';
+import { getSupabaseClient } from '@/lib/supabase/client';
+import { prepareFreshSignup } from '@/lib/auth-session';
 
 export default function SignupIndex() {
+  useEffect(() => {
+    prepareFreshSignup(getSupabaseClient());
+  }, []);
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />

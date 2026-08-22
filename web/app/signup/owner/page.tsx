@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
 import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
+import { prepareFreshSignup } from '@/lib/auth-session';
 import { claimCustomerInvite, previewCustomerInvite } from '@/lib/customer-invite-client';
 import { MODELS } from '@/lib/models';
 import {
@@ -195,6 +196,7 @@ function OwnerSignupInner() {
     try {
       const origin =
         typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+      await prepareFreshSignup(supabase);
       savePendingSignup(pendingPayload());
       const { data: authData, error: authError } = await supabase.auth.signUp({
         email,
@@ -285,8 +287,8 @@ function OwnerSignupInner() {
               mode="signup"
               onVerified={async () => {
                 const { data: { user } } = await supabase.auth.getUser();
-                const uid = user?.id || pendingUserId;
-                if (!uid) {
+                const uid = user?.id;
+                if (!uid || (pendingUserId && uid !== pendingUserId)) {
                   setMessage('Verified, but session is missing. Please sign in at Login.');
                   setMessageOk(false);
                   return;

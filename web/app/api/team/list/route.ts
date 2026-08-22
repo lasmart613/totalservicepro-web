@@ -64,7 +64,12 @@ export async function GET(req: NextRequest) {
           .select('id, organization_id')
           .ilike('email', email)
           .maybeSingle();
-        if (mem && String(mem.organization_id) !== String(orgId)) {
+        if (!mem) continue;
+        // Only attach unlinked profiles. Never steal a user who already belongs elsewhere.
+        if (mem.organization_id != null && String(mem.organization_id) !== String(orgId)) {
+          continue;
+        }
+        if (mem.organization_id == null) {
           await admin
             .from('user_profiles')
             .update({

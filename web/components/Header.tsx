@@ -3,6 +3,7 @@
 import React, { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { getSupabaseClient } from '../lib/supabase/client';
+import { signOutAndClearIdentity } from '@/lib/auth-session';
 import { User } from '@supabase/supabase-js';
 import {
   LogOut,
@@ -129,21 +130,38 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   }
 
   useEffect(() => {
+    let activeUserId: string | null = null;
+
+    const applyProfile = (uid: string, prof: any) => {
+      if (activeUserId !== uid) return;
+      if (prof && prof.id && prof.id !== uid) return;
+      setProfile(prof);
+    };
+
+    const loadProfileFor = async (uid: string) => {
+      const { data: prof } = await supabase
+        .from('user_profiles')
+        .select('id, first_name, last_name, role, organizations(name, type, facility_type)')
+        .eq('id', uid)
+        .maybeSingle();
+      applyProfile(uid, prof);
+    };
+
     const loadUser = async () => {
       const {
         data: { user: u },
       } = await supabase.auth.getUser();
+      activeUserId = u?.id ?? null;
       setUser(u);
-
-      if (u) {
-        const { data: prof } = await supabase
-          .from('user_profiles')
-          .select('first_name, last_name, role, organizations(name, type, facility_type)')
-          .eq('id', u.id)
-          .maybeSingle();
-        setProfile(prof);
-        await refreshUnread(u.id);
+      if (!u) {
+        setProfile(null);
+        setUnread(0);
+        setLoading(false);
+        return;
       }
+      setProfile(null);
+      await loadProfileFor(u.id);
+      if (activeUserId === u.id) await refreshUnread(u.id);
       setLoading(false);
     };
 
@@ -153,24 +171,23 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT' || !session?.user) {
+        activeUserId = null;
         setUser(null);
         setProfile(null);
         setUnread(0);
         return;
       }
+      const uid = session.user.id;
+      const switched = activeUserId !== uid;
+      activeUserId = uid;
       setUser(session.user);
-      if (session?.user) {
-        supabase
-          .from('user_profiles')
-          .select('first_name, last_name, role, organizations(name, type, facility_type)')
-          .eq('id', session.user.id)
-          .maybeSingle()
-          .then(({ data }) => setProfile(data));
-        refreshUnread(session.user.id);
-      } else {
+      if (switched) {
+        // Drop the previous account's org chip immediately — do not wait for fetch.
         setProfile(null);
         setUnread(0);
       }
+      loadProfileFor(uid);
+      refreshUnread(uid);
     });
 
     const t = setInterval(() => {
@@ -204,11 +221,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
     setUser(null);
     setProfile(null);
     setUnread(0);
-    try {
-      await supabase.auth.signOut();
-    } catch {
-      /* still leave */
-    }
+    await signOutAndClearIdentity(supabase);
     window.location.replace('/login');
   };
 

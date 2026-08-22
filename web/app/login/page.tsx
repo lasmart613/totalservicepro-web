@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { nextPathFromSearchParams } from '@/lib/login-next';
 import { claimCustomerInvite } from '@/lib/customer-invite-client';
+import { clearPendingSignup } from '@/lib/pending-signup';
+import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session';
 
 function LoginInner() {
   const [email, setEmail] = useState('');
@@ -112,6 +114,7 @@ function LoginInner() {
         }
         const origin =
           typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+        await prepareFreshSignup(supabase);
         const { data, error } = await supabase.auth.signUp({
           email: cleanEmail,
           password,
@@ -173,6 +176,14 @@ function LoginInner() {
           true
         );
       } else {
+        const {
+          data: { user: current },
+        } = await supabase.auth.getUser();
+        if (current?.email && current.email.toLowerCase() !== cleanEmail) {
+          await signOutAndClearIdentity(supabase);
+        } else {
+          clearPendingSignup();
+        }
         const { error } = await supabase.auth.signInWithPassword({ email: cleanEmail, password });
         if (error) {
           if (/invalid login credentials|invalid credentials/i.test(error.message || '')) {

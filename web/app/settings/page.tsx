@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { signOutAndClearIdentity } from '@/lib/auth-session';
 
 export const dynamic = 'force-dynamic';
 
@@ -214,7 +215,7 @@ export default function Settings() {
 
           <div>
             <div className="font-semibold mb-2">Account</div>
-            <button onClick={async () => { const s = getSupabaseClient(); await s.auth.signOut(); window.location.href = '/login'; }} className="btn btn-secondary text-red-400 border-red-900/40">Sign Out Everywhere</button>
+            <button onClick={async () => { const s = getSupabaseClient(); await signOutAndClearIdentity(s); window.location.href = '/login'; }} className="btn btn-secondary text-red-400 border-red-900/40">Sign Out Everywhere</button>
           </div>
 
           <div className="text-xs text-[var(--text3)] pt-2 border-t border-[var(--border)]">

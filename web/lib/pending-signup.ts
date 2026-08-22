@@ -217,8 +217,23 @@ export function resolvePendingSignup(user: {
 }): PendingSignup | null {
   const stored = loadPendingSignup();
   const email = (user.email || '').toLowerCase();
-  if (stored && stored.email && stored.email.toLowerCase() === email) return stored;
+  if (stored) {
+    if (stored.email && stored.email.toLowerCase() === email) return stored;
+    // Leftover payload from another account in this browser — do not apply it.
+    clearPendingSignup();
+  }
   return pendingSignupFromMetadata(user);
+}
+
+function pendingMatchesSession(
+  userId: string,
+  pending: PendingSignup,
+  sessionUser: { id?: string; email?: string | null } | null
+): boolean {
+  if (!sessionUser?.id || sessionUser.id !== userId) return false;
+  const pendingEmail = (pending.email || '').toLowerCase().trim();
+  const sessionEmail = (sessionUser.email || '').toLowerCase().trim();
+  return !!pendingEmail && pendingEmail === sessionEmail;
 }
 
 async function findCreatedOrganization(
@@ -366,6 +381,14 @@ export async function applyPendingSignup(
   userId: string,
   pending: PendingSignup
 ): Promise<{ orgId: string | number | null; dest: string }> {
+  const {
+    data: { user: sessionUser },
+  } = await supabase.auth.getUser();
+  if (!pendingMatchesSession(userId, pending, sessionUser)) {
+    clearPendingSignup();
+    throw new Error('Signup details do not match the signed-in account. Sign out and try again.');
+  }
+
   const { data: existing } = await supabase
     .from('user_profiles')
     .select('organization_id, role')
@@ -373,13 +396,25 @@ export async function applyPendingSignup(
     .maybeSingle();
 
   if (existing?.organization_id) {
-    if (pending.kind !== 'company' && existing.role !== pending.role) {
-      await supabase
-        .from('user_profiles')
-        .update({ role: pending.role, onboarding_completed: true })
-        .eq('id', userId);
+    const { data: linkedOrg } = await supabase
+      .from('organizations')
+      .select('id, created_by')
+      .eq('id', existing.organization_id)
+      .maybeSingle();
+    const ownOrg = linkedOrg && String(linkedOrg.created_by) === String(userId);
+    // Never rewrite role onto an org this user did not create (stolen / invite / other account).
+    if (ownOrg && pending.kind !== 'company' && existing.role !== pending.role) {
+      const prior = String(existing.role || '').toLowerCase();
+      if (!prior || prior === 'fse' || prior === 'pending' || prior === 'engineer') {
+        await supabase
+          .from('user_profiles')
+          .update({ role: pending.role, onboarding_completed: true })
+          .eq('id', userId);
+      }
     }
-    await insertPendingOwnerEquipment(supabase, existing.organization_id, pending);
+    if (ownOrg) {
+      await insertPendingOwnerEquipment(supabase, existing.organization_id, pending);
+    }
     clearPendingSignup();
     return { orgId: existing.organization_id, dest: destForKind(pending.kind) };
   }
