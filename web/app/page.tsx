@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
+import { LandingPage, LandingSplash } from '@/components/landing/LandingPage';
 import { Calendar, Wrench, Package, FileText, Zap, Building2, Settings } from 'lucide-react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
@@ -395,25 +396,11 @@ export default function HomePage() {
   }
 
   if (loading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading dashboard...</div>;
+    return <LandingSplash />;
   }
 
   if (!user) {
-    return (
-      <div className="min-h-screen flex flex-col">
-        <Header />
-        <div className="max-w-4xl mx-auto w-full px-4 py-10 text-center">
-          <h1 className="text-4xl font-extrabold tracking-tight mb-4">Welcome to Total Service Pro</h1>
-          <p className="text-xl text-[var(--text3)] mb-8">
-            The professional platform for laser equipment service, parts, and marketplace.
-          </p>
-          <div className="flex justify-center gap-4">
-            <Link href="/login" className="btn btn-primary px-8">Sign In</Link>
-            <Link href="/signup" className="btn btn-secondary px-8">Sign Up</Link>
-          </div>
-        </div>
-      </div>
-    );
+    return <LandingPage />;
   }
 
   const role = profile?.role;

@@ -69,6 +69,12 @@ body {
   font-family: var(--font-dm-sans), var(--font-geist-sans), system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
+/* Full-bleed marketing home (toggled by LandingPage). Portal pages unchanged. */
+html.landing-mode main {
+  padding: 0 !important;
+  max-width: none !important;
+}
+
 /* Professional components matching original TSP aesthetic */
 .header {
   background: var(--surface);

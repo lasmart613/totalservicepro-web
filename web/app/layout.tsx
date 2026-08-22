@@ -22,8 +22,9 @@ const dmSans = DM_Sans({
 });
 
 export const metadata: Metadata = {
-  title: "Total Service Pro",
-  description: "Professional field service management for medical and aesthetic laser technicians. Service reports, manuals, scheduling, and tools.",
+  title: "RepairPlanet · Total Service Pro",
+  description:
+    "RepairPlanet’s Total Service Pro — laser equipment service, parts, marketplace, manuals, service reports, and the technician field app.",
   icons: {
     icon: "/favicon.ico",
   },
