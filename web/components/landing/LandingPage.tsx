@@ -35,8 +35,84 @@ function Shot({
   );
 }
 
+type RoleId = 'owner' | 'shop' | 'parts' | 'rental';
+
+const ROLES: {
+  id: RoleId;
+  label: string;
+  signup: string;
+  lines: string[];
+  shot: { src: string; alt: string; caption: string };
+}[] = [
+  {
+    id: 'owner',
+    label: 'Clinic / owner',
+    signup: '/signup/owner',
+    lines: [
+      'Cut laser downtime',
+      'Keep the box running',
+      'Find a service company',
+      'Get competing bids',
+      'History on every serial',
+    ],
+    shot: {
+      src: '/landing/reports.webp',
+      alt: 'Service reports list with drafts and completed work',
+      caption: 'Service history',
+    },
+  },
+  {
+    id: 'shop',
+    label: 'Service company',
+    signup: '/signup/company',
+    lines: [
+      'Find clinics that need a call',
+      'Locate the part',
+      'Send the bid',
+      'Email the report from the job',
+      'Estimate and invoice the same job',
+    ],
+    shot: {
+      src: '/landing/dashboard.webp',
+      alt: 'Total Service Pro shop dashboard with open tickets and upcoming calls',
+      caption: 'Shop dashboard',
+    },
+  },
+  {
+    id: 'parts',
+    label: 'Parts seller',
+    signup: '/signup/supplier',
+    lines: [
+      'List what is on the shelf',
+      'Get found by shops and clinics',
+      'Checkout on the public page',
+    ],
+    shot: {
+      src: '/landing/parts.webp',
+      alt: 'Parts marketplace with live Candela listings and prices',
+      caption: 'Parts for sale',
+    },
+  },
+  {
+    id: 'rental',
+    label: 'Rental company',
+    signup: '/signup/owner',
+    lines: [
+      'Keep the fleet in one list',
+      'History on every box',
+      'Post a repair and take bids',
+    ],
+    shot: {
+      src: '/landing/reports.webp',
+      alt: 'Service history that stays with each laser in the fleet',
+      caption: 'Fleet history',
+    },
+  },
+];
+
 export function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
+  const [role, setRole] = useState<RoleId>('owner');
 
   useEffect(() => {
     document.documentElement.classList.add('landing-mode');
@@ -48,6 +124,8 @@ export function LandingPage() {
       window.removeEventListener('scroll', onScroll);
     };
   }, []);
+
+  const selected = ROLES.find((r) => r.id === role) ?? ROLES[0];
 
   return (
     <div className="lp-root -mx-4 sm:-mx-6 lg:-mx-8 -my-6">
@@ -118,37 +196,39 @@ export function LandingPage() {
 
       <section className="lp-section" id="features">
         <h2 className="lp-h2">What you get</h2>
-        <ul className="lp-features">
-          <li>Cut the next call’s downtime</li>
-          <li>Email reports from the job</li>
-          <li>Buy parts that are listed</li>
-          <li>Keep history on the serial</li>
-          <li>Find who works on the machine</li>
-          <li>Same account in the van</li>
-        </ul>
-
-        <div className="lp-expanders">
-          <details>
-            <summary>Repair companies</summary>
-            <p>
-              Dispatch the next call. Write the estimate on the same job. Email
-              the report. Invite technicians from Team.
-            </p>
-          </details>
-          <details>
-            <summary>Clinics and rental fleets</summary>
-            <p>
-              Every laser and serial in one list. Post a repair or preventive
-              visit and take bids. History stays with the machine.
-            </p>
-          </details>
-          <details>
-            <summary>Parts sellers</summary>
-            <p>
-              List parts, handpieces, optics, and consumables. Public product
-              pages with checkout. See open demand and respond.
-            </p>
-          </details>
+        <p className="lp-lede">Pick who you are.</p>
+        <div className="lp-role-tabs" role="radiogroup" aria-label="Who you are">
+          {ROLES.map((r) => (
+            <button
+              key={r.id}
+              type="button"
+              role="radio"
+              aria-checked={role === r.id}
+              className={`lp-role-tab${role === r.id ? ' is-on' : ''}`}
+              onClick={() => setRole(r.id)}
+            >
+              {r.label}
+            </button>
+          ))}
+        </div>
+        <div className="lp-role-pane">
+          <div>
+            <ul className="lp-features">
+              {selected.lines.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+            <div className="lp-actions">
+              <Link href={selected.signup} className="lp-btn lp-btn-primary">
+                Register for Total Service Pro
+              </Link>
+            </div>
+          </div>
+          <Shot
+            src={selected.shot.src}
+            alt={selected.shot.alt}
+            caption={selected.shot.caption}
+          />
         </div>
       </section>
 
@@ -169,7 +249,7 @@ export function LandingPage() {
 
       <section className="lp-section" id="join">
         <h2 className="lp-h2">Register for Total Service Pro</h2>
-        <p className="lp-lede">Repair company, clinic, or parts seller.</p>
+        <p className="lp-lede">Repair company, clinic, rental fleet, or parts seller.</p>
         <div className="lp-paths">
           <Link href="/signup/company" className="lp-path">
             <h3>Repair company</h3>
@@ -181,7 +261,7 @@ export function LandingPage() {
             <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
           </Link>
           <Link href="/signup/owner" className="lp-path">
-            <h3>Clinic / laser owner</h3>
+            <h3>Clinic / owner</h3>
             <ul>
               <li>Maximize uptime on every box</li>
               <li>Post a repair and take bids</li>

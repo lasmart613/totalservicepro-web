@@ -216,13 +216,58 @@ html.landing-mode body {
   margin-top: 36px;
 }
 
+.lp-role-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 0 22px;
+  padding: 4px;
+  background: #1A2233;
+  border: 1px solid #4B5563;
+  border-radius: 10px;
+}
+
+.lp-role-tab {
+  appearance: none;
+  background: transparent;
+  border: none;
+  color: #9CA3AF;
+  font-family: inherit;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  padding: 10px 14px;
+  border-radius: 8px;
+  cursor: pointer;
+  line-height: 1.2;
+}
+
+.lp-role-tab:hover {
+  color: #F3E8D8;
+}
+
+.lp-role-tab.is-on,
+.lp-role-tab[aria-checked='true'] {
+  background: #FBBF24;
+  color: #111827;
+}
+
+.lp-role-pane {
+  display: grid;
+  grid-template-columns: minmax(240px, 380px) minmax(0, 1fr);
+  gap: 32px;
+  align-items: center;
+}
+
 .lp-features {
   margin: 0 0 22px;
   padding: 0;
   list-style: none;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 320px));
-  gap: 10px 28px;
+  gap: 10px;
 }
 
 .lp-features li {
@@ -241,48 +286,6 @@ html.landing-mode body {
   height: 7px;
   border-radius: 50%;
   background: #FBBF24;
-}
-
-.lp-expanders {
-  display: grid;
-  gap: 8px;
-  max-width: 720px;
-}
-
-.lp-expanders details {
-  background: #1A2233;
-  border: 1px solid #4B5563;
-  border-radius: 10px;
-  padding: 4px 14px;
-}
-
-.lp-expanders summary {
-  cursor: pointer;
-  font-weight: 700;
-  padding: 12px 0;
-  list-style: none;
-}
-
-.lp-expanders summary::-webkit-details-marker {
-  display: none;
-}
-
-.lp-expanders summary::after {
-  content: '+';
-  float: right;
-  color: #FBBF24;
-  font-weight: 800;
-}
-
-.lp-expanders details[open] summary::after {
-  content: '–';
-}
-
-.lp-expanders p {
-  margin: 0 0 14px;
-  color: #9CA3AF;
-  font-size: 15px;
-  line-height: 1.45;
 }
 
 .lp-phones {
@@ -415,11 +418,11 @@ html.landing-mode body {
     padding-top: 28px;
   }
 
-  .lp-gallery {
+  .lp-role-pane {
     grid-template-columns: 1fr;
   }
 
-  .lp-features {
+  .lp-gallery {
     grid-template-columns: 1fr;
   }
 
@@ -456,6 +459,12 @@ html.landing-mode body {
   .lp-nav-cta .lp-btn {
     padding: 9px 12px;
     font-size: 11px;
+  }
+
+  .lp-role-tabs {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    width: 100%;
   }
 
   .lp-hero,
