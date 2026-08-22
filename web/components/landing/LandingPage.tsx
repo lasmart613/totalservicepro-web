@@ -8,7 +8,7 @@ export function LandingSplash() {
   return (
     <div className="lp-splash">
       <div className="text-center">
-        <div className="lp-brand-biz">RepairPlanet</div>
+        <div className="lp-brand-biz">Medical Repair Network</div>
         <div className="lp-brand-name" style={{ fontSize: 28 }}>
           Total Service Pro
         </div>
@@ -75,20 +75,21 @@ export function LandingPage() {
     <div className="lp-root -mx-4 sm:-mx-6 lg:-mx-8 -my-6">
       <header ref={navRef} className={`lp-nav ${scrolled ? 'is-scrolled' : ''}`}>
         <Link href="/" className="lp-brand">
-          <span className="lp-brand-biz">RepairPlanet</span>
+          <span className="lp-brand-biz">Medical Repair Network</span>
           <span className="lp-brand-name">Total Service Pro</span>
           <span className="lp-brand-sub">Laser Equipment Service</span>
         </Link>
         <nav className="lp-nav-links" aria-label="Public">
           <Link href="/directory">Directory</Link>
           <Link href="/marketplace">Marketplace</Link>
+          <Link href="/marketplace/parts">Parts</Link>
         </nav>
         <div className="lp-nav-cta">
           <Link href="/login" className="lp-btn lp-btn-ghost">
             Sign In
           </Link>
           <Link href="/signup" className="lp-btn lp-btn-primary">
-            Sign Up
+            Register for TSP
           </Link>
         </div>
       </header>
@@ -106,7 +107,7 @@ export function LandingPage() {
         </div>
         <div className="lp-copy">
           <div className="lp-heading">
-            <p className="lp-kicker">RepairPlanet</p>
+            <p className="lp-kicker">Medical Repair Network</p>
             <h1 className="lp-title">
               Total
               <br />
@@ -114,13 +115,13 @@ export function LandingPage() {
             </h1>
           </div>
           <p className="lp-lede">
-            Laser Equipment Service. The professional platform for laser
-            equipment service, parts, and marketplace — on the web and in the
-            technician field app.
+            TSP is the laser equipment service app — software, parts, and a
+            marketplace for clinics, RSPs, rental companies, and suppliers.
+            Register here to use it.
           </p>
           <div className="lp-actions">
             <Link href="/signup" className="lp-btn lp-btn-primary">
-              Sign Up
+              Register for TSP
             </Link>
             <Link href="/login" className="lp-btn lp-btn-ghost">
               Sign In
@@ -136,21 +137,21 @@ export function LandingPage() {
         </div>
         <div className="lp-copy">
           <div className="lp-heading">
-            <p className="lp-kicker">Join the network</p>
+            <p className="lp-kicker">Register for TSP</p>
             <h2 className="lp-title lp-title-sm">
-              One portal.
+              One service.
               <br />
               Three doors.
             </h2>
           </div>
           <p className="lp-lede">
-            Sign up as a Repair Service Provider, laser owner (clinic, rental
+            Register as a Repair Service Provider, laser owner (clinic, rental
             company, or reseller), or parts supplier. FSEs are invited by their
             RSP — there is no separate technician signup.
           </p>
           <div className="lp-actions">
             <Link href="/signup" className="lp-btn lp-btn-primary">
-              Sign Up
+              Register for TSP
             </Link>
           </div>
         </div>
@@ -162,26 +163,26 @@ export function LandingPage() {
         </div>
         <div className="lp-copy">
           <div className="lp-heading">
-            <p className="lp-kicker">Website + field app</p>
+            <p className="lp-kicker">What TSP is</p>
             <h2 className="lp-title lp-title-sm">
-              Service the
+              Laser equipment
               <br />
-              installed base.
+              service.
             </h2>
           </div>
           <p className="lp-lede">
-            RSPs run schedule and tickets, customers, estimates, invoices, test
-            equipment, manuals, and service reports — including Email report.
-            Owners post RFQs from My Lasers. Same account on the Android
-            technician app: Service Hub plus Photometry Tools (fluence,
-            irradiance, duty cycle, VBeam wavelength, average power).
+            Total Service Pro is the product you register for. Medical Repair
+            Network is the company that sells it. RSPs run schedule, tickets,
+            estimates, invoices, manuals, and reports. Owners post RFQs from My
+            Lasers. Same account on the Android field app, including Photometry
+            Tools.
           </p>
           <div className="lp-actions">
-            <Link href="/login" className="lp-btn lp-btn-primary">
-              Sign In
+            <Link href="/signup" className="lp-btn lp-btn-primary">
+              Register for TSP
             </Link>
-            <Link href="/signup" className="lp-btn lp-btn-ghost">
-              Sign Up
+            <Link href="/login" className="lp-btn lp-btn-ghost">
+              Sign In
             </Link>
           </div>
         </div>
@@ -210,16 +211,16 @@ export function LandingPage() {
             </h2>
           </div>
           <p className="lp-lede">
-            Buy and sell parts, used laser systems, and consumables. Owners post
-            repair and PM requests; RSPs bid. Only actively listed inventory
-            appears. The full parts catalog lives in the Tech Hub after Sign In.
+            Inside TSP: buy and sell listed parts, used laser systems, and
+            consumables. Owners post repair work; RSPs bid. Only inventory that
+            is actually listed appears.
           </p>
           <div className="lp-actions">
-            <Link href="/marketplace" className="lp-btn lp-btn-primary">
-              Marketplace
+            <Link href="/signup" className="lp-btn lp-btn-primary">
+              Register for TSP
             </Link>
-            <Link href="/signup" className="lp-btn lp-btn-ghost">
-              Sign Up
+            <Link href="/marketplace/parts" className="lp-btn lp-btn-ghost">
+              Browse Parts
             </Link>
           </div>
         </div>
@@ -279,7 +280,7 @@ export function LandingPage() {
           </p>
           <div className="lp-actions">
             <Link href="/signup" className="lp-btn lp-btn-primary">
-              Sign Up
+              Register for TSP
             </Link>
             <Link href="/login" className="lp-btn lp-btn-ghost">
               Sign In
@@ -295,12 +296,11 @@ export function LandingPage() {
         </div>
         <div className="lp-copy">
           <div className="lp-heading">
-            <p className="lp-kicker">Total Service Pro</p>
-            <h2 className="lp-title lp-title-sm">Sign Up or Sign In.</h2>
+            <p className="lp-kicker">Register for TSP</p>
+            <h2 className="lp-title lp-title-sm">Register for Total Service Pro.</h2>
           </div>
           <p className="lp-lede">
-            Same Total Service Pro routes already on repairplanet.net. No new
-            auth path.
+            Same signup doors already in the app. No new auth path.
           </p>
           <div className="lp-paths">
             <Link href="/signup/company" className="lp-path">
@@ -315,7 +315,7 @@ export function LandingPage() {
                 <li>Bid on marketplace repair jobs</li>
                 <li>Manuals, reports, photometry tools</li>
               </ul>
-              <span className="lp-btn lp-btn-primary">Sign Up</span>
+              <span className="lp-btn lp-btn-primary">Register for TSP</span>
             </Link>
             <Link href="/signup/owner" className="lp-path">
               <p className="lp-kicker">Owner</p>
@@ -329,7 +329,7 @@ export function LandingPage() {
                 <li>Laser rental company</li>
                 <li>Reseller inventory + listings</li>
               </ul>
-              <span className="lp-btn lp-btn-primary">Sign Up</span>
+              <span className="lp-btn lp-btn-primary">Register for TSP</span>
             </Link>
             <Link href="/signup/supplier" className="lp-path">
               <p className="lp-kicker">Supplier</p>
@@ -342,7 +342,7 @@ export function LandingPage() {
                 <li>Respond to open demand</li>
                 <li>Manage supplier profile</li>
               </ul>
-              <span className="lp-btn lp-btn-primary">Sign Up</span>
+              <span className="lp-btn lp-btn-primary">Register for TSP</span>
             </Link>
           </div>
           <div className="lp-actions" style={{ marginTop: 28 }}>
@@ -355,18 +355,19 @@ export function LandingPage() {
 
       <footer className="lp-footer">
         <div>
-          <strong style={{ color: '#FBBF24' }}>RepairPlanet</strong>
+          <strong style={{ color: '#FBBF24' }}>Medical Repair Network</strong>
           {' · '}
           Total Service Pro
           {' · '}
-          Laser Equipment Service
+          the service you register for
         </div>
         <div className="lp-footer-links">
           <Link href="/">Home</Link>
           <Link href="/directory">Directory</Link>
           <Link href="/marketplace">Marketplace</Link>
+          <Link href="/marketplace/parts">Parts</Link>
           <Link href="/login">Sign In</Link>
-          <Link href="/signup">Sign Up</Link>
+          <Link href="/signup">Register for TSP</Link>
           <Link href="/forgot-password">Forgot password</Link>
         </div>
       </footer>
