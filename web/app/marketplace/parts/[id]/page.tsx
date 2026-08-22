@@ -152,6 +152,15 @@ function PartDetail() {
         toast.error(json?.error || 'Could not start Stripe Checkout');
         return;
       }
+      const host = window.location.hostname;
+      const prodHost = host === 'repairplanet.net' || host.endsWith('.repairplanet.net');
+      const testSession = json.livemode === false || String(json.sessionId || '').startsWith('cs_test_');
+      if (prodHost && testSession) {
+        toast.error(
+          'Production Stripe is still test/sandbox. Set Netlify STRIPE_SECRET_KEY to the live invoice secret and redeploy.'
+        );
+        return;
+      }
       window.location.assign(json.url);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Could not start checkout');

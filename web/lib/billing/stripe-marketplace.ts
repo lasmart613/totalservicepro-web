@@ -1,6 +1,7 @@
 /**
  * Sync marketplace parts listings to Stripe Products + Prices on the existing
- * RepairPlanet / TSP Stripe account (STRIPE_SECRET_KEY). Reuses IDs when present.
+ * RepairPlanet / TSP Stripe account. Uses the same secret as invoice pay
+ * (STRIPE_SECRET_KEY, fallback STRIPE_SECRET). Reuses IDs when present.
  */
 
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
@@ -13,7 +14,15 @@ import {
   storedStripeIds,
   type MarketplaceListingLike,
 } from '@/lib/marketplace/parts';
-import { getStripeSecret, stripeSiteOrigin } from '@/lib/billing/stripe-pay';
+import {
+  getStripeSecret,
+  resolveStripeSecret,
+  stripeLiveRequired,
+  stripeMissingSecretMessage,
+  stripeSecretProblem,
+  stripeSiteOrigin,
+  stripeTestKeyOnProductionMessage,
+} from '@/lib/billing/stripe-pay';
 
 const LISTING_META = 'marketplace_listing_id';
 const KIND_META = 'marketplace_kind';
@@ -31,6 +40,7 @@ export type PartCheckoutResult = {
   productId: string;
   priceId: string;
   amountCents: number;
+  livemode: boolean | null;
 };
 
 type StripeObject = Record<string, unknown> & {
@@ -38,6 +48,7 @@ type StripeObject = Record<string, unknown> & {
   url?: string;
   deleted?: boolean;
   active?: boolean;
+  livemode?: boolean;
   unit_amount?: number;
   default_price?: string | StripeObject | null;
   data?: StripeObject[];
@@ -46,12 +57,13 @@ type StripeObject = Record<string, unknown> & {
 };
 
 function stripeSecretOrThrow(): string {
+  const problem = stripeSecretProblem();
+  if (problem) {
+    throw new StripeMarketplaceError(problem, 503);
+  }
   const secret = getStripeSecret();
   if (!secret) {
-    throw new StripeMarketplaceError(
-      'STRIPE_SECRET_KEY is not set on the server. Add the existing RepairPlanet Stripe secret in Netlify.',
-      503
-    );
+    throw new StripeMarketplaceError(stripeMissingSecretMessage(), 503);
   }
   return secret;
 }
@@ -360,12 +372,18 @@ export async function createPartCheckoutSession(input: {
   if (!session?.url) {
     throw new StripeMarketplaceError('Stripe Checkout session did not return a URL', 502);
   }
+  const livemode =
+    typeof session.livemode === 'boolean' ? session.livemode : resolveStripeSecret().livemode;
+  if (stripeLiveRequired() && livemode === false) {
+    throw new StripeMarketplaceError(stripeTestKeyOnProductionMessage(), 503);
+  }
   return {
     url: String(session.url),
     sessionId: String(session.id),
     productId: catalog.productId,
     priceId: catalog.priceId,
     amountCents: catalog.amountCents,
+    livemode,
   };
 }
 

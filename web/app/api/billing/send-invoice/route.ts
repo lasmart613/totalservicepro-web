@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { createInvoiceCheckoutSession } from '@/lib/billing/stripe-pay';
+import { createInvoiceCheckoutSession, stripeSecretProblem } from '@/lib/billing/stripe-pay';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import {
   publicSiteOrigin,
@@ -270,11 +270,10 @@ export async function POST(req: NextRequest) {
     let paymentUrl: string | null = null;
     let stripeSessionId: string | null = null;
     let stripeSkippedReason: string | null = null;
-    const hasStripeKey = !!(process.env.STRIPE_SECRET_KEY || process.env.STRIPE_SECRET);
+    const stripeProblem = stripeSecretProblem();
     if (includePay && balanceDue >= 0.5) {
-      if (!hasStripeKey) {
-        stripeSkippedReason =
-          'STRIPE_SECRET_KEY is not set on the server — email sent without a pay button.';
+      if (stripeProblem) {
+        stripeSkippedReason = stripeProblem;
       } else {
         const pay = await createInvoiceCheckoutSession({
           amountCents: Math.round(balanceDue * 100),
