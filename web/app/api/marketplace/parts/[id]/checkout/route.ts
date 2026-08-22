@@ -7,6 +7,7 @@ import {
   syncPartStripeCatalog,
 } from '@/lib/billing/stripe-marketplace';
 import { isPartListing, listingAvailability } from '@/lib/marketplace/parts';
+import { resolveStripeSecret } from '@/lib/billing/stripe-pay';
 
 export const dynamic = 'force-dynamic';
 
@@ -62,7 +63,12 @@ export async function POST(
 
     if (body?.syncOnly) {
       const catalog = await syncPartStripeCatalog(listing);
-      return NextResponse.json({ ok: true, ...catalog, availability });
+      return NextResponse.json({
+        ok: true,
+        ...catalog,
+        availability,
+        livemode: resolveStripeSecret().livemode,
+      });
     }
 
     const headerEmail = await callerEmail(req);
@@ -75,6 +81,7 @@ export async function POST(
       productId: session.productId,
       priceId: session.priceId,
       amountCents: session.amountCents,
+      livemode: session.livemode,
     });
   } catch (e: unknown) {
     const status = e instanceof StripeMarketplaceError ? e.status : 500;
