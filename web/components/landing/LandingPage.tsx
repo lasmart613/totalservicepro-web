@@ -74,12 +74,9 @@ export function LandingPage() {
 
       <section className="lp-hero" aria-label="Hero">
         <div className="lp-hero-copy">
-          <p className="lp-kicker">Medical Repair Network</p>
-          <h1 className="lp-title">Total Service Pro</h1>
-          <p className="lp-lede">
-            Software for shops and clinics that keep aesthetic and medical
-            lasers running.
-          </p>
+          <p className="lp-kicker">Medical Repair Network · Total Service Pro</p>
+          <h1 className="lp-title">Reduce laser downtime</h1>
+          <p className="lp-lede">Maximize your equipment’s uptime.</p>
           <div className="lp-actions">
             <Link href="/signup" className="lp-btn lp-btn-primary">
               Register for Total Service Pro
@@ -122,12 +119,12 @@ export function LandingPage() {
       <section className="lp-section" id="features">
         <h2 className="lp-h2">What you get</h2>
         <ul className="lp-features">
-          <li>Schedule and tickets</li>
-          <li>Estimates and invoices</li>
-          <li>Service reports you can email</li>
-          <li>Parts listed for sale</li>
-          <li>Manuals and photometry tools</li>
-          <li>Directory of shops and clinics</li>
+          <li>Cut the next call’s downtime</li>
+          <li>Email reports from the job</li>
+          <li>Buy parts that are listed</li>
+          <li>Keep history on the serial</li>
+          <li>Find who works on the machine</li>
+          <li>Same account in the van</li>
         </ul>
 
         <div className="lp-expanders">
@@ -157,11 +154,8 @@ export function LandingPage() {
 
       <section className="lp-section lp-phones" id="app">
         <div>
-          <h2 className="lp-h2">On the phone too</h2>
-          <p className="lp-lede">
-            Same Total Service Pro account on Android. Schedule, parts, manuals,
-            and reports in the van.
-          </p>
+          <h2 className="lp-h2">Same account in the van</h2>
+          <p className="lp-lede">Schedule, parts, manuals, and reports on Android.</p>
         </div>
         <div className="lp-phone-wrap">
           <div className="lp-phone">
@@ -175,35 +169,32 @@ export function LandingPage() {
 
       <section className="lp-section" id="join">
         <h2 className="lp-h2">Register for Total Service Pro</h2>
-        <p className="lp-lede">
-          Repair company, clinic, or parts seller. Technicians are invited by
-          their shop.
-        </p>
+        <p className="lp-lede">Repair company, clinic, or parts seller.</p>
         <div className="lp-paths">
           <Link href="/signup/company" className="lp-path">
             <h3>Repair company</h3>
             <ul>
-              <li>Schedule and tickets</li>
-              <li>Estimates and invoices</li>
-              <li>Reports and manuals</li>
+              <li>Cut the next call’s downtime</li>
+              <li>Estimate and invoice the same job</li>
+              <li>Email the report from the van</li>
             </ul>
             <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
           </Link>
           <Link href="/signup/owner" className="lp-path">
             <h3>Clinic / laser owner</h3>
             <ul>
-              <li>Lasers by serial</li>
+              <li>Maximize uptime on every box</li>
               <li>Post a repair and take bids</li>
-              <li>Service history on the machine</li>
+              <li>History stays with the serial</li>
             </ul>
             <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
           </Link>
           <Link href="/signup/supplier" className="lp-path">
             <h3>Parts seller</h3>
             <ul>
-              <li>List parts and consumables</li>
+              <li>List what is on the shelf</li>
               <li>Public pages with checkout</li>
-              <li>Respond to open demand</li>
+              <li>Answer demand while it is open</li>
             </ul>
             <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
           </Link>
