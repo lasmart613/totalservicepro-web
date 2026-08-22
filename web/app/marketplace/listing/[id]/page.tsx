@@ -1,16 +1,18 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { ShareButton } from '@/components/ShareButton';
 import { listingShareText } from '@/lib/share';
+import { isPartListing, partsDetailPath } from '@/lib/marketplace/parts';
 
 export default function ListingDetail() {
   const params = useParams();
+  const router = useRouter();
   const id = params.id as string;
   const [listing, setListing] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -56,6 +58,11 @@ export default function ListingDetail() {
 
     if (!data) {
       if (user) toast.error('Listing not found');
+    } else if (isPartListing(data)) {
+      const dest = partsDetailPath(data.id || id);
+      const search = typeof window !== 'undefined' ? window.location.search : '';
+      router.replace(dest + search);
+      return;
     } else {
       setListing(data);
       if (user && data.id) {
@@ -158,6 +165,8 @@ export default function ListingDetail() {
                 price: listing.price,
                 condition: listing.condition,
                 description: listing.description,
+                listingType: listing.listing_type,
+                category: listing.category,
               })}
             />
           </div>

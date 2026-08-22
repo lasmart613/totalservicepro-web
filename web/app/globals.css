@@ -176,6 +176,73 @@ body {
   color: var(--text3);
 }
 
+.listing-copy {
+  color: var(--text2);
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+}
+.listing-copy > :first-child {
+  margin-top: 0;
+}
+.listing-copy > :last-child {
+  margin-bottom: 0;
+}
+.listing-copy h1,
+.listing-copy h2,
+.listing-copy h3,
+.listing-copy h4 {
+  color: var(--text);
+  font-weight: 700;
+  line-height: 1.3;
+  margin: 1em 0 0.4em;
+}
+.listing-copy h1 { font-size: 1.35rem; }
+.listing-copy h2 { font-size: 1.2rem; }
+.listing-copy h3,
+.listing-copy h4 { font-size: 1.05rem; }
+.listing-copy p { margin: 0 0 0.85em; }
+.listing-copy ul,
+.listing-copy ol {
+  margin: 0.4em 0 0.85em;
+  padding-left: 1.35rem;
+}
+.listing-copy li { margin: 0.2em 0; }
+.listing-copy a {
+  color: var(--gold);
+  text-decoration: underline;
+}
+.listing-copy strong,
+.listing-copy b {
+  color: var(--text);
+  font-weight: 700;
+}
+.listing-copy img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin: 0.6em 0;
+}
+.listing-copy table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 0.8em 0;
+  font-size: 0.9em;
+}
+.listing-copy th,
+.listing-copy td {
+  border: 1px solid var(--border);
+  padding: 6px 8px;
+  text-align: left;
+}
+.listing-copy hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+  margin: 1em 0;
+}
+.listing-copy-compact {
+  font-size: 0.9rem;
+}
+
 .fab {
   position: fixed;
   bottom: 24px;

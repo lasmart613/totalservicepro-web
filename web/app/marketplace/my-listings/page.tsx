@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { isPartListing, partsDetailPath } from '@/lib/marketplace/parts';
 
 export default function MyListings() {
   const [listings, setListings] = useState<any[]>([]);
@@ -133,6 +134,12 @@ export default function MyListings() {
                       </>
                     ) : (
                       <>
+                        <Link
+                          href={isPartListing(listing) ? partsDetailPath(listing.id) : `/marketplace/listing/${listing.id}`}
+                          className="btn btn-primary text-sm px-4"
+                        >
+                          View
+                        </Link>
                         <button onClick={() => startEditing(listing)} className="btn btn-secondary text-sm px-4">Edit</button>
                         <button onClick={() => deleteListing(listing.id)} className="btn btn-secondary text-sm px-4 text-red-400">Delete</button>
                       </>
