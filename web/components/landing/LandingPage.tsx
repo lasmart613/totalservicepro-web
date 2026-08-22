@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { LandingShell } from './LandingShell';
 import './landing.css';
 
 export function LandingSplash() {
@@ -47,16 +48,15 @@ const AUDIENCES: {
     label: 'Repair companies',
     signup: '/signup/company',
     lines: [
-      'Run the schedule',
-      'Dispatch the engineer',
-      'History on every job',
-      'Manuals in one place',
-      'Bid on open jobs',
+      'Schedule and Assign Service Calls',
+      'View service history on every job',
+      'Keep service manuals in one place',
+      'Bid on open service requests',
     ],
     shot: {
       src: '/landing/dashboard.webp',
-      alt: 'Total Service Pro shop dashboard with open tickets and upcoming calls',
-      caption: 'Shop dashboard',
+      alt: 'Total Service Pro dashboard with open tickets and upcoming calls',
+      caption: 'Dashboard',
     },
   },
   {
@@ -64,9 +64,9 @@ const AUDIENCES: {
     label: 'Clinics',
     signup: '/signup/owner',
     lines: [
-      'Find a shop',
-      'Take competing bids',
-      'History and cost on every box',
+      'Find a Repair Company',
+      'Receive multiple bids on service requests',
+      'View service history and track maintenance costs',
     ],
     shot: {
       src: '/landing/reports.webp',
@@ -79,9 +79,9 @@ const AUDIENCES: {
     label: 'Parts sellers',
     signup: '/signup/supplier',
     lines: [
-      'Reach shops and owners',
+      'Connect with Repair Companies and laser owners',
       'Get found when they need a part',
-      'List what is on the shelf',
+      'List parts that are on the shelf',
     ],
     shot: {
       src: '/landing/parts.webp',
@@ -98,25 +98,16 @@ const HERO_SLIDES: {
 }[] = [
   {
     audience: 'Repair companies',
-    title: 'Run the schedule',
+    title: 'Schedule and Assign Service Calls',
     shot: {
       src: '/landing/dashboard.webp',
-      alt: 'Shop dashboard with open tickets and upcoming calls',
-      caption: 'Shop dashboard',
+      alt: 'Dashboard with open tickets and upcoming calls',
+      caption: 'Dashboard',
     },
   },
   {
     audience: 'Repair companies',
-    title: 'Dispatch the engineer',
-    shot: {
-      src: '/landing/dashboard.webp',
-      alt: 'Shop dashboard used to send the next call',
-      caption: 'Dispatch',
-    },
-  },
-  {
-    audience: 'Clinics',
-    title: 'Find a shop',
+    title: 'Bid on open service requests',
     shot: {
       src: '/landing/marketplace.webp',
       alt: 'Marketplace home for parts, used systems, and service needs',
@@ -125,7 +116,16 @@ const HERO_SLIDES: {
   },
   {
     audience: 'Clinics',
-    title: 'Take competing bids',
+    title: 'Find a Repair Company',
+    shot: {
+      src: '/landing/marketplace.webp',
+      alt: 'Marketplace home for parts, used systems, and service needs',
+      caption: 'Marketplace',
+    },
+  },
+  {
+    audience: 'Clinics',
+    title: 'Receive multiple bids on service requests',
     shot: {
       src: '/landing/reports.webp',
       alt: 'Service reports list with drafts and completed work',
@@ -134,16 +134,16 @@ const HERO_SLIDES: {
   },
   {
     audience: 'Clinics',
-    title: 'History and cost on file',
+    title: 'View service history and track maintenance costs',
     shot: {
       src: '/landing/reports.webp',
       alt: 'Service history that stays with each laser',
-      caption: 'History and cost',
+      caption: 'Service history',
     },
   },
   {
     audience: 'Parts sellers',
-    title: 'Reach shops and owners',
+    title: 'Connect with Repair Companies and laser owners',
     shot: {
       src: '/landing/parts.webp',
       alt: 'Parts marketplace with live listings and prices',
@@ -301,6 +301,9 @@ function HeroCarousel() {
           <Link href="/signup" className="lp-btn lp-btn-primary">
             Register for Total Service Pro
           </Link>
+          <Link href="/plans" className="lp-btn lp-btn-ghost">
+            Register for a Free Plan
+          </Link>
           <Link href="/login" className="lp-btn lp-btn-ghost">
             Sign in
           </Link>
@@ -311,42 +314,8 @@ function HeroCarousel() {
 }
 
 export function LandingPage() {
-  const [scrolled, setScrolled] = useState(false);
-
-  useEffect(() => {
-    document.documentElement.classList.add('landing-mode');
-    const onScroll = () => setScrolled(window.scrollY > 12);
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => {
-      document.documentElement.classList.remove('landing-mode');
-      window.removeEventListener('scroll', onScroll);
-    };
-  }, []);
-
   return (
-    <div className="lp-root -mx-4 sm:-mx-6 lg:-mx-8 -my-6">
-      <header className={`lp-nav ${scrolled ? 'is-scrolled' : ''}`}>
-        <Link href="/" className="lp-brand">
-          <span className="lp-brand-biz">Medical Repair Network</span>
-          <span className="lp-brand-name">Total Service Pro</span>
-          <span className="lp-brand-sub">Laser Equipment Service</span>
-        </Link>
-        <nav className="lp-nav-links" aria-label="Public">
-          <Link href="/directory">Directory</Link>
-          <Link href="/marketplace">Marketplace</Link>
-          <Link href="/marketplace/parts">Parts</Link>
-        </nav>
-        <div className="lp-nav-cta">
-          <Link href="/login" className="lp-btn lp-btn-ghost">
-            Sign in
-          </Link>
-          <Link href="/signup" className="lp-btn lp-btn-primary">
-            Register for Total Service Pro
-          </Link>
-        </div>
-      </header>
-
+    <LandingShell>
       <HeroCarousel />
 
       <section className="lp-gallery" aria-label="Product screens">
@@ -392,6 +361,9 @@ export function LandingPage() {
               <div className="lp-actions">
                 <Link href={r.signup} className="lp-btn lp-btn-primary">
                   Register for Total Service Pro
+                </Link>
+                <Link href="/plans" className="lp-btn lp-btn-ghost">
+                  Free Plan
                 </Link>
               </div>
             </article>
@@ -447,6 +419,9 @@ export function LandingPage() {
           </Link>
         </div>
         <div className="lp-actions" style={{ marginTop: 28 }}>
+          <Link href="/plans" className="lp-btn lp-btn-primary">
+            Register for a Free Plan
+          </Link>
           <Link href="/login" className="lp-btn lp-btn-ghost">
             Already registered? Sign in
           </Link>
@@ -455,23 +430,6 @@ export function LandingPage() {
           </Link>
         </div>
       </section>
-
-      <footer className="lp-footer">
-        <div>
-          <strong style={{ color: '#FBBF24' }}>Medical Repair Network</strong>
-          {' · '}
-          Total Service Pro
-        </div>
-        <div className="lp-footer-links">
-          <Link href="/">Home</Link>
-          <Link href="/directory">Directory</Link>
-          <Link href="/marketplace">Marketplace</Link>
-          <Link href="/marketplace/parts">Parts</Link>
-          <Link href="/login">Sign in</Link>
-          <Link href="/signup">Register for Total Service Pro</Link>
-          <Link href="/forgot-password">Forgot password</Link>
-        </div>
-      </footer>
-    </div>
+    </LandingShell>
   );
 }
