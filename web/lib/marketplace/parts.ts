@@ -68,7 +68,8 @@ export function listingImages(row: {
   images?: unknown;
   photos?: unknown;
   details?: Record<string, unknown> | null;
-}): string[] {
+} | null | undefined): string[] {
+  if (!row) return [];
   const from = (value: unknown): string[] => {
     if (!value) return [];
     if (Array.isArray(value)) {
@@ -179,7 +180,8 @@ export function listingSellerName(row: {
   details?: Record<string, unknown> | null;
   seller_name?: string | null;
   organizations?: { name?: string | null } | { name?: string | null }[] | null;
-}): string | null {
+} | null | undefined): string | null {
+  if (!row) return null;
   if (row.seller_name && String(row.seller_name).trim()) return String(row.seller_name).trim();
   const details = row.details && typeof row.details === 'object' ? row.details : null;
   const fromDetails = details?.seller_org_name || details?.seller_name || details?.organization_name;

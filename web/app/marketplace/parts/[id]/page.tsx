@@ -127,15 +127,11 @@ function PartDetail() {
   }, [id, supabase]);
 
   const images = useMemo(() => (listing ? listingImages(listing) : []), [listing]);
-  const mainPhoto = images[selectedPhoto] || images[0];
-  const availability = listingAvailability(listing);
-  const qty = listingQuantity(listing);
-  const seller = listingSellerName(listing);
-  const priceLabel = formatListingPrice(listing);
   const detailHref = partsDetailPath(id);
 
   const startPurchase = async () => {
     if (!listing || buying) return;
+    const availability = listingAvailability(listing);
     if (!availability.purchasable) {
       toast.error(availability.reason || 'This part cannot be purchased');
       return;
@@ -217,6 +213,11 @@ function PartDetail() {
     );
   }
 
+  const mainPhoto = images[selectedPhoto] || images[0];
+  const availability = listingAvailability(listing);
+  const qty = listingQuantity(listing);
+  const seller = listingSellerName(listing);
+  const priceLabel = formatListingPrice(listing);
   const details = listing.details && typeof listing.details === 'object' ? listing.details : {};
   const compatible = details.compatible_models != null ? String(details.compatible_models) : listing.model;
   const sku = details.sku != null ? String(details.sku) : listing.part_number || listing.serial_number;
