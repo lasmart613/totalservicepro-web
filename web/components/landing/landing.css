@@ -216,50 +216,53 @@ html.landing-mode body {
   margin-top: 36px;
 }
 
-.lp-role-tabs {
+.lp-role-cols {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  align-items: stretch;
+  margin-top: 8px;
+}
+
+.lp-role-col {
   display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  width: fit-content;
-  max-width: 100%;
-  margin: 0 0 22px;
-  padding: 4px;
+  flex-direction: column;
+  min-width: 0;
   background: #1A2233;
   border: 1px solid #4B5563;
-  border-radius: 10px;
+  border-radius: 12px;
+  padding: 20px 18px 18px;
 }
 
-.lp-role-tab {
-  appearance: none;
-  background: transparent;
-  border: none;
-  color: #9CA3AF;
-  font-family: inherit;
-  font-size: 12px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  padding: 10px 14px;
-  border-radius: 8px;
-  cursor: pointer;
+.lp-role-col h3 {
+  font-size: 18px;
+  font-weight: 800;
   line-height: 1.2;
+  letter-spacing: -0.02em;
+  margin: 0 0 14px;
 }
 
-.lp-role-tab:hover {
-  color: #F3E8D8;
+.lp-role-col .lp-features {
+  flex: 1;
+  margin-bottom: 16px;
 }
 
-.lp-role-tab.is-on,
-.lp-role-tab[aria-checked='true'] {
-  background: #FBBF24;
-  color: #111827;
+.lp-role-col .lp-shot {
+  margin: 0 0 16px;
 }
 
-.lp-role-pane {
-  display: grid;
-  grid-template-columns: minmax(240px, 380px) minmax(0, 1fr);
-  gap: 32px;
-  align-items: center;
+.lp-role-col .lp-shot img {
+  height: 112px;
+  object-fit: cover;
+  object-position: top center;
+}
+
+.lp-role-col .lp-actions {
+  margin-top: auto;
+}
+
+.lp-role-col .lp-btn {
+  width: 100%;
 }
 
 .lp-features {
@@ -418,7 +421,7 @@ html.landing-mode body {
     padding-top: 28px;
   }
 
-  .lp-role-pane {
+  .lp-role-cols {
     grid-template-columns: 1fr;
   }
 
@@ -459,12 +462,6 @@ html.landing-mode body {
   .lp-nav-cta .lp-btn {
     padding: 9px 12px;
     font-size: 11px;
-  }
-
-  .lp-role-tabs {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    width: 100%;
   }
 
   .lp-hero,

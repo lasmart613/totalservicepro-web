@@ -35,42 +35,23 @@ function Shot({
   );
 }
 
-type RoleId = 'owner' | 'shop' | 'parts' | 'rental';
-
-const ROLES: {
-  id: RoleId;
+const AUDIENCES: {
+  id: 'shop' | 'clinic' | 'parts';
   label: string;
   signup: string;
   lines: string[];
   shot: { src: string; alt: string; caption: string };
 }[] = [
   {
-    id: 'owner',
-    label: 'Clinic / owner',
-    signup: '/signup/owner',
-    lines: [
-      'Cut laser downtime',
-      'Keep the box running',
-      'Find a service company',
-      'Get competing bids',
-      'History on every serial',
-    ],
-    shot: {
-      src: '/landing/reports.webp',
-      alt: 'Service reports list with drafts and completed work',
-      caption: 'Service history',
-    },
-  },
-  {
     id: 'shop',
-    label: 'Service company',
+    label: 'Laser repair companies',
     signup: '/signup/company',
     lines: [
-      'Find clinics that need a call',
-      'Locate the part',
-      'Send the bid',
-      'Email the report from the job',
-      'Estimate and invoice the same job',
+      'Run the schedule',
+      'Dispatch the engineer',
+      'History on every job',
+      'Manuals in one place',
+      'Bid on open requests',
     ],
     shot: {
       src: '/landing/dashboard.webp',
@@ -79,13 +60,28 @@ const ROLES: {
     },
   },
   {
+    id: 'clinic',
+    label: 'Medical / aesthetic clinics',
+    signup: '/signup/owner',
+    lines: [
+      'Find the best shop',
+      'Take competing bids',
+      'History and cost on every serial',
+    ],
+    shot: {
+      src: '/landing/reports.webp',
+      alt: 'Service reports list with drafts and completed work',
+      caption: 'Service history',
+    },
+  },
+  {
     id: 'parts',
-    label: 'Parts seller',
+    label: 'Parts suppliers',
     signup: '/signup/supplier',
     lines: [
+      'Reach shops and owners',
+      'Get found when they need a part',
       'List what is on the shelf',
-      'Get found by shops and clinics',
-      'Checkout on the public page',
     ],
     shot: {
       src: '/landing/parts.webp',
@@ -93,26 +89,10 @@ const ROLES: {
       caption: 'Parts for sale',
     },
   },
-  {
-    id: 'rental',
-    label: 'Rental company',
-    signup: '/signup/owner',
-    lines: [
-      'Keep the fleet in one list',
-      'History on every box',
-      'Post a repair and take bids',
-    ],
-    shot: {
-      src: '/landing/reports.webp',
-      alt: 'Service history that stays with each laser in the fleet',
-      caption: 'Fleet history',
-    },
-  },
 ];
 
 export function LandingPage() {
   const [scrolled, setScrolled] = useState(false);
-  const [role, setRole] = useState<RoleId>('owner');
 
   useEffect(() => {
     document.documentElement.classList.add('landing-mode');
@@ -124,8 +104,6 @@ export function LandingPage() {
       window.removeEventListener('scroll', onScroll);
     };
   }, []);
-
-  const selected = ROLES.find((r) => r.id === role) ?? ROLES[0];
 
   return (
     <div className="lp-root -mx-4 sm:-mx-6 lg:-mx-8 -my-6">
@@ -196,39 +174,28 @@ export function LandingPage() {
 
       <section className="lp-section" id="features">
         <h2 className="lp-h2">What you get</h2>
-        <p className="lp-lede">Pick who you are.</p>
-        <div className="lp-role-tabs" role="radiogroup" aria-label="Who you are">
-          {ROLES.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              role="radio"
-              aria-checked={role === r.id}
-              className={`lp-role-tab${role === r.id ? ' is-on' : ''}`}
-              onClick={() => setRole(r.id)}
-            >
-              {r.label}
-            </button>
+        <p className="lp-lede">Repair shop, clinic, or parts seller.</p>
+        <div className="lp-role-cols">
+          {AUDIENCES.map((r) => (
+            <article key={r.id} className="lp-role-col">
+              <h3>{r.label}</h3>
+              <ul className="lp-features">
+                {r.lines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+              <Shot
+                src={r.shot.src}
+                alt={r.shot.alt}
+                caption={r.shot.caption}
+              />
+              <div className="lp-actions">
+                <Link href={r.signup} className="lp-btn lp-btn-primary">
+                  Register for Total Service Pro
+                </Link>
+              </div>
+            </article>
           ))}
-        </div>
-        <div className="lp-role-pane">
-          <div>
-            <ul className="lp-features">
-              {selected.lines.map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
-            <div className="lp-actions">
-              <Link href={selected.signup} className="lp-btn lp-btn-primary">
-                Register for Total Service Pro
-              </Link>
-            </div>
-          </div>
-          <Shot
-            src={selected.shot.src}
-            alt={selected.shot.alt}
-            caption={selected.shot.caption}
-          />
         </div>
       </section>
 
