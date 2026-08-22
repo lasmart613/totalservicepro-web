@@ -124,6 +124,11 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
+      if (member.organization_id != null) {
+        details.push(`${email}: already belongs to another organization — not moved`);
+        continue;
+      }
+
       const { error: upErr } = await admin
         .from('user_profiles')
         .update({

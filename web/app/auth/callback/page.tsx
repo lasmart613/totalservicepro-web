@@ -164,7 +164,7 @@ function AuthCallbackInner() {
 
         // Finish org creation from localStorage OR user_metadata (new-tab Gmail confirm).
         const pending = resolvePendingSignup(user);
-        if (pending && pending.email?.toLowerCase() === (user.email || '').toLowerCase()) {
+        if (pending && pending.email?.toLowerCase() === (user.email || '').toLowerCase() && pending.email) {
           try {
             setMessage('Creating your organization…');
             const applied = await applyPendingSignup(supabase, user.id, pending);

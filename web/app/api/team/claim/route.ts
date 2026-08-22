@@ -58,6 +58,16 @@ export async function POST(req: NextRequest) {
       });
     }
 
+    if (existingProf?.organization_id) {
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        organization_id: existingProf.organization_id,
+        role: existingProf.role,
+        needsMemberOnboarding: existingProf.onboarding_completed !== true,
+      });
+    }
+
     if (!hasServiceRole()) {
       // Best-effort client path (same as before)
       const { data: invites } = await userClient
@@ -69,8 +79,8 @@ export async function POST(req: NextRequest) {
         .limit(1);
 
       const inv = invites?.[0];
-      const orgId = inv?.organization_id ?? meta.organization_id ?? null;
-      const role = inv?.role || meta.role || 'fse';
+      const orgId = inv?.organization_id ?? null;
+      const role = inv?.role || 'fse';
 
       if (!orgId) {
         return NextResponse.json({
@@ -124,8 +134,8 @@ export async function POST(req: NextRequest) {
       }, { status: 404 });
     }
 
-    const orgId = inv?.organization_id ?? meta.organization_id ?? null;
-    const role = inv?.role || meta.role || 'fse';
+    const orgId = inv?.organization_id ?? null;
+    const role = inv?.role || 'fse';
 
     if (!orgId) {
       return NextResponse.json({
