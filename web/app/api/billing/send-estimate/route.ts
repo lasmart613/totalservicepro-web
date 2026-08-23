@@ -7,7 +7,7 @@ import {
   persistEstimateActionToken,
   readExistingActionToken,
 } from '@/lib/billing/estimate-action';
-import { estimateActionUrl } from '@/lib/share';
+import { estimateActionUrl, estimateCustomerPath, estimateCustomerUrl } from '@/lib/share';
 import {
   publicSiteOrigin,
   resolveFreeAccountUrls,
@@ -235,16 +235,24 @@ export async function POST(req: NextRequest) {
       } catch (e) {
         console.warn('could not persist estimate action token', e);
       }
-      html = ensureEstimateActionCtas(html, estimateActionUrl(actionToken));
+      html = ensureEstimateActionCtas(
+        html,
+        estimateCustomerUrl(estimateId) || estimateActionUrl(actionToken)
+      );
     }
 
     const companyName = String(est?.customer_name || '').trim();
-    const { signupUrl, loginUrl } = resolveFreeAccountUrls({
+    const { signupUrl, loginUrl: claimLoginUrl } = resolveFreeAccountUrls({
       origin: publicSiteOrigin(req),
       email: toEmail,
       companyName,
       customerOrgId: custOrgId,
     });
+    const origin = publicSiteOrigin(req);
+    const loginUrl =
+      estimateId != null
+        ? `${origin}/login?next=${encodeURIComponent(estimateCustomerPath(estimateId))}`
+        : claimLoginUrl;
     const wrapped = wrapCustomerFacingDocumentEmail({
       subject,
       documentHtml: html,

@@ -324,6 +324,7 @@ export function publicEstimatePayload(estimate: any, companyName: string) {
     }
   }
   return {
+    estimateId: estimate.id ?? null,
     estimateNumber: estimate.estimate_number || ed.estimate_number || ed.estNumber || '',
     customerName: estimate.customer_name || ed.customer_name || 'Customer',
     total: Number(estimate.total) || Number(ed.total) || 0,

@@ -22,10 +22,36 @@ export function listingShareUrl(
   return `${SITE_ORIGIN}${path}?utm_source=share&invite=1`;
 }
 
-/** Public, no-login estimate approve / request-changes page. */
+function siteOrigin(): string {
+  return String(SITE_ORIGIN || 'https://repairplanet.net').replace(/\/$/, '');
+}
+
+/** Signed-in clinic estimate page (RequireAuth → /login?next=/estimates/{id}). */
+export function estimateCustomerPath(
+  estimateId: string | number,
+  opts?: { changes?: boolean }
+): string {
+  const base = `/estimates/${encodeURIComponent(String(estimateId))}`;
+  return opts?.changes ? `${base}?changes=1` : base;
+}
+
+export function estimateCustomerUrl(
+  estimateId: string | number,
+  opts?: { changes?: boolean }
+): string {
+  return `${siteOrigin()}${estimateCustomerPath(estimateId, opts)}`;
+}
+
+export function estimateCustomerLoginPath(
+  estimateId: string | number,
+  opts?: { changes?: boolean }
+): string {
+  return `/login?next=${encodeURIComponent(estimateCustomerPath(estimateId, opts))}`;
+}
+
+/** Tokenized email CTA. Server redirects /e/{token} → /estimates/{id}. */
 export function estimateActionUrl(token: string, opts?: { changes?: boolean }): string {
-  const origin = String(SITE_ORIGIN || 'https://repairplanet.net').replace(/\/$/, '');
-  const base = `${origin}/e/${encodeURIComponent(token)}`;
+  const base = `${siteOrigin()}/e/${encodeURIComponent(token)}`;
   return opts?.changes ? `${base}?changes=1` : base;
 }
 
