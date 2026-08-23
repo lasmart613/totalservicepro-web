@@ -91,6 +91,15 @@ export default function HomePage() {
             console.warn('owner first-run apply', e);
           }
         }
+        if (pending?.kind === 'manufacturer') {
+          try {
+            await applyPendingSignup(supabase, u.id, pending);
+            router.replace('/?justSetup=1');
+            return;
+          } catch (e) {
+            console.warn('manufacturer first-run apply', e);
+          }
+        }
         router.replace('/onboarding');
         return;
       }
@@ -103,13 +112,15 @@ export default function HomePage() {
           r === 'customer' ||
           r === 'parts_supplier' ||
           r === 'supplier' ||
+          r === 'manufacturer' ||
           metaRole === 'owner' ||
-          metaRole === 'parts_supplier';
+          metaRole === 'parts_supplier' ||
+          metaRole === 'manufacturer';
         if (invited && !ownerOrSupplier) {
           router.replace('/onboarding/member');
           return;
         }
-        // Owners/suppliers already have an org — do not send them through RSP onboarding.
+        // Owners/suppliers/manufacturers already have an org — do not send them through RSP onboarding.
         if (!ownerOrSupplier) {
           router.replace('/onboarding');
           return;
@@ -149,6 +160,11 @@ export default function HomePage() {
 
       if (dashPersona === 'supplier') {
         await loadSupplierStats(orgId, u.id);
+        setLoading(false);
+        return;
+      }
+
+      if (dashPersona === 'manufacturer') {
         setLoading(false);
         return;
       }
@@ -409,7 +425,7 @@ export default function HomePage() {
   }
 
   const role = profile?.role;
-  const greetName = profile?.first_name || (persona === 'owner' || persona === 'supplier' ? 'there' : 'Tech');
+  const greetName = profile?.first_name || (persona === 'owner' || persona === 'supplier' || persona === 'manufacturer' ? 'there' : 'Tech');
   const labelKind = ownerLabelKind(orgType, facilityType, user?.user_metadata?.organization_type);
   const displayOrgType =
     labelKind === 'rental' ? 'laser_rental' : labelKind === 'reseller' ? 'laser_reseller' : orgType;
@@ -533,6 +549,32 @@ export default function HomePage() {
                 <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />
                   <div className="font-bold">Supplier Profile</div>
+                </Link>
+                <Link href="/settings" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Settings size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Settings</div>
+                </Link>
+              </div>
+            </div>
+          </>
+        )}
+
+        {/* ── Manufacturer (OEM / factory) — conservative, not a shop ── */}
+        {persona === 'manufacturer' && (
+          <>
+            <div className="mt-12">
+              <h3 className="font-bold text-lg mb-4">Manufacturer Dashboard</h3>
+              <p className="text-sm text-[var(--text3)] mb-4 max-w-xl">
+                Laser OEM / factory. Factory and authorized service come later. This is not a repair-company account.
+              </p>
+              <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
+                <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Manufacturer Profile</div>
+                </Link>
+                <Link href="/directory" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">TSP Directory</div>
                 </Link>
                 <Link href="/settings" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Settings size={32} className="mx-auto mb-3 text-[var(--gold)]" />

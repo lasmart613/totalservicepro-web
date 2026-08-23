@@ -386,7 +386,7 @@ html.landing-mode body {
 
 .lp-role-cols {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 16px;
   align-items: stretch;
   margin-top: 8px;
@@ -508,7 +508,7 @@ html.landing-mode body {
 
 .lp-paths {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
   margin-top: 8px;
 }
@@ -606,7 +606,7 @@ html.landing-mode body {
   }
 
   .lp-role-cols {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .lp-gallery {
@@ -614,7 +614,7 @@ html.landing-mode body {
   }
 
   .lp-paths {
-    grid-template-columns: 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .lp-phone-wrap {
@@ -623,6 +623,13 @@ html.landing-mode body {
 
   .lp-phone-wrap .lp-phone + .lp-phone {
     display: none;
+  }
+}
+
+@media (max-width: 699px) {
+  .lp-role-cols,
+  .lp-paths {
+    grid-template-columns: 1fr;
   }
 }
 

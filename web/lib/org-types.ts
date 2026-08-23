@@ -1,20 +1,27 @@
 /**
  * Organization types for Total Service Pro.
  *
- * Product model:
+ * Product model — one type per organization (no multi-type, no tags):
  * - service_company — Repair Service Provider (RSP)
  * - parts_supplier / vendor — parts/consumables suppliers
+ * - manufacturer — laser OEM / factory (Candela, Sciton, Cynosure, …)
  * - Owner-side (equipment operators / holders):
  *     customer | laser_clinic | laser_rental | laser_reseller
  *
  * Laser Rental and Laser Reseller are NOT service companies.
  * They are owner-side: they own/hold lasers (My Lasers, post service needs, award bids).
  * Reseller may also list systems on marketplace (same as owners today).
+ *
+ * Manufacturer is first-class. Do not treat it as a second tag on service_company.
+ * Existing imported OEM service contacts stay service_company until a later flip.
  */
 
 export const SERVICE_ORG_TYPES = ['service_company'] as const;
 
 export const SUPPLIER_ORG_TYPES = ['parts_supplier', 'vendor'] as const;
+
+/** Laser OEM / factory — not a service company, clinic, or parts supplier. */
+export const MANUFACTURER_ORG_TYPES = ['manufacturer'] as const;
 
 /** All org types that use the facility / laser-owner product persona */
 export const OWNER_ORG_TYPES = [
@@ -24,14 +31,32 @@ export const OWNER_ORG_TYPES = [
   'laser_reseller',
 ] as const;
 
+/**
+ * Live + first-class organizations.type values.
+ * Keep every live value: customer, service_company, parts_supplier,
+ * laser_clinic, laser_rental, laser_reseller, manufacturer.
+ */
+export const ORG_TYPES = [
+  'customer',
+  'service_company',
+  'parts_supplier',
+  'laser_clinic',
+  'laser_rental',
+  'laser_reseller',
+  'manufacturer',
+] as const;
+
 export type OwnerOrgType = (typeof OWNER_ORG_TYPES)[number];
 export type ServiceOrgType = (typeof SERVICE_ORG_TYPES)[number];
 export type SupplierOrgType = (typeof SUPPLIER_ORG_TYPES)[number];
+export type ManufacturerOrgType = (typeof MANUFACTURER_ORG_TYPES)[number];
+export type KnownOrgType = (typeof ORG_TYPES)[number];
 
 export type OrgType =
   | OwnerOrgType
   | ServiceOrgType
   | SupplierOrgType
+  | ManufacturerOrgType
   | string;
 
 export function isOwnerOrgType(type?: string | null): boolean {
@@ -47,6 +72,11 @@ export function isSupplierOrgType(type?: string | null): boolean {
 export function isServiceOrgType(type?: string | null): boolean {
   const t = (type || '').toLowerCase().trim();
   return t === 'service_company' || t === 'service';
+}
+
+export function isManufacturerOrgType(type?: string | null): boolean {
+  const t = (type || '').toLowerCase().trim();
+  return (MANUFACTURER_ORG_TYPES as readonly string[]).includes(t);
 }
 
 /** Customer directory / CRM — all owner-side orgs service companies may link */

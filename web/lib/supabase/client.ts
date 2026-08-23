@@ -54,7 +54,7 @@ export type UserProfile = {
   email?: string | null;
   phone?: string | null;
   job_title?: string | null;
-  role?: 'engineer' | 'fse' | 'dispatcher' | 'service_manager' | 'company_admin' | 'parts_supplier' | 'billing_manager' | 'crm' | 'admin' | 'owner' | 'customer' | string;
+  role?: 'engineer' | 'fse' | 'dispatcher' | 'service_manager' | 'company_admin' | 'parts_supplier' | 'billing_manager' | 'crm' | 'admin' | 'owner' | 'customer' | 'manufacturer' | string;
   additional_roles?: string[] | null;  // jsonb for multi-role support (sole prop etc); primary always in role field
   organization_id?: string | number | null;
   avatar_url?: string | null;
@@ -202,14 +202,14 @@ export async function claimPendingInvitations(supabase: SupabaseClient, userId: 
       .maybeSingle();
     const { data: { user: authUser } } = await supabase.auth.getUser();
     const invited = !!(authUser?.user_metadata as any)?.invited_member;
-    const founderRoles = new Set(['company_admin', 'admin', 'owner', 'parts_supplier']);
+    const founderRoles = new Set(['company_admin', 'admin', 'owner', 'parts_supplier', 'manufacturer']);
     const metaRole = String((authUser?.user_metadata as any)?.role || '').toLowerCase();
     const signupKind = String((authUser?.user_metadata as any)?.signup_kind || '').toLowerCase();
     const isFounderSignup =
       !invited &&
       (founderRoles.has(String(existingProf?.role || '').toLowerCase()) ||
         founderRoles.has(metaRole) ||
-        ['company', 'owner', 'supplier'].includes(signupKind));
+        ['company', 'owner', 'supplier', 'manufacturer'].includes(signupKind));
     if (isFounderSignup && (existingProf?.organization_id || signupKind || founderRoles.has(metaRole))) {
       return;
     }

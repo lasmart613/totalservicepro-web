@@ -199,7 +199,7 @@ function AuthCallbackInner() {
 
         if (cancelled) return;
 
-        const founderRoles = new Set(['company_admin', 'admin', 'owner', 'parts_supplier']);
+        const founderRoles = new Set(['company_admin', 'admin', 'owner', 'parts_supplier', 'manufacturer']);
         const metaRole = String(meta.role || '').toLowerCase();
         const isFounder =
           founderRoles.has(String(prof?.role || '').toLowerCase()) ||

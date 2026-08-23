@@ -171,7 +171,7 @@ export async function POST(req: NextRequest) {
     if (existingProfile?.id) {
       const existingOrg = existingProfile.organization_id;
       const existingRole = String(existingProfile.role || '').toLowerCase();
-      const founderLocked = ['company_admin', 'admin', 'owner', 'parts_supplier'].includes(existingRole);
+      const founderLocked = ['company_admin', 'admin', 'owner', 'parts_supplier', 'manufacturer'].includes(existingRole);
       if (existingOrg && String(existingOrg) !== String(orgId)) {
         return NextResponse.json({
           error: `${email} already belongs to another organization. Ask them to leave that org first, or invite a different email.`,

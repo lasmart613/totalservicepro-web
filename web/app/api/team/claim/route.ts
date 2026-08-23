@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     const email = user.email.toLowerCase().trim();
     const meta = user.user_metadata || {};
 
-    const founderRoles = new Set(['company_admin', 'admin', 'owner', 'parts_supplier']);
+    const founderRoles = new Set(['company_admin', 'admin', 'owner', 'parts_supplier', 'manufacturer']);
     const { data: existingProf } = await userClient
       .from('user_profiles')
       .select('organization_id, role, onboarding_completed')
@@ -47,7 +47,7 @@ export async function POST(req: NextRequest) {
     const alreadyFounder =
       !meta.invited_member &&
       (founderRoles.has(String(existingProf?.role || meta.role || '').toLowerCase()) ||
-        ['company', 'owner', 'supplier'].includes(signupKind));
+        ['company', 'owner', 'supplier', 'manufacturer'].includes(signupKind));
     if (alreadyFounder && (existingProf?.organization_id || signupKind)) {
       return NextResponse.json({
         ok: true,

@@ -5,6 +5,10 @@
  */
 
 import { z } from 'zod';
+import { ORG_TYPES } from './org-types';
+
+/** Live + first-class organizations.type values. One type per org. */
+export const orgTypeSchema = z.enum(ORG_TYPES);
 
 export const reportBaseSchema = z.object({
   reportNum: z.string().optional(),

@@ -16,7 +16,7 @@ import {
   ChevronDown,
   ArrowUpCircle,
 } from 'lucide-react';
-import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
+import { isOwnerish, isSupplier, isManufacturer, isAdmin } from '@/lib/roles';
 import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
@@ -258,12 +258,15 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const effectiveRole = profile?.role || meta.role;
   const ownerMode = isOwnerish(effectiveRole, orgType);
   const supplierMode = isSupplier(effectiveRole, orgType);
+  const manufacturerMode = isManufacturer(effectiveRole, orgType);
   const companyLabel = ownerMode
     ? ownerProfileLabel(orgType, facilityType, meta.organization_type)
     : supplierMode
       ? 'Supplier Profile'
-      : 'Company Profile';
-  const showServiceNav = !ownerMode && !supplierMode;
+      : manufacturerMode
+        ? 'Manufacturer Profile'
+        : 'Company Profile';
+  const showServiceNav = !ownerMode && !supplierMode && !manufacturerMode;
   const canBusinessNav =
     showServiceNav &&
     (isAdmin(profile?.role) ||
@@ -297,6 +300,16 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
             { href: '/marketplace/parts', label: 'Parts Marketplace' },
             { href: '/marketplace/consumables', label: 'Consumables' },
             { href: '/marketplace/my-listings', label: 'My Listings' },
+            { href: '/directory', label: 'TSP Directory' },
+          ],
+        }
+      : manufacturerMode
+      ? {
+          id: 'hub',
+          label: 'Manufacturer Hub',
+          href: '/company',
+          items: [
+            { href: '/company', label: 'Manufacturer Profile' },
             { href: '/directory', label: 'TSP Directory' },
           ],
         }

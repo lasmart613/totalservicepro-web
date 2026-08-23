@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { isAdmin, isOwnerish, isSupplier } from '@/lib/roles';
+import { isAdmin, isManufacturer, isOwnerish, isSupplier } from '@/lib/roles';
 import { ownerLabelKind } from '@/lib/labels';
 
 type HubCard = { href: string; icon: string; label: string; desc: string };
@@ -47,7 +47,8 @@ export default function TechHub() {
 
   const owner = isOwnerish(role, orgType);
   const supplier = isSupplier(role, orgType);
-  const service = !owner && !supplier;
+  const manufacturer = isManufacturer(role, orgType);
+  const service = !owner && !supplier && !manufacturer;
   const rentalOwner = owner && ownerLabelKind(orgType) === 'rental';
   const canBusiness =
     service &&
@@ -73,6 +74,11 @@ export default function TechHub() {
           { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Master list & listings' },
           { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Demand & your listings' },
           { href: '/company', icon: '🏢', label: 'Supplier Profile', desc: 'Company & brands' },
+          { href: '/directory', icon: '📒', label: 'TSP Directory', desc: 'Listed organizations (free)' },
+        ]
+      : manufacturer
+      ? [
+          { href: '/company', icon: '🏢', label: 'Manufacturer Profile', desc: 'OEM / factory details' },
           { href: '/directory', icon: '📒', label: 'TSP Directory', desc: 'Listed organizations (free)' },
         ]
       : [
@@ -113,7 +119,7 @@ export default function TechHub() {
       <Header />
       <div className="max-w-7xl mx-auto w-full px-4 py-6">
         <h1 className="text-2xl font-extrabold mb-1">
-          {owner ? (rentalOwner ? 'My Lasers' : 'Owner Hub') : supplier ? 'Supplier Hub' : '🛠️ Tech Hub'}
+          {owner ? (rentalOwner ? 'My Lasers' : 'Owner Hub') : supplier ? 'Supplier Hub' : manufacturer ? 'Manufacturer Hub' : '🛠️ Tech Hub'}
         </h1>
         <p className="text-sm text-[var(--text3)] mb-6">
           {owner
@@ -122,7 +128,9 @@ export default function TechHub() {
               : 'Facility tools & service history'
             : supplier
               ? 'Supplier catalog & marketplace tools'
-              : 'Professional laser service resources & reference tools'}
+              : manufacturer
+                ? 'OEM / factory profile. Factory and authorized service come later.'
+                : 'Professional laser service resources & reference tools'}
         </p>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">

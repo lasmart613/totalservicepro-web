@@ -2,7 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 
 const KEY = 'tsp-pending-signup';
 
-export type PendingSignupKind = 'company' | 'owner' | 'supplier';
+export type PendingSignupKind = 'company' | 'owner' | 'supplier' | 'manufacturer';
 
 export type PendingSignup = {
   kind: PendingSignupKind;
@@ -112,6 +112,10 @@ export function organizationInsertFromPending(pending: PendingSignup, userId: st
     orgInsert.tax_id = pending.extra?.tax_id || null;
     orgInsert.services_offered = pending.extra?.services_offered || null;
   }
+  if (pending.kind === 'manufacturer') {
+    orgInsert.supported_brands = pending.extra?.supported_brands || null;
+    orgInsert.notes = pending.extra?.bio || pending.extra?.notes || null;
+  }
 
   delete orgInsert.num_lasers;
   return orgInsert;
@@ -178,6 +182,12 @@ export function pendingSignupFromMetadata(user: {
     orgType === 'parts_supplier'
   ) {
     kind = 'supplier';
+  } else if (
+    signupKind === 'manufacturer' ||
+    role === 'manufacturer' ||
+    orgType === 'manufacturer'
+  ) {
+    kind = 'manufacturer';
   }
 
   if (!kind) return null;
@@ -185,10 +195,22 @@ export function pendingSignupFromMetadata(user: {
 
   const resolvedOrgType =
     orgType ||
-    (kind === 'company' ? 'service_company' : kind === 'owner' ? 'customer' : 'parts_supplier');
+    (kind === 'company'
+      ? 'service_company'
+      : kind === 'owner'
+        ? 'customer'
+        : kind === 'manufacturer'
+          ? 'manufacturer'
+          : 'parts_supplier');
   const resolvedRole =
     role ||
-    (kind === 'company' ? 'company_admin' : kind === 'owner' ? 'owner' : 'parts_supplier');
+    (kind === 'company'
+      ? 'company_admin'
+      : kind === 'owner'
+        ? 'owner'
+        : kind === 'manufacturer'
+          ? 'manufacturer'
+          : 'parts_supplier');
 
   return {
     kind,

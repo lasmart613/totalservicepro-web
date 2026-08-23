@@ -30,10 +30,10 @@ test('manual entitlements stay Premium 15 and Team 50', () => {
   assert.doesNotMatch(TEAM_MANUALS_LINE, /unlimited/i);
 });
 
-test('audience pills are Service Company, Laser Owner, Parts Supplier', () => {
+test('audience pills are Service Company, Laser Owner, Parts Supplier, Manufacturer', () => {
   assert.deepEqual(
     PLAN_AUDIENCE_OPTIONS.map((a) => a.label),
-    ['Service Company', 'Laser Owner', 'Parts Supplier']
+    ['Service Company', 'Laser Owner', 'Parts Supplier', 'Manufacturer']
   );
   assert.equal(DEFAULT_PLAN_AUDIENCE, 'company');
 });
@@ -47,6 +47,8 @@ test('?role=owner|supplier|company parse, with landing aliases', () => {
   assert.equal(parsePlanAudience('clinic'), 'owner');
   assert.equal(parsePlanAudience('supplier'), 'supplier');
   assert.equal(parsePlanAudience('parts'), 'supplier');
+  assert.equal(parsePlanAudience('manufacturer'), 'manufacturer');
+  assert.equal(parsePlanAudience('oem'), 'manufacturer');
   assert.equal(parsePlanAudience('unknown'), 'company');
 });
 
@@ -54,13 +56,16 @@ test('landing Free Plan hrefs stay on /plans with role query', () => {
   assert.equal(plansHrefForAudience('company'), '/plans');
   assert.equal(plansHrefForAudience('owner'), '/plans?role=owner');
   assert.equal(plansHrefForAudience('supplier'), '/plans?role=supplier');
+  assert.equal(plansHrefForAudience('manufacturer'), '/plans?role=manufacturer');
 });
 
-test('swipe wraps the three audiences', () => {
+test('swipe wraps the four audiences', () => {
   assert.equal(nextPlanAudience('company', 1), 'owner');
-  assert.equal(nextPlanAudience('supplier', 1), 'company');
-  assert.equal(nextPlanAudience('company', -1), 'supplier');
+  assert.equal(nextPlanAudience('manufacturer', 1), 'company');
+  assert.equal(nextPlanAudience('company', -1), 'manufacturer');
 });
+
+const SHOP_AUDIENCES = ['company', 'owner', 'supplier'] as const;
 
 test('shared entitlements appear on every audience and every tier', () => {
   for (const audience of PLAN_AUDIENCES) {
@@ -74,11 +79,24 @@ test('shared entitlements appear on every audience and every tier', () => {
         `${audience} ${tile} must not say unlimited`
       );
     }
+  }
+  for (const audience of SHOP_AUDIENCES) {
     assert.ok(planTileLines(audience, 'free').includes(FREE_AI_LINE));
     assert.ok(planTileLines(audience, 'premium').includes(PREMIUM_AI_LINE));
     assert.ok(planTileLines(audience, 'premium').includes(PREMIUM_MANUALS_LINE));
     assert.ok(planTileLines(audience, 'team').includes(TEAM_AI_LINE));
     assert.ok(planTileLines(audience, 'team').includes(TEAM_MANUALS_LINE));
+  }
+});
+
+test('manufacturer tiles stay conservative — no shop AI, manuals, or query counts', () => {
+  for (const tile of TILES) {
+    const blob = planTileLines('manufacturer', tile).join('\n');
+    assert.doesNotMatch(blob, /service manuals/i);
+    assert.doesNotMatch(blob, /AI queries/i);
+    assert.doesNotMatch(blob, /\b\d+\s+text\b/i);
+    assert.doesNotMatch(blob, /bid on open service/i);
+    assert.doesNotMatch(blob, /schedule service calls/i);
   }
 });
 
@@ -107,7 +125,9 @@ test('Parts Supplier photo entitlements are locked by tier', () => {
 test('audience copy stays separate — do not merge roles', () => {
   assert.notDeepEqual(PLAN_TILE_COPY.company.free, PLAN_TILE_COPY.owner.free);
   assert.notDeepEqual(PLAN_TILE_COPY.company.free, PLAN_TILE_COPY.supplier.free);
+  assert.notDeepEqual(PLAN_TILE_COPY.company.free, PLAN_TILE_COPY.manufacturer.free);
   assert.ok(PLAN_TILE_COPY.company.free.some((l) => /schedule service calls/i.test(l)));
   assert.ok(PLAN_TILE_COPY.owner.free.some((l) => /rated repair/i.test(l)));
   assert.ok(PLAN_TILE_COPY.supplier.free.some((l) => /one .*photo/i.test(l)));
+  assert.ok(PLAN_TILE_COPY.manufacturer.free.some((l) => /OEM|factory|directory/i.test(l)));
 });
