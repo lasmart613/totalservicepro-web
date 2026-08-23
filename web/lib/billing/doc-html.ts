@@ -68,7 +68,7 @@ export function buildEstimateActionCtasHtml(actionUrl: string): string {
     `Request Changes</a>` +
     `</td></tr>` +
     `<tr><td align="center" style="padding:8px 8px 0;font-size:10px;color:#666;">` +
-    `No account required. Opens a secure link from RepairPlanet.` +
+    `Sign in with your clinic account to approve. Opens your estimate on RepairPlanet.` +
     `</td></tr>` +
     `</table>`
   );
@@ -355,7 +355,7 @@ export type EstimateHtmlInput = {
   deposit?: number;
   balanceDue?: number;
   validDays?: number;
-  /** Public no-login action page (https://repairplanet.net/e/[token]). */
+  /** Clinic estimate page (https://repairplanet.net/estimates/{id}). */
   actionUrl?: string | null;
 };
 

@@ -11,7 +11,8 @@ import {
   resolveOrgNotifyEmails,
   sendResendHtml,
 } from '@/lib/billing/estimate-action';
-import { isEstimateExpired, parseJsonField } from '@/lib/billing/save-helpers';
+import { parseJsonField } from '@/lib/billing/save-helpers';
+import { estimateCustomerLoginPath } from '@/lib/share';
 
 export const dynamic = 'force-dynamic';
 
@@ -94,15 +95,17 @@ export async function POST(req: NextRequest) {
 
     const { companyName, emails } = await resolveOrgNotifyEmails(admin, est);
     const payload = publicEstimatePayload(est, companyName);
+    const loginUrl = estimateCustomerLoginPath(est.id);
 
-    if (action === CUSTOMER_ACTION_APPROVED && (payload.expired || isEstimateExpired(est))) {
+    if (action === CUSTOMER_ACTION_APPROVED) {
       return NextResponse.json(
         {
-          error: 'This estimate has expired. Please contact the company to request an updated quote.',
+          error: 'Sign in as the clinic this estimate was written for to approve it.',
+          loginUrl,
           estimate: payload,
-          expired: true,
+          requiresLogin: true,
         },
-        { status: 409 }
+        { status: 401 }
       );
     }
 

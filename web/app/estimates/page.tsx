@@ -16,6 +16,7 @@ import {
   parseJsonField,
   validUntilLabel,
 } from '@/lib/billing/save-helpers';
+import { approvedTicketRefFromEstimate } from '@/lib/billing/approve-estimate';
 
 type EstFilter = 'active' | 'draft' | 'pending' | 'invoiced' | 'expired' | 'all';
 
@@ -368,6 +369,7 @@ export default function EstimatesListPage() {
               const canConvert = st !== 'invoiced' && st !== 'cancelled' && st !== 'expired';
               const cust = customerActionFromEstimate(est);
               const actionLabel = customerActionLabel(cust.action);
+              const approvedTicket = approvedTicketRefFromEstimate(est);
               return (
                 <div
                   key={String(est.id)}
@@ -425,6 +427,11 @@ export default function EstimatesListPage() {
                             {actionLabel}
                           </span>
                         )}
+                        {approvedTicket.number && (
+                          <span className="ml-1 text-[10px] text-[var(--text3)]">
+                            · Request {approvedTicket.number}
+                          </span>
+                        )}
                       </div>
                       {est.device_model && (
                         <div className="text-xs text-[var(--text3)] mt-0.5 truncate">
@@ -442,7 +449,14 @@ export default function EstimatesListPage() {
                         className="btn btn-secondary text-xs px-3 py-1.5"
                         style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
                       >
-                        View
+                        Edit
+                      </Link>
+                      <Link
+                        href={`/estimates/${est.id}`}
+                        className="btn btn-secondary text-xs px-3 py-1.5"
+                        style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
+                      >
+                        Customer view
                       </Link>
                       {canConvert && (
                         <Link

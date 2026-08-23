@@ -2,8 +2,10 @@
 
 import React, { useEffect, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
+import { estimateCustomerPath } from '@/lib/share';
 
 type PublicEstimate = {
+  estimateId?: string | number | null;
   estimateNumber: string;
   customerName: string;
   total: number;
@@ -55,6 +57,12 @@ export default function EstimateActionClient({ token }: { token: string }) {
           if (!cancelled) setError(json?.error || 'This estimate link is not valid.');
           return;
         }
+        if (json.estimate.estimateId != null) {
+          window.location.replace(
+            estimateCustomerPath(json.estimate.estimateId, { changes: wantChanges })
+          );
+          return;
+        }
         if (!cancelled) {
           setEst(json.estimate);
           if (json.estimate.customerAction === 'approved') setDone('approved');
@@ -68,7 +76,7 @@ export default function EstimateActionClient({ token }: { token: string }) {
     return () => {
       cancelled = true;
     };
-  }, [token]);
+  }, [token, wantChanges]);
 
   async function submit(action: 'approve' | 'request_changes') {
     if (action === 'request_changes' && !note.trim()) {
