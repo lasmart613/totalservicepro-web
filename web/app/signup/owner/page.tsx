@@ -23,15 +23,36 @@ const FACILITY_TYPES = [
   'Private Practice',
   'Surgery Center',
   'Research / University',
-  'Rental fleet',
+  'Rental company',
   'Reseller inventory',
   'Other',
 ];
 
-const PREFERRED_SERVICE_OPTIONS = [
-  'Preventive Maintenance (PM)', 'Emergency / On-Call Repair', 'Install / Deinstall',
-  'Calibration', 'Training', 'Full Service Contract', 'Parts Supply'
+/** Clinic / practice / reseller — unchanged owner signup pills. */
+const CLINIC_PREFERRED_SERVICE_OPTIONS = [
+  'Preventive Maintenance (PM)',
+  'Emergency / On-Call Repair',
+  'Install / Deinstall',
+  'Calibration',
+  'Training',
+  'Full Service Contract',
+  'Parts Supply',
 ];
+
+/** Rental fleet pills. Reuses existing signup names where they exist. */
+const RENTAL_PREFERRED_SERVICE_OPTIONS = [
+  'Preventive Maintenance (PM)',
+  'On-site Repair',
+  'Depot Repair',
+  'Emergency / On-Call Repair',
+  'Install / Deinstall',
+  'Pickup / Delivery',
+  'Calibration',
+];
+
+function isRentalOwnerSignup(orgKind: OwnerOrgType, facilityType: string): boolean {
+  return orgKind === 'laser_rental' || /rental/i.test(facilityType);
+}
 
 const modelKeys = Object.keys(MODELS);
 
@@ -89,6 +110,19 @@ function OwnerSignupInner() {
       cancelled = true;
     };
   }, [searchParams]);
+
+  const rentalSignup = isRentalOwnerSignup(orgKind, facilityType);
+  const preferredServiceOptions = rentalSignup
+    ? RENTAL_PREFERRED_SERVICE_OPTIONS
+    : CLINIC_PREFERRED_SERVICE_OPTIONS;
+
+  useEffect(() => {
+    const allowed = new Set(preferredServiceOptions);
+    setSelectedServices((prev) => {
+      const next = prev.filter((s) => allowed.has(s));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [preferredServiceOptions]);
 
   const nameLabel =
     orgKind === 'laser_rental'
@@ -327,9 +361,13 @@ function OwnerSignupInner() {
                       checked={orgKind === opt.value}
                       onChange={() => {
                         setOrgKind(opt.value);
-                        if (opt.value === 'laser_rental') setFacilityType('Rental fleet');
+                        if (opt.value === 'laser_rental') setFacilityType('Rental company');
                         else if (opt.value === 'laser_reseller') setFacilityType('Reseller inventory');
-                        else if (facilityType === 'Rental fleet' || facilityType === 'Reseller inventory') {
+                        else if (
+                          facilityType === 'Rental company' ||
+                          facilityType === 'Rental fleet' ||
+                          facilityType === 'Reseller inventory'
+                        ) {
                           setFacilityType('Clinic');
                         }
                       }}
@@ -485,7 +523,7 @@ function OwnerSignupInner() {
             <div>
               <label className="label">Preferred Service Types</label>
               <div className="flex flex-wrap gap-2 mb-2">
-                {PREFERRED_SERVICE_OPTIONS.map(svc => (
+                {preferredServiceOptions.map(svc => (
                   <button
                     key={svc}
                     type="button"

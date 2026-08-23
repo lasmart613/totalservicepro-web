@@ -524,7 +524,7 @@ export default function Onboarding() {
           orgPayload.facility_type =
             orgPayload.facility_type ||
             (metaType === 'laser_rental'
-              ? 'Rental fleet'
+              ? 'Rental company'
               : metaType === 'laser_reseller'
                 ? 'Reseller inventory'
                 : 'Clinic');
@@ -759,7 +759,7 @@ export default function Onboarding() {
               ? 'Register your facility and lasers.'
               : orgType === 'supplier'
                 ? 'Set up supplier categories and brands.'
-                : 'RSPs: add your team and roles now (sole props supported).'}
+                : 'Repair companies: add your team and roles now (sole props supported).'}
           </p>
           <div className="flex justify-center gap-2 mt-4">
             {[1,2,3,4,5,6].map(s => <div key={s} className={`w-2.5 h-2.5 rounded-full ${step >= s ? 'bg-[var(--gold)]' : 'bg-[var(--surface3)]'}`} />)}
@@ -779,7 +779,7 @@ export default function Onboarding() {
                 </button>
               ))}
             </div>
-            <div className="mt-6 text-xs text-[var(--text3)]">FSEs are added as roles inside an RSP org (you can add during this flow or later in Company &gt; Team).</div>
+            <div className="mt-6 text-xs text-[var(--text3)]">Field engineers and service techs are added as roles inside a repair company (you can add them during this flow or later in Company &gt; Team).</div>
           </div>
         )}
 
@@ -812,7 +812,7 @@ export default function Onboarding() {
               <span className="text-sm leading-snug">
                 <strong>List my organization in the Total Service Pro directory for free</strong>
                 <span className="block text-xs text-[var(--text3)] mt-1 font-normal">
-                  Appears in the TSP Directory so other users can find you. Change anytime in Company Profile. Free for all org types.
+                  Appears in the company directory so other users can find you. Change anytime in Company Profile. Free for all org types.
                 </span>
               </span>
             </label>
@@ -828,7 +828,7 @@ export default function Onboarding() {
             <div className="mb-4">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={isSoleProp} onChange={toggleSoleProp} />
-                <span>Sole proprietorship (I handle multiple roles: admin + FSE etc.)</span>
+                <span>Sole proprietorship (I handle multiple roles: admin + field engineer etc.)</span>
               </label>
             </div>
 
@@ -1000,7 +1000,7 @@ export default function Onboarding() {
                 ? 'Your facility profile and lasers will be saved. Role stays owner.'
                 : orgType === 'supplier'
                   ? 'Your supplier profile, categories, and brands will be saved. Role stays parts_supplier.'
-                  : 'Your org, profile, and team (if RSP) will be saved. You can always edit from Company page or Settings.'}
+                  : 'Your organization, profile, and team (if you are a repair company) will be saved. You can always edit from Company page or Settings.'}
             </p>
             <button onClick={saveOnboarding} disabled={loading} className="btn btn-primary px-10">Finish &amp; Continue →</button>
           </div>
