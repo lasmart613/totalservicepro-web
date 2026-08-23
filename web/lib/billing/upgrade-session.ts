@@ -120,10 +120,115 @@ export function evaluateUpgradeSession(
 }
 
 export function orgUpgradeFields(plan: string): Record<string, unknown> {
-  const name = String(plan || '').toLowerCase().trim();
+  const name = String(plan || '')
+    .toLowerCase()
+    .trim();
   return {
     is_premium: true,
     subscription_tier: name,
     plan: name,
+  };
+}
+
+export function planDisplayName(plan: string): string {
+  const name = String(plan || '')
+    .toLowerCase()
+    .trim();
+  if (name === 'premium') return 'Premium';
+  if (name === 'team') return 'Team';
+  if (name === 'enterprise') return 'Enterprise';
+  return name;
+}
+
+/** Only a real https URL from Stripe — never a made-up receipt number. */
+export function firstHttpsUrl(...values: unknown[]): string | null {
+  for (const value of values) {
+    if (typeof value !== 'string') continue;
+    const url = value.trim();
+    if (/^https:\/\//i.test(url)) return url;
+  }
+  return null;
+}
+
+export function formatCheckoutAmountCents(cents: unknown, currency: unknown): string | null {
+  if (typeof cents !== 'number' || !Number.isFinite(cents)) return null;
+  const cur = String(currency || 'usd').toUpperCase();
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(cents / 100);
+  } catch {
+    return `$${(cents / 100).toFixed(2)}`;
+  }
+}
+
+type ReceiptInvoiceLike = {
+  hosted_invoice_url?: string | null;
+  invoice_pdf?: string | null;
+  receipt_number?: string | null;
+  number?: string | null;
+};
+
+type ReceiptChargeLike = {
+  receipt_url?: string | null;
+};
+
+export type StripeReceiptSessionLike = {
+  amount_total?: number | null;
+  currency?: string | null;
+  invoice?: string | ReceiptInvoiceLike | null;
+  payment_intent?:
+    | string
+    | {
+        latest_charge?: string | ReceiptChargeLike | null;
+      }
+    | null;
+};
+
+export type UpgradeReceiptFields = {
+  plan: string;
+  planLabel: string;
+  sku: string;
+  amountTotalCents: number | null;
+  currency: string | null;
+  amountLabel: string | null;
+  stripeReceiptUrl: string | null;
+  existingOrganizationUpgraded: true;
+};
+
+/**
+ * Build the confirmation page payload from a paid Stripe session.
+ * Does not invent a receipt number. Links only if Stripe returned a URL.
+ */
+export function buildUpgradeReceipt(input: {
+  plan: string;
+  sku: string;
+  session?: StripeReceiptSessionLike | null;
+  fallbackAmountLabel?: string | null;
+}): UpgradeReceiptFields {
+  const session = input.session || {};
+  const invoice = session.invoice && typeof session.invoice === 'object' ? session.invoice : null;
+  const intent = session.payment_intent && typeof session.payment_intent === 'object' ? session.payment_intent : null;
+  const charge = intent?.latest_charge && typeof intent.latest_charge === 'object' ? intent.latest_charge : null;
+
+  const amountTotalCents =
+    typeof session.amount_total === 'number' && Number.isFinite(session.amount_total)
+      ? session.amount_total
+      : null;
+  const currency = session.currency ? String(session.currency) : null;
+  const amountLabel =
+    formatCheckoutAmountCents(amountTotalCents, currency) || input.fallbackAmountLabel || null;
+
+  return {
+    plan: String(input.plan || '').toLowerCase().trim(),
+    planLabel: planDisplayName(input.plan),
+    sku: String(input.sku || ''),
+    amountTotalCents,
+    currency,
+    amountLabel,
+    stripeReceiptUrl: firstHttpsUrl(
+      invoice?.hosted_invoice_url,
+      charge?.receipt_url,
+      invoice?.invoice_pdf
+    ),
+    existingOrganizationUpgraded: true,
   };
 }

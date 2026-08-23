@@ -2,13 +2,14 @@
 
 import React, { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { LandingShell } from '@/components/landing/LandingShell';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { orgIsPaid } from '@/lib/org-plan';
+import { orgIsPaid, orgIsTopPaid, orgMayStartPaidPlan, type OrgPlanFields } from '@/lib/org-plan';
 import { PLAN_OFFERS, skuFor, type BillingCycle, type PaidPlanId } from '@/lib/billing/plan-catalog';
+import { startClientUpgradeCheckout } from '@/lib/billing/start-client-checkout';
 
 type AuthState = 'loading' | 'in' | 'out';
 
@@ -69,10 +70,11 @@ function PublicPlans() {
 
 function SignedInPlans() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const supabase = getSupabaseClient();
   const [cycle, setCycle] = useState<BillingCycle>('monthly');
   const [starting, setStarting] = useState<PaidPlanId | null>(null);
-  const [paid, setPaid] = useState(false);
+  const [org, setOrg] = useState<OrgPlanFields | null>(null);
   const [orgName, setOrgName] = useState<string>('');
 
   useEffect(() => {
@@ -87,12 +89,14 @@ function SignedInPlans() {
         .select('organization_id, organizations(name, is_premium, subscription_tier, plan)')
         .eq('id', user.id)
         .maybeSingle();
-      const org = (profile as { organizations?: Record<string, unknown> | Record<string, unknown>[] | null })
+      const orgRel = (profile as { organizations?: Record<string, unknown> | Record<string, unknown>[] | null })
         ?.organizations;
-      const row = Array.isArray(org) ? org[0] : org;
+      const row = (Array.isArray(orgRel) ? orgRel[0] : orgRel) as
+        | (OrgPlanFields & { name?: string })
+        | null;
       if (!cancelled) {
         setOrgName(String(row?.name || ''));
-        setPaid(orgIsPaid(row || null));
+        setOrg(row || null);
       }
     })();
     return () => {
@@ -111,76 +115,19 @@ function SignedInPlans() {
     }
 
     if ((upgraded === '1' || paidFlag === '1') && sessionId) {
-      let cancelled = false;
-      (async () => {
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        const token = session?.access_token;
-        if (!token) {
-          toast.error('Still signed in? Refresh and open Plans again to finish the upgrade.');
-          return;
-        }
-        const res = await fetch('/api/billing/upgrade/confirm', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ session_id: sessionId }),
-        });
-        const json = await res.json().catch(() => ({}));
-        if (cancelled) return;
-        if (!res.ok) {
-          toast.error(json?.error || 'Checkout was not completed. You were not charged.');
-          return;
-        }
-        setPaid(true);
-        toast.success('Your organization is now on the paid plan.');
-      })();
-      return () => {
-        cancelled = true;
-      };
+      router.replace(`/checkout/receipt?session_id=${encodeURIComponent(sessionId)}`);
     }
-    return undefined;
-  }, [searchParams, supabase]);
+  }, [searchParams, router]);
+
+  const paid = orgIsPaid(org);
+  const topPaid = orgIsTopPaid(org);
 
   async function startCheckout(plan: PaidPlanId) {
-    if (starting || paid) return;
+    if (starting || !orgMayStartPaidPlan(org, plan)) return;
     setStarting(plan);
     try {
-      const {
-        data: { session },
-      } = await supabase.auth.getSession();
-      const token = session?.access_token;
-      if (!token) {
-        toast.error('You are still signed in? Refresh and try Upgrade again.');
-        return;
-      }
-      const sku = skuFor(plan, cycle);
-      const res = await fetch('/api/billing/upgrade/checkout', {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ sku }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok || !json?.url) {
-        toast.error(json?.error || 'Could not start Stripe Checkout');
-        return;
-      }
-      const host = window.location.hostname;
-      const prodHost = host === 'repairplanet.net' || host.endsWith('.repairplanet.net');
-      const testSession = json.livemode === false || String(json.sessionId || '').startsWith('cs_test_');
-      if (prodHost && testSession) {
-        toast.error(
-          'Production Stripe is still test/sandbox. Set Netlify STRIPE_SECRET_KEY to the live invoice secret and redeploy.'
-        );
-        return;
-      }
-      window.location.assign(json.url);
+      const session = await startClientUpgradeCheckout(skuFor(plan, cycle));
+      window.location.assign(session.url);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : 'Could not start checkout');
     } finally {
@@ -203,9 +150,14 @@ function SignedInPlans() {
           before paying; you will not be charged.
         </p>
 
-        {paid ? (
+        {topPaid ? (
           <div className="mt-6 card p-4 border-[var(--gold-border)] text-sm">
-            This organization is already on a paid plan.
+            This organization is already on the top paid plan. Upgrade is hidden.
+          </div>
+        ) : paid ? (
+          <div className="mt-6 card p-4 border-[var(--gold-border)] text-sm">
+            This organization is on Premium. Upgrade to Team on this same account — you stay
+            signed in.
           </div>
         ) : null}
 
@@ -238,7 +190,7 @@ function SignedInPlans() {
               <li>Current plan for unpaid orgs</li>
             </ul>
             <div className="btn btn-secondary w-full text-center mt-5 pointer-events-none opacity-70">
-              Current plan
+              {paid ? 'Included' : 'Current plan'}
             </div>
           </article>
 
@@ -259,10 +211,14 @@ function SignedInPlans() {
             <button
               type="button"
               className="btn btn-primary w-full mt-5"
-              disabled={!!starting || paid}
+              disabled={!!starting || !orgMayStartPaidPlan(org, 'premium')}
               onClick={() => startCheckout('premium')}
             >
-              {starting === 'premium' ? 'Starting checkout…' : 'Upgrade to Premium'}
+              {starting === 'premium'
+                ? 'Starting checkout…'
+                : paid
+                  ? 'Current plan'
+                  : 'Upgrade to Premium'}
             </button>
           </article>
 
@@ -283,10 +239,14 @@ function SignedInPlans() {
             <button
               type="button"
               className="btn btn-secondary w-full mt-5"
-              disabled={!!starting || paid}
+              disabled={!!starting || !orgMayStartPaidPlan(org, 'team')}
               onClick={() => startCheckout('team')}
             >
-              {starting === 'team' ? 'Starting checkout…' : 'Upgrade to Team'}
+              {starting === 'team'
+                ? 'Starting checkout…'
+                : topPaid
+                  ? 'Current plan'
+                  : 'Upgrade to Team'}
             </button>
           </article>
         </div>

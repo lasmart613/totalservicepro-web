@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { getPlanOffer, isPlanSku } from '@/lib/billing/plan-catalog';
-import { orgIsPaid } from '@/lib/org-plan';
+import { orgIsTopPaid, orgMayStartPaidPlan } from '@/lib/org-plan';
 import { normalizeOrgId } from '@/lib/billing/upgrade-session';
 import {
   createOrgUpgradeCheckoutSession,
@@ -48,7 +48,8 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json().catch(() => ({}))) as { sku?: string };
     const sku = String(body.sku || '').trim();
-    if (!isPlanSku(sku) || !getPlanOffer(sku)) {
+    const offer = getPlanOffer(sku);
+    if (!isPlanSku(sku) || !offer) {
       return NextResponse.json({ error: 'Unknown plan' }, { status: 400 });
     }
 
@@ -88,8 +89,15 @@ export async function POST(req: NextRequest) {
       orgRes = await orgSelect(supabase, 'is_premium');
     }
     org = orgRes.data as typeof org;
-    if (orgIsPaid(org)) {
-      return NextResponse.json({ error: 'This organization is already on a paid plan.' }, { status: 409 });
+    if (!orgMayStartPaidPlan(org, offer.plan)) {
+      return NextResponse.json(
+        {
+          error: orgIsTopPaid(org)
+            ? 'This organization is already on the top paid plan.'
+            : 'This organization is already on a paid plan.',
+        },
+        { status: 409 }
+      );
     }
 
     let customerId: string | null = null;

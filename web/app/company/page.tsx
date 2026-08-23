@@ -18,7 +18,7 @@ import { listManufacturers } from '@/lib/laser-catalog';
 import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
 import { persistCustomerLogo } from '@/lib/customer-form';
 import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
-import { orgIsPaid } from '@/lib/org-plan';
+import { orgCanUpgrade, upgradeTargetForOrg } from '@/lib/org-plan';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 
 const FACILITY_TYPES = [
@@ -755,8 +755,11 @@ function CompanyProfile() {
         )}
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h1 className="text-2xl font-extrabold">🏢 {profileTitle}</h1>
-          {!orgIsPaid(org) && org?.id ? (
-            <UpgradePlanLink className="btn btn-secondary text-sm px-4 py-1.5">
+          {orgCanUpgrade(org) && org?.id ? (
+            <UpgradePlanLink
+              className="btn btn-secondary text-sm px-4 py-1.5"
+              target={upgradeTargetForOrg(org) || 'plans'}
+            >
               Upgrade plan
             </UpgradePlanLink>
           ) : null}
