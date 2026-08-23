@@ -7,7 +7,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --experimental-transform-types --test lib/theme.test.ts",
+    "test": "node --experimental-strip-types --experimental-transform-types --test lib/theme.test.ts lib/adsense.test.ts",
     "deploy": "netlify deploy --prod",
     "deploy:preview": "netlify deploy",
     "deploy:remote": "netlify build --context production",

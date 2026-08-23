@@ -1,6 +1,15 @@
 /** Larry's TSP-Web unit — same publisher as Android AdMob. Do not invent a new slot. */
 export const ADSENSE_CLIENT = 'ca-pub-5353320292042327';
 export const ADSENSE_SLOT = '8443570568';
+export const ADSENSE_SCRIPT_SRC = `https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`;
+
+/** Public / auth routes must never load adsbygoogle.js (auto-ads injects hidden units). */
+export const AD_HIDDEN_PREFIXES = ['/signup', '/onboarding', '/auth', '/login'] as const;
+
+export function pathHidesAds(pathname: string): boolean {
+  if (!pathname) return true;
+  return AD_HIDDEN_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
+}
 
 /** Exact paid plan names. "pro" is the product name, not a paid enum. */
 export const PAID_SUBSCRIPTION_TIERS = ['premium', 'team', 'enterprise'] as const;
