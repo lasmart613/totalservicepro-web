@@ -31,10 +31,10 @@ export const PREMIUM_MANUALS_LINE = '15 service manuals';
 /** Team is 50. Do not advertise unlimited — that is reserved for Enterprise. */
 export const TEAM_MANUALS_LINE = '50 service manuals';
 
-/** Per member per day — not a shared org bucket. */
-export const FREE_AI_LINE = '5 text + 5 voice AI queries per member per day';
-export const PREMIUM_AI_LINE = '50 text + 50 voice AI queries per member per day';
-export const TEAM_AI_LINE = '250 text + 250 voice AI queries per member per day';
+/** Qualitative only on marketing tiles. Backend quotas may still use 5/50/250. */
+export const FREE_AI_LINE = 'AI assistant (light use)';
+export const PREMIUM_AI_LINE = 'AI assistant (everyday use)';
+export const TEAM_AI_LINE = 'AI assistant (high-volume use)';
 
 const OWNER_ALIASES = new Set(['owner', 'clinic', 'laser', 'laser-owner', 'laser_owner']);
 const SUPPLIER_ALIASES = new Set([

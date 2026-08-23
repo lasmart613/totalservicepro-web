@@ -19,6 +19,16 @@ test('/plans never imports sign-out helpers', () => {
   assert.doesNotMatch(source, /prepareFreshSignup|signOutAndClearIdentity|signOut\(/);
 });
 
+test('logged-out /plans lede is customer-facing, not upgrade mechanics', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');
+  assert.match(source, /Compare plans, then create a free account/);
+  assert.doesNotMatch(source, /Signed-in companies upgrade/);
+  assert.doesNotMatch(source, /without registering again/);
+  assert.doesNotMatch(source, /for a service company/);
+  assert.doesNotMatch(source, /planAudienceLabel\(audience\)/);
+});
+
 test('receipt page never imports sign-out helpers', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/checkout/receipt/page.tsx'), 'utf8');

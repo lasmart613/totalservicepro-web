@@ -79,7 +79,18 @@ test('shared entitlements appear on every audience and every tier', () => {
     assert.ok(planTileLines(audience, 'premium').includes(PREMIUM_MANUALS_LINE));
     assert.ok(planTileLines(audience, 'team').includes(TEAM_AI_LINE));
     assert.ok(planTileLines(audience, 'team').includes(TEAM_MANUALS_LINE));
+    for (const tile of TILES) {
+      const blob = planTileLines(audience, tile).join('\n');
+      assert.doesNotMatch(blob, /5 text|50 text|250 text|per member|per day|text \+|voice quer/i);
+    }
   }
+});
+
+test('marketing AI lines stay qualitative', () => {
+  assert.equal(FREE_AI_LINE, 'AI assistant (light use)');
+  assert.equal(PREMIUM_AI_LINE, 'AI assistant (everyday use)');
+  assert.equal(TEAM_AI_LINE, 'AI assistant (high-volume use)');
+  assert.doesNotMatch(FREE_AI_LINE + PREMIUM_AI_LINE + TEAM_AI_LINE, /\d/);
 });
 
 test('Parts Supplier photo entitlements are locked by tier', () => {
