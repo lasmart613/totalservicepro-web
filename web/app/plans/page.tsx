@@ -17,13 +17,17 @@ import {
 } from '@/lib/org-plan';
 import { loadOrgPlanRow } from '@/lib/org-plan-load';
 import { PLAN_OFFERS, skuFor, type BillingCycle, type PaidPlanId } from '@/lib/billing/plan-catalog';
+import {
+  FREE_AI_LINE,
+  PREMIUM_AI_LINE,
+  PREMIUM_MANUALS_LINE,
+  SHARED_SERVICE_HISTORY_LINE,
+  TEAM_AI_LINE,
+  TEAM_MANUALS_LINE,
+} from '@/lib/billing/plan-tiles';
 import { startClientUpgradeCheckout } from '@/lib/billing/start-client-checkout';
 
 type AuthState = 'loading' | 'in' | 'out';
-
-/** Shown on the /plans tiles in both signed-in and logged-out views. */
-const PREMIUM_MANUALS_LINE = '15 service manuals';
-const TEAM_MANUALS_LINE = 'Unlimited service manuals';
 
 function PublicPlans() {
   return (
@@ -44,6 +48,8 @@ function PublicPlans() {
             <ul>
               <li>Register and use Total Service Pro at no charge</li>
               <li>Schedule service calls, post service requests, and list parts</li>
+              <li>{SHARED_SERVICE_HISTORY_LINE}</li>
+              <li>{FREE_AI_LINE}</li>
               <li>Ads may appear on the Free Plan</li>
             </ul>
             <Link href="/signup" className="lp-btn lp-btn-primary">
@@ -58,8 +64,9 @@ function PublicPlans() {
             </p>
             <ul>
               <li>Paid plan for accounts that need more of the app</li>
-              <li>AI troubleshooting assistant</li>
+              <li>{PREMIUM_AI_LINE}</li>
               <li>{PREMIUM_MANUALS_LINE}</li>
+              <li>{SHARED_SERVICE_HISTORY_LINE}</li>
               <li>No advertisements</li>
             </ul>
             <Link href="/signup" className="lp-btn lp-btn-ghost">
@@ -74,9 +81,10 @@ function PublicPlans() {
             </p>
             <ul>
               <li>Everything in Premium</li>
+              <li>{TEAM_AI_LINE}</li>
               <li>{TEAM_MANUALS_LINE}</li>
               <li>Up to 10 user seats</li>
-              <li>Shared service history</li>
+              <li>{SHARED_SERVICE_HISTORY_LINE}</li>
             </ul>
             <Link href="/signup" className="lp-btn lp-btn-ghost">
               Register for Total Service Pro
@@ -249,6 +257,8 @@ function SignedInPlans() {
             </p>
             <ul className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1">
               <li>Schedule, requests, and parts listings</li>
+              <li>{SHARED_SERVICE_HISTORY_LINE}</li>
+              <li>{FREE_AI_LINE}</li>
               <li>Ads may appear</li>
               <li>Get started at no charge</li>
             </ul>
@@ -267,8 +277,9 @@ function SignedInPlans() {
               <p className="text-xs text-[var(--text3)] line-through">{premium.displayOrig} / year list</p>
             ) : null}
             <ul className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1">
-              <li>AI troubleshooting assistant</li>
+              <li>{PREMIUM_AI_LINE}</li>
               <li>{PREMIUM_MANUALS_LINE}</li>
+              <li>{SHARED_SERVICE_HISTORY_LINE}</li>
               <li>No advertisements</li>
             </ul>
             <button
@@ -300,9 +311,10 @@ function SignedInPlans() {
             ) : null}
             <ul className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1">
               <li>Everything in Premium</li>
+              <li>{TEAM_AI_LINE}</li>
               <li>{TEAM_MANUALS_LINE}</li>
               <li>Up to 10 user seats</li>
-              <li>Shared service history</li>
+              <li>{SHARED_SERVICE_HISTORY_LINE}</li>
             </ul>
             <button
               type="button"

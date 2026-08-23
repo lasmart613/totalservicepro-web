@@ -46,7 +46,37 @@ test('/plans tiles: Premium 15, Team unlimited, Free does not claim a full libra
     const tile = block.slice(0, block.search(/<h[23][^>]*>|<\/article>/) || block.length);
     assert.doesNotMatch(tile, /unlimited/i);
     assert.doesNotMatch(tile, /full (manual|library)/i);
+    assert.match(tile, /SHARED_SERVICE_HISTORY_LINE/);
+    assert.match(tile, /FREE_AI_LINE/);
   }
+});
+
+test('/plans tiles show shared history and per-member AI caps on both views', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const tiles = readFileSync(join(here, './billing/plan-tiles.ts'), 'utf8');
+  assert.match(tiles, /export const SHARED_SERVICE_HISTORY_LINE = 'Shared service history'/);
+  assert.match(tiles, /5 text queries\/day and 5 voice queries\/day per team member/);
+  assert.match(tiles, /50 text queries\/day and 50 voice queries\/day per team member/);
+  assert.match(tiles, /250 text queries\/day and 250 voice queries\/day per team member/);
+  const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');
+  assert.match(source, /SHARED_SERVICE_HISTORY_LINE/);
+  assert.match(source, /FREE_AI_LINE/);
+  assert.match(source, /PREMIUM_AI_LINE/);
+  assert.match(source, /TEAM_AI_LINE/);
+  const historyHits = source.match(/SHARED_SERVICE_HISTORY_LINE/g) || [];
+  assert.ok(historyHits.length >= 6, 'history line on all three tiles in both views');
+  assert.doesNotMatch(source, /AI troubleshooting assistant/);
+});
+
+test('web AI client posts through the quota-enforcing API, not grok-assistant directly', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(join(here, './ai/grok-client.ts'), 'utf8');
+  assert.match(source, /\/api\/ai\/assistant/);
+  assert.doesNotMatch(source, /functions\/v1\/grok-assistant/);
+  const route = readFileSync(join(here, '../app/api/ai/assistant/route.ts'), 'utf8');
+  assert.match(route, /isDailyLimitReached/);
+  assert.match(route, /api_usage/);
+  assert.match(route, /aiDailyLimitsForOrg/);
 });
 
 test('/plans does not claim success after checkout', () => {
