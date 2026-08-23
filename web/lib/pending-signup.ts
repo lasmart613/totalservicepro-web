@@ -91,6 +91,8 @@ export function organizationInsertFromPending(pending: PendingSignup, userId: st
     phone: pending.phone || null,
     website: pending.website || null,
     created_by: userId,
+    // Free Plan signup — never inherit a paid DB default.
+    is_premium: false,
   };
 
   if (pending.kind === 'company') {
@@ -125,6 +127,7 @@ function coreOrganizationInsert(pending: PendingSignup, userId: string): Record<
     phone: pending.phone || null,
     website: pending.website || null,
     created_by: userId,
+    is_premium: false,
   };
 }
 
@@ -286,13 +289,18 @@ export async function insertOrganizationForPending(
       name: pending.name,
       type: fallbackType,
       created_by: userId,
+      is_premium: false,
     });
   }
 
   let lastError: { message?: string } | null = null;
   for (const row of attempts) {
     delete (row as any).num_lasers;
-    const { data, error } = await supabase.from('organizations').insert(row).select('id').maybeSingle();
+    let { data, error } = await supabase.from('organizations').insert(row).select('id').maybeSingle();
+    if (!data?.id && error && /is_premium|column/i.test(error.message || '')) {
+      delete row.is_premium;
+      ({ data, error } = await supabase.from('organizations').insert(row).select('id').maybeSingle());
+    }
     if (data?.id) return data.id;
     lastError = error;
     const found = await findCreatedOrganization(supabase, userId, pending.name);

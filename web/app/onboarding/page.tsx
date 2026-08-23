@@ -505,13 +505,15 @@ export default function Onboarding() {
         }
       } else {
         orgPayload.created_by = currentUser.id;
+        orgPayload.is_premium = false;
         let { data: newOrg, error: iErr } = await supabase
           .from('organizations')
           .insert(orgPayload)
           .select('id')
           .single();
-        if (iErr && /list_in_directory|column/i.test(iErr.message || '')) {
-          delete orgPayload.list_in_directory;
+        if (iErr && /list_in_directory|is_premium|column/i.test(iErr.message || '')) {
+          if (/list_in_directory/i.test(iErr.message || '')) delete orgPayload.list_in_directory;
+          if (/is_premium/i.test(iErr.message || '')) delete orgPayload.is_premium;
           ({ data: newOrg, error: iErr } = await supabase
             .from('organizations')
             .insert(orgPayload)
@@ -695,6 +697,22 @@ export default function Onboarding() {
             lasersSaved++;
           }
         }
+      }
+
+      // Flags-only write so Finish persists even if the earlier upsert hit a role lock.
+      const doneAt = new Date().toISOString();
+      let { error: flagErr } = await supabase
+        .from('user_profiles')
+        .update({ onboarding_completed: true, onboarding_completed_at: doneAt })
+        .eq('id', currentUser.id);
+      if (flagErr && /onboarding_completed_at|column/i.test(flagErr.message || '')) {
+        ({ error: flagErr } = await supabase
+          .from('user_profiles')
+          .update({ onboarding_completed: true })
+          .eq('id', currentUser.id));
+      }
+      if (flagErr) {
+        console.error('onboarding flags persist failed', flagErr);
       }
 
       // Do not claim FSE invites onto a founder who just created this org
