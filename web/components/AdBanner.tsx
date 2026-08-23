@@ -6,17 +6,12 @@ import { usePathname } from 'next/navigation';
 import { getSupabaseClient } from '../lib/supabase/client';
 import {
   ADSENSE_CLIENT,
+  ADSENSE_SCRIPT_SRC,
   ADSENSE_SLOT,
   onboardingFlagsDone,
   orgIsPaid,
+  pathHidesAds,
 } from '../lib/adsense';
-
-const HIDDEN_PREFIXES = ['/signup', '/onboarding', '/auth', '/login'];
-
-function pathHidesAds(pathname: string): boolean {
-  if (!pathname) return true;
-  return HIDDEN_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
-}
 
 declare global {
   interface Window {
@@ -34,8 +29,12 @@ function pushAdSlot() {
 
 /**
  * Top AdSense banner for logged-in free-tier users.
- * Hidden for premium/paid orgs, incomplete onboarding, /signup /onboarding /auth,
+ * Hidden for premium/paid orgs, incomplete onboarding, /signup /onboarding /auth /login,
  * and any logged-out marketing chrome.
+ *
+ * adsbygoogle.js must live here — not the root layout. A global script lets
+ * Google auto-ads inject hidden 0x0 units on public pages even when this
+ * banner returns null.
  */
 export default function AdBanner() {
   const pathname = usePathname() || '';
@@ -130,7 +129,7 @@ export default function AdBanner() {
       />
       <Script
         id="tsp-adsense"
-        src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`}
+        src={ADSENSE_SCRIPT_SRC}
         crossOrigin="anonymous"
         strategy="afterInteractive"
         onLoad={pushAdSlot}
