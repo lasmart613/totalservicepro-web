@@ -56,3 +56,23 @@ test('/plans does not claim success after checkout', () => {
   assert.doesNotMatch(source, /\/api\/billing\/upgrade\/confirm/);
   assert.match(source, /\/checkout\/receipt/);
 });
+
+test('/plans reads the current org plan and can sync a missed Checkout', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');
+  assert.match(source, /currentOrgPlan/);
+  assert.match(source, /loadOrgPlanRow/);
+  assert.match(source, /\/api\/billing\/upgrade\/sync/);
+  assert.doesNotMatch(source, /organizations\(name, is_premium/);
+});
+
+test('webhook and sync routes persist the existing org and never sign up', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const webhook = readFileSync(join(here, '../app/api/billing/upgrade/webhook/route.ts'), 'utf8');
+  const sync = readFileSync(join(here, '../app/api/billing/upgrade/sync/route.ts'), 'utf8');
+  assert.match(webhook, /verifyStripeWebhookSignature/);
+  assert.match(webhook, /applyPaidCheckoutSession/);
+  assert.doesNotMatch(webhook, /signUp|createUser|from\('organizations'\)\.insert/);
+  assert.match(sync, /pickLatestPaidUpgradeSession/);
+  assert.doesNotMatch(sync, /signUp|createUser|from\('organizations'\)\.insert/);
+});

@@ -3,8 +3,8 @@
  * Checkout must attach to the current org and must not create a second account.
  */
 
-import { getPlanOffer, type PlanOffer, type PlanSku } from './plan-catalog.ts';
-import { PREMIUM_MANUAL_SLOTS, UNLIMITED_MANUAL_SLOTS } from '../org-plan.ts';
+import { getPlanOffer, isPlanSku, PLAN_OFFERS, type PlanOffer, type PlanSku } from './plan-catalog.ts';
+import { PAID_SUBSCRIPTION_TIERS, PREMIUM_MANUAL_SLOTS, UNLIMITED_MANUAL_SLOTS } from '../org-plan.ts';
 
 export const UPGRADE_KIND = 'org_plan';
 
@@ -89,13 +89,57 @@ export type StripeCheckoutLike = {
   status?: string | null;
   payment_status?: string | null;
   client_reference_id?: string | null;
+  created?: number | null;
+  amount_total?: number | null;
+  customer?: string | { id?: string } | null;
+  subscription?: string | { id?: string } | null;
   metadata?: Record<string, string | undefined> | null;
 };
 
-export function evaluateUpgradeSession(
-  session: StripeCheckoutLike | null | undefined,
-  expected: UpgradeSessionOwner
-): { ok: true; sku: PlanSku; plan: string } | { ok: false; reason: string } {
+export type ParsedPaidUpgrade = {
+  sku: PlanSku | null;
+  plan: string;
+  organizationId: string | null;
+  userId: string | null;
+};
+
+function exactPaidPlanName(value: unknown): string | null {
+  const name = String(value || '')
+    .toLowerCase()
+    .trim();
+  return (PAID_SUBSCRIPTION_TIERS as readonly string[]).includes(name) ? name : null;
+}
+
+function planFromMetadata(meta: Record<string, string | undefined> | null | undefined): {
+  sku: PlanSku | null;
+  plan: string | null;
+} {
+  const rawSku = meta?.sku;
+  const offer = getPlanOffer(String(rawSku || ''));
+  if (offer) return { sku: offer.sku, plan: offer.plan };
+  const plan = exactPaidPlanName(meta?.plan);
+  const sku = isPlanSku(rawSku) ? rawSku : null;
+  return { sku, plan };
+}
+
+/** Identify a catalog plan from a real Stripe amount. Does not invent a charge. */
+export function planFromPaidAmount(amountCents: unknown): { sku: PlanSku; plan: string } | null {
+  if (typeof amountCents !== 'number' || !Number.isFinite(amountCents)) return null;
+  for (const offer of Object.values(PLAN_OFFERS)) {
+    if (offer.unitAmountCents === amountCents) {
+      return { sku: offer.sku, plan: offer.plan };
+    }
+  }
+  return null;
+}
+
+/**
+ * A complete paid subscription Checkout session. Does not invent a plan —
+ * sku/plan must be a catalog sku or exact premium|team|enterprise.
+ */
+export function parsePaidUpgradeSession(
+  session: StripeCheckoutLike | null | undefined
+): { ok: true } & ParsedPaidUpgrade | { ok: false; reason: string } {
   if (!session) return { ok: false, reason: 'missing_session' };
   if (session.mode !== 'subscription') return { ok: false, reason: 'not_subscription' };
   if (session.status !== 'complete') return { ok: false, reason: 'not_complete' };
@@ -105,19 +149,80 @@ export function evaluateUpgradeSession(
   }
 
   const meta = session.metadata || {};
-  const orgId = normalizeOrgId(meta.organization_id) || normalizeOrgId(session.client_reference_id);
-  const userId = String(meta.user_id || '').trim();
+  if (meta.kind && meta.kind !== UPGRADE_KIND) return { ok: false, reason: 'wrong_kind' };
+
+  let { sku, plan } = planFromMetadata(meta);
+  if (!plan) {
+    const fromAmount = planFromPaidAmount(session.amount_total);
+    if (fromAmount) {
+      sku = fromAmount.sku;
+      plan = fromAmount.plan;
+    }
+  }
+  if (!plan) return { ok: false, reason: 'unknown_sku' };
+
+  return {
+    ok: true,
+    sku,
+    plan,
+    organizationId: normalizeOrgId(meta.organization_id) || normalizeOrgId(session.client_reference_id),
+    userId: String(meta.user_id || '').trim() || null,
+  };
+}
+
+export type StripeSubscriptionLike = {
+  id?: string;
+  status?: string | null;
+  customer?: string | { id?: string } | null;
+  metadata?: Record<string, string | undefined> | null;
+};
+
+const LIVE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing']);
+
+/** Active Stripe subscription with org-plan metadata. Does not invent a plan. */
+export function parsePaidSubscriptionRecord(
+  sub: StripeSubscriptionLike | null | undefined
+): { ok: true } & ParsedPaidUpgrade | { ok: false; reason: string } {
+  if (!sub) return { ok: false, reason: 'missing_subscription' };
+  if (!LIVE_SUBSCRIPTION_STATUSES.has(String(sub.status || ''))) {
+    return { ok: false, reason: 'not_active' };
+  }
+  const meta = sub.metadata || {};
+  if (meta.kind && meta.kind !== UPGRADE_KIND) return { ok: false, reason: 'wrong_kind' };
+  const { sku, plan } = planFromMetadata(meta);
+  if (!plan) return { ok: false, reason: 'unknown_sku' };
+  return {
+    ok: true,
+    sku,
+    plan,
+    organizationId: normalizeOrgId(meta.organization_id),
+    userId: String(meta.user_id || '').trim() || null,
+  };
+}
+
+export function evaluateUpgradeSession(
+  session: StripeCheckoutLike | null | undefined,
+  expected: UpgradeSessionOwner,
+  opts?: { allowMissingUser?: boolean; allowMissingOrg?: boolean }
+): { ok: true; sku: PlanSku | null; plan: string } | { ok: false; reason: string } {
+  const parsed = parsePaidUpgradeSession(session);
+  if (!parsed.ok) return parsed;
+
   const expectedOrg = normalizeOrgId(expected.organizationId);
   const expectedUser = String(expected.userId || '').trim();
   if (!expectedOrg || !expectedUser) return { ok: false, reason: 'missing_expected_owner' };
-  if (orgId !== expectedOrg) return { ok: false, reason: 'org_mismatch' };
-  if (userId !== expectedUser) return { ok: false, reason: 'user_mismatch' };
-  if (meta.kind && meta.kind !== UPGRADE_KIND) return { ok: false, reason: 'wrong_kind' };
+  if (parsed.organizationId) {
+    if (parsed.organizationId !== expectedOrg) return { ok: false, reason: 'org_mismatch' };
+  } else if (!opts?.allowMissingOrg) {
+    return { ok: false, reason: 'org_mismatch' };
+  }
+  if (parsed.userId) {
+    if (parsed.userId !== expectedUser) return { ok: false, reason: 'user_mismatch' };
+  } else if (!opts?.allowMissingUser) {
+    return { ok: false, reason: 'user_mismatch' };
+  }
 
-  const sku = String(meta.sku || '');
-  const offer = getPlanOffer(sku);
-  if (!offer) return { ok: false, reason: 'unknown_sku' };
-  return { ok: true, sku: offer.sku, plan: offer.plan };
+  return { ok: true, sku: parsed.sku, plan: parsed.plan };
 }
 
 export function orgUpgradeFields(plan: string): Record<string, unknown> {

@@ -4,6 +4,8 @@ import {
   FREE_MANUAL_SLOTS,
   PREMIUM_MANUAL_SLOTS,
   UNLIMITED_MANUAL_SLOTS,
+  currentOrgPlan,
+  currentOrgPlanLabel,
   manualSlotLimit,
   orgCanUpgrade,
   orgIsPaid,
@@ -92,6 +94,17 @@ test('Team and Enterprise hide Upgrade and cannot start checkout', () => {
   assert.equal(orgCanUpgrade({ is_premium: true, plan: 'team' }), false);
   assert.equal(orgMayStartPaidPlan({ plan: 'team' }, 'team'), false);
   assert.equal(orgMayStartPaidPlan({ plan: 'enterprise' }, 'premium'), false);
+});
+
+test('current plan label is Free / Premium / Team from paid helper', () => {
+  assert.equal(currentOrgPlan(null), 'free');
+  assert.equal(currentOrgPlanLabel({ is_premium: false, plan: 'pro' }), 'Free');
+  assert.equal(currentOrgPlan({ is_premium: true }), 'premium');
+  assert.equal(currentOrgPlanLabel({ is_premium: true, plan: 'pro' }), 'Premium');
+  assert.equal(currentOrgPlan({ subscription_tier: 'PREMIUM' }), 'premium');
+  assert.equal(currentOrgPlanLabel({ plan: 'team' }), 'Team');
+  assert.equal(currentOrgPlan({ plan: 'enterprise' }), 'enterprise');
+  assert.equal(currentOrgPlan({ is_premium: true, plan: 'team' }), 'team');
 });
 
 test('Premium is 15 service manuals; Team is unlimited; pro is not paid', () => {

@@ -7,7 +7,15 @@ import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { LandingShell } from '@/components/landing/LandingShell';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { orgIsPaid, orgIsTopPaid, orgMayStartPaidPlan, type OrgPlanFields } from '@/lib/org-plan';
+import {
+  currentOrgPlan,
+  currentOrgPlanLabel,
+  orgIsPaid,
+  orgIsTopPaid,
+  orgMayStartPaidPlan,
+  type OrgPlanFields,
+} from '@/lib/org-plan';
+import { loadOrgPlanRow } from '@/lib/org-plan-load';
 import { PLAN_OFFERS, skuFor, type BillingCycle, type PaidPlanId } from '@/lib/billing/plan-catalog';
 import { startClientUpgradeCheckout } from '@/lib/billing/start-client-checkout';
 
@@ -96,6 +104,7 @@ function SignedInPlans() {
   const [starting, setStarting] = useState<PaidPlanId | null>(null);
   const [org, setOrg] = useState<OrgPlanFields | null>(null);
   const [orgName, setOrgName] = useState<string>('');
+  const [orgReady, setOrgReady] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -103,21 +112,51 @@ function SignedInPlans() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      if (!user) return;
+      if (!user) {
+        if (!cancelled) setOrgReady(true);
+        return;
+      }
       const { data: profile } = await supabase
         .from('user_profiles')
-        .select('organization_id, organizations(name, is_premium, subscription_tier, plan)')
+        .select('organization_id')
         .eq('id', user.id)
         .maybeSingle();
-      const orgRel = (profile as { organizations?: Record<string, unknown> | Record<string, unknown>[] | null })
-        ?.organizations;
-      const row = (Array.isArray(orgRel) ? orgRel[0] : orgRel) as
-        | (OrgPlanFields & { name?: string })
-        | null;
+      const orgId = profile?.organization_id;
+      let row: (OrgPlanFields & { name?: string | null }) | null = null;
+      if (orgId != null && String(orgId).trim() !== '') {
+        row = await loadOrgPlanRow(supabase, orgId);
+      }
       if (!cancelled) {
         setOrgName(String(row?.name || ''));
-        setOrg(row || null);
+        setOrg(row);
       }
+
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (token && !orgIsPaid(row)) {
+        try {
+          const res = await fetch('/api/billing/upgrade/sync', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+          const json = (await res.json().catch(() => ({}))) as {
+            org?: OrgPlanFields & { name?: string | null };
+            organizationName?: string | null;
+          };
+          if (!cancelled && res.ok && json?.org) {
+            setOrg(json.org);
+            if (json.organizationName) setOrgName(String(json.organizationName));
+          }
+        } catch {
+          /* keep the row we already loaded; do not invent a paid plan */
+        }
+      }
+      if (!cancelled) setOrgReady(true);
     })();
     return () => {
       cancelled = true;
@@ -139,7 +178,9 @@ function SignedInPlans() {
     }
   }, [searchParams, router]);
 
-  const paid = orgIsPaid(org);
+  const namedPlan = currentOrgPlan(org);
+  const planLabel = currentOrgPlanLabel(org);
+  const paid = namedPlan !== 'free';
   const topPaid = orgIsTopPaid(org);
 
   async function startCheckout(plan: PaidPlanId) {
@@ -170,16 +211,18 @@ function SignedInPlans() {
           before paying; you will not be charged.
         </p>
 
-        {topPaid ? (
+        {orgReady ? (
           <div className="mt-6 card p-4 border-[var(--gold-border)] text-sm">
-            This organization is already on the top paid plan. Upgrade is hidden.
+            {orgName ? `${orgName} is on ${planLabel}.` : `Current plan: ${planLabel}.`}
+            {namedPlan === 'premium'
+              ? ' Upgrade to Team on this same account — you stay signed in.'
+              : topPaid
+                ? ' Upgrade is hidden.'
+                : ' Upgrade from this page without creating a second account.'}
           </div>
-        ) : paid ? (
-          <div className="mt-6 card p-4 border-[var(--gold-border)] text-sm">
-            This organization is on Premium. Upgrade to Team on this same account — you stay
-            signed in.
-          </div>
-        ) : null}
+        ) : (
+          <div className="mt-6 text-sm text-[var(--text3)]">Loading current plan…</div>
+        )}
 
         <div className="mt-6 flex items-center gap-3">
           <button
@@ -207,10 +250,10 @@ function SignedInPlans() {
             <ul className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1">
               <li>Schedule, requests, and parts listings</li>
               <li>Ads may appear</li>
-              <li>Current plan for unpaid orgs</li>
+              <li>Get started at no charge</li>
             </ul>
             <div className="btn btn-secondary w-full text-center mt-5 pointer-events-none opacity-70">
-              {paid ? 'Included' : 'Current plan'}
+              {!orgReady ? '…' : namedPlan === 'free' ? 'Current plan' : 'Included'}
             </div>
           </article>
 
@@ -236,9 +279,13 @@ function SignedInPlans() {
             >
               {starting === 'premium'
                 ? 'Starting checkout…'
-                : paid
-                  ? 'Current plan'
-                  : 'Upgrade to Premium'}
+                : !orgReady
+                  ? '…'
+                  : namedPlan === 'premium'
+                    ? 'Current plan'
+                    : paid
+                      ? 'Included'
+                      : 'Upgrade to Premium'}
             </button>
           </article>
 
@@ -265,9 +312,11 @@ function SignedInPlans() {
             >
               {starting === 'team'
                 ? 'Starting checkout…'
-                : topPaid
-                  ? 'Current plan'
-                  : 'Upgrade to Team'}
+                : !orgReady
+                  ? '…'
+                  : topPaid
+                    ? 'Current plan'
+                    : 'Upgrade to Team'}
             </button>
           </article>
         </div>

@@ -7,6 +7,8 @@ import {
   evaluateUpgradeSession,
   firstHttpsUrl,
   orgUpgradeFields,
+  parsePaidSubscriptionRecord,
+  parsePaidUpgradeSession,
   planDisplayName,
 } from './upgrade-session.ts';
 
@@ -93,6 +95,77 @@ test('canceled or unpaid checkout does not upgrade', () => {
   );
   assert.equal(otherOrg.ok, false);
   if (!otherOrg.ok) assert.equal(otherOrg.reason, 'org_mismatch');
+});
+
+test('complete session with exact plan metadata is paid even without sku', () => {
+  const parsed = parsePaidUpgradeSession({
+    mode: 'subscription',
+    status: 'complete',
+    payment_status: 'paid',
+    client_reference_id: '42',
+    metadata: { kind: 'org_plan', organization_id: '42', user_id: 'user-1', plan: 'premium' },
+  });
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.equal(parsed.plan, 'premium');
+
+  const pro = parsePaidUpgradeSession({
+    mode: 'subscription',
+    status: 'complete',
+    payment_status: 'paid',
+    metadata: { kind: 'org_plan', organization_id: '42', user_id: 'user-1', plan: 'pro' },
+  });
+  assert.equal(pro.ok, false);
+});
+
+test('active Stripe subscription with org metadata is paid', () => {
+  const parsed = parsePaidSubscriptionRecord({
+    id: 'sub_1',
+    status: 'active',
+    metadata: { kind: 'org_plan', organization_id: '42', user_id: 'user-1', sku: 'team_monthly' },
+  });
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) assert.equal(parsed.plan, 'team');
+
+  const canceled = parsePaidSubscriptionRecord({
+    status: 'canceled',
+    metadata: { sku: 'premium_monthly', organization_id: '42' },
+  });
+  assert.equal(canceled.ok, false);
+});
+
+test('complete $9.99 subscription session is Premium even without plan metadata', () => {
+  const parsed = parsePaidUpgradeSession({
+    mode: 'subscription',
+    status: 'complete',
+    payment_status: 'paid',
+    amount_total: 999,
+    metadata: {},
+  });
+  assert.equal(parsed.ok, true);
+  if (parsed.ok) {
+    assert.equal(parsed.plan, 'premium');
+    assert.equal(parsed.sku, 'premium_monthly');
+  }
+  const unknownAmount = parsePaidUpgradeSession({
+    mode: 'subscription',
+    status: 'complete',
+    payment_status: 'paid',
+    amount_total: 123,
+    metadata: {},
+  });
+  assert.equal(unknownAmount.ok, false);
+});
+
+test('evaluate may accept a complete session when user_id is missing if allowed', () => {
+  const session = {
+    mode: 'subscription' as const,
+    status: 'complete',
+    payment_status: 'paid',
+    metadata: { kind: 'org_plan', organization_id: '42', sku: 'premium_monthly' },
+  };
+  assert.equal(evaluateUpgradeSession(session, owner).ok, false);
+  const allowed = evaluateUpgradeSession(session, owner, { allowMissingUser: true });
+  assert.equal(allowed.ok, true);
 });
 
 test('org upgrade writes paid flags for the selected plan', () => {
