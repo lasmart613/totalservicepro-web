@@ -31,13 +31,17 @@ test('manuals page does not treat Premium or pro as unlimited slots', () => {
   assert.doesNotMatch(source, /premium\|team\|enterprise\|pro/);
 });
 
-test('/plans tiles: Premium 15, Team unlimited, Free does not claim a full library', () => {
+test('/plans tiles: Premium 15, Team 50, Free does not claim a full library', () => {
   const here = dirname(fileURLToPath(import.meta.url));
+  const tiles = readFileSync(join(here, './billing/plan-tiles.ts'), 'utf8');
+  assert.match(tiles, /export const TEAM_MANUALS_LINE = '50 service manuals'/);
+  assert.doesNotMatch(tiles, /Unlimited service manuals/);
   const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');
   const premiumHits = source.match(/PREMIUM_MANUALS_LINE|15 service manuals/g) || [];
-  const teamHits = source.match(/TEAM_MANUALS_LINE|Unlimited service manuals/g) || [];
+  const teamHits = source.match(/TEAM_MANUALS_LINE|50 service manuals/g) || [];
   assert.ok(premiumHits.length >= 3, 'Premium tile line used on both views');
   assert.ok(teamHits.length >= 3, 'Team tile line used on both views');
+  assert.doesNotMatch(source, /Unlimited service manuals/i);
   assert.doesNotMatch(source, /Full manual library/i);
   assert.doesNotMatch(source, /full digital bookshelf/i);
   const freeBlocks = source.split(/<h[23][^>]*>Free/).slice(1);
@@ -45,6 +49,8 @@ test('/plans tiles: Premium 15, Team unlimited, Free does not claim a full libra
   for (const block of freeBlocks) {
     const tile = block.slice(0, block.search(/<h[23][^>]*>|<\/article>/) || block.length);
     assert.doesNotMatch(tile, /unlimited/i);
+    assert.doesNotMatch(tile, /50 service manuals/);
+    assert.doesNotMatch(tile, /15 service manuals/);
     assert.doesNotMatch(tile, /full (manual|library)/i);
     assert.match(tile, /SHARED_SERVICE_HISTORY_LINE/);
     assert.match(tile, /FREE_AI_LINE/);
@@ -66,6 +72,17 @@ test('/plans tiles show shared history and per-member AI caps on both views', ()
   const historyHits = source.match(/SHARED_SERVICE_HISTORY_LINE/g) || [];
   assert.ok(historyHits.length >= 6, 'history line on all three tiles in both views');
   assert.doesNotMatch(source, /AI troubleshooting assistant/);
+});
+
+test('manuals add and library API use the same slot gate (Team 50, not unlimited)', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const manuals = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
+  const api = readFileSync(join(here, '../app/api/manuals/library/route.ts'), 'utf8');
+  assert.match(manuals, /manualSlotLimit/);
+  assert.match(manuals, /isUnlimitedManualSlots/);
+  assert.match(api, /manualSlotLimit/);
+  assert.match(api, /owned\.size >= limit/);
+  assert.doesNotMatch(api, /Team \/ Enterprise are unlimited/);
 });
 
 test('web AI client posts through the quota-enforcing API, not grok-assistant directly', () => {

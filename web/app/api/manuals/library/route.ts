@@ -55,7 +55,8 @@ async function ownedManualIds(
 
 /**
  * Add a manual to the signed-in org library. Premium is capped at 15.
- * Team / Enterprise are unlimited. Download still requires ownership.
+ * Team is capped at 50. Exact enterprise may stay unlimited internally.
+ * Download still requires ownership.
  */
 export async function POST(req: NextRequest) {
   try {

@@ -11,4 +11,4 @@ export const PREMIUM_AI_LINE = '50 text queries/day and 50 voice queries/day per
 export const TEAM_AI_LINE = '250 text queries/day and 250 voice queries/day per team member';
 
 export const PREMIUM_MANUALS_LINE = '15 service manuals';
-export const TEAM_MANUALS_LINE = 'Unlimited service manuals';
+export const TEAM_MANUALS_LINE = '50 service manuals';

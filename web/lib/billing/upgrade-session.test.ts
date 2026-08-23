@@ -175,7 +175,8 @@ test('org upgrade writes paid flags for the selected plan', () => {
     plan: 'premium',
     manual_slots: 15,
   });
-  assert.deepEqual(orgUpgradeFields('team').manual_slots, 999);
+  assert.deepEqual(orgUpgradeFields('team').manual_slots, 50);
+  assert.deepEqual(orgUpgradeFields('enterprise').manual_slots, 999);
 });
 
 test('receipt uses Stripe amount and URL and does not invent a receipt number', () => {

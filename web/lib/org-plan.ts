@@ -12,9 +12,11 @@ export type OrgPlanFields = {
   manual_slots?: number | null;
 };
 
-/** Free default already in /manuals. Premium is 15. Team/Enterprise is unlimited. */
+/** Free default already in /manuals. Premium is 15. Team is 50. */
 export const FREE_MANUAL_SLOTS = 5;
 export const PREMIUM_MANUAL_SLOTS = 15;
+export const TEAM_MANUAL_SLOTS = 50;
+/** Internal only for an exact enterprise tier. Do not advertise on /plans. */
 export const UNLIMITED_MANUAL_SLOTS = 999;
 
 /**
@@ -106,12 +108,15 @@ export function isUnlimitedManualSlots(limit: number): boolean {
 }
 
 /**
- * Library slots from paid detection. Premium is 15 even if a stale
- * manual_slots row says 999. "pro" is not paid and stays on the free default.
+ * Library slots from paid detection. Premium is 15 and Team is 50 even if
+ * a stale manual_slots row says 999. Exact enterprise may stay unlimited
+ * internally. "pro" is not paid and stays on the free default.
  */
 export function manualSlotLimit(org: OrgPlanFields | null | undefined): number {
-  if (orgIsTopPaid(org)) return UNLIMITED_MANUAL_SLOTS;
-  if (orgIsPaid(org)) return PREMIUM_MANUAL_SLOTS;
+  const named = currentOrgPlan(org);
+  if (named === 'enterprise') return UNLIMITED_MANUAL_SLOTS;
+  if (named === 'team') return TEAM_MANUAL_SLOTS;
+  if (named === 'premium') return PREMIUM_MANUAL_SLOTS;
   const stored = org?.manual_slots;
   if (stored != null) {
     const n = parseInt(String(stored), 10);
