@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { isOwnerish } from '@/lib/roles';
 import { toast } from 'sonner';
 
 type BidRow = {
@@ -42,6 +43,7 @@ function parseAmt(s: string) {
 export default function MyBidsPage() {
   const [bids, setBids] = useState<BidRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [blocked, setBlocked] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
   const [orgId, setOrgId] = useState<number | string | null>(null);
   const [editId, setEditId] = useState<string | null>(null);
@@ -75,11 +77,21 @@ export default function MyBidsPage() {
 
     const { data: prof } = await supabase
       .from('user_profiles')
-      .select('organization_id')
+      .select('role, organization_id, organizations(type)')
       .eq('id', user.id)
       .maybeSingle();
     const oId = prof?.organization_id ?? null;
     setOrgId(oId);
+    const orgType =
+      (prof?.organizations as { type?: string | null } | null)?.type ||
+      user.user_metadata?.organization_type ||
+      null;
+    if (isOwnerish(prof?.role || user.user_metadata?.role, orgType)) {
+      setBlocked(true);
+      setBids([]);
+      setLoading(false);
+      return;
+    }
 
     // Include bids by user id (both columns) and by company org
     let query = supabase
@@ -234,6 +246,30 @@ export default function MyBidsPage() {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div>Loading your bids...</div>
+      </div>
+    );
+  }
+
+  if (blocked) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header />
+        <div className="max-w-4xl mx-auto w-full px-4 py-8">
+          <Link href="/" className="text-sm text-[var(--gold)] hover:underline">
+            ← Dashboard
+          </Link>
+          <h1 className="text-3xl font-extrabold mt-1">My Bids</h1>
+          <div className="card p-8 text-center mt-6">
+            <p className="text-lg mb-2">Not available</p>
+            <p className="text-sm text-[var(--text3)] mb-4">
+              My Bids is for repair companies that submit offers on jobs. Bids on your own service
+              requests stay on each request.
+            </p>
+            <Link href="/service-requests" className="btn btn-primary">
+              Service Requests
+            </Link>
+          </div>
+        </div>
       </div>
     );
   }

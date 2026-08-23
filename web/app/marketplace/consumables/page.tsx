@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { isConsumableListing } from '@/lib/marketplace/parts';
 import { toast } from 'sonner';
 
 
@@ -22,13 +23,20 @@ export default function ConsumablesMarketplace() {
 
   const fetchListings = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('marketplace_listings')
       .select('*')
-      .eq('listing_type', 'part')
+      .or('listing_type.eq.consumable,listing_type.eq.consumables,listing_type.eq.part,listing_type.eq.parts')
       .order('created_at', { ascending: false });
-    // Note: Consumables currently share the 'part' listing_type. Create with "Part for Sale" for now.
-    if (!error && data) setListings(data);
+    if (error) {
+      const retry = await supabase
+        .from('marketplace_listings')
+        .select('*')
+        .order('created_at', { ascending: false });
+      data = retry.data;
+      error = retry.error;
+    }
+    if (!error && data) setListings(data.filter(isConsumableListing));
     setLoading(false);
   };
 

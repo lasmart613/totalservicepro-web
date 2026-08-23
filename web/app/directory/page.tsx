@@ -13,6 +13,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { fetchAllPages } from '@/lib/supabase/paginate';
 import { isServiceOrgType } from '@/lib/org-types';
 import { orgTypeLabel } from '@/lib/labels';
+import { isOwnerish } from '@/lib/roles';
 
 type OrgRow = {
   id: number | string;
@@ -72,6 +73,7 @@ export default function DirectoryPage() {
     'Organizations opt in for free during onboarding or Company Profile. Clinics shows only customers linked to your repair company.'
   );
   const [myOrgId, setMyOrgId] = useState<string | number | null>(null);
+  const [showMyClinics, setShowMyClinics] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -80,14 +82,24 @@ export default function DirectoryPage() {
         data: { user },
       } = await supabase.auth.getUser();
       let orgId: string | number | null = null;
+      let allowMyClinics = true;
       if (user) {
         const { data: prof } = await supabase
           .from('user_profiles')
-          .select('organization_id')
+          .select('role, organization_id, organizations(type)')
           .eq('id', user.id)
           .maybeSingle();
         orgId = prof?.organization_id ?? null;
         setMyOrgId(orgId);
+        const orgType =
+          (prof?.organizations as { type?: string | null } | null)?.type ||
+          user.user_metadata?.organization_type ||
+          null;
+        allowMyClinics = !isOwnerish(prof?.role || user.user_metadata?.role, orgType);
+      }
+      setShowMyClinics(allowMyClinics);
+      if (!allowMyClinics) {
+        setFilter((prev) => (prev === 'clinics' ? 'all' : prev));
       }
 
       // Free public directory listings — page until a short range, no silent 500 cap
@@ -125,9 +137,9 @@ export default function DirectoryPage() {
       }
       setAllListed(listed);
 
-      // My clinics — org-scoped via organization_customers (not global)
+      // My clinics — org-scoped via organization_customers (repair companies only)
       const clinics: OrgRow[] = [];
-      if (orgId) {
+      if (orgId && allowMyClinics) {
         try {
           const { data: links, error: clinicErr } = await fetchAllPages<any>((from, to) =>
             supabase
@@ -218,7 +230,7 @@ export default function DirectoryPage() {
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-2 mb-4 scrollbar-none">
-          {FILTERS.map((f) => (
+          {FILTERS.filter((f) => f.key !== 'clinics' || showMyClinics).map((f) => (
             <button
               key={f.key}
               type="button"
