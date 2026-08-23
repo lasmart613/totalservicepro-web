@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { listMemberUserIdsForOrg, upsertMembership } from '@/lib/org-membership-server';
 
 /**
  * GET /api/team/list
@@ -65,15 +66,19 @@ export async function GET(req: NextRequest) {
           .ilike('email', email)
           .maybeSingle();
         if (!mem) continue;
-        // Only attach unlinked profiles. Never steal a user who already belongs elsewhere.
-        if (mem.organization_id != null && String(mem.organization_id) !== String(orgId)) {
-          continue;
-        }
+        await upsertMembership(admin, {
+          userId: mem.id,
+          organizationId: orgId,
+          role: inv.role || 'fse',
+          isHome: false,
+        });
+        // Only attach the profile pointer when they have no active org.
         if (mem.organization_id == null) {
           await admin
             .from('user_profiles')
             .update({
               organization_id: orgId,
+              active_organization_id: orgId,
               role: inv.role || 'fse',
             })
             .eq('id', mem.id);
@@ -87,6 +92,8 @@ export async function GET(req: NextRequest) {
       'id, first_name, last_name, email, role, job_title, additional_roles, created_at, onboarding_completed, organization_id';
     const teamSelectSafe =
       'id, first_name, last_name, email, role, job_title, created_at, onboarding_completed, organization_id';
+
+    const memberIds = await listMemberUserIdsForOrg(admin, orgId);
 
     let { data: members, error } = await admin
       .from('user_profiles')
@@ -103,9 +110,50 @@ export async function GET(req: NextRequest) {
         .order('first_name', { ascending: true, nullsFirst: false }));
     }
 
+    if (memberIds.length) {
+      let extras: any[] | null = null;
+      let extraErr = error;
+      ({ data: extras, error: extraErr } = await admin
+        .from('user_profiles')
+        .select(error ? teamSelectSafe : teamSelectFull)
+        .in('id', memberIds)
+        .order('first_name', { ascending: true, nullsFirst: false }));
+      if (extraErr && /additional_roles|column/i.test(extraErr.message || '')) {
+        ({ data: extras } = await admin
+          .from('user_profiles')
+          .select(teamSelectSafe)
+          .in('id', memberIds)
+          .order('first_name', { ascending: true, nullsFirst: false }));
+        extraErr = null as any;
+      }
+      if (!extraErr && extras) {
+        const seen = new Set((members || []).map((m: any) => m.id));
+        members = [...(members || [])];
+        for (const row of extras) {
+          if (!seen.has(row.id)) {
+            seen.add(row.id);
+            members.push(row);
+          }
+        }
+      }
+    }
+
     if (error) {
       return NextResponse.json({ error: error.message, members: [] }, { status: 400 });
     }
+
+    const { data: orgRoles } = await admin
+      .from('organization_memberships')
+      .select('user_id, role, is_home')
+      .eq('organization_id', orgId);
+    const roleByUser = new Map(
+      (orgRoles || []).map((r: any) => [r.user_id, { role: r.role, is_home: r.is_home }])
+    );
+    members = (members || []).map((m: any) => {
+      const mem = roleByUser.get(m.id);
+      if (!mem) return m;
+      return { ...m, role: mem.role, is_home: mem.is_home };
+    });
 
     // All invites for this org (history + pending) — client RLS often hides these
     const { data: allInvites } = await admin

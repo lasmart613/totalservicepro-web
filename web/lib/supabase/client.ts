@@ -185,34 +185,15 @@ export type ServiceContract = {
 };
 
 /**
- * Claims any pending engineer_invitations for this email (by exact email match).
- * If found and not accepted, applies organization_id + role to the profile,
- * marks invitation accepted. Called after signups / onboarding to auto-assign
- * FSEs invited during RSP org setup. (Auto-apply recommended UX.)
+ * Claims any pending engineer_invitations for this email.
+ * Founders with a home shop are not skipped — a pending invite to another
+ * company is accepted as a second membership (moonlight). Auto-claim never
+ * leaves/steals the home org.
  */
 export async function claimPendingInvitations(supabase: SupabaseClient, userId: string, email: string) {
   if (!email || !userId) return;
   try {
     const clean = email.toLowerCase().trim();
-    // Founders who just created an org must not be pulled into a pending FSE invite.
-    const { data: existingProf } = await supabase
-      .from('user_profiles')
-      .select('organization_id, role')
-      .eq('id', userId)
-      .maybeSingle();
-    const { data: { user: authUser } } = await supabase.auth.getUser();
-    const invited = !!(authUser?.user_metadata as any)?.invited_member;
-    const founderRoles = new Set(['company_admin', 'admin', 'owner', 'parts_supplier']);
-    const metaRole = String((authUser?.user_metadata as any)?.role || '').toLowerCase();
-    const signupKind = String((authUser?.user_metadata as any)?.signup_kind || '').toLowerCase();
-    const isFounderSignup =
-      !invited &&
-      (founderRoles.has(String(existingProf?.role || '').toLowerCase()) ||
-        founderRoles.has(metaRole) ||
-        ['company', 'owner', 'supplier'].includes(signupKind));
-    if (isFounderSignup && (existingProf?.organization_id || signupKind || founderRoles.has(metaRole))) {
-      return;
-    }
     // Prefer server claim (bypasses RLS) when we have a session
     try {
       const { data: { session } } = await supabase.auth.getSession();
@@ -223,6 +204,7 @@ export async function claimPendingInvitations(supabase: SupabaseClient, userId: 
             Authorization: `Bearer ${session.access_token}`,
             'Content-Type': 'application/json',
           },
+          body: JSON.stringify({}),
         });
         if (res.ok) {
           console.log('[TSP] Claimed invitation via API for', clean);
@@ -233,6 +215,12 @@ export async function claimPendingInvitations(supabase: SupabaseClient, userId: 
       console.warn('claim API fallback to client', apiErr);
     }
 
+    const { data: existingProf } = await supabase
+      .from('user_profiles')
+      .select('organization_id, role')
+      .eq('id', userId)
+      .maybeSingle();
+
     const { data: invites, error: selErr } = await supabase
       .from('engineer_invitations')
       .select('*')
@@ -241,10 +229,6 @@ export async function claimPendingInvitations(supabase: SupabaseClient, userId: 
       .order('created_at', { ascending: false })
       .limit(1);
     if (selErr) console.warn('claimPendingInvitations select', selErr);
-
-    if (existingProf?.organization_id) {
-      return;
-    }
 
     const inv = invites?.[0];
     // Only a real invitation row may attach org/role. Never trust user_metadata.organization_id.
@@ -256,22 +240,32 @@ export async function claimPendingInvitations(supabase: SupabaseClient, userId: 
 
     const { data: { user } } = await supabase.auth.getUser();
     const meta = user?.user_metadata || {};
-    const update: any = {
+
+    await supabase.from('organization_memberships').upsert({
+      user_id: userId,
       organization_id: orgId,
       role: inv?.role || 'fse',
-      onboarding_completed: true,
-    };
-    if (inv?.first_name || meta.first_name) update.first_name = inv?.first_name || meta.first_name;
-    if (inv?.last_name || meta.last_name) update.last_name = inv?.last_name || meta.last_name;
+      is_home: false,
+    }, { onConflict: 'user_id,organization_id' });
 
-    const { error: upErr } = await supabase.from('user_profiles').update(update).eq('id', userId);
-    if (upErr) {
-      // Profile may not exist yet
-      await supabase.from('user_profiles').upsert({
-        id: userId,
-        email: clean,
-        ...update,
-      }, { onConflict: 'id' });
+    if (!existingProf?.organization_id) {
+      const update: any = {
+        organization_id: orgId,
+        active_organization_id: orgId,
+        role: inv?.role || 'fse',
+        onboarding_completed: true,
+      };
+      if (inv?.first_name || meta.first_name) update.first_name = inv?.first_name || meta.first_name;
+      if (inv?.last_name || meta.last_name) update.last_name = inv?.last_name || meta.last_name;
+
+      const { error: upErr } = await supabase.from('user_profiles').update(update).eq('id', userId);
+      if (upErr) {
+        await supabase.from('user_profiles').upsert({
+          id: userId,
+          email: clean,
+          ...update,
+        }, { onConflict: 'id' });
+      }
     }
     if (inv?.id) {
       await supabase.from('engineer_invitations').update({

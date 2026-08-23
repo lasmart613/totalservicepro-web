@@ -265,7 +265,8 @@ export default function TeamManagement() {
     <div>
       <h1 className="text-3xl font-extrabold mb-2">Team Management</h1>
       <p className="text-[var(--text3)] mb-8">
-        Invite FSEs and staff. They get an email to join your organization.
+        Invite FSEs and staff. An email that already owns another shop is valid —
+        they join this company as a second membership (moonlight) and keep their home org.
       </p>
 
       <div className="card p-6 mb-10">
@@ -361,7 +362,7 @@ export default function TeamManagement() {
               {adding ? 'Sending invite…' : 'Send Invite Email'}
             </button>
             <p className="text-xs text-[var(--text3)] mt-2">
-              Sends a Supabase invite email. After they accept, they join your org automatically.
+              Existing RepairPlanet users are added as a membership (default FSE). Their home shop and founder role stay intact. New users still get the invite email.
             </p>
           </div>
         </form>

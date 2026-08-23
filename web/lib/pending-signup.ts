@@ -378,6 +378,17 @@ async function linkFounderProfile(
       );
     }
   }
+
+  try {
+    await supabase.from('organization_memberships').upsert({
+      user_id: userId,
+      organization_id: orgId,
+      role: pending.role || 'company_admin',
+      is_home: true,
+    }, { onConflict: 'user_id,organization_id' });
+  } catch {
+    /* migration may not be applied yet — profile pointer still works */
+  }
 }
 
 /**
