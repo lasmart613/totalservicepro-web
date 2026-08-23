@@ -14,6 +14,16 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
+  async headers() {
+    return [
+      {
+        source: '/ads.txt',
+        headers: [
+          { key: 'Content-Type', value: 'text/plain; charset=utf-8' },
+        ],
+      },
+    ];
+  },
   async redirects() {
     // Belt-and-suspenders with middleware: old Android asset URLs
     return [
