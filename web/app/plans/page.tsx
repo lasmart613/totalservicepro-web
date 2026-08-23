@@ -17,13 +17,14 @@ import {
 } from '@/lib/org-plan';
 import { loadOrgPlanRow } from '@/lib/org-plan-load';
 import { PLAN_OFFERS, skuFor, type BillingCycle, type PaidPlanId } from '@/lib/billing/plan-catalog';
+import {
+  PREMIUM_MANUALS_LINE,
+  TEAM_MANUALS_LINE,
+  WEEKLY_UPDATES_LINE,
+} from '@/lib/billing/plan-tiles';
 import { startClientUpgradeCheckout } from '@/lib/billing/start-client-checkout';
 
 type AuthState = 'loading' | 'in' | 'out';
-
-/** Shown on the /plans tiles in both signed-in and logged-out views. */
-const PREMIUM_MANUALS_LINE = '15 service manuals';
-const TEAM_MANUALS_LINE = 'Unlimited service manuals';
 
 function PublicPlans() {
   return (
@@ -45,6 +46,7 @@ function PublicPlans() {
               <li>Register and use Total Service Pro at no charge</li>
               <li>Schedule service calls, post service requests, and list parts</li>
               <li>Ads may appear on the Free Plan</li>
+              <li>{WEEKLY_UPDATES_LINE}</li>
             </ul>
             <Link href="/signup" className="lp-btn lp-btn-primary">
               Register for Total Service Pro
@@ -61,6 +63,7 @@ function PublicPlans() {
               <li>AI troubleshooting assistant</li>
               <li>{PREMIUM_MANUALS_LINE}</li>
               <li>No advertisements</li>
+              <li>{WEEKLY_UPDATES_LINE}</li>
             </ul>
             <Link href="/signup" className="lp-btn lp-btn-ghost">
               Register for Total Service Pro
@@ -77,6 +80,7 @@ function PublicPlans() {
               <li>{TEAM_MANUALS_LINE}</li>
               <li>Up to 10 user seats</li>
               <li>Shared service history</li>
+              <li>{WEEKLY_UPDATES_LINE}</li>
             </ul>
             <Link href="/signup" className="lp-btn lp-btn-ghost">
               Register for Total Service Pro
@@ -251,6 +255,7 @@ function SignedInPlans() {
               <li>Schedule, requests, and parts listings</li>
               <li>Ads may appear</li>
               <li>Get started at no charge</li>
+              <li>{WEEKLY_UPDATES_LINE}</li>
             </ul>
             <div className="btn btn-secondary w-full text-center mt-5 pointer-events-none opacity-70">
               {!orgReady ? '…' : namedPlan === 'free' ? 'Current plan' : 'Included'}
@@ -270,6 +275,7 @@ function SignedInPlans() {
               <li>AI troubleshooting assistant</li>
               <li>{PREMIUM_MANUALS_LINE}</li>
               <li>No advertisements</li>
+              <li>{WEEKLY_UPDATES_LINE}</li>
             </ul>
             <button
               type="button"
@@ -303,6 +309,7 @@ function SignedInPlans() {
               <li>{TEAM_MANUALS_LINE}</li>
               <li>Up to 10 user seats</li>
               <li>Shared service history</li>
+              <li>{WEEKLY_UPDATES_LINE}</li>
             </ul>
             <button
               type="button"
