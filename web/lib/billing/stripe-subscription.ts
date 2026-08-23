@@ -19,7 +19,7 @@ import {
   type UpgradeSessionOwner,
 } from '@/lib/billing/upgrade-session';
 
-type StripeObject = Record<string, unknown> & {
+export type StripeObject = Record<string, unknown> & {
   id?: string;
   url?: string;
   livemode?: boolean;
@@ -223,6 +223,81 @@ export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe
     `checkout/sessions/${encodeURIComponent(id)}?expand[]=invoice`,
     'GET'
   );
+}
+
+function stripeSearchQuote(value: string): string {
+  return `'${String(value).replace(/\\/g, '\\\\').replace(/'/g, "\\'")}'`;
+}
+
+export async function listCompleteCheckoutSessionsForCustomer(
+  customerId: string,
+  limit = 20
+): Promise<StripeObject[]> {
+  const id = String(customerId || '').trim();
+  if (!id || !id.startsWith('cus_')) return [];
+  const listed = await stripeRequest(
+    `checkout/sessions?customer=${encodeURIComponent(id)}&status=complete&limit=${Math.min(limit, 100)}`,
+    'GET'
+  );
+  return Array.isArray(listed.data) ? listed.data : [];
+}
+
+export async function searchCheckoutSessions(query: string, limit = 20): Promise<StripeObject[]> {
+  const q = String(query || '').trim();
+  if (!q) return [];
+  try {
+    const listed = await stripeRequest(
+      `checkout/sessions/search?query=${encodeURIComponent(q)}&limit=${Math.min(limit, 100)}`,
+      'GET'
+    );
+    return Array.isArray(listed.data) ? listed.data : [];
+  } catch {
+    return [];
+  }
+}
+
+export function checkoutSessionSearchQuery(input: {
+  organizationId?: string | null;
+  userId?: string | null;
+}): string | null {
+  const parts = [`status:'complete'`, `metadata['kind']:'org_plan'`];
+  const orgId = String(input.organizationId || '').trim();
+  const userId = String(input.userId || '').trim();
+  if (orgId) parts.push(`metadata['organization_id']:${stripeSearchQuote(orgId)}`);
+  else if (userId) parts.push(`metadata['user_id']:${stripeSearchQuote(userId)}`);
+  else return null;
+  return parts.join(' AND ');
+}
+
+export async function listCustomersByEmail(email: string): Promise<StripeObject[]> {
+  const value = String(email || '').trim();
+  if (!value.includes('@')) return [];
+  const listed = await stripeRequest(
+    `customers?email=${encodeURIComponent(value)}&limit=5`,
+    'GET'
+  );
+  return Array.isArray(listed.data) ? listed.data : [];
+}
+
+export async function listActiveSubscriptionsForCustomer(
+  customerId: string,
+  limit = 10
+): Promise<StripeObject[]> {
+  const id = String(customerId || '').trim();
+  if (!id || !id.startsWith('cus_')) return [];
+  const listed = await stripeRequest(
+    `subscriptions?customer=${encodeURIComponent(id)}&status=active&limit=${Math.min(limit, 100)}`,
+    'GET'
+  );
+  return Array.isArray(listed.data) ? listed.data : [];
+}
+
+export async function retrieveStripeSubscription(subscriptionId: string): Promise<StripeObject> {
+  const id = String(subscriptionId || '').trim();
+  if (!id || !/^sub_/.test(id)) {
+    throw new StripeSubscriptionError('Invalid subscription id', 400);
+  }
+  return stripeRequest(`subscriptions/${encodeURIComponent(id)}`, 'GET');
 }
 
 export async function retrieveStripeInvoice(invoiceId: string): Promise<StripeObject> {

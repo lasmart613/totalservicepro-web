@@ -10,10 +10,9 @@ export type UpgradeEntry = {
 };
 
 /**
- * Free → show Upgrade to /plans.
- * Premium / is_premium (not Team/Enterprise) → show Upgrade that starts Team checkout.
+ * Free and Premium / is_premium → show Upgrade chrome that goes to /plans.
  * Team / Enterprise → hide.
- * Hidden while loading or signed out.
+ * Hidden while loading or signed out. Never starts Stripe Checkout.
  */
 export function useUpgradeEntry(): UpgradeEntry {
   const [entry, setEntry] = useState<UpgradeEntry>({ show: false, target: 'plans' });

@@ -4,12 +4,15 @@ import {
   FREE_MANUAL_SLOTS,
   PREMIUM_MANUAL_SLOTS,
   UNLIMITED_MANUAL_SLOTS,
+  currentOrgPlan,
+  currentOrgPlanLabel,
   manualSlotLimit,
   orgCanUpgrade,
   orgIsPaid,
   orgIsTopPaid,
   orgMayStartPaidPlan,
   shouldPreserveSessionForExistingOrg,
+  upgradeChromeHrefForOrg,
   upgradeTargetForOrg,
 } from './org-plan.ts';
 
@@ -68,9 +71,18 @@ test('missing org does not preserve a session (public signup may clear it)', () 
 test('free and "pro" still see Upgrade to /plans', () => {
   assert.equal(upgradeTargetForOrg({}), 'plans');
   assert.equal(upgradeTargetForOrg({ is_premium: false, plan: 'pro' }), 'plans');
+  assert.equal(upgradeChromeHrefForOrg({}), '/plans');
   assert.equal(orgCanUpgrade({ plan: 'free' }), true);
   assert.equal(orgMayStartPaidPlan({ plan: 'free' }, 'premium'), true);
   assert.equal(orgMayStartPaidPlan({ plan: 'free' }, 'team'), true);
+});
+
+test('Free and Premium Upgrade chrome always go to /plans, never Checkout', () => {
+  assert.equal(upgradeChromeHrefForOrg({ is_premium: false }), '/plans');
+  assert.equal(upgradeChromeHrefForOrg({ plan: 'premium' }), '/plans');
+  assert.equal(upgradeChromeHrefForOrg({ is_premium: true }), '/plans');
+  assert.equal(upgradeChromeHrefForOrg({ plan: 'team' }), null);
+  assert.equal(upgradeChromeHrefForOrg({ subscription_tier: 'enterprise' }), null);
 });
 
 test('Premium / is_premium mid-tier still sees Upgrade to Team', () => {
@@ -92,6 +104,17 @@ test('Team and Enterprise hide Upgrade and cannot start checkout', () => {
   assert.equal(orgCanUpgrade({ is_premium: true, plan: 'team' }), false);
   assert.equal(orgMayStartPaidPlan({ plan: 'team' }, 'team'), false);
   assert.equal(orgMayStartPaidPlan({ plan: 'enterprise' }, 'premium'), false);
+});
+
+test('current plan label is Free / Premium / Team from paid helper', () => {
+  assert.equal(currentOrgPlan(null), 'free');
+  assert.equal(currentOrgPlanLabel({ is_premium: false, plan: 'pro' }), 'Free');
+  assert.equal(currentOrgPlan({ is_premium: true }), 'premium');
+  assert.equal(currentOrgPlanLabel({ is_premium: true, plan: 'pro' }), 'Premium');
+  assert.equal(currentOrgPlan({ subscription_tier: 'PREMIUM' }), 'premium');
+  assert.equal(currentOrgPlanLabel({ plan: 'team' }), 'Team');
+  assert.equal(currentOrgPlan({ plan: 'enterprise' }), 'enterprise');
+  assert.equal(currentOrgPlan({ is_premium: true, plan: 'team' }), 'team');
 });
 
 test('Premium is 15 service manuals; Team is unlimited; pro is not paid', () => {

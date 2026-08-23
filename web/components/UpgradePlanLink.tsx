@@ -1,10 +1,7 @@
 'use client';
 
-import React, { useState } from 'react';
+import React from 'react';
 import Link from 'next/link';
-import { toast } from 'sonner';
-import { useUpgradeEntry } from '@/lib/use-show-upgrade';
-import { startClientUpgradeCheckout } from '@/lib/billing/start-client-checkout';
 import type { UpgradeTarget } from '@/lib/org-plan';
 
 export const UPGRADE_HREF = '/plans';
@@ -14,37 +11,22 @@ type UpgradePlanLinkProps = {
   className?: string;
   onClick?: () => void;
   children?: React.ReactNode;
-  /** From the same gate that decided to show Upgrade — avoids a second fetch race. */
+  /**
+   * Ignored for navigation. Free and Premium chrome always go to /plans.
+   * Kept so dashboard / company / admin call sites do not need a second pass.
+   */
   target?: UpgradeTarget;
 };
 
 /**
- * Free: /plans (Premium + Team). Mid-tier (Premium): stay signed in and start
- * Stripe Checkout for Team ($39.99/mo) on the existing org.
+ * Dashboard, company profile menu, /company, and admin sidebar.
+ * Always /plans — never Stripe Checkout. Checkout starts only from a
+ * labeled button on /plans (Upgrade to Premium / Upgrade to Team).
  */
-export function UpgradePlanLink({ className, onClick, children, target }: UpgradePlanLinkProps) {
-  const entry = useUpgradeEntry();
-  const resolvedTarget = target ?? entry.target;
-  const [starting, setStarting] = useState(false);
-
-  async function startTeamCheckout(event: React.MouseEvent<HTMLAnchorElement>) {
-    onClick?.();
-    if (resolvedTarget !== 'team') return;
-    event.preventDefault();
-    if (starting) return;
-    setStarting(true);
-    try {
-      const session = await startClientUpgradeCheckout('team_monthly');
-      window.location.assign(session.url);
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Could not start Stripe Checkout');
-      setStarting(false);
-    }
-  }
-
+export function UpgradePlanLink({ className, onClick, children }: UpgradePlanLinkProps) {
   return (
-    <Link href={UPGRADE_HREF} className={className} onClick={startTeamCheckout}>
-      {starting ? 'Starting checkout…' : children ?? UPGRADE_LABEL}
+    <Link href={UPGRADE_HREF} className={className} onClick={onClick}>
+      {children ?? UPGRADE_LABEL}
     </Link>
   );
 }

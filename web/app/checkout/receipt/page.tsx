@@ -64,6 +64,30 @@ function ReceiptBody() {
       };
       if (cancelled) return;
       if (!res.ok) {
+        const syncRes = await fetch('/api/billing/upgrade/sync', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+        });
+        const syncJson = (await syncRes.json().catch(() => ({}))) as {
+          applied?: boolean;
+          planLabel?: string;
+          amountLabel?: string | null;
+          organizationName?: string | null;
+          stripeReceiptUrl?: string | null;
+        };
+        if (!cancelled && syncRes.ok && syncJson.applied) {
+          setState({
+            status: 'ok',
+            planLabel: syncJson.planLabel || 'Paid plan',
+            amountLabel: syncJson.amountLabel || null,
+            organizationName: syncJson.organizationName || null,
+            stripeReceiptUrl: syncJson.stripeReceiptUrl || null,
+          });
+          return;
+        }
         setState({
           status: 'failed',
           message: json?.error || 'Checkout was not completed. You were not charged.',
