@@ -21,6 +21,7 @@ import {
 
 type StripeObject = Record<string, unknown> & {
   id?: string;
+  name?: string;
   url?: string;
   livemode?: boolean;
   lookup_key?: string | null;
