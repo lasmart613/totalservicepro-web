@@ -7,7 +7,14 @@
 import { orgTypeLabel } from '../labels.ts';
 import { isServiceOrgType } from '../org-types.ts';
 
-export { GUEST_SIGNUP_HREF } from '../marketplace/guest.ts';
+import { GUEST_SIGNUP_HREF } from '../marketplace/guest.ts';
+
+export { GUEST_SIGNUP_HREF };
+
+/** Logged-out directory clicks go to register, never an org detail page. */
+export function directoryHref(signedIn: boolean, href: string): string {
+  return signedIn ? href : GUEST_SIGNUP_HREF;
+}
 
 export const GUEST_NAME_PLACEHOLDER = '••••••••';
 export const GUEST_PHONE_PLACEHOLDER = '(•••) •••-••••';

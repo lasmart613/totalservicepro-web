@@ -11,6 +11,7 @@ import {
   GUEST_PHONE_PLACEHOLDER,
   GUEST_SIGNUP_HREF,
   clampGuestDirectoryPageSize,
+  directoryHref,
   displayGuestDirectoryField,
   guestCardLeaksPii,
   guestDirectoryTypeFilter,
@@ -91,6 +92,12 @@ test('guest field helpers never return the real value while logged out', () => {
   assert.equal(GUEST_SIGNUP_HREF, '/signup');
 });
 
+test('logged-out directory clicks go to register, not an org detail page', () => {
+  assert.equal(directoryHref(false, '/directory/42'), GUEST_SIGNUP_HREF);
+  assert.equal(directoryHref(false, '/directory/42?tab=contact'), GUEST_SIGNUP_HREF);
+  assert.equal(directoryHref(true, '/directory/42'), '/directory/42');
+});
+
 test('type filters map to real Organizations.type values', () => {
   assert.deepEqual(guestDirectoryTypeFilter('clinics'), ['customer', 'laser_clinic']);
   assert.deepEqual(guestDirectoryTypeFilter('service'), ['service_company', 'service']);
@@ -111,7 +118,9 @@ test('logged-out directory redacts PII and sends card clicks to signup', () => {
   const page = readFileSync(join(here, '../../app/directory/page.tsx'), 'utf8');
   const api = readFileSync(join(here, '../../app/api/directory/route.ts'), 'utf8');
   const ui = readFileSync(join(here, '../../components/directory/GuestRedactedText.tsx'), 'utf8');
-  assert.match(page, /GuestRedactedText/);
+  const card = readFileSync(join(here, '../../components/directory/GuestDirectoryCard.tsx'), 'utf8');
+  const deep = readFileSync(join(here, '../../app/directory/[id]/page.tsx'), 'utf8');
+  assert.match(page, /GuestDirectoryCard/);
   assert.match(page, /\/api\/directory/);
   assert.match(page, /GUEST_SIGNUP_HREF/);
   assert.match(page, /useSignedIn/);
@@ -120,4 +129,11 @@ test('logged-out directory redacts PII and sends card clicks to signup', () => {
   assert.doesNotMatch(api, /\.eq\(\s*['\"]list_in_directory['\"]/);
   assert.match(ui, /blur-\[7px\]/);
   assert.match(ui, /placeholder/);
+  assert.match(card, /directoryHref/);
+  assert.doesNotMatch(card, /href=\{?["'`]tel:/);
+  assert.doesNotMatch(card, /href=\{?["'`]mailto:/);
+  assert.doesNotMatch(card, /maps\.google|google\.com\/maps/);
+  assert.doesNotMatch(card, /websiteHref/);
+  assert.doesNotMatch(card, /target="_blank"/);
+  assert.match(deep, /useGuestSignupRedirect/);
 });

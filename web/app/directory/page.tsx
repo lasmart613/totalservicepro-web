@@ -13,22 +13,17 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
-import { GuestRedactedText } from '@/components/directory/GuestRedactedText';
+import { GuestDirectoryCard } from '@/components/directory/GuestDirectoryCard';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { fetchAllPages } from '@/lib/supabase/paginate';
 import { isServiceOrgType } from '@/lib/org-types';
 import { orgTypeLabel } from '@/lib/labels';
 import { useSignedIn } from '@/lib/use-signed-in';
 import {
-  GUEST_ADDRESS_PLACEHOLDER,
   GUEST_DIRECTORY_PAGE_SIZE,
-  GUEST_EMAIL_PLACEHOLDER,
-  GUEST_INITIALS_PLACEHOLDER,
-  GUEST_NAME_PLACEHOLDER,
-  GUEST_PHONE_PLACEHOLDER,
   GUEST_SIGNUP_HREF,
   type DirectoryFilterKey,
-  type GuestDirectoryCard,
+  type GuestDirectoryCard as GuestDirectoryCardData,
 } from '@/lib/directory/guest';
 
 type OrgRow = {
@@ -86,7 +81,7 @@ export default function DirectoryPage() {
   const [loading, setLoading] = useState(true);
   const [allListed, setAllListed] = useState<OrgRow[]>([]);
   const [myClinics, setMyClinics] = useState<OrgRow[]>([]);
-  const [guestCards, setGuestCards] = useState<GuestDirectoryCard[]>([]);
+  const [guestCards, setGuestCards] = useState<GuestDirectoryCardData[]>([]);
   const [guestPage, setGuestPage] = useState(1);
   const [guestHasMore, setGuestHasMore] = useState(false);
   const [guestTotal, setGuestTotal] = useState<number | null>(null);
@@ -189,7 +184,7 @@ export default function DirectoryPage() {
   }, [supabase]);
 
   const applyGuestPayload = useCallback(
-    (json: { listings?: GuestDirectoryCard[]; hasMore?: boolean; total?: number | null }, append: boolean) => {
+    (json: { listings?: GuestDirectoryCardData[]; hasMore?: boolean; total?: number | null }, append: boolean) => {
       const rows = Array.isArray(json?.listings) ? json.listings : [];
       setGuestCards((prev) => (append ? [...prev, ...rows] : rows));
       setGuestHasMore(Boolean(json?.hasMore));
@@ -354,66 +349,7 @@ export default function DirectoryPage() {
             <>
               <div className="space-y-2.5">
                 {visibleGuests.map((o) => (
-                  <Link
-                    key={String(o.id)}
-                    href={GUEST_SIGNUP_HREF}
-                    className="card p-4 block hover:border-[var(--gold)] transition-colors"
-                  >
-                    <div className="flex gap-3 items-center">
-                      <div className="w-12 h-12 rounded-xl bg-[var(--gold)] text-[#111] font-extrabold flex items-center justify-center overflow-hidden shrink-0">
-                        <GuestRedactedText
-                          signedIn={false}
-                          placeholder={GUEST_INITIALS_PLACEHOLDER}
-                          label="organization"
-                        />
-                      </div>
-                      <div className="min-w-0">
-                        <div className="font-bold text-[15px] truncate">
-                          <GuestRedactedText
-                            signedIn={false}
-                            placeholder={GUEST_NAME_PLACEHOLDER}
-                            label="organization name"
-                          />
-                        </div>
-                        <div className="text-[11px] font-bold text-[var(--gold)] mt-0.5">
-                          {o.typeLabel}
-                        </div>
-                        <div className="text-xs text-[var(--text3)] mt-0.5">
-                          📍{' '}
-                          {o.region ? (
-                            o.region
-                          ) : (
-                            <GuestRedactedText
-                              signedIn={false}
-                              placeholder={GUEST_ADDRESS_PLACEHOLDER}
-                              label="location"
-                            />
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                    {(o.hasPhone || o.hasEmail || o.hasWebsite) && (
-                      <div className="text-xs text-[var(--text2)] mt-2.5 leading-relaxed">
-                        {o.hasPhone && (
-                          <GuestRedactedText
-                            signedIn={false}
-                            placeholder={GUEST_PHONE_PLACEHOLDER}
-                            label="phone"
-                          />
-                        )}
-                        {o.hasPhone && o.hasEmail && <span> · </span>}
-                        {o.hasEmail && (
-                          <GuestRedactedText
-                            signedIn={false}
-                            placeholder={GUEST_EMAIL_PLACEHOLDER}
-                            label="email"
-                          />
-                        )}
-                        {(o.hasPhone || o.hasEmail) && o.hasWebsite && <span> · </span>}
-                        {o.hasWebsite && <span className="text-[var(--gold)]">Website</span>}
-                      </div>
-                    )}
-                  </Link>
+                  <GuestDirectoryCard key={String(o.id)} signedIn={signedIn} card={o} />
                 ))}
               </div>
               <div className="text-center text-xs text-[var(--text3)] mt-4">
