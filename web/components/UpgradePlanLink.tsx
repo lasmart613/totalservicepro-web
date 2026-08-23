@@ -12,7 +12,7 @@ type UpgradePlanLinkProps = {
   children?: React.ReactNode;
 };
 
-/** Links to the existing /plans page. Does not invent checkout or prices. */
+/** Links to /plans. Signed-in orgs stay in-session there and start Stripe checkout. */
 export function UpgradePlanLink({ className, onClick, children }: UpgradePlanLinkProps) {
   return (
     <Link href={UPGRADE_HREF} className={className} onClick={onClick}>

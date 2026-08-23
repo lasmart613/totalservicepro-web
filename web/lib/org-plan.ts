@@ -23,3 +23,14 @@ export function orgIsPaid(org: OrgPlanFields | null | undefined): boolean {
   if (org.is_premium === true) return true;
   return isExactPaidName(org.subscription_tier) || isExactPaidName(org.plan);
 }
+
+/**
+ * True when this browser already has an organization to upgrade.
+ * Viewing /plans or starting checkout must never clear that session.
+ */
+export function shouldPreserveSessionForExistingOrg(
+  organizationId: string | number | null | undefined
+): boolean {
+  if (organizationId == null) return false;
+  return String(organizationId).trim() !== '';
+}

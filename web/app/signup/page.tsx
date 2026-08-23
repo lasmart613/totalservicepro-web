@@ -2,15 +2,41 @@
 
 import React, { useEffect } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { Building2, Hospital, Package } from 'lucide-react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { prepareFreshSignup } from '@/lib/auth-session';
+import { shouldPreserveSessionForExistingOrg } from '@/lib/org-plan';
 
 export default function SignupIndex() {
+  const router = useRouter();
+
   useEffect(() => {
-    prepareFreshSignup(getSupabaseClient());
-  }, []);
+    let cancelled = false;
+    (async () => {
+      const supabase = getSupabaseClient();
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase
+          .from('user_profiles')
+          .select('organization_id')
+          .eq('id', user.id)
+          .maybeSingle();
+        if (shouldPreserveSessionForExistingOrg(profile?.organization_id)) {
+          if (!cancelled) router.replace('/plans');
+          return;
+        }
+      }
+      // Logged-out (or no org) register only. Never clear a signed-in org session.
+      await prepareFreshSignup(supabase);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [router]);
 
   return (
     <div className="min-h-screen flex flex-col">
