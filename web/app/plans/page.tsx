@@ -13,17 +13,21 @@ import { startClientUpgradeCheckout } from '@/lib/billing/start-client-checkout'
 
 type AuthState = 'loading' | 'in' | 'out';
 
+/** Shown on the /plans tiles in both signed-in and logged-out views. */
+const PREMIUM_MANUALS_LINE = '15 service manuals';
+const TEAM_MANUALS_LINE = 'Unlimited service manuals';
+
 function PublicPlans() {
   return (
     <LandingShell>
       <section className="lp-section" style={{ marginTop: 0, borderTop: 'none' }}>
         <p className="lp-kicker">Total Service Pro</p>
-        <h1 className="lp-h2">Free Plan and Premium</h1>
+        <h1 className="lp-h2">Free Plan, Premium, and Team</h1>
         <p className="lp-lede">
-          Register for a Free Plan. Compare Free and Premium, then create your account.
+          Register for a Free Plan. Compare Free, Premium, and Team, then create your account.
           Signed-in companies upgrade from this page without registering again.
         </p>
-        <div className="lp-paths lp-paths-2">
+        <div className="lp-paths">
           <article className="lp-path" style={{ cursor: 'default' }}>
             <h3>Free Plan</h3>
             <p className="lp-lede" style={{ margin: '0 0 12px' }}>
@@ -47,8 +51,24 @@ function PublicPlans() {
             <ul>
               <li>Paid plan for accounts that need more of the app</li>
               <li>AI troubleshooting assistant</li>
-              <li>15 service manuals</li>
+              <li>{PREMIUM_MANUALS_LINE}</li>
               <li>No advertisements</li>
+            </ul>
+            <Link href="/signup" className="lp-btn lp-btn-ghost">
+              Register for Total Service Pro
+            </Link>
+          </article>
+          <article className="lp-path" style={{ cursor: 'default' }}>
+            <h3>Team</h3>
+            <p className="lp-lede" style={{ margin: '0 0 12px' }}>
+              <strong>{PLAN_OFFERS.team_monthly.displayAmount}</strong>{' '}
+              {PLAN_OFFERS.team_monthly.displayPeriod}
+            </p>
+            <ul>
+              <li>Everything in Premium</li>
+              <li>{TEAM_MANUALS_LINE}</li>
+              <li>Up to 10 user seats</li>
+              <li>Shared service history</li>
             </ul>
             <Link href="/signup" className="lp-btn lp-btn-ghost">
               Register for Total Service Pro
@@ -205,7 +225,7 @@ function SignedInPlans() {
             ) : null}
             <ul className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1">
               <li>AI troubleshooting assistant</li>
-              <li>15 service manuals</li>
+              <li>{PREMIUM_MANUALS_LINE}</li>
               <li>No advertisements</li>
             </ul>
             <button
@@ -233,7 +253,7 @@ function SignedInPlans() {
             ) : null}
             <ul className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1">
               <li>Everything in Premium</li>
-              <li>Unlimited service manuals</li>
+              <li>{TEAM_MANUALS_LINE}</li>
               <li>Up to 10 user seats</li>
               <li>Shared service history</li>
             </ul>

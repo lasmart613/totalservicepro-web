@@ -31,12 +31,22 @@ test('manuals page does not treat Premium or pro as unlimited slots', () => {
   assert.doesNotMatch(source, /premium\|team\|enterprise\|pro/);
 });
 
-test('/plans Premium is 15 manuals and Team is unlimited', () => {
+test('/plans tiles: Premium 15, Team unlimited, Free does not claim a full library', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');
-  assert.match(source, /15 service manuals/);
-  assert.match(source, /Unlimited service manuals/);
-  assert.doesNotMatch(source, /Full manual library/);
+  const premiumHits = source.match(/PREMIUM_MANUALS_LINE|15 service manuals/g) || [];
+  const teamHits = source.match(/TEAM_MANUALS_LINE|Unlimited service manuals/g) || [];
+  assert.ok(premiumHits.length >= 3, 'Premium tile line used on both views');
+  assert.ok(teamHits.length >= 3, 'Team tile line used on both views');
+  assert.doesNotMatch(source, /Full manual library/i);
+  assert.doesNotMatch(source, /full digital bookshelf/i);
+  const freeBlocks = source.split(/<h[23][^>]*>Free/).slice(1);
+  assert.equal(freeBlocks.length, 2);
+  for (const block of freeBlocks) {
+    const tile = block.slice(0, block.search(/<h[23][^>]*>|<\/article>/) || block.length);
+    assert.doesNotMatch(tile, /unlimited/i);
+    assert.doesNotMatch(tile, /full (manual|library)/i);
+  }
 });
 
 test('/plans does not claim success after checkout', () => {
