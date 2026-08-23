@@ -12,6 +12,7 @@ import {
   orgIsTopPaid,
   orgMayStartPaidPlan,
   shouldPreserveSessionForExistingOrg,
+  upgradeChromeHrefForOrg,
   upgradeTargetForOrg,
 } from './org-plan.ts';
 
@@ -70,9 +71,18 @@ test('missing org does not preserve a session (public signup may clear it)', () 
 test('free and "pro" still see Upgrade to /plans', () => {
   assert.equal(upgradeTargetForOrg({}), 'plans');
   assert.equal(upgradeTargetForOrg({ is_premium: false, plan: 'pro' }), 'plans');
+  assert.equal(upgradeChromeHrefForOrg({}), '/plans');
   assert.equal(orgCanUpgrade({ plan: 'free' }), true);
   assert.equal(orgMayStartPaidPlan({ plan: 'free' }, 'premium'), true);
   assert.equal(orgMayStartPaidPlan({ plan: 'free' }, 'team'), true);
+});
+
+test('Free and Premium Upgrade chrome always go to /plans, never Checkout', () => {
+  assert.equal(upgradeChromeHrefForOrg({ is_premium: false }), '/plans');
+  assert.equal(upgradeChromeHrefForOrg({ plan: 'premium' }), '/plans');
+  assert.equal(upgradeChromeHrefForOrg({ is_premium: true }), '/plans');
+  assert.equal(upgradeChromeHrefForOrg({ plan: 'team' }), null);
+  assert.equal(upgradeChromeHrefForOrg({ subscription_tier: 'enterprise' }), null);
 });
 
 test('Premium / is_premium mid-tier still sees Upgrade to Team', () => {

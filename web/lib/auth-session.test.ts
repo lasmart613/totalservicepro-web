@@ -66,6 +66,23 @@ test('/plans reads the current org plan and can sync a missed Checkout', () => {
   assert.doesNotMatch(source, /organizations\(name, is_premium/);
 });
 
+test('Upgrade chrome goes to /plans and never starts Stripe Checkout', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const link = readFileSync(join(here, '../components/UpgradePlanLink.tsx'), 'utf8');
+  assert.match(link, /href=\{UPGRADE_HREF\}/);
+  assert.match(link, /export const UPGRADE_HREF = '\/plans'/);
+  assert.doesNotMatch(link, /startClientUpgradeCheckout|team_monthly|preventDefault/);
+  for (const rel of ['../app/page.tsx', '../app/company/page.tsx', '../app/admin/layout.tsx', '../components/Header.tsx']) {
+    const source = readFileSync(join(here, rel), 'utf8');
+    assert.match(source, /UpgradePlanLink/);
+    assert.doesNotMatch(source, /startClientUpgradeCheckout|team_monthly/);
+  }
+  const plans = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');
+  assert.match(plans, /startClientUpgradeCheckout/);
+  assert.match(plans, /Upgrade to Premium/);
+  assert.match(plans, /Upgrade to Team/);
+});
+
 test('webhook and sync routes persist the existing org and never sign up', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const webhook = readFileSync(join(here, '../app/api/billing/upgrade/webhook/route.ts'), 'utf8');

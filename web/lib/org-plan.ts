@@ -17,7 +17,12 @@ export const FREE_MANUAL_SLOTS = 5;
 export const PREMIUM_MANUAL_SLOTS = 15;
 export const UNLIMITED_MANUAL_SLOTS = 999;
 
-/** Free → /plans. Mid (Premium) → Team checkout. Top → hide Upgrade. */
+/**
+ * Chrome visibility + which /plans Checkout button may run.
+ * Free and Premium chrome always navigate to /plans (never Checkout).
+ * 'team' means the org may start Team Checkout from /plans only.
+ * Top → hide Upgrade.
+ */
 export type UpgradeTarget = 'plans' | 'team';
 
 function exactName(value: unknown): string {
@@ -76,8 +81,9 @@ export function currentOrgPlanLabel(org: OrgPlanFields | null | undefined): stri
 }
 
 /**
- * Where signed-in Upgrade should go. Null = hide (Team / Enterprise).
- * Free → /plans. Paid-but-not-top (Premium or is_premium) → Team checkout.
+ * Whether Upgrade chrome is shown, and which /plans button may start Checkout.
+ * Null = hide (Team / Enterprise). Free → Premium or Team on /plans.
+ * Paid-but-not-top → Team button on /plans only. Chrome href is always /plans.
  */
 export function upgradeTargetForOrg(org: OrgPlanFields | null | undefined): UpgradeTarget | null {
   if (orgIsTopPaid(org)) return null;
@@ -87,6 +93,11 @@ export function upgradeTargetForOrg(org: OrgPlanFields | null | undefined): Upgr
 
 export function orgCanUpgrade(org: OrgPlanFields | null | undefined): boolean {
   return upgradeTargetForOrg(org) != null;
+}
+
+/** Dashboard / company / admin Upgrade always opens /plans, never Checkout. */
+export function upgradeChromeHrefForOrg(org: OrgPlanFields | null | undefined): '/plans' | null {
+  return orgCanUpgrade(org) ? '/plans' : null;
 }
 
 /** Free may start Premium or Team. Mid-tier may start Team only. Top cannot. */
