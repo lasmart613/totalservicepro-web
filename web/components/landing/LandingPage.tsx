@@ -388,7 +388,7 @@ export function LandingPage() {
 
       <section className="lp-section" id="join">
         <h2 className="lp-h2">Register for Total Service Pro</h2>
-        <p className="lp-lede">Repair company, clinic, rental fleet, or parts seller.</p>
+        <p className="lp-lede">Repair company, clinic, or parts seller.</p>
         <div className="lp-paths">
           <Link href="/signup/company" className="lp-path">
             <h3>Repair company</h3>
