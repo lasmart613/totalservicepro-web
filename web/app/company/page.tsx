@@ -19,6 +19,7 @@ import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
 import { persistCustomerLogo } from '@/lib/customer-form';
 import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
 import { orgCanUpgrade, upgradeTargetForOrg } from '@/lib/org-plan';
+import { loadLinkedCustomers } from '@/lib/org-customers';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 
 const FACILITY_TYPES = [
@@ -585,12 +586,10 @@ function CompanyProfile() {
       setCustomers([]);
       return;
     }
-    // Scope to customers linked to this service org only
-    const { data: links, error: linkErr } = await supabase
-      .from('organization_customers')
-      .select('customer_organization_id')
-      .eq('service_organization_id', sid)
-      .limit(500);
+    // Scope to customers linked to this service org only (page until empty)
+    const { data: custs, error: linkErr } = await loadLinkedCustomers(supabase, sid, {
+      select: '*',
+    });
 
     if (linkErr) {
       console.warn('organization_customers load failed:', linkErr);
@@ -598,24 +597,6 @@ function CompanyProfile() {
       return;
     }
 
-    const ids = Array.from(
-      new Set(
-        (links || [])
-          .map((r: any) => r.customer_organization_id)
-          .filter((id: any) => id != null)
-      )
-    );
-    if (ids.length === 0) {
-      setCustomers([]);
-      return;
-    }
-
-    const { data: custs } = await supabase
-      .from('organizations')
-      .select('*')
-      .in('id', ids)
-      .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'])
-      .order('name');
     setCustomers(custs || []);
   }
 

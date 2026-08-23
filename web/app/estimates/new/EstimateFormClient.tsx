@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { loadLinkedCustomers } from '@/lib/org-customers';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { buildEstimateHtml, type DocCompany } from '@/lib/billing/doc-html';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
@@ -185,23 +186,9 @@ export default function EstimateFormClient() {
   const loadCustomers = useCallback(
     async (orgId: string | number) => {
       try {
-        const { data: links } = await supabase
-          .from('organization_customers')
-          .select('customer_organization_id')
-          .eq('service_organization_id', orgId)
-          .limit(500);
-        const ids = Array.from(
-          new Set((links || []).map((r: any) => r.customer_organization_id).filter(Boolean))
-        );
-        if (!ids.length) {
-          setCustomers([]);
-          return;
-        }
-        const { data: custs } = await supabase
-          .from('organizations')
-          .select('id, name, address, city, state, phone, email, zip, contact_name')
-          .in('id', ids)
-          .order('name', { ascending: true });
+        const { data: custs } = await loadLinkedCustomers(supabase, orgId, {
+          select: 'id, name, address, city, state, phone, email, zip, contact_name',
+        });
         setCustomers(
           (custs || []).map((c: any) => ({
             id: c.id,

@@ -11,6 +11,7 @@ import { MODELS, resolveModelDef } from '@/lib/models';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
+import { loadLinkedCustomers } from '@/lib/org-customers';
 
 /** Admin / manager roles may edit Service Engineer (Android parity). */
 function canEditServiceEngineer(profile: any): boolean {
@@ -544,28 +545,15 @@ export default function NewServiceReport() {
         setCustomerOptions([]);
         return;
       }
-      const { data: junc, error } = await supabase
-        .from('organization_customers')
-        .select(`organizations:customer_organization_id (id, name, address, city, state, phone, email, contact_name)`)
-        .eq('service_organization_id', orgId)
-        .limit(500);
+      const { data: opts, error } = await loadLinkedCustomers(supabase, orgId, {
+        select: 'id, name, address, city, state, phone, email, contact_name, website',
+      });
       if (error) {
         console.warn('organization_customers load failed:', error);
         setCustomerOptions([]);
         return;
       }
-      const opts = (junc || [])
-        .map((j: any) => j.organizations)
-        .filter(Boolean);
-      // de-dupe by id
-      const seen = new Set<any>();
-      setCustomerOptions(
-        opts.filter((o: any) => {
-          if (!o?.id || seen.has(o.id)) return false;
-          seen.add(o.id);
-          return true;
-        })
-      );
+      setCustomerOptions(opts || []);
     } catch (e) { console.warn(e); }
   }
 
