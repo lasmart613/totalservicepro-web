@@ -5,6 +5,7 @@ import { ensureTeamMemberProfile, findAuthUserByEmail } from '@/lib/team-profile
 import {
   buildTeamInviteHtml,
   buildTeamInviteText,
+  isFounderLockedRole,
   teamInviteLoginUrl,
   teamInviteRoleLabel,
   teamInviteSubject,
@@ -41,9 +42,10 @@ function isRateLimitError(msg: string): boolean {
 /**
  * Invite a team member:
  * 1) Verify caller is authenticated admin of an org
- * 2) Record engineer_invitations + user_profiles
- * 3) generateLink (creates the auth user, no mail) + branded Resend email
- * 4) If Resend is not configured or send fails, still return a copyable action link
+ * 2) Existing profile on another org / founder-locked role → 409, no email
+ * 3) Existing RepairPlanet user (profile or auth) → link as chosen role + branded Sign-in email
+ * 4) New user → generateLink (no Supabase mail) + branded set-password email
+ * 5) If Resend is not configured or send fails, still return a copyable link
  */
 export async function POST(req: NextRequest) {
   try {
@@ -152,50 +154,155 @@ export async function POST(req: NextRequest) {
       site_url: base,
     };
 
-    // Existing profile → link only if they are not already on another org
+    const loginUrl = teamInviteLoginUrl(base);
+    const subject = teamInviteSubject(organizationName);
+
+    const deliverBrandedInvite = async (opts: {
+      alreadyRegistered: boolean;
+      acceptUrl?: string | null;
+      greetName?: string | null;
+    }) => {
+      const html = buildTeamInviteHtml({
+        organizationName,
+        firstName: opts.greetName ?? firstName,
+        roleLabel,
+        acceptUrl: opts.acceptUrl || undefined,
+        loginUrl,
+        alreadyRegistered: opts.alreadyRegistered,
+      });
+      const text = buildTeamInviteText({
+        organizationName,
+        firstName: opts.greetName ?? firstName,
+        roleLabel,
+        acceptUrl: opts.acceptUrl || undefined,
+        loginUrl,
+        alreadyRegistered: opts.alreadyRegistered,
+      });
+      const resendKey = process.env.RESEND_API_KEY;
+      const from =
+        process.env.NOTIFY_FROM_EMAIL ||
+        process.env.RESEND_FROM ||
+        'Total Service Pro <contact@medicalrepairnetwork.com>';
+      const copyUrl = opts.alreadyRegistered ? loginUrl : opts.acceptUrl || loginUrl;
+
+      if (!resendKey) {
+        return NextResponse.json({
+          ok: true,
+          emailed: false,
+          linked: opts.alreadyRegistered,
+          alreadyRegistered: opts.alreadyRegistered,
+          inviteUrl: copyUrl,
+          message: `Invitation saved for ${email}. Email delivery is not configured (RESEND_API_KEY) — copy the ${opts.alreadyRegistered ? 'sign-in' : 'invite'} link and send it yourself.`,
+        });
+      }
+
+      try {
+        const rr = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${resendKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            from,
+            to: [email],
+            subject,
+            html,
+            text,
+          }),
+        });
+        const result = await rr.json().catch(() => ({}));
+        if (rr.ok) {
+          return NextResponse.json({
+            ok: true,
+            emailed: true,
+            linked: opts.alreadyRegistered,
+            alreadyRegistered: opts.alreadyRegistered,
+            inviteUrl: copyUrl,
+            message: opts.alreadyRegistered
+              ? `Invite email sent to ${email}. They already have a RepairPlanet account — ask them to sign in with this email.`
+              : `Invite email sent to ${email}. If they don't see it within a few minutes, check spam — or copy the invite link from the toast / pending list.`,
+          });
+        }
+        const sendMsg = result?.message || `Email provider error (${rr.status})`;
+        console.error('Resend team invite failed', rr.status, sendMsg);
+        if (isRateLimitError(sendMsg)) {
+          return NextResponse.json({
+            ok: true,
+            emailed: false,
+            rateLimited: true,
+            linked: opts.alreadyRegistered,
+            alreadyRegistered: opts.alreadyRegistered,
+            inviteUrl: copyUrl,
+            message: 'Email rate limit hit. Copy the link below and send it yourself.',
+          });
+        }
+        return NextResponse.json({
+          ok: true,
+          emailed: false,
+          warning: sendMsg,
+          linked: opts.alreadyRegistered,
+          alreadyRegistered: opts.alreadyRegistered,
+          inviteUrl: copyUrl,
+          message: `Could not send email: ${sendMsg}. Copy the link and send it yourself.`,
+        });
+      } catch (sendErr: any) {
+        console.error('Resend team invite exception', sendErr);
+        return NextResponse.json({
+          ok: true,
+          emailed: false,
+          warning: sendErr?.message || 'send failed',
+          linked: opts.alreadyRegistered,
+          alreadyRegistered: opts.alreadyRegistered,
+          inviteUrl: copyUrl,
+          message: 'Could not send email. Copy the link and send it yourself.',
+        });
+      }
+    };
+
+    // Existing profile → link + branded Sign-in email only if they are not on another org
+    // and are not a founder/owner/admin/supplier of their own company.
     const { data: existingProfile } = await admin
       .from('user_profiles')
-      .select('id, email, organization_id, role')
+      .select('id, email, organization_id, role, first_name, last_name')
       .ilike('email', email)
       .maybeSingle();
 
     if (existingProfile?.id) {
       const existingOrg = existingProfile.organization_id;
       const existingRole = String(existingProfile.role || '').toLowerCase();
-      const founderLocked = ['company_admin', 'admin', 'owner', 'parts_supplier'].includes(existingRole);
       if (existingOrg && String(existingOrg) !== String(orgId)) {
         return NextResponse.json({
           error: `${email} already belongs to another organization. Ask them to leave that org first, or invite a different email.`,
         }, { status: 409 });
       }
-      if (founderLocked && String(existingOrg) === String(orgId) && existingRole !== inviteRole) {
+      if (isFounderLockedRole(existingRole)) {
+        const where = existingOrg && String(existingOrg) === String(orgId)
+          ? 'your organization'
+          : 'their own organization';
         return NextResponse.json({
-          ok: true,
-          linked: true,
-          emailed: false,
-          message: `${email} is already a ${existingRole.replace(/_/g, ' ')} in your organization. Role was not overwritten.`,
-        });
+          error: `${email} is already a ${teamInviteRoleLabel(existingRole)} of ${where}. Role was not overwritten. Ask them to leave that org first, or invite a different email.`,
+        }, { status: 409 });
       }
-      if (!existingOrg) {
-        const { error: upErr } = await admin
-          .from('user_profiles')
-          .update({
-            organization_id: orgId,
-            role: inviteRole,
-            job_title: jobTitle,
-            ...(firstName ? { first_name: firstName } : {}),
-            ...(lastName ? { last_name: lastName } : {}),
-          })
-          .eq('id', existingProfile.id);
-        if (upErr) {
-          return NextResponse.json({ error: upErr.message }, { status: 400 });
-        }
+
+      const { error: upErr } = await admin
+        .from('user_profiles')
+        .update({
+          organization_id: orgId,
+          role: inviteRole,
+          job_title: jobTitle,
+          ...(firstName ? { first_name: firstName } : {}),
+          ...(lastName ? { last_name: lastName } : {}),
+        })
+        .eq('id', existingProfile.id);
+      if (upErr) {
+        return NextResponse.json({ error: upErr.message }, { status: 400 });
       }
-      return NextResponse.json({
-        ok: true,
-        linked: true,
-        emailed: false,
-        message: `${email} already has a profile — linked to your organization. No invite email needed; they can sign in.`,
+
+      const greetName = firstName || (existingProfile as { first_name?: string | null }).first_name || null;
+      return deliverBrandedInvite({
+        alreadyRegistered: true,
+        greetName,
       });
     }
 
@@ -280,101 +387,18 @@ export async function POST(req: NextRequest) {
       }
     };
 
+    // Auth exists but no profile yet — treat as already registered (Sign in, no set-password).
+    const existingAuth = await findAuthUserByEmail(admin, email);
+    if (existingAuth?.id) {
+      await ensureProfileForUserId(existingAuth.id);
+      return deliverBrandedInvite({ alreadyRegistered: true });
+    }
+
     const generated = await buildActionLink(true);
     const inviteUrl = generated.url;
-    let newUserId = generated.userId;
-
-    if (!newUserId && inviteUrl) {
-      const found = await findAuthUserByEmail(admin, email);
-      newUserId = found?.id || null;
-    }
+    const newUserId = generated.userId;
     if (newUserId) {
       await ensureProfileForUserId(newUserId);
-    }
-
-    const loginUrl = teamInviteLoginUrl(base);
-    const subject = teamInviteSubject(organizationName);
-    const html = inviteUrl
-      ? buildTeamInviteHtml({
-          organizationName,
-          firstName,
-          roleLabel,
-          acceptUrl: inviteUrl,
-          loginUrl,
-        })
-      : null;
-    const text = inviteUrl
-      ? buildTeamInviteText({
-          organizationName,
-          firstName,
-          roleLabel,
-          acceptUrl: inviteUrl,
-          loginUrl,
-        })
-      : null;
-
-    const resendKey = process.env.RESEND_API_KEY;
-    const from =
-      process.env.NOTIFY_FROM_EMAIL ||
-      process.env.RESEND_FROM ||
-      'Total Service Pro <contact@medicalrepairnetwork.com>';
-
-    if (inviteUrl && html && text && resendKey) {
-      try {
-        const rr = await fetch('https://api.resend.com/emails', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${resendKey}`,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            from,
-            to: [email],
-            subject,
-            html,
-            text,
-          }),
-        });
-        const result = await rr.json().catch(() => ({}));
-        if (rr.ok) {
-          return NextResponse.json({
-            ok: true,
-            emailed: true,
-            userId: newUserId,
-            inviteUrl,
-            message: `Invite email sent to ${email}. If they don't see it within a few minutes, check spam — or copy the invite link from the toast / pending list.`,
-          });
-        }
-        const sendMsg = result?.message || `Email provider error (${rr.status})`;
-        console.error('Resend team invite failed', rr.status, sendMsg);
-        if (isRateLimitError(sendMsg)) {
-          return NextResponse.json({
-            ok: true,
-            emailed: false,
-            rateLimited: true,
-            inviteUrl,
-            message:
-              'Email rate limit hit. Copy the invite link below and send it yourself.',
-          });
-        }
-        return NextResponse.json({
-          ok: true,
-          emailed: false,
-          warning: sendMsg,
-          inviteUrl,
-          message: `Could not send email: ${sendMsg}. Copy the invite link and send it yourself.`,
-        });
-      } catch (sendErr: any) {
-        console.error('Resend team invite exception', sendErr);
-        return NextResponse.json({
-          ok: true,
-          emailed: false,
-          warning: sendErr?.message || 'send failed',
-          inviteUrl,
-          message:
-            'Could not send email. Copy the invite link and send it yourself.',
-        });
-      }
     }
 
     if (!inviteUrl) {
@@ -387,13 +411,9 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    return NextResponse.json({
-      ok: true,
-      emailed: false,
-      inviteUrl,
-      message: resendKey
-        ? `Invite link created for ${email}. Email could not be sent — copy the link and share it with them.`
-        : `Invitation saved for ${email}. Email delivery is not configured (RESEND_API_KEY) — copy the invite link and send it yourself.`,
+    return deliverBrandedInvite({
+      alreadyRegistered: false,
+      acceptUrl: inviteUrl,
     });
   } catch (e: any) {
     console.error('team invite error', e);

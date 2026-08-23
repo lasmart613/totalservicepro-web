@@ -8,6 +8,7 @@ import {
   DEFAULT_TEAM_ROLE_LABEL,
   buildTeamInviteHtml,
   buildTeamInviteText,
+  isFounderLockedRole,
   teamInviteLoginUrl,
   teamInviteRoleLabel,
   teamInviteSubject,
@@ -105,6 +106,57 @@ test('HTML escapes organization and name', () => {
   assert.doesNotMatch(html, /<script>alert/);
 });
 
+test('already-registered HTML uses Sign in as the primary CTA', () => {
+  const html = buildTeamInviteHtml({
+    organizationName: 'Luxor Photonix',
+    firstName: 'Alex',
+    roleLabel: DEFAULT_TEAM_ROLE_LABEL,
+    loginUrl: LOGIN_URL,
+    alreadyRegistered: true,
+  });
+  assert.equal(teamInviteSubject('Luxor Photonix'), 'Luxor Photonix invited you to Total Service Pro');
+  assert.match(html, /Hi Alex,/);
+  assert.match(html, /Luxor Photonix/);
+  assert.match(html, /added you to their team on RepairPlanet as a/);
+  assert.match(html, /Sign in with this email to start/);
+  assert.match(html, /Field Service Engineer \(FSE\)/);
+  assert.match(html, />Sign in</);
+  assert.match(html, new RegExp(`href="${LOGIN_URL}"`));
+  assert.match(html, /Never set a password\? Use Forgot password/);
+  assert.match(html, /background:#0f1419/);
+  assert.match(html, /#d4af37/);
+  assert.doesNotMatch(html, /Accept invite/);
+  assert.doesNotMatch(html, /set-password/);
+  assert.doesNotMatch(html, /This link is just for you/);
+  assert.doesNotMatch(html, /You've been invited/);
+});
+
+test('already-registered plain text points at login, not set-password', () => {
+  const text = buildTeamInviteText({
+    organizationName: 'Luxor Photonix',
+    firstName: 'Alex',
+    roleLabel: DEFAULT_TEAM_ROLE_LABEL,
+    loginUrl: LOGIN_URL,
+    alreadyRegistered: true,
+  });
+  assert.match(text, /^Hi Alex,/);
+  assert.match(text, /Luxor Photonix added you to their team on RepairPlanet as a Field Service Engineer \(FSE\)\./);
+  assert.match(text, /Sign in with this email to start/);
+  assert.ok(text.includes(`Sign in: ${LOGIN_URL}`));
+  assert.match(text, /Never set a password\? Use Forgot password/);
+  assert.doesNotMatch(text, /Accept invite & set password/);
+  assert.doesNotMatch(text, /set-password/);
+});
+
+test('founder-locked roles are owner, admin, and supplier — not FSE', () => {
+  assert.equal(isFounderLockedRole('owner'), true);
+  assert.equal(isFounderLockedRole('company_admin'), true);
+  assert.equal(isFounderLockedRole('admin'), true);
+  assert.equal(isFounderLockedRole('parts_supplier'), true);
+  assert.equal(isFounderLockedRole('fse'), false);
+  assert.equal(isFounderLockedRole('dispatcher'), false);
+});
+
 test('plain-text body includes the real accept URL and FSE default', () => {
   const text = buildTeamInviteText({
     organizationName: 'Luxor Photonix',
@@ -129,6 +181,10 @@ test('team invite API uses the builders and does not send the generic Supabase i
   assert.match(source, /buildTeamInviteText/);
   assert.match(source, /generateLink/);
   assert.match(source, /RESEND_API_KEY/);
+  assert.match(source, /alreadyRegistered: true/);
+  assert.match(source, /already belongs to another organization/);
+  assert.match(source, /isFounderLockedRole/);
+  assert.match(source, /status: 409/);
   assert.doesNotMatch(source, /inviteUserByEmail/);
   assert.match(source, /body\.role \|\| 'fse'/);
 });

@@ -2,8 +2,8 @@
  * Team / staff invite — RepairPlanet branded email (FSE default role).
  * Server-only builders. Do not import from client components.
  *
- * CTA must be a real Supabase generateLink action_link (or ConfirmationURL),
- * never a placeholder token.
+ * New users: CTA is a real generateLink action_link (set-password).
+ * Already-registered users: CTA is Sign in (loginUrl). Never a placeholder token.
  */
 
 export const DEFAULT_TEAM_ROLE = 'fse';
@@ -22,9 +22,22 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: 'Viewer',
 };
 
+/** Founder / owner / admin / supplier — do not overwrite or email-steal onto another org. */
+const FOUNDER_LOCKED_ROLES = new Set([
+  'company_admin',
+  'admin',
+  'owner',
+  'parts_supplier',
+  'supplier',
+]);
+
 export function teamInviteRoleLabel(role?: string | null): string {
   const r = String(role || DEFAULT_TEAM_ROLE).toLowerCase().trim();
   return ROLE_LABELS[r] || r.replace(/_/g, ' ');
+}
+
+export function isFounderLockedRole(role?: string | null): boolean {
+  return FOUNDER_LOCKED_ROLES.has(String(role || '').toLowerCase().trim());
 }
 
 function esc(s: unknown): string {
@@ -53,8 +66,11 @@ export type TeamInviteCopy = {
   organizationName: string;
   firstName?: string | null;
   roleLabel?: string | null;
-  acceptUrl: string;
+  /** Required for new users (generateLink action_link). Unused when alreadyRegistered. */
+  acceptUrl?: string;
   loginUrl: string;
+  /** Existing RepairPlanet account — Sign in CTA instead of set-password. */
+  alreadyRegistered?: boolean;
 };
 
 function inviteFields(opts: TeamInviteCopy) {
@@ -64,6 +80,7 @@ function inviteFields(opts: TeamInviteCopy) {
     role: String(opts.roleLabel || '').trim() || DEFAULT_TEAM_ROLE_LABEL,
     acceptUrl: String(opts.acceptUrl || '').trim(),
     loginUrl: String(opts.loginUrl || '').trim() || 'https://repairplanet.net/login',
+    alreadyRegistered: Boolean(opts.alreadyRegistered),
   };
 }
 
@@ -76,20 +93,13 @@ function bulletRow(text: string): string {
   );
 }
 
-export function buildTeamInviteHtml(opts: TeamInviteCopy): string {
-  const { org, greetName, role, acceptUrl, loginUrl } = inviteFields(opts);
-  const greet = greetName ? `Hi ${esc(greetName)},` : 'Hello,';
-  const orgHtml = esc(org);
-  const roleHtml = esc(role);
-  const accept = esc(acceptUrl);
-  const login = esc(loginUrl);
-
+function wrapTeamInviteEmail(title: string, inner: string): string {
   return `<!DOCTYPE html>
 <html>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>${esc(teamInviteSubject(org))}</title>
+  <title>${esc(title)}</title>
 </head>
 <body style="margin:0;padding:0;background:#0f1419;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e8edf4;">
   <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="background:#0f1419;padding:32px 12px;">
@@ -108,39 +118,7 @@ export function buildTeamInviteHtml(opts: TeamInviteCopy): string {
           </tr>
           <tr>
             <td style="padding:16px 28px 8px;">
-              <p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#e8edf4;">${greet}</p>
-              <p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#e8edf4;">
-                <strong style="color:#e8edf4;">${orgHtml}</strong>
-                invited you to join their team on RepairPlanet as a
-                <strong style="color:#d4af37;">${roleHtml}</strong>.
-              </p>
-              <p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#e8edf4;">
-                Accept this invite, set your password, and you can:
-              </p>
-              <table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 8px;">
-                ${bulletRow('See assigned jobs and the shop schedule')}
-                ${bulletRow('Write service reports and estimates in the field')}
-                ${bulletRow('Open laser manuals and the parts marketplace')}
-                ${bulletRow('Use the same login on the website and the Android app')}
-              </table>
-              <table role="presentation" cellspacing="0" cellpadding="0" align="center" style="margin:22px auto 8px;">
-                <tr>
-                  <td align="center" style="border-radius:8px;background:#d4af37;">
-                    <a href="${accept}"
-                       style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:#111111;text-decoration:none;border-radius:8px;">
-                      Accept invite &amp; set password
-                    </a>
-                  </td>
-                </tr>
-              </table>
-              <p style="margin:0 0 16px;text-align:center;font-size:12px;line-height:1.5;color:#8b95a5;">
-                This link is just for you. It expires if unused.
-              </p>
-              <p style="margin:0 0 8px;font-size:13px;line-height:1.55;color:#8b95a5;">
-                Already on RepairPlanet?
-                <a href="${login}" style="color:#d4af37;text-decoration:underline;">Sign in</a>
-                with this email, then use Forgot password if you still need to set one.
-              </p>
+              ${inner}
             </td>
           </tr>
           <tr>
@@ -163,19 +141,119 @@ export function buildTeamInviteHtml(opts: TeamInviteCopy): string {
 </html>`;
 }
 
+function ctaButton(href: string, label: string): string {
+  return (
+    `<table role="presentation" cellspacing="0" cellpadding="0" align="center" style="margin:22px auto 8px;">` +
+    `<tr>` +
+    `<td align="center" style="border-radius:8px;background:#d4af37;">` +
+    `<a href="${href}" style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:#111111;text-decoration:none;border-radius:8px;">` +
+    `${label}` +
+    `</a>` +
+    `</td>` +
+    `</tr>` +
+    `</table>`
+  );
+}
+
+function bulletsHtml(): string {
+  return (
+    `<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:0 0 8px;">` +
+    `${bulletRow('See assigned jobs and the shop schedule')}` +
+    `${bulletRow('Write service reports and estimates in the field')}` +
+    `${bulletRow('Open laser manuals and the parts marketplace')}` +
+    `${bulletRow('Use the same login on the website and the Android app')}` +
+    `</table>`
+  );
+}
+
+export function buildTeamInviteHtml(opts: TeamInviteCopy): string {
+  const { org, greetName, role, acceptUrl, loginUrl, alreadyRegistered } = inviteFields(opts);
+  const greet = greetName ? `Hi ${esc(greetName)},` : 'Hello,';
+  const orgHtml = esc(org);
+  const roleHtml = esc(role);
+  const accept = esc(acceptUrl);
+  const login = esc(loginUrl);
+  const subject = teamInviteSubject(org);
+
+  if (alreadyRegistered) {
+    const inner =
+      `<p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#e8edf4;">${greet}</p>` +
+      `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#e8edf4;">` +
+      `<strong style="color:#e8edf4;">${orgHtml}</strong>` +
+      ` added you to their team on RepairPlanet as a ` +
+      `<strong style="color:#d4af37;">${roleHtml}</strong>.` +
+      ` Sign in with this email to start.` +
+      `</p>` +
+      `<p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#e8edf4;">You can:</p>` +
+      bulletsHtml() +
+      ctaButton(login, 'Sign in') +
+      `<p style="margin:0 0 8px;text-align:center;font-size:12px;line-height:1.5;color:#8b95a5;">` +
+      `Use this email to sign in on the website and the Android app.` +
+      `</p>` +
+      `<p style="margin:0 0 8px;font-size:12px;line-height:1.55;color:#8b95a5;">` +
+      `Never set a password? Use Forgot password on the sign-in page.` +
+      `</p>`;
+    return wrapTeamInviteEmail(subject, inner);
+  }
+
+  const inner =
+    `<p style="margin:0 0 16px;font-size:16px;line-height:1.5;color:#e8edf4;">${greet}</p>` +
+    `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#e8edf4;">` +
+    `<strong style="color:#e8edf4;">${orgHtml}</strong>` +
+    ` invited you to join their team on RepairPlanet as a ` +
+    `<strong style="color:#d4af37;">${roleHtml}</strong>.` +
+    `</p>` +
+    `<p style="margin:0 0 12px;font-size:15px;line-height:1.55;color:#e8edf4;">` +
+    `Accept this invite, set your password, and you can:` +
+    `</p>` +
+    bulletsHtml() +
+    ctaButton(accept, 'Accept invite &amp; set password') +
+    `<p style="margin:0 0 16px;text-align:center;font-size:12px;line-height:1.5;color:#8b95a5;">` +
+    `This link is just for you. It expires if unused.` +
+    `</p>` +
+    `<p style="margin:0 0 8px;font-size:13px;line-height:1.55;color:#8b95a5;">` +
+    `Already on RepairPlanet? ` +
+    `<a href="${login}" style="color:#d4af37;text-decoration:underline;">Sign in</a>` +
+    ` with this email, then use Forgot password if you still need to set one.` +
+    `</p>`;
+  return wrapTeamInviteEmail(subject, inner);
+}
+
 export function buildTeamInviteText(opts: TeamInviteCopy): string {
-  const { org, greetName, role, acceptUrl, loginUrl } = inviteFields(opts);
+  const { org, greetName, role, acceptUrl, loginUrl, alreadyRegistered } = inviteFields(opts);
   const greet = greetName ? `Hi ${greetName},` : 'Hello,';
+  const bullets = [
+    '- See assigned jobs and the shop schedule',
+    '- Write service reports and estimates in the field',
+    '- Open laser manuals and the parts marketplace',
+    '- Use the same login on the website and the Android app',
+  ];
+
+  if (alreadyRegistered) {
+    return [
+      greet,
+      '',
+      `${org} added you to their team on RepairPlanet as a ${role}. Sign in with this email to start.`,
+      '',
+      'You can:',
+      ...bullets,
+      '',
+      `Sign in: ${loginUrl}`,
+      '',
+      'Never set a password? Use Forgot password on the sign-in page.',
+      '',
+      'If you were not expecting this, you can ignore the email. Nobody else on the team was copied.',
+      'Sent by Total Service Pro · repairplanet.net',
+    ].join('\n');
+  }
+
   return [
     greet,
     '',
     `${org} invited you to join their team on RepairPlanet as a ${role}.`,
     '',
     'Accept this invite, set your password, and you can:',
-    '- See assigned jobs and the shop schedule',
-    '- Write service reports and estimates in the field',
-    '- Open laser manuals and the parts marketplace',
-    '- Use the same login on the website and the Android app',
+    ...bullets,
     '',
     `Accept invite & set password: ${acceptUrl}`,
     '',
