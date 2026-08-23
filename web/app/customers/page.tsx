@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { AddCustomerModal } from '@/components/AddCustomerModal';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { chunkIds, fetchAllPages, uniqueLinkedIds } from '@/lib/supabase/paginate';
 import { canAddCustomers, isOwnerish, isServiceCompany, isSupplier } from '@/lib/roles';
 
 export default function CustomersDirectory() {
@@ -74,12 +75,16 @@ export default function CustomersDirectory() {
       return;
     }
 
-    // Only customers linked to THIS service org via organization_customers
-    const { data: links, error: linkErr } = await supabase
-      .from('organization_customers')
-      .select('customer_organization_id')
-      .eq('service_organization_id', orgId)
-      .limit(500);
+    // Only customers linked to THIS service org via organization_customers.
+    // Page through every link — do not silently cap at 500 (Luxor Photonix has 1,754+).
+    const { data: links, error: linkErr } = await fetchAllPages<{ customer_organization_id: any }>(
+      (from, to) =>
+        supabase
+          .from('organization_customers')
+          .select('customer_organization_id')
+          .eq('service_organization_id', orgId)
+          .range(from, to)
+    );
 
     if (linkErr) {
       console.warn('organization_customers load failed:', linkErr);
@@ -88,13 +93,7 @@ export default function CustomersDirectory() {
       return;
     }
 
-    const customerIds = Array.from(
-      new Set(
-        (links || [])
-          .map((r: any) => r.customer_organization_id)
-          .filter((id: any) => id != null)
-      )
-    );
+    const customerIds = uniqueLinkedIds(links);
 
     if (customerIds.length === 0) {
       setCustomers([]);
@@ -102,16 +101,24 @@ export default function CustomersDirectory() {
       return;
     }
 
-    const { data: custs } = await supabase
-      .from('organizations')
-      .select(
-        'id, name, address, city, state, phone, email, laser_models, facility_type, biz_type, type, logo_url'
-      )
-      .in('id', customerIds)
-      .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'])
-      .order('name', { ascending: true });
+    const orgSelect =
+      'id, name, address, city, state, phone, email, laser_models, facility_type, biz_type, type, logo_url';
+    const custs: any[] = [];
+    for (const chunk of chunkIds(customerIds)) {
+      const { data, error: orgErr } = await supabase
+        .from('organizations')
+        .select(orgSelect)
+        .in('id', chunk)
+        .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller']);
+      if (orgErr) {
+        console.warn('organizations load failed:', orgErr);
+        break;
+      }
+      custs.push(...(data || []));
+    }
+    custs.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 
-    setCustomers(custs || []);
+    setCustomers(custs);
     setLoading(false);
   }, [supabase]);
 
