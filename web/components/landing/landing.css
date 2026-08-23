@@ -325,6 +325,14 @@ html.landing-mode body {
   max-width: 16em;
 }
 
+.lp-subhead {
+  font-size: 18px;
+  line-height: 1.35;
+  color: #9CA3AF;
+  margin: -6px 0 16px;
+  max-width: 22em;
+}
+
 .lp-h2 {
   font-size: clamp(26px, 3vw, 36px);
   font-weight: 800;
