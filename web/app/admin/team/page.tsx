@@ -362,7 +362,7 @@ export default function TeamManagement() {
               {adding ? 'Sending invite…' : 'Send Invite Email'}
             </button>
             <p className="text-xs text-[var(--text3)] mt-2">
-              Existing RepairPlanet users are added as a membership (default FSE). Their home shop and founder role stay intact. New users still get the invite email.
+              Sends a RepairPlanet invite email. Existing users (including shop owners) are added as a membership — default FSE — and keep their home shop. New users set a password from the email.
             </p>
           </div>
         </form>
