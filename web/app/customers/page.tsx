@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { AddCustomerModal } from '@/components/AddCustomerModal';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { loadLinkedCustomers } from '@/lib/org-customers';
 import { canAddCustomers, isOwnerish, isServiceCompany, isSupplier } from '@/lib/roles';
 
 export default function CustomersDirectory() {
@@ -75,11 +76,9 @@ export default function CustomersDirectory() {
     }
 
     // Only customers linked to THIS service org via organization_customers
-    const { data: links, error: linkErr } = await supabase
-      .from('organization_customers')
-      .select('customer_organization_id')
-      .eq('service_organization_id', orgId)
-      .limit(500);
+    const { data: custs, error: linkErr } = await loadLinkedCustomers(supabase, orgId, {
+      select: 'id, name, address, city, state, phone, email, laser_models, facility_type, biz_type, type, logo_url',
+    });
 
     if (linkErr) {
       console.warn('organization_customers load failed:', linkErr);
@@ -87,29 +86,6 @@ export default function CustomersDirectory() {
       setLoading(false);
       return;
     }
-
-    const customerIds = Array.from(
-      new Set(
-        (links || [])
-          .map((r: any) => r.customer_organization_id)
-          .filter((id: any) => id != null)
-      )
-    );
-
-    if (customerIds.length === 0) {
-      setCustomers([]);
-      setLoading(false);
-      return;
-    }
-
-    const { data: custs } = await supabase
-      .from('organizations')
-      .select(
-        'id, name, address, city, state, phone, email, laser_models, facility_type, biz_type, type, logo_url'
-      )
-      .in('id', customerIds)
-      .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'])
-      .order('name', { ascending: true });
 
     setCustomers(custs || []);
     setLoading(false);
@@ -160,7 +136,10 @@ export default function CustomersDirectory() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
           <div>
             <h1 className="text-2xl font-extrabold">👥 Customer Directory</h1>
-            <p className="text-sm text-[var(--text3)]">Customers managed by your organization</p>
+            <p className="text-sm text-[var(--text3)]">
+              Customers managed by your organization
+              {!loading ? ` (${customers.length})` : ''}
+            </p>
           </div>
           {allowAdd && (
             <button type="button" className="btn btn-primary text-sm" onClick={() => setShowAdd(true)}>
@@ -256,7 +235,7 @@ export default function CustomersDirectory() {
         )}
 
         <div className="mt-8 text-xs text-[var(--text3)]">
-          Showing only customers linked to your organization
+          Showing all {customers.length} customer{customers.length === 1 ? '' : 's'} linked to your organization
           {userOrgType ? ` (${userOrgType})` : ''}. Access limited to service companies and parts
           suppliers.
         </div>

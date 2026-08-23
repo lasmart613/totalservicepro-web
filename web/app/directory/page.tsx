@@ -10,6 +10,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { loadDirectoryListings, loadLinkedCustomers } from '@/lib/org-customers';
 import { isServiceOrgType } from '@/lib/org-types';
 import { orgTypeLabel } from '@/lib/labels';
 
@@ -89,16 +90,9 @@ export default function DirectoryPage() {
         setMyOrgId(orgId);
       }
 
-      // Free public directory listings
+      // Free public directory listings — page until empty (no silent 500 cap)
       let listed: OrgRow[] = [];
-      const q1 = await supabase
-        .from('organizations')
-        .select(
-          'id, name, type, city, state, phone, email, website, logo_url, list_in_directory, is_active'
-        )
-        .eq('list_in_directory', true)
-        .order('name')
-        .limit(500);
+      const q1 = await loadDirectoryListings<OrgRow>(supabase);
 
       if (q1.error) {
         console.warn('directory list', q1.error);
@@ -107,19 +101,10 @@ export default function DirectoryPage() {
             'Directory listing needs the list_in_directory column (migration). Orgs can opt in from Company Profile once applied.'
           );
         } else {
-          // Try without is_active filter
-          const q2 = await supabase
-            .from('organizations')
-            .select(
-              'id, name, type, city, state, phone, email, website, logo_url, list_in_directory, is_active'
-            )
-            .eq('list_in_directory', true)
-            .order('name')
-            .limit(500);
-          listed = (q2.data || []).filter((o: any) => o.is_active !== false);
+          listed = (q1.data || []).filter((o) => o.is_active !== false);
         }
       } else {
-        listed = (q1.data || []).filter((o: any) => o.is_active !== false);
+        listed = (q1.data || []).filter((o) => o.is_active !== false);
       }
       setAllListed(listed);
 
@@ -127,16 +112,11 @@ export default function DirectoryPage() {
       const clinics: OrgRow[] = [];
       if (orgId) {
         try {
-          const { data: links } = await supabase
-            .from('organization_customers')
-            .select(
-              'customer_organization_id, organizations:customer_organization_id (id, name, type, city, state, phone, email, website, logo_url, is_active)'
-            )
-            .eq('service_organization_id', orgId)
-            .limit(500);
+          const { data: linked } = await loadLinkedCustomers<OrgRow>(supabase, orgId, {
+            select: 'id, name, type, city, state, phone, email, website, logo_url, is_active',
+          });
           const seen = new Set<string>();
-          (links || []).forEach((row: any) => {
-            const o = row.organizations;
+          (linked || []).forEach((o) => {
             if (!o?.id || seen.has(String(o.id))) return;
             if (o.is_active === false) return;
             seen.add(String(o.id));
