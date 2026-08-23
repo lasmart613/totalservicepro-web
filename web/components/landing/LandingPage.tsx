@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { LandingShell } from './LandingShell';
 import './landing.css';
 
 export function LandingSplash() {
@@ -35,25 +36,37 @@ function Shot({
   );
 }
 
-type RoleId = 'owner' | 'shop' | 'parts' | 'rental';
-
-const ROLES: {
-  id: RoleId;
+const AUDIENCES: {
+  id: 'shop' | 'clinic' | 'parts';
   label: string;
   signup: string;
   lines: string[];
   shot: { src: string; alt: string; caption: string };
 }[] = [
   {
-    id: 'owner',
-    label: 'Clinic / owner',
+    id: 'shop',
+    label: 'Repair companies',
+    signup: '/signup/company',
+    lines: [
+      'Schedule and Assign Service Calls',
+      'View service history on every job',
+      'Keep service manuals in one place',
+      'Bid on open service requests',
+    ],
+    shot: {
+      src: '/landing/dashboard.webp',
+      alt: 'Total Service Pro dashboard with open tickets and upcoming calls',
+      caption: 'Dashboard',
+    },
+  },
+  {
+    id: 'clinic',
+    label: 'Clinics',
     signup: '/signup/owner',
     lines: [
-      'Cut laser downtime',
-      'Keep the box running',
-      'Find a service company',
-      'Get competing bids',
-      'History on every serial',
+      'Find a Repair Company',
+      'Receive multiple bids on service requests',
+      'View service history and track maintenance costs',
     ],
     shot: {
       src: '/landing/reports.webp',
@@ -62,30 +75,13 @@ const ROLES: {
     },
   },
   {
-    id: 'shop',
-    label: 'Service company',
-    signup: '/signup/company',
-    lines: [
-      'Find clinics that need a call',
-      'Locate the part',
-      'Send the bid',
-      'Email the report from the job',
-      'Estimate and invoice the same job',
-    ],
-    shot: {
-      src: '/landing/dashboard.webp',
-      alt: 'Total Service Pro shop dashboard with open tickets and upcoming calls',
-      caption: 'Shop dashboard',
-    },
-  },
-  {
     id: 'parts',
-    label: 'Parts seller',
+    label: 'Parts sellers',
     signup: '/signup/supplier',
     lines: [
-      'List what is on the shelf',
-      'Get found by shops and clinics',
-      'Checkout on the public page',
+      'Connect with Repair Companies and laser owners',
+      'Get found when they need a part',
+      'List parts that are on the shelf',
     ],
     shot: {
       src: '/landing/parts.webp',
@@ -93,83 +89,234 @@ const ROLES: {
       caption: 'Parts for sale',
     },
   },
+];
+
+const HERO_SLIDES: {
+  audience: string;
+  title: string;
+  shot: { src: string; alt: string; caption: string };
+}[] = [
   {
-    id: 'rental',
-    label: 'Rental company',
-    signup: '/signup/owner',
-    lines: [
-      'Keep the fleet in one list',
-      'History on every box',
-      'Post a repair and take bids',
-    ],
+    audience: 'Repair companies',
+    title: 'Schedule and Assign Service Calls',
+    shot: {
+      src: '/landing/dashboard.webp',
+      alt: 'Dashboard with open tickets and upcoming calls',
+      caption: 'Dashboard',
+    },
+  },
+  {
+    audience: 'Repair companies',
+    title: 'Bid on open service requests',
+    shot: {
+      src: '/landing/marketplace.webp',
+      alt: 'Marketplace home for parts, used systems, and service needs',
+      caption: 'Marketplace',
+    },
+  },
+  {
+    audience: 'Clinics',
+    title: 'Find a Repair Company',
+    shot: {
+      src: '/landing/marketplace.webp',
+      alt: 'Marketplace home for parts, used systems, and service needs',
+      caption: 'Marketplace',
+    },
+  },
+  {
+    audience: 'Clinics',
+    title: 'Receive multiple bids on service requests',
     shot: {
       src: '/landing/reports.webp',
-      alt: 'Service history that stays with each laser in the fleet',
-      caption: 'Fleet history',
+      alt: 'Service reports list with drafts and completed work',
+      caption: 'Service history',
+    },
+  },
+  {
+    audience: 'Clinics',
+    title: 'View service history and track maintenance costs',
+    shot: {
+      src: '/landing/reports.webp',
+      alt: 'Service history that stays with each laser',
+      caption: 'Service history',
+    },
+  },
+  {
+    audience: 'Parts sellers',
+    title: 'Connect with Repair Companies and laser owners',
+    shot: {
+      src: '/landing/parts.webp',
+      alt: 'Parts marketplace with live listings and prices',
+      caption: 'Parts for sale',
     },
   },
 ];
 
-export function LandingPage() {
-  const [scrolled, setScrolled] = useState(false);
-  const [role, setRole] = useState<RoleId>('owner');
+const HERO_AUTO_MS = 7000;
+
+function HeroCarousel() {
+  const n = HERO_SLIDES.length;
+  const [i, setI] = useState(0);
+  const [paused, setPaused] = useState(false);
+  const [hold, setHold] = useState(false);
+  const start = React.useRef<{ x: number; y: number } | null>(null);
+
+  const go = (dir: number) => setI((x) => (x + dir + n) % n);
+  const goTo = (idx: number) => setI(((idx % n) + n) % n);
 
   useEffect(() => {
-    document.documentElement.classList.add('landing-mode');
-    const onScroll = () => setScrolled(window.scrollY > 12);
-    onScroll();
-    window.addEventListener('scroll', onScroll, { passive: true });
-    return () => {
-      document.documentElement.classList.remove('landing-mode');
-      window.removeEventListener('scroll', onScroll);
-    };
-  }, []);
+    if (paused || hold) return;
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
+    const id = window.setInterval(() => {
+      if (document.hidden) return;
+      setI((x) => (x + 1) % n);
+    }, HERO_AUTO_MS);
+    return () => window.clearInterval(id);
+  }, [paused, hold, i, n]);
 
-  const selected = ROLES.find((r) => r.id === role) ?? ROLES[0];
+  const onPointerDown = (e: React.PointerEvent) => {
+    if (e.pointerType === 'mouse' && e.button !== 0) return;
+    start.current = { x: e.clientX, y: e.clientY };
+  };
+
+  const onPointerUp = (e: React.PointerEvent) => {
+    if (!start.current) return;
+    const dx = e.clientX - start.current.x;
+    const dy = e.clientY - start.current.y;
+    start.current = null;
+    if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy)) {
+      go(dx < 0 ? 1 : -1);
+    }
+  };
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      go(-1);
+    } else if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      go(1);
+    }
+  };
+
+  const slide = HERO_SLIDES[i];
 
   return (
-    <div className="lp-root -mx-4 sm:-mx-6 lg:-mx-8 -my-6">
-      <header className={`lp-nav ${scrolled ? 'is-scrolled' : ''}`}>
-        <Link href="/" className="lp-brand">
-          <span className="lp-brand-biz">Medical Repair Network</span>
-          <span className="lp-brand-name">Total Service Pro</span>
-          <span className="lp-brand-sub">Laser Equipment Service</span>
-        </Link>
-        <nav className="lp-nav-links" aria-label="Public">
-          <Link href="/directory">Directory</Link>
-          <Link href="/marketplace">Marketplace</Link>
-          <Link href="/marketplace/parts">Parts</Link>
-        </nav>
-        <div className="lp-nav-cta">
-          <Link href="/login" className="lp-btn lp-btn-ghost">
-            Sign in
-          </Link>
+    <section
+      className="lp-hero-carousel"
+      aria-roledescription="carousel"
+      aria-label="Who Total Service Pro is for"
+      onMouseEnter={() => setHold(true)}
+      onMouseLeave={() => setHold(false)}
+      onFocusCapture={() => setHold(true)}
+      onBlurCapture={(e) => {
+        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
+          setHold(false);
+        }
+      }}
+    >
+      <div
+        className="lp-hero-viewport"
+        tabIndex={0}
+        onKeyDown={onKeyDown}
+        onPointerDown={onPointerDown}
+        onPointerUp={onPointerUp}
+        onPointerCancel={() => {
+          start.current = null;
+        }}
+      >
+        <div
+          className="lp-hero-track"
+          style={{ transform: `translateX(-${i * 100}%)` }}
+        >
+          {HERO_SLIDES.map((s, idx) => (
+            <div
+              key={`${s.audience}-${s.title}`}
+              className="lp-hero-slide"
+              role="group"
+              aria-roledescription="slide"
+              aria-label={`${idx + 1} of ${n}: ${s.audience}. ${s.title}`}
+              aria-hidden={idx !== i}
+              inert={idx !== i ? true : undefined}
+            >
+              <div className="lp-hero-copy">
+                <p className="lp-kicker">{s.audience}</p>
+                {idx === i ? (
+                  <h1 className="lp-title">{s.title}</h1>
+                ) : (
+                  <p className="lp-title">{s.title}</p>
+                )}
+              </div>
+              <Shot src={s.shot.src} alt={s.shot.alt} caption={s.shot.caption} />
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <p className="lp-sr" aria-live="polite">
+        {slide.audience}. {slide.title}.
+      </p>
+
+      <div className="lp-hero-bar">
+        <div className="lp-hero-controls">
+          <button
+            type="button"
+            className="lp-hero-arrow"
+            aria-label="Previous slide"
+            onClick={() => go(-1)}
+          >
+            <span aria-hidden="true">‹</span>
+          </button>
+          <div className="lp-hero-dots" role="group" aria-label="Slides">
+            {HERO_SLIDES.map((s, idx) => (
+              <button
+                key={`${s.audience}-${s.title}-dot`}
+                type="button"
+                className={`lp-hero-dot${idx === i ? ' is-on' : ''}`}
+                aria-label={`${s.audience}: ${s.title}`}
+                aria-current={idx === i ? 'true' : undefined}
+                onClick={() => goTo(idx)}
+              />
+            ))}
+          </div>
+          <button
+            type="button"
+            className="lp-hero-arrow"
+            aria-label="Next slide"
+            onClick={() => go(1)}
+          >
+            <span aria-hidden="true">›</span>
+          </button>
+          <button
+            type="button"
+            className="lp-hero-pause"
+            aria-pressed={paused}
+            aria-label={paused ? 'Play slides' : 'Pause slides'}
+            onClick={() => setPaused((p) => !p)}
+          >
+            {paused ? 'Play' : 'Pause'}
+          </button>
+        </div>
+        <div className="lp-actions">
           <Link href="/signup" className="lp-btn lp-btn-primary">
             Register for Total Service Pro
           </Link>
+          <Link href="/plans" className="lp-btn lp-btn-ghost">
+            Register for a Free Plan
+          </Link>
+          <Link href="/login" className="lp-btn lp-btn-ghost">
+            Sign in
+          </Link>
         </div>
-      </header>
+      </div>
+    </section>
+  );
+}
 
-      <section className="lp-hero" aria-label="Hero">
-        <div className="lp-hero-copy">
-          <p className="lp-kicker">Medical Repair Network · Total Service Pro</p>
-          <h1 className="lp-title">Reduce laser downtime</h1>
-          <p className="lp-lede">Maximize your equipment’s uptime.</p>
-          <div className="lp-actions">
-            <Link href="/signup" className="lp-btn lp-btn-primary">
-              Register for Total Service Pro
-            </Link>
-            <Link href="/login" className="lp-btn lp-btn-ghost">
-              Sign in
-            </Link>
-          </div>
-        </div>
-        <Shot
-          src="/landing/dashboard.webp"
-          alt="Total Service Pro shop dashboard with open tickets and upcoming calls"
-          caption="Shop dashboard"
-        />
-      </section>
+export function LandingPage() {
+  return (
+    <LandingShell>
+      <HeroCarousel />
 
       <section className="lp-gallery" aria-label="Product screens">
         <Shot
@@ -196,39 +343,31 @@ export function LandingPage() {
 
       <section className="lp-section" id="features">
         <h2 className="lp-h2">What you get</h2>
-        <p className="lp-lede">Pick who you are.</p>
-        <div className="lp-role-tabs" role="radiogroup" aria-label="Who you are">
-          {ROLES.map((r) => (
-            <button
-              key={r.id}
-              type="button"
-              role="radio"
-              aria-checked={role === r.id}
-              className={`lp-role-tab${role === r.id ? ' is-on' : ''}`}
-              onClick={() => setRole(r.id)}
-            >
-              {r.label}
-            </button>
+        <p className="lp-lede">Repair company, clinic, or parts seller.</p>
+        <div className="lp-role-cols">
+          {AUDIENCES.map((r) => (
+            <article key={r.id} className="lp-role-col">
+              <h3>{r.label}</h3>
+              <ul className="lp-features">
+                {r.lines.map((line) => (
+                  <li key={line}>{line}</li>
+                ))}
+              </ul>
+              <Shot
+                src={r.shot.src}
+                alt={r.shot.alt}
+                caption={r.shot.caption}
+              />
+              <div className="lp-actions">
+                <Link href={r.signup} className="lp-btn lp-btn-primary">
+                  Register for Total Service Pro
+                </Link>
+                <Link href="/plans" className="lp-btn lp-btn-ghost">
+                  Free Plan
+                </Link>
+              </div>
+            </article>
           ))}
-        </div>
-        <div className="lp-role-pane">
-          <div>
-            <ul className="lp-features">
-              {selected.lines.map((line) => (
-                <li key={line}>{line}</li>
-              ))}
-            </ul>
-            <div className="lp-actions">
-              <Link href={selected.signup} className="lp-btn lp-btn-primary">
-                Register for Total Service Pro
-              </Link>
-            </div>
-          </div>
-          <Shot
-            src={selected.shot.src}
-            alt={selected.shot.alt}
-            caption={selected.shot.caption}
-          />
         </div>
       </section>
 
@@ -249,7 +388,7 @@ export function LandingPage() {
 
       <section className="lp-section" id="join">
         <h2 className="lp-h2">Register for Total Service Pro</h2>
-        <p className="lp-lede">Repair company, clinic, rental fleet, or parts seller.</p>
+        <p className="lp-lede">Repair company, clinic, or parts seller.</p>
         <div className="lp-paths">
           <Link href="/signup/company" className="lp-path">
             <h3>Repair company</h3>
@@ -280,6 +419,9 @@ export function LandingPage() {
           </Link>
         </div>
         <div className="lp-actions" style={{ marginTop: 28 }}>
+          <Link href="/plans" className="lp-btn lp-btn-primary">
+            Register for a Free Plan
+          </Link>
           <Link href="/login" className="lp-btn lp-btn-ghost">
             Already registered? Sign in
           </Link>
@@ -288,23 +430,6 @@ export function LandingPage() {
           </Link>
         </div>
       </section>
-
-      <footer className="lp-footer">
-        <div>
-          <strong style={{ color: '#FBBF24' }}>Medical Repair Network</strong>
-          {' · '}
-          Total Service Pro
-        </div>
-        <div className="lp-footer-links">
-          <Link href="/">Home</Link>
-          <Link href="/directory">Directory</Link>
-          <Link href="/marketplace">Marketplace</Link>
-          <Link href="/marketplace/parts">Parts</Link>
-          <Link href="/login">Sign in</Link>
-          <Link href="/signup">Register for Total Service Pro</Link>
-          <Link href="/forgot-password">Forgot password</Link>
-        </div>
-      </footer>
-    </div>
+    </LandingShell>
   );
 }
