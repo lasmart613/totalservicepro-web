@@ -10,7 +10,8 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { isServiceOrgType, ownerOrgTypeLabel } from '@/lib/org-types';
+import { isServiceOrgType } from '@/lib/org-types';
+import { orgTypeLabel } from '@/lib/labels';
 
 type OrgRow = {
   id: number | string;
@@ -29,13 +30,7 @@ type OrgRow = {
 type FilterKey = 'all' | 'service' | 'clinics' | 'reseller' | 'rental' | 'supplier';
 
 function typeLabel(t?: string | null): string {
-  const x = String(t || '').toLowerCase();
-  if (x === 'service_company' || x === 'service') return 'Service Company';
-  if (x === 'customer' || x === 'laser_clinic') return 'Laser Clinic';
-  if (x === 'laser_rental') return 'Laser Rental';
-  if (x === 'laser_reseller') return 'Laser Reseller';
-  if (x === 'parts_supplier' || x === 'vendor') return 'Parts Supplier';
-  return ownerOrgTypeLabel(x) || x || 'Organization';
+  return orgTypeLabel(t) || 'Organization';
 }
 
 function initials(name?: string | null): string {
@@ -58,10 +53,10 @@ function websiteHref(w?: string | null): string | null {
 
 const FILTERS: { key: FilterKey; label: string }[] = [
   { key: 'all', label: 'All listed' },
-  { key: 'service', label: 'Service Cos' },
+  { key: 'service', label: 'Repair companies' },
   { key: 'clinics', label: 'My Clinics' },
   { key: 'reseller', label: 'Resellers' },
-  { key: 'rental', label: 'Rental Cos' },
+  { key: 'rental', label: 'Rental companies' },
   { key: 'supplier', label: 'Parts Suppliers' },
 ];
 
@@ -73,7 +68,7 @@ export default function DirectoryPage() {
   const [filter, setFilter] = useState<FilterKey>('all');
   const [search, setSearch] = useState('');
   const [note, setNote] = useState(
-    'Organizations opt in for free during onboarding or Company Profile. Clinics shows only customers linked to your service company.'
+    'Organizations opt in for free during onboarding or Company Profile. Clinics shows only customers linked to your repair company.'
   );
   const [myOrgId, setMyOrgId] = useState<string | number | null>(null);
 
@@ -198,10 +193,10 @@ export default function DirectoryPage() {
           <Link href="/" className="text-[var(--gold)] text-xl font-bold" aria-label="Back">
             ←
           </Link>
-          <h1 className="text-2xl font-extrabold">TSP Directory</h1>
+          <h1 className="text-2xl font-extrabold">Company directory</h1>
         </div>
         <p className="text-sm text-[var(--text3)] mb-4">
-          Discover service companies, clinics, resellers, and suppliers listed in Total Service Pro.
+          Discover repair companies, clinics, resellers, and suppliers listed in Total Service Pro.
           Listings are free.
         </p>
 
@@ -241,7 +236,7 @@ export default function DirectoryPage() {
             {filter === 'clinics'
               ? myOrgId
                 ? 'No customers linked to your organization yet.'
-                : 'Sign in with a service company to see your linked clinics.'
+                : 'Sign in with a repair company to see your linked clinics.'
               : 'No organizations match this filter. Orgs appear when they opt into the free directory listing.'}
           </div>
         ) : (

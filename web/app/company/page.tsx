@@ -26,6 +26,7 @@ const FACILITY_TYPES = [
   'Private Practice',
   'Surgery Center',
   'Research / University',
+  'Rental company',
   'Rental fleet',
   'Reseller inventory',
   'Other',

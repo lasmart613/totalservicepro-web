@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { roleLabel } from '@/lib/labels';
 
 /**
  * Light onboarding for team invitees.
@@ -170,7 +171,7 @@ export default function MemberOnboardingPage() {
               <label className="label">Role</label>
               <input
                 className="input opacity-80 capitalize"
-                value={(role || 'fse').replace(/_/g, ' ')}
+                value={roleLabel(role || 'fse')}
                 disabled
                 readOnly
               />

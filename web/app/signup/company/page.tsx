@@ -137,7 +137,7 @@ export default function CompanySignup() {
 
       await completeCompanySetup(userId);
     } catch (err: any) {
-      const msg = err.message || 'Service Organization sign up failed.';
+      const msg = err.message || 'Repair company sign up failed.';
       setMessage(msg);
       setMessageOk(false);
     } finally {
@@ -154,7 +154,7 @@ export default function CompanySignup() {
             <span className="font-extrabold text-2xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </div>
           <h1 className="text-2xl font-bold mt-1">Register as a repair company</h1>
-          <p className="text-sm text-[var(--text3)]">Shops and independent techs that service aesthetic and medical lasers. First user is admin. Invite field engineers from Team.</p>
+          <p className="text-sm text-[var(--text3)]">Repair companies and independent techs that service aesthetic and medical lasers. First user is admin. Invite field engineers from Team.</p>
         </div>
 
         <div className="card p-6">
@@ -276,7 +276,7 @@ export default function CompanySignup() {
                 disabled={loading}
                 className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
               >
-                {loading ? 'Creating account…' : 'Create Service Organization Account'}
+                {loading ? 'Creating account…' : 'Create Repair company account'}
               </button>
             )}
           </form>
@@ -285,7 +285,7 @@ export default function CompanySignup() {
             <Link href="/login" className="text-[var(--gold)] hover:underline">Already have an account? Sign in</Link>
           </div>
           <div className="mt-3 text-xs text-[var(--text3)] text-center">
-            Signup creates your account and shop. Next you can review details, add your team, logo, and brands. Use Company for ongoing management.
+            Signup creates your account and repair company. Next you can review details, add your team, logo, and brands. Use Company for ongoing management.
           </div>
         </div>
       </div>

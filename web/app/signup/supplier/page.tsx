@@ -312,7 +312,10 @@ export default function SupplierSignup() {
         </div>
 
         <p className="text-center text-xs text-[var(--text3)] mt-6">
-          Organization of type <code>parts_supplier</code> will be created and linked to your profile (role: parts_supplier). FSEs and other roles are within Service Company orgs (added by admins in /company). You can manage supplier profile and list parts after login.
+          This creates your parts seller organization and links it to your profile.
+          Field engineers and service techs belong to repair companies — they are
+          added by admins in Company. You can manage your supplier profile and list
+          parts after login.
         </p>
       </div>
     </div>
