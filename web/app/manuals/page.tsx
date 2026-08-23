@@ -17,7 +17,7 @@ const WAVELENGTH_OPTIONS = [
   { label: 'Multi-Wavelength', value: 'multi' },
 ];
 
-const DEFAULT_SLOT_LIMIT = 5; // free default; Premium is 15 via manualSlotLimit()
+const DEFAULT_SLOT_LIMIT = 5; // free default; Premium 15 / Team 50 via manualSlotLimit()
 
 export default function ManualsLibrary() {
   const [manuals, setManuals] = useState<any[]>([]);

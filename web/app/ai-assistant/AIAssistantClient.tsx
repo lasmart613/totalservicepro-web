@@ -11,6 +11,7 @@ import {
   fetchAiUsage,
   grokChat,
 } from '@/lib/ai/grok-client';
+import { FREE_AI_DAILY } from '@/lib/ai/daily-quota';
 import { toast } from 'sonner';
 
 type ManualRow = {
@@ -45,8 +46,8 @@ function formatMsgHtml(content: string): string {
 
 function defaultUsage(): AiUsage {
   return {
-    text: { used: 0, limit: 5 },
-    voice: { used: 0, limit: 1 },
+    text: { used: 0, limit: FREE_AI_DAILY.text },
+    voice: { used: 0, limit: FREE_AI_DAILY.voice },
     tier: 'free',
   };
 }

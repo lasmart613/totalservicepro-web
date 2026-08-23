@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   FREE_MANUAL_SLOTS,
   PREMIUM_MANUAL_SLOTS,
+  TEAM_MANUAL_SLOTS,
   UNLIMITED_MANUAL_SLOTS,
   currentOrgPlan,
   currentOrgPlanLabel,
@@ -117,13 +118,15 @@ test('current plan label is Free / Premium / Team from paid helper', () => {
   assert.equal(currentOrgPlan({ is_premium: true, plan: 'team' }), 'team');
 });
 
-test('Premium is 15 service manuals; Team is unlimited; pro is not paid', () => {
+test('Premium is 15 service manuals; Team is 50; pro is not paid', () => {
   assert.equal(PREMIUM_MANUAL_SLOTS, 15);
+  assert.equal(TEAM_MANUAL_SLOTS, 50);
   assert.equal(manualSlotLimit({ plan: 'premium' }), 15);
   assert.equal(manualSlotLimit({ is_premium: true }), 15);
   assert.equal(manualSlotLimit({ is_premium: true, manual_slots: 999 }), 15);
   assert.equal(manualSlotLimit({ plan: 'pro', manual_slots: null }), FREE_MANUAL_SLOTS);
-  assert.equal(manualSlotLimit({ plan: 'team' }), UNLIMITED_MANUAL_SLOTS);
+  assert.equal(manualSlotLimit({ plan: 'team' }), 50);
+  assert.equal(manualSlotLimit({ plan: 'team', manual_slots: 999 }), 50);
   assert.equal(manualSlotLimit({ subscription_tier: 'enterprise' }), UNLIMITED_MANUAL_SLOTS);
   assert.equal(manualSlotLimit({ is_premium: false }), FREE_MANUAL_SLOTS);
 });

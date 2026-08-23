@@ -1,9 +1,10 @@
 /**
- * Client for Supabase edge function `grok-assistant` (shared with Android AI).
+ * Client for POST /api/ai/assistant, which enforces per-user daily caps
+ * then proxies to Supabase edge function `grok-assistant`.
  * Text chat only on web for Sprint A — voice/TTS remains mobile.
  */
 
-import { getSupabaseUrl } from '@/lib/supabase/client';
+import { FREE_AI_DAILY } from '@/lib/ai/daily-quota';
 
 export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
 
@@ -35,9 +36,7 @@ export type GrokErrorResult = {
 };
 
 function grokUrl(): string {
-  const base = (getSupabaseUrl() || process.env.NEXT_PUBLIC_SUPABASE_URL || '').replace(/\/$/, '');
-  if (!base) throw new Error('NEXT_PUBLIC_SUPABASE_URL is not configured');
-  return `${base}/functions/v1/grok-assistant`;
+  return '/api/ai/assistant';
 }
 
 async function postGrok(
@@ -69,11 +68,11 @@ export async function fetchAiUsage(accessToken: string): Promise<AiUsage | null>
     return {
       text: {
         used: Number(json.text?.used ?? 0),
-        limit: Number(json.text?.limit ?? 5),
+        limit: Number(json.text?.limit ?? FREE_AI_DAILY.text),
       },
       voice: {
         used: Number(json.voice?.used ?? 0),
-        limit: Number(json.voice?.limit ?? 1),
+        limit: Number(json.voice?.limit ?? FREE_AI_DAILY.voice),
       },
       tier: json.tier || 'free',
     };
@@ -118,10 +117,10 @@ export async function grokChat(opts: {
               voice: json._usage.voice,
               tier: json.tier,
             }
-          : json?.used != null
+            : json?.used != null
             ? {
-                text: { used: json.used, limit: json.limit ?? 5 },
-                voice: { used: 0, limit: 1 },
+                text: { used: json.used, limit: json.limit ?? FREE_AI_DAILY.text },
+                voice: { used: 0, limit: FREE_AI_DAILY.voice },
               }
             : undefined,
       };
