@@ -2,10 +2,11 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { ensureTeamMemberProfile, findAuthUserByEmail } from '@/lib/team-profile';
+import { applyInviteToExistingUser } from '@/lib/org-membership-server';
+import { DEFAULT_STAFF_ROLE } from '@/lib/org-membership';
 import {
   buildTeamInviteHtml,
   buildTeamInviteText,
-  isFounderLockedRole,
   teamInviteLoginUrl,
   teamInviteRoleLabel,
   teamInviteSubject,
@@ -42,13 +43,12 @@ function isRateLimitError(msg: string): boolean {
 /**
  * Invite a team member:
  * 1) Verify caller is authenticated admin of an org
- * 2) Existing RepairPlanet user (no other-org conflict yet) → link + branded Sign-in email
- * 3) New user → generateLink (no Supabase mail) + branded set-password email
+ * 2) Existing RepairPlanet user → add membership (moonlight / first-org attach),
+ *    never reject just because they already have another company. Branded Sign-in email.
+ * 3) New user → generateLink (no Supabase Auth mail) + branded set-password email
  * 4) If Resend is not configured or send fails, still return a copyable link
  *
- * Other-org 409 below is interim (single user_profiles.organization_id).
- * Multi-org memberships will replace it with add-membership + the same Sign-in email
- * so a shop owner can moonlight as FSE on another company.
+ * Does not send the generic Auth invite mail (avoids double send with Resend).
  */
 export async function POST(req: NextRequest) {
   try {
@@ -98,7 +98,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Valid email is required' }, { status: 400 });
     }
 
-    const inviteRole = (body.role || 'fse').toLowerCase();
+    const inviteRole = (body.role || DEFAULT_STAFF_ROLE).toLowerCase();
     const firstName = (body.firstName || '').trim() || null;
     const lastName = (body.lastName || '').trim() || null;
     const jobTitle = (body.jobTitle || '').trim() || null;
@@ -164,6 +164,7 @@ export async function POST(req: NextRequest) {
       alreadyRegistered: boolean;
       acceptUrl?: string | null;
       greetName?: string | null;
+      moonlight?: boolean;
     }) => {
       const html = buildTeamInviteHtml({
         organizationName,
@@ -194,6 +195,7 @@ export async function POST(req: NextRequest) {
           emailed: false,
           linked: opts.alreadyRegistered,
           alreadyRegistered: opts.alreadyRegistered,
+          moonlight: !!opts.moonlight,
           inviteUrl: copyUrl,
           message: `Invitation saved for ${email}. Email delivery is not configured (RESEND_API_KEY) — copy the ${opts.alreadyRegistered ? 'sign-in' : 'invite'} link and send it yourself.`,
         });
@@ -221,10 +223,13 @@ export async function POST(req: NextRequest) {
             emailed: true,
             linked: opts.alreadyRegistered,
             alreadyRegistered: opts.alreadyRegistered,
+            moonlight: !!opts.moonlight,
             inviteUrl: copyUrl,
-            message: opts.alreadyRegistered
-              ? `Invite email sent to ${email}. They already have a RepairPlanet account — ask them to sign in with this email.`
-              : `Invite email sent to ${email}. If they don't see it within a few minutes, check spam — or copy the invite link from the toast / pending list.`,
+            message: opts.moonlight
+              ? `Invite email sent to ${email}. They already have a company — added as ${inviteRole} here without changing their home shop. Ask them to sign in and switch companies.`
+              : opts.alreadyRegistered
+                ? `Invite email sent to ${email}. They already have a RepairPlanet account — ask them to sign in with this email.`
+                : `Invite email sent to ${email}. If they don't see it within a few minutes, check spam — or copy the invite link from the toast / pending list.`,
           });
         }
         const sendMsg = result?.message || `Email provider error (${rr.status})`;
@@ -236,6 +241,7 @@ export async function POST(req: NextRequest) {
             rateLimited: true,
             linked: opts.alreadyRegistered,
             alreadyRegistered: opts.alreadyRegistered,
+            moonlight: !!opts.moonlight,
             inviteUrl: copyUrl,
             message: 'Email rate limit hit. Copy the link below and send it yourself.',
           });
@@ -246,6 +252,7 @@ export async function POST(req: NextRequest) {
           warning: sendMsg,
           linked: opts.alreadyRegistered,
           alreadyRegistered: opts.alreadyRegistered,
+          moonlight: !!opts.moonlight,
           inviteUrl: copyUrl,
           message: `Could not send email: ${sendMsg}. Copy the link and send it yourself.`,
         });
@@ -257,14 +264,41 @@ export async function POST(req: NextRequest) {
           warning: sendErr?.message || 'send failed',
           linked: opts.alreadyRegistered,
           alreadyRegistered: opts.alreadyRegistered,
+          moonlight: !!opts.moonlight,
           inviteUrl: copyUrl,
           message: 'Could not send email. Copy the link and send it yourself.',
         });
       }
     };
 
-    // Existing profile → branded Sign-in email when we can attach them without
-    // overwriting another company's single-org row.
+    const recordInvitation = async (accepted: boolean) => {
+      const { data: existingInv } = await admin
+        .from('engineer_invitations')
+        .select('id')
+        .eq('email', email)
+        .eq('organization_id', orgId)
+        .maybeSingle();
+      if (!existingInv) {
+        await admin.from('engineer_invitations').insert({
+          organization_id: orgId,
+          email,
+          role: inviteRole,
+          first_name: firstName,
+          last_name: lastName,
+          invited_by: user.id,
+          accepted,
+          accepted_at: accepted ? new Date().toISOString() : null,
+        });
+      } else if (accepted) {
+        await admin
+          .from('engineer_invitations')
+          .update({ accepted: true, accepted_at: new Date().toISOString(), role: inviteRole })
+          .eq('id', existingInv.id);
+      }
+    };
+
+    // Existing profile → add a membership (moonlight) instead of a conflict / steal.
+    // One branded Sign-in email only — do not send a second Auth invite mail.
     const { data: existingProfile } = await admin
       .from('user_profiles')
       .select('id, email, organization_id, role, first_name, last_name')
@@ -272,70 +306,45 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (existingProfile?.id) {
-      const existingOrg = existingProfile.organization_id;
-      const existingRole = String(existingProfile.role || '').toLowerCase();
-      // TODO(multi-org): replace this 409 with add-membership + alreadyRegistered Sign-in email.
-      // Owners of a service company must be invit-able as FSE on another shop (moonlight).
-      if (existingOrg && String(existingOrg) !== String(orgId)) {
-        return NextResponse.json({
-          error: `${email} already belongs to another organization. Ask them to leave that org first, or invite a different email.`,
-        }, { status: 409 });
-      }
-      // Same-org founder row: do not demote owner/admin/supplier on this company.
-      // Other-org founders are covered by the 409 above until add-membership lands.
-      if (isFounderLockedRole(existingRole)) {
-        const where = existingOrg && String(existingOrg) === String(orgId)
-          ? 'your organization'
-          : 'their own organization';
-        return NextResponse.json({
-          error: `${email} is already a ${teamInviteRoleLabel(existingRole)} of ${where}. Role was not overwritten. Ask them to leave that org first, or invite a different email.`,
-        }, { status: 409 });
+      const applied = await applyInviteToExistingUser(admin, {
+        userId: existingProfile.id,
+        email,
+        inviteOrgId: orgId,
+        inviteRole,
+        profileOrgId: existingProfile.organization_id,
+        profileRole: existingProfile.role,
+        firstName,
+        lastName,
+        jobTitle,
+      });
+      if (!applied.ok) {
+        return NextResponse.json({ error: applied.error || 'Could not add membership' }, { status: 400 });
       }
 
-      const { error: upErr } = await admin
-        .from('user_profiles')
-        .update({
-          organization_id: orgId,
-          role: inviteRole,
-          job_title: jobTitle,
-          ...(firstName ? { first_name: firstName } : {}),
-          ...(lastName ? { last_name: lastName } : {}),
-        })
-        .eq('id', existingProfile.id);
-      if (upErr) {
-        return NextResponse.json({ error: upErr.message }, { status: 400 });
+      await recordInvitation(true);
+
+      if (!applied.moonlight && applied.message && /already/i.test(applied.message || '')) {
+        return NextResponse.json({
+          ok: true,
+          linked: true,
+          emailed: false,
+          moonlight: false,
+          alreadyRegistered: true,
+          inviteUrl: loginUrl,
+          message: applied.message,
+        });
       }
 
       const greetName = firstName || (existingProfile as { first_name?: string | null }).first_name || null;
       return deliverBrandedInvite({
         alreadyRegistered: true,
         greetName,
+        moonlight: !!applied.moonlight,
       });
     }
 
-    // Pending invitation row
-    const { data: existingInv } = await admin
-      .from('engineer_invitations')
-      .select('id')
-      .eq('email', email)
-      .eq('organization_id', orgId)
-      .eq('accepted', false)
-      .maybeSingle();
-
-    if (!existingInv) {
-      const { error: invErr } = await admin.from('engineer_invitations').insert({
-        organization_id: orgId,
-        email,
-        role: inviteRole,
-        first_name: firstName,
-        last_name: lastName,
-        invited_by: user.id,
-        accepted: false,
-      });
-      if (invErr) {
-        return NextResponse.json({ error: invErr.message }, { status: 400 });
-      }
-    }
+    // Pending invitation row for a new email
+    await recordInvitation(false);
 
     const ensureProfileForUserId = async (userId: string) => {
       const r = await ensureTeamMemberProfile(admin, {
@@ -359,7 +368,6 @@ export async function POST(req: NextRequest) {
     }> => {
       try {
         const type = preferInvite ? 'invite' : 'recovery';
-        // Cast: supabase-js GenerateLinkParams typing is stricter than runtime invite/recovery payloads
         const { data, error } = await admin.auth.admin.generateLink({
           type,
           email,

@@ -20,6 +20,7 @@ import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
 import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
+import { OrgSwitcher } from '@/components/OrgSwitcher';
 
 type NavLink = { href: string; label: string };
 type NavGroup = { id: string; label: string; href?: string; items: NavLink[] };
@@ -405,6 +406,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       </div>
 
       <div className="flex items-center gap-3 shrink-0">
+        {user && <OrgSwitcher compact />}
         {user && (
           <Link
             href="/notifications"
@@ -463,6 +465,9 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                   {profile?.role && (
                     <div className="text-[10px] mt-0.5 text-[var(--text3)]">Role: {roleLabel(profile.role)}</div>
                   )}
+                  <div className="mt-2">
+                    <OrgSwitcher />
+                  </div>
                 </div>
 
                 <Link
@@ -592,6 +597,11 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
               >
                 Admin Portal
               </Link>
+            )}
+            {user && (
+              <div className="py-3 border-b border-[var(--border)]">
+                <OrgSwitcher />
+              </div>
             )}
             {user && (
               <Link

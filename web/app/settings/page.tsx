@@ -5,6 +5,7 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { signOutAndClearIdentity } from '@/lib/auth-session';
 import { applyStoredTheme, togglePersistedTheme } from '@/lib/theme';
+import { MembershipsSettings } from '@/components/OrgSwitcher';
 
 export const dynamic = 'force-dynamic';
 
@@ -215,6 +216,8 @@ export default function Settings() {
               </button>
             </div>
           </div>
+
+          <MembershipsSettings />
 
           <div>
             <div className="font-semibold mb-2">Account</div>

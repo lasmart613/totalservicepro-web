@@ -2,10 +2,27 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { ensureTeamMemberProfile } from '@/lib/team-profile';
+import {
+  decideClaim,
+  inviteMustNotLeaveHome,
+} from '@/lib/org-membership';
+import {
+  deleteMembership,
+  listMembershipsForUser,
+  setActiveOrganization,
+  upsertMembership,
+} from '@/lib/org-membership-server';
+
+type ClaimBody = {
+  inviteId?: number;
+  leaveOrganizationId?: number | string | null;
+};
 
 /**
  * Invited user claims their engineer_invitations row (service role).
- * Client-side claim often fails: invitee can't SELECT invitations / UPDATE own org under RLS.
+ * Founders with a home shop are not skipped: a pending invite to another
+ * company becomes a second membership (moonlight). Optional leaveOrganizationId
+ * is a move (staff leave A after joining B). Auth user is never deleted.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -36,147 +53,158 @@ export async function POST(req: NextRequest) {
 
     const email = user.email.toLowerCase().trim();
     const meta = user.user_metadata || {};
+    let body: ClaimBody = {};
+    try {
+      body = (await req.json()) as ClaimBody;
+    } catch {
+      body = {};
+    }
 
-    const founderRoles = new Set(['company_admin', 'admin', 'owner', 'parts_supplier']);
     const { data: existingProf } = await userClient
       .from('user_profiles')
       .select('organization_id, role, onboarding_completed')
       .eq('id', user.id)
       .maybeSingle();
-    const signupKind = String(meta.signup_kind || '').toLowerCase();
-    const alreadyFounder =
-      !meta.invited_member &&
-      (founderRoles.has(String(existingProf?.role || meta.role || '').toLowerCase()) ||
-        ['company', 'owner', 'supplier'].includes(signupKind));
-    if (alreadyFounder && (existingProf?.organization_id || signupKind)) {
-      return NextResponse.json({
-        ok: true,
-        skipped: true,
-        organization_id: existingProf.organization_id,
-        role: existingProf.role,
-        needsMemberOnboarding: false,
-      });
-    }
-
-    if (existingProf?.organization_id) {
-      return NextResponse.json({
-        ok: true,
-        skipped: true,
-        organization_id: existingProf.organization_id,
-        role: existingProf.role,
-        needsMemberOnboarding: existingProf.onboarding_completed !== true,
-      });
-    }
 
     if (!hasServiceRole()) {
-      // Best-effort client path (same as before)
-      const { data: invites } = await userClient
-        .from('engineer_invitations')
-        .select('*')
-        .eq('email', email)
-        .eq('accepted', false)
-        .order('created_at', { ascending: false })
-        .limit(1);
-
-      const inv = invites?.[0];
-      const orgId = inv?.organization_id ?? null;
-      const role = inv?.role || 'fse';
-
-      if (!orgId) {
-        return NextResponse.json({
-          ok: false,
-          error: 'No pending invitation found for this email (and no service role on server).',
-        }, { status: 404 });
-      }
-
-      const { error: upErr } = await userClient
-        .from('user_profiles')
-        .upsert(
-          {
-            id: user.id,
-            email,
-            organization_id: orgId,
-            role,
-            first_name: inv?.first_name || meta.first_name || null,
-            last_name: inv?.last_name || meta.last_name || null,
-            onboarding_completed: existingProf?.onboarding_completed === true,
-          },
-          { onConflict: 'id' }
-        );
-      if (upErr) {
-        return NextResponse.json({ error: upErr.message }, { status: 400 });
-      }
-      if (inv?.id) {
-        await userClient
-          .from('engineer_invitations')
-          .update({ accepted: true, accepted_at: new Date().toISOString() })
-          .eq('id', inv.id);
-      }
-      return NextResponse.json({ ok: true, organization_id: orgId, role });
+      return NextResponse.json({
+        ok: false,
+        error: 'No pending invitation found for this email (and no service role on server).',
+      }, { status: 404 });
     }
 
     const admin = getSupabaseAdmin();
+    const memberships = await listMembershipsForUser(admin, user.id);
 
-    // Prefer open invite; else most recent invite for this email
-    let { data: inv } = await admin
+    let invQuery = admin
       .from('engineer_invitations')
       .select('*')
       .eq('email', email)
       .eq('accepted', false)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .maybeSingle();
+      .order('created_at', { ascending: false });
+    if (body.inviteId) {
+      invQuery = admin.from('engineer_invitations').select('*').eq('id', body.inviteId).eq('email', email);
+    }
+    const { data: inv } = await invQuery.limit(1).maybeSingle();
 
-    if (!inv) {
+    if (!inv?.organization_id) {
+      if (existingProf?.organization_id) {
+        return NextResponse.json({
+          ok: true,
+          skipped: true,
+          organization_id: existingProf.organization_id,
+          role: existingProf.role,
+          needsMemberOnboarding: existingProf.onboarding_completed !== true,
+        });
+      }
       return NextResponse.json({
         ok: false,
         error: 'No pending invitation found for this email.',
       }, { status: 404 });
     }
 
-    const orgId = inv?.organization_id ?? null;
-    const role = inv?.role || 'fse';
-
-    if (!orgId) {
-      return NextResponse.json({
-        ok: false,
-        error: 'No invitation found for this email.',
-      }, { status: 404 });
+    const leaveGuard = inviteMustNotLeaveHome({
+      leaveOrganizationId: body.leaveOrganizationId,
+      memberships,
+    });
+    if (!leaveGuard.ok) {
+      return NextResponse.json({ error: leaveGuard.error }, { status: 403 });
     }
 
-    const alreadyDone = existingProf?.onboarding_completed === true;
-    // Do not force onboarding_completed here — member onboarding collects name/phone
-    const r = await ensureTeamMemberProfile(admin, {
-      userId: user.id,
-      email,
-      organizationId: orgId,
-      role,
-      firstName: inv?.first_name || meta.first_name || null,
-      lastName: inv?.last_name || meta.last_name || null,
-      jobTitle: meta.job_title || null,
-      onboardingCompleted: alreadyDone,
+    const decision = decideClaim({
+      inviteOrgId: inv.organization_id,
+      inviteRole: inv.role || 'fse',
+      memberships,
+      leaveOrganizationId: body.leaveOrganizationId,
     });
 
-    if (!r.ok) {
-      return NextResponse.json({ error: r.error || 'Profile upsert failed' }, { status: 400 });
+    if (decision.action === 'error') {
+      return NextResponse.json({ error: decision.error }, { status: 400 });
     }
 
-    if (inv?.id) {
+    if (decision.action === 'skip' || decision.action === 'none') {
+      if (inv.id) {
+        await admin
+          .from('engineer_invitations')
+          .update({ accepted: true, accepted_at: new Date().toISOString() })
+          .eq('id', inv.id);
+      }
+      return NextResponse.json({
+        ok: true,
+        skipped: true,
+        organization_id: existingProf?.organization_id ?? inv.organization_id,
+        role: existingProf?.role || inv.role || 'fse',
+      });
+    }
+
+    const added = await upsertMembership(admin, {
+      userId: user.id,
+      organizationId: decision.add.organizationId,
+      role: decision.add.role,
+      isHome: false,
+    });
+    if (!added.ok) {
+      return NextResponse.json({ error: added.error || 'Membership failed' }, { status: 400 });
+    }
+
+    if (decision.leaveOrganizationId) {
+      await deleteMembership(admin, {
+        userId: user.id,
+        organizationId: decision.leaveOrganizationId,
+      });
+    }
+
+    if (decision.activateOrganizationId) {
+      const alreadyDone = existingProf?.onboarding_completed === true;
+      const r = await ensureTeamMemberProfile(admin, {
+        userId: user.id,
+        email,
+        organizationId: decision.activateOrganizationId,
+        role: decision.add.role,
+        firstName: inv.first_name || meta.first_name || null,
+        lastName: inv.last_name || meta.last_name || null,
+        jobTitle: meta.job_title || null,
+        onboardingCompleted: alreadyDone,
+      });
+      if (!r.ok) {
+        return NextResponse.json({ error: r.error || 'Profile upsert failed' }, { status: 400 });
+      }
+    } else if (decision.leaveOrganizationId && sameActive(existingProf?.organization_id, decision.leaveOrganizationId)) {
+      await setActiveOrganization(admin, {
+        userId: user.id,
+        organizationId: decision.add.organizationId,
+        role: decision.add.role,
+      });
+    }
+
+    if (inv.id) {
       await admin
         .from('engineer_invitations')
         .update({ accepted: true, accepted_at: new Date().toISOString() })
         .eq('id', inv.id);
     }
 
+    const { data: after } = await admin
+      .from('user_profiles')
+      .select('organization_id, role, onboarding_completed')
+      .eq('id', user.id)
+      .maybeSingle();
+
     return NextResponse.json({
       ok: true,
-      organization_id: orgId,
-      role,
+      organization_id: after?.organization_id ?? existingProf?.organization_id,
+      role: after?.role ?? existingProf?.role,
       claimed: true,
-      needsMemberOnboarding: !alreadyDone,
+      moonlight: decision.keepHome,
+      leftOrganizationId: decision.leaveOrganizationId,
+      needsMemberOnboarding: after?.onboarding_completed !== true,
     });
   } catch (e: any) {
     console.error('team claim error', e);
     return NextResponse.json({ error: e?.message || 'Claim failed' }, { status: 500 });
   }
+}
+
+function sameActive(a: number | string | null | undefined, b: number | string | null | undefined) {
+  return a != null && b != null && String(a) === String(b);
 }

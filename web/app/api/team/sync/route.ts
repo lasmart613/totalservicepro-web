@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { ensureTeamMemberProfile, findAuthUserByEmail } from '@/lib/team-profile';
+import { listMemberUserIdsForOrg, upsertMembership } from '@/lib/org-membership-server';
 
 const ADMIN_ROLES = new Set([
   'admin',
@@ -125,7 +126,22 @@ export async function POST(req: NextRequest) {
       }
 
       if (member.organization_id != null) {
-        details.push(`${email}: already belongs to another organization — not moved`);
+        const added = await upsertMembership(admin, {
+          userId: member.id,
+          organizationId: orgId,
+          role: inv.role || member.role || 'fse',
+          isHome: false,
+        });
+        if (!added.ok) {
+          details.push(`${email}: ${added.error || 'could not add membership'}`);
+          continue;
+        }
+        await admin
+          .from('engineer_invitations')
+          .update({ accepted: true, accepted_at: new Date().toISOString() })
+          .eq('id', inv.id);
+        linked++;
+        details.push(`${email}: added membership (home org kept)`);
         continue;
       }
 
@@ -153,6 +169,7 @@ export async function POST(req: NextRequest) {
       details.push(`${email}: linked existing profile to org`);
     }
 
+    const rosterIds = await listMemberUserIdsForOrg(admin, orgId);
     let { data: members, error: memErr } = await admin
       .from('user_profiles')
       .select('id, first_name, last_name, email, role, job_title, additional_roles, created_at, onboarding_completed')
@@ -164,6 +181,20 @@ export async function POST(req: NextRequest) {
         .select('id, first_name, last_name, email, role, job_title, created_at, onboarding_completed')
         .eq('organization_id', orgId)
         .order('role', { ascending: true }));
+    }
+    if (rosterIds.length) {
+      const { data: extras } = await admin
+        .from('user_profiles')
+        .select('id, first_name, last_name, email, role, job_title, created_at, onboarding_completed')
+        .in('id', rosterIds);
+      const seen = new Set((members || []).map((m: any) => m.id));
+      members = [...(members || [])];
+      for (const row of extras || []) {
+        if (!seen.has(row.id)) {
+          seen.add(row.id);
+          members.push(row);
+        }
+      }
     }
 
     return NextResponse.json({
