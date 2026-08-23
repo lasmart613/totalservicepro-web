@@ -3,7 +3,14 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { LandingShell } from './LandingShell';
+import { plansHrefForAudience, type PlanAudience } from '@/lib/billing/plan-tiles';
 import './landing.css';
+
+const LANDING_PLAN_ROLE: Record<'shop' | 'clinic' | 'parts', PlanAudience> = {
+  shop: 'company',
+  clinic: 'owner',
+  parts: 'supplier',
+};
 
 export function LandingSplash() {
   return (
@@ -362,7 +369,10 @@ export function LandingPage() {
                 <Link href={r.signup} className="lp-btn lp-btn-primary">
                   Register for Total Service Pro
                 </Link>
-                <Link href="/plans" className="lp-btn lp-btn-ghost">
+                <Link
+                  href={plansHrefForAudience(LANDING_PLAN_ROLE[r.id])}
+                  className="lp-btn lp-btn-ghost"
+                >
                   Free Plan
                 </Link>
               </div>

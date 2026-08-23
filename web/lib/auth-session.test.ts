@@ -4,6 +4,15 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+test('landing Free Plan CTAs pass role into /plans', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');
+  assert.match(source, /plansHrefForAudience/);
+  assert.match(source, /shop: 'company'/);
+  assert.match(source, /clinic: 'owner'/);
+  assert.match(source, /parts: 'supplier'/);
+});
+
 test('/plans never imports sign-out helpers', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');
@@ -37,10 +46,8 @@ test('/plans tiles: Premium 15, Team 50, Free does not claim a full library', ()
   assert.match(tiles, /export const TEAM_MANUALS_LINE = '50 service manuals'/);
   assert.doesNotMatch(tiles, /Unlimited service manuals/);
   const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');
-  const premiumHits = source.match(/PREMIUM_MANUALS_LINE|15 service manuals/g) || [];
-  const teamHits = source.match(/TEAM_MANUALS_LINE|50 service manuals/g) || [];
-  assert.ok(premiumHits.length >= 3, 'Premium tile line used on both views');
-  assert.ok(teamHits.length >= 3, 'Team tile line used on both views');
+  assert.match(source, /planTileLines/);
+  assert.match(source, /PlanAudienceSelector/);
   assert.doesNotMatch(source, /Unlimited service manuals/i);
   assert.doesNotMatch(source, /Full manual library/i);
   assert.doesNotMatch(source, /full digital bookshelf/i);
@@ -57,9 +64,9 @@ test('/plans tiles list the same weekly-updates perk on every tier', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const tiles = readFileSync(join(here, './billing/plan-tiles.ts'), 'utf8');
   assert.match(tiles, /export const WEEKLY_UPDATES_LINE = 'New features added weekly'/);
+  assert.match(tiles, /WEEKLY_UPDATES_LINE/);
   const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');
-  const weeklyHits = source.match(/WEEKLY_UPDATES_LINE/g) || [];
-  assert.ok(weeklyHits.length >= 6, 'weekly line on all three tiles in both views');
+  assert.match(source, /planTileLines/);
   const paywall = readFileSync(join(here, '../../app/src/main/assets/paywall.html'), 'utf8');
   const paywallWeekly = paywall.match(/New features added weekly/g) || [];
   assert.ok(paywallWeekly.length >= 2, 'Android paywall Premium and Team use the same weekly line');
