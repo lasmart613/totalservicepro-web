@@ -4,10 +4,12 @@ import React, { useEffect, useState } from 'react';
 import Script from 'next/script';
 import { usePathname } from 'next/navigation';
 import { getSupabaseClient } from '../lib/supabase/client';
-
-/** Larry's TSP-Web unit — see ADSENSE_WEB.md. Same publisher as Android AdMob. */
-const ADSENSE_CLIENT = 'ca-pub-5353320292042327';
-const ADSENSE_SLOT = '8443570568';
+import {
+  ADSENSE_CLIENT,
+  ADSENSE_SLOT,
+  onboardingFlagsDone,
+  orgIsPaid,
+} from '../lib/adsense';
 
 const HIDDEN_PREFIXES = ['/signup', '/onboarding', '/auth', '/login'];
 
@@ -16,16 +18,17 @@ function pathHidesAds(pathname: string): boolean {
   return HIDDEN_PREFIXES.some((p) => pathname === p || pathname.startsWith(`${p}/`));
 }
 
-function orgIsPaid(org: { is_premium?: boolean | null; subscription_tier?: string | null } | null): boolean {
-  if (!org) return false;
-  if (org.is_premium) return true;
-  const tier = String(org.subscription_tier || '').toLowerCase();
-  return /premium|team|enterprise|pro/.test(tier);
-}
-
 declare global {
   interface Window {
     adsbygoogle?: unknown[];
+  }
+}
+
+function pushAdSlot() {
+  try {
+    (window.adsbygoogle = window.adsbygoogle || []).push({});
+  } catch {
+    /* AdSense may throw if the slot was already filled */
   }
 }
 
@@ -58,24 +61,38 @@ export default function AdBanner() {
           return;
         }
 
-        const { data: profile } = await supabase
+        let { data: profile, error: profileErr } = await supabase
           .from('user_profiles')
-          .select('organization_id, onboarding_completed')
+          .select('organization_id, onboarding_completed, onboarding_completed_at')
           .eq('id', user.id)
           .maybeSingle();
+        if (profileErr && /onboarding_completed_at|column/i.test(profileErr.message || '')) {
+          ({ data: profile, error: profileErr } = await supabase
+            .from('user_profiles')
+            .select('organization_id, onboarding_completed')
+            .eq('id', user.id)
+            .maybeSingle());
+        }
         if (cancelled) return;
 
         // Company-admin (and any) onboarding — never show ads until setup is done.
-        if (!profile?.organization_id || profile.onboarding_completed !== true) {
+        if (!profile?.organization_id || !onboardingFlagsDone(profile)) {
           setShowAd(false);
           return;
         }
 
-        const { data: org } = await supabase
+        let { data: org, error: orgErr } = await supabase
           .from('organizations')
           .select('is_premium, subscription_tier')
           .eq('id', profile.organization_id)
           .maybeSingle();
+        if (orgErr && /subscription_tier|column/i.test(orgErr.message || '')) {
+          ({ data: org } = await supabase
+            .from('organizations')
+            .select('is_premium')
+            .eq('id', profile.organization_id)
+            .maybeSingle());
+        }
         if (cancelled) return;
 
         setShowAd(!orgIsPaid(org));
@@ -91,15 +108,9 @@ export default function AdBanner() {
 
   useEffect(() => {
     if (!showAd) return;
-    const t = window.setTimeout(() => {
-      try {
-        (window.adsbygoogle = window.adsbygoogle || []).push({});
-      } catch {
-        /* AdSense may throw if the slot was already filled */
-      }
-    }, 80);
+    const t = window.setTimeout(pushAdSlot, 300);
     return () => window.clearTimeout(t);
-  }, [showAd]);
+  }, [showAd, pathname]);
 
   if (!showAd) return null;
 
@@ -107,20 +118,22 @@ export default function AdBanner() {
     <div
       className="w-full shrink-0 border-b border-[var(--border)] bg-[var(--surface)] flex justify-center"
       data-tsp-ad-banner="1"
+      style={{ minHeight: 90 }}
     >
       <ins
         className="adsbygoogle"
-        style={{ display: 'block' }}
+        style={{ display: 'block', width: '100%', minHeight: 90 }}
         data-ad-client={ADSENSE_CLIENT}
         data-ad-slot={ADSENSE_SLOT}
         data-ad-format="auto"
         data-full-width-responsive="true"
       />
       <Script
-        async
+        id="tsp-adsense"
         src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`}
         crossOrigin="anonymous"
         strategy="afterInteractive"
+        onLoad={pushAdSlot}
       />
     </div>
   );
