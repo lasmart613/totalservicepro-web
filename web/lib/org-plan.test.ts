@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  FREE_MANUAL_SLOTS,
+  PREMIUM_MANUAL_SLOTS,
+  UNLIMITED_MANUAL_SLOTS,
+  manualSlotLimit,
   orgCanUpgrade,
   orgIsPaid,
   orgIsTopPaid,
@@ -88,4 +92,15 @@ test('Team and Enterprise hide Upgrade and cannot start checkout', () => {
   assert.equal(orgCanUpgrade({ is_premium: true, plan: 'team' }), false);
   assert.equal(orgMayStartPaidPlan({ plan: 'team' }, 'team'), false);
   assert.equal(orgMayStartPaidPlan({ plan: 'enterprise' }, 'premium'), false);
+});
+
+test('Premium is 15 service manuals; Team is unlimited; pro is not paid', () => {
+  assert.equal(PREMIUM_MANUAL_SLOTS, 15);
+  assert.equal(manualSlotLimit({ plan: 'premium' }), 15);
+  assert.equal(manualSlotLimit({ is_premium: true }), 15);
+  assert.equal(manualSlotLimit({ is_premium: true, manual_slots: 999 }), 15);
+  assert.equal(manualSlotLimit({ plan: 'pro', manual_slots: null }), FREE_MANUAL_SLOTS);
+  assert.equal(manualSlotLimit({ plan: 'team' }), UNLIMITED_MANUAL_SLOTS);
+  assert.equal(manualSlotLimit({ subscription_tier: 'enterprise' }), UNLIMITED_MANUAL_SLOTS);
+  assert.equal(manualSlotLimit({ is_premium: false }), FREE_MANUAL_SLOTS);
 });

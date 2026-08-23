@@ -47,7 +47,7 @@ function PublicPlans() {
             <ul>
               <li>Paid plan for accounts that need more of the app</li>
               <li>AI troubleshooting assistant</li>
-              <li>Full manual library</li>
+              <li>15 service manuals</li>
               <li>No advertisements</li>
             </ul>
             <Link href="/signup" className="lp-btn lp-btn-ghost">
@@ -205,7 +205,7 @@ function SignedInPlans() {
             ) : null}
             <ul className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1">
               <li>AI troubleshooting assistant</li>
-              <li>Full manual library</li>
+              <li>15 service manuals</li>
               <li>No advertisements</li>
             </ul>
             <button
@@ -233,6 +233,7 @@ function SignedInPlans() {
             ) : null}
             <ul className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1">
               <li>Everything in Premium</li>
+              <li>Unlimited service manuals</li>
               <li>Up to 10 user seats</li>
               <li>Shared service history</li>
             </ul>

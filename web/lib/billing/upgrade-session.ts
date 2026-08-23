@@ -4,6 +4,7 @@
  */
 
 import { getPlanOffer, type PlanOffer, type PlanSku } from './plan-catalog.ts';
+import { PREMIUM_MANUAL_SLOTS, UNLIMITED_MANUAL_SLOTS } from '../org-plan.ts';
 
 export const UPGRADE_KIND = 'org_plan';
 
@@ -123,10 +124,12 @@ export function orgUpgradeFields(plan: string): Record<string, unknown> {
   const name = String(plan || '')
     .toLowerCase()
     .trim();
+  const unlimited = name === 'team' || name === 'enterprise';
   return {
     is_premium: true,
     subscription_tier: name,
     plan: name,
+    manual_slots: unlimited ? UNLIMITED_MANUAL_SLOTS : PREMIUM_MANUAL_SLOTS,
   };
 }
 

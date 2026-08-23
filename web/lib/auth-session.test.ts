@@ -24,6 +24,21 @@ test('checkout success lands on the receipt page, cancel stays on /plans', () =>
   assert.doesNotMatch(source, /\/plans\?upgraded=1/);
 });
 
+test('manuals page does not treat Premium or pro as unlimited slots', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
+  assert.match(source, /manualSlotLimit/);
+  assert.doesNotMatch(source, /premium\|team\|enterprise\|pro/);
+});
+
+test('/plans Premium is 15 manuals and Team is unlimited', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');
+  assert.match(source, /15 service manuals/);
+  assert.match(source, /Unlimited service manuals/);
+  assert.doesNotMatch(source, /Full manual library/);
+});
+
 test('/plans does not claim success after checkout', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');

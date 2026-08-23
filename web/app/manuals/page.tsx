@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Header } from '@/components/Header';
 import { ShelfScroller } from '@/components/ShelfScroller';
 import { getSupabaseClient, getSupabaseUrl } from '@/lib/supabase/client';
+import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
 import { toast } from 'sonner';
 
 const WAVELENGTH_OPTIONS = [
@@ -16,7 +17,7 @@ const WAVELENGTH_OPTIONS = [
   { label: 'Multi-Wavelength', value: 'multi' },
 ];
 
-const DEFAULT_SLOT_LIMIT = 5;
+const DEFAULT_SLOT_LIMIT = 5; // free default; Premium is 15 via manualSlotLimit()
 
 export default function ManualsLibrary() {
   const [manuals, setManuals] = useState<any[]>([]);
@@ -48,16 +49,30 @@ export default function ManualsLibrary() {
 
       const { data: prof } = await supabase
         .from('user_profiles')
-        .select('organization_id, organizations(manual_slots, subscription_tier)')
+        .select('organization_id')
         .eq('id', user.id)
         .maybeSingle();
       const oId = prof?.organization_id ?? null;
       setOrgId(oId);
-      const org = (prof as any)?.organizations;
-      if (org?.manual_slots != null) {
-        setSlotLimit(parseInt(String(org.manual_slots), 10) || DEFAULT_SLOT_LIMIT);
-      } else if (org?.subscription_tier && /premium|team|enterprise|pro/i.test(String(org.subscription_tier))) {
-        setSlotLimit(999);
+      if (oId != null) {
+        let org: Record<string, unknown> | null = null;
+        let orgRes = await supabase
+          .from('organizations')
+          .select('manual_slots, subscription_tier, plan, is_premium')
+          .eq('id', oId)
+          .maybeSingle();
+        if (orgRes.error && /subscription_tier|plan|manual_slots|column/i.test(orgRes.error.message || '')) {
+          orgRes = await supabase
+            .from('organizations')
+            .select('is_premium, subscription_tier, plan')
+            .eq('id', oId)
+            .maybeSingle();
+        }
+        if (orgRes.error && /subscription_tier|plan|column/i.test(orgRes.error.message || '')) {
+          orgRes = await supabase.from('organizations').select('is_premium').eq('id', oId).maybeSingle();
+        }
+        org = orgRes.data as Record<string, unknown> | null;
+        setSlotLimit(manualSlotLimit(org));
       } else {
         setSlotLimit(DEFAULT_SLOT_LIMIT);
       }
@@ -146,12 +161,50 @@ export default function ManualsLibrary() {
       toast.error('No service company on your profile — complete onboarding first. Manuals are shared by your organization.');
       return false;
     }
-    if (ownedIds.size >= slotLimit) {
+    if (!isUnlimitedManualSlots(slotLimit) && ownedIds.size >= slotLimit) {
       toast.error(`Library full (${ownedIds.size}/${slotLimit}). Upgrade or remove a manual.`);
       return false;
     }
 
-    // Prefer org library
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (token) {
+      try {
+        const res = await fetch('/api/manuals/library', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ manual_id: m.id }),
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+          personal?: boolean;
+          slot_limit?: number;
+        };
+        if (res.ok && json?.ok) {
+          if (json.personal) {
+            toast.message('Added to personal library (company library table not set up yet)');
+          }
+          if (json.slot_limit != null) setSlotLimit(Number(json.slot_limit) || slotLimit);
+          return true;
+        }
+        if (res.status === 409) {
+          toast.error(json?.error || `Library full (${ownedIds.size}/${slotLimit}). Upgrade or remove a manual.`);
+          return false;
+        }
+        if (json?.error && res.status < 500) {
+          toast.error(json.error);
+          return false;
+        }
+      } catch {
+        /* API unreachable — fall through to local insert, still capped above */
+      }
+    }
+
+    // Fallback only if the API is unavailable; still honor the local Premium=15 cap.
     let { error } = await supabase.from('organization_manuals').insert({
       organization_id: orgId,
       manual_id: m.id,
@@ -161,7 +214,6 @@ export default function ManualsLibrary() {
       return true;
     }
     if (error && /schema cache|does not exist|relation/i.test(error.message || '')) {
-      // Fallback personal
       const um = await supabase.from('user_manuals').insert({
         user_id: user.id,
         manual_id: m.id,
@@ -248,36 +300,22 @@ export default function ManualsLibrary() {
           await loadData();
         }
         const used = ownedIds.size;
-        const limit = json.slot_limit != null ? Number(json.slot_limit) : slotLimit;
-        const remaining = Math.max(0, limit - used);
-        if (remaining <= 0) {
+        const limit = slotLimit;
+        const remaining = isUnlimitedManualSlots(limit) ? Number.POSITIVE_INFINITY : Math.max(0, limit - used);
+        if (!isUnlimitedManualSlots(limit) && remaining <= 0) {
           toast.error(`Company library is full (${used}/${limit}). Upgrade for more slots.`);
           return;
         }
         const confirmAdd = window.confirm(
           `Add "${m.title}" to your company library?\n\n` +
-            `Slots used: ${used} of ${limit} (${remaining} left).\n` +
+            `Slots used: ${used} of ${isUnlimitedManualSlots(limit) ? 'unlimited' : limit}` +
+            `${isUnlimitedManualSlots(limit) ? '' : ` (${remaining} left)`}.\n` +
             `Everyone in your service company can open it after you add it.`
         );
         if (!confirmAdd) return;
 
-        // Prefer edge action=add (adds + returns URL)
-        const addRes = await callGetManualUrl({
-          ...payload,
-          action: 'add',
-        });
-        if (openPayloadUrl(addRes.json, m.title) === true) {
-          toast.success('Added to company library');
-          await loadData();
-          return;
-        }
-
-        // Client-side insert fallback, then open
         const added = await addToCompanyLibrary(m);
-        if (!added) {
-          if (addRes.json.error) toast.error(addRes.json.error);
-          return;
-        }
+        if (!added) return;
         await loadData();
         const openRes = await callGetManualUrl(payload);
         if (openPayloadUrl(openRes.json, m.title) === true) {
@@ -503,14 +541,14 @@ export default function ManualsLibrary() {
             onClick={() => setTab('library')}
             className={`px-6 py-2 text-sm font-semibold ${tab === 'library' ? 'border-b-2 border-[var(--gold)] text-[var(--gold)]' : 'text-[var(--text3)]'}`}
           >
-            My Library ({ownedIds.size}/{slotLimit === 999 ? '∞' : slotLimit})
+            My Library ({ownedIds.size}/{isUnlimitedManualSlots(slotLimit) ? '∞' : slotLimit})
           </button>
         </div>
 
         {tab === 'browse' && (
           <p className="text-sm text-[var(--text3)] mb-4">
             Tap a manual to <strong className="text-[var(--text)]">add it to your company library</strong>
-            {slotLimit < 999 ? ` (${Math.max(0, slotLimit - ownedIds.size)} slots left)` : ''}, then open the PDF.
+            {!isUnlimitedManualSlots(slotLimit) ? ` (${Math.max(0, slotLimit - ownedIds.size)} slots left)` : ''}, then open the PDF.
             Manuals are shared with everyone in your service company.
           </p>
         )}

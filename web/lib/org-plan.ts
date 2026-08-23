@@ -9,7 +9,13 @@ export type OrgPlanFields = {
   is_premium?: boolean | null;
   subscription_tier?: string | null;
   plan?: string | null;
+  manual_slots?: number | null;
 };
+
+/** Free default already in /manuals. Premium is 15. Team/Enterprise is unlimited. */
+export const FREE_MANUAL_SLOTS = 5;
+export const PREMIUM_MANUAL_SLOTS = 15;
+export const UNLIMITED_MANUAL_SLOTS = 999;
 
 /** Free → /plans. Mid (Premium) → Team checkout. Top → hide Upgrade. */
 export type UpgradeTarget = 'plans' | 'team';
@@ -59,6 +65,25 @@ export function orgCanUpgrade(org: OrgPlanFields | null | undefined): boolean {
 }
 
 /** Free may start Premium or Team. Mid-tier may start Team only. Top cannot. */
+export function isUnlimitedManualSlots(limit: number): boolean {
+  return Number.isFinite(limit) && limit >= UNLIMITED_MANUAL_SLOTS;
+}
+
+/**
+ * Library slots from paid detection. Premium is 15 even if a stale
+ * manual_slots row says 999. "pro" is not paid and stays on the free default.
+ */
+export function manualSlotLimit(org: OrgPlanFields | null | undefined): number {
+  if (orgIsTopPaid(org)) return UNLIMITED_MANUAL_SLOTS;
+  if (orgIsPaid(org)) return PREMIUM_MANUAL_SLOTS;
+  const stored = org?.manual_slots;
+  if (stored != null) {
+    const n = parseInt(String(stored), 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return FREE_MANUAL_SLOTS;
+}
+
 export function orgMayStartPaidPlan(
   org: OrgPlanFields | null | undefined,
   plan: string
