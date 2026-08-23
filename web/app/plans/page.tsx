@@ -17,37 +17,54 @@ import {
 } from '@/lib/org-plan';
 import { loadOrgPlanRow } from '@/lib/org-plan-load';
 import { PLAN_OFFERS, skuFor, type BillingCycle, type PaidPlanId } from '@/lib/billing/plan-catalog';
-import {
-  PREMIUM_MANUALS_LINE,
-  TEAM_MANUALS_LINE,
-  WEEKLY_UPDATES_LINE,
-} from '@/lib/billing/plan-tiles';
+import { planAudienceLabel, planTileLines, type PlanAudience, type PlanTileId } from '@/lib/billing/plan-tiles';
 import { startClientUpgradeCheckout } from '@/lib/billing/start-client-checkout';
+import {
+  PlanAudienceSelector,
+  usePlanAudienceFromUrl,
+} from '@/components/plans/PlanAudienceSelector';
 
 type AuthState = 'loading' | 'in' | 'out';
 
+function TileLines({
+  audience,
+  tile,
+  className,
+}: {
+  audience: PlanAudience;
+  tile: PlanTileId;
+  className?: string;
+}) {
+  return (
+    <ul className={className}>
+      {planTileLines(audience, tile).map((line) => (
+        <li key={line}>{line}</li>
+      ))}
+    </ul>
+  );
+}
+
 function PublicPlans() {
+  const [audience, setAudience] = usePlanAudienceFromUrl();
+
   return (
     <LandingShell>
       <section className="lp-section" style={{ marginTop: 0, borderTop: 'none' }}>
         <p className="lp-kicker">Total Service Pro</p>
         <h1 className="lp-h2">Free Plan, Premium, and Team</h1>
         <p className="lp-lede">
-          Register for a Free Plan. Compare Free, Premium, and Team, then create your account.
+          Register for a Free Plan. Compare Free, Premium, and Team for a{' '}
+          {planAudienceLabel(audience).toLowerCase()}, then create your account.
           Signed-in companies upgrade from this page without registering again.
         </p>
+        <PlanAudienceSelector value={audience} onChange={setAudience} variant="landing">
         <div className="lp-paths">
           <article className="lp-path" style={{ cursor: 'default' }}>
             <h3>Free Plan</h3>
             <p className="lp-lede" style={{ margin: '0 0 12px' }}>
               <strong>$0</strong> / month
             </p>
-            <ul>
-              <li>Register and use Total Service Pro at no charge</li>
-              <li>Schedule service calls, post service requests, and list parts</li>
-              <li>Ads may appear on the Free Plan</li>
-              <li>{WEEKLY_UPDATES_LINE}</li>
-            </ul>
+            <TileLines audience={audience} tile="free" />
             <Link href="/signup" className="lp-btn lp-btn-primary">
               Register for Total Service Pro
             </Link>
@@ -58,13 +75,7 @@ function PublicPlans() {
               <strong>{PLAN_OFFERS.premium_monthly.displayAmount}</strong>{' '}
               {PLAN_OFFERS.premium_monthly.displayPeriod}
             </p>
-            <ul>
-              <li>Paid plan for accounts that need more of the app</li>
-              <li>AI troubleshooting assistant</li>
-              <li>{PREMIUM_MANUALS_LINE}</li>
-              <li>No advertisements</li>
-              <li>{WEEKLY_UPDATES_LINE}</li>
-            </ul>
+            <TileLines audience={audience} tile="premium" />
             <Link href="/signup" className="lp-btn lp-btn-ghost">
               Register for Total Service Pro
             </Link>
@@ -75,18 +86,13 @@ function PublicPlans() {
               <strong>{PLAN_OFFERS.team_monthly.displayAmount}</strong>{' '}
               {PLAN_OFFERS.team_monthly.displayPeriod}
             </p>
-            <ul>
-              <li>Everything in Premium</li>
-              <li>{TEAM_MANUALS_LINE}</li>
-              <li>Up to 10 user seats</li>
-              <li>Shared service history</li>
-              <li>{WEEKLY_UPDATES_LINE}</li>
-            </ul>
+            <TileLines audience={audience} tile="team" />
             <Link href="/signup" className="lp-btn lp-btn-ghost">
               Register for Total Service Pro
             </Link>
           </article>
         </div>
+        </PlanAudienceSelector>
         <div className="lp-actions" style={{ marginTop: 28 }}>
           <Link href="/signup" className="lp-btn lp-btn-primary">
             Register for a Free Plan
@@ -103,6 +109,7 @@ function PublicPlans() {
 function SignedInPlans() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const [audience, setAudience] = usePlanAudienceFromUrl();
   const supabase = getSupabaseClient();
   const [cycle, setCycle] = useState<BillingCycle>('monthly');
   const [starting, setStarting] = useState<PaidPlanId | null>(null);
@@ -212,7 +219,8 @@ function SignedInPlans() {
         <p className="text-[var(--text3)] mt-2 max-w-2xl">
           Stay signed in. Choose a paid plan for{orgName ? ` ${orgName}` : ' your current organization'}.
           Stripe Checkout attaches to this account — it does not create a second one. Cancel anytime
-          before paying; you will not be charged.
+          before paying; you will not be charged. Same prices for every role — swipe to see{' '}
+          {planAudienceLabel(audience)} benefits.
         </p>
 
         {orgReady ? (
@@ -228,6 +236,7 @@ function SignedInPlans() {
           <div className="mt-6 text-sm text-[var(--text3)]">Loading current plan…</div>
         )}
 
+        <PlanAudienceSelector value={audience} onChange={setAudience} variant="app">
         <div className="mt-6 flex items-center gap-3">
           <button
             type="button"
@@ -251,12 +260,11 @@ function SignedInPlans() {
             <p className="text-3xl font-extrabold text-[var(--gold)] mt-2">
               $0 <span className="text-sm font-semibold text-[var(--text3)]">/ month</span>
             </p>
-            <ul className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1">
-              <li>Schedule, requests, and parts listings</li>
-              <li>Ads may appear</li>
-              <li>Get started at no charge</li>
-              <li>{WEEKLY_UPDATES_LINE}</li>
-            </ul>
+            <TileLines
+              audience={audience}
+              tile="free"
+              className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1"
+            />
             <div className="btn btn-secondary w-full text-center mt-5 pointer-events-none opacity-70">
               {!orgReady ? '…' : namedPlan === 'free' ? 'Current plan' : 'Included'}
             </div>
@@ -271,12 +279,11 @@ function SignedInPlans() {
             {premium.displayOrig ? (
               <p className="text-xs text-[var(--text3)] line-through">{premium.displayOrig} / year list</p>
             ) : null}
-            <ul className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1">
-              <li>AI troubleshooting assistant</li>
-              <li>{PREMIUM_MANUALS_LINE}</li>
-              <li>No advertisements</li>
-              <li>{WEEKLY_UPDATES_LINE}</li>
-            </ul>
+            <TileLines
+              audience={audience}
+              tile="premium"
+              className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1"
+            />
             <button
               type="button"
               className="btn btn-primary w-full mt-5"
@@ -304,13 +311,11 @@ function SignedInPlans() {
             {team.displayOrig ? (
               <p className="text-xs text-[var(--text3)] line-through">{team.displayOrig} / year list</p>
             ) : null}
-            <ul className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1">
-              <li>Everything in Premium</li>
-              <li>{TEAM_MANUALS_LINE}</li>
-              <li>Up to 10 user seats</li>
-              <li>Shared service history</li>
-              <li>{WEEKLY_UPDATES_LINE}</li>
-            </ul>
+            <TileLines
+              audience={audience}
+              tile="team"
+              className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1"
+            />
             <button
               type="button"
               className="btn btn-secondary w-full mt-5"
@@ -327,6 +332,7 @@ function SignedInPlans() {
             </button>
           </article>
         </div>
+        </PlanAudienceSelector>
 
         <p className="text-xs text-[var(--text3)] mt-6">
           Enterprise (custom pricing):{' '}
@@ -381,7 +387,19 @@ function PlansGate() {
       </Suspense>
     );
   }
-  return <PublicPlans />;
+  return (
+    <Suspense
+      fallback={
+        <LandingShell>
+          <section className="lp-section" style={{ marginTop: 0, borderTop: 'none' }}>
+            <p className="lp-lede">Loading plans…</p>
+          </section>
+        </LandingShell>
+      }
+    >
+      <PublicPlans />
+    </Suspense>
+  );
 }
 
 export default function PlansPage() {

@@ -1,6 +1,24 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PREMIUM_MANUALS_LINE, TEAM_MANUALS_LINE, WEEKLY_UPDATES_LINE } from './plan-tiles.ts';
+import {
+  DEFAULT_PLAN_AUDIENCE,
+  FREE_AI_LINE,
+  PLAN_AUDIENCES,
+  PLAN_AUDIENCE_OPTIONS,
+  PLAN_TILE_COPY,
+  PREMIUM_AI_LINE,
+  PREMIUM_MANUALS_LINE,
+  SHARED_SERVICE_HISTORY_LINE,
+  TEAM_AI_LINE,
+  TEAM_MANUALS_LINE,
+  WEEKLY_UPDATES_LINE,
+  nextPlanAudience,
+  parsePlanAudience,
+  planTileLines,
+  plansHrefForAudience,
+} from './plan-tiles.ts';
+
+const TILES = ['free', 'premium', 'team'] as const;
 
 test('weekly updates perk is one shared phrase', () => {
   assert.equal(WEEKLY_UPDATES_LINE, 'New features added weekly');
@@ -10,4 +28,73 @@ test('manual entitlements stay Premium 15 and Team 50', () => {
   assert.equal(PREMIUM_MANUALS_LINE, '15 service manuals');
   assert.equal(TEAM_MANUALS_LINE, '50 service manuals');
   assert.doesNotMatch(TEAM_MANUALS_LINE, /unlimited/i);
+});
+
+test('audience pills are Service Company, Laser Owner, Parts Supplier', () => {
+  assert.deepEqual(
+    PLAN_AUDIENCE_OPTIONS.map((a) => a.label),
+    ['Service Company', 'Laser Owner', 'Parts Supplier']
+  );
+  assert.equal(DEFAULT_PLAN_AUDIENCE, 'company');
+});
+
+test('?role=owner|supplier|company parse, with landing aliases', () => {
+  assert.equal(parsePlanAudience(undefined), 'company');
+  assert.equal(parsePlanAudience(''), 'company');
+  assert.equal(parsePlanAudience('company'), 'company');
+  assert.equal(parsePlanAudience('shop'), 'company');
+  assert.equal(parsePlanAudience('owner'), 'owner');
+  assert.equal(parsePlanAudience('clinic'), 'owner');
+  assert.equal(parsePlanAudience('supplier'), 'supplier');
+  assert.equal(parsePlanAudience('parts'), 'supplier');
+  assert.equal(parsePlanAudience('unknown'), 'company');
+});
+
+test('landing Free Plan hrefs stay on /plans with role query', () => {
+  assert.equal(plansHrefForAudience('company'), '/plans');
+  assert.equal(plansHrefForAudience('owner'), '/plans?role=owner');
+  assert.equal(plansHrefForAudience('supplier'), '/plans?role=supplier');
+});
+
+test('swipe wraps the three audiences', () => {
+  assert.equal(nextPlanAudience('company', 1), 'owner');
+  assert.equal(nextPlanAudience('supplier', 1), 'company');
+  assert.equal(nextPlanAudience('company', -1), 'supplier');
+});
+
+test('shared entitlements appear on every audience and every tier', () => {
+  for (const audience of PLAN_AUDIENCES) {
+    for (const tile of TILES) {
+      const lines = planTileLines(audience, tile);
+      assert.ok(lines.includes(WEEKLY_UPDATES_LINE), `${audience} ${tile} weekly`);
+      assert.ok(lines.includes(SHARED_SERVICE_HISTORY_LINE), `${audience} ${tile} history`);
+      assert.equal(
+        lines.filter((l) => /unlimited/i.test(l)).length,
+        0,
+        `${audience} ${tile} must not say unlimited`
+      );
+    }
+    assert.ok(planTileLines(audience, 'free').includes(FREE_AI_LINE));
+    assert.ok(planTileLines(audience, 'premium').includes(PREMIUM_AI_LINE));
+    assert.ok(planTileLines(audience, 'premium').includes(PREMIUM_MANUALS_LINE));
+    assert.ok(planTileLines(audience, 'team').includes(TEAM_AI_LINE));
+    assert.ok(planTileLines(audience, 'team').includes(TEAM_MANUALS_LINE));
+  }
+});
+
+test('Parts Supplier Premium leads with photos and visibility', () => {
+  const premium = planTileLines('supplier', 'premium');
+  assert.match(premium[0], /photo/i);
+  assert.ok(premium.some((l) => /featured|placement|search/i.test(l)));
+  assert.ok(premium.some((l) => /storefront/i.test(l)));
+  assert.doesNotMatch(premium.join(' '), /%/);
+  assert.doesNotMatch(premium.join(' '), /\b\d{2,}\s+(sku|listings?)\b/i);
+});
+
+test('audience copy stays separate — do not merge roles', () => {
+  assert.notDeepEqual(PLAN_TILE_COPY.company.free, PLAN_TILE_COPY.owner.free);
+  assert.notDeepEqual(PLAN_TILE_COPY.company.free, PLAN_TILE_COPY.supplier.free);
+  assert.ok(PLAN_TILE_COPY.company.free.some((l) => /schedule service calls/i.test(l)));
+  assert.ok(PLAN_TILE_COPY.owner.free.some((l) => /rated repair/i.test(l)));
+  assert.ok(PLAN_TILE_COPY.supplier.free.some((l) => /text listing/i.test(l)));
 });

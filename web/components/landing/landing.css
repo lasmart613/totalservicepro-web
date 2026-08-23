@@ -261,6 +261,51 @@ html.landing-mode body {
   border: 0;
 }
 
+.lp-audience {
+  margin: 0 0 8px;
+  touch-action: pan-y;
+}
+
+.lp-audience-pills {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0 0 22px;
+  outline: none;
+  user-select: none;
+}
+
+.lp-audience-pills:focus-visible {
+  box-shadow: 0 0 0 2px #FBBF24;
+  border-radius: 999px;
+}
+
+.lp-audience-pill {
+  appearance: none;
+  font-family: inherit;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  font-size: 11px;
+  padding: 9px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+  background: #1A2233;
+  color: #F3E8D8;
+  border: 1px solid #4B5563;
+}
+
+.lp-audience-pill:hover {
+  border-color: #FBBF24;
+}
+
+.lp-audience-pill.is-on,
+.lp-audience-pill[aria-checked='true'] {
+  background: #FBBF24;
+  color: #111827;
+  border-color: #FBBF24;
+}
+
 .lp-kicker {
   font-size: 12px;
   font-weight: 700;
