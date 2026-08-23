@@ -2,14 +2,21 @@
 
 import { useEffect, useState } from 'react';
 import { getSupabaseClient } from './supabase/client';
-import { orgIsPaid } from './org-plan';
+import { upgradeTargetForOrg, type UpgradeTarget } from './org-plan';
+
+export type UpgradeEntry = {
+  show: boolean;
+  target: UpgradeTarget;
+};
 
 /**
- * True only after the signed-in org is known to be free (not paid).
- * Hidden while loading, signed out, or paid.
+ * Free → show Upgrade to /plans.
+ * Premium / is_premium (not Team/Enterprise) → show Upgrade that starts Team checkout.
+ * Team / Enterprise → hide.
+ * Hidden while loading or signed out.
  */
-export function useShowUpgrade(): boolean {
-  const [show, setShow] = useState(false);
+export function useUpgradeEntry(): UpgradeEntry {
+  const [entry, setEntry] = useState<UpgradeEntry>({ show: false, target: 'plans' });
   const supabase = getSupabaseClient();
 
   useEffect(() => {
@@ -21,7 +28,7 @@ export function useShowUpgrade(): boolean {
           data: { user },
         } = await supabase.auth.getUser();
         if (!user) {
-          if (!cancelled) setShow(false);
+          if (!cancelled) setEntry({ show: false, target: 'plans' });
           return;
         }
 
@@ -31,7 +38,7 @@ export function useShowUpgrade(): boolean {
           .eq('id', user.id)
           .maybeSingle();
         if (!profile?.organization_id) {
-          if (!cancelled) setShow(false);
+          if (!cancelled) setEntry({ show: false, target: 'plans' });
           return;
         }
 
@@ -55,9 +62,15 @@ export function useShowUpgrade(): boolean {
             .eq('id', orgId)
             .maybeSingle());
         }
-        if (!cancelled) setShow(!orgIsPaid(org));
+        const target = upgradeTargetForOrg(org);
+        if (!cancelled) {
+          setEntry({
+            show: target != null,
+            target: target || 'plans',
+          });
+        }
       } catch {
-        if (!cancelled) setShow(false);
+        if (!cancelled) setEntry({ show: false, target: 'plans' });
       }
     })();
 
@@ -66,5 +79,10 @@ export function useShowUpgrade(): boolean {
     };
   }, [supabase]);
 
-  return show;
+  return entry;
+}
+
+/** True only after the signed-in org is known to be free or mid-tier (Premium). */
+export function useShowUpgrade(): boolean {
+  return useUpgradeEntry().show;
 }

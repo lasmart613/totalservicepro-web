@@ -6,7 +6,7 @@ import { useRouter, usePathname } from 'next/navigation';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { isAdmin } from '@/lib/roles';
-import { useShowUpgrade } from '@/lib/use-show-upgrade';
+import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink, UPGRADE_LABEL } from '@/components/UpgradePlanLink';
 
 /**
@@ -21,7 +21,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [allowed, setAllowed] = useState(false);
   const [orgName, setOrgName] = useState('Your company');
   const [deniedReason, setDeniedReason] = useState<'login' | 'role' | null>(null);
-  const showUpgrade = useShowUpgrade();
+  const upgrade = useUpgradeEntry();
 
   useEffect(() => {
     let cancelled = false;
@@ -168,7 +168,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </Link>
               );
             })}
-            {showUpgrade && (
+            {upgrade.show && (
               <UpgradePlanLink
                 className={
                   'block px-4 py-2.5 rounded-lg hover:bg-[var(--surface3)] ' +
@@ -176,6 +176,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     ? 'bg-[var(--surface3)] text-[var(--gold)] font-semibold'
                     : '')
                 }
+                target={upgrade.target}
               >
                 {UPGRADE_LABEL}
               </UpgradePlanLink>
@@ -199,8 +200,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 {item.label}
               </Link>
             ))}
-            {showUpgrade && (
-              <UpgradePlanLink className="btn btn-secondary text-xs whitespace-nowrap">
+            {upgrade.show && (
+              <UpgradePlanLink
+                className="btn btn-secondary text-xs whitespace-nowrap"
+                target={upgrade.target}
+              >
                 {UPGRADE_LABEL}
               </UpgradePlanLink>
             )}

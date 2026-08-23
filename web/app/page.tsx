@@ -14,7 +14,7 @@ import {
 } from '@/lib/roles';
 import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
-import { useShowUpgrade } from '@/lib/use-show-upgrade';
+import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import {
   isClosedTicketStatus,
@@ -56,7 +56,7 @@ export default function HomePage() {
   const [upcoming, setUpcoming] = useState<any[]>([]);
 
   const supabase = getSupabaseClient();
-  const showUpgrade = useShowUpgrade();
+  const upgrade = useUpgradeEntry();
 
   useEffect(() => {
     const loadData = async () => {
@@ -429,8 +429,11 @@ export default function HomePage() {
               {displayOrgType ? <span> · Org: {orgTypeLabel(displayOrgType)}</span> : null}
             </p>
           </div>
-          {showUpgrade && (
-            <UpgradePlanLink className="btn btn-secondary text-sm px-4 py-1.5 shrink-0">
+          {upgrade.show && (
+            <UpgradePlanLink
+              className="btn btn-secondary text-sm px-4 py-1.5 shrink-0"
+              target={upgrade.target}
+            >
               Upgrade plan
             </UpgradePlanLink>
           )}

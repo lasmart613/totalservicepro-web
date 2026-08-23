@@ -1,9 +1,17 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { evaluateUpgradeSession, normalizeOrgId, orgUpgradeFields } from '@/lib/billing/upgrade-session';
 import {
+  buildUpgradeReceipt,
+  evaluateUpgradeSession,
+  normalizeOrgId,
+  orgUpgradeFields,
+} from '@/lib/billing/upgrade-session';
+import { getPlanOffer } from '@/lib/billing/plan-catalog';
+import {
+  cancelStripeSubscription,
   retrieveCheckoutSession,
+  retrieveStripeInvoice,
   stripeCustomerIdFromSession,
   stripeSubscriptionIdFromSession,
   StripeSubscriptionError,
@@ -104,6 +112,13 @@ export async function POST(req: NextRequest) {
     }
 
     const session = await retrieveCheckoutSession(sessionId);
+    if (typeof session.invoice === 'string' && String(session.invoice).startsWith('in_')) {
+      try {
+        session.invoice = await retrieveStripeInvoice(String(session.invoice));
+      } catch (invoiceErr) {
+        console.warn('[billing/upgrade/confirm] invoice expand skipped', invoiceErr);
+      }
+    }
     const verdict = evaluateUpgradeSession(session, {
       userId: user.id,
       organizationId: orgId,
@@ -115,7 +130,20 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const { data: priorSub } = await writer
+      .from('subscriptions')
+      .select('stripe_subscription_id')
+      .eq('user_id', user.id)
+      .maybeSingle();
+    const priorSubscriptionId =
+      priorSub?.stripe_subscription_id != null ? String(priorSub.stripe_subscription_id) : null;
+
     const org = await writeOrgUpgrade(writer, orgId, verdict.plan);
+    const { data: orgRow } = await writer
+      .from('organizations')
+      .select('name')
+      .eq('id', orgId)
+      .maybeSingle();
     const customerId = stripeCustomerIdFromSession(session);
     const subscriptionId = stripeSubscriptionIdFromSession(session);
 
@@ -166,12 +194,38 @@ export async function POST(req: NextRequest) {
       console.warn('[billing/upgrade/confirm] org upgraded; ledger write skipped', recordErr);
     }
 
+    if (
+      verdict.plan === 'team' &&
+      priorSubscriptionId &&
+      subscriptionId &&
+      priorSubscriptionId !== subscriptionId
+    ) {
+      try {
+        await cancelStripeSubscription(priorSubscriptionId);
+      } catch (cancelErr) {
+        console.warn('[billing/upgrade/confirm] prior subscription cancel skipped', cancelErr);
+      }
+    }
+
+    const offer = getPlanOffer(verdict.sku);
+    const fallbackAmountLabel = offer
+      ? `${offer.displayAmount} ${offer.displayPeriod}`.replace(/\s+/g, ' ').trim()
+      : null;
+    const receipt = buildUpgradeReceipt({
+      plan: verdict.plan,
+      sku: verdict.sku,
+      session,
+      fallbackAmountLabel,
+    });
+
     return NextResponse.json({
       ok: true,
       organizationId: orgId,
+      organizationName: orgRow?.name ? String(orgRow.name) : null,
       plan: verdict.plan,
       sku: verdict.sku,
       org,
+      ...receipt,
     });
   } catch (e: unknown) {
     const status = e instanceof StripeSubscriptionError ? e.status : 500;

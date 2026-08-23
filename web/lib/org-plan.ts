@@ -1,17 +1,37 @@
 /** Exact paid plan names. "pro" is the product name, not a paid enum. */
 export const PAID_SUBSCRIPTION_TIERS = ['premium', 'team', 'enterprise'] as const;
+/** Mid tier can still Upgrade to Team. */
+export const MID_PAID_TIERS = ['premium'] as const;
+/** Top paid tiers hide Upgrade. */
+export const TOP_PAID_TIERS = ['team', 'enterprise'] as const;
 
 export type OrgPlanFields = {
   is_premium?: boolean | null;
   subscription_tier?: string | null;
   plan?: string | null;
+  manual_slots?: number | null;
 };
 
-function isExactPaidName(value: unknown): boolean {
-  const name = String(value || '')
+/** Free default already in /manuals. Premium is 15. Team/Enterprise is unlimited. */
+export const FREE_MANUAL_SLOTS = 5;
+export const PREMIUM_MANUAL_SLOTS = 15;
+export const UNLIMITED_MANUAL_SLOTS = 999;
+
+/** Free → /plans. Mid (Premium) → Team checkout. Top → hide Upgrade. */
+export type UpgradeTarget = 'plans' | 'team';
+
+function exactName(value: unknown): string {
+  return String(value || '')
     .toLowerCase()
     .trim();
-  return (PAID_SUBSCRIPTION_TIERS as readonly string[]).includes(name);
+}
+
+function isExactName(value: unknown, allowed: readonly string[]): boolean {
+  return allowed.includes(exactName(value));
+}
+
+function isExactPaidName(value: unknown): boolean {
+  return isExactName(value, PAID_SUBSCRIPTION_TIERS);
 }
 
 /**
@@ -22,6 +42,58 @@ export function orgIsPaid(org: OrgPlanFields | null | undefined): boolean {
   if (!org) return false;
   if (org.is_premium === true) return true;
   return isExactPaidName(org.subscription_tier) || isExactPaidName(org.plan);
+}
+
+/** Team or Enterprise by exact plan/tier name only. "pro" is not top-tier. */
+export function orgIsTopPaid(org: OrgPlanFields | null | undefined): boolean {
+  if (!org) return false;
+  return isExactName(org.subscription_tier, TOP_PAID_TIERS) || isExactName(org.plan, TOP_PAID_TIERS);
+}
+
+/**
+ * Where signed-in Upgrade should go. Null = hide (Team / Enterprise).
+ * Free → /plans. Paid-but-not-top (Premium or is_premium) → Team checkout.
+ */
+export function upgradeTargetForOrg(org: OrgPlanFields | null | undefined): UpgradeTarget | null {
+  if (orgIsTopPaid(org)) return null;
+  if (orgIsPaid(org)) return 'team';
+  return 'plans';
+}
+
+export function orgCanUpgrade(org: OrgPlanFields | null | undefined): boolean {
+  return upgradeTargetForOrg(org) != null;
+}
+
+/** Free may start Premium or Team. Mid-tier may start Team only. Top cannot. */
+export function isUnlimitedManualSlots(limit: number): boolean {
+  return Number.isFinite(limit) && limit >= UNLIMITED_MANUAL_SLOTS;
+}
+
+/**
+ * Library slots from paid detection. Premium is 15 even if a stale
+ * manual_slots row says 999. "pro" is not paid and stays on the free default.
+ */
+export function manualSlotLimit(org: OrgPlanFields | null | undefined): number {
+  if (orgIsTopPaid(org)) return UNLIMITED_MANUAL_SLOTS;
+  if (orgIsPaid(org)) return PREMIUM_MANUAL_SLOTS;
+  const stored = org?.manual_slots;
+  if (stored != null) {
+    const n = parseInt(String(stored), 10);
+    if (Number.isFinite(n) && n > 0) return n;
+  }
+  return FREE_MANUAL_SLOTS;
+}
+
+export function orgMayStartPaidPlan(
+  org: OrgPlanFields | null | undefined,
+  plan: string
+): boolean {
+  const name = exactName(plan);
+  if (name !== 'premium' && name !== 'team') return false;
+  const target = upgradeTargetForOrg(org);
+  if (target === null) return false;
+  if (target === 'team') return name === 'team';
+  return true;
 }
 
 /**

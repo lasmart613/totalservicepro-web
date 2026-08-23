@@ -3,8 +3,11 @@ import test from 'node:test';
 import { PLAN_OFFERS } from './plan-catalog.ts';
 import {
   buildUpgradeCheckoutFields,
+  buildUpgradeReceipt,
   evaluateUpgradeSession,
+  firstHttpsUrl,
   orgUpgradeFields,
+  planDisplayName,
 } from './upgrade-session.ts';
 
 const owner = { userId: 'user-1', organizationId: '42' };
@@ -14,7 +17,7 @@ function fields() {
     offer: PLAN_OFFERS.premium_monthly,
     priceId: 'price_existing',
     owner,
-    successUrl: 'https://repairplanet.net/plans?upgraded=1&session_id={CHECKOUT_SESSION_ID}',
+    successUrl: 'https://repairplanet.net/checkout/receipt?session_id={CHECKOUT_SESSION_ID}',
     cancelUrl: 'https://repairplanet.net/plans?paid=0',
     customerEmail: 'tech@example.com',
   });
@@ -97,5 +100,38 @@ test('org upgrade writes paid flags for the selected plan', () => {
     is_premium: true,
     subscription_tier: 'premium',
     plan: 'premium',
+    manual_slots: 15,
   });
+  assert.deepEqual(orgUpgradeFields('team').manual_slots, 999);
+});
+
+test('receipt uses Stripe amount and URL and does not invent a receipt number', () => {
+  const receipt = buildUpgradeReceipt({
+    plan: 'premium',
+    sku: 'premium_monthly',
+    session: {
+      amount_total: 999,
+      currency: 'usd',
+      invoice: { hosted_invoice_url: 'https://invoice.stripe.com/i/acct_real', number: 'INV-99' },
+    },
+  });
+  assert.equal(receipt.planLabel, 'Premium');
+  assert.equal(receipt.amountLabel, '$9.99');
+  assert.equal(receipt.stripeReceiptUrl, 'https://invoice.stripe.com/i/acct_real');
+  assert.equal(receipt.existingOrganizationUpgraded, true);
+  assert.equal('receiptNumber' in receipt, false);
+  assert.equal(planDisplayName('team'), 'Team');
+  assert.equal(firstHttpsUrl('not-a-url', 'https://pay.stripe.com/receipts/in_1'), 'https://pay.stripe.com/receipts/in_1');
+});
+
+test('receipt omits a Stripe link when the session has no invoice or receipt URL', () => {
+  const receipt = buildUpgradeReceipt({
+    plan: 'team',
+    sku: 'team_monthly',
+    session: { amount_total: 3999, currency: 'usd', invoice: 'in_123' },
+    fallbackAmountLabel: '$39.99 / month',
+  });
+  assert.equal(receipt.planLabel, 'Team');
+  assert.equal(receipt.amountLabel, '$39.99');
+  assert.equal(receipt.stripeReceiptUrl, null);
 });

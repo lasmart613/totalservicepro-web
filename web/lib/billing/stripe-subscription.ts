@@ -66,7 +66,7 @@ function formBody(fields: Record<string, string | number | boolean | null | unde
 
 async function stripeRequest(
   path: string,
-  method: 'GET' | 'POST',
+  method: 'GET' | 'POST' | 'DELETE',
   fields?: Record<string, string | number | boolean | null | undefined>,
   idempotencyKey?: string
 ): Promise<StripeObject> {
@@ -189,7 +189,7 @@ export async function createOrgUpgradeCheckoutSession(input: {
     offer,
     priceId,
     owner: input.owner,
-    successUrl: `${site}/plans?upgraded=1&session_id={CHECKOUT_SESSION_ID}`,
+    successUrl: `${site}/checkout/receipt?session_id={CHECKOUT_SESSION_ID}`,
     cancelUrl: `${site}/plans?paid=0`,
     customerId: input.customerId,
     customerEmail: input.customerEmail,
@@ -219,7 +219,25 @@ export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe
   if (!id || !/^cs_(test|live)_/.test(id)) {
     throw new StripeSubscriptionError('Invalid Checkout session id', 400);
   }
-  return stripeRequest(`checkout/sessions/${encodeURIComponent(id)}`, 'GET');
+  return stripeRequest(
+    `checkout/sessions/${encodeURIComponent(id)}?expand[]=invoice`,
+    'GET'
+  );
+}
+
+export async function retrieveStripeInvoice(invoiceId: string): Promise<StripeObject> {
+  const id = String(invoiceId || '').trim();
+  if (!id || !/^in_/.test(id)) {
+    throw new StripeSubscriptionError('Invalid invoice id', 400);
+  }
+  return stripeRequest(`invoices/${encodeURIComponent(id)}`, 'GET');
+}
+
+/** Cancel a replaced Premium subscription after Team checkout so the org is not double-billed. */
+export async function cancelStripeSubscription(subscriptionId: string): Promise<void> {
+  const id = String(subscriptionId || '').trim();
+  if (!id || !/^sub_/.test(id)) return;
+  await stripeRequest(`subscriptions/${encodeURIComponent(id)}`, 'DELETE');
 }
 
 export function stripeCustomerIdFromSession(session: StripeObject): string | null {
