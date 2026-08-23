@@ -180,6 +180,30 @@ test('Android WebView switcher uses the same memberships RPCs as the website', (
   assert.match(js, /Working as/);
 });
 
+test('Android WebView switcher shows pending invites and Join (keep home) / Join & leave', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const js = readFileSync(join(here, '../../app/src/main/assets/org-switcher.js'), 'utf8');
+  const indexHtml = readFileSync(join(here, '../../app/src/main/assets/index.html'), 'utf8');
+  const settingsHtml = readFileSync(join(here, '../../app/src/main/assets/settings.html'), 'utf8');
+
+  assert.match(indexHtml, /org-switcher\.js/);
+  assert.match(settingsHtml, /org-switcher\.js/);
+
+  assert.match(js, /engineer_invitations/);
+  assert.match(js, /accepted',\s*false|eq\('accepted',\s*false\)/);
+  assert.match(js, /\/api\/team\/claim/);
+  assert.match(js, /\/api\/org\/memberships/);
+  assert.match(js, /accept_team_invite/);
+  assert.match(js, /p_invite_id/);
+  assert.match(js, /p_leave_organization_id/);
+  assert.match(js, /leaveOrganizationId/);
+  assert.match(js, /Join \(keep home\)/);
+  assert.match(js, /Join & leave /);
+  assert.match(js, /Pending invites/);
+  assert.match(js, /!m\.isHome/);
+  assert.match(js, /Founder\/home shop cannot be stripped/);
+});
+
 test('schema keeps organization_id as the active RLS pointer', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const sql = readFileSync(
