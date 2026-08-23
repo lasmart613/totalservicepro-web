@@ -68,11 +68,11 @@ const AUDIENCES: {
   },
   {
     id: 'clinic',
-    label: 'Clinics',
+    label: 'Laser Owner',
     signup: '/signup/owner',
     lines: [
       'Find a Repair Company',
-      'Receive multiple bids on service requests',
+      'Shop around for the best price and the right shop.',
       'View service history and track maintenance costs',
     ],
     shot: {
@@ -92,7 +92,7 @@ const AUDIENCES: {
     ],
     shot: {
       src: '/landing/parts.webp',
-      alt: 'Parts marketplace with live Candela listings and prices',
+      alt: 'Parts marketplace listings with guest prices redacted',
       caption: 'Parts for sale',
     },
   },
@@ -101,6 +101,7 @@ const AUDIENCES: {
 const HERO_SLIDES: {
   audience: string;
   title: string;
+  subhead?: string;
   shot: { src: string; alt: string; caption: string };
 }[] = [
   {
@@ -122,7 +123,7 @@ const HERO_SLIDES: {
     },
   },
   {
-    audience: 'Clinics',
+    audience: 'Laser Owner',
     title: 'Find a Repair Company',
     shot: {
       src: '/landing/marketplace.webp',
@@ -131,8 +132,9 @@ const HERO_SLIDES: {
     },
   },
   {
-    audience: 'Clinics',
-    title: 'Receive multiple bids on service requests',
+    audience: 'Laser Owner',
+    title: 'Laser Owner',
+    subhead: 'Shop around for the best price and the right shop.',
     shot: {
       src: '/landing/reports.webp',
       alt: 'Service reports list with drafts and completed work',
@@ -140,7 +142,7 @@ const HERO_SLIDES: {
     },
   },
   {
-    audience: 'Clinics',
+    audience: 'Laser Owner',
     title: 'View service history and track maintenance costs',
     shot: {
       src: '/landing/reports.webp',
@@ -153,13 +155,14 @@ const HERO_SLIDES: {
     title: 'Connect with Repair Companies and laser owners',
     shot: {
       src: '/landing/parts.webp',
-      alt: 'Parts marketplace with live listings and prices',
+      alt: 'Parts marketplace listings with guest prices redacted',
       caption: 'Parts for sale',
     },
   },
 ];
 
-const HERO_AUTO_MS = 7000;
+/** 5–7s; restart after swipe so a manual move is not immediately overwritten. */
+export const HERO_AUTO_MS = 6000;
 
 function HeroCarousel() {
   const n = HERO_SLIDES.length;
@@ -167,19 +170,27 @@ function HeroCarousel() {
   const [paused, setPaused] = useState(false);
   const [hold, setHold] = useState(false);
   const start = React.useRef<{ x: number; y: number } | null>(null);
+  const pausedRef = React.useRef(false);
+  const holdRef = React.useRef(false);
 
   const go = (dir: number) => setI((x) => (x + dir + n) % n);
   const goTo = (idx: number) => setI(((idx % n) + n) % n);
 
   useEffect(() => {
-    if (paused || hold) return;
+    pausedRef.current = paused;
+  }, [paused]);
+  useEffect(() => {
+    holdRef.current = hold;
+  }, [hold]);
+
+  useEffect(() => {
     if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
     const id = window.setInterval(() => {
-      if (document.hidden) return;
+      if (document.hidden || pausedRef.current || holdRef.current) return;
       setI((x) => (x + 1) % n);
     }, HERO_AUTO_MS);
     return () => window.clearInterval(id);
-  }, [paused, hold, i, n]);
+  }, [i, n]);
 
   const onPointerDown = (e: React.PointerEvent) => {
     if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -194,6 +205,12 @@ function HeroCarousel() {
     if (Math.abs(dx) > 48 && Math.abs(dx) > Math.abs(dy)) {
       go(dx < 0 ? 1 : -1);
     }
+  };
+
+  const onPointerMove = () => {
+    // Arm pause only after the pointer actually moves. A page-load
+    // mouseenter (cursor already over the hero) used to freeze autoplay.
+    if (!holdRef.current) setHold(true);
   };
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -213,8 +230,8 @@ function HeroCarousel() {
       className="lp-hero-carousel"
       aria-roledescription="carousel"
       aria-label="Who Total Service Pro is for"
-      onMouseEnter={() => setHold(true)}
-      onMouseLeave={() => setHold(false)}
+      onPointerMove={onPointerMove}
+      onPointerLeave={() => setHold(false)}
       onFocusCapture={() => setHold(true)}
       onBlurCapture={(e) => {
         if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
@@ -242,17 +259,18 @@ function HeroCarousel() {
               className="lp-hero-slide"
               role="group"
               aria-roledescription="slide"
-              aria-label={`${idx + 1} of ${n}: ${s.audience}. ${s.title}`}
+              aria-label={`${idx + 1} of ${n}: ${s.audience}. ${s.title}${s.subhead ? `. ${s.subhead}` : ''}`}
               aria-hidden={idx !== i}
               inert={idx !== i ? true : undefined}
             >
               <div className="lp-hero-copy">
-                <p className="lp-kicker">{s.audience}</p>
+                {s.audience !== s.title ? <p className="lp-kicker">{s.audience}</p> : null}
                 {idx === i ? (
                   <h1 className="lp-title">{s.title}</h1>
                 ) : (
                   <p className="lp-title">{s.title}</p>
                 )}
+                {s.subhead ? <p className="lp-subhead">{s.subhead}</p> : null}
               </div>
               <Shot src={s.shot.src} alt={s.shot.alt} caption={s.shot.caption} />
             </div>
@@ -261,7 +279,8 @@ function HeroCarousel() {
       </div>
 
       <p className="lp-sr" aria-live="polite">
-        {slide.audience}. {slide.title}.
+        {slide.audience}. {slide.title}
+        {slide.subhead ? `. ${slide.subhead}` : ''}.
       </p>
 
       <div className="lp-hero-bar">
@@ -328,7 +347,7 @@ export function LandingPage() {
       <section className="lp-gallery" aria-label="Product screens">
         <Shot
           src="/landing/parts.webp"
-          alt="Parts marketplace with live Candela listings and prices"
+          alt="Parts marketplace listings with guest prices redacted"
           caption="Parts for sale"
         />
         <Shot
