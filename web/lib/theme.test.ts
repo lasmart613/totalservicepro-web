@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { LIGHT_CLASS, THEME_INIT_SCRIPT, THEME_KEY, resolveEffectiveTheme } from './theme.js';
+import { LIGHT_CLASS, THEME_INIT_SCRIPT, THEME_KEY, resolveEffectiveTheme } from './theme.ts';
 
 test('explicit light/dark wins over system preference', () => {
   assert.equal(resolveEffectiveTheme('light', false), 'light');
