@@ -5,10 +5,24 @@
  * - Explicit `light` / `dark` wins and is written on toggle.
  * - No saved choice: honor prefers-color-scheme; otherwise Dark.
  * - Never persist the system preference as a user choice.
+ * - Logged-out public pages always render Dark. Saved Light is only
+ *   applied when a signed-in session hint (`tsp-auth-token`) is present.
  */
 
 export const THEME_KEY = 'tsp_theme';
 export const LIGHT_CLASS = 'light';
+/** Same storage key as `AUTH_STORAGE_KEY` in auth-session (inlined to keep this module test-safe). */
+export const AUTH_HINT_KEY = 'tsp-auth-token';
+
+function hasAuthHint(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = window.localStorage.getItem(AUTH_HINT_KEY);
+    return !!raw && raw !== 'null' && raw !== '{}' && raw !== 'undefined';
+  } catch {
+    return false;
+  }
+}
 
 export type ThemeChoice = 'light' | 'dark';
 
@@ -18,6 +32,16 @@ export function resolveEffectiveTheme(
 ): ThemeChoice {
   if (saved === 'light' || saved === 'dark') return saved;
   return prefersLight ? 'light' : 'dark';
+}
+
+/** Light Mode is a signed-in preference only. Guests always get Dark. */
+export function resolveThemeForViewer(
+  signedIn: boolean,
+  saved: string | null | undefined,
+  prefersLight: boolean,
+): ThemeChoice {
+  if (!signedIn) return 'dark';
+  return resolveEffectiveTheme(saved, prefersLight);
 }
 
 export function applyEffectiveTheme(
@@ -66,7 +90,7 @@ function prefersLightScheme(): boolean {
 }
 
 export function applyStoredTheme(): ThemeChoice {
-  const theme = resolveEffectiveTheme(readSavedTheme(), prefersLightScheme());
+  const theme = resolveThemeForViewer(hasAuthHint(), readSavedTheme(), prefersLightScheme());
   applyEffectiveTheme(theme);
   return theme;
 }
@@ -84,7 +108,7 @@ export function subscribeThemeSync(onApply?: (theme: ThemeChoice) => void): () =
   const apply = () => onApply?.(applyStoredTheme());
 
   const onStorage = (event: StorageEvent) => {
-    if (event.key === THEME_KEY || event.key === null) apply();
+    if (event.key === THEME_KEY || event.key === AUTH_HINT_KEY || event.key === null) apply();
   };
 
   const media =
@@ -107,4 +131,4 @@ export function subscribeThemeSync(onApply?: (theme: ThemeChoice) => void): () =
 }
 
 /** Runs before first paint. Reads storage only — does not write a preference. */
-export const THEME_INIT_SCRIPT = `!function(){try{var k=${JSON.stringify(THEME_KEY)},c=${JSON.stringify(LIGHT_CLASS)},s=null;try{s=localStorage.getItem(k)}catch(e){}if(s!=="light"&&s!=="dark"){var m=document.cookie.match(/(?:^|; )tsp_theme=(light|dark)(?:;|$)/);if(m)s=m[1]}var t=(s==="light"||s==="dark")?s:(window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark"),r=document.documentElement;r.classList.toggle(c,t==="light");r.dataset.theme=t}catch(e){}}();`;
+export const THEME_INIT_SCRIPT = `!function(){try{var k=${JSON.stringify(THEME_KEY)},c=${JSON.stringify(LIGHT_CLASS)},a=${JSON.stringify(AUTH_HINT_KEY)},signed=false;try{var tok=localStorage.getItem(a);signed=!!tok&&tok!=="null"&&tok!=="{}"&&tok!=="undefined"}catch(e){}var t="dark";if(signed){var s=null;try{s=localStorage.getItem(k)}catch(e){}if(s!=="light"&&s!=="dark"){var m=document.cookie.match(/(?:^|; )tsp_theme=(light|dark)(?:;|$)/);if(m)s=m[1]}t=(s==="light"||s==="dark")?s:(window.matchMedia&&window.matchMedia("(prefers-color-scheme: light)").matches?"light":"dark")}var r=document.documentElement;r.classList.toggle(c,t==="light");r.dataset.theme=t}catch(e){}}();`;

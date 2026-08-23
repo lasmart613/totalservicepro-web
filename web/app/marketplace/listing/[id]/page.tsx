@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { ShareButton } from '@/components/ShareButton';
 import { listingShareText } from '@/lib/share';
 import { isPartListing, partsDetailPath } from '@/lib/marketplace/parts';
+import { useGuestSignupRedirect } from '@/lib/use-signed-in';
 
 export default function ListingDetail() {
   const params = useParams();
@@ -22,11 +23,12 @@ export default function ListingDetail() {
   const [bidNotes, setBidNotes] = useState('');
   const [bidQuestion, setBidQuestion] = useState('');
   const [userId, setUserId] = useState<string | null>(null);
+  const { ready: authReady, signedIn } = useGuestSignupRedirect();
   const supabase = getSupabaseClient();
 
   useEffect(() => {
-    if (id) fetchListing();
-  }, [id]);
+    if (id && authReady && signedIn) fetchListing();
+  }, [id, authReady, signedIn]);
 
   const fetchListing = async () => {
     setLoading(true);
@@ -104,7 +106,7 @@ export default function ListingDetail() {
     }
   };
 
-  if (loading) {
+  if (!authReady || !signedIn || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div>Loading...</div>
