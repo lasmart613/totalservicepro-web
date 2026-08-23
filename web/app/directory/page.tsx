@@ -27,7 +27,6 @@ import {
   GUEST_NAME_PLACEHOLDER,
   GUEST_PHONE_PLACEHOLDER,
   GUEST_SIGNUP_HREF,
-  redactDirectoryOrg,
   type DirectoryFilterKey,
   type GuestDirectoryCard,
 } from '@/lib/directory/guest';
@@ -211,7 +210,7 @@ export default function DirectoryPage() {
         });
         const res = await fetch(`/api/directory?${params.toString()}`, { cache: 'no-store' });
         const json = await res.json().catch(() => ({}));
-        if (res.ok && Array.isArray(json?.listings) && json.listings.length > 0) {
+        if (res.ok && Array.isArray(json?.listings)) {
           applyGuestPayload(json, append);
           setGuestPage(page);
           setNote(
@@ -221,41 +220,9 @@ export default function DirectoryPage() {
         }
 
         if (append) return;
-
-        // Client fallback: still redact before state so PII never lands in the DOM.
-        const from = 0;
-        const to = GUEST_DIRECTORY_PAGE_SIZE - 1;
-        let query = supabase
-          .from('organizations')
-          .select('id, type, state, phone, email, website, is_active')
-          .order('id')
-          .range(from, to);
-        const typeFilter = {
-          service: ['service_company', 'service'],
-          clinics: ['customer', 'laser_clinic'],
-          reseller: ['laser_reseller'],
-          rental: ['laser_rental'],
-          supplier: ['parts_supplier', 'vendor'],
-        } as const;
-        if (filter !== 'all') query = query.in('type', typeFilter[filter]);
-        const { data, error } = await query;
-        if (error) {
-          console.warn('directory guest fallback', error);
-          setGuestCards([]);
-          setGuestHasMore(false);
-          setNote('Sign up to browse the company directory.');
-          return;
-        }
-        const rows = (data || [])
-          .filter((o: OrgRow) => o.is_active !== false)
-          .map((o) => redactDirectoryOrg(o));
-        setGuestCards(rows);
-        setGuestPage(1);
-        setGuestHasMore(rows.length >= GUEST_DIRECTORY_PAGE_SIZE);
-        setGuestTotal(null);
-        setNote(
-          'Names, addresses, and contact details are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.'
-        );
+        setGuestCards([]);
+        setGuestHasMore(false);
+        setNote('Sign up to browse the company directory.');
       } catch (e) {
         console.warn(e);
         if (!append) {
@@ -267,7 +234,7 @@ export default function DirectoryPage() {
         setGuestLoadingMore(false);
       }
     },
-    [applyGuestPayload, filter, supabase]
+    [applyGuestPayload, filter]
   );
 
   useEffect(() => {
