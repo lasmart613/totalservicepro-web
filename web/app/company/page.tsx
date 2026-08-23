@@ -10,6 +10,7 @@ import {
   isAdmin,
   isOwnerish,
   isSupplier,
+  isManufacturer,
   isServiceCompany,
   canAccessCompanyProfile,
 } from '@/lib/roles';
@@ -58,7 +59,7 @@ async function ensureServiceCreatorLinked(supabase: any, orgId: any, orgType?: s
       .maybeSingle();
 
     // Never elevate owner / customer / supplier to company_admin
-    if (isOwnerish(prof?.role, orgType) || isSupplier(prof?.role, orgType)) {
+    if (isOwnerish(prof?.role, orgType) || isSupplier(prof?.role, orgType) || isManufacturer(prof?.role, orgType)) {
       const needsLink = !prof?.organization_id || prof.organization_id !== orgId;
       if (needsLink) {
         await supabase.from('user_profiles').update({ organization_id: orgId }).eq('id', user.id);
@@ -398,9 +399,11 @@ function CompanyProfile() {
           ? 'customer'
           : supplierMode
             ? 'parts_supplier'
-            : 'service_company';
+            : manufacturerMode
+              ? 'manufacturer'
+              : 'service_company';
         const orgInsert: any = {
-          name: currentOrg.name || (ownerMode ? 'My Facility' : supplierMode ? 'My Supplier Co' : 'My Company'),
+          name: currentOrg.name || (ownerMode ? 'My Facility' : supplierMode ? 'My Supplier Co' : manufacturerMode ? 'My Manufacturer' : 'My Company'),
           type: inferredType,
           address: currentOrg.address ?? null,
           city: currentOrg.city ?? null,
@@ -715,6 +718,7 @@ function CompanyProfile() {
 
   const ownerMode = isOwnerish(userRole, org?.type);
   const supplierMode = isSupplier(userRole, org?.type);
+  const manufacturerMode = isManufacturer(userRole, org?.type);
   const serviceAdminMode =
     isServiceCompany(userRole, org?.type) &&
     (isAdmin(userRole) || userRole === 'service_manager');
@@ -722,12 +726,16 @@ function CompanyProfile() {
     ? ownerProfileLabel(org?.type, org?.facility_type)
     : supplierMode
       ? 'Supplier Profile'
-      : 'Company Management';
+      : manufacturerMode
+        ? 'Manufacturer Profile'
+        : 'Company Management';
   const detailsTitle = ownerMode
     ? ownerDetailsLabel(org?.type, org?.facility_type)
     : supplierMode
       ? 'Supplier Details'
-      : 'Company Details';
+      : manufacturerMode
+        ? 'Manufacturer Details'
+        : 'Company Details';
 
   if (accessDenied) {
     return (
@@ -915,7 +923,9 @@ function CompanyProfile() {
                 ? `Save ${ownerDetailsLabel(org?.type, org?.facility_type)}`
                 : supplierMode
                   ? 'Save Supplier Details'
-                  : 'Save Company Details'}
+                  : manufacturerMode
+                    ? 'Save Manufacturer Details'
+                    : 'Save Company Details'}
           </button>
         </div>
 
@@ -1166,11 +1176,13 @@ function CompanyProfile() {
           </div>
         )}
 
-        {(ownerMode || supplierMode) && (
+        {(ownerMode || supplierMode || manufacturerMode) && (
           <p className="text-sm text-[var(--text3)]">
             {ownerMode
               ? 'You can only edit this facility. Add lasers on My Lasers. Post service needs on the Marketplace.'
-              : 'Manage catalog items from Parts and list inventory on the Marketplace.'}
+              : manufacturerMode
+                ? 'Manufacturer organization. Factory and authorized service come later. This is not a repair-company profile.'
+                : 'Manage catalog items from Parts and list inventory on the Marketplace.'}
           </p>
         )}
       </div>

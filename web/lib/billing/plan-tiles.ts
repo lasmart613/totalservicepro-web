@@ -5,7 +5,7 @@
  * only changes benefit copy — not prices, SKUs, or plan names.
  */
 
-export const PLAN_AUDIENCES = ['company', 'owner', 'supplier'] as const;
+export const PLAN_AUDIENCES = ['company', 'owner', 'supplier', 'manufacturer'] as const;
 export type PlanAudience = (typeof PLAN_AUDIENCES)[number];
 export type PlanTileId = 'free' | 'premium' | 'team';
 
@@ -17,6 +17,7 @@ export const PLAN_AUDIENCE_OPTIONS: {
   { id: 'company', label: 'Service Company', query: 'company' },
   { id: 'owner', label: 'Laser Owner', query: 'owner' },
   { id: 'supplier', label: 'Parts Supplier', query: 'supplier' },
+  { id: 'manufacturer', label: 'Manufacturer', query: 'manufacturer' },
 ];
 
 export const DEFAULT_PLAN_AUDIENCE: PlanAudience = 'company';
@@ -51,6 +52,13 @@ const COMPANY_ALIASES = new Set([
   'service-company',
   'service_company',
 ]);
+const MANUFACTURER_ALIASES = new Set([
+  'manufacturer',
+  'oem',
+  'factory',
+  'laser-oem',
+  'laser_oem',
+]);
 
 export function parsePlanAudience(value: unknown): PlanAudience {
   const raw = String(value || '')
@@ -58,6 +66,7 @@ export function parsePlanAudience(value: unknown): PlanAudience {
     .trim();
   if (OWNER_ALIASES.has(raw)) return 'owner';
   if (SUPPLIER_ALIASES.has(raw)) return 'supplier';
+  if (MANUFACTURER_ALIASES.has(raw)) return 'manufacturer';
   if (COMPANY_ALIASES.has(raw) || raw === '') return 'company';
   return DEFAULT_PLAN_AUDIENCE;
 }
@@ -168,10 +177,36 @@ const SUPPLIER_TILES: Record<PlanTileId, readonly string[]> = {
   ],
 };
 
+// Manufacturer tiles stay conservative: no service-company AI or
+// service-manual perks, and no query-count lines (same restraint as
+// owner / supplier for those two — do not advertise shop AI or manuals).
+const MANUFACTURER_TILES: Record<PlanTileId, readonly string[]> = {
+  free: [
+    'Register the OEM / factory on Total Service Pro at no charge',
+    'Directory listing so shops and clinics can find the brand',
+    SHARED_SERVICE_HISTORY_LINE,
+    'Ads may appear on the Free Plan',
+    WEEKLY_UPDATES_LINE,
+  ],
+  premium: [
+    'Paid plan for OEMs that need more of the app',
+    SHARED_SERVICE_HISTORY_LINE,
+    'No advertisements',
+    WEEKLY_UPDATES_LINE,
+  ],
+  team: [
+    'Everything in Premium',
+    'Up to 10 user seats for factory / authorized-service staff',
+    SHARED_SERVICE_HISTORY_LINE,
+    WEEKLY_UPDATES_LINE,
+  ],
+};
+
 export const PLAN_TILE_COPY: Record<PlanAudience, Record<PlanTileId, readonly string[]>> = {
   company: COMPANY_TILES,
   owner: OWNER_TILES,
   supplier: SUPPLIER_TILES,
+  manufacturer: MANUFACTURER_TILES,
 };
 
 export function planTileLines(audience: PlanAudience, tile: PlanTileId): readonly string[] {

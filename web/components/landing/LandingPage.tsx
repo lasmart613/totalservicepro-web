@@ -6,10 +6,11 @@ import { LandingShell } from './LandingShell';
 import { plansHrefForAudience, type PlanAudience } from '@/lib/billing/plan-tiles';
 import './landing.css';
 
-const LANDING_PLAN_ROLE: Record<'shop' | 'clinic' | 'parts', PlanAudience> = {
+const LANDING_PLAN_ROLE: Record<'shop' | 'clinic' | 'parts' | 'oem', PlanAudience> = {
   shop: 'company',
   clinic: 'owner',
   parts: 'supplier',
+  oem: 'manufacturer',
 };
 
 export function LandingSplash() {
@@ -44,7 +45,7 @@ function Shot({
 }
 
 const AUDIENCES: {
-  id: 'shop' | 'clinic' | 'parts';
+  id: 'shop' | 'clinic' | 'parts' | 'oem';
   label: string;
   signup: string;
   lines: string[];
@@ -94,6 +95,21 @@ const AUDIENCES: {
       src: '/landing/parts.webp',
       alt: 'Parts marketplace with live Candela listings and prices',
       caption: 'Parts for sale',
+    },
+  },
+  {
+    id: 'oem',
+    label: 'Manufacturers',
+    signup: '/signup/manufacturer',
+    lines: [
+      'OEMs that make the machines',
+      'Factory and authorized service later',
+      'One type — not a repair-company tag',
+    ],
+    shot: {
+      src: '/landing/signup.webp',
+      alt: 'Register chooser including manufacturer for laser OEMs',
+      caption: 'Manufacturer register',
     },
   },
 ];
@@ -350,7 +366,7 @@ export function LandingPage() {
 
       <section className="lp-section" id="features">
         <h2 className="lp-h2">What you get</h2>
-        <p className="lp-lede">Repair company, clinic, or parts seller.</p>
+        <p className="lp-lede">Repair company, clinic, parts seller, or manufacturer.</p>
         <div className="lp-role-cols">
           {AUDIENCES.map((r) => (
             <article key={r.id} className="lp-role-col">
@@ -398,7 +414,7 @@ export function LandingPage() {
 
       <section className="lp-section" id="join">
         <h2 className="lp-h2">Register for Total Service Pro</h2>
-        <p className="lp-lede">Repair company, clinic, or parts seller.</p>
+        <p className="lp-lede">Repair company, clinic, parts seller, or manufacturer.</p>
         <div className="lp-paths">
           <Link href="/signup/company" className="lp-path">
             <h3>Repair company</h3>
@@ -424,6 +440,15 @@ export function LandingPage() {
               <li>List what is on the shelf</li>
               <li>Public pages with checkout</li>
               <li>Answer demand while it is open</li>
+            </ul>
+            <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
+          </Link>
+          <Link href="/signup/manufacturer" className="lp-path">
+            <h3>Manufacturer</h3>
+            <ul>
+              <li>OEMs that make the machines</li>
+              <li>Factory and authorized service later</li>
+              <li>Not a tag on a repair company</li>
             </ul>
             <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
           </Link>

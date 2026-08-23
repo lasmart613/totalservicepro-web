@@ -17,6 +17,7 @@ export function roleLabel(role?: string | null): string {
     customer: 'Owner',
     parts_supplier: 'Parts Supplier',
     supplier: 'Parts Supplier',
+    manufacturer: 'Manufacturer',
   };
   if (map[r]) return map[r];
   if (!r) return 'Member';
@@ -34,6 +35,7 @@ export function orgTypeLabel(type?: string | null): string {
     laser_clinic: 'Laser Clinic / Practice',
     laser_rental: 'Laser Rental Company',
     laser_reseller: 'Laser Reseller',
+    manufacturer: 'Manufacturer',
   };
   if (map[t]) return map[t];
   if (!t) return '';

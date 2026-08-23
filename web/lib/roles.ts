@@ -4,10 +4,12 @@
  *
  * Owner-side org types (same product persona — My Lasers, post service needs):
  *   customer | laser_clinic | laser_rental | laser_reseller
+ * Manufacturer is first-class (OEM / factory) — not service, owner, or supplier.
  * See lib/org-types.ts.
  */
 
 import {
+  isManufacturerOrgType,
   isOwnerOrgType,
   isServiceOrgType,
   isSupplierOrgType,
@@ -65,9 +67,18 @@ export function isSupplier(role?: RoleLike, orgType?: OrgTypeLike): boolean {
   return isSupplierOrgType(orgType);
 }
 
-/** Service company (RSP) — not owner-side and not supplier */
+/** Laser OEM / factory — first-class type, not a tag on service_company. */
+export function isManufacturer(role?: RoleLike, orgType?: OrgTypeLike): boolean {
+  const r = normalizeRole(role);
+  if (r === 'manufacturer') return true;
+  return isManufacturerOrgType(orgType);
+}
+
+/** Service company (RSP) — not owner-side, supplier, or manufacturer */
 export function isServiceCompany(role?: RoleLike, orgType?: OrgTypeLike): boolean {
-  if (isOwnerish(role, orgType) || isSupplier(role, orgType)) return false;
+  if (isOwnerish(role, orgType) || isSupplier(role, orgType) || isManufacturer(role, orgType)) {
+    return false;
+  }
   if (isServiceOrgType(orgType)) return true;
   const r = normalizeRole(role);
   return (
@@ -84,7 +95,9 @@ export function isServiceCompany(role?: RoleLike, orgType?: OrgTypeLike): boolea
  * Service-company staff only — suppliers may view, owners use their own profile.
  */
 export function canAddCustomers(role?: RoleLike, orgType?: OrgTypeLike): boolean {
-  if (isOwnerish(role, orgType) || isSupplier(role, orgType)) return false;
+  if (isOwnerish(role, orgType) || isSupplier(role, orgType) || isManufacturer(role, orgType)) {
+    return false;
+  }
   return isServiceCompany(role, orgType) || normalizeOrgType(orgType) === 'service_company';
 }
 
@@ -97,7 +110,8 @@ export function canAccessCompanyProfile(role?: RoleLike): boolean {
     r === 'owner' ||
     r === 'customer' ||
     r === 'parts_supplier' ||
-    r === 'supplier'
+    r === 'supplier' ||
+    r === 'manufacturer'
   );
 }
 
@@ -128,10 +142,11 @@ export function canAcceptBids(role?: RoleLike, orgType?: OrgTypeLike): boolean {
 }
 
 /** Convenience: dashboard persona */
-export type DashboardPersona = 'service' | 'owner' | 'supplier';
+export type DashboardPersona = 'service' | 'owner' | 'supplier' | 'manufacturer';
 
 export function getDashboardPersona(role?: RoleLike, orgType?: OrgTypeLike): DashboardPersona {
   if (isOwnerish(role, orgType)) return 'owner';
   if (isSupplier(role, orgType)) return 'supplier';
+  if (isManufacturer(role, orgType)) return 'manufacturer';
   return 'service';
 }

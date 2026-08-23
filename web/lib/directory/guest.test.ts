@@ -101,9 +101,13 @@ test('logged-out directory clicks go to register, not an org detail page', () =>
 test('type filters map to real Organizations.type values', () => {
   assert.deepEqual(guestDirectoryTypeFilter('clinics'), ['customer', 'laser_clinic']);
   assert.deepEqual(guestDirectoryTypeFilter('service'), ['service_company', 'service']);
+  assert.deepEqual(guestDirectoryTypeFilter('manufacturer'), ['manufacturer']);
   assert.equal(guestDirectoryTypeFilter('all'), null);
   assert.equal(matchesGuestDirectoryFilter('customer', 'clinics'), true);
   assert.equal(matchesGuestDirectoryFilter('service_company', 'clinics'), false);
+  assert.equal(matchesGuestDirectoryFilter('manufacturer', 'clinics'), false);
+  assert.equal(matchesGuestDirectoryFilter('manufacturer', 'service'), false);
+  assert.equal(matchesGuestDirectoryFilter('manufacturer', 'manufacturer'), true);
 });
 
 test('guest directory pages stay in the 24–48 first-page range', () => {

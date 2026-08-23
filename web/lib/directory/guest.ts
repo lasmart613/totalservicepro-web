@@ -33,7 +33,8 @@ export type DirectoryFilterKey =
   | 'clinics'
   | 'reseller'
   | 'rental'
-  | 'supplier';
+  | 'supplier'
+  | 'manufacturer';
 
 export type DirectoryOrgLike = {
   id?: number | string | null;
@@ -237,6 +238,8 @@ export function guestDirectoryTypeFilter(filter: string | null | undefined): str
       return ['laser_rental'];
     case 'supplier':
       return ['parts_supplier', 'vendor'];
+    case 'manufacturer':
+      return ['manufacturer'];
     default:
       return null;
   }
@@ -252,6 +255,7 @@ export function matchesGuestDirectoryFilter(
   if (filter === 'reseller') return t === 'laser_reseller';
   if (filter === 'rental') return t === 'laser_rental';
   if (filter === 'supplier') return t === 'parts_supplier' || t === 'vendor';
+  if (filter === 'manufacturer') return t === 'manufacturer';
   return true;
 }
 

@@ -5,12 +5,12 @@ import { Header } from '@/components/Header';
 import { Upload, ArrowRight, Check } from 'lucide-react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
-import { isOwnerish, isSupplier } from '@/lib/roles';
+import { isManufacturer, isOwnerish, isSupplier } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 
-type OrgType = 'service' | 'clinic' | 'supplier';
+type OrgType = 'service' | 'clinic' | 'supplier' | 'manufacturer';
 type TeamMember = {
   id: string;
   email: string;
@@ -108,7 +108,7 @@ export default function Onboarding() {
           router.replace('/my-lasers');
           return;
         }
-        if (isSupplier(profile.role, orgTypeNow)) {
+        if (isSupplier(profile.role, orgTypeNow) || isManufacturer(profile.role, orgTypeNow)) {
           router.replace('/');
           return;
         }
@@ -133,6 +133,15 @@ export default function Onboarding() {
           return;
         } catch (e) {
           console.warn('onboarding owner apply', e);
+        }
+      }
+      if (!profile?.organization_id && pending?.kind === 'manufacturer') {
+        try {
+          await applyPendingSignup(supabase, user.id, pending);
+          router.replace('/?justSetup=1');
+          return;
+        } catch (e) {
+          console.warn('onboarding manufacturer apply', e);
         }
       }
 
@@ -187,6 +196,8 @@ export default function Onboarding() {
           t = 'clinic';
         } else if (o.type === 'parts_supplier' || o.type === 'vendor') {
           t = 'supplier';
+        } else if (o.type === 'manufacturer') {
+          t = 'manufacturer';
         }
         setOrgType(t);
         setFormData((prev: any) => ({
@@ -211,6 +222,8 @@ export default function Onboarding() {
           setOrgType('clinic');
         } else if (initialRole === 'parts_supplier' || initialRole === 'supplier' || orgKind === 'parts_supplier' || pending?.kind === 'supplier') {
           setOrgType('supplier');
+        } else if (initialRole === 'manufacturer' || orgKind === 'manufacturer' || pending?.kind === 'manufacturer') {
+          setOrgType('manufacturer');
         } else if (
           initialRole === 'company_admin' ||
           initialRole === 'admin' ||
@@ -244,6 +257,7 @@ export default function Onboarding() {
     let role = currentRole;
     if (isOwnerish(currentRole)) role = currentRole === 'customer' ? 'owner' : currentRole;
     else if (isSupplier(currentRole)) role = currentRole === 'supplier' ? 'parts_supplier' : currentRole;
+    else if (isManufacturer(currentRole)) role = 'manufacturer';
     else if (!currentRole || currentRole === 'fse' || currentRole === 'pending') {
       // Email-confirm / trigger defaulted to fse with no org — founder must be admin
       if (!profile?.organization_id) role = 'company_admin';
@@ -431,6 +445,9 @@ export default function Onboarding() {
       if (isSupplier(profileRole)) return profileRole === 'supplier' ? 'parts_supplier' : (profileRole || 'parts_supplier');
       return 'parts_supplier';
     }
+    if (orgType === 'manufacturer') {
+      return 'manufacturer';
+    }
     // service company
     const creator = teamMembers.find(m => m.isCreator) || teamMembers[0];
     if (isOwnerish(creator?.role) || isSupplier(creator?.role)) {
@@ -466,6 +483,7 @@ export default function Onboarding() {
           oType = 'customer';
         }
       } else if (orgType === 'supplier') oType = 'parts_supplier';
+      else if (orgType === 'manufacturer') oType = 'manufacturer';
 
       let logoUrl = logoPreview;
       if (logoFile) {
@@ -546,7 +564,7 @@ export default function Onboarding() {
       const creator = teamMembers.find(m => m.isCreator) || teamMembers[0];
       const creatorAddl = orgType === 'service' ? (creator?.additionalRoles || []) : [];
       let finalJob = formData.jobTitle || (
-        orgType === 'clinic' ? 'Facility Manager' : orgType === 'supplier' ? 'Parts Supplier' : 'Company Admin'
+        orgType === 'clinic' ? 'Facility Manager' : orgType === 'supplier' ? 'Parts Supplier' : orgType === 'manufacturer' ? 'Manufacturer / OEM Contact' : 'Company Admin'
       );
       if (creatorAddl.length > 0) {
         finalJob = `${finalJob} + ${creatorAddl.map(r => r).join(' + ')}`;
@@ -732,7 +750,7 @@ export default function Onboarding() {
       // Clinic / supplier → Dashboard; service company → company profile to review team
       if (orgType === 'clinic') {
         router.push(lasersSaved > 0 ? '/my-lasers?justSetup=1' : '/?justSetup=1');
-      } else if (orgType === 'supplier') {
+      } else if (orgType === 'supplier' || orgType === 'manufacturer') {
         router.push('/?justSetup=1');
       } else {
         router.push('/company?justSetup=true');
@@ -777,7 +795,9 @@ export default function Onboarding() {
               ? 'Register your facility and lasers.'
               : orgType === 'supplier'
                 ? 'Set up supplier categories and brands.'
-                : 'Repair companies: add your team and roles now (sole props supported).'}
+                : orgType === 'manufacturer'
+                  ? 'Set up the OEM / factory profile.'
+                  : 'Repair companies: add your team and roles now (sole props supported).'}
           </p>
           <div className="flex justify-center gap-2 mt-4">
             {[1,2,3,4,5,6].map(s => <div key={s} className={`w-2.5 h-2.5 rounded-full ${step >= s ? 'bg-[var(--gold)]' : 'bg-[var(--surface3)]'}`} />)}
@@ -788,12 +808,16 @@ export default function Onboarding() {
         {step === 1 && (
           <div>
             <h2 className="text-2xl font-semibold text-center mb-6">Confirm your organization type</h2>
-            <div className="grid md:grid-cols-3 gap-4">
-              {(['service','clinic','supplier'] as OrgType[]).map(t => (
+            <div className="grid md:grid-cols-2 xl:grid-cols-4 gap-4">
+              {(['service','clinic','supplier','manufacturer'] as OrgType[]).map(t => (
                 <button key={t} onClick={() => handleTypeSelect(t)} className={`card p-6 text-left hover:border-[var(--gold)] ${orgType===t ? 'border-[var(--gold)]' : ''}`}>
-                  <div className="text-2xl mb-2">{t==='service'?'👷':t==='clinic'?'🏥':'📦'}</div>
-                  <div className="font-bold">{t==='service' ? 'Repair company' : t==='clinic' ? 'Laser Owner (Clinic / Rental / Reseller)' : 'Parts Supplier'}</div>
-                  <div className="text-sm text-[var(--text3)]">Click to select</div>
+                  <div className="text-2xl mb-2">{t==='service'?'👷':t==='clinic'?'🏥':t==='manufacturer'?'🏭':'📦'}</div>
+                  <div className="font-bold">{t==='service' ? 'Repair company' : t==='clinic' ? 'Laser Owner (Clinic / Rental / Reseller)' : t==='manufacturer' ? 'Manufacturer (OEM / factory)' : 'Parts Supplier'}</div>
+                  <div className="text-sm text-[var(--text3)]">
+                    {t === 'manufacturer'
+                      ? 'OEMs that make the machines. Factory/authorized service later.'
+                      : 'Click to select'}
+                  </div>
                 </button>
               ))}
             </div>
@@ -954,6 +978,16 @@ export default function Onboarding() {
           </div>
         )}
 
+        {step === 3 && orgType === 'manufacturer' && (
+          <div className="max-w-xl mx-auto">
+            <h2 className="text-2xl font-bold mb-2">OEM / factory profile</h2>
+            <p className="text-sm text-[var(--text3)] mb-4">
+              This is a manufacturer organization — not a repair company. Factory and
+              authorized service come later. Brands you make can be selected on the next screens.
+            </p>
+          </div>
+        )}
+
         {step === 3 && orgType === 'supplier' && (
           <div className="max-w-xl mx-auto">
             <h2 className="text-2xl font-bold mb-2">Parts categories</h2>
@@ -994,7 +1028,9 @@ export default function Onboarding() {
                 ? 'Brands you stock'
                 : orgType === 'clinic'
                   ? 'Brands at your facility (optional)'
-                  : 'Specialties / Brands you service'}
+                  : orgType === 'manufacturer'
+                    ? 'Brands you manufacture'
+                    : 'Specialties / Brands you service'}
             </h2>
             <div className="flex flex-wrap gap-2">
               {BRANDS.map(b => (
@@ -1004,7 +1040,9 @@ export default function Onboarding() {
             <p className="text-xs mt-3 text-[var(--text3)]">
               {orgType === 'supplier'
                 ? 'Used for marketplace demand matching and catalog targeting.'
-                : 'Used for manual library, AI, and Marketplace targeting.'}
+                : orgType === 'manufacturer'
+                  ? 'Shown on the manufacturer profile. Factory and authorized service come later.'
+                  : 'Used for manual library, AI, and Marketplace targeting.'}
             </p>
           </div>
         )}
@@ -1018,7 +1056,9 @@ export default function Onboarding() {
                 ? 'Your facility profile and lasers will be saved. Role stays owner.'
                 : orgType === 'supplier'
                   ? 'Your supplier profile, categories, and brands will be saved. Role stays parts_supplier.'
-                  : 'Your organization, profile, and team (if you are a repair company) will be saved. You can always edit from Company page or Settings.'}
+                  : orgType === 'manufacturer'
+                    ? 'Your manufacturer profile will be saved. Role stays manufacturer — not a repair company.'
+                    : 'Your organization, profile, and team (if you are a repair company) will be saved. You can always edit from Company page or Settings.'}
             </p>
             <button onClick={saveOnboarding} disabled={loading} className="btn btn-primary px-10">Finish &amp; Continue →</button>
           </div>

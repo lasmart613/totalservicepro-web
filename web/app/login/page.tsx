@@ -569,7 +569,7 @@ function LoginInner() {
 
         <div className="mt-8 card p-5 text-sm">
           <div className="font-bold mb-3 text-center" style={{ color: 'var(--gold)' }}>
-            Join as a Repair company, Clinic, or Parts seller
+            Join as a Repair company, Clinic, Parts seller, or Manufacturer
           </div>
           <p className="text-center text-xs text-[var(--text3)] mb-4">
             Field engineers and service techs are added by their repair company through Team.
@@ -584,6 +584,9 @@ function LoginInner() {
             </Link>
             <Link href="/signup/supplier" className="btn btn-secondary w-full justify-center text-sm py-2">
               Sign up as Parts seller
+            </Link>
+            <Link href="/signup/manufacturer" className="btn btn-secondary w-full justify-center text-sm py-2">
+              Sign up as Manufacturer
             </Link>
           </div>
           <div className="text-center mt-3">

@@ -11,6 +11,7 @@ test('landing Free Plan CTAs pass role into /plans', () => {
   assert.match(source, /shop: 'company'/);
   assert.match(source, /clinic: 'owner'/);
   assert.match(source, /parts: 'supplier'/);
+  assert.match(source, /oem: 'manufacturer'/);
 });
 
 test('/plans never imports sign-out helpers', () => {

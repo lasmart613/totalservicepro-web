@@ -72,6 +72,7 @@ function guestFilters(signedIn: boolean): { key: FilterKey; label: string }[] {
     { key: 'reseller', label: 'Resellers' },
     { key: 'rental', label: 'Rental companies' },
     { key: 'supplier', label: 'Parts Suppliers' },
+    { key: 'manufacturer', label: 'Manufacturers' },
   ];
 }
 
@@ -258,6 +259,7 @@ export default function DirectoryPage() {
         if (filter === 'reseller') return t === 'laser_reseller';
         if (filter === 'rental') return t === 'laser_rental';
         if (filter === 'supplier') return t === 'parts_supplier' || t === 'vendor';
+        if (filter === 'manufacturer') return t === 'manufacturer';
         return true;
       });
     }
@@ -296,7 +298,7 @@ export default function DirectoryPage() {
           <h1 className="text-2xl font-extrabold">Company directory</h1>
         </div>
         <p className="text-sm text-[var(--text3)] mb-4">
-          Discover repair companies, clinics, resellers, and suppliers listed in Total Service Pro.
+          Discover repair companies, clinics, resellers, suppliers, and manufacturers listed in Total Service Pro.
           Listings are free.
         </p>
 
