@@ -569,21 +569,21 @@ function LoginInner() {
 
         <div className="mt-8 card p-5 text-sm">
           <div className="font-bold mb-3 text-center" style={{ color: 'var(--gold)' }}>
-            Join as a Service Organization, Laser Clinic, or Parts Supplier
+            Join as a Repair company, Clinic, or Parts seller
           </div>
           <p className="text-center text-xs text-[var(--text3)] mb-4">
-            FSEs are added by Service Organizations through their Team section.
-            There is no individual FSE signup.
+            Field engineers and service techs are added by their repair company through Team.
+            There is no individual technician signup.
           </p>
           <div className="grid grid-cols-1 gap-2">
             <Link href="/signup/company" className="btn btn-secondary w-full justify-center text-sm py-2">
-              Sign up as Service Organization
+              Sign up as Repair company
             </Link>
             <Link href="/signup/owner" className="btn btn-secondary w-full justify-center text-sm py-2">
-              Sign up as Laser Owner / Facility
+              Sign up as Clinic / laser owner
             </Link>
             <Link href="/signup/supplier" className="btn btn-secondary w-full justify-center text-sm py-2">
-              Sign up as Parts Supplier
+              Sign up as Parts seller
             </Link>
           </div>
           <div className="text-center mt-3">

@@ -24,8 +24,8 @@ export default function SignupIndex() {
           <h1 className="text-3xl font-extrabold tracking-tight">Register for Total Service Pro</h1>
           <p className="text-[var(--text3)] mt-2 max-w-lg mx-auto">
             Pick how you work. Repair companies, clinics and laser owners (including
-            rental fleets), and parts sellers each get their own door. Technicians
-            are invited by their shop — they do not register alone.
+            rental companies), and parts sellers each get their own door. Technicians
+            are invited by their repair company — they do not register alone.
           </p>
         </div>
 
@@ -36,9 +36,9 @@ export default function SignupIndex() {
             <div className="w-12 h-12 rounded-xl bg-[var(--gold-glow)] flex items-center justify-center mb-4 group-hover:bg-[var(--gold)] transition-colors">
               <Building2 size={26} className="text-[var(--gold)] group-hover:text-[#111827]" />
             </div>
-            <div className="font-bold text-xl mb-1">Service company / repair company</div>
+            <div className="font-bold text-xl mb-1">Repair company</div>
             <div className="text-sm text-[var(--text3)] mb-4">
-              Independent techs and shops that service aesthetic and medical lasers.
+              Independent techs and repair companies that service aesthetic and medical lasers.
               First user is admin. Invite technicians from Team.
             </div>
             <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
@@ -57,13 +57,13 @@ export default function SignupIndex() {
             </div>
             <div className="font-bold text-xl mb-1">Clinic / laser owner</div>
             <div className="text-sm text-[var(--text3)] mb-4">
-              Med spas, practices, and rental fleets that own or hold the machines.
+              Med spas, practices, and rental companies that own or hold the machines.
             </div>
             <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
               <li>• Every laser and serial in one list</li>
               <li>• Post a repair or preventive visit and take bids</li>
               <li>• Service history that stays with the machine</li>
-              <li>• Rental fleets: which box is out, and its last service</li>
+              <li>• Rental companies: which box is out, and its last service</li>
             </ul>
             <div className="btn btn-primary w-full text-center">Register for Total Service Pro →</div>
           </Link>
@@ -94,8 +94,8 @@ export default function SignupIndex() {
         </div>
 
         <div className="mt-8 p-4 bg-[var(--surface3)] border border-[var(--border)] rounded-xl text-xs text-[var(--text3)]">
-          Repair company · Clinic / laser owner (including rental fleets) · Parts seller.
-          Technicians join through their shop.
+          Repair company · Clinic / laser owner (including rental companies) · Parts seller.
+          Technicians join through their repair company.
         </div>
       </div>
     </div>
