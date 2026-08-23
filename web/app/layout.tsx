@@ -4,6 +4,8 @@ import { Geist, Geist_Mono, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import AdBanner from "@/components/AdBanner";
+import { ThemeScript } from "@/components/ThemeScript";
+import { ThemeSync } from "@/components/ThemeSync";
 import { ADSENSE_CLIENT } from "@/lib/adsense";
 
 const geistSans = Geist({
@@ -41,7 +43,11 @@ export default function RootLayout({
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} ${dmSans.variable} h-full antialiased`}
+      suppressHydrationWarning
     >
+      <head>
+        <ThemeScript />
+      </head>
       <body className="min-h-full flex flex-col bg-[var(--bg)] text-[var(--text)]">
         <Script
           id="tsp-adsense"
@@ -50,6 +56,7 @@ export default function RootLayout({
           strategy="afterInteractive"
         />
         <Providers>
+          <ThemeSync />
           <AdBanner />
           <div className="flex-1 flex flex-col">
 		<main className="flex-1 w-full mx-auto px-4 sm:px-6 lg:px-8 py-6 max-w-full">

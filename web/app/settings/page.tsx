@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { signOutAndClearIdentity } from '@/lib/auth-session';
+import { applyStoredTheme, togglePersistedTheme } from '@/lib/theme';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,6 +20,7 @@ export default function Settings() {
   const [timeZone, setTimeZone] = useState('');
   const [browserNotif, setBrowserNotif] = useState(true);
   const [sound, setSound] = useState(true);
+  const [theme, setTheme] = useState<'light' | 'dark'>('dark');
 
   const TIME_ZONES = [
     'UTC',
@@ -62,6 +64,7 @@ export default function Settings() {
       setTimeZone(localStorage.getItem('timeZone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
       setBrowserNotif(localStorage.getItem('browserNotifications') !== 'false');
       setSound(localStorage.getItem('notificationSound') !== 'false');
+      setTheme(applyStoredTheme());
     }
   }, []);
 
@@ -72,10 +75,7 @@ export default function Settings() {
   };
 
   const toggleTheme = () => {
-    if (typeof document === 'undefined') return;
-    const html = document.documentElement;
-    const isLight = html.classList.toggle('light');
-    localStorage.setItem('tsp_theme', isLight ? 'light' : 'dark');
+    setTheme(togglePersistedTheme());
   };
 
   const updateScheduleView = (val: string) => {
@@ -133,7 +133,10 @@ export default function Settings() {
           <div>
             <div className="font-semibold mb-2">Theme</div>
             <button onClick={toggleTheme} className="btn btn-secondary">Toggle Light / Dark</button>
-            <div className="text-xs text-[var(--text3)] mt-1">Follows system preference by default (persisted).</div>
+            <div className="text-xs text-[var(--text3)] mt-1">
+              Current: {theme === 'light' ? 'Light' : 'Dark'}. Saved on this device after you choose.
+              Until then, follows your system Light/Dark setting.
+            </div>
           </div>
 
           {/* Schedule */}
