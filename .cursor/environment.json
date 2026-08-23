@@ -1,0 +1,10 @@
+{
+  "name": "Total Service Pro Web",
+  "install": "cd web && npm ci",
+  "terminals": [
+    {
+      "name": "web-dev",
+      "command": "cd web && npm run dev"
+    }
+  ]
+}
