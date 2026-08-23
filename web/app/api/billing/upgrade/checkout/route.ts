@@ -43,7 +43,7 @@ async function loadCaller(req: NextRequest) {
 export async function POST(req: NextRequest) {
   try {
     const caller = await loadCaller(req);
-    if ('error' in caller && caller.error) return caller.error;
+    if (!('user' in caller) || !caller.user) return caller.error;
     const { user, supabase } = caller;
 
     const body = (await req.json().catch(() => ({}))) as { sku?: string };

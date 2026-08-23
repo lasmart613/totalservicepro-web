@@ -5,6 +5,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
 import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup } from '@/lib/auth-session';
+import { useRedirectSignedInOrgToPlans } from '@/lib/use-redirect-signed-in-org';
 import AuthOtpBox from '@/components/AuthOtpBox';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -44,6 +45,7 @@ export default function SupplierSignup() {
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const router = useRouter();
   const supabase = getSupabaseClient();
+  useRedirectSignedInOrgToPlans();
 
   const togglePart = (part: string) => {
     setSelectedParts(prev =>

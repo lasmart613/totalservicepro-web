@@ -51,9 +51,9 @@ async function writeOrgUpgrade(client: SupabaseClient, orgId: string, plan: stri
       .from('organizations')
       .update(payload)
       .eq('id', orgId)
-      .select('id, is_premium, subscription_tier, plan')
+      .select('id')
       .maybeSingle();
-    if (!error && data?.id != null) return data;
+    if (!error && data?.id != null) return { ...data, ...payload };
     lastError = error;
     const col = missingColumn(error?.message);
     if (col && col in payload) {
@@ -72,7 +72,7 @@ async function writeOrgUpgrade(client: SupabaseClient, orgId: string, plan: stri
 export async function POST(req: NextRequest) {
   try {
     const caller = await loadCaller(req);
-    if ('error' in caller && caller.error) return caller.error;
+    if (!('user' in caller) || !caller.user) return caller.error;
     const { user, supabase } = caller;
 
     const body = (await req.json().catch(() => ({}))) as { session_id?: string; sessionId?: string };

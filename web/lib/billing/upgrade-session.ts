@@ -3,7 +3,7 @@
  * Checkout must attach to the current org and must not create a second account.
  */
 
-import { getPlanOffer, type PlanOffer, type PlanSku } from './plan-catalog';
+import { getPlanOffer, type PlanOffer, type PlanSku } from './plan-catalog.ts';
 
 export const UPGRADE_KIND = 'org_plan';
 
