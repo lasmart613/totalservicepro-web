@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { orgIsPaid } from './org-plan.ts';
+import { orgIsPaid, shouldPreserveSessionForExistingOrg } from './org-plan.ts';
 
 test('null or missing org is not paid', () => {
   assert.equal(orgIsPaid(null), false);
@@ -39,4 +39,17 @@ test('pro and product-like names are not paid', () => {
   assert.equal(orgIsPaid({ plan: 'pro' }), false);
   assert.equal(orgIsPaid({ plan: 'free' }), false);
   assert.equal(orgIsPaid({ is_premium: false, subscription_tier: 'pro', plan: 'pro' }), false);
+});
+
+test('existing org ids must keep the session', () => {
+  assert.equal(shouldPreserveSessionForExistingOrg(12), true);
+  assert.equal(shouldPreserveSessionForExistingOrg('12'), true);
+  assert.equal(shouldPreserveSessionForExistingOrg(' 88 '), true);
+});
+
+test('missing org does not preserve a session (public signup may clear it)', () => {
+  assert.equal(shouldPreserveSessionForExistingOrg(null), false);
+  assert.equal(shouldPreserveSessionForExistingOrg(undefined), false);
+  assert.equal(shouldPreserveSessionForExistingOrg(''), false);
+  assert.equal(shouldPreserveSessionForExistingOrg('   '), false);
 });
