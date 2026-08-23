@@ -64,6 +64,22 @@ export function isPartListing(row: MarketplaceListingLike | null | undefined): b
   return PART_TYPES.has(type) || PART_CATEGORIES.has(category) || PART_TYPES.has(kind);
 }
 
+/**
+ * Existing marketplace taxonomy (list form + catalog helpers):
+ * listing_type / category / details.kind in { consumable, consumables }.
+ * Do not infer from title keywords (head, module, etc.).
+ */
+export function isConsumableListing(row: MarketplaceListingLike | null | undefined): boolean {
+  if (!row) return false;
+  const type = norm(row.listing_type);
+  const category = norm(row.category);
+  const kind = detailsKind(row);
+  if (type === 'used' || type === 'equipment' || type === 'request' || type === 'service' || type === 'rfq' || type === 'need') {
+    return false;
+  }
+  return CONSUMABLE_VALUES.has(type) || CONSUMABLE_VALUES.has(category) || CONSUMABLE_VALUES.has(kind);
+}
+
 export function listingImages(row: {
   images?: unknown;
   photos?: unknown;

@@ -9,6 +9,7 @@ import {
   EMPTY_PARTS_FILTERS,
   filterPartsListings,
   formatListingPrice,
+  isConsumableListing,
   isPartListing,
   listingAvailability,
   listingBrand,
@@ -22,6 +23,7 @@ import {
   type MarketplaceListingLike,
   type PartsCatalogFilters,
 } from '@/lib/marketplace/parts';
+import { restrictMarketplaceToConsumables } from '@/lib/roles';
 import { toast } from 'sonner';
 
 export default function PartsMarketplace() {
@@ -32,27 +34,54 @@ export default function PartsMarketplace() {
   const [bidPrice, setBidPrice] = useState('');
   const [bidNotes, setBidNotes] = useState('');
   const [bidQuestion, setBidQuestion] = useState('');
+  const [consumablesOnly, setConsumablesOnly] = useState(false);
   const supabase = getSupabaseClient();
 
   useEffect(() => {
     const fetchListings = async () => {
       setLoading(true);
+      let ownerConsumablesOnly = false;
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (user) {
+        const { data: prof } = await supabase
+          .from('user_profiles')
+          .select('role, organization_id, organizations(type, facility_type)')
+          .eq('id', user.id)
+          .maybeSingle();
+        const meta = user.user_metadata || {};
+        const org = (prof?.organizations as { type?: string | null; facility_type?: string | null } | null) || null;
+        ownerConsumablesOnly = restrictMarketplaceToConsumables(
+          prof?.role || meta.role,
+          org?.type || meta.organization_type,
+          org?.facility_type,
+          meta.facility_type,
+          meta.organization_type
+        );
+      }
+      setConsumablesOnly(ownerConsumablesOnly);
+
+      const typeOr = ownerConsumablesOnly
+        ? 'listing_type.eq.consumable,listing_type.eq.consumables,listing_type.eq.part,listing_type.eq.parts'
+        : 'listing_type.eq.part,listing_type.eq.parts';
       let { data, error } = await supabase
         .from('marketplace_listings')
         .select('*')
-        .or('listing_type.eq.part,listing_type.eq.parts')
+        .or(typeOr)
         .order('created_at', { ascending: false });
       if (error) {
         const retry = await supabase
           .from('marketplace_listings')
           .select('*')
-          .eq('listing_type', 'part')
+          .eq('listing_type', ownerConsumablesOnly ? 'consumable' : 'part')
           .order('created_at', { ascending: false });
         data = retry.data;
         error = retry.error;
       }
-      let rows: MarketplaceListingLike[] = !error && data ? data.filter(isPartListing) : [];
-      if (rows.length === 0) {
+      const keep = ownerConsumablesOnly ? isConsumableListing : isPartListing;
+      let rows: MarketplaceListingLike[] = !error && data ? data.filter(keep) : [];
+      if (rows.length === 0 && !ownerConsumablesOnly) {
         try {
           const res = await fetch('/api/marketplace/parts', { cache: 'no-store' });
           const json = await res.json().catch(() => ({}));
@@ -120,8 +149,14 @@ export default function PartsMarketplace() {
       <div className="max-w-7xl mx-auto w-full px-4 py-8">
         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
           <div>
-            <h1 className="text-3xl font-extrabold">Parts Marketplace</h1>
-            <p className="text-[var(--text3)]">Parts currently listed for sale</p>
+            <h1 className="text-3xl font-extrabold">
+              {consumablesOnly ? 'Consumable Parts' : 'Parts Marketplace'}
+            </h1>
+            <p className="text-[var(--text3)]">
+              {consumablesOnly
+                ? 'Consumable parts listed for sale'
+                : 'Parts currently listed for sale'}
+            </p>
           </div>
           <Link href="/marketplace/list?type=part" className="btn btn-primary whitespace-nowrap">
             + Create New Listing

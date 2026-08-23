@@ -12,6 +12,7 @@ import {
   isServiceOrgType,
   isSupplierOrgType,
 } from '@/lib/org-types';
+import { ownerLabelKind } from '@/lib/labels';
 
 export type RoleLike = string | null | undefined;
 export type OrgTypeLike = string | null | undefined;
@@ -134,4 +135,35 @@ export function getDashboardPersona(role?: RoleLike, orgType?: OrgTypeLike): Das
   if (isOwnerish(role, orgType)) return 'owner';
   if (isSupplier(role, orgType)) return 'supplier';
   return 'service';
+}
+
+/**
+ * Clinic / hospital / medspa / private practice, plus rental fleet owners.
+ * Laser resellers keep the full parts catalog (they buy/sell systems).
+ */
+export function restrictMarketplaceToConsumables(
+  role?: RoleLike,
+  orgType?: OrgTypeLike,
+  ...extraOrgHints: Array<string | null | undefined>
+): boolean {
+  if (!isOwnerish(role, orgType)) return false;
+  return ownerLabelKind(orgType, ...extraOrgHints) !== 'reseller';
+}
+
+/**
+ * Outgoing "My Bids" — repair companies submit bids. Owner chrome does not.
+ * Inbound bids on an owner's own request stay on that request (not this section).
+ */
+export function canAccessMyBids(role?: RoleLike, orgType?: OrgTypeLike): boolean {
+  if (isOwnerish(role, orgType)) return false;
+  return isPro(role) || isServiceCompany(role, orgType);
+}
+
+/**
+ * Directory "My Clinics" is the repair company's linked-customer list.
+ * Clinic / rental / reseller owners share owner chrome and should not see it.
+ */
+export function canSeeDirectoryMyClinics(role?: RoleLike, orgType?: OrgTypeLike): boolean {
+  if (isOwnerish(role, orgType)) return false;
+  return isServiceCompany(role, orgType) || isPro(role);
 }

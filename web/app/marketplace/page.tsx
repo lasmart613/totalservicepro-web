@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { canPostMarketplaceNeed, isPro, isSupplier } from '@/lib/roles';
+import { canPostMarketplaceNeed, isOwnerish, isPro, isSupplier } from '@/lib/roles';
 
 export default function Marketplace() {
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -150,12 +150,13 @@ export default function Marketplace() {
             </p>
           </Link>
 
-          {/* My Bids - New */}
+          {!isOwnerish(userRole, orgType) && (
           <Link href="/bids" className="card p-6 hover:border-[var(--gold)] group flex flex-col border-2 border-[var(--gold)]/30">
             <div className="text-4xl mb-4">📋</div>
             <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">My Bids</h3>
             <p className="text-sm text-[var(--text3)] flex-1">View and manage all bids you have submitted</p>
           </Link>
+          )}
 
           {/* My Listings */}
           <Link href="/marketplace/my-listings" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
