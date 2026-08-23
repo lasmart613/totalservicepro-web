@@ -17,7 +17,7 @@ import {
 } from '@/lib/org-plan';
 import { loadOrgPlanRow } from '@/lib/org-plan-load';
 import { PLAN_OFFERS, skuFor, type BillingCycle, type PaidPlanId } from '@/lib/billing/plan-catalog';
-import { planAudienceLabel, planTileLines, type PlanAudience, type PlanTileId } from '@/lib/billing/plan-tiles';
+import { planTileLines, type PlanAudience, type PlanTileId } from '@/lib/billing/plan-tiles';
 import { startClientUpgradeCheckout } from '@/lib/billing/start-client-checkout';
 import {
   PlanAudienceSelector,
@@ -52,11 +52,7 @@ function PublicPlans() {
       <section className="lp-section" style={{ marginTop: 0, borderTop: 'none' }}>
         <p className="lp-kicker">Total Service Pro</p>
         <h1 className="lp-h2">Free Plan, Premium, and Team</h1>
-        <p className="lp-lede">
-          Register for a Free Plan. Compare Free, Premium, and Team for a{' '}
-          {planAudienceLabel(audience).toLowerCase()}, then create your account.
-          Signed-in companies upgrade from this page without registering again.
-        </p>
+        <p className="lp-lede">Compare plans, then create a free account.</p>
         <PlanAudienceSelector value={audience} onChange={setAudience} variant="landing">
         <div className="lp-paths">
           <article className="lp-path" style={{ cursor: 'default' }}>
@@ -219,8 +215,7 @@ function SignedInPlans() {
         <p className="text-[var(--text3)] mt-2 max-w-2xl">
           Stay signed in. Choose a paid plan for{orgName ? ` ${orgName}` : ' your current organization'}.
           Stripe Checkout attaches to this account — it does not create a second one. Cancel anytime
-          before paying; you will not be charged. Same prices for every role — swipe to see{' '}
-          {planAudienceLabel(audience)} benefits.
+          before paying; you will not be charged.
         </p>
 
         {orgReady ? (
