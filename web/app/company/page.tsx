@@ -18,6 +18,8 @@ import { listManufacturers } from '@/lib/laser-catalog';
 import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
 import { persistCustomerLogo } from '@/lib/customer-form';
 import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
+import { orgIsPaid } from '@/lib/org-plan';
+import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -751,7 +753,14 @@ function CompanyProfile() {
               : 'Onboarding complete! Your details, team (if added), and logo have been saved. Review or update company info below anytime. Use Settings for personal phone/job/role.'}
           </div>
         )}
-        <h1 className="text-2xl font-extrabold">🏢 {profileTitle}</h1>
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <h1 className="text-2xl font-extrabold">🏢 {profileTitle}</h1>
+          {!orgIsPaid(org) && org?.id ? (
+            <UpgradePlanLink className="btn btn-secondary text-sm px-4 py-1.5">
+              Upgrade plan
+            </UpgradePlanLink>
+          ) : null}
+        </div>
 
         {/* Company Details Form - FULLY RESTORED */}
         <div className="card p-6">
