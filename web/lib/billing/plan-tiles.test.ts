@@ -82,13 +82,26 @@ test('shared entitlements appear on every audience and every tier', () => {
   }
 });
 
-test('Parts Supplier Premium leads with photos and visibility', () => {
-  const premium = planTileLines('supplier', 'premium');
-  assert.match(premium[0], /photo/i);
-  assert.ok(premium.some((l) => /featured|placement|search/i.test(l)));
-  assert.ok(premium.some((l) => /storefront/i.test(l)));
-  assert.doesNotMatch(premium.join(' '), /%/);
-  assert.doesNotMatch(premium.join(' '), /\b\d{2,}\s+(sku|listings?)\b/i);
+test('Parts Supplier photo entitlements are locked by tier', () => {
+  const free = planTileLines('supplier', 'free').join('\n');
+  const premium = planTileLines('supplier', 'premium').join('\n');
+  const team = planTileLines('supplier', 'team').join('\n');
+
+  assert.match(free, /one .*photo/i);
+  assert.match(free, /low-res|smaller/i);
+  assert.doesNotMatch(free, /multiple|hi-res|featured|storefront/i);
+
+  assert.match(premium, /multiple/i);
+  assert.match(premium, /hi-res/i);
+  assert.doesNotMatch(premium, /featured|storefront|premium placement/i);
+  assert.doesNotMatch(premium, /%/);
+  assert.doesNotMatch(premium, /\b\d{2,}\s+(sku|listings?)\b/i);
+
+  assert.match(team, /hi-res/i);
+  assert.match(team, /featured|premium placement/i);
+  assert.match(team, /storefront/i);
+  assert.doesNotMatch(team, /%/);
+  assert.doesNotMatch(team, /\b\d{2,}\s+(sku|listings?)\b/i);
 });
 
 test('audience copy stays separate — do not merge roles', () => {
@@ -96,5 +109,5 @@ test('audience copy stays separate — do not merge roles', () => {
   assert.notDeepEqual(PLAN_TILE_COPY.company.free, PLAN_TILE_COPY.supplier.free);
   assert.ok(PLAN_TILE_COPY.company.free.some((l) => /schedule service calls/i.test(l)));
   assert.ok(PLAN_TILE_COPY.owner.free.some((l) => /rated repair/i.test(l)));
-  assert.ok(PLAN_TILE_COPY.supplier.free.some((l) => /text listing/i.test(l)));
+  assert.ok(PLAN_TILE_COPY.supplier.free.some((l) => /one .*photo/i.test(l)));
 });

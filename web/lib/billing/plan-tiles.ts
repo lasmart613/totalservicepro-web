@@ -137,11 +137,11 @@ const OWNER_TILES: Record<PlanTileId, readonly string[]> = {
 };
 
 // TODO: listing photo upload is not plan-gated yet (marketplace/list allows
-// up to 8 photos on every plan). Premium/Team copy below is the intended
-// Parts Supplier hook — do not invent SKU caps or fee percentages here.
+// up to 8 photos on every plan). Tile copy below is Larry-locked for
+// Parts Supplier — do not invent SKU caps or fee percentages here.
 const SUPPLIER_TILES: Record<PlanTileId, readonly string[]> = {
   free: [
-    'List parts with a basic text listing',
+    'List parts with one smaller, low-res photo',
     'Appear in the marketplace',
     SHARED_SERVICE_HISTORY_LINE,
     FREE_AI_LINE,
@@ -149,9 +149,7 @@ const SUPPLIER_TILES: Record<PlanTileId, readonly string[]> = {
     WEEKLY_UPDATES_LINE,
   ],
   premium: [
-    'Photo uploads on listings — Free is text-only',
-    'More listings and featured placement in Parts search',
-    'Supplier storefront in the directory',
+    'Multiple hi-res photos on listings',
     PREMIUM_AI_LINE,
     PREMIUM_MANUALS_LINE,
     SHARED_SERVICE_HISTORY_LINE,
@@ -160,7 +158,8 @@ const SUPPLIER_TILES: Record<PlanTileId, readonly string[]> = {
   ],
   team: [
     'Everything in Premium',
-    'More photos plus a listing gallery',
+    'Multiple hi-res photos plus featured / premium placement',
+    'Supplier storefront in the directory',
     TEAM_AI_LINE,
     TEAM_MANUALS_LINE,
     'Up to 10 user seats',
