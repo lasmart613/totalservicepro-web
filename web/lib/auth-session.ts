@@ -8,7 +8,18 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { clearPendingSignup } from '@/lib/pending-signup';
 
-const AUTH_STORAGE_KEY = 'tsp-auth-token';
+export const AUTH_STORAGE_KEY = 'tsp-auth-token';
+
+/** True when a Supabase session blob is in localStorage. Used before getUser() resolves. */
+export function hasBrowserAuthHint(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    const raw = window.localStorage.getItem(AUTH_STORAGE_KEY);
+    return !!raw && raw !== 'null' && raw !== '{}' && raw !== 'undefined';
+  } catch {
+    return false;
+  }
+}
 
 export function clearBrowserIdentityArtifacts() {
   clearPendingSignup();

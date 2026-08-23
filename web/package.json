@@ -7,7 +7,7 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "test": "node --experimental-strip-types --experimental-transform-types --test lib/theme.test.ts lib/org-plan.test.ts lib/org-plan-load.test.ts lib/auth-session.test.ts lib/billing/plan-catalog.test.ts lib/billing/plan-tiles.test.ts lib/billing/upgrade-session.test.ts lib/billing/stripe-webhook.test.ts lib/billing/sync-subscription.test.ts lib/supabase/paginate.test.ts",
+    "test": "node --experimental-strip-types --experimental-transform-types --test lib/theme.test.ts lib/org-plan.test.ts lib/org-plan-load.test.ts lib/auth-session.test.ts lib/billing/plan-catalog.test.ts lib/billing/plan-tiles.test.ts lib/billing/upgrade-session.test.ts lib/billing/stripe-webhook.test.ts lib/billing/sync-subscription.test.ts lib/supabase/paginate.test.ts lib/marketplace/parts.test.ts lib/marketplace/guest.test.ts",
     "deploy": "netlify deploy --prod",
     "deploy:preview": "netlify deploy",
     "deploy:remote": "netlify build --context production",

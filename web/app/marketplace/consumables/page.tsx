@@ -3,17 +3,28 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
+import { GuestAwarePrice } from '@/components/marketplace/GuestAwarePrice';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { listingHref } from '@/lib/marketplace/guest';
+import {
+  formatListingPrice,
+  isConsumableListing,
+  listingImages,
+  listingPartCategory,
+  type MarketplaceListingLike,
+} from '@/lib/marketplace/parts';
+import { useSignedIn } from '@/lib/use-signed-in';
 import { toast } from 'sonner';
 
 
 export default function ConsumablesMarketplace() {
-  const [listings, setListings] = useState<any[]>([]);
+  const [listings, setListings] = useState<MarketplaceListingLike[]>([]);
   const [loading, setLoading] = useState(true);
-  const [biddingOn, setBiddingOn] = useState<any>(null);
+  const [biddingOn, setBiddingOn] = useState<MarketplaceListingLike | null>(null);
   const [bidPrice, setBidPrice] = useState('');
   const [bidNotes, setBidNotes] = useState('');
   const [bidQuestion, setBidQuestion] = useState('');
+  const { signedIn } = useSignedIn();
   const supabase = getSupabaseClient();
 
   useEffect(() => {
@@ -22,13 +33,20 @@ export default function ConsumablesMarketplace() {
 
   const fetchListings = async () => {
     setLoading(true);
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('marketplace_listings')
       .select('*')
-      .eq('listing_type', 'part')
+      .or('listing_type.eq.consumable,listing_type.eq.consumables,listing_type.eq.part,listing_type.eq.parts')
       .order('created_at', { ascending: false });
-    // Note: Consumables currently share the 'part' listing_type. Create with "Part for Sale" for now.
-    if (!error && data) setListings(data);
+    if (error) {
+      const retry = await supabase
+        .from('marketplace_listings')
+        .select('*')
+        .order('created_at', { ascending: false });
+      data = retry.data;
+      error = retry.error;
+    }
+    if (!error && data) setListings(data.filter(isConsumableListing));
     setLoading(false);
   };
 
@@ -74,9 +92,9 @@ export default function ConsumablesMarketplace() {
         <div className="flex justify-between items-center mb-8">
           <div>
             <h1 className="text-3xl font-extrabold">Consumables Marketplace</h1>
-            <p className="text-[var(--text3)]">Handpieces, fibers, tips, gels, and other consumables for sale</p>
+            <p className="text-[var(--text3)]">Dye kits, cryogen, filters, windows, tips, and other used-up items</p>
           </div>
-          <Link href="/marketplace/list?type=part" className="btn btn-primary">
+          <Link href="/marketplace/list?type=consumable" className="btn btn-primary">
             + Create New Listing
           </Link>
         </div>
@@ -87,28 +105,39 @@ export default function ConsumablesMarketplace() {
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {listings.map((l) => {
-              const imgs = Array.isArray(l.images) ? l.images : (l.images ? [l.images] : []);
+              const imgs = listingImages(l);
               const featured = imgs[0];
+              const href = listingHref(signedIn, `/marketplace/listing/${l.id}`);
+              const category = listingPartCategory(l);
               return (
-                <div key={l.id} className="card p-6">
+                <div key={l.id} className="card p-6 text-left">
                   {featured && (
-                    <Link href={`/marketplace/listing/${l.id}`}>
+                    <Link href={href}>
                       <img src={featured} alt="" className="w-full h-32 object-cover rounded mb-3 cursor-pointer" />
                     </Link>
                   )}
-                  <Link href={`/marketplace/listing/${l.id}`}>
+                  <Link href={href}>
                     <h3 className="font-bold text-xl mb-1 hover:text-[var(--gold)] cursor-pointer">{l.title}</h3>
                   </Link>
+                  {category && (
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--gold)] mb-1">{category}</p>
+                  )}
                   <p className="text-sm text-[var(--text3)] mb-1">{l.description || l.notes}</p>
                   <p className="text-sm text-[var(--text3)] mb-2">PN: {l.part_number || l.serial_number || 'N/A'}</p>
                   <p className="text-sm mb-2">{l.manufacturer} {l.model} • {l.condition}</p>
-                  <div className="font-semibold text-[var(--gold)] mb-2">${l.price}</div>
+                  <GuestAwarePrice signedIn={signedIn} priceLabel={formatListingPrice(l)} className="font-semibold text-[var(--gold)] mb-2" />
+                  {signedIn ? (
                   <button 
                     onClick={() => { setBiddingOn(l); setBidPrice(''); setBidNotes(''); setBidQuestion(''); }} 
                     className="btn btn-primary w-full text-sm"
                   >
                     Make Offer / Bid
                   </button>
+                  ) : (
+                    <Link href={href} className="btn btn-primary w-full text-sm">
+                      Sign up to view
+                    </Link>
+                  )}
 
                   {biddingOn?.id === l.id && (
                     <div className="mt-3 p-3 bg-[var(--surface3)] rounded">

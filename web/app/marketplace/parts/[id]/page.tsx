@@ -20,11 +20,13 @@ import {
 } from '@/lib/marketplace/parts';
 import { toast } from 'sonner';
 import { ArrowLeft, Image as ImageIcon, Package } from 'lucide-react';
+import { useGuestSignupRedirect } from '@/lib/use-signed-in';
 
 function PartDetail() {
   const params = useParams();
   const searchParams = useSearchParams();
   const id = params.id as string;
+  const { ready: authReady, signedIn } = useGuestSignupRedirect();
   const [listing, setListing] = useState<null | (Record<string, unknown> & {
     id?: string;
     title?: string;
@@ -65,7 +67,7 @@ function PartDetail() {
   }, [searchParams]);
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !authReady || !signedIn) return;
     const fetchListing = async () => {
     setLoading(true);
     setListing(null);
@@ -124,7 +126,7 @@ function PartDetail() {
     setLoading(false);
     };
     void fetchListing();
-  }, [id, supabase]);
+  }, [id, supabase, authReady, signedIn]);
 
   const images = useMemo(() => (listing ? listingImages(listing) : []), [listing]);
   const detailHref = partsDetailPath(id);
@@ -200,7 +202,7 @@ function PartDetail() {
     }
   };
 
-  if (loading) {
+  if (!authReady || !signedIn || loading) {
     return (
       <div className="min-h-screen flex flex-col">
         <Header />

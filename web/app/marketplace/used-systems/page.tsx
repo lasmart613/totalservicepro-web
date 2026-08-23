@@ -3,7 +3,11 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
+import { GuestAwarePrice } from '@/components/marketplace/GuestAwarePrice';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { listingHref } from '@/lib/marketplace/guest';
+import { formatListingPrice } from '@/lib/marketplace/parts';
+import { useSignedIn } from '@/lib/use-signed-in';
 import { toast } from 'sonner';
 
 export default function UsedSystemsMarketplace() {
@@ -13,6 +17,7 @@ export default function UsedSystemsMarketplace() {
   const [bidPrice, setBidPrice] = useState('');
   const [bidNotes, setBidNotes] = useState('');
   const [bidQuestion, setBidQuestion] = useState('');
+  const { signedIn } = useSignedIn();
   const supabase = getSupabaseClient();
 
   useEffect(() => {
@@ -87,26 +92,33 @@ export default function UsedSystemsMarketplace() {
             {listings.map((l) => {
               const imgs = Array.isArray(l.images) ? l.images : (l.images ? [l.images] : []);
               const featured = imgs[0];
+              const href = listingHref(signedIn, `/marketplace/listing/${l.id}`);
               return (
                 <div key={l.id} className="card p-6">
                   {featured && (
-                    <Link href={`/marketplace/listing/${l.id}`}>
+                    <Link href={href}>
                       <img src={featured} alt="Featured" className="w-full h-32 object-cover rounded mb-3 cursor-pointer" />
                     </Link>
                   )}
-                  <Link href={`/marketplace/listing/${l.id}`}>
+                  <Link href={href}>
                     <h3 className="font-bold text-xl mb-1 hover:text-[var(--gold)] cursor-pointer">{l.title}</h3>
                   </Link>
                   <p className="text-sm text-[var(--text3)] mb-1">{l.description}</p>
                   <p className="text-sm text-[var(--text3)] mb-2">S/N: {l.serial_number || l.part_number || 'N/A'}</p>
                   <p className="text-sm mb-1">{l.manufacturer} {l.model} • {l.condition} {l.year_manufactured ? '• ' + l.year_manufactured : ''}</p>
-                  <div className="font-semibold text-[var(--gold)] mb-2">${l.price}</div>
+                  <GuestAwarePrice signedIn={signedIn} priceLabel={formatListingPrice(l)} className="font-semibold text-[var(--gold)] mb-2" />
+                  {signedIn ? (
                   <button 
                     onClick={() => { setBiddingOn(l); setBidPrice(''); setBidNotes(''); setBidQuestion(''); }} 
                     className="btn btn-primary w-full text-sm"
                   >
                     Make Offer / Bid
                   </button>
+                  ) : (
+                    <Link href={href} className="btn btn-primary w-full text-sm">
+                      Sign up to view
+                    </Link>
+                  )}
 
                   {biddingOn?.id === l.id && (
                     <div className="mt-3 p-3 bg-[var(--surface3)] rounded">

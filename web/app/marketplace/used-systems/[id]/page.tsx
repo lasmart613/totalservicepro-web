@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { ArrowLeft, DollarSign, Calendar, Tag } from 'lucide-react';
+import { useGuestSignupRedirect } from '@/lib/use-signed-in';
 
 export default function UsedSystemDetail() {
   const params = useParams();
@@ -15,9 +16,10 @@ export default function UsedSystemDetail() {
   const [system, setSystem] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [images, setImages] = useState<string[]>([]);
+  const { ready: authReady, signedIn } = useGuestSignupRedirect();
 
   useEffect(() => {
-    if (!id) return;
+    if (!id || !authReady || !signedIn) return;
 
     const fetchSystem = async () => {
       const { data, error } = await supabase
@@ -41,9 +43,9 @@ export default function UsedSystemDetail() {
     };
 
     fetchSystem();
-  }, [id, supabase]);
+  }, [id, supabase, authReady, signedIn]);
 
-  if (loading) {
+  if (!authReady || !signedIn || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div>Loading system details...</div>

@@ -22,6 +22,9 @@ import {
   type MarketplaceListingLike,
   type PartsCatalogFilters,
 } from '@/lib/marketplace/parts';
+import { listingHref } from '@/lib/marketplace/guest';
+import { GuestAwarePrice } from '@/components/marketplace/GuestAwarePrice';
+import { useSignedIn } from '@/lib/use-signed-in';
 import { toast } from 'sonner';
 
 export default function PartsMarketplace() {
@@ -32,6 +35,7 @@ export default function PartsMarketplace() {
   const [bidPrice, setBidPrice] = useState('');
   const [bidNotes, setBidNotes] = useState('');
   const [bidQuestion, setBidQuestion] = useState('');
+  const { signedIn } = useSignedIn();
   const supabase = getSupabaseClient();
 
   useEffect(() => {
@@ -234,9 +238,10 @@ export default function PartsMarketplace() {
             {filtered.map((l) => {
               const imgs = listingImages(l);
               const featured = imgs[0];
-              const href = partsDetailPath(l.id);
+              const href = listingHref(signedIn, partsDetailPath(l.id!));
               const avail = listingAvailability(l);
               const qty = listingQuantity(l);
+              const category = listingPartCategory(l);
               return (
                 <div key={l.id} className="card p-6 text-left">
                   {featured && (
@@ -247,10 +252,13 @@ export default function PartsMarketplace() {
                   <Link href={href}>
                     <h3 className="font-bold text-xl mb-1 hover:text-[var(--gold)] cursor-pointer">{l.title}</h3>
                   </Link>
+                  {category && (
+                    <p className="text-xs font-semibold uppercase tracking-wide text-[var(--gold)] mb-1">{category}</p>
+                  )}
                   <ListingDescriptionSnippet text={l.description} className="mb-1" />
                   <p className="text-sm text-[var(--text3)] mb-2">PN: {l.part_number || l.serial_number || 'N/A'}</p>
                   <p className="text-sm mb-1">{l.manufacturer} {l.model} • {l.condition}</p>
-                  <div className="font-semibold text-[var(--gold)] mb-1">{formatListingPrice(l)}</div>
+                  <GuestAwarePrice signedIn={signedIn} priceLabel={formatListingPrice(l)} className="font-semibold text-[var(--gold)] mb-1" />
                   {avail.soldOut ? (
                     <div className="text-xs text-red-400 mb-3">Sold out</div>
                   ) : qty != null ? (
@@ -259,14 +267,20 @@ export default function PartsMarketplace() {
                     <div className="mb-3" />
                   )}
                   <Link href={href} className="btn btn-primary w-full text-sm mb-2">
-                    View details
+                    {signedIn ? 'View details' : 'Sign up to view'}
                   </Link>
+                  {signedIn ? (
                   <button 
                     onClick={() => { setBiddingOn(l); setBidPrice(''); setBidNotes(''); setBidQuestion(''); }} 
                     className="btn btn-secondary w-full text-sm"
                   >
                     Make Offer / Bid
                   </button>
+                  ) : (
+                    <Link href={href} className="btn btn-secondary w-full text-sm">
+                      Sign up to offer
+                    </Link>
+                  )}
 
                   {biddingOn?.id === l.id && (
                     <div className="mt-3 p-3 bg-[var(--surface3)] rounded">

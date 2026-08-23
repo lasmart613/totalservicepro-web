@@ -2,7 +2,7 @@
  * Parts-for-sale helpers. Consumables, used systems, and RFQs stay out of this lane.
  */
 
-import { toPlainListingText } from './listing-copy';
+import { toPlainListingText } from './listing-copy.ts';
 
 export type MarketplaceListingLike = {
   id?: string;
@@ -30,14 +30,21 @@ const PART_TYPES = new Set(['part', 'parts']);
 const PART_CATEGORIES = new Set(['part', 'parts']);
 const CONSUMABLE_VALUES = new Set(['consumable', 'consumables']);
 const NON_PART_TYPES = new Set([
-  'consumable',
-  'consumables',
   'used',
   'equipment',
   'request',
   'service',
   'rfq',
   'need',
+]);
+const GENERIC_CATEGORY_LABELS = new Set([
+  '',
+  'part',
+  'parts',
+  'consumable',
+  'consumables',
+  'other',
+  'other consumable',
 ]);
 
 function norm(value: unknown): string {
@@ -52,16 +59,101 @@ function detailsKind(row: MarketplaceListingLike): string {
   return norm((details as { kind?: unknown }).kind);
 }
 
+function listingHaystack(row: MarketplaceListingLike | null | undefined): string {
+  if (!row) return '';
+  const details = row.details && typeof row.details === 'object' ? row.details : null;
+  return [
+    row.title,
+    row.description,
+    row.notes,
+    row.manufacturer,
+    row.model,
+    row.part_number,
+    details?.part_category,
+    details?.category,
+    details?.kind,
+    details?.sku,
+  ]
+    .filter((v) => v != null && String(v).trim())
+    .join('\n')
+    .toLowerCase();
+}
+
+type InferredLane = { lane: 'part' | 'consumable'; label: string };
+
+/** Capital parts / spares — never consumables, even if the listing was typed that way. */
+const CAPITAL_PART_RULES: { re: RegExp; label: string }[] = [
+  { re: /\b(power\s*supply|powersupply|psu|hvps|simmer\s+supply)\b/i, label: 'Power supply' },
+  {
+    re: /\b(circuit\s*boards?|motherboards?|pcbs?|i\/?o\s*boards?|distribution\s*boards?|control\s*boards?|trigger\s*pcb|modulator\s+motherboard)\b/i,
+    label: 'Control board / PCB',
+  },
+  { re: /\b(laser\s*heads?|resonators?)\b/i, label: 'Laser head' },
+  { re: /\b(handpieces?|delivery\s+systems?)\b/i, label: 'Optical / Handpiece' },
+];
+
+/** Items that get used up — dye kits, cryogen, filters, windows, tips, etc. */
+const CONSUMABLE_RULES: { re: RegExp; label: string }[] = [
+  { re: /\bdye\s*kits?\b/i, label: 'Other consumable' },
+  { re: /\b(cryogen|coolant|distilled\s+water)\b/i, label: 'Cryogen / gas' },
+  { re: /\b(filters?|windows?)\b/i, label: 'Filter / window (consumable)' },
+  { re: /\b(disposable\s+)?tips?\b|\bspacers?\b/i, label: 'Disposable tip / spacer' },
+  { re: /\b(o-?rings?|cartridges?|coupling\s+gel)\b/i, label: 'Other consumable' },
+  { re: /\b(flash\s*lamps?|flashlamps?)\b/i, label: 'Flashlamp (consumable stock)' },
+  { re: /\b(disposable\s+fibers?|fiber\s+tips?)\b/i, label: 'Other consumable' },
+];
+
+export function inferPartKind(row: MarketplaceListingLike | null | undefined): InferredLane | null {
+  const hay = listingHaystack(row);
+  if (!hay) return null;
+  for (const rule of CAPITAL_PART_RULES) {
+    if (rule.re.test(hay)) return { lane: 'part', label: rule.label };
+  }
+  for (const rule of CONSUMABLE_RULES) {
+    if (rule.re.test(hay)) return { lane: 'consumable', label: rule.label };
+  }
+  return null;
+}
+
+function explicitConsumable(row: MarketplaceListingLike): boolean {
+  return (
+    CONSUMABLE_VALUES.has(norm(row.listing_type)) ||
+    CONSUMABLE_VALUES.has(norm(row.category)) ||
+    CONSUMABLE_VALUES.has(detailsKind(row))
+  );
+}
+
+function explicitPart(row: MarketplaceListingLike): boolean {
+  const type = norm(row.listing_type);
+  const category = norm(row.category);
+  const kind = detailsKind(row);
+  return PART_TYPES.has(type) || PART_CATEGORIES.has(category) || PART_TYPES.has(kind);
+}
+
 /** True only for marketplace parts-for-sale (not consumables, used systems, or RFQs). */
 export function isPartListing(row: MarketplaceListingLike | null | undefined): boolean {
   if (!row) return false;
   const type = norm(row.listing_type);
-  const category = norm(row.category);
-  const kind = detailsKind(row);
-  if (NON_PART_TYPES.has(type) || CONSUMABLE_VALUES.has(category) || CONSUMABLE_VALUES.has(kind)) {
-    return false;
-  }
-  return PART_TYPES.has(type) || PART_CATEGORIES.has(category) || PART_TYPES.has(kind);
+  if (NON_PART_TYPES.has(type)) return false;
+  const inferred = inferPartKind(row);
+  if (inferred?.lane === 'part') return true;
+  if (inferred?.lane === 'consumable') return false;
+  if (explicitConsumable(row)) return false;
+  return explicitPart(row);
+}
+
+/**
+ * Consumables are used-up items (dye kits, cryogen, filters, windows, tips).
+ * Circuit boards, power supplies, laser heads, and handpieces are parts/spares.
+ */
+export function isConsumableListing(row: MarketplaceListingLike | null | undefined): boolean {
+  if (!row) return false;
+  const type = norm(row.listing_type);
+  if (NON_PART_TYPES.has(type)) return false;
+  const inferred = inferPartKind(row);
+  if (inferred?.lane === 'part') return false;
+  if (inferred?.lane === 'consumable') return true;
+  return explicitConsumable(row);
 }
 
 export function listingImages(row: {
@@ -219,11 +311,16 @@ export function listingBrand(row: MarketplaceListingLike | null | undefined): st
 export function listingPartCategory(row: MarketplaceListingLike | null | undefined): string {
   const details = row?.details && typeof row.details === 'object' ? row.details : null;
   const fromDetails = String(details?.part_category || details?.category || '').trim();
-  if (fromDetails && !PART_CATEGORIES.has(fromDetails.toLowerCase()) && !CONSUMABLE_VALUES.has(fromDetails.toLowerCase())) {
+  const inferred = inferPartKind(row);
+  if (fromDetails && !GENERIC_CATEGORY_LABELS.has(fromDetails.toLowerCase())) {
+    if (inferred?.lane === 'part' && CONSUMABLE_VALUES.has(fromDetails.toLowerCase())) {
+      return inferred.label;
+    }
     return fromDetails;
   }
+  if (inferred?.label) return inferred.label;
   const category = String(row?.category || '').trim();
-  if (category && !PART_CATEGORIES.has(category.toLowerCase())) return category;
+  if (category && !GENERIC_CATEGORY_LABELS.has(category.toLowerCase())) return category;
   return '';
 }
 
