@@ -40,9 +40,9 @@ async function loadCaller(req: NextRequest) {
   return { user, supabase };
 }
 
-async function writeOrgUpgrade(client: SupabaseClient, orgId: string, plan: string) {
+async function writeOrgUpgrade(client: SupabaseClient, orgId: string) {
   const payload: Record<string, unknown> = {
-    ...orgUpgradeFields(plan),
+    ...orgUpgradeFields(),
     updated_at: new Date().toISOString(),
   };
   let lastError: { message?: string } | null = null;
@@ -115,7 +115,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const org = await writeOrgUpgrade(writer, orgId, verdict.plan);
+    const org = await writeOrgUpgrade(writer, orgId);
     const customerId = stripeCustomerIdFromSession(session);
     const subscriptionId = stripeSubscriptionIdFromSession(session);
 
@@ -143,12 +143,12 @@ export async function POST(req: NextRequest) {
       const subRow: Record<string, unknown> = {
         user_id: user.id,
         organization_id: Number.isFinite(Number(orgId)) ? Number(orgId) : orgId,
-        tier: verdict.plan,
+        tier: verdict.priceId,
         status: 'active',
-        sku: verdict.sku,
+        sku: verdict.priceId,
         platform: 'stripe',
         subscription_type: 'stripe',
-        package_name: verdict.plan,
+        stripe_price_id: verdict.priceId,
         stripe_subscription_id: subscriptionId,
         updated_at: new Date().toISOString(),
       };
@@ -169,8 +169,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       organizationId: orgId,
-      plan: verdict.plan,
-      sku: verdict.sku,
+      priceId: verdict.priceId,
       org,
     });
   } catch (e: unknown) {

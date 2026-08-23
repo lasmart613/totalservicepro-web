@@ -1,6 +1,6 @@
 /**
- * Org-plan Stripe Checkout on the existing RepairPlanet / TSP account.
- * Reuses STRIPE_SECRET_KEY / STRIPE_SECRET (same as invoice + parts).
+ * Org-plan Stripe Checkout using products that already exist on the
+ * RepairPlanet / TSP account. Never creates products or prices.
  * Cancel URL is unpaid — Checkout does not charge until the customer confirms.
  */
 
@@ -13,7 +13,7 @@ import {
   stripeSiteOrigin,
   stripeTestKeyOnProductionMessage,
 } from '@/lib/billing/stripe-pay';
-import { PLAN_OFFERS, type PlanOffer, type PlanSku } from '@/lib/billing/plan-catalog';
+import { isStripePriceId, livePlanFromStripePrice, type LivePlanPrice } from '@/lib/billing/plan-catalog';
 import {
   buildUpgradeCheckoutFields,
   type UpgradeSessionOwner,
@@ -23,9 +23,14 @@ type StripeObject = Record<string, unknown> & {
   id?: string;
   url?: string;
   livemode?: boolean;
-  lookup_key?: string;
+  lookup_key?: string | null;
   unit_amount?: number;
+  currency?: string;
+  type?: string;
+  active?: boolean;
   recurring?: { interval?: string } | null;
+  product?: string | StripeObject | null;
+  metadata?: Record<string, string>;
   data?: StripeObject[];
   error?: { message?: string };
   message?: string;
@@ -34,7 +39,6 @@ type StripeObject = Record<string, unknown> & {
   payment_status?: string;
   status?: string;
   mode?: string;
-  metadata?: Record<string, string>;
   client_reference_id?: string;
 };
 
@@ -67,8 +71,7 @@ function formBody(fields: Record<string, string | number | boolean | null | unde
 async function stripeRequest(
   path: string,
   method: 'GET' | 'POST',
-  fields?: Record<string, string | number | boolean | null | undefined>,
-  idempotencyKey?: string
+  fields?: Record<string, string | number | boolean | null | undefined>
 ): Promise<StripeObject> {
   stripeSecretOrThrow();
   const secret = getStripeSecret() as string;
@@ -80,7 +83,6 @@ async function stripeRequest(
   if (method === 'POST') {
     headers['Content-Type'] = 'application/x-www-form-urlencoded';
     body = formBody(fields || {});
-    if (idempotencyKey) headers['Idempotency-Key'] = idempotencyKey.slice(0, 255);
   }
   const res = await fetch(url, { method, headers, body });
   const data = (await res.json().catch(() => ({}))) as StripeObject;
@@ -91,103 +93,57 @@ async function stripeRequest(
   return data;
 }
 
-function envPriceId(sku: PlanSku): string | null {
-  const envName = `STRIPE_PRICE_${sku.toUpperCase()}`;
-  const value = String(process.env[envName] ?? '').trim();
-  return value || null;
-}
-
-async function findPriceByLookupKey(offer: PlanOffer): Promise<string | null> {
+/** Existing recurring prices only. Does not create Products or Prices. */
+export async function listLivePlanPrices(): Promise<LivePlanPrice[]> {
   const listed = await stripeRequest(
-    `prices?lookup_keys[]=${encodeURIComponent(offer.lookupKey)}&active=true&limit=1`,
+    'prices?active=true&type=recurring&limit=100&expand[]=data.product',
     'GET'
   );
-  const found = listed.data?.[0];
-  if (found?.id) return String(found.id);
-  return null;
-}
-
-async function findProductId(offer: PlanOffer): Promise<string | null> {
-  try {
-    const search = await stripeRequest(
-      `products/search?query=${encodeURIComponent(`metadata['tsp_sku_family']:'${offer.plan}'`)}&limit=1`,
-      'GET'
-    );
-    const hit = search.data?.[0];
-    if (hit?.id) return String(hit.id);
-  } catch {
-    /* search may be unavailable on some keys */
+  const out: LivePlanPrice[] = [];
+  for (const row of listed.data || []) {
+    const plan = livePlanFromStripePrice(row);
+    if (plan) out.push(plan);
   }
-  return null;
+  return out;
 }
 
-async function ensureProduct(offer: PlanOffer): Promise<string> {
-  const existing = await findProductId(offer);
-  if (existing) return existing;
-  const created = await stripeRequest(
-    'products',
-    'POST',
-    {
-      name: offer.productName,
-      description: `${offer.productName} subscription`,
-      active: 'true',
-      'metadata[tsp_sku_family]': offer.plan,
-      'metadata[source]': 'totalservicepro_subscription',
-    },
-    `tsp-plan-product-${offer.plan}`
-  );
-  if (!created.id) throw new StripeSubscriptionError('Stripe did not return a product id', 502);
-  return String(created.id);
-}
-
-export async function resolvePlanPriceId(sku: PlanSku): Promise<{ priceId: string; offer: PlanOffer }> {
-  const offer = PLAN_OFFERS[sku];
-  const fromEnv = envPriceId(sku);
-  if (fromEnv) return { priceId: fromEnv, offer };
-
-  const byLookup = await findPriceByLookupKey(offer);
-  if (byLookup) return { priceId: byLookup, offer };
-
-  const productId = await ensureProduct(offer);
+export async function requireLivePlanPrice(priceId: string): Promise<LivePlanPrice> {
+  if (!isStripePriceId(priceId)) {
+    throw new StripeSubscriptionError('Not an existing Stripe price', 400);
+  }
   const price = await stripeRequest(
-    'prices',
-    'POST',
-    {
-      product: productId,
-      currency: 'usd',
-      unit_amount: offer.unitAmountCents,
-      'recurring[interval]': offer.interval,
-      lookup_key: offer.lookupKey,
-      active: 'true',
-      'metadata[sku]': offer.sku,
-      'metadata[plan]': offer.plan,
-      'metadata[source]': 'totalservicepro_subscription',
-    },
-    `tsp-plan-price-${offer.sku}-${offer.unitAmountCents}`
+    `prices/${encodeURIComponent(priceId)}?expand[]=product`,
+    'GET'
   );
-  if (!price.id) throw new StripeSubscriptionError('Stripe did not return a price id', 502);
-  return { priceId: String(price.id), offer };
+  const plan = livePlanFromStripePrice(price);
+  if (!plan) {
+    throw new StripeSubscriptionError(
+      'That Stripe price is not an existing recurring plan on this account.',
+      404
+    );
+  }
+  return plan;
 }
 
 export type OrgUpgradeCheckoutResult = {
   url: string;
   sessionId: string;
   livemode: boolean | null;
-  sku: PlanSku;
+  priceId: string;
   organizationId: string;
 };
 
 export async function createOrgUpgradeCheckoutSession(input: {
-  sku: PlanSku;
+  priceId: string;
   owner: UpgradeSessionOwner;
   customerId?: string | null;
   customerEmail?: string | null;
 }): Promise<OrgUpgradeCheckoutResult> {
-  const { priceId, offer } = await resolvePlanPriceId(input.sku);
+  const offer = await requireLivePlanPrice(input.priceId);
   const site = stripeSiteOrigin();
   const fields = buildUpgradeCheckoutFields({
-    offer,
-    priceId,
+    priceId: offer.priceId,
+    productId: offer.productId,
     owner: input.owner,
     successUrl: `${site}/plans?upgraded=1&session_id={CHECKOUT_SESSION_ID}`,
     cancelUrl: `${site}/plans?paid=0`,
@@ -195,7 +151,6 @@ export async function createOrgUpgradeCheckoutSession(input: {
     customerEmail: input.customerEmail,
   });
 
-  // No idempotency key: cancel-then-retry must open a new unpaid session.
   const session = await stripeRequest('checkout/sessions', 'POST', fields);
   if (!session.url || !session.id) {
     throw new StripeSubscriptionError('Stripe Checkout session did not return a URL', 502);
@@ -209,7 +164,7 @@ export async function createOrgUpgradeCheckoutSession(input: {
     url: String(session.url),
     sessionId: String(session.id),
     livemode,
-    sku: offer.sku,
+    priceId: offer.priceId,
     organizationId: input.owner.organizationId,
   };
 }

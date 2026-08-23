@@ -1,18 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { PLAN_OFFERS } from './plan-catalog.ts';
 import {
   buildUpgradeCheckoutFields,
   evaluateUpgradeSession,
   orgUpgradeFields,
 } from './upgrade-session.ts';
+import { livePlanFromStripePrice } from './plan-catalog.ts';
 
 const owner = { userId: 'user-1', organizationId: '42' };
 
 function fields() {
   return buildUpgradeCheckoutFields({
-    offer: PLAN_OFFERS.premium_monthly,
-    priceId: 'price_existing',
+    priceId: 'price_liveExisting',
+    productId: 'prod_liveExisting',
     owner,
     successUrl: 'https://repairplanet.net/plans?upgraded=1&session_id={CHECKOUT_SESSION_ID}',
     cancelUrl: 'https://repairplanet.net/plans?paid=0',
@@ -26,23 +26,33 @@ test('checkout session is subscription mode attached to the current org', () => 
   assert.equal(body.client_reference_id, '42');
   assert.equal(body['metadata[organization_id]'], '42');
   assert.equal(body['metadata[user_id]'], 'user-1');
-  assert.equal(body['metadata[sku]'], 'premium_monthly');
-  assert.equal(body['subscription_data[metadata][organization_id]'], '42');
-  assert.equal(body['line_items[0][price]'], 'price_existing');
+  assert.equal(body['metadata[stripe_price_id]'], 'price_liveExisting');
+  assert.equal(body['line_items[0][price]'], 'price_liveExisting');
   assert.match(body.cancel_url, /paid=0/);
 });
 
-test('checkout refuses to start without an organization', () => {
+test('checkout refuses to start without an organization or a Stripe price', () => {
   assert.throws(
     () =>
       buildUpgradeCheckoutFields({
-        offer: PLAN_OFFERS.team_monthly,
         priceId: 'price_x',
+        productId: 'prod_x',
         owner: { userId: 'user-1', organizationId: '' },
         successUrl: 'https://example.com/ok',
         cancelUrl: 'https://example.com/cancel',
       }),
     /organization_id/
+  );
+  assert.throws(
+    () =>
+      buildUpgradeCheckoutFields({
+        priceId: 'not-a-price',
+        productId: 'prod_x',
+        owner,
+        successUrl: 'https://example.com/ok',
+        cancelUrl: 'https://example.com/cancel',
+      }),
+    /price id/
   );
 });
 
@@ -57,19 +67,18 @@ test('complete paid session for the same org is accepted', () => {
         kind: 'org_plan',
         organization_id: '42',
         user_id: 'user-1',
-        sku: 'premium_monthly',
-        plan: 'premium',
+        stripe_price_id: 'price_liveExisting',
       },
     },
     owner
   );
   assert.equal(result.ok, true);
-  if (result.ok) assert.equal(result.plan, 'premium');
+  if (result.ok) assert.equal(result.priceId, 'price_liveExisting');
 });
 
 test('canceled or unpaid checkout does not upgrade', () => {
   const open = evaluateUpgradeSession(
-    { mode: 'subscription', status: 'open', payment_status: 'unpaid', metadata: { sku: 'premium_monthly' } },
+    { mode: 'subscription', status: 'open', payment_status: 'unpaid', metadata: {} },
     owner
   );
   assert.equal(open.ok, false);
@@ -82,7 +91,7 @@ test('canceled or unpaid checkout does not upgrade', () => {
       metadata: {
         organization_id: '99',
         user_id: 'user-1',
-        sku: 'premium_monthly',
+        stripe_price_id: 'price_liveExisting',
         kind: 'org_plan',
       },
     },
@@ -92,10 +101,41 @@ test('canceled or unpaid checkout does not upgrade', () => {
   if (!otherOrg.ok) assert.equal(otherOrg.reason, 'org_mismatch');
 });
 
-test('org upgrade writes paid flags for the selected plan', () => {
-  assert.deepEqual(orgUpgradeFields('premium'), {
-    is_premium: true,
-    subscription_tier: 'premium',
-    plan: 'premium',
+test('org upgrade only sets is_premium — no invented plan name', () => {
+  assert.deepEqual(orgUpgradeFields(), { is_premium: true });
+});
+
+test('live plan mapper drops marketplace prices and one-off prices', () => {
+  assert.equal(
+    livePlanFromStripePrice({
+      id: 'price_part',
+      active: true,
+      type: 'recurring',
+      unit_amount: 5000,
+      recurring: { interval: 'month' },
+      metadata: { marketplace_listing_id: 'abc' },
+    }),
+    null
+  );
+  assert.equal(
+    livePlanFromStripePrice({
+      id: 'price_once',
+      active: true,
+      type: 'one_time',
+      unit_amount: 5000,
+    }),
+    null
+  );
+  const live = livePlanFromStripePrice({
+    id: 'price_abc123',
+    active: true,
+    type: 'recurring',
+    unit_amount: 2500,
+    currency: 'usd',
+    recurring: { interval: 'month' },
+    product: { id: 'prod_abc', name: 'Existing Stripe name' },
   });
+  assert.equal(live?.priceId, 'price_abc123');
+  assert.equal(live?.name, 'Existing Stripe name');
+  assert.equal(live?.unitAmountCents, 2500);
 });

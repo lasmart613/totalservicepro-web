@@ -1,9 +1,8 @@
 /**
  * Pure helpers for signed-in org upgrade Checkout.
  * Checkout must attach to the current org and must not create a second account.
+ * Price IDs must already exist on Larry's Stripe account.
  */
-
-import { getPlanOffer, type PlanOffer, type PlanSku } from './plan-catalog.ts';
 
 export const UPGRADE_KIND = 'org_plan';
 
@@ -22,13 +21,12 @@ export type UpgradeSessionFields = {
   'metadata[kind]': typeof UPGRADE_KIND;
   'metadata[organization_id]': string;
   'metadata[user_id]': string;
-  'metadata[plan]': string;
-  'metadata[sku]': PlanSku;
+  'metadata[stripe_price_id]': string;
+  'metadata[stripe_product_id]': string;
   'subscription_data[metadata][kind]': typeof UPGRADE_KIND;
   'subscription_data[metadata][organization_id]': string;
   'subscription_data[metadata][user_id]': string;
-  'subscription_data[metadata][plan]': string;
-  'subscription_data[metadata][sku]': PlanSku;
+  'subscription_data[metadata][stripe_price_id]': string;
   customer?: string;
   customer_email?: string;
 };
@@ -40,8 +38,8 @@ export function normalizeOrgId(value: string | number | null | undefined): strin
 }
 
 export function buildUpgradeCheckoutFields(input: {
-  offer: PlanOffer;
   priceId: string;
+  productId: string;
   owner: UpgradeSessionOwner;
   successUrl: string;
   cancelUrl: string;
@@ -50,26 +48,28 @@ export function buildUpgradeCheckoutFields(input: {
 }): UpgradeSessionFields {
   const orgId = normalizeOrgId(input.owner.organizationId);
   const userId = String(input.owner.userId || '').trim();
+  const priceId = String(input.priceId || '').trim();
+  const productId = String(input.productId || '').trim();
   if (!orgId) throw new Error('organization_id is required to start checkout');
   if (!userId) throw new Error('user_id is required to start checkout');
+  if (!/^price_/.test(priceId)) throw new Error('An existing Stripe price id is required');
 
   const fields: UpgradeSessionFields = {
     mode: 'subscription',
     client_reference_id: orgId,
     success_url: input.successUrl,
     cancel_url: input.cancelUrl,
-    'line_items[0][price]': input.priceId,
+    'line_items[0][price]': priceId,
     'line_items[0][quantity]': 1,
     'metadata[kind]': UPGRADE_KIND,
     'metadata[organization_id]': orgId,
     'metadata[user_id]': userId,
-    'metadata[plan]': input.offer.plan,
-    'metadata[sku]': input.offer.sku,
+    'metadata[stripe_price_id]': priceId,
+    'metadata[stripe_product_id]': productId,
     'subscription_data[metadata][kind]': UPGRADE_KIND,
     'subscription_data[metadata][organization_id]': orgId,
     'subscription_data[metadata][user_id]': userId,
-    'subscription_data[metadata][plan]': input.offer.plan,
-    'subscription_data[metadata][sku]': input.offer.sku,
+    'subscription_data[metadata][stripe_price_id]': priceId,
   };
 
   const customerId = String(input.customerId || '').trim();
@@ -94,7 +94,7 @@ export type StripeCheckoutLike = {
 export function evaluateUpgradeSession(
   session: StripeCheckoutLike | null | undefined,
   expected: UpgradeSessionOwner
-): { ok: true; sku: PlanSku; plan: string } | { ok: false; reason: string } {
+): { ok: true; priceId: string } | { ok: false; reason: string } {
   if (!session) return { ok: false, reason: 'missing_session' };
   if (session.mode !== 'subscription') return { ok: false, reason: 'not_subscription' };
   if (session.status !== 'complete') return { ok: false, reason: 'not_complete' };
@@ -113,17 +113,12 @@ export function evaluateUpgradeSession(
   if (userId !== expectedUser) return { ok: false, reason: 'user_mismatch' };
   if (meta.kind && meta.kind !== UPGRADE_KIND) return { ok: false, reason: 'wrong_kind' };
 
-  const sku = String(meta.sku || '');
-  const offer = getPlanOffer(sku);
-  if (!offer) return { ok: false, reason: 'unknown_sku' };
-  return { ok: true, sku: offer.sku, plan: offer.plan };
+  const priceId = String(meta.stripe_price_id || '').trim();
+  if (!/^price_/.test(priceId)) return { ok: false, reason: 'missing_price' };
+  return { ok: true, priceId };
 }
 
-export function orgUpgradeFields(plan: string): Record<string, unknown> {
-  const name = String(plan || '').toLowerCase().trim();
-  return {
-    is_premium: true,
-    subscription_tier: name,
-    plan: name,
-  };
+/** Paid flag only. Do not invent a plan enum name. */
+export function orgUpgradeFields(): Record<string, unknown> {
+  return { is_premium: true };
 }

@@ -1,97 +1,87 @@
 /**
- * Paid plan catalog copied from the Android paywall
- * (app/src/main/assets/paywall.html PRICES + BillingManager SKUs).
- * Web checkout uses these amounts; do not invent new prices here.
+ * Helpers for Stripe subscription products that already exist on the
+ * RepairPlanet account. This file does not name plans or set dollar amounts.
  */
 
-export const PLAN_SKUS = [
-  'premium_monthly',
-  'premium_annual',
-  'team_monthly',
-  'team_annual',
-] as const;
-
-export type PlanSku = (typeof PLAN_SKUS)[number];
-export type PaidPlanId = 'premium' | 'team';
-export type BillingCycle = 'monthly' | 'annual';
-
-export type PlanOffer = {
-  sku: PlanSku;
-  plan: PaidPlanId;
-  cycle: BillingCycle;
-  /** Amount charged on the Stripe invoice (cents). */
+export type LivePlanPrice = {
+  priceId: string;
+  productId: string;
+  name: string;
   unitAmountCents: number;
-  interval: 'month' | 'year';
-  /** Android paywall display, e.g. "$9.99". */
-  displayAmount: string;
-  displayPeriod: string;
-  /** Crossed-out monthly*12 list price on the annual toggle. */
-  displayOrig: string | null;
-  productName: string;
-  lookupKey: PlanSku;
+  currency: string;
+  interval: 'day' | 'week' | 'month' | 'year' | string;
+  lookupKey: string | null;
 };
 
-export const PLAN_OFFERS: Record<PlanSku, PlanOffer> = {
-  premium_monthly: {
-    sku: 'premium_monthly',
-    plan: 'premium',
-    cycle: 'monthly',
-    unitAmountCents: 999,
-    interval: 'month',
-    displayAmount: '$9.99',
-    displayPeriod: '/ month',
-    displayOrig: null,
-    productName: 'Total Service Pro Premium',
-    lookupKey: 'premium_monthly',
-  },
-  premium_annual: {
-    sku: 'premium_annual',
-    plan: 'premium',
-    cycle: 'annual',
-    // Android shows $6.66/month billed annually → $79.92/year
-    unitAmountCents: 7992,
-    interval: 'year',
-    displayAmount: '$6.66',
-    displayPeriod: '/ month',
-    displayOrig: '$119.88',
-    productName: 'Total Service Pro Premium',
-    lookupKey: 'premium_annual',
-  },
-  team_monthly: {
-    sku: 'team_monthly',
-    plan: 'team',
-    cycle: 'monthly',
-    unitAmountCents: 3999,
-    interval: 'month',
-    displayAmount: '$39.99',
-    displayPeriod: '/ month',
-    displayOrig: null,
-    productName: 'Total Service Pro Team',
-    lookupKey: 'team_monthly',
-  },
-  team_annual: {
-    sku: 'team_annual',
-    plan: 'team',
-    cycle: 'annual',
-    // Android shows $24.99/month billed annually → $299.88/year
-    unitAmountCents: 29988,
-    interval: 'year',
-    displayAmount: '$24.99',
-    displayPeriod: '/ month',
-    displayOrig: '$479.88',
-    productName: 'Total Service Pro Team',
-    lookupKey: 'team_annual',
-  },
+export function isStripePriceId(value: unknown): boolean {
+  return /^price_[A-Za-z0-9]+$/.test(String(value || '').trim());
+}
+
+/** Marketplace listing prices are one-off products, not org plans. */
+export function isMarketplaceStripeMeta(
+  metadata: Record<string, string | undefined> | null | undefined
+): boolean {
+  if (!metadata) return false;
+  if (metadata.marketplace_listing_id) return true;
+  if (metadata.marketplace_kind) return true;
+  if (metadata.source === 'repairplanet_marketplace') return true;
+  return false;
+}
+
+export function formatStripeMoney(unitAmountCents: number, currency = 'usd'): string {
+  const amount = Number(unitAmountCents) || 0;
+  try {
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: (currency || 'usd').toUpperCase(),
+    }).format(amount / 100);
+  } catch {
+    return `$${(amount / 100).toFixed(2)}`;
+  }
+}
+
+type StripePriceLike = {
+  id?: string;
+  active?: boolean;
+  type?: string;
+  unit_amount?: number;
+  currency?: string;
+  lookup_key?: string | null;
+  recurring?: { interval?: string } | null;
+  metadata?: Record<string, string | undefined> | null;
+  product?: string | { id?: string; name?: string; metadata?: Record<string, string | undefined> } | null;
 };
 
-export function isPlanSku(value: unknown): value is PlanSku {
-  return (PLAN_SKUS as readonly string[]).includes(String(value || ''));
+export function livePlanFromStripePrice(price: StripePriceLike | null | undefined): LivePlanPrice | null {
+  if (!price?.id || !isStripePriceId(price.id)) return null;
+  if (price.active === false) return null;
+  if (price.type && price.type !== 'recurring') return null;
+  const interval = price.recurring?.interval;
+  if (!interval) return null;
+  const product = typeof price.product === 'object' && price.product ? price.product : null;
+  if (isMarketplaceStripeMeta(price.metadata) || isMarketplaceStripeMeta(product?.metadata || null)) {
+    return null;
+  }
+  const amount = Number(price.unit_amount);
+  if (!Number.isFinite(amount) || amount < 0) return null;
+  const productId = typeof price.product === 'string' ? price.product : String(product?.id || '');
+  const name = String(product?.name || productId || 'Subscription').slice(0, 120);
+  return {
+    priceId: String(price.id),
+    productId,
+    name,
+    unitAmountCents: amount,
+    currency: String(price.currency || 'usd'),
+    interval,
+    lookupKey: price.lookup_key ? String(price.lookup_key) : null,
+  };
 }
 
-export function getPlanOffer(sku: string): PlanOffer | null {
-  return isPlanSku(sku) ? PLAN_OFFERS[sku] : null;
-}
-
-export function skuFor(plan: PaidPlanId, cycle: BillingCycle): PlanSku {
-  return `${plan}_${cycle}` as PlanSku;
+export function formatStripeInterval(interval: string): string {
+  const i = String(interval || '').toLowerCase();
+  if (i === 'month') return '/ month';
+  if (i === 'year') return '/ year';
+  if (i === 'week') return '/ week';
+  if (i === 'day') return '/ day';
+  return i ? `/ ${i}` : '';
 }

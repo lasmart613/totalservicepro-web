@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { getPlanOffer, isPlanSku } from '@/lib/billing/plan-catalog';
+import { isStripePriceId } from '@/lib/billing/plan-catalog';
 import { orgIsPaid } from '@/lib/org-plan';
 import { normalizeOrgId } from '@/lib/billing/upgrade-session';
 import {
@@ -46,10 +46,13 @@ export async function POST(req: NextRequest) {
     if (!('user' in caller) || !caller.user) return caller.error;
     const { user, supabase } = caller;
 
-    const body = (await req.json().catch(() => ({}))) as { sku?: string };
-    const sku = String(body.sku || '').trim();
-    if (!isPlanSku(sku) || !getPlanOffer(sku)) {
-      return NextResponse.json({ error: 'Unknown plan' }, { status: 400 });
+    const body = (await req.json().catch(() => ({}))) as { priceId?: string };
+    const priceId = String(body.priceId || '').trim();
+    if (!isStripePriceId(priceId)) {
+      return NextResponse.json(
+        { error: 'Checkout needs an existing Stripe price on this account.' },
+        { status: 400 }
+      );
     }
 
     const { data: profile } = await supabase
@@ -101,7 +104,7 @@ export async function POST(req: NextRequest) {
     if (stripeRow?.stripe_customer_id) customerId = String(stripeRow.stripe_customer_id);
 
     const session = await createOrgUpgradeCheckoutSession({
-      sku,
+      priceId,
       owner: { userId: user.id, organizationId: orgId },
       customerId,
       customerEmail: user.email || null,
@@ -111,7 +114,7 @@ export async function POST(req: NextRequest) {
       url: session.url,
       sessionId: session.sessionId,
       livemode: session.livemode,
-      sku: session.sku,
+      priceId: session.priceId,
       organizationId: session.organizationId,
     });
   } catch (e: unknown) {
