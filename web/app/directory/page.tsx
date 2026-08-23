@@ -4,15 +4,27 @@
  * TSP Directory — free public opt-in listings (Android tsp_directory.html parity).
  * Product: list_in_directory is free for all org types; no paywall.
  * Future: optional premium profile / boosting (not implemented).
+ *
+ * Logged-out visitors see a first page of real Organizations rows with PII
+ * replaced (same privacy bar as guest marketplace prices). Card clicks go to
+ * /signup. Signed-in viewers keep the existing opted-in listings and details.
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
+import { GuestDirectoryCard } from '@/components/directory/GuestDirectoryCard';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { fetchAllPages } from '@/lib/supabase/paginate';
 import { isServiceOrgType } from '@/lib/org-types';
 import { orgTypeLabel } from '@/lib/labels';
+import { useSignedIn } from '@/lib/use-signed-in';
+import {
+  GUEST_DIRECTORY_PAGE_SIZE,
+  GUEST_SIGNUP_HREF,
+  type DirectoryFilterKey,
+  type GuestDirectoryCard as GuestDirectoryCardData,
+} from '@/lib/directory/guest';
 
 type OrgRow = {
   id: number | string;
@@ -28,7 +40,7 @@ type OrgRow = {
   is_active?: boolean | null;
 };
 
-type FilterKey = 'all' | 'service' | 'clinics' | 'reseller' | 'rental' | 'supplier';
+type FilterKey = DirectoryFilterKey;
 
 function typeLabel(t?: string | null): string {
   return orgTypeLabel(t) || 'Organization';
@@ -52,20 +64,28 @@ function websiteHref(w?: string | null): string | null {
   return /^https?:\/\//i.test(s) ? s : `https://${s}`;
 }
 
-const FILTERS: { key: FilterKey; label: string }[] = [
-  { key: 'all', label: 'All listed' },
-  { key: 'service', label: 'Repair companies' },
-  { key: 'clinics', label: 'My Clinics' },
-  { key: 'reseller', label: 'Resellers' },
-  { key: 'rental', label: 'Rental companies' },
-  { key: 'supplier', label: 'Parts Suppliers' },
-];
+function guestFilters(signedIn: boolean): { key: FilterKey; label: string }[] {
+  return [
+    { key: 'all', label: 'All listed' },
+    { key: 'service', label: 'Repair companies' },
+    { key: 'clinics', label: signedIn ? 'My Clinics' : 'Laser clinics' },
+    { key: 'reseller', label: 'Resellers' },
+    { key: 'rental', label: 'Rental companies' },
+    { key: 'supplier', label: 'Parts Suppliers' },
+  ];
+}
 
 export default function DirectoryPage() {
   const supabase = getSupabaseClient();
+  const { ready: authReady, signedIn } = useSignedIn();
   const [loading, setLoading] = useState(true);
   const [allListed, setAllListed] = useState<OrgRow[]>([]);
   const [myClinics, setMyClinics] = useState<OrgRow[]>([]);
+  const [guestCards, setGuestCards] = useState<GuestDirectoryCardData[]>([]);
+  const [guestPage, setGuestPage] = useState(1);
+  const [guestHasMore, setGuestHasMore] = useState(false);
+  const [guestTotal, setGuestTotal] = useState<number | null>(null);
+  const [guestLoadingMore, setGuestLoadingMore] = useState(false);
   const [filter, setFilter] = useState<FilterKey>('all');
   const [search, setSearch] = useState('');
   const [note, setNote] = useState(
@@ -73,7 +93,7 @@ export default function DirectoryPage() {
   );
   const [myOrgId, setMyOrgId] = useState<string | number | null>(null);
 
-  const load = useCallback(async () => {
+  const loadSignedIn = useCallback(async () => {
     setLoading(true);
     try {
       const {
@@ -124,6 +144,9 @@ export default function DirectoryPage() {
         listed = (q1.data || []).filter((o: any) => o.is_active !== false);
       }
       setAllListed(listed);
+      setNote(
+        'Organizations opt in for free during onboarding or Company Profile. Clinics shows only customers linked to your repair company.'
+      );
 
       // My clinics — org-scoped via organization_customers (not global)
       const clinics: OrgRow[] = [];
@@ -160,9 +183,69 @@ export default function DirectoryPage() {
     }
   }, [supabase]);
 
+  const applyGuestPayload = useCallback(
+    (json: { listings?: GuestDirectoryCardData[]; hasMore?: boolean; total?: number | null }, append: boolean) => {
+      const rows = Array.isArray(json?.listings) ? json.listings : [];
+      setGuestCards((prev) => (append ? [...prev, ...rows] : rows));
+      setGuestHasMore(Boolean(json?.hasMore));
+      setGuestTotal(typeof json?.total === 'number' ? json.total : null);
+    },
+    []
+  );
+
+  const loadGuestPage = useCallback(
+    async (page: number, append: boolean) => {
+      if (append) setGuestLoadingMore(true);
+      else setLoading(true);
+      try {
+        const params = new URLSearchParams({
+          page: String(page),
+          limit: String(GUEST_DIRECTORY_PAGE_SIZE),
+          filter,
+        });
+        const res = await fetch(`/api/directory?${params.toString()}`, { cache: 'no-store' });
+        const json = await res.json().catch(() => ({}));
+        if (res.ok && Array.isArray(json?.listings)) {
+          applyGuestPayload(json, append);
+          setGuestPage(page);
+          setNote(
+            'Names, addresses, and contact details are hidden until you create a free account. Cards below are real organizations already on Total Service Pro.'
+          );
+          return;
+        }
+
+        if (append) return;
+        setGuestCards([]);
+        setGuestHasMore(false);
+        setNote('Sign up to browse the company directory.');
+      } catch (e) {
+        console.warn(e);
+        if (!append) {
+          setGuestCards([]);
+          setNote('Sign up to browse the company directory.');
+        }
+      } finally {
+        setLoading(false);
+        setGuestLoadingMore(false);
+      }
+    },
+    [applyGuestPayload, filter]
+  );
+
   useEffect(() => {
-    load();
-  }, [load]);
+    if (!authReady || !signedIn) return;
+    setGuestCards([]);
+    void loadSignedIn();
+  }, [authReady, signedIn, loadSignedIn]);
+
+  useEffect(() => {
+    if (!authReady || signedIn) return;
+    setSearch('');
+    setAllListed([]);
+    setMyClinics([]);
+    setGuestPage(1);
+    void loadGuestPage(1, false);
+  }, [authReady, signedIn, filter, loadGuestPage]);
 
   const visible = useMemo(() => {
     let source: OrgRow[];
@@ -190,6 +273,18 @@ export default function DirectoryPage() {
     return source;
   }, [allListed, myClinics, filter, search]);
 
+  const visibleGuests = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return guestCards;
+    return guestCards.filter((o) => {
+      const hay = [o.typeLabel, o.region, o.type].join(' ').toLowerCase();
+      return hay.includes(q);
+    });
+  }, [guestCards, search]);
+
+  const filters = guestFilters(signedIn);
+  const showingGuest = authReady && !signedIn;
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
@@ -211,14 +306,18 @@ export default function DirectoryPage() {
           <input
             type="search"
             className="input w-full rounded-full"
-            placeholder="Search by name, city, state…"
+            placeholder={
+              showingGuest
+                ? 'Filter by type or region… Sign up to search names'
+                : 'Search by name, city, state…'
+            }
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
         </div>
 
         <div className="flex gap-2 overflow-x-auto pb-2 mb-4 scrollbar-none">
-          {FILTERS.map((f) => (
+          {filters.map((f) => (
             <button
               key={f.key}
               type="button"
@@ -234,8 +333,49 @@ export default function DirectoryPage() {
           ))}
         </div>
 
-        {loading ? (
+        {!authReady || loading ? (
           <div className="text-center text-[var(--text3)] py-12">Loading directory…</div>
+        ) : showingGuest ? (
+          visibleGuests.length === 0 ? (
+            <div className="text-center text-[var(--text3)] py-12 px-4">
+              Sign up to browse the company directory.
+              <div className="mt-4">
+                <Link href={GUEST_SIGNUP_HREF} className="btn btn-primary text-sm px-4 py-2">
+                  Create a free account
+                </Link>
+              </div>
+            </div>
+          ) : (
+            <>
+              <div className="space-y-2.5">
+                {visibleGuests.map((o) => (
+                  <GuestDirectoryCard key={String(o.id)} signedIn={signedIn} card={o} />
+                ))}
+              </div>
+              <div className="text-center text-xs text-[var(--text3)] mt-4">
+                Showing {visibleGuests.length}
+                {guestTotal != null ? ` of ${guestTotal}` : ''} organizations.
+                {guestHasMore ? ' More listings are available after you sign up — or load the next page.' : ''}
+              </div>
+              {guestHasMore && (
+                <div className="flex justify-center mt-3">
+                  <button
+                    type="button"
+                    className="btn btn-secondary text-sm px-4 py-2"
+                    disabled={guestLoadingMore}
+                    onClick={() => void loadGuestPage(guestPage + 1, true)}
+                  >
+                    {guestLoadingMore ? 'Loading…' : 'Load more'}
+                  </button>
+                </div>
+              )}
+              <div className="flex justify-center mt-4">
+                <Link href={GUEST_SIGNUP_HREF} className="btn btn-primary text-sm px-4 py-2">
+                  Sign up to see names and contact details
+                </Link>
+              </div>
+            </>
+          )
         ) : visible.length === 0 ? (
           <div className="text-center text-[var(--text3)] py-12 px-4">
             {filter === 'clinics'
@@ -294,9 +434,15 @@ export default function DirectoryPage() {
 
         <p className="text-center text-xs text-[var(--text3)] mt-8">
           Want to appear here?{' '}
-          <Link href="/company" className="text-[var(--gold)] hover:underline">
-            Company Profile
-          </Link>{' '}
+          {showingGuest ? (
+            <Link href={GUEST_SIGNUP_HREF} className="text-[var(--gold)] hover:underline">
+              Create a free account
+            </Link>
+          ) : (
+            <Link href="/company" className="text-[var(--gold)] hover:underline">
+              Company Profile
+            </Link>
+          )}{' '}
           → enable free directory listing.
         </p>
       </div>
