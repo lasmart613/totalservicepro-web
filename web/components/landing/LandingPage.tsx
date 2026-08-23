@@ -400,7 +400,7 @@ export function LandingPage() {
             <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
           </Link>
           <Link href="/signup/owner" className="lp-path">
-            <h3>Clinic / owner</h3>
+            <h3>Laser Owner</h3>
             <ul>
               <li>Maximize uptime on every box</li>
               <li>Post a repair and take bids</li>
