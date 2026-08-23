@@ -2,6 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { ensureTeamMemberProfile, findAuthUserByEmail } from '@/lib/team-profile';
+import {
+  buildTeamInviteHtml,
+  buildTeamInviteText,
+  teamInviteLoginUrl,
+  teamInviteRoleLabel,
+  teamInviteSubject,
+} from '@/lib/team-invite';
 
 const ADMIN_ROLES = new Set([
   'admin',
@@ -27,22 +34,6 @@ function siteUrl(req: NextRequest): string {
   return 'https://repairplanet.net';
 }
 
-function roleLabelFor(role: string): string {
-  const roleLabels: Record<string, string> = {
-    fse: 'Field Service Engineer (FSE)',
-    engineer: 'Field Service Engineer',
-    dispatcher: 'Dispatcher',
-    service_manager: 'Service Manager',
-    company_admin: 'Company Admin',
-    admin: 'Administrator',
-    billing_manager: 'Billing Manager',
-    scheduler: 'Scheduler',
-    technician: 'Technician',
-    viewer: 'Viewer',
-  };
-  return roleLabels[role] || role.replace(/_/g, ' ');
-}
-
 function isRateLimitError(msg: string): boolean {
   return /rate.?limit|too many|429|email.*limit/i.test(msg || '');
 }
@@ -51,8 +42,8 @@ function isRateLimitError(msg: string): boolean {
  * Invite a team member:
  * 1) Verify caller is authenticated admin of an org
  * 2) Record engineer_invitations + user_profiles
- * 3) Send Supabase Auth invite email (service role)
- * 4) If email fails (rate limit / SMTP), still return a copyable action link
+ * 3) generateLink (creates the auth user, no mail) + branded Resend email
+ * 4) If Resend is not configured or send fails, still return a copyable action link
  */
 export async function POST(req: NextRequest) {
   try {
@@ -109,7 +100,7 @@ export async function POST(req: NextRequest) {
     const orgId = profile.organization_id;
     const base = siteUrl(req);
     const redirectTo = `${base}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`;
-    const roleLabel = roleLabelFor(inviteRole);
+    const roleLabel = teamInviteRoleLabel(inviteRole);
 
     if (!hasServiceRole()) {
       const { error: invErr } = await userClient.from('engineer_invitations').insert({
@@ -247,8 +238,11 @@ export async function POST(req: NextRequest) {
       return r;
     };
 
-    /** Build a copyable invite/recovery link even when SMTP fails */
-    const buildActionLink = async (preferInvite: boolean): Promise<string | null> => {
+    /** Build a copyable invite/recovery link without sending Supabase mail. */
+    const buildActionLink = async (preferInvite: boolean): Promise<{
+      url: string | null;
+      userId: string | null;
+    }> => {
       try {
         const type = preferInvite ? 'invite' : 'recovery';
         // Cast: supabase-js GenerateLinkParams typing is stricter than runtime invite/recovery payloads
@@ -261,7 +255,6 @@ export async function POST(req: NextRequest) {
           },
         } as any);
         if (error) {
-          // Try the other type
           const alt = preferInvite ? 'recovery' : 'invite';
           const { data: d2, error: e2 } = await admin.auth.admin.generateLink({
             type: alt,
@@ -270,140 +263,137 @@ export async function POST(req: NextRequest) {
           } as any);
           if (e2) {
             console.warn('generateLink failed', error.message, e2.message);
-            return null;
+            return { url: null, userId: null };
           }
-          return d2?.properties?.action_link || null;
+          return {
+            url: d2?.properties?.action_link || null,
+            userId: d2?.user?.id || null,
+          };
         }
-        return data?.properties?.action_link || null;
+        return {
+          url: data?.properties?.action_link || null,
+          userId: data?.user?.id || null,
+        };
       } catch (e) {
         console.warn('generateLink exception', e);
-        return null;
+        return { url: null, userId: null };
       }
     };
 
-    // --- Send invite email ---
-    const { data: inviteData, error: inviteErr } = await admin.auth.admin.inviteUserByEmail(email, {
-      data: inviteMeta,
-      redirectTo,
-    });
+    const generated = await buildActionLink(true);
+    const inviteUrl = generated.url;
+    let newUserId = generated.userId;
 
-    if (!inviteErr) {
-      const newUserId = inviteData?.user?.id || null;
-      if (newUserId) {
-        await ensureProfileForUserId(newUserId);
-      } else {
-        const found = await findAuthUserByEmail(admin, email);
-        if (found?.id) await ensureProfileForUserId(found.id);
-      }
-
-      // Also generate link for admin (handy if email is slow / in spam)
-      const inviteUrl = await buildActionLink(true);
-
-      return NextResponse.json({
-        ok: true,
-        emailed: true,
-        userId: newUserId,
-        inviteUrl,
-        message: `Invite email sent to ${email}. If they don't see it within a few minutes, check spam — or copy the invite link from the toast / pending list.`,
-      });
-    }
-
-    // --- Email path failed ---
-    const msg = inviteErr.message || 'Invite email failed';
-    const rateLimited = isRateLimitError(msg);
-    console.warn('inviteUserByEmail failed:', msg);
-
-    // User may already exist, or email rate limit hit after partial create
-    const existingAuth = await findAuthUserByEmail(admin, email);
-    if (existingAuth?.id) {
-      await ensureProfileForUserId(existingAuth.id);
-    }
-
-    // Prefer recovery link if auth user already exists; invite link if not
-    const inviteUrl = await buildActionLink(!existingAuth);
-
-    // If generateLink created a user (invite type), ensure profile
-    if (!existingAuth && inviteUrl) {
+    if (!newUserId && inviteUrl) {
       const found = await findAuthUserByEmail(admin, email);
-      if (found?.id) await ensureProfileForUserId(found.id);
+      newUserId = found?.id || null;
+    }
+    if (newUserId) {
+      await ensureProfileForUserId(newUserId);
     }
 
-    if (rateLimited) {
-      return NextResponse.json({
-        ok: true,
-        emailed: false,
-        rateLimited: true,
-        inviteUrl,
-        message:
-          'Supabase blocked the email (built-in email limit: only a few per hour without custom SMTP). ' +
-          (inviteUrl
-            ? 'Copy the invite link below and send it yourself (text/email).'
-            : 'Wait ~1 hour and try again, or configure custom SMTP in Supabase Auth settings.'),
-      });
-    }
+    const loginUrl = teamInviteLoginUrl(base);
+    const subject = teamInviteSubject(organizationName);
+    const html = inviteUrl
+      ? buildTeamInviteHtml({
+          organizationName,
+          firstName,
+          roleLabel,
+          acceptUrl: inviteUrl,
+          loginUrl,
+        })
+      : null;
+    const text = inviteUrl
+      ? buildTeamInviteText({
+          organizationName,
+          firstName,
+          roleLabel,
+          acceptUrl: inviteUrl,
+          loginUrl,
+        })
+      : null;
 
-    if (/already|registered|exists/i.test(msg)) {
-      // Try recovery email
+    const resendKey = process.env.RESEND_API_KEY;
+    const from =
+      process.env.NOTIFY_FROM_EMAIL ||
+      process.env.RESEND_FROM ||
+      'Total Service Pro <contact@medicalrepairnetwork.com>';
+
+    if (inviteUrl && html && text && resendKey) {
       try {
-        const recoverRes = await fetch(`${url}/auth/v1/recover`, {
+        const rr = await fetch('https://api.resend.com/emails', {
           method: 'POST',
           headers: {
-            apikey: process.env.SUPABASE_SERVICE_ROLE_KEY || '',
-            Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY || ''}`,
+            Authorization: `Bearer ${resendKey}`,
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            email,
-            gotrue_meta_security: {},
-            redirect_to: redirectTo,
+            from,
+            to: [email],
+            subject,
+            html,
+            text,
           }),
         });
-        if (recoverRes.ok) {
+        const result = await rr.json().catch(() => ({}));
+        if (rr.ok) {
           return NextResponse.json({
             ok: true,
             emailed: true,
+            userId: newUserId,
             inviteUrl,
-            message: `Account already existed for ${email}. Sent a password-setup email. Check spam if needed.`,
+            message: `Invite email sent to ${email}. If they don't see it within a few minutes, check spam — or copy the invite link from the toast / pending list.`,
           });
         }
-        const recoverText = await recoverRes.text().catch(() => '');
-        console.warn('recover failed', recoverRes.status, recoverText);
-        if (isRateLimitError(recoverText)) {
+        const sendMsg = result?.message || `Email provider error (${rr.status})`;
+        console.error('Resend team invite failed', rr.status, sendMsg);
+        if (isRateLimitError(sendMsg)) {
           return NextResponse.json({
             ok: true,
             emailed: false,
             rateLimited: true,
             inviteUrl,
             message:
-              'Email rate limit hit. Copy the invite/setup link and send it to them manually.',
+              'Email rate limit hit. Copy the invite link below and send it yourself.',
           });
         }
-      } catch (re) {
-        console.warn('recover exception', re);
+        return NextResponse.json({
+          ok: true,
+          emailed: false,
+          warning: sendMsg,
+          inviteUrl,
+          message: `Could not send email: ${sendMsg}. Copy the invite link and send it yourself.`,
+        });
+      } catch (sendErr: any) {
+        console.error('Resend team invite exception', sendErr);
+        return NextResponse.json({
+          ok: true,
+          emailed: false,
+          warning: sendErr?.message || 'send failed',
+          inviteUrl,
+          message:
+            'Could not send email. Copy the invite link and send it yourself.',
+        });
       }
+    }
 
+    if (!inviteUrl) {
       return NextResponse.json({
         ok: true,
         emailed: false,
-        inviteUrl,
         message:
-          inviteUrl
-            ? `Account exists for ${email}. Email could not be sent — copy this link and share it with them.`
-            : `Account exists for ${email}. They should use Login → Forgot password.`,
-        signupUrl: `${base}/login`,
+          'Invitation saved, but an invite link could not be created. Ask them to use Login → Forgot password with this email.',
+        signupUrl: loginUrl,
       });
     }
 
     return NextResponse.json({
       ok: true,
       emailed: false,
-      warning: msg,
       inviteUrl,
-      message:
-        `Could not send email: ${msg}. ` +
-        (inviteUrl
-          ? 'Copy the invite link and send it yourself.'
-          : 'Try again later or set up custom SMTP in Supabase.'),
+      message: resendKey
+        ? `Invite link created for ${email}. Email could not be sent — copy the link and share it with them.`
+        : `Invitation saved for ${email}. Email delivery is not configured (RESEND_API_KEY) — copy the invite link and send it yourself.`,
     });
   } catch (e: any) {
     console.error('team invite error', e);

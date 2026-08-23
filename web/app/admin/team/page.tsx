@@ -361,7 +361,7 @@ export default function TeamManagement() {
               {adding ? 'Sending invite…' : 'Send Invite Email'}
             </button>
             <p className="text-xs text-[var(--text3)] mt-2">
-              Sends a Supabase invite email. After they accept, they join your org automatically.
+              Sends a RepairPlanet invite email. After they accept, they join your org automatically.
             </p>
           </div>
         </form>
