@@ -6,6 +6,8 @@ import { useRouter, usePathname } from 'next/navigation';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { isAdmin } from '@/lib/roles';
+import { useShowUpgrade } from '@/lib/use-show-upgrade';
+import { UpgradePlanLink, UPGRADE_LABEL } from '@/components/UpgradePlanLink';
 
 /**
  * Client-side admin gate.
@@ -19,6 +21,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [allowed, setAllowed] = useState(false);
   const [orgName, setOrgName] = useState('Your company');
   const [deniedReason, setDeniedReason] = useState<'login' | 'role' | null>(null);
+  const showUpgrade = useShowUpgrade();
 
   useEffect(() => {
     let cancelled = false;
@@ -165,6 +168,18 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 </Link>
               );
             })}
+            {showUpgrade && (
+              <UpgradePlanLink
+                className={
+                  'block px-4 py-2.5 rounded-lg hover:bg-[var(--surface3)] ' +
+                  (pathname === '/plans'
+                    ? 'bg-[var(--surface3)] text-[var(--gold)] font-semibold'
+                    : '')
+                }
+              >
+                {UPGRADE_LABEL}
+              </UpgradePlanLink>
+            )}
             <div className="pt-4 mt-4 border-t border-[var(--border)]">
               <Link href="/" className="block px-4 py-2.5 rounded-lg hover:bg-[var(--surface3)] text-[var(--text3)]">
                 ← Main Dashboard
@@ -184,6 +199,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 {item.label}
               </Link>
             ))}
+            {showUpgrade && (
+              <UpgradePlanLink className="btn btn-secondary text-xs whitespace-nowrap">
+                {UPGRADE_LABEL}
+              </UpgradePlanLink>
+            )}
           </div>
           {children}
         </main>

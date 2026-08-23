@@ -14,9 +14,12 @@ import {
   X,
   Bell,
   ChevronDown,
+  ArrowUpCircle,
 } from 'lucide-react';
 import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
 import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
+import { useShowUpgrade } from '@/lib/use-show-upgrade';
+import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 
 type NavLink = { href: string; label: string };
 type NavGroup = { id: string; label: string; href?: string; items: NavLink[] };
@@ -106,6 +109,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const [navOpenId, setNavOpenId] = useState<string | null>(null);
   const [mobileOpenGroup, setMobileOpenGroup] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
+  const showUpgrade = useShowUpgrade();
   const supabase = getSupabaseClient();
 
   async function refreshUnread(uid: string) {
@@ -475,6 +479,14 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 >
                   <Building2 size={16} /> {companyLabel}
                 </Link>
+                {showUpgrade && (
+                  <UpgradePlanLink
+                    className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"
+                    onClick={() => setDropdownOpen(false)}
+                  >
+                    <ArrowUpCircle size={16} /> Upgrade plan
+                  </UpgradePlanLink>
+                )}
                 <Link
                   href="/settings"
                   className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"

@@ -14,6 +14,8 @@ import {
 } from '@/lib/roles';
 import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
+import { useShowUpgrade } from '@/lib/use-show-upgrade';
+import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import {
   isClosedTicketStatus,
   isCompleteReport,
@@ -54,6 +56,7 @@ export default function HomePage() {
   const [upcoming, setUpcoming] = useState<any[]>([]);
 
   const supabase = getSupabaseClient();
+  const showUpgrade = useShowUpgrade();
 
   useEffect(() => {
     const loadData = async () => {
@@ -416,13 +419,22 @@ export default function HomePage() {
       <Header />
 
       <div className="max-w-7xl mx-auto w-full px-4 py-8">
-        <h1 className="text-4xl font-extrabold tracking-tight">
-          Welcome back, {greetName}!
-        </h1>
-        <p className="text-[var(--text3)]">
-          Role: {roleLabel(role)}
-          {displayOrgType ? <span> · Org: {orgTypeLabel(displayOrgType)}</span> : null}
-        </p>
+        <div className="flex items-start justify-between gap-4 flex-wrap">
+          <div>
+            <h1 className="text-4xl font-extrabold tracking-tight">
+              Welcome back, {greetName}!
+            </h1>
+            <p className="text-[var(--text3)]">
+              Role: {roleLabel(role)}
+              {displayOrgType ? <span> · Org: {orgTypeLabel(displayOrgType)}</span> : null}
+            </p>
+          </div>
+          {showUpgrade && (
+            <UpgradePlanLink className="btn btn-secondary text-sm px-4 py-1.5 shrink-0">
+              Upgrade plan
+            </UpgradePlanLink>
+          )}
+        </div>
 
         {/* ── Owner / facility KPIs ── */}
         {persona === 'owner' && (
