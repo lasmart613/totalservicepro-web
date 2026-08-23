@@ -22,7 +22,10 @@ const ROLE_LABELS: Record<string, string> = {
   viewer: 'Viewer',
 };
 
-/** Founder / owner / admin / supplier — do not overwrite or email-steal onto another org. */
+/**
+ * Primary-org founder roles on *this* company (do not demote).
+ * Not a product ban on moonlighting — other-org invites become add-membership.
+ */
 const FOUNDER_LOCKED_ROLES = new Set([
   'company_admin',
   'admin',

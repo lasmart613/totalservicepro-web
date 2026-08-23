@@ -185,6 +185,7 @@ test('team invite API uses the builders and does not send the generic Supabase i
   assert.match(source, /already belongs to another organization/);
   assert.match(source, /isFounderLockedRole/);
   assert.match(source, /status: 409/);
+  assert.match(source, /TODO\(multi-org\): replace this 409 with add-membership/);
   assert.doesNotMatch(source, /inviteUserByEmail/);
   assert.match(source, /body\.role \|\| 'fse'/);
 });

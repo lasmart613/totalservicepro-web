@@ -42,10 +42,13 @@ function isRateLimitError(msg: string): boolean {
 /**
  * Invite a team member:
  * 1) Verify caller is authenticated admin of an org
- * 2) Existing profile on another org / founder-locked role → 409, no email
- * 3) Existing RepairPlanet user (profile or auth) → link as chosen role + branded Sign-in email
- * 4) New user → generateLink (no Supabase mail) + branded set-password email
- * 5) If Resend is not configured or send fails, still return a copyable link
+ * 2) Existing RepairPlanet user (no other-org conflict yet) → link + branded Sign-in email
+ * 3) New user → generateLink (no Supabase mail) + branded set-password email
+ * 4) If Resend is not configured or send fails, still return a copyable link
+ *
+ * Other-org 409 below is interim (single user_profiles.organization_id).
+ * Multi-org memberships will replace it with add-membership + the same Sign-in email
+ * so a shop owner can moonlight as FSE on another company.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -260,8 +263,8 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    // Existing profile → link + branded Sign-in email only if they are not on another org
-    // and are not a founder/owner/admin/supplier of their own company.
+    // Existing profile → branded Sign-in email when we can attach them without
+    // overwriting another company's single-org row.
     const { data: existingProfile } = await admin
       .from('user_profiles')
       .select('id, email, organization_id, role, first_name, last_name')
@@ -271,11 +274,15 @@ export async function POST(req: NextRequest) {
     if (existingProfile?.id) {
       const existingOrg = existingProfile.organization_id;
       const existingRole = String(existingProfile.role || '').toLowerCase();
+      // TODO(multi-org): replace this 409 with add-membership + alreadyRegistered Sign-in email.
+      // Owners of a service company must be invit-able as FSE on another shop (moonlight).
       if (existingOrg && String(existingOrg) !== String(orgId)) {
         return NextResponse.json({
           error: `${email} already belongs to another organization. Ask them to leave that org first, or invite a different email.`,
         }, { status: 409 });
       }
+      // Same-org founder row: do not demote owner/admin/supplier on this company.
+      // Other-org founders are covered by the 409 above until add-membership lands.
       if (isFounderLockedRole(existingRole)) {
         const where = existingOrg && String(existingOrg) === String(orgId)
           ? 'your organization'
