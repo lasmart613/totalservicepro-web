@@ -44,11 +44,11 @@ function isRateLimitError(msg: string): boolean {
  * Invite a team member:
  * 1) Verify caller is authenticated admin of an org
  * 2) Existing RepairPlanet user → add membership (moonlight / first-org attach),
- *    never 409 just because they already have another company. Branded Sign-in email.
- * 3) New user → generateLink (no Supabase mail) + branded set-password email
+ *    never reject just because they already have another company. Branded Sign-in email.
+ * 3) New user → generateLink (no Supabase Auth mail) + branded set-password email
  * 4) If Resend is not configured or send fails, still return a copyable link
  *
- * Never calls inviteUserByEmail (avoids generic Supabase mail + double send with Resend).
+ * Does not send the generic Auth invite mail (avoids double send with Resend).
  */
 export async function POST(req: NextRequest) {
   try {
@@ -297,8 +297,8 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    // Existing profile → add a membership (moonlight) instead of 409 / steal.
-    // One branded Sign-in email only — never inviteUserByEmail.
+    // Existing profile → add a membership (moonlight) instead of a conflict / steal.
+    // One branded Sign-in email only — do not send a second Auth invite mail.
     const { data: existingProfile } = await admin
       .from('user_profiles')
       .select('id, email, organization_id, role, first_name, last_name')
