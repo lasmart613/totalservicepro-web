@@ -23,7 +23,7 @@ const FACILITY_TYPES = [
   'Private Practice',
   'Surgery Center',
   'Research / University',
-  'Rental fleet',
+  'Rental company',
   'Reseller inventory',
   'Other',
 ];
@@ -327,9 +327,13 @@ function OwnerSignupInner() {
                       checked={orgKind === opt.value}
                       onChange={() => {
                         setOrgKind(opt.value);
-                        if (opt.value === 'laser_rental') setFacilityType('Rental fleet');
+                        if (opt.value === 'laser_rental') setFacilityType('Rental company');
                         else if (opt.value === 'laser_reseller') setFacilityType('Reseller inventory');
-                        else if (facilityType === 'Rental fleet' || facilityType === 'Reseller inventory') {
+                        else if (
+                          facilityType === 'Rental company' ||
+                          facilityType === 'Rental fleet' ||
+                          facilityType === 'Reseller inventory'
+                        ) {
                           setFacilityType('Clinic');
                         }
                       }}

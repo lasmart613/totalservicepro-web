@@ -130,7 +130,7 @@ function coreOrganizationInsert(pending: PendingSignup, userId: string): Record<
 
 export function facilityTypeForOwnerOrg(orgType?: string | null): string | null {
   const t = String(orgType || '').toLowerCase().trim();
-  if (t === 'laser_rental') return 'Rental fleet';
+  if (t === 'laser_rental') return 'Rental company';
   if (t === 'laser_reseller') return 'Reseller inventory';
   return null;
 }
