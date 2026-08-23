@@ -72,7 +72,7 @@ test('HTML matches the branded preview (colors, gold bar, CTA, bullets)', () => 
   assert.match(html, /Forgot password/);
   assert.match(html, /Nobody else on the team was copied/);
   assert.match(html, /repairplanet\.net/);
-  assert.match(html, new RegExp(`href="${ACCEPT_URL.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}"`));
+  assert.match(html, /href="https:\/\/yljztfajyvjzqikxdddf\.supabase\.co\/auth\/v1\/verify\?token=real-invite-token&amp;type=invite/);
   assert.match(html, new RegExp(`href="${LOGIN_URL}"`));
   assert.doesNotMatch(html, /fake-token|PLACEHOLDER|TODO/i);
   assert.doesNotMatch(html, /You've been invited/);
@@ -116,8 +116,8 @@ test('plain-text body includes the real accept URL and FSE default', () => {
   assert.match(text, /^Hi Alex,/);
   assert.match(text, /Luxor Photonix invited you to join their team on RepairPlanet as a Field Service Engineer \(FSE\)\./);
   assert.match(text, /See assigned jobs and the shop schedule/);
-  assert.match(text, `Accept invite & set password: ${ACCEPT_URL}`);
-  assert.match(text, `Sign in with this email: ${LOGIN_URL}`);
+  assert.ok(text.includes(`Accept invite & set password: ${ACCEPT_URL}`));
+  assert.ok(text.includes(`Sign in with this email: ${LOGIN_URL}`));
   assert.match(text, /Sent by Total Service Pro/);
 });
 
