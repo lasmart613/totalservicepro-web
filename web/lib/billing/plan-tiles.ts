@@ -26,12 +26,12 @@ export const WEEKLY_UPDATES_LINE = 'New features added weekly';
 /** History lives with the laser on Free, Premium, and Team. */
 export const SHARED_SERVICE_HISTORY_LINE = 'Shared service history lives with the laser';
 
-/** Shown on the /plans tiles in both signed-in and logged-out views. */
+/** Service Company tiles only. Do not list manuals on owner or supplier /plans. */
 export const PREMIUM_MANUALS_LINE = '15 service manuals';
 /** Team is 50. Do not advertise unlimited — that is reserved for Enterprise. */
 export const TEAM_MANUALS_LINE = '50 service manuals';
 
-/** Qualitative only on marketing tiles. Backend quotas may still use 5/50/250. */
+/** Service Company tiles only. Owner/supplier /plans copy must not mention AI. */
 export const FREE_AI_LINE = 'AI assistant (light use)';
 export const PREMIUM_AI_LINE = 'AI assistant (everyday use)';
 export const TEAM_AI_LINE = 'AI assistant (high-volume use)';
@@ -113,14 +113,11 @@ const OWNER_TILES: Record<PlanTileId, readonly string[]> = {
     'Request service and order consumables',
     'Keep FDA-style service records with the machine',
     SHARED_SERVICE_HISTORY_LINE,
-    FREE_AI_LINE,
     'Ads may appear on the Free Plan',
     WEEKLY_UPDATES_LINE,
   ],
   premium: [
     'Cut downtime with faster matching to rated shops',
-    PREMIUM_AI_LINE,
-    PREMIUM_MANUALS_LINE,
     SHARED_SERVICE_HISTORY_LINE,
     'Request service and order consumables',
     'No advertisements',
@@ -128,8 +125,6 @@ const OWNER_TILES: Record<PlanTileId, readonly string[]> = {
   ],
   team: [
     'Everything in Premium',
-    TEAM_AI_LINE,
-    TEAM_MANUALS_LINE,
     'Up to 10 user seats for the practice',
     SHARED_SERVICE_HISTORY_LINE,
     WEEKLY_UPDATES_LINE,
@@ -144,14 +139,11 @@ const SUPPLIER_TILES: Record<PlanTileId, readonly string[]> = {
     'List parts with one smaller, low-res photo',
     'Appear in the marketplace',
     SHARED_SERVICE_HISTORY_LINE,
-    FREE_AI_LINE,
     'Ads may appear on the Free Plan',
     WEEKLY_UPDATES_LINE,
   ],
   premium: [
     'Multiple hi-res photos on listings',
-    PREMIUM_AI_LINE,
-    PREMIUM_MANUALS_LINE,
     SHARED_SERVICE_HISTORY_LINE,
     'No advertisements',
     WEEKLY_UPDATES_LINE,
@@ -160,8 +152,6 @@ const SUPPLIER_TILES: Record<PlanTileId, readonly string[]> = {
     'Everything in Premium',
     'Multiple hi-res photos plus featured / premium placement',
     'Supplier storefront in the directory',
-    TEAM_AI_LINE,
-    TEAM_MANUALS_LINE,
     'Up to 10 user seats',
     SHARED_SERVICE_HISTORY_LINE,
     WEEKLY_UPDATES_LINE,

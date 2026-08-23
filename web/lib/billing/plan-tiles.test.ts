@@ -73,15 +73,27 @@ test('shared entitlements appear on every audience and every tier', () => {
         0,
         `${audience} ${tile} must not say unlimited`
       );
+      assert.doesNotMatch(
+        lines.join('\n'),
+        /5 text|50 text|250 text|per member|per day|text \+|voice quer/i
+      );
     }
-    assert.ok(planTileLines(audience, 'free').includes(FREE_AI_LINE));
-    assert.ok(planTileLines(audience, 'premium').includes(PREMIUM_AI_LINE));
-    assert.ok(planTileLines(audience, 'premium').includes(PREMIUM_MANUALS_LINE));
-    assert.ok(planTileLines(audience, 'team').includes(TEAM_AI_LINE));
-    assert.ok(planTileLines(audience, 'team').includes(TEAM_MANUALS_LINE));
+  }
+});
+
+test('Service Company tiles keep AI and manuals; owner and supplier do not', () => {
+  assert.ok(planTileLines('company', 'free').includes(FREE_AI_LINE));
+  assert.ok(planTileLines('company', 'premium').includes(PREMIUM_AI_LINE));
+  assert.ok(planTileLines('company', 'premium').includes(PREMIUM_MANUALS_LINE));
+  assert.ok(planTileLines('company', 'team').includes(TEAM_AI_LINE));
+  assert.ok(planTileLines('company', 'team').includes(TEAM_MANUALS_LINE));
+
+  for (const audience of ['owner', 'supplier'] as const) {
     for (const tile of TILES) {
       const blob = planTileLines(audience, tile).join('\n');
-      assert.doesNotMatch(blob, /5 text|50 text|250 text|per member|per day|text \+|voice quer/i);
+      assert.doesNotMatch(blob, /AI assistant|AI\b/i);
+      assert.doesNotMatch(blob, /service manuals|manuals library|user manuals/i);
+      assert.doesNotMatch(blob, /HIPAA|coming soon|future/i);
     }
   }
 });
