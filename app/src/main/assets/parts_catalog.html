@@ -701,6 +701,27 @@
         renderParts();
     }
 
+    async function savePartStock(partId, inStock, qtyRaw) {
+        const quantity_on_hand = Math.max(0, parseInt(qtyRaw, 10) || 0);
+        const in_stock = !!inStock || quantity_on_hand > 0;
+        const qty = in_stock && quantity_on_hand === 0 ? 1 : quantity_on_hand;
+        let { error } = await supabaseClient.from('parts_catalog').update({ in_stock, quantity_on_hand: qty }).eq('id', partId);
+        if (error && /column|in_stock|quantity_on_hand/i.test(error.message || '')) {
+            ({ error } = await supabaseClient.from('parts_catalog').update({ quantity_on_hand: qty }).eq('id', partId));
+        }
+        if (error) {
+            alert(error.message || 'Could not save stock');
+            return;
+        }
+        const part = allParts.find(p => String(p.id) === String(partId));
+        if (part) {
+            part.in_stock = in_stock;
+            part.quantity_on_hand = qty;
+        }
+        const qtyEl = document.getElementById('qty-' + partId);
+        if (qtyEl) qtyEl.value = String(qty);
+    }
+
     // ── Init ─────────────────────────────────────────────────
 
     // Session-aware navigation — encodes session into URL for WebView page transitions
@@ -886,6 +907,18 @@
                     <div class="detail-section">
                         <div class="detail-label">Sale price</div>
                         <div style="font-size:18px;font-weight:800;color:#FBBF24;">${sale || '—'}</div>
+                    </div>
+                    <div class="detail-section" onclick="event.stopPropagation()">
+                        <div class="detail-label">Stock</div>
+                        <label style="display:flex;align-items:center;gap:8px;font-size:14px;margin-bottom:8px;">
+                            <input type="checkbox" ${part.in_stock || Number(part.quantity_on_hand) > 0 ? 'checked' : ''}
+                                   onchange="savePartStock(${part.id}, this.checked, this.checked ? document.getElementById('qty-${part.id}').value : 0)">
+                            In stock
+                        </label>
+                        <label class="form-label" for="qty-${part.id}">Quantity in stock</label>
+                        <input class="form-input" id="qty-${part.id}" type="number" inputmode="numeric" min="0" step="1"
+                               value="${Number(part.quantity_on_hand) > 0 ? Number(part.quantity_on_hand) : (part.in_stock ? 1 : 0)}"
+                               onchange="savePartStock(${part.id}, Number(this.value) > 0, this.value)">
                     </div>
                     ${(part.compatible_models || []).length > 0 ? `
                     <div class="detail-section">

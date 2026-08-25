@@ -1779,10 +1779,12 @@ export type Database = {
           description: string | null
           id: number
           image_url: string | null
+          in_stock: boolean
           is_active: boolean | null
           is_consumable: boolean | null
           name: string
           part_number: string
+          quantity_on_hand: number
           sale_price: number | null
           unit_of_measure: string | null
           updated_at: string | null
@@ -1796,10 +1798,12 @@ export type Database = {
           description?: string | null
           id?: number
           image_url?: string | null
+          in_stock?: boolean
           is_active?: boolean | null
           is_consumable?: boolean | null
           name: string
           part_number: string
+          quantity_on_hand?: number
           sale_price?: number | null
           unit_of_measure?: string | null
           updated_at?: string | null
@@ -1813,10 +1817,12 @@ export type Database = {
           description?: string | null
           id?: number
           image_url?: string | null
+          in_stock?: boolean
           is_active?: boolean | null
           is_consumable?: boolean | null
           name?: string
           part_number?: string
+          quantity_on_hand?: number
           sale_price?: number | null
           unit_of_measure?: string | null
           updated_at?: string | null

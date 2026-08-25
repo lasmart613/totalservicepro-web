@@ -33,6 +33,12 @@ function money(n: number | string | null | undefined): string {
   return `$${v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 }
 
+function stockQty(n: unknown): number {
+  const v = Number(n);
+  if (!Number.isFinite(v) || v < 0) return 0;
+  return Math.floor(v);
+}
+
 function missingColumn(message?: string): string | null {
   return message?.match(/Could not find the '([^']+)' column/i)?.[1] || null;
 }
@@ -166,6 +172,8 @@ export default function PartDetailPage() {
         is_active: form.is_active !== false,
         sale_price:
           form.sale_price === '' || form.sale_price == null ? null : Number(form.sale_price),
+        quantity_on_hand: stockQty(form.quantity_on_hand),
+        in_stock: !!form.in_stock || stockQty(form.quantity_on_hand) > 0,
         image_url: images[0] || null,
         image_urls: images.length ? images : null,
         updated_at: new Date().toISOString(),
@@ -209,6 +217,38 @@ export default function PartDetailPage() {
     }
     setVendors((rows) => rows.filter((v) => String(v.id) !== String(id)));
     toast.success('Vendor removed.');
+  }
+
+  async function persistStock(inStock: boolean, qty: number) {
+    if (!part?.id) return;
+    const quantity_on_hand = stockQty(qty);
+    const in_stock = inStock || quantity_on_hand > 0;
+    const payload: Record<string, unknown> = {
+      in_stock,
+      quantity_on_hand,
+      updated_at: new Date().toISOString(),
+    };
+    let lastError: { message?: string } | null = null;
+    for (let attempt = 0; attempt < 6; attempt++) {
+      const { error } = await supabase.from('parts_catalog').update(payload).eq('id', part.id);
+      if (!error) {
+        lastError = null;
+        break;
+      }
+      lastError = error;
+      const col = missingColumn(error.message);
+      if (col && col in payload) {
+        delete payload[col];
+        continue;
+      }
+      break;
+    }
+    if (lastError) {
+      toast.error(lastError.message || 'Could not save stock');
+      return;
+    }
+    setPart((prev) => (prev ? { ...prev, in_stock, quantity_on_hand } : prev));
+    setForm((prev) => ({ ...prev, in_stock, quantity_on_hand }));
   }
 
   async function markPreferred(id: number | string) {
@@ -259,6 +299,9 @@ export default function PartDetailPage() {
               {part.part_number}
               {part.brand ? ` • ${part.brand}` : ''}
               {part.category ? ` • ${part.category}` : ''}
+              {part.in_stock || stockQty(part.quantity_on_hand) > 0
+                ? ` • In stock${stockQty(part.quantity_on_hand) > 0 ? ` (${stockQty(part.quantity_on_hand)})` : ''}`
+                : ' • Out of stock'}
             </p>
           </div>
           <div className="flex gap-2">
@@ -327,6 +370,38 @@ export default function PartDetailPage() {
                   </div>
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{part.description || 'No description yet.'}</p>
+                <div className="rounded-lg border border-[var(--border)] p-3 space-y-2">
+                  <label className="flex items-center gap-2 text-sm font-medium">
+                    <input
+                      type="checkbox"
+                      checked={!!part.in_stock || stockQty(part.quantity_on_hand) > 0}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        void persistStock(checked, checked ? stockQty(part.quantity_on_hand) || 1 : 0);
+                      }}
+                    />
+                    In stock
+                  </label>
+                  <div>
+                    <label className="label">Quantity in stock</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={part.quantity_on_hand ?? 0}
+                      onChange={(e) => {
+                        const qty = stockQty(e.target.value);
+                        setPart((prev) => (prev ? { ...prev, quantity_on_hand: qty, in_stock: qty > 0 } : prev));
+                        setForm((prev) => ({ ...prev, quantity_on_hand: qty, in_stock: qty > 0 }));
+                      }}
+                      onBlur={(e) => {
+                        const qty = stockQty(e.target.value);
+                        void persistStock(qty > 0, qty);
+                      }}
+                    />
+                  </div>
+                </div>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                   <dt className="text-[var(--text3)]">Unit</dt>
                   <dd>{part.unit_of_measure || 'Each'}</dd>
@@ -406,6 +481,37 @@ export default function PartDetailPage() {
                 <div>
                   <label className="label">Compatible models</label>
                   <input className="input" value={modelsText} onChange={(e) => setField('compatible_models', e.target.value.split(',').map((m) => m.trim()).filter(Boolean))} />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={!!form.in_stock || stockQty(form.quantity_on_hand) > 0}
+                      onChange={(e) => {
+                        const checked = e.target.checked;
+                        setForm((prev) => ({
+                          ...prev,
+                          in_stock: checked,
+                          quantity_on_hand: checked ? stockQty(prev.quantity_on_hand) || 1 : 0,
+                        }));
+                      }}
+                    />
+                    In stock
+                  </label>
+                  <div>
+                    <label className="label">Quantity in stock</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      step="1"
+                      value={form.quantity_on_hand ?? 0}
+                      onChange={(e) => {
+                        const qty = stockQty(e.target.value);
+                        setForm((prev) => ({ ...prev, quantity_on_hand: qty, in_stock: qty > 0 }));
+                      }}
+                    />
+                  </div>
                 </div>
                 <label className="flex items-center gap-2 text-sm">
                   <input type="checkbox" checked={!!form.is_consumable} onChange={(e) => setField('is_consumable', e.target.checked)} />
