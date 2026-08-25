@@ -9,7 +9,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { buildPurchaseOrderHtml, type DocCompany } from '@/lib/billing/doc-html';
 import { isValidOnFileEmail, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
-import { fetchAllPages } from '@/lib/supabase/paginate';
+import { chunkIds, fetchAllPages } from '@/lib/supabase/paginate';
 import {
   coerceOrgId,
   emptyLineItem,
@@ -21,6 +21,16 @@ import {
   writeWithColumnRetry,
   type LineItem,
 } from '@/lib/billing/save-helpers';
+import { isPartListing } from '@/lib/marketplace/parts';
+import {
+  exactPartSuggest,
+  filterPartSuggests,
+  fromCatalogRow,
+  fromMarketplaceRow,
+  mergePartSuggests,
+  sourceLabel,
+  type PartSuggestHit,
+} from '@/lib/billing/part-suggest';
 
 type SupplierOpt = {
   id: string | number;
@@ -72,6 +82,8 @@ export default function PurchaseOrderFormClient() {
   const [lineItems, setLineItems] = useState<LineItem[]>([emptyLineItem('LI')]);
   const [tax, setTax] = useState(0);
   const [totalOverride, setTotalOverride] = useState<number | null>(null);
+  const [partHits, setPartHits] = useState<PartSuggestHit[]>([]);
+  const [suggestLineId, setSuggestLineId] = useState<string | null>(null);
 
   const subtotal = useMemo(() => lineItemsSubtotal(lineItems), [lineItems]);
   const computedTotal = useMemo(
@@ -100,6 +112,80 @@ export default function PurchaseOrderFormClient() {
     }
     return list;
   }, [suppliers, supSearch, supplierOrgId]);
+
+  const loadPartSuggests = useCallback(async () => {
+    const hits: PartSuggestHit[] = [];
+    try {
+      let cat = await supabase
+        .from('parts_catalog')
+        .select('id, part_number, name, description, brand, sale_price')
+        .eq('is_active', true)
+        .order('part_number')
+        .limit(800);
+      if (cat.error) {
+        cat = await supabase
+          .from('parts_catalog')
+          .select('id, part_number, name, description, brand, sale_price')
+          .limit(800);
+      }
+      const rows = cat.data || [];
+      const costByPart: Record<string, number> = {};
+      const ids = rows.map((r: { id?: string | number }) => r.id).filter(Boolean);
+      for (const chunk of chunkIds(ids)) {
+        const { data: vrows } = await supabase
+          .from('part_vendors')
+          .select('part_id, unit_cost, is_preferred')
+          .in('part_id', chunk);
+        for (const v of vrows || []) {
+          const key = String(v.part_id);
+          const cost = Number(v.unit_cost);
+          if (!Number.isFinite(cost) || cost <= 0) continue;
+          if (v.is_preferred || costByPart[key] == null) costByPart[key] = cost;
+        }
+      }
+      for (const r of rows) {
+        const hit = fromCatalogRow({ ...r, unit_cost: costByPart[String(r.id)] ?? null });
+        if (hit) hits.push(hit);
+      }
+    } catch (e) {
+      console.warn('PO catalog suggest', e);
+    }
+    try {
+      let mkt = await supabase
+        .from('marketplace_listings')
+        .select(
+          'id, title, description, part_number, manufacturer, price, listing_type, category, status, details'
+        )
+        .limit(500);
+      if (mkt.error) {
+        mkt = await supabase
+          .from('marketplace_listings')
+          .select('id, title, description, part_number, manufacturer, price, listing_type, category, status')
+          .limit(500);
+      }
+      for (const raw of mkt.data || []) {
+        let details = (raw as { details?: unknown }).details;
+        if (typeof details === 'string') {
+          try {
+            details = JSON.parse(details);
+          } catch {
+            details = null;
+          }
+        }
+        const row = { ...raw, details: details && typeof details === 'object' ? details : null };
+        const st = String(row.status || '').toLowerCase();
+        if (['sold', 'inactive', 'closed', 'expired', 'draft'].includes(st)) continue;
+        const type = String(row.listing_type || '').toLowerCase();
+        if (['used', 'equipment', 'request', 'service', 'rfq', 'need'].includes(type)) continue;
+        if (!isPartListing(row) && !String(row.part_number || '').trim()) continue;
+        const hit = fromMarketplaceRow(row);
+        if (hit) hits.push(hit);
+      }
+    } catch (e) {
+      console.warn('PO marketplace suggest', e);
+    }
+    setPartHits(mergePartSuggests(hits));
+  }, [supabase]);
 
   const loadSuppliers = useCallback(async () => {
     const { data, error } = await fetchAllPages<SupplierOpt>(async (from, to) => {
@@ -234,6 +320,7 @@ export default function PurchaseOrderFormClient() {
           setShipTo((prev) => prev || ship);
         }
         await loadSuppliers();
+        await loadPartSuggests();
         if (editIdParam && orgId) await loadPo(editIdParam, orgId);
       } catch (e) {
         console.error(e);
@@ -241,13 +328,21 @@ export default function PurchaseOrderFormClient() {
         setLoading(false);
       }
     })();
-  }, [supabase, router, editIdParam, loadSuppliers, loadPo]);
+  }, [supabase, router, editIdParam, loadSuppliers, loadPartSuggests, loadPo]);
 
   function updateLine(id: string, patch: Partial<LineItem>) {
     setTotalOverride(null);
     setLineItems((rows) =>
       rows.map((r) => (r.id === id ? recomputeExt({ ...r, ...patch }) : r))
     );
+  }
+
+  function applyPartHit(lineId: string, hit: PartSuggestHit) {
+    const patch: Partial<LineItem> = { part_number: hit.part_number };
+    if (hit.description) patch.description = hit.description;
+    if (hit.unit_price != null) patch.unit_price = hit.unit_price;
+    updateLine(lineId, patch);
+    setSuggestLineId(null);
   }
 
   async function savePo(
@@ -541,6 +636,9 @@ export default function PurchaseOrderFormClient() {
 
         <section className="card p-4 mb-4 overflow-x-auto">
           <h2 className="font-bold text-[var(--gold)] mb-3">Line items</h2>
+          <p className="text-[11px] text-[var(--text3)] mb-2">
+            Part # suggests from the Parts Catalog and Marketplace Parts. Pick a match to fill description and price.
+          </p>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[11px] text-[var(--text3)]">
@@ -555,12 +653,49 @@ export default function PurchaseOrderFormClient() {
             <tbody>
               {lineItems.map((li) => (
                 <tr key={li.id}>
-                  <td className="pr-1 pb-2">
+                  <td className="pr-1 pb-2 relative">
                     <input
                       className="input"
+                      list={`po-parts-${li.id}`}
                       value={li.part_number}
-                      onChange={(e) => updateLine(li.id, { part_number: e.target.value })}
+                      autoComplete="off"
+                      placeholder="Start typing a part #…"
+                      onFocus={() => setSuggestLineId(li.id)}
+                      onBlur={() => setTimeout(() => setSuggestLineId((cur) => (cur === li.id ? null : cur)), 180)}
+                      onChange={(e) => {
+                        const pn = e.target.value;
+                        updateLine(li.id, { part_number: pn });
+                        setSuggestLineId(li.id);
+                        const hit = exactPartSuggest(partHits, pn);
+                        if (hit) applyPartHit(li.id, hit);
+                      }}
                     />
+                    <datalist id={`po-parts-${li.id}`}>
+                      {filterPartSuggests(partHits, li.part_number).map((p) => (
+                        <option key={p.key} value={p.part_number}>
+                          {p.description} · {sourceLabel(p.source)}
+                        </option>
+                      ))}
+                    </datalist>
+                    {suggestLineId === li.id && filterPartSuggests(partHits, li.part_number).length > 0 && (
+                      <div className="absolute left-0 right-0 top-full z-30 mt-0.5 max-h-48 overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--surface)] shadow-lg">
+                        {filterPartSuggests(partHits, li.part_number).map((p) => (
+                          <button
+                            key={p.key}
+                            type="button"
+                            className="block w-full text-left px-2 py-1.5 text-xs hover:bg-[var(--surface2)]"
+                            onMouseDown={(e) => {
+                              e.preventDefault();
+                              applyPartHit(li.id, p);
+                            }}
+                          >
+                            <span className="font-semibold text-[var(--gold)]">{p.part_number}</span>
+                            <span className="text-[var(--text3)]"> · {sourceLabel(p.source)}</span>
+                            <div className="text-[var(--text2)] truncate">{p.description}</div>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </td>
                   <td className="pr-1 pb-2">
                     <input
