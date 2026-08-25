@@ -193,3 +193,27 @@ test('schema keeps organization_id as the active RLS pointer', () => {
   assert.match(sql, /accept_team_invite/);
   assert.match(sql, /user_profiles\.organization_id stays the ACTIVE company/);
 });
+
+test('creating your own shop after an FSE invite still adds a home membership', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sql = readFileSync(
+    join(here, '../supabase/migrations/20260825_000003_founder_own_org_membership.sql'),
+    'utf8'
+  );
+  assert.match(sql, /own_created OR invited/);
+  assert.match(sql, /INSERT INTO public\.organization_memberships/);
+  assert.match(sql, /service_company/);
+  assert.doesNotMatch(
+    sql,
+    /IF OLD\.organization_id IS NOT NULL THEN\s+RAISE EXCEPTION 'organization_id cannot be changed by the client';\s+END IF;\s+SELECT EXISTS \(\s+SELECT 1 FROM public\.organizations o\s+WHERE o\.id = NEW\.organization_id AND o\.created_by = actor/
+  );
+
+  const onboarding = readFileSync(join(here, '../app/onboarding/page.tsx'), 'utf8');
+  assert.match(onboarding, /organization_memberships/);
+  assert.match(onboarding, /is_home:\s*true/);
+  assert.match(onboarding, /createdNewOrg/);
+
+  const membershipsRoute = readFileSync(join(here, '../app/api/org/memberships/route.ts'), 'utf8');
+  assert.match(membershipsRoute, /created_by/);
+  assert.match(membershipsRoute, /isHome:\s*true/);
+});

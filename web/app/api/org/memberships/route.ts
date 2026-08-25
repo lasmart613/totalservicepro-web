@@ -63,6 +63,25 @@ export async function GET(req: NextRequest) {
         }
       }
 
+      const { data: ownShops } = await admin
+        .from('organizations')
+        .select('id, type')
+        .eq('created_by', user.id)
+        .in('type', ['service_company', 'parts_supplier', 'supplier', 'vendor']);
+      for (const shop of ownShops || []) {
+        const shopType = String(shop.type || '').toLowerCase();
+        const shopRole =
+          shopType === 'parts_supplier' || shopType === 'supplier' || shopType === 'vendor'
+            ? 'parts_supplier'
+            : 'company_admin';
+        await upsertMembership(admin, {
+          userId: user.id,
+          organizationId: shop.id,
+          role: shopRole,
+          isHome: true,
+        });
+      }
+
       const rows = await listMembershipsWithOrgs(admin, user.id);
       memberships = rows.map((row) => ({
         organizationId: row.organization_id,

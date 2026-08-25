@@ -141,9 +141,6 @@ BEGIN
         -- Active-org switch (or first activate of a membership).
         NULL;
       ELSE
-        IF OLD.organization_id IS NOT NULL THEN
-          RAISE EXCEPTION 'organization_id cannot be changed by the client';
-        END IF;
         SELECT EXISTS (
           SELECT 1 FROM public.organizations o
           WHERE o.id = NEW.organization_id AND o.created_by = actor
@@ -154,7 +151,11 @@ BEGIN
             AND lower(i.email) = lower(COALESCE(NEW.email, ''))
             AND COALESCE(i.accepted, false) = false
         ) INTO invited;
-        IF NOT own_created AND NOT invited THEN
+        IF own_created OR invited THEN
+          NULL;
+        ELSIF OLD.organization_id IS NOT NULL THEN
+          RAISE EXCEPTION 'organization_id cannot be changed by the client';
+        ELSE
           RAISE EXCEPTION 'cannot attach profile to an organization you did not create or were not invited to';
         END IF;
       END IF;
@@ -197,18 +198,27 @@ BEGIN
     IF member_role IS NOT NULL AND lower(NEW.role) = lower(member_role) THEN
       -- Role follows the membership of the (new) active org.
       NULL;
-    ELSIF OLD.organization_id IS NOT NULL THEN
+    ELSE
       SELECT EXISTS (
         SELECT 1 FROM public.organizations o
-        WHERE o.id = OLD.organization_id AND o.created_by = actor
+        WHERE o.id = NEW.organization_id AND o.created_by = actor
       ) INTO own_created;
 
-      IF OLD.role IS NOT NULL AND lower(OLD.role) = ANY (locked_roles) THEN
-        RAISE EXCEPTION 'role cannot be changed by the client once set';
-      END IF;
+      IF own_created THEN
+        NULL;
+      ELSIF OLD.organization_id IS NOT NULL THEN
+        SELECT EXISTS (
+          SELECT 1 FROM public.organizations o
+          WHERE o.id = OLD.organization_id AND o.created_by = actor
+        ) INTO own_created;
 
-      IF NOT own_created THEN
-        RAISE EXCEPTION 'role cannot be changed by the client once set';
+        IF OLD.role IS NOT NULL AND lower(OLD.role) = ANY (locked_roles) THEN
+          RAISE EXCEPTION 'role cannot be changed by the client once set';
+        END IF;
+
+        IF NOT own_created THEN
+          RAISE EXCEPTION 'role cannot be changed by the client once set';
+        END IF;
       END IF;
     END IF;
   END IF;
@@ -218,7 +228,7 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.user_profiles_guard_identity() IS
-  'Blocks steal/self-attach. Allows switching organization_id/role to an existing organization_memberships row.';
+  'Blocks steal/self-attach. Allows switching to a membership, and attaching an org the user created (home shop) or was invited to, even if they already belong elsewhere.';
 
 -- ---------------------------------------------------------------------------
 -- 4) RLS on memberships

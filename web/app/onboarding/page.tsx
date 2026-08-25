@@ -521,6 +521,7 @@ export default function Onboarding() {
         orgPayload.specialties = selectedCategories;
       }
 
+      const createdNewOrg = !orgId;
       if (orgId) {
         let { error: uErr } = await supabase.from('organizations').update(orgPayload).eq('id', orgId);
         if (uErr && /list_in_directory|column/i.test(uErr.message || '')) {
@@ -567,6 +568,17 @@ export default function Onboarding() {
       }
 
       const creatorRole = resolveCreatorRole();
+      // Membership first so the switcher lists this shop even if the profile
+      // pointer stays on an FSE invite org (guard used to block that write).
+      if (createdNewOrg && orgId) {
+        const { error: memErr } = await supabase.from('organization_memberships').insert({
+          user_id: currentUser.id,
+          organization_id: orgId,
+          role: creatorRole || 'company_admin',
+          is_home: true,
+        });
+        if (memErr) console.warn('home membership insert', memErr.message);
+      }
       const creator = teamMembers.find(m => m.isCreator) || teamMembers[0];
       const creatorAddl = orgType === 'service' ? (creator?.additionalRoles || []) : [];
       let finalJob = formData.jobTitle || (

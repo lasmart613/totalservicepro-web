@@ -308,12 +308,25 @@
                 logo_url: logoUrl || null,
             };
 
+            const createdNewOrg = !orgId;
             if (orgId) {
                 await supabaseClient.from('organizations').update(orgData).eq('id', orgId);
             } else {
                 orgData.created_by = currentUser.id;
                 const { data: org } = await supabaseClient.from('organizations').insert(orgData).select('id').single();
                 if (org) orgId = org.id;
+            }
+
+            if (createdNewOrg && orgId) {
+                try {
+                    const memRes = await supabaseClient.from('organization_memberships').insert({
+                        user_id: currentUser.id,
+                        organization_id: orgId,
+                        role: 'company_admin',
+                        is_home: true,
+                    });
+                    if (memRes && memRes.error) console.warn('home membership insert', memRes.error.message);
+                } catch (memErr) { console.warn('home membership insert', memErr); }
             }
 
             // Update user profile
