@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { useRouter, usePathname } from 'next/navigation';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
-import { isAdmin } from '@/lib/roles';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink, UPGRADE_LABEL } from '@/components/UpgradePlanLink';
 
@@ -44,13 +43,11 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           return;
         }
 
-        const { data: profile } = await supabase
-          .from('user_profiles')
-          .select('role, organization_id, organizations(name)')
-          .eq('id', user.id)
-          .maybeSingle();
+        const { loadOwnNavProfile, roleAllowsAdminPortal } = await import('@/lib/profile-nav');
+        const profile = await loadOwnNavProfile(supabase, user.id);
+        const allowedByRole = await roleAllowsAdminPortal(profile?.role);
 
-        if (!profile || !isAdmin(profile.role)) {
+        if (!profile || !allowedByRole) {
           if (!cancelled) {
             setDeniedReason('role');
             setAllowed(false);
@@ -59,7 +56,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           return;
         }
 
-        const oname = (profile.organizations as any)?.name;
+        const oname = profile.organizations?.name;
         if (oname) setOrgName(oname);
 
         if (!cancelled) {

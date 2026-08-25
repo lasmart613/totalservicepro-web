@@ -17,6 +17,7 @@ import {
   ArrowUpCircle,
 } from 'lucide-react';
 import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
+import { loadOwnNavProfile } from '@/lib/profile-nav';
 import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
@@ -144,11 +145,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
     };
 
     const loadProfileFor = async (uid: string) => {
-      const { data: prof } = await supabase
-        .from('user_profiles')
-        .select('id, first_name, last_name, role, organizations(name, type, facility_type)')
-        .eq('id', uid)
-        .maybeSingle();
+      const prof = await loadOwnNavProfile(supabase, uid);
       applyProfile(uid, prof);
     };
 

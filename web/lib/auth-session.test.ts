@@ -4,6 +4,17 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+test('admin portal loads role without embedding organizations from user_profiles', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const layout = readFileSync(join(here, '../app/admin/layout.tsx'), 'utf8');
+  const header = readFileSync(join(here, '../components/Header.tsx'), 'utf8');
+  const helper = readFileSync(join(here, '../lib/profile-nav.ts'), 'utf8');
+  assert.match(layout, /loadOwnNavProfile/);
+  assert.doesNotMatch(layout, /organizations\(/);
+  assert.match(header, /loadOwnNavProfile/);
+  assert.doesNotMatch(helper, /\.select\([^)]*organizations/);
+});
+
 test('home page does not flash marketing while a session is in localStorage', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/page.tsx'), 'utf8');
