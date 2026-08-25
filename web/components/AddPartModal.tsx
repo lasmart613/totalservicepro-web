@@ -112,7 +112,7 @@ export function AddVendorModal({
           <input className="input" value={vendor.vendor_name} onChange={(e) => setVendor({ ...vendor, vendor_name: e.target.value })} placeholder="Vendor name *" />
           <div className="grid grid-cols-2 gap-2">
             <input className="input" value={vendor.vendor_part_number} onChange={(e) => setVendor({ ...vendor, vendor_part_number: e.target.value })} placeholder="Vendor P/N" />
-            <input className="input" type="number" min="0" step="0.01" value={vendor.unit_cost} onChange={(e) => setVendor({ ...vendor, unit_cost: e.target.value })} placeholder="Unit cost USD" />
+            <input className="input" type="number" min="0" step="0.01" value={vendor.unit_cost} onChange={(e) => setVendor({ ...vendor, unit_cost: e.target.value })} placeholder="Vendor cost USD" />
             <input className="input" type="number" min="0" value={vendor.lead_time_days} onChange={(e) => setVendor({ ...vendor, lead_time_days: e.target.value })} placeholder="Lead days" />
             <input className="input" value={vendor.url} onChange={(e) => setVendor({ ...vendor, url: e.target.value })} placeholder="https://…" />
           </div>
@@ -146,7 +146,7 @@ export function AddPartModal({ onClose, onCreated }: Props) {
   const [unit, setUnit] = useState('Each');
   const [models, setModels] = useState('');
   const [consumable, setConsumable] = useState(false);
-  const [listPrice, setListPrice] = useState('');
+  const [salePrice, setSalePrice] = useState('');
   const [vendors, setVendors] = useState<VendorDraft[]>([emptyVendor(true)]);
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
@@ -254,7 +254,7 @@ export function AddPartModal({ onClose, onCreated }: Props) {
         created_by: user.id,
         image_url: imageUrls[0] || null,
         image_urls: imageUrls.length ? imageUrls : null,
-        unit_cost: listPrice.trim() ? Number(listPrice) : null,
+        sale_price: salePrice.trim() ? Number(salePrice) : null,
       };
 
       let created: { id: number | string } | null = null;
@@ -281,20 +281,13 @@ export function AddPartModal({ onClose, onCreated }: Props) {
       if (!created) throw new Error(lastError?.message || 'Could not save part');
 
       const filledVendors = vendors.filter((v) => v.vendor_name.trim());
-      if (!filledVendors.length && listPrice.trim()) {
-        filledVendors.push({
-          ...emptyVendor(true),
-          vendor_name: 'List',
-          unit_cost: listPrice.trim(),
-        });
-      }
 
       for (const v of filledVendors) {
         const row: Record<string, unknown> = {
           part_id: created.id,
           vendor_name: v.vendor_name.trim(),
           vendor_part_number: v.vendor_part_number.trim() || null,
-          unit_cost: v.unit_cost.trim() ? Number(v.unit_cost) : listPrice.trim() ? Number(listPrice) : null,
+          unit_cost: v.unit_cost.trim() ? Number(v.unit_cost) : null,
           lead_time_days: v.lead_time_days.trim() ? parseInt(v.lead_time_days, 10) : null,
           url: v.url.trim() || null,
           notes: v.notes.trim() || null,
@@ -340,7 +333,7 @@ export function AddPartModal({ onClose, onCreated }: Props) {
                 Add Part
               </h2>
               <p className="text-xs text-[var(--text3)] mt-0.5">
-                Catalog entry with photo, price, and one or more vendors.
+                Catalog entry with photo, sale price, and one or more vendors.
               </p>
             </div>
             <button type="button" className="text-2xl leading-none text-[var(--text3)]" onClick={onClose}>
@@ -403,8 +396,9 @@ export function AddPartModal({ onClose, onCreated }: Props) {
                 </select>
               </div>
               <div>
-                <label className="label">Your price (USD)</label>
-                <input className="input" type="number" min="0" step="0.01" value={listPrice} onChange={(e) => setListPrice(e.target.value)} placeholder="0.00" />
+                <label className="label">Sale price (USD)</label>
+                <input className="input" type="number" min="0" step="0.01" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} placeholder="0.00" />
+                <p className="text-[10px] text-[var(--text3)] mt-1">What you charge. Hidden on the catalog until you show prices.</p>
               </div>
             </div>
             <div>
@@ -447,7 +441,8 @@ export function AddPartModal({ onClose, onCreated }: Props) {
                 </button>
               </div>
               <p className="text-[10px] text-[var(--text3)] mb-2">
-                Add every source you buy this from. Price on a vendor is what estimates will suggest.
+                Add every source you buy this from. Vendor cost is what you pay that supplier — separate from sale
+                price, and hidden until you show prices.
               </p>
               {vendors.map((v, idx) => (
                 <div key={v.key} className="rounded-lg border border-[var(--border)] p-3 mb-2 space-y-2">
@@ -472,7 +467,7 @@ export function AddPartModal({ onClose, onCreated }: Props) {
                   />
                   <div className="grid grid-cols-2 gap-2">
                     <input className="input" value={v.vendor_part_number} onChange={(e) => updateVendor(v.key, { vendor_part_number: e.target.value })} placeholder="Vendor P/N" />
-                    <input className="input" type="number" min="0" step="0.01" value={v.unit_cost} onChange={(e) => updateVendor(v.key, { unit_cost: e.target.value })} placeholder="Unit cost USD" />
+                    <input className="input" type="number" min="0" step="0.01" value={v.unit_cost} onChange={(e) => updateVendor(v.key, { unit_cost: e.target.value })} placeholder="Vendor cost USD" />
                     <input className="input" type="number" min="0" value={v.lead_time_days} onChange={(e) => updateVendor(v.key, { lead_time_days: e.target.value })} placeholder="Lead time (days)" />
                     <input className="input" value={v.url} onChange={(e) => updateVendor(v.key, { url: e.target.value })} placeholder="https://…" />
                   </div>

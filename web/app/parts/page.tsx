@@ -17,6 +17,7 @@ type CatalogPart = {
   image_url?: string | null;
   compatible_models?: string[] | null;
   unit_cost?: number | string | null;
+  sale_price?: number | string | null;
   category?: string | null;
 };
 
@@ -49,6 +50,7 @@ export default function PartsCatalog() {
   const [selectedBrand, setSelectedBrand] = useState('');
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
+  const [showSalePrices, setShowSalePrices] = useState(false);
   const supabase = getSupabaseClient();
   const router = useRouter();
 
@@ -103,10 +105,8 @@ export default function PartsCatalog() {
 
   const brands = [...new Set(parts.map((p) => p.brand).filter(Boolean))].sort() as string[];
 
-  function displayPrice(part: CatalogPart): string | null {
-    const vendors = vendorsByPart[String(part.id)] || [];
-    const preferred = vendors.find((v) => v.is_preferred && v.unit_cost != null) || vendors.find((v) => v.unit_cost != null);
-    return money(preferred?.unit_cost ?? part.unit_cost);
+  function salePriceOf(part: CatalogPart): string | null {
+    return money(part.sale_price ?? part.unit_cost);
   }
 
   return (
@@ -140,6 +140,13 @@ export default function PartsCatalog() {
                 </option>
               ))}
             </select>
+            <button
+              type="button"
+              className="btn btn-secondary whitespace-nowrap"
+              onClick={() => setShowSalePrices((v) => !v)}
+            >
+              {showSalePrices ? 'Hide sale prices' : 'Show sale prices'}
+            </button>
             <button type="button" className="btn btn-primary whitespace-nowrap" onClick={() => setShowAdd(true)}>
               + Add Part
             </button>
@@ -170,7 +177,7 @@ export default function PartsCatalog() {
             {filteredParts.map((part) => {
               const vendors = vendorsByPart[String(part.id)] || [];
               const img = partImage(part);
-              const price = displayPrice(part);
+              const sale = salePriceOf(part);
               return (
                 <Link
                   href={`/parts/${part.id}`}
@@ -201,7 +208,11 @@ export default function PartsCatalog() {
                     )}
                     <div className="flex justify-between items-center text-sm gap-2">
                       <span className="text-xs text-[var(--gold)]">View details</span>
-                      {price && <span className="font-medium text-[var(--gold)]">{price}</span>}
+                      {showSalePrices && sale ? (
+                        <span className="font-medium text-[var(--gold)]">{sale}</span>
+                      ) : sale ? (
+                        <span className="text-xs text-[var(--text3)]">Sale hidden</span>
+                      ) : null}
                     </div>
                   </div>
                 </Link>

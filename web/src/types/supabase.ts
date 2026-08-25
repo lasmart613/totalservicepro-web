@@ -1783,6 +1783,7 @@ export type Database = {
           is_consumable: boolean | null
           name: string
           part_number: string
+          sale_price: number | null
           unit_of_measure: string | null
           updated_at: string | null
         }
@@ -1799,6 +1800,7 @@ export type Database = {
           is_consumable?: boolean | null
           name: string
           part_number: string
+          sale_price?: number | null
           unit_of_measure?: string | null
           updated_at?: string | null
         }
@@ -1815,6 +1817,7 @@ export type Database = {
           is_consumable?: boolean | null
           name?: string
           part_number?: string
+          sale_price?: number | null
           unit_of_measure?: string | null
           updated_at?: string | null
         }

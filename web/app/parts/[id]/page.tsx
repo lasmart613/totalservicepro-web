@@ -61,6 +61,7 @@ export default function PartDetailPage() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showVendor, setShowVendor] = useState(false);
+  const [showPrices, setShowPrices] = useState(false);
   const [hero, setHero] = useState(0);
   const [form, setForm] = useState<PartRow>({});
   const [imageFiles, setImageFiles] = useState<File[]>([]);
@@ -102,7 +103,6 @@ export default function PartDetailPage() {
   }, [previews]);
 
   const photos = gallery(part || {});
-  const preferred = vendors.find((v) => v.is_preferred && v.unit_cost != null) || vendors.find((v) => v.unit_cost != null);
 
   function setField(key: string, value: unknown) {
     setForm((prev) => ({ ...prev, [key]: value }));
@@ -164,7 +164,8 @@ export default function PartDetailPage() {
         compatible_models: modelsRaw.length ? modelsRaw : null,
         is_consumable: !!form.is_consumable,
         is_active: form.is_active !== false,
-        unit_cost: form.unit_cost === '' || form.unit_cost == null ? null : Number(form.unit_cost),
+        sale_price:
+          form.sale_price === '' || form.sale_price == null ? null : Number(form.sale_price),
         image_url: images[0] || null,
         image_urls: images.length ? images : null,
         updated_at: new Date().toISOString(),
@@ -261,6 +262,9 @@ export default function PartDetailPage() {
             </p>
           </div>
           <div className="flex gap-2">
+            <button type="button" className="btn btn-secondary" onClick={() => setShowPrices((v) => !v)}>
+              {showPrices ? 'Hide prices' : 'Show prices'}
+            </button>
             {!editing ? (
               <button type="button" className="btn btn-primary" onClick={() => setEditing(true)}>
                 Edit part
@@ -316,7 +320,18 @@ export default function PartDetailPage() {
           <div className="card p-5 hover:transform-none space-y-3">
             {!editing ? (
               <>
-                <div className="text-2xl font-extrabold text-[var(--gold)]">{money(preferred?.unit_cost ?? part.unit_cost)}</div>
+                {showPrices ? (
+                  <div>
+                    <div className="text-xs text-[var(--text3)]">Sale price</div>
+                    <div className="text-2xl font-extrabold text-[var(--gold)]">
+                      {money(part.sale_price ?? part.unit_cost)}
+                    </div>
+                  </div>
+                ) : (
+                  <button type="button" className="text-sm text-[var(--text3)]" onClick={() => setShowPrices(true)}>
+                    Sale price hidden — Show prices
+                  </button>
+                )}
                 <p className="text-sm whitespace-pre-wrap">{part.description || 'No description yet.'}</p>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                   <dt className="text-[var(--text3)]">Unit</dt>
@@ -383,8 +398,15 @@ export default function PartDetailPage() {
                     </select>
                   </div>
                   <div>
-                    <label className="label">List price</label>
-                    <input className="input" type="number" min="0" step="0.01" value={form.unit_cost ?? ''} onChange={(e) => setField('unit_cost', e.target.value)} />
+                    <label className="label">Sale price</label>
+                    <input
+                      className="input"
+                      type="number"
+                      min="0"
+                      step="0.01"
+                      value={form.sale_price ?? form.unit_cost ?? ''}
+                      onChange={(e) => setField('sale_price', e.target.value)}
+                    />
                   </div>
                 </div>
                 <div>
@@ -431,7 +453,7 @@ export default function PartDetailPage() {
                   <tr className="text-left text-[var(--text3)] border-b border-[var(--border)]">
                     <th className="py-2 pr-3">Vendor</th>
                     <th className="py-2 pr-3">P/N</th>
-                    <th className="py-2 pr-3">Price</th>
+                    <th className="py-2 pr-3">Vendor cost</th>
                     <th className="py-2 pr-3">Lead</th>
                     <th className="py-2 pr-3" />
                   </tr>
@@ -450,7 +472,9 @@ export default function PartDetailPage() {
                         )}
                       </td>
                       <td className="py-2 pr-3 font-mono text-xs">{v.vendor_part_number || '—'}</td>
-                      <td className="py-2 pr-3 text-[var(--gold)] font-semibold">{money(v.unit_cost)}</td>
+                      <td className="py-2 pr-3 text-[var(--gold)] font-semibold">
+                        {showPrices ? money(v.unit_cost) : '•••'}
+                      </td>
                       <td className="py-2 pr-3">{v.lead_time_days != null ? `${v.lead_time_days}d` : '—'}</td>
                       <td className="py-2 text-right whitespace-nowrap">
                         {!v.is_preferred && (
