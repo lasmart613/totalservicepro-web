@@ -172,6 +172,80 @@ export function buildFreeAccountEmailCtaHtml(opts: {
 }
 
 /** Email envelope around a billing document. PDF/print paths must not call this. */
+export function supplierSignupUrl(origin: string, email?: string | null): string {
+  const base = String(origin || 'https://repairplanet.net').replace(/\/$/, '');
+  const params = new URLSearchParams();
+  const em = String(email || '').trim();
+  if (em) params.set('email', em);
+  const q = params.toString();
+  return q ? `${base}/signup/supplier?${q}` : `${base}/signup/supplier`;
+}
+
+export function supplierLoginUrl(origin: string): string {
+  const base = String(origin || 'https://repairplanet.net').replace(/\/$/, '');
+  return `${base}/login?next=${encodeURIComponent('/parts')}`;
+}
+
+/**
+ * Footer for purchase-order emails to parts suppliers (email only, not PDF).
+ */
+export function buildSupplierPoEmailCtaHtml(opts: {
+  signupUrl: string;
+  loginUrl: string;
+}): string {
+  return (
+    `<table class="tsp-supplier-po-cta" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
+    `style="margin:20px 0 0;border-collapse:collapse;">` +
+    `<tr><td style="padding:18px 16px;background:#0f1115;border-radius:12px;border:1px solid #2a2f3a;">` +
+    `<div style="font-size:13px;font-weight:800;color:#d4a017;letter-spacing:0.02em;margin-bottom:6px;">RepairPlanet</div>` +
+    `<div style="font-size:15px;font-weight:700;color:#f1f3f4;margin-bottom:8px;">Free for parts suppliers</div>` +
+    `<p style="margin:0 0 10px;font-size:13px;line-height:1.55;color:#c4c7cc;">` +
+    `Register free. Connect with laser service companies, receive purchase orders in one inbox, ` +
+    `and list parts on the marketplace.` +
+    `</p>` +
+    `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:12px 0 8px;"><tr>` +
+    `<td style="border-radius:8px;background:#d4a017;">` +
+    `<a href="${esc(opts.signupUrl)}" ` +
+    `style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;">` +
+    `Create a free account</a>` +
+    `</td>` +
+    `<td width="10"></td>` +
+    `<td style="border-radius:8px;border:1px solid #d4a017;">` +
+    `<a href="${esc(opts.loginUrl)}" ` +
+    `style="display:inline-block;padding:12px 18px;font-size:14px;font-weight:700;color:#d4a017;text-decoration:none;border-radius:8px;">` +
+    `Sign in</a>` +
+    `</td></tr></table>` +
+    `</td></tr></table>`
+  );
+}
+
+export function wrapSupplierFacingDocumentEmail(opts: {
+  subject: string;
+  documentHtml: string;
+  signupUrl: string;
+  loginUrl: string;
+}): string {
+  const title = esc(opts.subject);
+  const already = opts.documentHtml.includes('tsp-supplier-po-cta');
+  const cta = already
+    ? ''
+    : buildSupplierPoEmailCtaHtml({
+        signupUrl: opts.signupUrl,
+        loginUrl: opts.loginUrl,
+      });
+  return `<!DOCTYPE html>
+<html><head><meta charset="utf-8"/><title>${title}</title></head>
+<body style="margin:0;padding:16px;background:#f4f4f5;font-family:system-ui,sans-serif;">
+  <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:12px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.06);">
+    ${opts.documentHtml}
+    ${cta}
+  </div>
+  <p style="max-width:720px;margin:16px auto 0;font-size:11px;color:#666;text-align:center;">
+    Sent via Total Service Pro · <a href="https://repairplanet.net">repairplanet.net</a>
+  </p>
+</body></html>`;
+}
+
 export function wrapCustomerFacingDocumentEmail(opts: {
   subject: string;
   documentHtml: string;

@@ -340,6 +340,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
           { href: '/customers', label: 'Customers' },
           { href: '/estimates', label: 'Estimates' },
           { href: '/invoices', label: 'Invoices' },
+          { href: '/purchase-orders', label: 'Purchase Orders' },
           { href: '/company', label: 'Company Profile' },
         ],
       }

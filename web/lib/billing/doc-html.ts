@@ -144,13 +144,15 @@ export function buildDocTopHeader(
   );
 }
 
-function customerBillTo(customer: DocCustomer): string {
+function customerBillTo(customer: DocCustomer, heading = 'Customer / Bill To'): string {
   const addr = [customer.address, customer.city, customer.state, customer.zip]
     .filter(Boolean)
     .join(', ');
   return (
     `<div style="margin-bottom:8px;padding:6px 8px;background:#f8f4e8;border:1px solid #e8d9a0;border-radius:4px;">` +
-    `<div style="font-size:9px;font-weight:700;color:#8a6f2e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Customer / Bill To</div>` +
+    `<div style="font-size:9px;font-weight:700;color:#8a6f2e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">${esc(
+      heading
+    )}</div>` +
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:10px;">` +
     `<div><span style="color:#666;font-size:8px;">NAME</span> ${esc(customer.name || '—')}</div>` +
     `<div><span style="color:#666;font-size:8px;">ADDRESS</span> ${esc(addr || '—')}</div>` +
@@ -316,6 +318,121 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         `</div>`
       : '') +
     `Thank you for choosing ${esc(input.company.company_name || 'Total Service Pro')}!` +
+    `</div></div>`
+  );
+}
+
+export type PurchaseOrderHtmlInput = {
+  company: DocCompany;
+  supplier: DocCustomer;
+  poNumber: string;
+  poDate: string;
+  neededBy?: string;
+  shipTo?: string;
+  description?: string;
+  preparedBy?: string;
+  lines: { part_number?: string; description?: string; qty?: number; unit_price?: number; ext?: number }[];
+  subtotal: number;
+  tax: number;
+  total: number;
+};
+
+export function buildPurchaseOrderHtml(input: PurchaseOrderHtmlInput): string {
+  const dateLabel = input.poDate
+    ? (() => {
+        try {
+          return new Date(input.poDate + (input.poDate.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
+        } catch {
+          return input.poDate;
+        }
+      })()
+    : new Date().toLocaleDateString();
+  const neededLabel = input.neededBy
+    ? (() => {
+        try {
+          return new Date(input.neededBy + (input.neededBy.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
+        } catch {
+          return input.neededBy;
+        }
+      })()
+    : '—';
+
+  let linesHtml =
+    `<table style="width:100%;border-collapse:collapse;font-size:11px;margin:0 0 12px;">` +
+    `<thead><tr style="background:#f5f5f5;border-bottom:2px solid #FBBF24;">` +
+    `<th style="text-align:left;padding:6px 4px;">Part #</th>` +
+    `<th style="text-align:left;padding:6px 4px;">Description</th>` +
+    `<th style="text-align:right;padding:6px 4px;">Qty</th>` +
+    `<th style="text-align:right;padding:6px 4px;">Price</th>` +
+    `<th style="text-align:right;padding:6px 4px;">Ext</th>` +
+    `</tr></thead><tbody>`;
+
+  const items = (input.lines || []).filter(
+    (it) => it.description || it.part_number || it.unit_price
+  );
+  if (!items.length) {
+    linesHtml += `<tr><td colspan="5" style="padding:8px;color:#666;">No line items</td></tr>`;
+  } else {
+    items.forEach((it) => {
+      const ext = it.ext ?? (Number(it.qty) || 0) * (Number(it.unit_price) || 0);
+      linesHtml +=
+        `<tr style="border-bottom:1px solid #eee;">` +
+        `<td style="padding:5px 4px;vertical-align:top;">${esc(it.part_number || '')}</td>` +
+        `<td style="padding:5px 4px;vertical-align:top;">${esc(it.description || '')}</td>` +
+        `<td style="padding:5px 4px;text-align:right;vertical-align:top;">${Number(it.qty || 0)
+          .toFixed(2)
+          .replace(/\.00$/, '')}</td>` +
+        `<td style="padding:5px 4px;text-align:right;vertical-align:top;">${money(it.unit_price)}</td>` +
+        `<td style="padding:5px 4px;text-align:right;vertical-align:top;">${money(ext)}</td>` +
+        `</tr>`;
+    });
+  }
+  linesHtml += `</tbody></table>`;
+
+  return (
+    `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;font-size:12px;line-height:1.35;max-width:800px;margin:auto;">` +
+    buildDocTopHeader(input.company, 'Purchase Order', input.poNumber, dateLabel) +
+    customerBillTo(
+      {
+        ...input.supplier,
+        name: input.supplier.name || 'Parts supplier',
+      },
+      'Vendor / Parts Supplier'
+    ) +
+    `<div style="margin-bottom:10px;padding:6px 8px;background:#f9f9f9;border:1px solid #eee;border-radius:4px;">` +
+    `<div style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Purchase Order</div>` +
+    `<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:10px;">` +
+    `<div><span style="color:#666;font-size:8px;">PO DATE</span> ${esc(dateLabel)}</div>` +
+    `<div><span style="color:#666;font-size:8px;">PO #</span> ${esc(input.poNumber)}</div>` +
+    `<div><span style="color:#666;font-size:8px;">NEEDED BY</span> ${esc(neededLabel)}</div>` +
+    (input.preparedBy || input.company.tech_name
+      ? `<div><span style="color:#666;font-size:8px;">PREPARED BY</span> ${esc(
+          input.preparedBy || input.company.tech_name
+        )}</div>`
+      : '') +
+    (input.shipTo
+      ? `<div style="grid-column:1 / -1;"><span style="color:#666;font-size:8px;">SHIP TO</span> ${esc(
+          input.shipTo
+        )}</div>`
+      : '') +
+    `</div></div>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px;">Line Items</h3>` +
+    linesHtml +
+    (input.description
+      ? `<div style="margin:0 0 12px;font-size:11px;color:#444;"><strong>Notes:</strong> ${esc(
+          input.description
+        )}</div>`
+      : '') +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px;">Amounts</h3>` +
+    `<div style="font-size:13px;font-weight:600;">` +
+    `<div>Subtotal: ${money(input.subtotal)}</div>` +
+    `<div>Tax: ${money(input.tax)}</div>` +
+    `<div class="totals" style="margin-top:10px;padding-top:10px;border-top:2px solid #ccc;font-size:1.25rem;">PO Total: ${money(
+      input.total
+    )}</div>` +
+    `</div>` +
+    `<div style="margin-top:28px;font-size:11px;color:#555;text-align:center;border-top:1px solid #eee;padding-top:12px;">` +
+    `Please confirm this purchase order with ${esc(input.company.company_name || 'Total Service Pro')}.` +
     `</div></div>`
   );
 }

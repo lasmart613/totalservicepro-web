@@ -7,13 +7,14 @@
  * Sequence advances per org + day by scanning saved numbers (column + JSON fallbacks).
  */
 
-export type DocKind = 'TKT' | 'SR' | 'EST' | 'INV';
+export type DocKind = 'TKT' | 'SR' | 'EST' | 'INV' | 'PO';
 
 export const DOC_KIND = {
   TKT: 'TKT',
   SR: 'SR',
   EST: 'EST',
   INV: 'INV',
+  PO: 'PO',
 } as const;
 
 /** Minimal Supabase-like client surface used by this module. */
@@ -138,6 +139,17 @@ function extractNumberFromRow(row: any, kind: string): string {
     }
     return row.invoice_number || (idata && (idata.invoice_number || idata.invNumber)) || '';
   }
+  if (kind === 'PO') {
+    let pdata = row.po_data;
+    if (typeof pdata === 'string') {
+      try {
+        pdata = JSON.parse(pdata);
+      } catch {
+        pdata = {};
+      }
+    }
+    return row.po_number || (pdata && (pdata.po_number || pdata.poNumber)) || '';
+  }
   return '';
 }
 
@@ -259,6 +271,25 @@ async function nextSequence(
       } catch {
         /* ignore */
       }
+    } else if (kind === 'PO') {
+      const po = await sb
+        .from('purchase_orders')
+        .select('po_number, po_data, organization_id, created_at')
+        .eq('organization_id', id)
+        .order('created_at', { ascending: false })
+        .limit(200);
+      maxSeq = considerRows(po.data, kind, stem, maxSeq);
+      try {
+        const po2 = await sb
+          .from('purchase_orders')
+          .select('po_number, po_data, created_at')
+          .ilike('po_number', stem + '%')
+          .order('created_at', { ascending: false })
+          .limit(100);
+        maxSeq = considerRows(po2.data, kind, stem, maxSeq);
+      } catch {
+        /* ignore */
+      }
     }
   } catch (e) {
     console.warn('DocNumbers.nextSequence', e);
@@ -332,9 +363,25 @@ export async function allocateDocNumber(
     last = await generateDocNumber(client, { ...opts, existing: null });
     const kind = String(opts.kind || 'INV').toUpperCase();
     const table =
-      kind === 'EST' ? 'service_estimates' : kind === 'INV' ? 'service_invoices' : kind === 'TKT' ? 'service_tickets' : 'service_reports';
+      kind === 'EST'
+        ? 'service_estimates'
+        : kind === 'INV'
+          ? 'service_invoices'
+          : kind === 'PO'
+            ? 'purchase_orders'
+            : kind === 'TKT'
+              ? 'service_tickets'
+              : 'service_reports';
     const col =
-      kind === 'EST' ? 'estimate_number' : kind === 'INV' ? 'invoice_number' : kind === 'TKT' ? 'ticket_number' : 'report_number';
+      kind === 'EST'
+        ? 'estimate_number'
+        : kind === 'INV'
+          ? 'invoice_number'
+          : kind === 'PO'
+            ? 'po_number'
+            : kind === 'TKT'
+              ? 'ticket_number'
+              : 'report_number';
     try {
       const q = client.from(table).select('id').eq(col, last).limit(1);
       const { data } = await q;

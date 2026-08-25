@@ -728,6 +728,11 @@ export default function HomePage() {
                     <div className="font-bold">Invoices</div>
                     <div className="text-xs text-[var(--text3)] mt-1">Billing & collections</div>
                   </Link>
+                  <Link href="/purchase-orders" className="card p-6 text-center hover:border-[var(--gold)]">
+                    <div className="text-3xl mb-2">📦</div>
+                    <div className="font-bold">Purchase Orders</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">Email POs to parts suppliers</div>
+                  </Link>
                   <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
                     <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />
                     <div className="font-bold">Company Profile</div>

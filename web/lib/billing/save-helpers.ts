@@ -114,6 +114,10 @@ export async function writeWithColumnRetry(
         delete body.invoice_number;
         stripped = true;
       }
+      if (/po_number/i.test(m) && 'po_number' in body) {
+        delete body.po_number;
+        stripped = true;
+      }
       if (/customer_organization/i.test(m) && 'customer_organization_id' in body) {
         delete body.customer_organization_id;
         stripped = true;

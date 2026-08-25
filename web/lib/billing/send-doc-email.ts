@@ -76,7 +76,7 @@ export async function resolveCustomerEmailOnFile(opts: {
 }
 
 export async function sendBillingDocEmail(opts: {
-  kind: 'invoice' | 'estimate' | 'report';
+  kind: 'invoice' | 'estimate' | 'report' | 'purchase_order';
   accessToken: string;
   payload: Record<string, unknown>;
 }): Promise<SendDocResult> {
@@ -85,7 +85,9 @@ export async function sendBillingDocEmail(opts: {
       ? '/api/billing/send-invoice'
       : opts.kind === 'report'
         ? '/api/billing/send-report'
-        : '/api/billing/send-estimate';
+        : opts.kind === 'purchase_order'
+          ? '/api/billing/send-purchase-order'
+          : '/api/billing/send-estimate';
 
   try {
     const res = await fetch(path, {

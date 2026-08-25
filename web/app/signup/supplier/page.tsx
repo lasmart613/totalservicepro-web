@@ -1,6 +1,6 @@
 ﻿'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
 import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
@@ -46,6 +46,15 @@ export default function SupplierSignup() {
   const router = useRouter();
   const supabase = getSupabaseClient();
   useRedirectSignedInOrgToPlans();
+
+  useEffect(() => {
+    try {
+      const q = new URLSearchParams(window.location.search).get('email');
+      if (q) setEmail(q.trim());
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const togglePart = (part: string) => {
     setSelectedParts(prev =>
