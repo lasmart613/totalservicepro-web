@@ -56,7 +56,6 @@ export default function PurchaseOrderFormClient() {
 
   const [suppliers, setSuppliers] = useState<SupplierOpt[]>([]);
   const [supSearch, setSupSearch] = useState('');
-  const [showSupDrop, setShowSupDrop] = useState(false);
   const [supplierName, setSupplierName] = useState('');
   const [supplierOrgId, setSupplierOrgId] = useState<string | number | null>(null);
   const [supAddress, setSupAddress] = useState('');
@@ -83,17 +82,24 @@ export default function PurchaseOrderFormClient() {
 
   const filteredSuppliers = useMemo(() => {
     const q = supSearch.trim().toLowerCase();
-    if (!q) return suppliers.slice(0, 12);
-    return suppliers
-      .filter((s) =>
-        [s.name, s.city, s.state, s.email, s.phone]
-          .filter(Boolean)
-          .join(' ')
-          .toLowerCase()
-          .includes(q)
-      )
-      .slice(0, 12);
-  }, [suppliers, supSearch]);
+    const list = !q
+      ? suppliers
+      : suppliers.filter((s) =>
+          [s.name, s.city, s.state, s.email, s.phone]
+            .filter(Boolean)
+            .join(' ')
+            .toLowerCase()
+            .includes(q)
+        );
+    if (
+      supplierOrgId != null &&
+      !list.some((s) => String(s.id) === String(supplierOrgId))
+    ) {
+      const selected = suppliers.find((s) => String(s.id) === String(supplierOrgId));
+      if (selected) return [selected, ...list];
+    }
+    return list;
+  }, [suppliers, supSearch, supplierOrgId]);
 
   const loadSuppliers = useCallback(async () => {
     const { data, error } = await fetchAllPages<SupplierOpt>(async (from, to) => {
@@ -119,7 +125,18 @@ export default function PurchaseOrderFormClient() {
     setSupZip(s.zip || '');
     setSupPhone(s.phone || '');
     setSupEmail(s.email || '');
-    setShowSupDrop(false);
+  };
+
+  const clearSupplier = () => {
+    setSupplierName('');
+    setSupplierOrgId(null);
+    setSupSearch('');
+    setSupAddress('');
+    setSupCity('');
+    setSupState('');
+    setSupZip('');
+    setSupPhone('');
+    setSupEmail('');
   };
 
   const loadPo = useCallback(
@@ -411,41 +428,64 @@ export default function PurchaseOrderFormClient() {
 
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-[var(--gold)] mb-3">Parts supplier</h2>
-          <div className="relative">
-            <label className="text-xs text-[var(--text3)]">Search any parts supplier</label>
+          <div>
+            <label className="text-xs text-[var(--text3)]">Choose a parts supplier</label>
+            <select
+              className="input select mt-1"
+              value={supplierOrgId != null ? String(supplierOrgId) : ''}
+              onChange={(e) => {
+                const id = e.target.value;
+                if (!id) {
+                  clearSupplier();
+                  return;
+                }
+                const s = suppliers.find((x) => String(x.id) === id);
+                if (s) applySupplier(s);
+              }}
+            >
+              <option value="">
+                {suppliers.length
+                  ? `Choose a parts supplier (${filteredSuppliers.length} shown)…`
+                  : 'No parts suppliers found'}
+              </option>
+              {filteredSuppliers.map((s) => (
+                <option key={String(s.id)} value={String(s.id)}>
+                  {s.name}
+                  {s.city || s.state ? ` — ${[s.city, s.state].filter(Boolean).join(', ')}` : ''}
+                  {s.email ? ` · ${s.email}` : ' · no email'}
+                </option>
+              ))}
+            </select>
+            <label className="text-xs text-[var(--text3)] mt-3 block">Type to filter the list</label>
             <input
               className="input mt-1"
               value={supSearch}
               onChange={(e) => {
-                setSupSearch(e.target.value);
-                setShowSupDrop(true);
-                if (!e.target.value) {
-                  setSupplierOrgId(null);
-                  setSupplierName('');
-                  setSupEmail('');
+                const v = e.target.value;
+                setSupSearch(v);
+                const exact = suppliers.find(
+                  (s) => s.name.toLowerCase() === v.trim().toLowerCase()
+                );
+                if (exact) {
+                  applySupplier(exact);
+                  return;
                 }
+                if (!v.trim()) clearSupplier();
               }}
-              onFocus={() => setShowSupDrop(true)}
-              placeholder="Start typing a supplier name"
+              list="po-supplier-autofill"
+              placeholder="Start typing a supplier name…"
+              autoComplete="off"
             />
-            {showSupDrop && filteredSuppliers.length > 0 && (
-              <div className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-y-auto rounded-lg border border-[var(--border)] bg-[var(--surface3)] shadow-xl">
-                {filteredSuppliers.map((s) => (
-                  <button
-                    key={String(s.id)}
-                    type="button"
-                    className="w-full text-left px-3 py-2 hover:bg-[var(--surface)] text-sm"
-                    onClick={() => applySupplier(s)}
-                  >
-                    <div className="font-semibold">{s.name}</div>
-                    <div className="text-[11px] text-[var(--text3)]">
-                      {[s.city, s.state].filter(Boolean).join(', ') || '—'}
-                      {s.email ? ` · ${s.email}` : ' · no email on profile'}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
+            <datalist id="po-supplier-autofill">
+              {suppliers.map((s) => (
+                <option key={String(s.id)} value={s.name}>
+                  {s.email || [s.city, s.state].filter(Boolean).join(', ')}
+                </option>
+              ))}
+            </datalist>
+            <p className="text-[11px] text-[var(--text3)] mt-1">
+              Pick from the dropdown or type a name — email fills from their profile.
+            </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <div>
