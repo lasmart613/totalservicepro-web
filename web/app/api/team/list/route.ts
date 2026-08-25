@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { listMemberUserIdsForOrg, upsertMembership } from '@/lib/org-membership-server';
+import { listMemberUserIdsForOrg } from '@/lib/org-membership-server';
 
 /**
  * GET /api/team/list
@@ -49,50 +49,6 @@ export async function GET(req: NextRequest) {
 
     const orgId = profile.organization_id;
     const admin = getSupabaseAdmin();
-
-    // Run invite→profile sync lightly (same org)
-    try {
-      const { data: invites } = await admin
-        .from('engineer_invitations')
-        .select('id, email, role, first_name, last_name, accepted')
-        .eq('organization_id', orgId);
-
-      for (const inv of invites || []) {
-        const email = (inv.email || '').toLowerCase().trim();
-        if (!email) continue;
-        const { data: mem } = await admin
-          .from('user_profiles')
-          .select('id, organization_id')
-          .ilike('email', email)
-          .maybeSingle();
-        if (!mem) continue;
-        await upsertMembership(admin, {
-          userId: mem.id,
-          organizationId: orgId,
-          role: inv.role || 'fse',
-          isHome: false,
-        });
-        // Only attach the profile pointer when they have no active org.
-        if (mem.organization_id == null) {
-          await admin
-            .from('user_profiles')
-            .update({
-              organization_id: orgId,
-              active_organization_id: orgId,
-              role: inv.role || 'fse',
-            })
-            .eq('id', mem.id);
-        }
-        if (!inv.accepted) {
-          await admin
-            .from('engineer_invitations')
-            .update({ accepted: true, accepted_at: new Date().toISOString() })
-            .eq('id', inv.id);
-        }
-      }
-    } catch (e) {
-      console.warn('list sync light fail', e);
-    }
 
     const teamSelectFull =
       'id, first_name, last_name, email, role, job_title, additional_roles, created_at, onboarding_completed, organization_id';

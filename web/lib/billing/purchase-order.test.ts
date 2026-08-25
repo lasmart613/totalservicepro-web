@@ -81,3 +81,12 @@ test('purchase order list is scoped to caller organization_id', () => {
   assert.match(src, /\.eq\('organization_id', orgId\)/);
   assert.doesNotMatch(src, /created_by/);
 });
+
+test('PO RLS uses the active shop only, not every membership', () => {
+  const live = readFileSync(
+    join(here, '../../supabase/migrations/20260825_000004_po_active_org_rls.sql'),
+    'utf8'
+  );
+  assert.match(live, /organization_id = public\.get_my_org_id\(\)/);
+  assert.doesNotMatch(live, /my_membership_org_ids/);
+});

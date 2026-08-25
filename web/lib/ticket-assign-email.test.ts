@@ -45,4 +45,7 @@ test('creating a ticket notifies the assigned FSE', () => {
   assert.match(route, /sendTicketAssignedEmail/);
   assert.match(route, /ticket_assigned/);
   assert.match(route, /skipped: 'self'/);
+  assert.match(route, /userClient/);
+  assert.match(route, /Assignee is not on this shop/);
+  assert.doesNotMatch(route, /hasServiceRole\(\) \? getSupabaseAdmin\(\) : userClient;\s*\n\s*const \{ data: ticket/);
 });

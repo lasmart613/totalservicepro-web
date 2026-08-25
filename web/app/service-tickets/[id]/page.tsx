@@ -7,6 +7,30 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { ArrowLeft, Edit2, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
+import { loadLinkedCustomers } from '@/lib/customer-form';
+
+const TICKET_SAVE_FIELDS = [
+  'status',
+  'priority',
+  'description',
+  'notes',
+  'customer_name',
+  'customer_phone',
+  'customer_email',
+  'customer_address',
+  'customer_city',
+  'customer_state',
+  'zip',
+  'customer_organization_id',
+  'equipment_make',
+  'equipment_model',
+  'equipment_type',
+  'serial_number',
+  'service_date',
+  'scheduled_time',
+  'end_time',
+  'assigned_to',
+] as const;
 
 export default function ServiceTicketDetail() {
   const params = useParams();
@@ -62,15 +86,12 @@ export default function ServiceTicketDetail() {
         setTicket(ticketData);
         setFormData(ticketData);
 
-        // Fetch customer organizations for dropdown
-        const { data: orgData } = await supabase
-          .from('organizations')
-          .select('id, name, address, city, state, zip, phone, email')
-          .eq('type', 'customer')
-          .eq('is_active', true)
-          .order('name');
-
-        setOrganizations(orgData || []);
+        const shopId = ticketData.organization_id;
+        if (shopId != null) {
+          setOrganizations(await loadLinkedCustomers(supabase, shopId));
+        } else {
+          setOrganizations([]);
+        }
 
         // Load reference data for equipment dropdowns
         try {
@@ -93,15 +114,13 @@ export default function ServiceTicketDetail() {
     setFormData((prev: any) => ({ ...prev, [field]: value }));
   };
 
-  // Handle customer selection from dropdown
   const handleCustomerSelect = (orgId: string) => {
     if (orgId === 'new') {
-      // New customer - clear autofill fields but keep customer_name editable
-      handleInputChange('organization_id', null);
+      setFormData((prev: any) => ({ ...prev, customer_organization_id: null }));
       return;
     }
 
-    const selectedOrg = organizations.find(org => org.id.toString() === orgId);
+    const selectedOrg = organizations.find((org) => String(org.id) === String(orgId));
     if (selectedOrg) {
       setFormData((prev: any) => ({
         ...prev,
@@ -109,10 +128,10 @@ export default function ServiceTicketDetail() {
         customer_address: selectedOrg.address || prev.customer_address,
         customer_city: selectedOrg.city || prev.customer_city,
         customer_state: selectedOrg.state || prev.customer_state,
-        customer_zip: selectedOrg.zip || prev.zip,
+        zip: selectedOrg.zip || prev.zip,
         customer_phone: selectedOrg.phone || prev.customer_phone,
         customer_email: selectedOrg.email || prev.customer_email,
-        organization_id: selectedOrg.id,
+        customer_organization_id: selectedOrg.id,
       }));
     }
   };
@@ -121,14 +140,22 @@ export default function ServiceTicketDetail() {
     if (!ticketId) return;
     setSaving(true);
     try {
-      const { error } = await supabase
+      const patch: Record<string, any> = { updated_at: new Date().toISOString() };
+      for (const key of TICKET_SAVE_FIELDS) {
+        if (key in formData) patch[key] = formData[key];
+      }
+      let { error } = await supabase
         .from('service_tickets')
-        .update({ ...formData, updated_at: new Date().toISOString() })
+        .update(patch)
         .eq('id', ticketId);
+      if (error && /customer_organization/i.test(error.message || '')) {
+        delete patch.customer_organization_id;
+        ({ error } = await supabase.from('service_tickets').update(patch).eq('id', ticketId));
+      }
 
       if (error) throw error;
 
-      setTicket(formData);
+      setTicket({ ...ticket, ...patch });
       setIsEditing(false);
       toast.success('Ticket updated successfully!');
     } catch (err) {
@@ -230,7 +257,11 @@ export default function ServiceTicketDetail() {
                   <select 
                     className="input mb-3" 
                     onChange={(e) => handleCustomerSelect(e.target.value)}
-                    defaultValue={formData.organization_id ? formData.organization_id.toString() : 'new'}
+                    value={
+                      formData.customer_organization_id != null && formData.customer_organization_id !== ''
+                        ? String(formData.customer_organization_id)
+                        : 'new'
+                    }
                   >
                     <option value="new">New / Custom Customer</option>
                     {organizations.map(org => (

@@ -163,6 +163,14 @@ test('invite route no longer 409s just because the email already has an org', ()
   assert.doesNotMatch(source, /status: 409/);
 });
 
+test('GET /api/team/list does not enroll people or mark invites accepted', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(join(here, '../app/api/team/list/route.ts'), 'utf8');
+  assert.doesNotMatch(source, /upsertMembership/);
+  assert.doesNotMatch(source, /accepted: true/);
+  assert.match(source, /listMemberUserIdsForOrg/);
+});
+
 test('claim does not skip founders who have a pending invite to another shop', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/api/team/claim/route.ts'), 'utf8');

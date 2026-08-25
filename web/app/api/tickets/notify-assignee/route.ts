@@ -65,9 +65,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'ticketId is required' }, { status: 400 });
     }
 
-    const writer = hasServiceRole() ? getSupabaseAdmin() : userClient;
+    const { data: caller } = await userClient
+      .from('user_profiles')
+      .select('id, organization_id, first_name, last_name, email, role')
+      .eq('id', user.id)
+      .maybeSingle();
 
-    const { data: ticket, error: ticketErr } = await writer
+    // Ticket must already be visible to this session (shop RLS or assigned_to).
+    const { data: ticket, error: ticketErr } = await userClient
       .from('service_tickets')
       .select(
         'id, ticket_number, organization_id, assigned_to, customer_name, service_type, service_date, scheduled_time, priority, notes, description, customer_address, customer_city, customer_state'
@@ -76,6 +81,24 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
     if (ticketErr || !ticket) {
       return NextResponse.json({ error: ticketErr?.message || 'Ticket not found' }, { status: 404 });
+    }
+    if (ticket.organization_id == null) {
+      return NextResponse.json({ error: 'Ticket has no shop' }, { status: 403 });
+    }
+
+    const shopId = ticket.organization_id;
+    let onShop = sameId(caller?.organization_id, shopId);
+    if (!onShop) {
+      const { data: mem } = await userClient
+        .from('organization_memberships')
+        .select('user_id')
+        .eq('user_id', user.id)
+        .eq('organization_id', shopId)
+        .maybeSingle();
+      onShop = !!mem;
+    }
+    if (!onShop) {
+      return NextResponse.json({ error: 'Not a member of this ticket’s shop' }, { status: 403 });
     }
 
     const assigneeId = String(body.assignedTo || body.assigned_to || ticket.assigned_to || '').trim();
@@ -86,24 +109,25 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, emailed: false, skipped: 'self' });
     }
 
-    const { data: caller } = await writer
-      .from('user_profiles')
-      .select('id, organization_id, first_name, last_name, email, role')
-      .eq('id', user.id)
-      .maybeSingle();
+    const writer = hasServiceRole() ? getSupabaseAdmin() : userClient;
 
-    if (ticket.organization_id != null && caller?.organization_id != null) {
-      if (!sameId(ticket.organization_id, caller.organization_id)) {
-        const { data: mem } = await writer
-          .from('organization_memberships')
-          .select('user_id')
-          .eq('user_id', user.id)
-          .eq('organization_id', ticket.organization_id)
-          .maybeSingle();
-        if (!mem) {
-          return NextResponse.json({ error: 'Not a member of this ticket’s shop' }, { status: 403 });
-        }
-      }
+    const { data: assigneeMem } = await writer
+      .from('organization_memberships')
+      .select('user_id')
+      .eq('user_id', assigneeId)
+      .eq('organization_id', shopId)
+      .maybeSingle();
+    let assigneeOnShop = !!assigneeMem;
+    if (!assigneeOnShop) {
+      const { data: assigneeProf } = await writer
+        .from('user_profiles')
+        .select('id, organization_id')
+        .eq('id', assigneeId)
+        .maybeSingle();
+      assigneeOnShop = sameId(assigneeProf?.organization_id, shopId);
+    }
+    if (!assigneeOnShop) {
+      return NextResponse.json({ error: 'Assignee is not on this shop' }, { status: 403 });
     }
 
     const { data: assignee } = await writer

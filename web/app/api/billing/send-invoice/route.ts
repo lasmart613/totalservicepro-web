@@ -117,8 +117,7 @@ export async function POST(req: NextRequest) {
               (row.created_by && String(row.created_by) === String(user.id)) ||
               (callerOrgId != null &&
                 row.organization_id != null &&
-                String(row.organization_id) === String(callerOrgId)) ||
-              row.organization_id == null;
+                String(row.organization_id) === String(callerOrgId));
             if (owns) {
               inv = row;
               invLoadNote = 'loaded_via_service_role';
@@ -135,8 +134,6 @@ export async function POST(req: NextRequest) {
         invLoadNote = userLoad.errorMsg || 'not_found_user_rls';
       }
 
-      // Do NOT hard-fail: client already sent html, email, balance in the body.
-      // Missing row only skips CRM hydration + payment_url persistence.
       if (!inv) {
         console.warn('send-invoice: invoice row not loaded', {
           invoiceId,
@@ -144,6 +141,17 @@ export async function POST(req: NextRequest) {
           userId: user.id,
           callerOrgId,
         });
+        const status = invLoadNote === 'service_role_row_not_owned' ? 403 : 404;
+        return NextResponse.json(
+          {
+            error:
+              status === 403
+                ? 'This invoice belongs to another organization.'
+                : 'Invoice not found.',
+            invLoadNote,
+          },
+          { status }
+        );
       }
     }
 
@@ -300,8 +308,8 @@ export async function POST(req: NextRequest) {
               html = html + payBlock;
             }
           }
-          // Persist link on invoice for later (service role if RLS blocks user update)
-          if (invoiceId) {
+          // Persist link only on an invoice this caller already owns.
+          if (invoiceId && inv) {
             try {
               let idata: any = inv?.invoice_data || {};
               if (typeof idata === 'string') {

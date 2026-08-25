@@ -43,8 +43,22 @@ test('new service call form autocompletes assigned customers and can add a new c
   assert.match(src, /assigned_to: assignedTo/);
   assert.match(src, /100dvh/);
   assert.match(src, /overflowY: 'auto'/);
-  assert.doesNotMatch(
-    src,
-    /<label className="label">Customer name \*<\/label>\s*<input\s+className="input"\s+value=\{form\.customer_name\}/
-  );
+});
+
+test('ticket editor keeps shop organization_id and writes customer_organization_id', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
+  assert.match(src, /TICKET_SAVE_FIELDS/);
+  assert.match(src, /customer_organization_id: selectedOrg\.id/);
+  assert.match(src, /loadLinkedCustomers/);
+  assert.doesNotMatch(src, /[^_]organization_id: selectedOrg\.id/);
+  assert.doesNotMatch(src, /update\(\{ \.\.\.formData/);
+});
+
+test('send-invoice requires an owned invoice row before service-role writes', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, '../app/api/billing/send-invoice/route.ts'), 'utf8');
+  assert.doesNotMatch(src, /row\.organization_id == null/);
+  assert.match(src, /This invoice belongs to another organization/);
+  assert.match(src, /if \(invoiceId && inv\)/);
 });

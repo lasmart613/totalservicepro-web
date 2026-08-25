@@ -37,14 +37,8 @@ ALTER TABLE public.purchase_orders ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS purchase_orders_sending_org_all ON public.purchase_orders;
 CREATE POLICY purchase_orders_sending_org_all ON public.purchase_orders
   FOR ALL TO authenticated
-  USING (
-    organization_id = public.get_my_org_id()
-    OR organization_id IN (SELECT public.my_membership_org_ids())
-  )
-  WITH CHECK (
-    organization_id = public.get_my_org_id()
-    OR organization_id IN (SELECT public.my_membership_org_ids())
-  );
+  USING (organization_id = public.get_my_org_id())
+  WITH CHECK (organization_id = public.get_my_org_id());
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON public.purchase_orders TO authenticated;
 GRANT USAGE, SELECT ON SEQUENCE public.purchase_orders_id_seq TO authenticated;
