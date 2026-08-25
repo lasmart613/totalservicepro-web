@@ -1010,8 +1010,7 @@ function CompanyProfile() {
                   Pending invites ({pendingInvites.length})
                 </h3>
                 <p className="text-[10px] text-[var(--text3)] mb-2">
-                  Invites that are still open, or accepted but not yet on the roster. Once someone finishes
-                  setup they move to Current Team (not pending).
+                  Open invites only. After someone joins they appear on Current Team, not here.
                 </p>
                 {pendingInvites.length === 0 ? (
                   <p className="text-xs text-[var(--text3)]">No pending invites.</p>

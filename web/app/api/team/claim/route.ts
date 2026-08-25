@@ -79,13 +79,23 @@ export async function POST(req: NextRequest) {
     let invQuery = admin
       .from('engineer_invitations')
       .select('*')
-      .eq('email', email)
+      .ilike('email', email)
       .eq('accepted', false)
       .order('created_at', { ascending: false });
     if (body.inviteId) {
-      invQuery = admin.from('engineer_invitations').select('*').eq('id', body.inviteId).eq('email', email);
+      invQuery = admin.from('engineer_invitations').select('*').eq('id', body.inviteId).ilike('email', email);
     }
-    const { data: inv } = await invQuery.limit(1).maybeSingle();
+    let { data: inv } = await invQuery.limit(1).maybeSingle();
+    if (!inv && !body.inviteId) {
+      const { data: anyInv } = await admin
+        .from('engineer_invitations')
+        .select('*')
+        .ilike('email', email)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      inv = anyInv;
+    }
 
     if (!inv?.organization_id) {
       if (existingProf?.organization_id) {
@@ -144,7 +154,7 @@ export async function POST(req: NextRequest) {
       isHome: false,
     });
     if (!added.ok) {
-      return NextResponse.json({ error: added.error || 'Membership failed' }, { status: 400 });
+      console.warn('claim membership upsert failed, attaching profile anyway', added.error);
     }
 
     if (decision.leaveOrganizationId) {
@@ -154,12 +164,29 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    if (decision.activateOrganizationId) {
+    let activateId = decision.activateOrganizationId;
+    // Forgot-password invitees often complete founder onboarding by mistake and
+    // create a new company. If that org was created after this invite, join the
+    // inviting company as the active org instead of moonlight-only.
+    if (!activateId && inv.organization_id && existingProf?.organization_id) {
+      const { data: curOrg } = await admin
+        .from('organizations')
+        .select('id, created_at, created_by')
+        .eq('id', existingProf.organization_id)
+        .maybeSingle();
+      const inviteAt = inv.created_at ? new Date(inv.created_at).getTime() : 0;
+      const orgAt = curOrg?.created_at ? new Date(curOrg.created_at).getTime() : 0;
+      if (curOrg && String(curOrg.created_by) === user.id && orgAt >= inviteAt) {
+        activateId = inv.organization_id;
+      }
+    }
+
+    if (activateId) {
       const alreadyDone = existingProf?.onboarding_completed === true;
       const r = await ensureTeamMemberProfile(admin, {
         userId: user.id,
         email,
-        organizationId: decision.activateOrganizationId,
+        organizationId: activateId,
         role: decision.add.role,
         firstName: inv.first_name || meta.first_name || null,
         lastName: inv.last_name || meta.last_name || null,

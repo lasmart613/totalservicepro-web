@@ -83,6 +83,12 @@ export async function GET(req: NextRequest) {
             })
             .eq('id', mem.id);
         }
+        if (!inv.accepted) {
+          await admin
+            .from('engineer_invitations')
+            .update({ accepted: true, accepted_at: new Date().toISOString() })
+            .eq('id', inv.id);
+        }
       }
     } catch (e) {
       console.warn('list sync light fail', e);
@@ -168,12 +174,11 @@ export async function GET(req: NextRequest) {
       (members || []).map((m: any) => (m.email || '').toLowerCase().trim()).filter(Boolean)
     );
 
-    // Pending = not accepted OR accepted but still no profile on the roster
+    // Pending = invite not accepted AND that email is not already on the roster
     const pendingInvites = invites.filter((inv: any) => {
       const em = (inv.email || '').toLowerCase().trim();
-      if (!inv.accepted) return true;
-      // accepted but missing from roster → still show as needs attention
-      return em && !memberEmails.has(em);
+      if (em && memberEmails.has(em)) return false;
+      return !inv.accepted;
     });
 
     return NextResponse.json({

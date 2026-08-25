@@ -92,6 +92,30 @@ export default function Onboarding() {
       }
       setCurrentUser(user);
 
+      // Invitees who used Forgot password often land here as "founders".
+      // Claim first so they join the inviting org instead of creating a new one.
+      try {
+        const { data: { session } } = await supabase.auth.getSession();
+        if (session?.access_token) {
+          const claimRes = await fetch('/api/team/claim', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${session.access_token}`,
+              'Content-Type': 'application/json',
+            },
+          });
+          if (claimRes.ok) {
+            const claimJson = await claimRes.json().catch(() => ({}));
+            if (claimJson.claimed || claimJson.needsMemberOnboarding) {
+              router.replace('/onboarding/member');
+              return;
+            }
+          }
+        }
+      } catch (e) {
+        console.warn('onboarding claim invite', e);
+      }
+
       const { data: profile } = await supabase
         .from('user_profiles')
         .select('*, organizations(*)')
