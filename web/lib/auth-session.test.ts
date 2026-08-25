@@ -4,6 +4,15 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+test('home page does not flash marketing while a session is in localStorage', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(join(here, '../app/page.tsx'), 'utf8');
+  assert.match(source, /hasBrowserAuthHint/);
+  assert.match(source, /getSession/);
+  assert.match(source, /showDashboardSplash/);
+  assert.match(source, /authPending/);
+});
+
 test('landing Free Plan CTAs pass role into /plans', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');

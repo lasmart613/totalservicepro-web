@@ -14,6 +14,7 @@ import {
 } from '@/lib/roles';
 import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
+import { hasBrowserAuthHint } from '@/lib/auth-session';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import {
@@ -54,13 +55,27 @@ export default function HomePage() {
   });
   const [fseStats, setFseStats] = useState<any[]>([]);
   const [upcoming, setUpcoming] = useState<any[]>([]);
+  const [authHint, setAuthHint] = useState(false);
+  const [authHintReady, setAuthHintReady] = useState(false);
 
   const supabase = getSupabaseClient();
   const upgrade = useUpgradeEntry();
 
   useEffect(() => {
+    setAuthHint(hasBrowserAuthHint());
+    setAuthHintReady(true);
+  }, []);
+
+  useEffect(() => {
     const loadData = async () => {
-      const { data: { user: u } } = await supabase.auth.getUser();
+      // localStorage session is enough to keep the dashboard up. getUser()
+      // talks to Auth over the network and can sit on a slow link for seconds.
+      const { data: { session } } = await supabase.auth.getSession();
+      let u = session?.user ?? null;
+      if (!u) {
+        const { data: { user: verified } } = await supabase.auth.getUser();
+        u = verified ?? null;
+      }
       setUser(u);
 
       if (!u) {
@@ -398,14 +413,21 @@ export default function HomePage() {
     setSupplierStats({ catalog, listings, openDemand, brands });
   }
 
-  // Logged-out visitors see the marketing page immediately. Do not block `/`
-  // on getUser() — a hung auth check would leave a dead-end splash.
-  if (!user) {
-    return <LandingPage />;
+  const showDashboardSplash = loading && (!!user || !authHintReady || authHint);
+
+  if (showDashboardSplash) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header authPending />
+        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">
+          Loading dashboard...
+        </div>
+      </div>
+    );
   }
 
-  if (loading) {
-    return <div className="min-h-screen flex items-center justify-center">Loading dashboard...</div>;
+  if (!user) {
+    return <LandingPage />;
   }
 
   const role = profile?.role;
