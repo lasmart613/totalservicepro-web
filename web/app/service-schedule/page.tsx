@@ -7,8 +7,18 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { isAdmin, isPro } from '@/lib/roles';
+import { roleLabel } from '@/lib/labels';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { ticketDateYmd, toLocalYmd } from '@/lib/tickets';
+import { AddCustomerModal } from '@/components/AddCustomerModal';
+import {
+  createLinkedCustomer,
+  emptyCustomerForm,
+  filterLinkedCustomers,
+  loadLinkedCustomers,
+  matchLinkedCustomer,
+  type LinkedCustomerOpt,
+} from '@/lib/customer-form';
 
 function parseYmd(ymd: string | null | undefined): { y: number; m: number; d: number } | null {
   const part = ticketDateYmd(ymd);
@@ -84,10 +94,17 @@ export default function ServiceSchedule() {
   const [userRole, setUserRole] = useState<string>('');
   const [orgId, setOrgId] = useState<number | string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
+  const [selfName, setSelfName] = useState('');
+  const [assignees, setAssignees] = useState<Array<{ id: string; name: string; role: string }>>([]);
+  const [assignedTo, setAssignedTo] = useState('');
   const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState<TicketForm>(() => EMPTY_FORM());
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [customers, setCustomers] = useState<LinkedCustomerOpt[]>([]);
+  const [showCustDrop, setShowCustDrop] = useState(false);
+  const [customerOrgId, setCustomerOrgId] = useState<string | number | null>(null);
+  const [showAddCustomer, setShowAddCustomer] = useState(false);
 
   const supabase = getSupabaseClient();
   const router = useRouter();
@@ -143,11 +160,16 @@ export default function ServiceSchedule() {
 
       const { data: profile } = await supabase
         .from('user_profiles')
-        .select('role, organization_id')
+        .select('role, organization_id, first_name, last_name, email')
         .eq('id', user.id)
         .maybeSingle();
 
       setUserRole(profile?.role || '');
+      const mine =
+        [profile?.first_name, profile?.last_name].filter(Boolean).join(' ') ||
+        profile?.email ||
+        '';
+      setSelfName(mine);
       const oId = coerceOrgId(profile?.organization_id ?? null);
       setOrgId(oId);
 
@@ -229,6 +251,115 @@ export default function ServiceSchedule() {
       setLoading(false);
     }
   }, [supabase, formatTicket]);
+
+  const refreshCustomers = useCallback(
+    async (oId: number | string | null) => {
+      if (oId == null) {
+        setCustomers([]);
+        return;
+      }
+      try {
+        setCustomers(await loadLinkedCustomers(supabase, oId));
+      } catch (e) {
+        console.warn('ticket customers', e);
+        setCustomers([]);
+      }
+    },
+    [supabase]
+  );
+
+  const refreshAssignees = useCallback(
+    async (oId: number | string | null, meId: string | null) => {
+      if (oId == null) {
+        setAssignees([]);
+        return;
+      }
+      const assignable = new Set([
+        'fse',
+        'engineer',
+        'technician',
+        'service_manager',
+        'admin',
+        'company_admin',
+      ]);
+      const toOpt = (m: any) => ({
+        id: String(m.id),
+        name:
+          [m.first_name, m.last_name].filter(Boolean).join(' ') ||
+          m.email ||
+          'Team member',
+        role: String(m.role || 'fse'),
+      });
+      let members: any[] = [];
+      try {
+        const { data: sessionData } = await supabase.auth.getSession();
+        const token = sessionData.session?.access_token;
+        if (token) {
+          const res = await fetch('/api/team/list', {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const json = await res.json().catch(() => ({}));
+            if (Array.isArray(json.members)) members = json.members;
+          }
+        }
+      } catch (e) {
+        console.warn('ticket assignees api', e);
+      }
+      if (!members.length) {
+        const { data, error } = await supabase
+          .from('user_profiles')
+          .select('id, first_name, last_name, email, role')
+          .eq('organization_id', oId);
+        if (error) console.warn('ticket assignees', error.message);
+        members = data || [];
+      }
+      const opts = members
+        .filter((m) => m?.id && (String(m.id) === String(meId) || assignable.has(String(m.role || '').toLowerCase())))
+        .map(toOpt);
+      if (meId && !opts.some((o) => o.id === meId)) {
+        opts.unshift({
+          id: meId,
+          name: selfName || 'Me',
+          role: userRole || 'fse',
+        });
+      }
+      opts.sort((a, b) => {
+        if (meId && a.id === meId) return -1;
+        if (meId && b.id === meId) return 1;
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      });
+      setAssignees(opts);
+    },
+    [supabase, selfName, userRole]
+  );
+
+  useEffect(() => {
+    refreshCustomers(orgId);
+  }, [orgId, refreshCustomers]);
+
+  useEffect(() => {
+    refreshAssignees(orgId, userId);
+  }, [orgId, userId, refreshAssignees]);
+
+  const filteredCustomers = useMemo(
+    () => filterLinkedCustomers(customers, form.customer_name),
+    [customers, form.customer_name]
+  );
+
+  function applyCustomer(c: LinkedCustomerOpt) {
+    setCustomerOrgId(c.id);
+    setForm((prev) => ({
+      ...prev,
+      customer_name: c.name,
+      customer_address: c.address || '',
+      customer_city: c.city || '',
+      customer_state: c.state || '',
+      customer_phone: c.phone || '',
+      customer_email: c.email || '',
+    }));
+    setShowCustDrop(false);
+  }
 
   useEffect(() => {
     fetchServiceCalls();
@@ -324,7 +455,14 @@ export default function ServiceSchedule() {
   function openNewModal(presetDate?: string) {
     setForm(EMPTY_FORM(presetDate));
     setFormError(null);
+    setCustomerOrgId(null);
+    setShowCustDrop(false);
+    setShowAddCustomer(false);
+    setAssignedTo(userId || '');
     setShowNew(true);
+    if (orgId != null && customers.length === 0) {
+      refreshCustomers(orgId);
+    }
   }
 
   async function createTicket(e: React.FormEvent) {
@@ -360,9 +498,32 @@ export default function ServiceSchedule() {
       let status = form.status || 'Scheduled';
       if (form.service_date && status === 'Awaiting Scheduling') status = 'Scheduled';
 
+      let linkedCustomerId = customerOrgId;
+      if (!linkedCustomerId) {
+        linkedCustomerId = matchLinkedCustomer(customers, customer)?.id || null;
+      }
+      if (!linkedCustomerId) {
+        const created = await createLinkedCustomer(supabase, {
+          serviceOrgId: orgId,
+          form: {
+            ...emptyCustomerForm(),
+            name: customer,
+            address: form.customer_address,
+            city: form.customer_city,
+            state: form.customer_state,
+            phone: form.customer_phone,
+            email: form.customer_email,
+          },
+          createdBy: userId,
+        });
+        linkedCustomerId = created.id;
+        await refreshCustomers(orgId);
+      }
+
       const payload: Record<string, any> = {
         ticket_number: ticketNumber,
         organization_id: orgId,
+        customer_organization_id: linkedCustomerId,
         customer_name: customer,
         customer_address: form.customer_address.trim() || null,
         customer_city: form.customer_city.trim() || null,
@@ -380,14 +541,22 @@ export default function ServiceSchedule() {
         status,
         notes: form.notes.trim() || null,
         description: form.notes.trim() || null,
-        assigned_to: userId || null,
+        assigned_to: assignedTo || null,
       };
 
-      const { data, error } = await supabase
+      let { data, error } = await supabase
         .from('service_tickets')
         .insert([payload])
         .select('id, ticket_number')
         .single();
+      if (error && /customer_organization/i.test(error.message || '') && 'customer_organization_id' in payload) {
+        delete payload.customer_organization_id;
+        ({ data, error } = await supabase
+          .from('service_tickets')
+          .insert([payload])
+          .select('id, ticket_number')
+          .single());
+      }
 
       if (error) throw error;
 
@@ -829,15 +998,90 @@ export default function ServiceSchedule() {
             )}
 
             <form onSubmit={createTicket} className="space-y-3">
-              <div>
-                <label className="label">Customer name *</label>
+              <div className="relative">
+                <label className="label">Customer *</label>
                 <input
                   className="input"
                   value={form.customer_name}
-                  onChange={(e) => setForm({ ...form, customer_name: e.target.value })}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setForm({ ...form, customer_name: value });
+                    const match = matchLinkedCustomer(customers, value);
+                    setCustomerOrgId(match?.id || null);
+                    setShowCustDrop(true);
+                  }}
+                  onFocus={() => setShowCustDrop(true)}
+                  onBlur={() => {
+                    window.setTimeout(() => setShowCustDrop(false), 180);
+                  }}
+                  placeholder="Type to find a company assigned to this shop"
+                  autoComplete="off"
                   required
                   autoFocus
                 />
+                {showCustDrop && (
+                  <div className="absolute z-20 left-0 right-0 mt-1 max-h-56 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
+                    {filteredCustomers.length === 0 && !form.customer_name.trim() && (
+                      <div className="px-3 py-2 text-xs text-[var(--text3)]">
+                        {customers.length
+                          ? 'Start typing to search your customers.'
+                          : 'No customers assigned to this shop yet.'}
+                      </div>
+                    )}
+                    {filteredCustomers.map((c) => (
+                      <button
+                        key={String(c.id)}
+                        type="button"
+                        className="w-full text-left px-3 py-2 hover:bg-[var(--surface)] text-sm"
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => applyCustomer(c)}
+                      >
+                        <div className="font-semibold">{c.name}</div>
+                        <div className="text-xs text-[var(--text3)]">
+                          {[c.city, c.state].filter(Boolean).join(', ') || 'Assigned customer'}
+                        </div>
+                      </button>
+                    ))}
+                    <button
+                      type="button"
+                      className="w-full text-left px-3 py-2 border-t border-[var(--border)] text-sm text-[var(--gold)] hover:bg-[var(--surface)]"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => {
+                        setShowCustDrop(false);
+                        setShowAddCustomer(true);
+                      }}
+                    >
+                      {form.customer_name.trim() && !matchLinkedCustomer(customers, form.customer_name)
+                        ? `Add “${form.customer_name.trim()}” as a new company`
+                        : 'Add a company that’s new to me'}
+                    </button>
+                  </div>
+                )}
+                <p className="text-[10px] text-[var(--text3)] mt-1">
+                  Autofill is limited to customers assigned to your active company. Add a new company to put it on that list.
+                </p>
+              </div>
+              <div>
+                <label className="label">Assign to</label>
+                <select
+                  className="select"
+                  value={assignedTo}
+                  onChange={(e) => setAssignedTo(e.target.value)}
+                >
+                  {userId && (
+                    <option value={userId}>
+                      Me{selfName ? ` — ${selfName}` : ''}
+                    </option>
+                  )}
+                  {assignees
+                    .filter((a) => a.id !== userId)
+                    .map((a) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name} · {roleLabel(a.role)}
+                      </option>
+                    ))}
+                  <option value="">Unassigned</option>
+                </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1001,6 +1245,22 @@ export default function ServiceSchedule() {
             </form>
           </div>
         </div>
+      )}
+
+      {showAddCustomer && orgId != null && (
+        <AddCustomerModal
+          serviceOrgId={orgId}
+          initialName={form.customer_name}
+          onClose={() => setShowAddCustomer(false)}
+          onCreated={async (id) => {
+            const list = await loadLinkedCustomers(supabase, orgId);
+            setCustomers(list);
+            const hit = list.find((c) => String(c.id) === String(id));
+            if (hit) applyCustomer(hit);
+            else setCustomerOrgId(id);
+            setShowAddCustomer(false);
+          }}
+        />
       )}
     </div>
   );

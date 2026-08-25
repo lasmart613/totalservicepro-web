@@ -15,11 +15,16 @@ type Props = {
   serviceOrgId: string | number | null;
   onClose: () => void;
   onCreated: (id: string | number) => void;
+  initialName?: string;
 };
 
-export function AddCustomerModal({ serviceOrgId, onClose, onCreated }: Props) {
+export function AddCustomerModal({ serviceOrgId, onClose, onCreated, initialName }: Props) {
   const supabase = getSupabaseClient();
-  const [form, setForm] = useState<CustomerInfoFormValues>(emptyCustomerForm());
+  const [form, setForm] = useState<CustomerInfoFormValues>(() => {
+    const next = emptyCustomerForm();
+    if (initialName?.trim()) next.name = initialName.trim();
+    return next;
+  });
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
 
@@ -73,7 +78,7 @@ export function AddCustomerModal({ serviceOrgId, onClose, onCreated }: Props) {
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4"
+      className="fixed inset-0 z-[80] flex items-end sm:items-center justify-center bg-black/60 p-0 sm:p-4"
       onClick={onClose}
     >
       <div

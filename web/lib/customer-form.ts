@@ -5,7 +5,8 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { isBlobLogoUrl, uploadCustomerLogo } from '@/lib/customer-logo';
+import { isBlobLogoUrl, uploadCustomerLogo } from './customer-logo.ts';
+import { chunkIds, fetchAllPages, uniqueLinkedIds } from './supabase/paginate.ts';
 
 export const CUSTOMER_BIZ_TYPES = [
   'Medical Spa',
@@ -252,3 +253,99 @@ export async function updateCustomerOrg(
 }
 
 export { OPTIONAL_ORG_COLUMNS };
+
+const LINKED_CUSTOMER_TYPES = ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'];
+
+export type LinkedCustomerOpt = {
+  id: string | number;
+  name: string;
+  address?: string | null;
+  city?: string | null;
+  state?: string | null;
+  zip?: string | null;
+  phone?: string | null;
+  email?: string | null;
+  contact?: string | null;
+};
+
+/** Customers assigned to this service company via organization_customers (Luxor directory, etc.). */
+export async function loadLinkedCustomers(
+  supabase: SupabaseClient,
+  serviceOrgId: string | number
+): Promise<LinkedCustomerOpt[]> {
+  const { data: links, error: linkErr } = await fetchAllPages<{ customer_organization_id: any }>(
+    (from, to) =>
+      supabase
+        .from('organization_customers')
+        .select('customer_organization_id')
+        .eq('service_organization_id', serviceOrgId)
+        .range(from, to)
+  );
+  if (linkErr) {
+    console.warn('organization_customers load failed:', linkErr);
+    return [];
+  }
+
+  const customerIds = uniqueLinkedIds(links);
+  if (!customerIds.length) return [];
+
+  const orgSelect = 'id, name, address, city, state, zip, phone, email, contact_name, type';
+  const rows: any[] = [];
+  for (const chunk of chunkIds(customerIds)) {
+    let { data, error } = await supabase
+      .from('organizations')
+      .select(orgSelect)
+      .in('id', chunk)
+      .in('type', LINKED_CUSTOMER_TYPES);
+    if (error) {
+      ({ data, error } = await supabase.from('organizations').select(orgSelect).in('id', chunk));
+    }
+    if (error) {
+      console.warn('linked customer orgs load failed:', error);
+      break;
+    }
+    rows.push(...(data || []));
+  }
+
+  return rows
+    .filter((c) => c?.id != null && String(c.name || '').trim())
+    .map((c) => ({
+      id: c.id,
+      name: String(c.name || '').trim(),
+      address: c.address,
+      city: c.city,
+      state: c.state,
+      zip: c.zip,
+      phone: c.phone,
+      email: c.email,
+      contact: c.contact_name,
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
+export function filterLinkedCustomers(
+  customers: LinkedCustomerOpt[],
+  query: string,
+  limit = 15
+): LinkedCustomerOpt[] {
+  const q = query.trim().toLowerCase();
+  const list = q
+    ? customers.filter((c) => {
+        const hay = [c.name, c.city, c.state, c.phone, c.email]
+          .filter(Boolean)
+          .join(' ')
+          .toLowerCase();
+        return hay.includes(q);
+      })
+    : customers;
+  return list.slice(0, limit);
+}
+
+export function matchLinkedCustomer(
+  customers: LinkedCustomerOpt[],
+  name: string
+): LinkedCustomerOpt | null {
+  const key = name.trim().toLowerCase();
+  if (!key) return null;
+  return customers.find((c) => c.name.trim().toLowerCase() === key) || null;
+}
