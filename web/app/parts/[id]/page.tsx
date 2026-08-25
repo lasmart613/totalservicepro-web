@@ -61,7 +61,7 @@ export default function PartDetailPage() {
   const [editing, setEditing] = useState(false);
   const [saving, setSaving] = useState(false);
   const [showVendor, setShowVendor] = useState(false);
-  const [showPrices, setShowPrices] = useState(false);
+  const [showVendors, setShowVendors] = useState(false);
   const [hero, setHero] = useState(0);
   const [form, setForm] = useState<PartRow>({});
   const [imageFiles, setImageFiles] = useState<File[]>([]);
@@ -262,8 +262,8 @@ export default function PartDetailPage() {
             </p>
           </div>
           <div className="flex gap-2">
-            <button type="button" className="btn btn-secondary" onClick={() => setShowPrices((v) => !v)}>
-              {showPrices ? 'Hide prices' : 'Show prices'}
+            <button type="button" className="btn btn-secondary" onClick={() => setShowVendors((v) => !v)}>
+              {showVendors ? 'Hide vendors' : 'Show vendors'}
             </button>
             {!editing ? (
               <button type="button" className="btn btn-primary" onClick={() => setEditing(true)}>
@@ -320,18 +320,12 @@ export default function PartDetailPage() {
           <div className="card p-5 hover:transform-none space-y-3">
             {!editing ? (
               <>
-                {showPrices ? (
-                  <div>
-                    <div className="text-xs text-[var(--text3)]">Sale price</div>
-                    <div className="text-2xl font-extrabold text-[var(--gold)]">
-                      {money(part.sale_price ?? part.unit_cost)}
-                    </div>
+                <div>
+                  <div className="text-xs text-[var(--text3)]">Sale price</div>
+                  <div className="text-2xl font-extrabold text-[var(--gold)]">
+                    {money(part.sale_price ?? part.unit_cost)}
                   </div>
-                ) : (
-                  <button type="button" className="text-sm text-[var(--text3)]" onClick={() => setShowPrices(true)}>
-                    Sale price hidden — Show prices
-                  </button>
-                )}
+                </div>
                 <p className="text-sm whitespace-pre-wrap">{part.description || 'No description yet.'}</p>
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                   <dt className="text-[var(--text3)]">Unit</dt>
@@ -440,12 +434,23 @@ export default function PartDetailPage() {
         <div className="card p-5 hover:transform-none">
           <div className="flex justify-between items-center mb-3">
             <h2 className="text-xl font-bold">Vendors</h2>
-            <button type="button" className="btn btn-secondary text-sm" onClick={() => setShowVendor(true)}>
-              + Add vendor
-            </button>
+            <div className="flex gap-2">
+              {vendors.length > 0 && (
+                <button type="button" className="btn btn-secondary text-sm" onClick={() => setShowVendors((v) => !v)}>
+                  {showVendors ? 'Hide vendors' : 'Show vendors'}
+                </button>
+              )}
+              <button type="button" className="btn btn-secondary text-sm" onClick={() => setShowVendor(true)}>
+                + Add vendor
+              </button>
+            </div>
           </div>
           {vendors.length === 0 ? (
             <p className="text-sm text-[var(--text3)]">No vendors yet. Add every source you buy this from.</p>
+          ) : !showVendors ? (
+            <p className="text-sm text-[var(--text3)]">
+              {vendors.length} vendor{vendors.length === 1 ? '' : 's'} on file. Names and costs are hidden.
+            </p>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
@@ -472,9 +477,7 @@ export default function PartDetailPage() {
                         )}
                       </td>
                       <td className="py-2 pr-3 font-mono text-xs">{v.vendor_part_number || '—'}</td>
-                      <td className="py-2 pr-3 text-[var(--gold)] font-semibold">
-                        {showPrices ? money(v.unit_cost) : '•••'}
-                      </td>
+                      <td className="py-2 pr-3 text-[var(--gold)] font-semibold">{money(v.unit_cost)}</td>
                       <td className="py-2 pr-3">{v.lead_time_days != null ? `${v.lead_time_days}d` : '—'}</td>
                       <td className="py-2 text-right whitespace-nowrap">
                         {!v.is_preferred && (
@@ -492,7 +495,7 @@ export default function PartDetailPage() {
               </table>
             </div>
           )}
-          {vendors.some((v) => v.notes) && (
+          {showVendors && vendors.some((v) => v.notes) && (
             <div className="mt-3 text-xs text-[var(--text3)] space-y-1">
               {vendors.filter((v) => v.notes).map((v) => (
                 <div key={`n-${v.id}`}>

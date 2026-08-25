@@ -398,7 +398,7 @@ export function AddPartModal({ onClose, onCreated }: Props) {
               <div>
                 <label className="label">Sale price (USD)</label>
                 <input className="input" type="number" min="0" step="0.01" value={salePrice} onChange={(e) => setSalePrice(e.target.value)} placeholder="0.00" />
-                <p className="text-[10px] text-[var(--text3)] mt-1">What you charge. Hidden on the catalog until you show prices.</p>
+                <p className="text-[10px] text-[var(--text3)] mt-1">What you charge. Shown on the catalog and part page.</p>
               </div>
             </div>
             <div>
@@ -441,8 +441,7 @@ export function AddPartModal({ onClose, onCreated }: Props) {
                 </button>
               </div>
               <p className="text-[10px] text-[var(--text3)] mb-2">
-                Add every source you buy this from. Vendor cost is what you pay that supplier — separate from sale
-                price, and hidden until you show prices.
+                Add every source you buy this from. Vendor names and costs stay hidden until you tap Show vendors.
               </p>
               {vendors.map((v, idx) => (
                 <div key={v.key} className="rounded-lg border border-[var(--border)] p-3 mb-2 space-y-2">

@@ -409,7 +409,7 @@
             <div class="page-subtitle">Global parts library</div>
         </div>
         <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
-            <button type="button" class="action-btn" id="togglePricesBtn" onclick="togglePrices()" style="flex:none;padding:9px 12px;white-space:nowrap;">Show prices</button>
+            <button type="button" class="action-btn" id="toggleVendorsBtn" onclick="toggleVendors()" style="flex:none;padding:9px 12px;white-space:nowrap;">Show vendors</button>
             <button class="add-part-btn" onclick="openAddPartModal()">+ Add Part</button>
         </div>
     </div>
@@ -548,6 +548,7 @@
         <div class="form-row">
             <div class="form-group">
                 <label class="form-label">Sale price (USD)</label>
+                <div style="font-size:11px;color:#9CA3AF;margin:-2px 0 6px;">Shown on the catalog. Vendor names and costs stay hidden.</div>
                 <input class="form-input" id="newPartPrice" type="number" inputmode="decimal" step="0.01" placeholder="0.00">
             </div>
             <div class="form-group">
@@ -680,7 +681,7 @@
     let filteredParts = [];
     let currentVendorPartId = null;
     let searchTimeout = null;
-    let showPrices = false;
+    let showVendors = false;
 
     function money(n) {
         if (n == null || n === '') return '';
@@ -693,10 +694,10 @@
         return money(part.sale_price != null && part.sale_price !== '' ? part.sale_price : part.unit_cost);
     }
 
-    function togglePrices() {
-        showPrices = !showPrices;
-        const btn = document.getElementById('togglePricesBtn');
-        if (btn) btn.textContent = showPrices ? 'Hide prices' : 'Show prices';
+    function toggleVendors() {
+        showVendors = !showVendors;
+        const btn = document.getElementById('toggleVendorsBtn');
+        if (btn) btn.textContent = showVendors ? 'Hide vendors' : 'Show vendors';
         renderParts();
     }
 
@@ -838,9 +839,9 @@
             const moreModels = (part.compatible_models || []).length - 3;
             const hasImage = !!part.image_url;
             const sale = saleOf(part);
-            const saleHtml = showPrices && sale
+            const saleHtml = sale
                 ? `<div style="font-size:13px;color:#FBBF24;font-weight:700;">${sale}</div>`
-                : (sale ? `<div style="font-size:11px;color:#6B7280;">Sale hidden</div>` : '');
+                : '';
 
             const thumbHtml = hasImage
                 ? `<img class="part-thumb" src="${part.image_url}" alt="${part.part_number}"
@@ -884,9 +885,7 @@
                     ${expandedImageHtml}
                     <div class="detail-section">
                         <div class="detail-label">Sale price</div>
-                        ${showPrices
-                            ? `<div style="font-size:18px;font-weight:800;color:#FBBF24;">${saleOf(part) || '—'}</div>`
-                            : `<button type="button" class="action-btn" style="flex:none;width:auto;padding:6px 10px;" onclick="event.stopPropagation(); togglePrices()">Sale price hidden — Show prices</button>`}
+                        <div style="font-size:18px;font-weight:800;color:#FBBF24;">${sale || '—'}</div>
                     </div>
                     ${(part.compatible_models || []).length > 0 ? `
                     <div class="detail-section">
@@ -899,7 +898,7 @@
                     <div class="detail-section">
                         <div class="detail-label">Vendors (${vendors.length})</div>
                         <div class="vendor-list">
-                            ${vendors.map(v => `
+                            ${showVendors ? vendors.map(v => `
                             <div class="vendor-row ${v.is_preferred ? 'preferred' : ''}">
                                 <div>
                                     <div class="vendor-name">${v.is_preferred ? '⭐ ' : ''}${v.vendor_name}</div>
@@ -907,11 +906,11 @@
                                     ${v.notes ? `<div style="font-size:11px;color:#6B7280;margin-top:2px;">${v.notes}</div>` : ''}
                                 </div>
                                 <div style="text-align:right;">
-                                    <div class="vendor-price">${showPrices ? (v.unit_cost ? money(v.unit_cost) : '—') : '•••'}</div>
+                                    <div class="vendor-price">${v.unit_cost ? money(v.unit_cost) : '—'}</div>
                                     ${v.lead_time_days ? `<div class="vendor-lead">${v.lead_time_days}d lead</div>` : ''}
                                     ${v.url ? `<a href="${v.url}" target="_blank" style="font-size:11px;color:#60A5FA;text-decoration:none;" onclick="event.stopPropagation()">🔗 Website</a>` : ''}
                                 </div>
-                            </div>`).join('')}
+                            </div>`).join('') : (vendors.length ? `<div style="font-size:13px;color:#9CA3AF;">Vendor names and costs are hidden.</div>` : '')}
                             <button class="add-vendor-btn" onclick="event.stopPropagation(); openAddVendorModal(${part.id}, '${part.part_number.replace(/'/g,"\\'")}', '${part.name.replace(/'/g,"\\'")}')">
                                 + Add Vendor
                             </button>

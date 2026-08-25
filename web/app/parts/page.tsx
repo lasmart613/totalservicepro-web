@@ -50,7 +50,7 @@ export default function PartsCatalog() {
   const [selectedBrand, setSelectedBrand] = useState('');
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [showSalePrices, setShowSalePrices] = useState(false);
+  const [showVendors, setShowVendors] = useState(false);
   const supabase = getSupabaseClient();
   const router = useRouter();
 
@@ -143,9 +143,9 @@ export default function PartsCatalog() {
             <button
               type="button"
               className="btn btn-secondary whitespace-nowrap"
-              onClick={() => setShowSalePrices((v) => !v)}
+              onClick={() => setShowVendors((v) => !v)}
             >
-              {showSalePrices ? 'Hide sale prices' : 'Show sale prices'}
+              {showVendors ? 'Hide vendors' : 'Show vendors'}
             </button>
             <button type="button" className="btn btn-primary whitespace-nowrap" onClick={() => setShowAdd(true)}>
               + Add Part
@@ -203,17 +203,25 @@ export default function PartsCatalog() {
                     {vendors.length > 0 && (
                       <div className="text-xs text-[var(--text3)] mb-2">
                         {vendors.length} vendor{vendors.length === 1 ? '' : 's'}
-                        {vendors[0]?.vendor_name ? ` · ${vendors.find((v) => v.is_preferred)?.vendor_name || vendors[0].vendor_name}` : ''}
+                        {showVendors && vendors[0]?.vendor_name
+                          ? ` · ${vendors.find((v) => v.is_preferred)?.vendor_name || vendors[0].vendor_name}`
+                          : ''}
                       </div>
                     )}
                     <div className="flex justify-between items-center text-sm gap-2">
                       <span className="text-xs text-[var(--gold)]">View details</span>
-                      {showSalePrices && sale ? (
-                        <span className="font-medium text-[var(--gold)]">{sale}</span>
-                      ) : sale ? (
-                        <span className="text-xs text-[var(--text3)]">Sale hidden</span>
-                      ) : null}
+                      {sale ? <span className="font-medium text-[var(--gold)]">{sale}</span> : null}
                     </div>
+                    {showVendors && vendors.length > 0 && (
+                      <div className="mt-2 text-xs text-[var(--text3)] space-y-1">
+                        {vendors.slice(0, 3).map((v) => (
+                          <div key={String(v.id)} className="flex justify-between gap-2">
+                            <span className="truncate">{v.is_preferred ? '⭐ ' : ''}{v.vendor_name}</span>
+                            <span className="shrink-0">{money(v.unit_cost) || '—'}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </Link>
               );
