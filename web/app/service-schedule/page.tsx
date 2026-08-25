@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { toast } from 'sonner';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { isAdmin, isPro } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
@@ -562,8 +563,36 @@ export default function ServiceSchedule() {
 
       setShowNew(false);
       await fetchServiceCalls();
-      if (data?.id) {
-        // Stay on schedule so user sees the new call; optional deep-link later
+      if (data?.id && assignedTo && assignedTo !== userId) {
+        const who =
+          assignees.find((a) => a.id === assignedTo)?.name || 'the assigned FSE';
+        try {
+          const { data: sessionData } = await supabase.auth.getSession();
+          const token = sessionData.session?.access_token;
+          if (token) {
+            const res = await fetch('/api/tickets/notify-assignee', {
+              method: 'POST',
+              headers: {
+                Authorization: `Bearer ${token}`,
+                'Content-Type': 'application/json',
+              },
+              body: JSON.stringify({ ticketId: data.id, assignedTo }),
+            });
+            const json = await res.json().catch(() => ({}));
+            if (json.emailed) {
+              toast.success(`Ticket created. ${who} was emailed.`);
+            } else {
+              toast.success(
+                `Ticket created. Could not email ${who}${json.error ? `: ${json.error}` : '.'}`
+              );
+            }
+          }
+        } catch (notifyErr) {
+          console.warn('notify assignee', notifyErr);
+          toast.success('Ticket created.');
+        }
+      } else {
+        toast.success('Ticket created.');
       }
     } catch (err: any) {
       console.error('create ticket', err);
