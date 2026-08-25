@@ -12,8 +12,10 @@ import {
   money,
   parseJsonField,
 } from '@/lib/billing/save-helpers';
+import { buildInvoicePaymentPatch, existingPaidAmount } from '@/lib/billing/apply-invoice-payment';
+import { toast } from 'sonner';
 
-type InvFilter = 'all' | 'draft' | 'sent' | 'paid';
+type InvFilter = 'all' | 'draft' | 'sent' | 'paid' | 'partially_paid';
 
 type InvoiceRow = {
   id: string | number;
@@ -30,9 +32,15 @@ type InvoiceRow = {
 
 function statusBadgeClass(st: string): string {
   if (st === 'paid') return 'bg-green-900/40 text-green-200 border-green-700';
+  if (st === 'partially_paid') return 'bg-amber-900/40 text-amber-200 border-amber-700';
   if (st === 'draft') return 'bg-gray-700/40 text-gray-200 border-gray-600';
   if (st === 'sent') return 'bg-blue-900/40 text-blue-200 border-blue-700';
   return 'bg-[var(--surface2)] text-[var(--text2)] border-[var(--border2)]';
+}
+
+function statusLabel(st: string): string {
+  if (st === 'partially_paid') return 'Partial';
+  return st ? st.charAt(0).toUpperCase() + st.slice(1) : 'Draft';
 }
 
 function docNumber(inv: InvoiceRow): string {
@@ -48,9 +56,29 @@ export default function InvoicesListPage() {
   const [activeFilter, setActiveFilter] = useState<InvFilter>('all');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [payRow, setPayRow] = useState<InvoiceRow | null>(null);
+  const [payAmt, setPayAmt] = useState('');
+  const [payMethod, setPayMethod] = useState('Check');
+  const [paying, setPaying] = useState(false);
 
   useEffect(() => {
     init();
+    try {
+      const sid = new URL(window.location.href).searchParams.get('session_id');
+      if (sid) {
+        fetch('/api/billing/invoices/confirm?session_id=' + encodeURIComponent(sid))
+          .then((r) => r.json())
+          .then((j) => {
+            if (j?.ok) {
+              toast.success(j.status === 'partially_paid' ? 'Partial Stripe payment recorded.' : 'Stripe payment recorded — marked paid.');
+              init();
+            }
+          })
+          .catch(() => {});
+      }
+    } catch {
+      /* ignore */
+    }
   }, []);
 
   useEffect(() => {
@@ -151,8 +179,44 @@ export default function InvoicesListPage() {
     setFiltered(res);
   }
 
+  async function applyManualPayment(inv: InvoiceRow, addAmount: number, method: string) {
+    setPaying(true);
+    try {
+      const patch = buildInvoicePaymentPatch({
+        invoice: inv,
+        addAmount,
+        method,
+      });
+      const payload: Record<string, unknown> = { ...patch };
+      let lastErr: { message?: string } | null = null;
+      for (let i = 0; i < 8; i++) {
+        const { error } = await supabase.from('service_invoices').update(payload).eq('id', inv.id);
+        if (!error) {
+          lastErr = null;
+          break;
+        }
+        lastErr = error;
+        const col = error.message?.match(/Could not find the '([^']+)' column/i)?.[1];
+        if (col && col in payload) {
+          delete payload[col];
+          continue;
+        }
+        break;
+      }
+      if (lastErr) throw new Error(lastErr.message);
+      toast.success(patch.status === 'paid' ? 'Invoice marked paid.' : 'Partial payment recorded.');
+      setPayRow(null);
+      await init();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Could not record payment');
+    } finally {
+      setPaying(false);
+    }
+  }
+
   const drafts = rows.filter((r) => (r.status || '').toLowerCase() === 'draft').length;
   const sent = rows.filter((r) => (r.status || '').toLowerCase() === 'sent').length;
+  const partial = rows.filter((r) => (r.status || '').toLowerCase() === 'partially_paid').length;
   const paid = rows.filter((r) => (r.status || '').toLowerCase() === 'paid').length;
 
   return (
@@ -169,7 +233,7 @@ export default function InvoicesListPage() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-3 gap-3 mb-5">
+        <div className="grid grid-cols-4 gap-3 mb-5">
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-[var(--gold)]">{loading ? '—' : drafts}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
@@ -180,6 +244,12 @@ export default function InvoicesListPage() {
             <div className="text-2xl font-extrabold text-blue-300">{loading ? '—' : sent}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
               SENT
+            </div>
+          </div>
+          <div className="stat-card card p-3 text-center">
+            <div className="text-2xl font-extrabold text-amber-300">{loading ? '—' : partial}</div>
+            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
+              PARTIAL
             </div>
           </div>
           <div className="stat-card card p-3 text-center">
@@ -205,6 +275,7 @@ export default function InvoicesListPage() {
               ['all', 'All'],
               ['draft', 'Drafts'],
               ['sent', 'Sent'],
+              ['partially_paid', 'Partial'],
               ['paid', 'Paid'],
             ] as [InvFilter, string][]
           ).map(([key, label]) => (
@@ -244,13 +315,13 @@ export default function InvoicesListPage() {
                 : inv.created_at
                   ? new Date(inv.created_at).toLocaleDateString()
                   : '—';
+              const alreadyPaid = st === 'paid';
               return (
-                <Link
+                <div
                   key={String(inv.id)}
-                  href={`/invoices/new?id=${inv.id}`}
-                  className="card p-4 flex items-center justify-between gap-3 hover:border-[var(--gold-border)] block"
+                  className="card p-4 flex flex-wrap items-center justify-between gap-3 hover:border-[var(--gold-border)]"
                 >
-                  <div className="flex-1 min-w-0">
+                  <Link href={`/invoices/new?id=${inv.id}`} className="flex-1 min-w-0">
                     <div className="font-bold text-base truncate">
                       {inv.customer_name || 'Unknown Customer'}
                     </div>
@@ -262,14 +333,46 @@ export default function InvoicesListPage() {
                           st
                         )}`}
                       >
-                        {st.charAt(0).toUpperCase() + st.slice(1)}
+                        {statusLabel(st)}
                       </span>
                     </div>
-                  </div>
+                  </Link>
                   <div className="font-bold text-[var(--gold)] text-lg flex-shrink-0">
                     {money(Number(inv.total) || 0)}
                   </div>
-                </Link>
+                  {!alreadyPaid && (
+                    <div className="flex gap-2 w-full sm:w-auto">
+                      <button
+                        type="button"
+                        className="btn btn-secondary text-xs"
+                        onClick={() => {
+                          setPayRow(inv);
+                          const remain = Math.max(
+                            0,
+                            Number(inv.total || 0) - existingPaidAmount(inv)
+                          );
+                          setPayAmt(remain ? String(remain) : '');
+                          setPayMethod('Check');
+                        }}
+                      >
+                        Record payment
+                      </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary text-xs"
+                        onClick={() =>
+                          applyManualPayment(
+                            inv,
+                            Math.max(0, Number(inv.total || 0) - existingPaidAmount(inv)),
+                            'Other'
+                          )
+                        }
+                      >
+                        Mark paid
+                      </button>
+                    </div>
+                  )}
+                </div>
               );
             })}
           </div>
@@ -279,6 +382,48 @@ export default function InvoicesListPage() {
       <Link href="/invoices/new" className="fab sm:hidden" title="New Invoice">
         <Plus size={28} />
       </Link>
+
+      {payRow && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setPayRow(null)}>
+          <div className="card w-full max-w-sm p-5 hover:transform-none" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-extrabold text-[var(--gold)] mb-1">Record payment</h2>
+            <p className="text-xs text-[var(--text3)] mb-3">
+              {payRow.customer_name || 'Customer'} · {money(Number(payRow.total) || 0)} due
+            </p>
+            <label className="label">Amount received</label>
+            <input
+              className="input mb-2"
+              type="number"
+              min="0"
+              step="0.01"
+              value={payAmt}
+              onChange={(e) => setPayAmt(e.target.value)}
+            />
+            <label className="label">Method</label>
+            <select className="select mb-4" value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
+              <option>Cash</option>
+              <option>Check</option>
+              <option>Credit Card</option>
+              <option>ACH / Wire</option>
+              <option>Stripe</option>
+              <option>Other</option>
+            </select>
+            <div className="flex gap-2">
+              <button type="button" className="btn btn-secondary flex-1" onClick={() => setPayRow(null)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary flex-1"
+                disabled={paying}
+                onClick={() => applyManualPayment(payRow, Number(payAmt) || 0, payMethod)}
+              >
+                {paying ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

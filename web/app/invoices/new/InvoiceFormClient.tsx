@@ -465,11 +465,23 @@ export default function InvoiceFormClient() {
         tax: Math.round((Number(tax) || 0) * 100) / 100,
         total: Math.round(total * 100) / 100,
         status: nextStatus,
+        amount_paid:
+          nextStatus === 'paid'
+            ? Math.round(Number(total) * 100) / 100
+            : Math.round((Number(deposit) || 0) * 100) / 100,
+        paid_at: nextStatus === 'paid' ? new Date().toISOString() : null,
+        payment_method: depositMethod || null,
         invoice_number: invNum,
         invoice_data: {
           line_items: items,
-          deposit: Number(deposit) || 0,
-          travelDeposit: Number(deposit) || 0,
+          deposit:
+            nextStatus === 'paid'
+              ? Math.round(Number(total) * 100) / 100
+              : Number(deposit) || 0,
+          travelDeposit:
+            nextStatus === 'paid'
+              ? Math.round(Number(total) * 100) / 100
+              : Number(deposit) || 0,
           depositDate: depositDate || null,
           depositMethod: depositMethod || null,
           balanceDue,
@@ -531,6 +543,7 @@ export default function InvoiceFormClient() {
         else if (nextStatus === 'sent')
           toast.success('Invoice marked as sent (no email sent).');
         else if (nextStatus === 'paid') toast.success('Invoice marked as paid.');
+        else if (nextStatus === 'partially_paid') toast.success('Invoice marked as partially paid.');
         else toast.success('Invoice saved.');
       }
       return result.id || savedId;
@@ -1059,8 +1072,9 @@ export default function InvoiceFormClient() {
             </div>
           </div>
           <p className="text-xs text-[var(--text3)] mt-2">
-            Balance remaining = Total Due − Deposit Received. Online card pay is not wired on web
-            yet (use recorded deposit / mark paid).
+            Balance remaining = Total Due − amount received. Stripe Link payments mark the invoice
+            paid (or partial) automatically. For cash, check, or card in person, record the amount
+            here or use Mark paid / Mark partial.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
@@ -1132,9 +1146,25 @@ export default function InvoiceFormClient() {
             type="button"
             className="btn btn-secondary min-w-[100px]"
             disabled={saving || emailing}
+            onClick={() => {
+              const rec = Number(deposit) || 0;
+              const tot = Number(total) || 0;
+              if (rec <= 0) {
+                toast.error('Enter amount received first, or use Mark paid for the full total.');
+                return;
+              }
+              saveInvoice(rec + 0.004 >= tot ? 'paid' : 'partially_paid');
+            }}
+          >
+            Mark partial
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary min-w-[100px]"
+            disabled={saving || emailing}
             onClick={() => saveInvoice('paid')}
           >
-            Mark Paid
+            Mark paid
           </button>
         </div>
         <p className="text-[10px] text-[var(--text3)] mt-2">

@@ -15,6 +15,7 @@ import {
   StripeSubscriptionError,
   type StripeObject,
 } from '@/lib/billing/stripe-subscription';
+import { applyInvoiceCheckoutSession } from '@/lib/billing/persist-invoice-payment';
 
 export const dynamic = 'force-dynamic';
 
@@ -58,6 +59,17 @@ export async function POST(req: NextRequest) {
       const sessionId = obj && typeof obj.id === 'string' ? obj.id : '';
       if (!sessionId) return NextResponse.json({ ok: true, ignored: 'missing_session_id' });
       const session = await retrieveCheckoutSession(sessionId);
+      const invoicePay = await applyInvoiceCheckoutSession({ writer, session });
+      if (invoicePay.ok) {
+        return NextResponse.json({
+          ok: true,
+          applied: true,
+          kind: 'invoice',
+          invoiceId: invoicePay.applied.invoiceId,
+          status: invoicePay.applied.status,
+          alreadyApplied: invoicePay.applied.alreadyApplied,
+        });
+      }
       const result = await applyPaidCheckoutSession({
         writer,
         session,

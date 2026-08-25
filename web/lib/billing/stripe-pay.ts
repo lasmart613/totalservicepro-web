@@ -141,8 +141,9 @@ export async function createInvoiceCheckoutSession(
 
   const params = new URLSearchParams();
   params.set('mode', 'payment');
-  params.set('success_url', `${site}/invoices?paid=1&session_id={CHECKOUT_SESSION_ID}`);
-  params.set('cancel_url', `${site}/invoices?paid=0`);
+  params.set('success_url', `${site}/invoice-paid?session_id={CHECKOUT_SESSION_ID}`);
+  params.set('cancel_url', `${site}/invoice-paid?canceled=1`);
+  params.set('metadata[kind]', 'invoice_pay');
   params.set('line_items[0][quantity]', '1');
   params.set('line_items[0][price_data][currency]', currency);
   params.set('line_items[0][price_data][unit_amount]', String(amount));
