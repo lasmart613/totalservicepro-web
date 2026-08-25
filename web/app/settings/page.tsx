@@ -235,18 +235,10 @@ export default function Settings() {
               <span className="text-[var(--text3)]">Build</span>
               <span>{buildLabel()}</span>
             </div>
-            <div className="flex justify-between text-sm mb-2">
+            <div className="flex justify-between text-sm">
               <span className="text-[var(--text3)]">Channel</span>
               <span className="capitalize">{APP_CHANNEL}</span>
             </div>
-            <p className="text-xs text-[var(--text3)]">
-              Web and Android share this {APP_VERSION} line. Live customer beta — invoices, estimates, and tickets
-              go to real shops. 1.0 comes later, when we call it generally available.
-            </p>
-            <p className="text-xs text-[var(--text3)] mt-1">
-              All data lives in Supabase — fully shared with the Android app. Preferences on this page are saved on
-              this device.
-            </p>
           </div>
         </div>
       </div>
