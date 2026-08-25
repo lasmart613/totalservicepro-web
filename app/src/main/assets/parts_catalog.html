@@ -542,6 +542,31 @@
             <label class="form-label">Compatible Models (comma separated)</label>
             <input class="form-input" id="newPartModels" placeholder="e.g. GentleMax Pro, GentleLASE">
         </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Your price (USD)</label>
+                <input class="form-input" id="newPartPrice" type="number" inputmode="decimal" step="0.01" placeholder="0.00">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Photo</label>
+                <input class="form-input" id="newPartImage" type="file" accept="image/*">
+            </div>
+        </div>
+        <div class="form-group">
+            <label class="form-label">Vendor name</label>
+            <input class="form-input" id="newPartVendor" placeholder="e.g. Medical Laser Services">
+        </div>
+        <div class="form-row">
+            <div class="form-group">
+                <label class="form-label">Vendor P/N</label>
+                <input class="form-input" id="newPartVendorPn" placeholder="Vendor's part number">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Vendor cost (USD)</label>
+                <input class="form-input" id="newPartVendorCost" type="number" inputmode="decimal" step="0.01" placeholder="0.00">
+            </div>
+        </div>
+        <p style="font-size:11px;color:#9CA3AF;margin:-4px 0 8px;">Add more vendors after save with + Add Vendor on the part card.</p>
         <div id="addPartError" class="form-error"></div>
         <div class="modal-actions">
             <button class="modal-btn cancel" onclick="closeAddPartModal()">Cancel</button>
@@ -893,7 +918,9 @@
     function openAddPartModal() {
         document.getElementById('addPartModal').classList.add('open');
         document.getElementById('addPartError').textContent = '';
-        ['newPartNumber','newPartName','newPartDesc','newPartModels'].forEach(id => document.getElementById(id).value = '');
+        ['newPartNumber','newPartName','newPartDesc','newPartModels','newPartPrice','newPartVendor','newPartVendorPn','newPartVendorCost'].forEach(id => document.getElementById(id).value = '');
+        const imgIn = document.getElementById('newPartImage');
+        if (imgIn) imgIn.value = '';
         document.getElementById('newPartBrand').value = '';
         document.getElementById('newPartCategory').value = '';
         document.getElementById('newPartUnit').value = 'Each';
@@ -918,15 +945,51 @@
         const models = modelsRaw ? modelsRaw.split(',').map(m => m.trim()).filter(Boolean) : null;
 
         const { data: user } = await supabaseClient.auth.getUser();
+        const uid = user?.user?.id || null;
+        const listPrice = parseFloat((document.getElementById('newPartPrice') || {}).value || '');
+        let imageUrl = null;
+        const imgEl = document.getElementById('newPartImage');
+        const imgFile = imgEl && imgEl.files && imgEl.files[0];
+        if (imgFile && uid) {
+            const ext = (imgFile.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
+            const path = 'parts/' + uid + '/' + Date.now() + '.' + ext;
+            const buckets = ['marketplace-images', 'equipment-photos', 'equipment', 'logos'];
+            for (const b of buckets) {
+                const up = await supabaseClient.storage.from(b).upload(path, imgFile, { upsert: true, contentType: imgFile.type || 'image/' + ext });
+                if (!up.error) {
+                    imageUrl = supabaseClient.storage.from(b).getPublicUrl(path).data.publicUrl;
+                    break;
+                }
+            }
+        }
 
-        const { error } = await supabaseClient.from('parts_catalog').insert({
+        const insert = {
             part_number: pn, brand, name, description: desc || name,
             category, unit_of_measure: unit,
             compatible_models: models,
-            created_by: user?.user?.id || null
-        });
+            created_by: uid,
+            image_url: imageUrl,
+            unit_cost: Number.isFinite(listPrice) ? listPrice : null
+        };
+        let { data: created, error } = await supabaseClient.from('parts_catalog').insert(insert).select('id').single();
+        if (error && /unit_cost|image_url|column/i.test(error.message || '')) {
+            delete insert.unit_cost;
+            if (/image_url/i.test(error.message || '')) delete insert.image_url;
+            ({ data: created, error } = await supabaseClient.from('parts_catalog').insert(insert).select('id').single());
+        }
 
         if (error) { errEl.textContent = error.message; return; }
+        const vendorName = (document.getElementById('newPartVendor') || {}).value.trim();
+        const vendorCostRaw = parseFloat((document.getElementById('newPartVendorCost') || {}).value || '');
+        if (created && created.id && (vendorName || Number.isFinite(listPrice))) {
+            await supabaseClient.from('part_vendors').insert({
+                part_id: created.id,
+                vendor_name: vendorName || 'List',
+                vendor_part_number: (document.getElementById('newPartVendorPn') || {}).value.trim() || null,
+                unit_cost: Number.isFinite(vendorCostRaw) ? vendorCostRaw : (Number.isFinite(listPrice) ? listPrice : null),
+                is_preferred: true
+            });
+        }
         closeAddPartModal();
         await loadParts();
     }
