@@ -408,7 +408,10 @@
             <div class="page-title">🔩 Parts Catalog</div>
             <div class="page-subtitle">Global parts library</div>
         </div>
-        <button class="add-part-btn" onclick="openAddPartModal()">+ Add Part</button>
+        <div style="display:flex;gap:8px;align-items:center;flex-shrink:0;">
+            <button type="button" class="action-btn" id="togglePricesBtn" onclick="togglePrices()" style="flex:none;padding:9px 12px;white-space:nowrap;">Show prices</button>
+            <button class="add-part-btn" onclick="openAddPartModal()">+ Add Part</button>
+        </div>
     </div>
 
     <!-- Search -->
@@ -544,7 +547,7 @@
         </div>
         <div class="form-row">
             <div class="form-group">
-                <label class="form-label">Your price (USD)</label>
+                <label class="form-label">Sale price (USD)</label>
                 <input class="form-input" id="newPartPrice" type="number" inputmode="decimal" step="0.01" placeholder="0.00">
             </div>
             <div class="form-group">
@@ -591,14 +594,14 @@
                 <input class="form-input" id="vendorPartNum" placeholder="Vendor's own P/N">
             </div>
             <div class="form-group">
-                <label class="form-label">Unit Cost (USD)</label>
-                <input class="form-input" id="vendorCost" type="number" step="0.01" placeholder="0.00">
+                <label class="form-label">Vendor cost (USD)</label>
+                <input class="form-input" id="vendorCost" type="number" inputmode="decimal" step="0.01" placeholder="0.00">
             </div>
         </div>
         <div class="form-row">
             <div class="form-group">
                 <label class="form-label">Lead Time (days)</label>
-                <input class="form-input" id="vendorLeadTime" type="number" placeholder="e.g. 7">
+                <input class="form-input" id="vendorLeadTime" type="number" inputmode="numeric" placeholder="e.g. 7">
             </div>
             <div class="form-group">
                 <label class="form-label">Preferred Vendor?</label>
@@ -677,6 +680,25 @@
     let filteredParts = [];
     let currentVendorPartId = null;
     let searchTimeout = null;
+    let showPrices = false;
+
+    function money(n) {
+        if (n == null || n === '') return '';
+        const v = parseFloat(n);
+        if (!Number.isFinite(v)) return '';
+        return '$' + v.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    }
+
+    function saleOf(part) {
+        return money(part.sale_price != null && part.sale_price !== '' ? part.sale_price : part.unit_cost);
+    }
+
+    function togglePrices() {
+        showPrices = !showPrices;
+        const btn = document.getElementById('togglePricesBtn');
+        if (btn) btn.textContent = showPrices ? 'Hide prices' : 'Show prices';
+        renderParts();
+    }
 
     // ── Init ─────────────────────────────────────────────────
 
@@ -812,10 +834,13 @@
 
         const html = filteredParts.map(part => {
             const vendors = vendorsMap[part.id] || [];
-            const preferred = vendors.find(v => v.is_preferred);
             const models = (part.compatible_models || []).slice(0, 3);
             const moreModels = (part.compatible_models || []).length - 3;
             const hasImage = !!part.image_url;
+            const sale = saleOf(part);
+            const saleHtml = showPrices && sale
+                ? `<div style="font-size:13px;color:#FBBF24;font-weight:700;">${sale}</div>`
+                : (sale ? `<div style="font-size:11px;color:#6B7280;">Sale hidden</div>` : '');
 
             const thumbHtml = hasImage
                 ? `<img class="part-thumb" src="${part.image_url}" alt="${part.part_number}"
@@ -851,12 +876,18 @@
                         <div class="vendor-count ${vendors.length > 0 ? 'has-vendors' : ''}">
                             ${vendors.length > 0 ? '✓ ' + vendors.length + ' vendor' + (vendors.length > 1 ? 's' : '') : 'No vendors'}
                         </div>
-                        ${preferred && preferred.unit_cost ? `<div style="font-size:13px;color:#34D399;font-weight:700;">$${parseFloat(preferred.unit_cost).toLocaleString('en-US',{minimumFractionDigits:2})}</div>` : ''}
+                        ${saleHtml}
                     </div>
                 </div>
 
                 <div class="part-detail">
                     ${expandedImageHtml}
+                    <div class="detail-section">
+                        <div class="detail-label">Sale price</div>
+                        ${showPrices
+                            ? `<div style="font-size:18px;font-weight:800;color:#FBBF24;">${saleOf(part) || '—'}</div>`
+                            : `<button type="button" class="action-btn" style="flex:none;width:auto;padding:6px 10px;" onclick="event.stopPropagation(); togglePrices()">Sale price hidden — Show prices</button>`}
+                    </div>
                     ${(part.compatible_models || []).length > 0 ? `
                     <div class="detail-section">
                         <div class="detail-label">Compatible Models</div>
@@ -876,7 +907,7 @@
                                     ${v.notes ? `<div style="font-size:11px;color:#6B7280;margin-top:2px;">${v.notes}</div>` : ''}
                                 </div>
                                 <div style="text-align:right;">
-                                    ${v.unit_cost ? `<div class="vendor-price">$${parseFloat(v.unit_cost).toLocaleString('en-US',{minimumFractionDigits:2})}</div>` : '<div class="vendor-price" style="color:#6B7280;">—</div>'}
+                                    <div class="vendor-price">${showPrices ? (v.unit_cost ? money(v.unit_cost) : '—') : '•••'}</div>
                                     ${v.lead_time_days ? `<div class="vendor-lead">${v.lead_time_days}d lead</div>` : ''}
                                     ${v.url ? `<a href="${v.url}" target="_blank" style="font-size:11px;color:#60A5FA;text-decoration:none;" onclick="event.stopPropagation()">🔗 Website</a>` : ''}
                                 </div>
@@ -969,10 +1000,11 @@
             compatible_models: models,
             created_by: uid,
             image_url: imageUrl,
-            unit_cost: Number.isFinite(listPrice) ? listPrice : null
+            sale_price: Number.isFinite(listPrice) ? listPrice : null
         };
         let { data: created, error } = await supabaseClient.from('parts_catalog').insert(insert).select('id').single();
-        if (error && /unit_cost|image_url|column/i.test(error.message || '')) {
+        if (error && /sale_price|unit_cost|image_url|column/i.test(error.message || '')) {
+            delete insert.sale_price;
             delete insert.unit_cost;
             if (/image_url/i.test(error.message || '')) delete insert.image_url;
             ({ data: created, error } = await supabaseClient.from('parts_catalog').insert(insert).select('id').single());
@@ -981,12 +1013,12 @@
         if (error) { errEl.textContent = error.message; return; }
         const vendorName = (document.getElementById('newPartVendor') || {}).value.trim();
         const vendorCostRaw = parseFloat((document.getElementById('newPartVendorCost') || {}).value || '');
-        if (created && created.id && (vendorName || Number.isFinite(listPrice))) {
+        if (created && created.id && vendorName) {
             await supabaseClient.from('part_vendors').insert({
                 part_id: created.id,
-                vendor_name: vendorName || 'List',
+                vendor_name: vendorName,
                 vendor_part_number: (document.getElementById('newPartVendorPn') || {}).value.trim() || null,
-                unit_cost: Number.isFinite(vendorCostRaw) ? vendorCostRaw : (Number.isFinite(listPrice) ? listPrice : null),
+                unit_cost: Number.isFinite(vendorCostRaw) ? vendorCostRaw : null,
                 is_preferred: true
             });
         }
@@ -1130,11 +1162,24 @@ if (_pendingSession) {
         try {
             const { data: { user } } = await supabaseClient.auth.getUser();
             if (!user) return;
-            const { data: sub } = await supabaseClient
-                .from('subscriptions')
+            const { data: profile } = await supabaseClient
+                .from('user_profiles')
+                .select('organization_id')
+                .eq('id', user.id)
+                .maybeSingle();
+            const orgId = profile?.organization_id;
+
+            let q = supabaseClient.from('subscriptions')
                 .select('tier, status')
-                .eq('user_id', user.id)
-                .single();
+                .eq('status', 'active');
+
+            if (orgId) {
+                q = q.or(`user_id.eq.${user.id},organization_id.eq.${orgId}`);
+            } else {
+                q = q.eq('user_id', user.id);
+            }
+
+            const { data: sub } = await q.maybeSingle();
             const isPaid = sub && ['premium','team','enterprise'].includes(sub.tier) && sub.status === 'active';
             const btn = document.getElementById('upgradeBtn');
             if (btn) btn.style.display = isPaid ? 'none' : 'flex';
