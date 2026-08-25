@@ -18,3 +18,14 @@ test('parts catalog can add a part with photo, price, and multiple vendors', () 
   assert.match(modal, /from\('part_vendors'\)/);
   assert.match(modal, /storage\.from/);
 });
+
+test('catalog cards open a part detail page that can edit the record', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const page = readFileSync(join(here, '../app/parts/page.tsx'), 'utf8');
+  const detail = readFileSync(join(here, '../app/parts/[id]/page.tsx'), 'utf8');
+  assert.match(page, /href=\{`\/parts\/\$\{part\.id\}`\}/);
+  assert.match(detail, /Edit part/);
+  assert.match(detail, /from\('parts_catalog'\)\.update/);
+  assert.match(detail, /Vendors/);
+  assert.match(detail, /AddVendorModal/);
+});

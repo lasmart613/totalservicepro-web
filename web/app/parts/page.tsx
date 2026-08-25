@@ -1,9 +1,11 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { AddPartModal, AddVendorModal } from '@/components/AddPartModal';
+import { AddPartModal } from '@/components/AddPartModal';
 import { chunkIds } from '@/lib/supabase/paginate';
 
 type CatalogPart = {
@@ -47,8 +49,8 @@ export default function PartsCatalog() {
   const [selectedBrand, setSelectedBrand] = useState('');
   const [loading, setLoading] = useState(true);
   const [showAdd, setShowAdd] = useState(false);
-  const [vendorFor, setVendorFor] = useState<CatalogPart | null>(null);
   const supabase = getSupabaseClient();
+  const router = useRouter();
 
   const fetchParts = async () => {
     setLoading(true);
@@ -170,7 +172,11 @@ export default function PartsCatalog() {
               const img = partImage(part);
               const price = displayPrice(part);
               return (
-                <div key={part.id} className="card overflow-hidden hover:border-[var(--gold)] transition-colors hover:transform-none">
+                <Link
+                  href={`/parts/${part.id}`}
+                  key={part.id}
+                  className="card overflow-hidden hover:border-[var(--gold)] transition-colors hover:transform-none block"
+                >
                   {img ? (
                     <img src={img} alt={part.name || ''} className="w-full h-48 object-cover" />
                   ) : (
@@ -194,17 +200,11 @@ export default function PartsCatalog() {
                       </div>
                     )}
                     <div className="flex justify-between items-center text-sm gap-2">
-                      <button
-                        type="button"
-                        className="text-xs text-[var(--gold)]"
-                        onClick={() => setVendorFor(part)}
-                      >
-                        + Vendor
-                      </button>
+                      <span className="text-xs text-[var(--gold)]">View details</span>
                       {price && <span className="font-medium text-[var(--gold)]">{price}</span>}
                     </div>
                   </div>
-                </div>
+                </Link>
               );
             })}
           </div>
@@ -214,17 +214,10 @@ export default function PartsCatalog() {
       {showAdd && (
         <AddPartModal
           onClose={() => setShowAdd(false)}
-          onCreated={() => {
-            fetchParts();
+          onCreated={(id) => {
+            setShowAdd(false);
+            router.push(`/parts/${id}`);
           }}
-        />
-      )}
-      {vendorFor && (
-        <AddVendorModal
-          partId={vendorFor.id}
-          partLabel={`${vendorFor.part_number || ''} — ${vendorFor.name || ''}`.trim()}
-          onClose={() => setVendorFor(null)}
-          onSaved={() => fetchParts()}
         />
       )}
     </div>
