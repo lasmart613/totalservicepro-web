@@ -453,7 +453,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
             </button>
 
             {dropdownOpen && (
-              <div className="absolute right-0 mt-2 w-64 rounded-xl border border-[var(--gold)] bg-[var(--surface3)] shadow-xl z-[100] overflow-hidden text-sm">
+              <div className="absolute right-0 mt-2 w-[min(22rem,calc(100vw-1.5rem))] min-w-[18rem] rounded-xl border border-[var(--gold)] bg-[var(--surface3)] shadow-xl z-[100] overflow-visible text-sm">
                 <div className="px-4 py-3 border-b border-[var(--border)]">
                   <div className="font-semibold text-[var(--gold)]">{orgName || fullName}</div>
                   {orgName ? (
@@ -464,7 +464,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                     <div className="text-[10px] mt-0.5 text-[var(--text3)]">Role: {roleLabel(profile.role)}</div>
                   )}
                   <div className="mt-2">
-                    <OrgSwitcher />
+                    <OrgSwitcher variant="menu" />
                   </div>
                 </div>
 
@@ -598,7 +598,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
             )}
             {user && (
               <div className="py-3 border-b border-[var(--border)]">
-                <OrgSwitcher />
+                <OrgSwitcher variant="menu" />
               </div>
             )}
             {user && (

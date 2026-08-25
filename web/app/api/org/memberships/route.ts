@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { listMembershipsWithOrgs } from '@/lib/org-membership-server';
+import { listMembershipsWithOrgs, upsertMembership } from '@/lib/org-membership-server';
 
 /**
  * GET /api/org/memberships
@@ -44,6 +44,25 @@ export async function GET(req: NextRequest) {
 
     if (hasServiceRole()) {
       const admin = getSupabaseAdmin();
+      const email = (profile?.email || user.email || '').toLowerCase().trim();
+      if (email) {
+        const { data: invRows } = await admin
+          .from('engineer_invitations')
+          .select('id, organization_id, role, accepted, email')
+          .ilike('email', email)
+          .order('created_at', { ascending: false })
+          .limit(50);
+        for (const inv of invRows || []) {
+          if (!inv.organization_id || !inv.accepted) continue;
+          await upsertMembership(admin, {
+            userId: user.id,
+            organizationId: inv.organization_id,
+            role: inv.role || 'fse',
+            isHome: false,
+          });
+        }
+      }
+
       const rows = await listMembershipsWithOrgs(admin, user.id);
       memberships = rows.map((row) => ({
         organizationId: row.organization_id,
@@ -54,25 +73,36 @@ export async function GET(req: NextRequest) {
         isActive: String(row.organization_id) === String(activeId),
       }));
 
-      const email = (profile?.email || user.email || '').toLowerCase().trim();
       if (email) {
         const { data: invites } = await admin
           .from('engineer_invitations')
-          .select('id, organization_id, role, first_name, last_name, created_at, accepted, organizations(name)')
-          .eq('email', email)
+          .select('id, organization_id, role, first_name, last_name, created_at, accepted')
+          .ilike('email', email)
           .eq('accepted', false)
           .order('created_at', { ascending: false })
           .limit(20);
         const memberOrgIds = new Set(memberships.map((m) => String(m.organizationId)));
-        pendingInvites = (invites || [])
-          .filter((inv: any) => !memberOrgIds.has(String(inv.organization_id)))
-          .map((inv: any) => ({
-            id: inv.id,
-            organizationId: inv.organization_id,
-            name: inv.organizations?.name || `Company ${inv.organization_id}`,
-            role: inv.role || 'fse',
-            createdAt: inv.created_at,
-          }));
+        const pendingRaw = (invites || []).filter(
+          (inv: any) => inv.organization_id && !memberOrgIds.has(String(inv.organization_id))
+        );
+        const orgIds = Array.from(
+          new Set(pendingRaw.map((inv: any) => inv.organization_id).filter(Boolean))
+        );
+        const names = new Map<string, string>();
+        if (orgIds.length) {
+          const { data: orgs } = await admin
+            .from('organizations')
+            .select('id, name')
+            .in('id', orgIds);
+          (orgs || []).forEach((o: any) => names.set(String(o.id), o.name || `Company ${o.id}`));
+        }
+        pendingInvites = pendingRaw.map((inv: any) => ({
+          id: inv.id,
+          organizationId: inv.organization_id,
+          name: names.get(String(inv.organization_id)) || `Company ${inv.organization_id}`,
+          role: inv.role || 'fse',
+          createdAt: inv.created_at,
+        }));
       }
     } else {
       const { data: rows } = await userClient

@@ -76,16 +76,27 @@ export async function POST(req: NextRequest) {
     const admin = getSupabaseAdmin();
     const memberships = await listMembershipsForUser(admin, user.id);
 
-    let invQuery = admin
-      .from('engineer_invitations')
-      .select('*')
-      .ilike('email', email)
-      .eq('accepted', false)
-      .order('created_at', { ascending: false });
+    let inv: any = null;
     if (body.inviteId) {
-      invQuery = admin.from('engineer_invitations').select('*').eq('id', body.inviteId).ilike('email', email);
+      const { data: byId } = await admin
+        .from('engineer_invitations')
+        .select('*')
+        .eq('id', body.inviteId)
+        .maybeSingle();
+      const invEmail = String(byId?.email || '').toLowerCase().trim();
+      if (byId && (!invEmail || invEmail === email)) inv = byId;
     }
-    let { data: inv } = await invQuery.limit(1).maybeSingle();
+    if (!inv) {
+      const { data: openInv } = await admin
+        .from('engineer_invitations')
+        .select('*')
+        .ilike('email', email)
+        .eq('accepted', false)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      inv = openInv;
+    }
     if (!inv && !body.inviteId) {
       const { data: anyInv } = await admin
         .from('engineer_invitations')

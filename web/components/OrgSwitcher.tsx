@@ -13,7 +13,13 @@ import {
   type PendingOrgInvite,
 } from '@/lib/org-membership-client';
 
-export function OrgSwitcher({ compact = false }: { compact?: boolean }) {
+export function OrgSwitcher({
+  compact = false,
+  variant = 'chip',
+}: {
+  compact?: boolean;
+  variant?: 'chip' | 'menu';
+}) {
   const [memberships, setMemberships] = useState<OrgMembership[]>([]);
   const [pending, setPending] = useState<PendingOrgInvite[]>([]);
   const [open, setOpen] = useState(false);
@@ -70,24 +76,14 @@ export function OrgSwitcher({ compact = false }: { compact?: boolean }) {
     }
   };
 
-  return (
-    <div className="relative">
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-1.5 max-w-[220px] rounded-full border border-[var(--gold-border)] px-2.5 py-1 text-xs hover:bg-[var(--surface3)]"
-        aria-label="Switch company"
-        title="Switch which company you are working as"
-      >
-        <Building2 size={14} className="text-[var(--gold)] shrink-0" />
-        <span className="truncate font-semibold">
-          {active?.name || 'Choose company'}
-        </span>
-        <ChevronDown size={12} className="opacity-70 shrink-0" />
-      </button>
-      {open && (
-        <div className="absolute right-0 mt-2 w-72 rounded-xl border border-[var(--gold)] bg-[var(--surface3)] shadow-xl z-[110] overflow-hidden text-sm">
+  const panel = (
+        <div
+          className={
+            variant === 'menu'
+              ? 'mt-2 w-full min-w-0 rounded-lg border border-[var(--gold)] bg-[var(--surface)] text-sm overflow-visible'
+              : 'absolute right-0 mt-2 w-[min(18rem,calc(100vw-2rem))] min-w-[16rem] rounded-xl border border-[var(--gold)] bg-[var(--surface3)] shadow-xl z-[120] overflow-visible text-sm'
+          }
+        >
           <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-[var(--text3)] border-b border-[var(--border)]">
             Working as
           </div>
@@ -148,7 +144,29 @@ export function OrgSwitcher({ compact = false }: { compact?: boolean }) {
             </div>
           )}
         </div>
-      )}
+  );
+
+  if (variant === 'menu') {
+    return <div className="w-full min-w-0">{panel}</div>;
+  }
+
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        disabled={busy}
+        onClick={() => setOpen(!open)}
+        className="inline-flex items-center gap-1.5 max-w-[220px] rounded-full border border-[var(--gold-border)] px-2.5 py-1 text-xs hover:bg-[var(--surface3)]"
+        aria-label="Switch company"
+        title="Switch which company you are working as"
+      >
+        <Building2 size={14} className="text-[var(--gold)] shrink-0" />
+        <span className="truncate font-semibold">
+          {active?.name || 'Choose company'}
+        </span>
+        <ChevronDown size={12} className="opacity-70 shrink-0" />
+      </button>
+      {open && panel}
     </div>
   );
 }
