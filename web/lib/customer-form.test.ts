@@ -41,6 +41,8 @@ test('new service call form autocompletes assigned customers and can add a new c
   assert.match(src, /Assign to/);
   assert.match(src, /\/api\/team\/list/);
   assert.match(src, /assigned_to: assignedTo/);
+  assert.match(src, /100dvh/);
+  assert.match(src, /overflowY: 'auto'/);
   assert.doesNotMatch(
     src,
     /<label className="label">Customer name \*<\/label>\s*<input\s+className="input"\s+value=\{form\.customer_name\}/

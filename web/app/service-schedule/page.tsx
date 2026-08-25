@@ -973,14 +973,20 @@ export default function ServiceSchedule() {
       {/* New Service Call modal */}
       {showNew && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60"
+          className="fixed inset-0 z-50 overflow-y-auto overscroll-contain bg-black/60 p-3 sm:p-4"
           onClick={() => !saving && setShowNew(false)}
         >
+          <div className="flex min-h-full items-start sm:items-center justify-center">
           <div
-            className="card w-full max-w-lg max-h-[90vh] overflow-y-auto p-6"
+            className="card w-full max-w-lg flex flex-col p-0 hover:transform-none"
+            style={{
+              maxHeight: 'calc(100dvh - 1.5rem)',
+              minHeight: 0,
+              overflow: 'hidden',
+            }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex justify-between items-center mb-4">
+            <div className="flex justify-between items-center px-6 pt-5 pb-3 shrink-0 border-b border-[var(--border)]">
               <h2 className="text-xl font-bold" style={{ color: 'var(--gold)' }}>
                 New Service Call
               </h2>
@@ -994,10 +1000,19 @@ export default function ServiceSchedule() {
             </div>
 
             {formError && (
-              <div className="mb-3 p-2 rounded text-sm bg-red-900/30 text-red-400">{formError}</div>
+              <div className="mx-6 mt-3 p-2 rounded text-sm bg-red-900/30 text-red-400 shrink-0">
+                {formError}
+              </div>
             )}
 
-            <form onSubmit={createTicket} className="space-y-3">
+            <form
+              onSubmit={createTicket}
+              className="flex flex-col min-h-0 flex-1"
+            >
+              <div
+                className="space-y-3 px-6 py-4"
+                style={{ overflowY: 'auto', minHeight: 0, flex: '1 1 auto', overscrollBehavior: 'contain' }}
+              >
               <div className="relative">
                 <label className="label">Customer *</label>
                 <input
@@ -1228,8 +1243,9 @@ export default function ServiceSchedule() {
                   onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 />
               </div>
+              </div>
 
-              <div className="flex gap-2 pt-2">
+              <div className="flex gap-2 px-6 py-4 border-t border-[var(--border)] shrink-0">
                 <button
                   type="button"
                   className="btn btn-secondary flex-1"
@@ -1243,6 +1259,7 @@ export default function ServiceSchedule() {
                 </button>
               </div>
             </form>
+          </div>
           </div>
         </div>
       )}
