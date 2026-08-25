@@ -6,6 +6,10 @@ const __dirname = path.dirname(__filename);
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  env: {
+    NEXT_PUBLIC_APP_VERSION: process.env.NEXT_PUBLIC_APP_VERSION || '0.4.0-beta',
+    NEXT_PUBLIC_GIT_SHA: process.env.COMMIT_REF || process.env.NEXT_PUBLIC_GIT_SHA || '',
+  },
   typescript: {
     ignoreBuildErrors: true,
   },

@@ -6,6 +6,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { signOutAndClearIdentity } from '@/lib/auth-session';
 import { applyStoredTheme, togglePersistedTheme } from '@/lib/theme';
 import { MembershipsSettings } from '@/components/OrgSwitcher';
+import { APP_CHANNEL, APP_VERSION, buildLabel } from '@/lib/app-version';
 
 export const dynamic = 'force-dynamic';
 
@@ -224,9 +225,28 @@ export default function Settings() {
             <button onClick={async () => { const s = getSupabaseClient(); await signOutAndClearIdentity(s); window.location.href = '/login'; }} className="btn btn-secondary text-red-400 border-red-900/40">Sign Out Everywhere</button>
           </div>
 
-          <div className="text-xs text-[var(--text3)] pt-2 border-t border-[var(--border)]">
-            Web build of Total Service Pro. All data lives in Supabase — fully shared with the Android app.
-            <br />Preferences saved locally for now.
+          <div className="pt-2 border-t border-[var(--border)]">
+            <div className="font-semibold mb-2">About</div>
+            <div className="flex justify-between text-sm mb-1">
+              <span className="text-[var(--text3)]">Version</span>
+              <span className="text-[var(--gold)] font-semibold">{APP_VERSION}</span>
+            </div>
+            <div className="flex justify-between text-sm mb-1">
+              <span className="text-[var(--text3)]">Build</span>
+              <span>{buildLabel()}</span>
+            </div>
+            <div className="flex justify-between text-sm mb-2">
+              <span className="text-[var(--text3)]">Channel</span>
+              <span className="capitalize">{APP_CHANNEL}</span>
+            </div>
+            <p className="text-xs text-[var(--text3)]">
+              Web and Android share this {APP_VERSION} line. Live customer beta — invoices, estimates, and tickets
+              go to real shops. 1.0 comes later, when we call it generally available.
+            </p>
+            <p className="text-xs text-[var(--text3)] mt-1">
+              All data lives in Supabase — fully shared with the Android app. Preferences on this page are saved on
+              this device.
+            </p>
           </div>
         </div>
       </div>
