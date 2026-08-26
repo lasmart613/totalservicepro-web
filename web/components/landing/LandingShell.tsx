@@ -19,7 +19,7 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <div className="lp-root -mx-4 sm:-mx-6 lg:-mx-8 -my-6">
+    <div className="lp-root">
       <header className={`lp-nav ${scrolled ? 'is-scrolled' : ''}`}>
         <Link href="/" className="lp-brand">
           <span className="lp-brand-biz">Medical Repair Network</span>
