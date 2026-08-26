@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { claimCustomerInvite } from '@/lib/customer-invite-client';
+import { destAfterInviteClaim, inviteInPlay, type InviteClaimResult } from '@/lib/invite-claim';
 
 function safeNextPath(raw: string | null): string {
   if (!raw) return '';
@@ -118,6 +119,13 @@ function AuthCallbackInner() {
         const meta = user.user_metadata || {};
         const invitedMember = !!(meta as any).invited_member || authType === 'invite';
 
+        // Claim before routing. Invite + Forgot password used to skip this and
+        // send people through founder onboarding with the invite still pending.
+        let claimResult: InviteClaimResult | null = null;
+        if (user.email && !isSignupConfirm) {
+          claimResult = await claimPendingInvitations(supabase, user.id, user.email);
+        }
+
         // Invited / password-recovery users must set a password.
         // type=signup never belongs here — they already chose a password at signup.
         if (isInviteOrRecovery || (invitedMember && !isSignupConfirm && !meta.role?.includes('admin') && meta.role !== 'owner' && meta.role !== 'parts_supplier')) {
@@ -163,7 +171,8 @@ function AuthCallbackInner() {
         }
 
         // Finish org creation from localStorage OR user_metadata (new-tab Gmail confirm).
-        const pending = resolvePendingSignup(user);
+        // Never create a new shop when a team invite is in play.
+        const pending = inviteInPlay(claimResult) ? null : resolvePendingSignup(user);
         if (pending && pending.email?.toLowerCase() === (user.email || '').toLowerCase() && pending.email) {
           try {
             setMessage('Creating your organization…');
@@ -187,8 +196,8 @@ function AuthCallbackInner() {
         }
 
         // Auto-assign org/role from pending engineer_invitations (team invites only)
-        if (user.email && !isSignupConfirm) {
-          await claimPendingInvitations(supabase, user.id, user.email);
+        if (!claimResult && user.email && !isSignupConfirm) {
+          claimResult = await claimPendingInvitations(supabase, user.id, user.email);
         }
 
         let { data: prof } = await supabase
@@ -228,7 +237,9 @@ function AuthCallbackInner() {
         }
 
         let dest = '/';
-        if (!prof?.organization_id || (isFounder && !prof?.onboarding_completed)) {
+        if (inviteInPlay(claimResult)) {
+          dest = destAfterInviteClaim(claimResult, '/onboarding/member');
+        } else if (!prof?.organization_id || (isFounder && !prof?.onboarding_completed)) {
           dest = '/onboarding';
         } else if (next && next !== '/auth/set-password') {
           dest = next;

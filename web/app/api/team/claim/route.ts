@@ -69,8 +69,8 @@ export async function POST(req: NextRequest) {
     if (!hasServiceRole()) {
       return NextResponse.json({
         ok: false,
-        error: 'No pending invitation found for this email (and no service role on server).',
-      }, { status: 404 });
+        error: 'Server cannot accept team invites (missing service role).',
+      }, { status: 503 });
     }
 
     const admin = getSupabaseAdmin();
@@ -143,8 +143,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: decision.error }, { status: 400 });
     }
 
+    const hadPending = inv.accepted !== true;
+
     if (decision.action === 'skip' || decision.action === 'none') {
-      if (inv.id) {
+      if (inv.id && hadPending) {
         await admin
           .from('engineer_invitations')
           .update({ accepted: true, accepted_at: new Date().toISOString() })
@@ -153,8 +155,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         ok: true,
         skipped: true,
+        claimed: hadPending,
+        pendingInvite: hadPending,
+        inviteAccepted: true,
         organization_id: existingProf?.organization_id ?? inv.organization_id,
         role: existingProf?.role || inv.role || 'fse',
+        needsMemberOnboarding: existingProf?.onboarding_completed !== true,
       });
     }
 
@@ -230,9 +236,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      organization_id: after?.organization_id ?? existingProf?.organization_id,
+      organization_id: after?.organization_id ?? existingProf?.organization_id ?? inv.organization_id,
       role: after?.role ?? existingProf?.role,
       claimed: true,
+      pendingInvite: hadPending,
+      inviteAccepted: true,
       moonlight: decision.keepHome,
       leftOrganizationId: decision.leaveOrganizationId,
       needsMemberOnboarding: after?.onboarding_completed !== true,

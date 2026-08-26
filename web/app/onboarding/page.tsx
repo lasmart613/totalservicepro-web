@@ -9,6 +9,7 @@ import { isOwnerish, isSupplier } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
+import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
 
 type OrgType = 'service' | 'clinic' | 'supplier';
 type TeamMember = {
@@ -97,19 +98,10 @@ export default function Onboarding() {
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) {
-          const claimRes = await fetch('/api/team/claim', {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${session.access_token}`,
-              'Content-Type': 'application/json',
-            },
-          });
-          if (claimRes.ok) {
-            const claimJson = await claimRes.json().catch(() => ({}));
-            if (claimJson.claimed || claimJson.needsMemberOnboarding) {
-              router.replace('/onboarding/member');
-              return;
-            }
+          const claimJson = await postTeamClaim(session.access_token);
+          if (inviteInPlay(claimJson) || claimJson.needsMemberOnboarding) {
+            router.replace(destAfterInviteClaim(claimJson, '/onboarding/member'));
+            return;
           }
         }
       } catch (e) {
@@ -466,6 +458,21 @@ export default function Onboarding() {
 
   async function saveOnboarding() {
     if (!currentUser) return;
+
+    // Team invite in play: join that org and leave founder setup. Never create a new shop.
+    try {
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.access_token) {
+        const claimJson = await postTeamClaim(session.access_token);
+        if (inviteInPlay(claimJson)) {
+          router.replace(destAfterInviteClaim(claimJson, '/onboarding/member'));
+          return;
+        }
+      }
+    } catch (e) {
+      console.warn('onboarding finish claim invite', e);
+    }
+
     if (!formData.companyName?.trim() || !formData.firstName?.trim()) {
       alert('Company / facility name and first name are required.');
       return;
@@ -751,8 +758,16 @@ export default function Onboarding() {
         console.error('onboarding flags persist failed', flagErr);
       }
 
-      // Do not claim FSE invites onto a founder who just created this org
       await supabase.auth.updateUser({ data: { first_name: formData.firstName, last_name: formData.lastName } });
+      // If an invite is still open (forgot-password → this wizard), join that org now.
+      try {
+        const { data: { session: afterSession } } = await supabase.auth.getSession();
+        if (afterSession?.access_token) {
+          await postTeamClaim(afterSession.access_token);
+        }
+      } catch (e) {
+        console.warn('onboarding post-save claim invite', e);
+      }
 
       if (laserSaveErrors.length) {
         alert(

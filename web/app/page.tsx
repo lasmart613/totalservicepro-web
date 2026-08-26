@@ -6,7 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { LandingPage } from '@/components/landing/LandingPage';
 import { Calendar, Wrench, Package, FileText, Zap, Building2, Settings } from 'lucide-react';
-import { getSupabaseClient } from '@/lib/supabase/client';
+import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
 import {
   isAdmin,
   getDashboardPersona,
@@ -14,6 +14,7 @@ import {
 } from '@/lib/roles';
 import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
+import { destAfterInviteClaim, inviteInPlay } from '@/lib/invite-claim';
 import { hasBrowserAuthHint } from '@/lib/auth-session';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
@@ -83,7 +84,7 @@ export default function HomePage() {
         return;
       }
 
-      const { data: prof, error: profErr } = await supabase
+      let { data: prof, error: profErr } = await supabase
         .from('user_profiles')
         .select('first_name, role, organization_id, onboarding_completed')
         .eq('id', u.id)
@@ -95,7 +96,26 @@ export default function HomePage() {
       }
       setProfile(prof);
 
+      const claim = u.email
+        ? await claimPendingInvitations(supabase, u.id, u.email)
+        : { ok: false };
+      if (inviteInPlay(claim) && !prof?.organization_id && claim.organization_id) {
+        const { data: again } = await supabase
+          .from('user_profiles')
+          .select('first_name, role, organization_id, onboarding_completed')
+          .eq('id', u.id)
+          .maybeSingle();
+        if (again) {
+          prof = again;
+          setProfile(again);
+        }
+      }
+
       if (!prof?.organization_id) {
+        if (inviteInPlay(claim)) {
+          router.replace(destAfterInviteClaim(claim, '/onboarding/member'));
+          return;
+        }
         const pending = resolvePendingSignup(u);
         if (pending?.kind === 'owner') {
           try {
