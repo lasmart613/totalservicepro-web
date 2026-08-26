@@ -176,6 +176,8 @@ test('claim does not skip founders who have a pending invite to another shop', (
   const source = readFileSync(join(here, '../app/api/team/claim/route.ts'), 'utf8');
   assert.match(source, /decideClaim/);
   assert.match(source, /leaveOrganizationId/);
+  assert.match(source, /pendingInvite/);
+  assert.match(source, /inviteAccepted/);
   assert.doesNotMatch(source, /alreadyFounder && \(existingProf\?\.organization_id/);
 });
 

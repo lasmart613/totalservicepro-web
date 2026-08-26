@@ -4,6 +4,7 @@ import React, { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
+import { destAfterInviteClaim, inviteInPlay } from '@/lib/invite-claim';
 
 /**
  * Invited / recovery users land here after the email link establishes a session.
@@ -113,27 +114,9 @@ function SetPasswordInner() {
         { onConflict: 'id' }
       );
 
-      let needsMemberOnboarding = false;
-      let claimedOrg = false;
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
-        const claimRes = await fetch('/api/team/claim', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-        });
-        if (claimRes.ok) {
-          const claimJson = await claimRes.json().catch(() => ({}));
-          needsMemberOnboarding = !!claimJson.needsMemberOnboarding;
-          claimedOrg = !!claimJson.organization_id;
-        } else if (user.email) {
-          await claimPendingInvitations(supabase, user.id, user.email);
-        }
-      } else if (user.email) {
-        await claimPendingInvitations(supabase, user.id, user.email);
-      }
+      let claim = user.email
+        ? await claimPendingInvitations(supabase, user.id, user.email)
+        : { ok: false };
 
       const { data: prof } = await supabase
         .from('user_profiles')
@@ -141,11 +124,19 @@ function SetPasswordInner() {
         .eq('id', user.id)
         .maybeSingle();
 
-      // Claim API owns the flag. Invited members go to the short form.
+      // Invite in play → member onboarding (never founder wizard / new company).
       let dest = '/hub';
-      if (needsMemberOnboarding || (prof?.organization_id && !prof.onboarding_completed)) {
-        dest = '/onboarding/member';
-      } else if (!prof?.organization_id && !claimedOrg) {
+      if (inviteInPlay(claim) || claim.organization_id || (prof?.organization_id && !prof.onboarding_completed)) {
+        dest = destAfterInviteClaim(
+          {
+            ...claim,
+            organization_id: claim.organization_id ?? prof?.organization_id,
+            needsMemberOnboarding:
+              claim.needsMemberOnboarding ?? prof?.onboarding_completed !== true,
+          },
+          '/onboarding/member'
+        );
+      } else if (!prof?.organization_id) {
         dest = '/onboarding';
       }
 
@@ -157,8 +148,9 @@ function SetPasswordInner() {
         next !== '/auth/set-password' &&
         next !== '/hub'
       ) {
-        // keep explicit next only for non-default destinations
-        if (next.startsWith('/onboarding')) dest = next;
+        // Invitees must not be sent to founder /onboarding (that creates a new shop).
+        if (next.startsWith('/onboarding/member')) dest = next;
+        else if (next.startsWith('/onboarding') && !inviteInPlay(claim)) dest = next;
       }
 
       setMessage('Password saved! Redirecting…');

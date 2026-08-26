@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
 
 const KEY = 'tsp-pending-signup';
 
@@ -406,6 +407,22 @@ export async function applyPendingSignup(
   if (!pendingMatchesSession(userId, pending, sessionUser)) {
     clearPendingSignup();
     throw new Error('Signup details do not match the signed-in account. Sign out and try again.');
+  }
+
+  try {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (session?.access_token) {
+      const claim = await postTeamClaim(session.access_token);
+      if (inviteInPlay(claim)) {
+        clearPendingSignup();
+        return {
+          orgId: claim.organization_id ?? null,
+          dest: destAfterInviteClaim(claim, '/onboarding/member'),
+        };
+      }
+    }
+  } catch {
+    /* no invite or claim failed — continue founder org create */
   }
 
   const { data: existing } = await supabase
