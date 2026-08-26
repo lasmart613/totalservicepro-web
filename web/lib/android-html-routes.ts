@@ -24,6 +24,7 @@ const FILE_TO_PATH: Record<string, string> = {
   manuals: '/manuals',
   manual_library: '/manuals',
   service_manuals: '/manuals',
+  pdf_viewer: '/manuals/view',
   test_equipment: '/test-equipment',
   calculators_menu: '/calculators',
   ai_assistant: '/ai-assistant',

@@ -94,6 +94,18 @@ html.landing-mode body {
   flex-shrink: 0;
 }
 
+.lp-report-btn {
+  gap: 6px;
+  text-transform: none;
+  letter-spacing: 0.02em;
+  padding: 9px 12px;
+}
+
+.lp-report-btn svg {
+  color: #FBBF24;
+  flex-shrink: 0;
+}
+
 .lp-btn {
   display: inline-flex;
   align-items: center;

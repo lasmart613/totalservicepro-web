@@ -5,6 +5,8 @@ import { Header } from '@/components/Header';
 import { ShelfScroller } from '@/components/ShelfScroller';
 import { getSupabaseClient, getSupabaseUrl } from '@/lib/supabase/client';
 import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
+import { useRouter } from 'next/navigation';
+import { manualViewHref, stashManualView, type ManualViewPayload } from '@/lib/manuals';
 import { toast } from 'sonner';
 
 const WAVELENGTH_OPTIONS = [
@@ -20,6 +22,7 @@ const WAVELENGTH_OPTIONS = [
 const DEFAULT_SLOT_LIMIT = 5; // free default; Premium is 15 via manualSlotLimit()
 
 export default function ManualsLibrary() {
+  const router = useRouter();
   const [manuals, setManuals] = useState<any[]>([]);
   const [myLibrary, setMyLibrary] = useState<any[]>([]);
   const [ownedIds, setOwnedIds] = useState<Set<string>>(new Set());
@@ -232,28 +235,24 @@ export default function ManualsLibrary() {
     return true;
   }
 
-  function openPayloadUrl(json: any, titleHint?: string) {
-    if (json?.url) {
-      window.open(json.url, '_blank');
-      if (Array.isArray(json.chapters) && json.chapters.length > 1) {
-        toast.message(
-          `${titleHint || 'Manual'} has ${json.chapters.length} chapters — opened the default PDF. Re-open from the app for the full chapter list.`
-        );
-      }
-      return true;
-    }
-    if (json?.data_base64) {
-      try {
-        const bin = atob(json.data_base64);
-        const bytes = new Uint8Array(bin.length);
-        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        const blob = new Blob([bytes], { type: json.content_type || 'application/pdf' });
-        const blobUrl = URL.createObjectURL(blob);
-        window.open(blobUrl, '_blank');
-        return true;
-      } catch (e) {
-        console.error(e);
-      }
+  function openInAppViewer(json: any, manual: any, titleHint?: string) {
+    const payload: ManualViewPayload = {
+      manualId: manual?.id ?? null,
+      title: titleHint || manual?.title || 'Service Manual',
+      storagePath: json?.storage_path || manual?.storage_path || null,
+      url: json?.url || null,
+      dataBase64: json?.data_base64 || null,
+      contentType: json?.content_type || null,
+      chapters: Array.isArray(json?.chapters) ? json.chapters : null,
+    };
+    stashManualView(payload);
+    router.push(manualViewHref({ id: payload.manualId, title: payload.title }));
+    return true;
+  }
+
+  function openPayloadUrl(json: any, manual: any, titleHint?: string) {
+    if (json?.url || json?.data_base64) {
+      return openInAppViewer(json, manual, titleHint);
     }
     // Folder response without auto-resolved URL: open first chapter PDF
     if (Array.isArray(json?.chapters) && json.chapters.length) {
@@ -275,7 +274,7 @@ export default function ManualsLibrary() {
       };
       const { json, status } = await callGetManualUrl(payload);
 
-      const opened = openPayloadUrl(json, m.title);
+      const opened = openPayloadUrl(json, m, m.title);
       if (opened === true) return;
       if (opened === 'chapter') {
         const chapterPath = (openPayloadUrl as any)._pendingChapter;
@@ -283,7 +282,7 @@ export default function ManualsLibrary() {
           manual_id: m.id,
           storage_path: chapterPath,
         });
-        if (openPayloadUrl(chRes.json, m.title) === true) return;
+        if (openPayloadUrl({ ...chRes.json, chapters: json.chapters }, m, m.title) === true) return;
         toast.error(chRes.json.error || 'Could not open first chapter');
         return;
       }
@@ -318,7 +317,7 @@ export default function ManualsLibrary() {
         if (!added) return;
         await loadData();
         const openRes = await callGetManualUrl(payload);
-        if (openPayloadUrl(openRes.json, m.title) === true) {
+        if (openPayloadUrl(openRes.json, m, m.title) === true) {
           toast.success('Added to company library');
         } else {
           toast.error(openRes.json.error || 'Added, but could not open PDF yet. Try again from My Library.');

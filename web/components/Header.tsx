@@ -22,6 +22,7 @@ import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import { OrgSwitcher } from '@/components/OrgSwitcher';
+import { ReportIssueControl } from '@/components/ReportIssueControl';
 
 type NavLink = { href: string; label: string };
 type NavGroup = { id: string; label: string; href?: string; items: NavLink[] };
@@ -352,7 +353,10 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         <Link href="/" className="font-extrabold text-xl" style={{ color: 'var(--gold)' }}>
           Total Service Pro
         </Link>
-        <div className="w-8 h-8 rounded-full bg-[var(--surface3)] animate-pulse" />
+        <div className="flex items-center gap-3">
+          <ReportIssueControl />
+          <div className="w-8 h-8 rounded-full bg-[var(--surface3)] animate-pulse" />
+        </div>
       </header>
     );
   }
@@ -404,6 +408,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       </div>
 
       <div className="flex items-center gap-3 shrink-0">
+        <ReportIssueControl />
         {user && <OrgSwitcher compact />}
         {user && (
           <Link
@@ -601,6 +606,9 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 <OrgSwitcher variant="menu" />
               </div>
             )}
+            <div className="py-3">
+              <ReportIssueControl />
+            </div>
             {user && (
               <Link
                 href="/notifications"
