@@ -41,6 +41,20 @@ test('no invitation → founder onboarding is allowed', () => {
   assert.equal(inviteInPlay(null), false);
 });
 
+test('already-accepted historical invite does not hijack later logins', () => {
+  const historical = {
+    ok: true,
+    skipped: true,
+    claimed: false,
+    pendingInvite: false,
+    inviteAccepted: true,
+    organization_id: 4,
+    needsMemberOnboarding: false,
+  };
+  assert.equal(inviteInPlay(historical), false);
+  assert.equal(destAfterInviteClaim(historical, '/'), '/hub');
+});
+
 test('claim route marks skip as accepted and returns routing flags', () => {
   const source = readFileSync(join(here, '../app/api/team/claim/route.ts'), 'utf8');
   assert.match(source, /pendingInvite/);

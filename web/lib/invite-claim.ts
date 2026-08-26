@@ -27,7 +27,6 @@ export function inviteInPlay(result: InviteClaimResult | null | undefined): bool
   if (!result) return false;
   if (result.pendingInvite) return true;
   if (result.claimed) return true;
-  if (result.inviteAccepted) return true;
   return false;
 }
 

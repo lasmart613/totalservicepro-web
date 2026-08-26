@@ -155,7 +155,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         ok: true,
         skipped: true,
-        claimed: true,
+        claimed: hadPending,
         pendingInvite: hadPending,
         inviteAccepted: true,
         organization_id: existingProf?.organization_id ?? inv.organization_id,
