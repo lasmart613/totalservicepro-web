@@ -8,6 +8,18 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { ArrowLeft, Edit2, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { loadLinkedCustomers } from '@/lib/customer-form';
+import { updateOmittingCharOverflow } from '@/lib/char-overflow';
+import { AssignFseSelect } from '@/components/AssignFseSelect';
+import {
+  applyTicketAssignee,
+  assigneeName,
+  loadTicketAssignees,
+  looksLikeUuid,
+  notifyTicketAssignee,
+  shouldNotifyAssignee,
+  ticketAssigneeId,
+  type TicketAssignee,
+} from '@/lib/ticket-assignees';
 
 const TICKET_SAVE_FIELDS = [
   'status',
@@ -42,6 +54,9 @@ export default function ServiceTicketDetail() {
   const [formData, setFormData] = useState<any>({});
   const [saving, setSaving] = useState(false);
   const [organizations, setOrganizations] = useState<any[]>([]);
+  const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [selfName, setSelfName] = useState('');
 
   // DB dropdowns for equipment
   const [dbMfrs, setDbMfrs] = useState<any[]>([]);
@@ -83,14 +98,58 @@ export default function ServiceTicketDetail() {
           .single();
 
         if (ticketError) throw ticketError;
-        setTicket(ticketData);
-        setFormData(ticketData);
+        const assigned = ticketAssigneeId(ticketData);
+        const normalized = { ...ticketData, assigned_to: assigned };
+        setTicket(normalized);
+        setFormData(normalized);
 
         const shopId = ticketData.organization_id;
         if (shopId != null) {
           setOrganizations(await loadLinkedCustomers(supabase, shopId));
         } else {
           setOrganizations([]);
+        }
+
+        let meId: string | null = null;
+        let meName = '';
+        let meRole = '';
+        try {
+          const user =
+            (await supabase.auth.getSession()).data.session?.user ??
+            (await supabase.auth.getUser()).data.user ??
+            null;
+          meId = user?.id || null;
+          setUserId(meId);
+          if (meId) {
+            const { data: prof } = await supabase
+              .from('user_profiles')
+              .select('first_name, last_name, email, role')
+              .eq('id', meId)
+              .maybeSingle();
+            meName =
+              [prof?.first_name, prof?.last_name].filter(Boolean).join(' ') ||
+              prof?.email ||
+              '';
+            meRole = prof?.role || '';
+            setSelfName(meName);
+          }
+        } catch (e) {
+          console.warn('ticket editor session', e);
+        }
+
+        try {
+          setAssignees(
+            await loadTicketAssignees(supabase, {
+              orgId: shopId ?? null,
+              meId,
+              selfName: meName,
+              selfRole: meRole,
+              keepIds: [assigned],
+            })
+          );
+        } catch (e) {
+          console.warn('ticket assignees', e);
+          setAssignees([]);
         }
 
         // Load reference data for equipment dropdowns
@@ -144,20 +203,52 @@ export default function ServiceTicketDetail() {
       for (const key of TICKET_SAVE_FIELDS) {
         if (key in formData) patch[key] = formData[key];
       }
-      let { error } = await supabase
-        .from('service_tickets')
-        .update(patch)
-        .eq('id', ticketId);
+      // Form assigned_to is the picker value. applyTicketAssignee writes assigned_to
+      // and assigned_fse; omit-and-retry drops a leftover CHAR(3) assigned_to.
+      const assignedTo = looksLikeUuid(formData.assigned_to) ? String(formData.assigned_to).trim() : '';
+      applyTicketAssignee(patch, assignedTo || null);
+
+      let { error } = await updateOmittingCharOverflow(supabase, 'service_tickets', patch, {
+        column: 'id',
+        value: ticketId,
+      });
       if (error && /customer_organization/i.test(error.message || '')) {
         delete patch.customer_organization_id;
-        ({ error } = await supabase.from('service_tickets').update(patch).eq('id', ticketId));
+        ({ error } = await updateOmittingCharOverflow(supabase, 'service_tickets', patch, {
+          column: 'id',
+          value: ticketId,
+        }));
       }
 
       if (error) throw error;
 
-      setTicket({ ...ticket, ...patch });
+      const { data: fresh } = await supabase.from('service_tickets').select('*').eq('id', ticketId).maybeSingle();
+      const reloaded = fresh
+        ? { ...fresh, assigned_to: ticketAssigneeId(fresh) || assignedTo }
+        : { ...ticket, ...patch, assigned_to: assignedTo || null };
+      setTicket(reloaded);
+      setFormData(reloaded);
       setIsEditing(false);
-      toast.success('Ticket updated successfully!');
+
+      const prevAssigned = ticketAssigneeId(ticket);
+      if (shouldNotifyAssignee({ previousId: prevAssigned, nextId: assignedTo, actorId: userId })) {
+        const who = assigneeName(assignees, assignedTo, 'the assigned FSE');
+        try {
+          const json = await notifyTicketAssignee(supabase, ticketId, assignedTo);
+          if (json.emailed) {
+            toast.success(`Ticket updated. ${who} was emailed.`);
+          } else {
+            toast.success(
+              `Ticket updated. Could not email ${who}${json.error ? `: ${json.error}` : '.'}`
+            );
+          }
+        } catch (notifyErr) {
+          console.warn('notify assignee', notifyErr);
+          toast.success('Ticket updated successfully!');
+        }
+      } else {
+        toast.success('Ticket updated successfully!');
+      }
     } catch (err) {
       console.error('Error saving ticket:', err);
       toast.error('Failed to save changes.');
@@ -320,6 +411,26 @@ export default function ServiceTicketDetail() {
               <Field label="Service Date" value={isEditing ? <input type="date" className="input" value={formData.service_date || ''} onChange={(e) => handleInputChange('service_date', e.target.value)} /> : ticket.service_date} />
               <Field label="Scheduled Time" value={isEditing ? <input type="time" className="input" value={formData.scheduled_time || ''} onChange={(e) => handleInputChange('scheduled_time', e.target.value)} /> : ticket.scheduled_time} />
               <Field label="End Time" value={isEditing ? <input type="time" className="input" value={formData.end_time || ''} onChange={(e) => handleInputChange('end_time', e.target.value)} /> : ticket.end_time} />
+              <Field
+                label="Assign to FSE"
+                value={
+                  isEditing ? (
+                    <AssignFseSelect
+                      value={formData.assigned_to || ''}
+                      onChange={(id) => handleInputChange('assigned_to', id)}
+                      assignees={assignees}
+                      userId={userId}
+                      selfName={selfName}
+                    />
+                  ) : (
+                    assigneeName(
+                      assignees,
+                      ticketAssigneeId(ticket),
+                      ticketAssigneeId(ticket) ? 'Assigned FSE' : 'Unassigned'
+                    )
+                  )
+                }
+              />
               <Field label="Arrival Time" value={ticket.arrival_time} />
               <Field label="Departure Time" value={ticket.departure_time} />
             </div>

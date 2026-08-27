@@ -1,16 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { publicSiteOrigin } from '@/lib/customer-invite';
 import { sendTicketAssignedEmail } from '@/lib/ticket-assign-email';
-
-function siteUrl(req: NextRequest): string {
-  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.URL || process.env.DEPLOY_PRIME_URL;
-  if (env) return env.replace(/\/$/, '');
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
-  const proto = req.headers.get('x-forwarded-proto') || 'https';
-  if (host) return `${proto}://${host}`;
-  return 'https://repairplanet.net';
-}
+import { ticketAssigneeId } from '@/lib/ticket-assignees';
 
 function sameId(a: unknown, b: unknown): boolean {
   return a != null && b != null && String(a) === String(b);
@@ -72,13 +65,18 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     // Ticket must already be visible to this session (shop RLS or assigned_to).
-    const { data: ticket, error: ticketErr } = await userClient
-      .from('service_tickets')
-      .select(
-        'id, ticket_number, organization_id, assigned_to, customer_name, service_type, service_date, scheduled_time, priority, notes, description, customer_address, customer_city, customer_state'
-      )
-      .eq('id', ticketId)
-      .maybeSingle();
+    const ticketSelects = [
+      'id, ticket_number, organization_id, assigned_to, customer_name, customer_phone, service_type, status, service_date, scheduled_time, priority, notes, description, customer_address, customer_city, customer_state',
+      'id, ticket_number, organization_id, assigned_to, customer_name, service_type, service_date, scheduled_time, priority, notes, description, customer_address, customer_city, customer_state',
+    ];
+    let ticket: any = null;
+    let ticketErr: { message?: string } | null = null;
+    for (const cols of ticketSelects) {
+      const res = await userClient.from('service_tickets').select(cols).eq('id', ticketId).maybeSingle();
+      ticket = res.data;
+      ticketErr = res.error;
+      if (!ticketErr && ticket) break;
+    }
     if (ticketErr || !ticket) {
       return NextResponse.json({ error: ticketErr?.message || 'Ticket not found' }, { status: 404 });
     }
@@ -101,7 +99,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Not a member of this ticket’s shop' }, { status: 403 });
     }
 
-    const assigneeId = String(body.assignedTo || body.assigned_to || ticket.assigned_to || '').trim();
+    const assigneeId = String(
+      body.assignedTo || body.assigned_to || ticketAssigneeId(ticket) || ''
+    ).trim();
     if (!assigneeId) {
       return NextResponse.json({ ok: true, emailed: false, skipped: 'unassigned' });
     }
@@ -149,15 +149,19 @@ export async function POST(req: NextRequest) {
       shopName = shop?.name || '';
     }
 
-    const origin = siteUrl(req);
+    const origin = publicSiteOrigin(req);
     const ticketUrl = `${origin}/service-tickets/${ticket.id}`;
+    const title = [ticket.service_type, ticket.customer_name].filter(Boolean).join(' — ') || null;
     const copy = {
       assigneeFirstName: assignee.first_name || null,
       assignerName: displayName(caller),
       organizationName: shopName,
       ticketNumber: ticket.ticket_number || null,
+      title,
       customerName: ticket.customer_name || null,
+      customerPhone: ticket.customer_phone || null,
       serviceType: ticket.service_type || null,
+      status: ticket.status || null,
       serviceDate: ticket.service_date || null,
       scheduledTime: ticket.scheduled_time ? String(ticket.scheduled_time).slice(0, 5) : null,
       priority: ticket.priority || null,

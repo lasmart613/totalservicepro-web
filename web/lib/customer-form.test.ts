@@ -46,9 +46,9 @@ test('new service call form autocompletes assigned customers and can add a new c
   assert.match(src, /createLinkedCustomer/);
   assert.match(src, /Add a company/);
   assert.match(src, /customer_organization_id/);
-  assert.match(src, /Assign to/);
-  assert.match(src, /\/api\/team\/list/);
-  assert.match(src, /assigned_to: assignedTo/);
+  assert.match(src, /Assign to FSE|AssignFseSelect/);
+  assert.match(src, /loadTicketAssignees/);
+  assert.match(src, /applyTicketAssignee/);
   assert.match(src, /100dvh/);
   assert.match(src, /overflowY: 'auto'/);
   assert.match(src, /normalizeStateCode/);

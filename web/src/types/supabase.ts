@@ -2249,6 +2249,7 @@ export type Database = {
         Row: {
           address: string | null
           arrival_time: string | null
+          assigned_fse: string | null
           assigned_to: string | null
           billable: boolean | null
           city: string | null
@@ -2287,6 +2288,7 @@ export type Database = {
         Insert: {
           address?: string | null
           arrival_time?: string | null
+          assigned_fse?: string | null
           assigned_to?: string | null
           billable?: boolean | null
           city?: string | null
@@ -2325,6 +2327,7 @@ export type Database = {
         Update: {
           address?: string | null
           arrival_time?: string | null
+          assigned_fse?: string | null
           assigned_to?: string | null
           billable?: boolean | null
           city?: string | null
