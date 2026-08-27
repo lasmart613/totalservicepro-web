@@ -33,6 +33,21 @@ test('landing Free Plan CTAs pass role into /plans', () => {
   assert.match(source, /parts: 'supplier'/);
 });
 
+test('logged-out landing gives Free Plan a gold outline without making it primary', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const page = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');
+  const css = readFileSync(join(here, '../components/landing/landing.css'), 'utf8');
+  assert.match(page, /Start on the free plan/);
+  assert.match(page, /A free plan is included\. Upgrade when you need more\./);
+  assert.match(page, /lp-btn-outline/);
+  assert.match(page, /Register for Total Service Pro/);
+  assert.doesNotMatch(page, /lp-btn-primary">\s*Start on the free plan/);
+  assert.doesNotMatch(page, /lp-btn-primary">\s*Register for a Free Plan/);
+  assert.doesNotMatch(page, /lp-btn-primary">\s*Free Plan/);
+  assert.match(css, /\.lp-btn-outline\s*\{[^}]*border:\s*1px solid #FBBF24/);
+  assert.match(css, /\.lp-btn-primary\s*\{[^}]*background:\s*#FBBF24/);
+});
+
 test('logged-out landing shows schedule, assign-FSE, and test-equipment shots', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');
