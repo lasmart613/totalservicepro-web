@@ -11,7 +11,7 @@ import {
   isOwnerOrgType,
   isServiceOrgType,
   isSupplierOrgType,
-} from '@/lib/org-types';
+} from './org-types.ts';
 
 export type RoleLike = string | null | undefined;
 export type OrgTypeLike = string | null | undefined;
@@ -28,6 +28,45 @@ export function normalizeOrgType(orgType?: OrgTypeLike): string {
 export function isAdmin(role?: RoleLike): boolean {
   const r = normalizeRole(role);
   return r === 'admin' || r === 'company_admin';
+}
+
+/**
+ * Field Service Engineer / technician (Larry: FSE).
+ * Existing roster values only — do not invent roles.
+ */
+export const FIELD_ENGINEER_ROLES = ['fse', 'engineer', 'technician'] as const;
+
+/**
+ * Shop-lead roles that see the full shop schedule (assigned + unassigned).
+ * Larry: Admin, Scheduler, Dispatcher, Owner → closest existing roster names,
+ * plus service_manager / billing_manager already used as shop leads.
+ */
+export const SHOP_SCHEDULE_LEAD_ROLES = [
+  'admin',
+  'company_admin',
+  'scheduler',
+  'dispatcher',
+  'owner',
+  'service_manager',
+  'billing_manager',
+] as const;
+
+/** FSE / tech / service tech — personal schedule only. */
+export function isFieldEngineer(role?: RoleLike): boolean {
+  const r = normalizeRole(role);
+  return (FIELD_ENGINEER_ROLES as readonly string[]).includes(r);
+}
+
+/** Admin / scheduler / dispatcher / owner / similar shop leads — all shop tickets. */
+export function canSeeAllShopTickets(role?: RoleLike): boolean {
+  const r = normalizeRole(role);
+  return (SHOP_SCHEDULE_LEAD_ROLES as readonly string[]).includes(r);
+}
+
+/** Admin / owner (and company_admin / service_manager) may assign shop test gear. */
+export function canAssignShopTestEquipment(role?: RoleLike): boolean {
+  const r = normalizeRole(role);
+  return isAdmin(role) || r === 'owner' || r === 'service_manager';
 }
 
 /**
