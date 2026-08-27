@@ -131,6 +131,16 @@ html.landing-mode body {
   border-color: #FBBF24;
 }
 
+.lp-btn-outline {
+  background: #1A2233;
+  color: #F3E8D8;
+  border: 1px solid #FBBF24;
+}
+
+.lp-btn-outline:hover {
+  color: #FBBF24;
+}
+
 .lp-hero-carousel {
   position: relative;
   padding: 48px 8vw 20px;
@@ -344,6 +354,22 @@ html.landing-mode body {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
+}
+
+.lp-hero-cta {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lp-hero-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.45;
+  color: #9CA3AF;
+  max-width: 28em;
 }
 
 .lp-shot {

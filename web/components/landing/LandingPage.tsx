@@ -313,16 +313,21 @@ function HeroCarousel() {
             {paused ? 'Play' : 'Pause'}
           </button>
         </div>
-        <div className="lp-actions">
-          <Link href="/signup" className="lp-btn lp-btn-primary">
-            Register for Total Service Pro
-          </Link>
-          <Link href="/plans" className="lp-btn lp-btn-ghost">
-            Register for a Free Plan
-          </Link>
-          <Link href="/login" className="lp-btn lp-btn-ghost">
-            Sign in
-          </Link>
+        <div className="lp-hero-cta">
+          <div className="lp-actions">
+            <Link href="/signup" className="lp-btn lp-btn-primary">
+              Register for Total Service Pro
+            </Link>
+            <Link href="/plans" className="lp-btn lp-btn-outline">
+              Start on the free plan
+            </Link>
+            <Link href="/login" className="lp-btn lp-btn-ghost">
+              Sign in
+            </Link>
+          </div>
+          <p className="lp-hero-note">
+            A free plan is included. Upgrade when you need more.
+          </p>
         </div>
       </div>
     </section>
@@ -390,7 +395,7 @@ export function LandingPage() {
                 </Link>
                 <Link
                   href={plansHrefForAudience(LANDING_PLAN_ROLE[r.id])}
-                  className="lp-btn lp-btn-ghost"
+                  className="lp-btn lp-btn-outline"
                 >
                   Free Plan
                 </Link>
@@ -448,8 +453,8 @@ export function LandingPage() {
           </Link>
         </div>
         <div className="lp-actions" style={{ marginTop: 28 }}>
-          <Link href="/plans" className="lp-btn lp-btn-primary">
-            Register for a Free Plan
+          <Link href="/plans" className="lp-btn lp-btn-outline">
+            Start on the free plan
           </Link>
           <Link href="/login" className="lp-btn lp-btn-ghost">
             Already registered? Sign in
