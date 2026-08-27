@@ -12,6 +12,7 @@ import { roleLabel } from '@/lib/labels';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { ticketDateYmd, toLocalYmd } from '@/lib/tickets';
 import { AddCustomerModal } from '@/components/AddCustomerModal';
+import { insertOmittingCharOverflow } from '@/lib/char-overflow';
 import {
   createLinkedCustomer,
   emptyCustomerForm,
@@ -548,18 +549,14 @@ export default function ServiceSchedule() {
         assigned_to: assignedTo || null,
       };
 
-      let { data, error } = await supabase
-        .from('service_tickets')
-        .insert([payload])
-        .select('id, ticket_number')
-        .single();
+      let { data, error } = await insertOmittingCharOverflow(supabase, 'service_tickets', payload, {
+        select: 'id, ticket_number',
+      });
       if (error && /customer_organization/i.test(error.message || '') && 'customer_organization_id' in payload) {
         delete payload.customer_organization_id;
-        ({ data, error } = await supabase
-          .from('service_tickets')
-          .insert([payload])
-          .select('id, ticket_number')
-          .single());
+        ({ data, error } = await insertOmittingCharOverflow(supabase, 'service_tickets', payload, {
+          select: 'id, ticket_number',
+        }));
       }
 
       if (error) throw error;
