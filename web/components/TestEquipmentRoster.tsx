@@ -52,7 +52,6 @@ export function TestEquipmentRoster(props: {
   for (const m of props.members) nameById[m.id] = m.name;
 
   const reload = useCallback(async () => {
-    setLoading(true);
     const result = await loadShopTestEquipment(supabase, {
       orgId: props.orgId,
       userId: props.userId,
@@ -65,12 +64,32 @@ export function TestEquipmentRoster(props: {
   }, [supabase, props.orgId, props.userId]);
 
   useEffect(() => {
-    if (props.orgId == null && !props.userId) {
+    let cancelled = false;
+    (async () => {
+      if (props.orgId == null && !props.userId) {
+        if (!cancelled) {
+          setRows([]);
+          setNote(null);
+          setLoading(false);
+        }
+        return;
+      }
+      if (!cancelled) setLoading(true);
+      const result = await loadShopTestEquipment(supabase, {
+        orgId: props.orgId,
+        userId: props.userId,
+      });
+      if (cancelled) return;
+      setRows(result.rows);
+      if (result.unavailable) setNote(schemaNote('unavailable'));
+      else if (result.schemaLag) setNote(schemaNote('lag'));
+      else setNote(null);
       setLoading(false);
-      return;
-    }
-    reload();
-  }, [props.orgId, props.userId, reload]);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, props.orgId, props.userId]);
 
   async function onAssign(id: string, fseId: string) {
     const result = await assignTestEquipmentToFse(supabase, id, fseId || null);

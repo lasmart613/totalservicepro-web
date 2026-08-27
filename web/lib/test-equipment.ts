@@ -64,7 +64,18 @@ export type LoadTestEquipmentResult = {
   schemaLag: boolean;
 };
 
-type Supa = { from: (t: string) => any };
+type Supa = { from: (t: string) => QueryBuilder };
+
+type QueryBuilder = {
+  select: (cols: string) => QueryBuilder;
+  or: (filter: string) => QueryBuilder;
+  eq: (col: string, val: unknown) => QueryBuilder;
+  order: (col: string) => Promise<{ data: TestEquipmentRow[] | null; error: { message?: string } | null }>;
+  insert?: unknown;
+  update: (payload: Record<string, unknown>) => {
+    eq: (col: string, val: unknown) => Promise<{ error: { message?: string } | null }>;
+  };
+};
 
 function sameOrg(left: unknown, right: unknown): boolean {
   if (left == null || right == null || left === '' || right === '') return false;
