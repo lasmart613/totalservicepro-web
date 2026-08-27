@@ -171,6 +171,21 @@ export async function loadTicketAssignees(
   return sortTicketAssignees(optsOut, meId);
 }
 
+/** Email only on first assign or a change to a different FSE — not re-save or unassign. */
+export function shouldNotifyAssignee(opts: {
+  previousId?: string | null;
+  nextId?: string | null;
+  actorId?: string | null;
+}): boolean {
+  const next = String(opts.nextId || '').trim();
+  const prev = String(opts.previousId || '').trim();
+  const actor = String(opts.actorId || '').trim();
+  if (!next || !looksLikeUuid(next)) return false;
+  if (next === prev) return false;
+  if (actor && next === actor) return false;
+  return true;
+}
+
 export async function notifyTicketAssignee(
   supabase: { auth: { getSession: () => Promise<{ data: { session: { access_token?: string } | null } }> } },
   ticketId: unknown,

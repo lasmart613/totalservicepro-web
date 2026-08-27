@@ -16,6 +16,7 @@ import {
   loadTicketAssignees,
   looksLikeUuid,
   notifyTicketAssignee,
+  shouldNotifyAssignee,
   ticketAssigneeId,
   type TicketAssignee,
 } from '@/lib/ticket-assignees';
@@ -230,7 +231,7 @@ export default function ServiceTicketDetail() {
       setIsEditing(false);
 
       const prevAssigned = ticketAssigneeId(ticket);
-      if (assignedTo && assignedTo !== prevAssigned && assignedTo !== userId) {
+      if (shouldNotifyAssignee({ previousId: prevAssigned, nextId: assignedTo, actorId: userId })) {
         const who = assigneeName(assignees, assignedTo, 'the assigned FSE');
         try {
           const json = await notifyTicketAssignee(supabase, ticketId, assignedTo);

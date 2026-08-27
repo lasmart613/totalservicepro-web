@@ -18,6 +18,7 @@ import {
   assigneeName,
   loadTicketAssignees,
   notifyTicketAssignee,
+  shouldNotifyAssignee,
   ticketAssigneeId,
   type TicketAssignee,
 } from '@/lib/ticket-assignees';
@@ -556,7 +557,7 @@ export default function ServiceSchedule() {
 
       setShowNew(false);
       await fetchServiceCalls();
-      if (data?.id && assignedTo && assignedTo !== userId) {
+      if (data?.id && shouldNotifyAssignee({ nextId: assignedTo, actorId: userId })) {
         const who =
           assignees.find((a) => a.id === assignedTo)?.name || 'the assigned FSE';
         try {

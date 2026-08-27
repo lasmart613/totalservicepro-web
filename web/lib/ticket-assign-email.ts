@@ -17,7 +17,9 @@ export type TicketAssignCopy = {
   organizationName?: string | null;
   ticketNumber?: string | null;
   customerName?: string | null;
+  customerPhone?: string | null;
   serviceType?: string | null;
+  status?: string | null;
   serviceDate?: string | null;
   scheduledTime?: string | null;
   priority?: string | null;
@@ -53,7 +55,9 @@ export function ticketAssignText(opts: TicketAssignCopy): string {
     `${assigner} at ${shop} assigned you a service call.`,
     opts.ticketNumber ? `Ticket: ${opts.ticketNumber}` : '',
     opts.customerName ? `Customer: ${opts.customerName}` : '',
+    opts.customerPhone ? `Phone: ${opts.customerPhone}` : '',
     opts.serviceType ? `Type: ${opts.serviceType}` : '',
+    opts.status ? `Status: ${opts.status}` : '',
     opts.serviceDate
       ? `When: ${opts.serviceDate}${opts.scheduledTime ? ` ${opts.scheduledTime}` : ''}`
       : '',
@@ -76,7 +80,9 @@ export function ticketAssignHtml(opts: TicketAssignCopy): string {
   const rows: Array<[string, string]> = [];
   if (opts.ticketNumber) rows.push(['Ticket', String(opts.ticketNumber)]);
   if (opts.customerName) rows.push(['Customer', String(opts.customerName)]);
+  if (opts.customerPhone) rows.push(['Phone', String(opts.customerPhone)]);
   if (opts.serviceType) rows.push(['Type', String(opts.serviceType)]);
+  if (opts.status) rows.push(['Status', String(opts.status)]);
   if (opts.serviceDate) {
     rows.push([
       'When',

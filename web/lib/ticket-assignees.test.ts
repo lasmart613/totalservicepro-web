@@ -9,6 +9,7 @@ import {
   isAssignableMember,
   looksLikeUuid,
   memberDisplayName,
+  shouldNotifyAssignee,
   sortTicketAssignees,
   ticketAssigneeId,
   toAssigneeOpt,
@@ -30,6 +31,14 @@ test('ticketAssigneeId prefers UUID assigned_to then assigned_fse', () => {
   assert.equal(ticketAssigneeId({ assigned_to: 'Lar', assigned_fse: TONY }), TONY);
   assert.equal(ticketAssigneeId({ assigned_to: '', assigned_fse: null }), '');
   assert.equal(ticketAssigneeId(null), '');
+});
+
+test('shouldNotifyAssignee emails only a new FSE, not re-save or unassign', () => {
+  assert.equal(shouldNotifyAssignee({ previousId: '', nextId: TONY, actorId: LARRY }), true);
+  assert.equal(shouldNotifyAssignee({ previousId: TONY, nextId: TONY, actorId: LARRY }), false);
+  assert.equal(shouldNotifyAssignee({ previousId: TONY, nextId: '', actorId: LARRY }), false);
+  assert.equal(shouldNotifyAssignee({ previousId: '', nextId: LARRY, actorId: LARRY }), false);
+  assert.equal(shouldNotifyAssignee({ previousId: TONY, nextId: LARRY, actorId: 'other' }), true);
 });
 
 test('applyTicketAssignee writes both columns and allows clear', () => {

@@ -73,13 +73,18 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     // Ticket must already be visible to this session (shop RLS or assigned_to).
-    const { data: ticket, error: ticketErr } = await userClient
-      .from('service_tickets')
-      .select(
-        'id, ticket_number, organization_id, assigned_to, customer_name, service_type, service_date, scheduled_time, priority, notes, description, customer_address, customer_city, customer_state'
-      )
-      .eq('id', ticketId)
-      .maybeSingle();
+    const ticketSelects = [
+      'id, ticket_number, organization_id, assigned_to, customer_name, customer_phone, service_type, status, service_date, scheduled_time, priority, notes, description, customer_address, customer_city, customer_state',
+      'id, ticket_number, organization_id, assigned_to, customer_name, service_type, service_date, scheduled_time, priority, notes, description, customer_address, customer_city, customer_state',
+    ];
+    let ticket: any = null;
+    let ticketErr: { message?: string } | null = null;
+    for (const cols of ticketSelects) {
+      const res = await userClient.from('service_tickets').select(cols).eq('id', ticketId).maybeSingle();
+      ticket = res.data;
+      ticketErr = res.error;
+      if (!ticketErr && ticket) break;
+    }
     if (ticketErr || !ticket) {
       return NextResponse.json({ error: ticketErr?.message || 'Ticket not found' }, { status: 404 });
     }
@@ -160,7 +165,9 @@ export async function POST(req: NextRequest) {
       organizationName: shopName,
       ticketNumber: ticket.ticket_number || null,
       customerName: ticket.customer_name || null,
+      customerPhone: ticket.customer_phone || null,
       serviceType: ticket.service_type || null,
+      status: ticket.status || null,
       serviceDate: ticket.service_date || null,
       scheduledTime: ticket.scheduled_time ? String(ticket.scheduled_time).slice(0, 5) : null,
       priority: ticket.priority || null,
