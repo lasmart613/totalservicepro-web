@@ -14,6 +14,7 @@ import { ticketDateYmd, toLocalYmd } from '@/lib/tickets';
 import {
   UNASSIGNED_ASSIGNEE,
   assigneeColor,
+  buildAssigneeColorMap,
   buildScheduleLegend,
   filterTicketsByLegend,
   filterTicketsByOrg,
@@ -628,6 +629,14 @@ export default function ServiceSchedule() {
     () => buildScheduleLegend(serviceCalls, assignees),
     [serviceCalls, assignees]
   );
+  const assigneeColors = useMemo(
+    () => buildAssigneeColorMap(legendItems.map((item) => item.id)),
+    [legendItems]
+  );
+  const colorFor = useCallback(
+    (id: string | null | undefined) => assigneeColor(id, assigneeColors),
+    [assigneeColors]
+  );
 
   const visibleCalls = useMemo(
     () => (shopLeadView ? filterTicketsByLegend(serviceCalls, legendFilter) : serviceCalls),
@@ -649,7 +658,7 @@ export default function ServiceSchedule() {
     [visibleCalls]
   );
 
-  const myColor = assigneeColor(userId);
+  const myColor = colorFor(userId);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -882,7 +891,7 @@ export default function ServiceSchedule() {
                                 key={call.id}
                                 href={`/service-tickets/${call.id}`}
                                 className="block break-words hover:underline rounded px-0.5"
-                                style={{ color: assigneeColor(call.assigned_to) }}
+                                style={{ color: colorFor(call.assigned_to) }}
                                 onClick={(ev) => ev.stopPropagation()}
                                 title={`${call.time} • ${call.title}${call.equipment_model ? ` • ${call.equipment_model}` : ''}`}
                               >
@@ -954,8 +963,8 @@ export default function ServiceSchedule() {
                             key={call.id}
                             className="text-[10px] p-1 rounded flex items-start gap-1"
                             style={{
-                              background: `${assigneeColor(call.assigned_to)}22`,
-                              color: assigneeColor(call.assigned_to),
+                              background: `${colorFor(call.assigned_to)}22`,
+                              color: colorFor(call.assigned_to),
                             }}
                           >
                             <span
@@ -1019,9 +1028,9 @@ export default function ServiceSchedule() {
                     key={call.id}
                     href={`/service-tickets/${call.id}`}
                     className="block p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)]"
-                    style={{ borderLeft: `4px solid ${assigneeColor(call.assigned_to)}` }}
+                    style={{ borderLeft: `4px solid ${colorFor(call.assigned_to)}` }}
                   >
-                    <div className="font-semibold" style={{ color: assigneeColor(call.assigned_to) }}>
+                    <div className="font-semibold" style={{ color: colorFor(call.assigned_to) }}>
                       {call.time} · {call.title}
                     </div>
                     {call.equipment_model && (
@@ -1055,7 +1064,7 @@ export default function ServiceSchedule() {
                   key={call.id}
                   href={`/service-tickets/${call.id}`}
                   className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] flex justify-between gap-3"
-                  style={{ borderLeft: `4px solid ${assigneeColor(call.assigned_to)}` }}
+                  style={{ borderLeft: `4px solid ${colorFor(call.assigned_to)}` }}
                 >
                   <div>
                     <div className="font-semibold">{call.title}</div>
@@ -1080,7 +1089,7 @@ export default function ServiceSchedule() {
                       key={call.id}
                       href={`/service-tickets/${call.id}`}
                       className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] flex justify-between gap-3"
-                      style={{ borderLeft: `4px solid ${assigneeColor(call.assigned_to)}` }}
+                      style={{ borderLeft: `4px solid ${colorFor(call.assigned_to)}` }}
                     >
                       <div>
                         <div className="font-semibold">{call.title}</div>

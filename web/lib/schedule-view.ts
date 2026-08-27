@@ -23,6 +23,69 @@ const FSE_PALETTE = [
   '#6366f1',
 ] as const;
 
+export type AssigneeColorMap = ReadonlyMap<string, string>;
+
+function hslToHex(h: number, s: number, l: number): string {
+  const sat = s / 100;
+  const light = l / 100;
+  const a = sat * Math.min(light, 1 - light);
+  const f = (n: number) => {
+    const k = (n + h / 30) % 12;
+    const color = light - a * Math.max(Math.min(k - 3, 9 - k, 1), -1);
+    return Math.round(255 * color)
+      .toString(16)
+      .padStart(2, '0');
+  };
+  return `#${f(0)}${f(8)}${f(4)}`;
+}
+
+function extraAssigneeColor(extraIndex: number, used: Set<string>): string {
+  for (let attempt = 0; attempt < 720; attempt++) {
+    const hue = (extraIndex * 137.508 + attempt * 11 + 19) % 360;
+    const sat = 62 + ((extraIndex + attempt) % 4) * 7;
+    const light = 38 + ((extraIndex + attempt) % 3) * 8;
+    const hex = hslToHex(hue, sat, light);
+    if (!used.has(hex.toLowerCase())) return hex;
+  }
+  return hslToHex((extraIndex * 47) % 360, 70, 40);
+}
+
+/** Unique colors for the FSEs currently on the shop schedule (stable input order). */
+export function buildAssigneeColorMap(
+  ids: Iterable<string | null | undefined>
+): Map<string, string> {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of ids) {
+    const id = String(raw ?? '').trim();
+    if (!id || id === UNASSIGNED_ASSIGNEE || seen.has(id)) continue;
+    seen.add(id);
+    unique.push(id);
+  }
+
+  const used = new Set<string>([UNASSIGNED_COLOR.toLowerCase()]);
+  const map = new Map<string, string>();
+  unique.forEach((id, i) => {
+    let color: string;
+    if (i < FSE_PALETTE.length) {
+      color = FSE_PALETTE[i];
+    } else {
+      color = extraAssigneeColor(i - FSE_PALETTE.length, used);
+    }
+    used.add(color.toLowerCase());
+    map.set(id, color);
+  });
+  return map;
+}
+
+function hashPaletteColor(assigneeId: string): string {
+  let h = 0;
+  for (let i = 0; i < assigneeId.length; i++) {
+    h = (h * 31 + assigneeId.charCodeAt(i)) >>> 0;
+  }
+  return FSE_PALETTE[h % FSE_PALETTE.length];
+}
+
 export type TicketAssigneeLike = {
   assigned_to?: unknown;
   assigned_fse?: unknown;
@@ -39,13 +102,14 @@ export function ticketAssigneeId(ticket: TicketAssigneeLike | null | undefined):
   return null;
 }
 
-export function assigneeColor(assigneeId: string | null | undefined): string {
-  if (!assigneeId) return UNASSIGNED_COLOR;
-  let h = 0;
-  for (let i = 0; i < assigneeId.length; i++) {
-    h = (h * 31 + assigneeId.charCodeAt(i)) >>> 0;
-  }
-  return FSE_PALETTE[h % FSE_PALETTE.length];
+export function assigneeColor(
+  assigneeId: string | null | undefined,
+  colorMap?: AssigneeColorMap | null
+): string {
+  if (!assigneeId || assigneeId === UNASSIGNED_ASSIGNEE) return UNASSIGNED_COLOR;
+  const mapped = colorMap?.get(assigneeId);
+  if (mapped) return mapped;
+  return hashPaletteColor(assigneeId);
 }
 
 export function sameOrgId(
@@ -127,7 +191,7 @@ export function buildScheduleLegend(
     items.push({
       id,
       name,
-      color: assigneeColor(id),
+      color: UNASSIGNED_COLOR,
       count: counts.get(id) || 0,
     });
   };
@@ -141,6 +205,10 @@ export function buildScheduleLegend(
   }
 
   items.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+  const colorMap = buildAssigneeColorMap(items.map((item) => item.id));
+  for (const item of items) {
+    item.color = colorMap.get(item.id) || UNASSIGNED_COLOR;
+  }
   items.push({
     id: UNASSIGNED_ASSIGNEE,
     name: 'Unassigned',
