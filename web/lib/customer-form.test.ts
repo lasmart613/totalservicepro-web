@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  OPTIONAL_ORG_COLUMNS,
   charLimitFromError,
   customerOrgPayload,
   emptyCustomerForm,
@@ -87,6 +88,29 @@ test('character(3) retry omits UUID created_by, phone, biz_type, and type — ne
 test('empty specialties are omitted from the org insert payload', () => {
   const payload = customerOrgPayload({ ...emptyCustomerForm(), name: 'Clinic' }, { type: 'customer' });
   assert.equal('specialties' in payload, false);
+});
+
+test('customer org payload normalizes social handles and lists social columns as optional', () => {
+  const payload = customerOrgPayload(
+    { ...emptyCustomerForm(), name: 'Clinic', x_url: '@northshore', instagram_url: 'instagram.com/clinic' },
+    { type: 'customer' }
+  );
+  assert.equal(payload.x_url, 'https://x.com/northshore');
+  assert.equal(payload.instagram_url, 'https://instagram.com/clinic');
+  assert.equal(payload.website, null);
+  assert.equal(payload.facebook_url, null);
+  for (const col of [
+    'x_url',
+    'instagram_url',
+    'facebook_url',
+    'tiktok_url',
+    'youtube_url',
+    'linkedin_url',
+    'yelp_url',
+    'threads_url',
+  ]) {
+    assert.ok((OPTIONAL_ORG_COLUMNS as readonly string[]).includes(col), col);
+  }
 });
 
 test('Add Customer form accepts full state names instead of forcing ISO typing', () => {
