@@ -5,6 +5,8 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   charLimitFromError,
+  customerOrgPayload,
+  emptyCustomerForm,
   filterLinkedCustomers,
   matchLinkedCustomer,
   stripOverflowingAddressFields,
@@ -58,6 +60,32 @@ test('postgres character(3) overflow names the limit and optional address fields
   assert.equal(stripOverflowingAddressFields(payload, 3), 'zip');
   assert.equal(payload.zip, undefined);
   assert.equal(payload.state, 'TX');
+});
+
+test('character(3) retry omits UUID created_by, phone, biz_type, and type — never name', () => {
+  const payload: Record<string, unknown> = {
+    name: 'Northshore Clinic',
+    type: 'customer',
+    created_by: '11111111-1111-1111-1111-111111111111',
+    phone: '312-555-0100',
+    biz_type: 'Medical Spa',
+    specialties: ['Hair Removal'],
+  };
+  assert.equal(stripOverflowingAddressFields(payload, 3), 'created_by');
+  assert.equal(payload.created_by, undefined);
+  assert.equal(stripOverflowingAddressFields(payload, 3), 'specialties');
+  assert.equal(payload.specialties, undefined);
+  assert.equal(stripOverflowingAddressFields(payload, 3), 'phone');
+  assert.equal(stripOverflowingAddressFields(payload, 3), 'biz_type');
+  assert.equal(stripOverflowingAddressFields(payload, 3), 'type');
+  assert.equal(payload.type, undefined);
+  assert.equal(payload.name, 'Northshore Clinic');
+  assert.equal(stripOverflowingAddressFields(payload, 3), null);
+});
+
+test('empty specialties are omitted from the org insert payload', () => {
+  const payload = customerOrgPayload({ ...emptyCustomerForm(), name: 'Clinic' }, { type: 'customer' });
+  assert.equal('specialties' in payload, false);
 });
 
 test('Add Customer form accepts full state names instead of forcing ISO typing', () => {
