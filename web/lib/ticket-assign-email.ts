@@ -16,6 +16,7 @@ export type TicketAssignCopy = {
   assignerName?: string | null;
   organizationName?: string | null;
   ticketNumber?: string | null;
+  title?: string | null;
   customerName?: string | null;
   customerPhone?: string | null;
   serviceType?: string | null;
@@ -54,6 +55,7 @@ export function ticketAssignText(opts: TicketAssignCopy): string {
     '',
     `${assigner} at ${shop} assigned you a service call.`,
     opts.ticketNumber ? `Ticket: ${opts.ticketNumber}` : '',
+    opts.title ? `Job: ${opts.title}` : '',
     opts.customerName ? `Customer: ${opts.customerName}` : '',
     opts.customerPhone ? `Phone: ${opts.customerPhone}` : '',
     opts.serviceType ? `Type: ${opts.serviceType}` : '',
@@ -79,6 +81,7 @@ export function ticketAssignHtml(opts: TicketAssignCopy): string {
   const shop = esc(orgName(opts.organizationName));
   const rows: Array<[string, string]> = [];
   if (opts.ticketNumber) rows.push(['Ticket', String(opts.ticketNumber)]);
+  if (opts.title) rows.push(['Job', String(opts.title)]);
   if (opts.customerName) rows.push(['Customer', String(opts.customerName)]);
   if (opts.customerPhone) rows.push(['Phone', String(opts.customerPhone)]);
   if (opts.serviceType) rows.push(['Type', String(opts.serviceType)]);

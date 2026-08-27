@@ -1,17 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { publicSiteOrigin } from '@/lib/customer-invite';
 import { sendTicketAssignedEmail } from '@/lib/ticket-assign-email';
 import { ticketAssigneeId } from '@/lib/ticket-assignees';
-
-function siteUrl(req: NextRequest): string {
-  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.URL || process.env.DEPLOY_PRIME_URL;
-  if (env) return env.replace(/\/$/, '');
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
-  const proto = req.headers.get('x-forwarded-proto') || 'https';
-  if (host) return `${proto}://${host}`;
-  return 'https://repairplanet.net';
-}
 
 function sameId(a: unknown, b: unknown): boolean {
   return a != null && b != null && String(a) === String(b);
@@ -157,13 +149,15 @@ export async function POST(req: NextRequest) {
       shopName = shop?.name || '';
     }
 
-    const origin = siteUrl(req);
+    const origin = publicSiteOrigin(req);
     const ticketUrl = `${origin}/service-tickets/${ticket.id}`;
+    const title = [ticket.service_type, ticket.customer_name].filter(Boolean).join(' — ') || null;
     const copy = {
       assigneeFirstName: assignee.first_name || null,
       assignerName: displayName(caller),
       organizationName: shopName,
       ticketNumber: ticket.ticket_number || null,
+      title,
       customerName: ticket.customer_name || null,
       customerPhone: ticket.customer_phone || null,
       serviceType: ticket.service_type || null,

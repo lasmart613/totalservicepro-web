@@ -10,6 +10,7 @@ const copy = {
   assignerName: 'Larry Smart',
   organizationName: 'Luxor Photonix',
   ticketNumber: 'LPX-TKT-20260825-01',
+  title: 'Repair — Northshore Clinic',
   customerName: 'Northshore Clinic',
   customerPhone: '847-555-0100',
   serviceType: 'Repair',
@@ -31,6 +32,7 @@ test('assignment email names the shop, ticket, and FSE', () => {
   const text = ticketAssignText(copy);
   assert.match(text, /Hi Tony/);
   assert.match(text, /Larry Smart/);
+  assert.match(text, /Job: Repair — Northshore Clinic/);
   assert.match(text, /Phone: 847-555-0100/);
   assert.match(text, /Status: Scheduled/);
   assert.match(text, /Open ticket: https:\/\/repairplanet\.net\/service-tickets\/99/);
@@ -43,6 +45,7 @@ test('assignment email names the shop, ticket, and FSE', () => {
   assert.match(html, /Scheduled/);
   assert.match(html, /https:\/\/repairplanet\.net\/service-tickets\/99/);
   assert.doesNotMatch(html, /<script/i);
+  assert.doesNotMatch(html, /Create your free account|Sign in to claim/i);
 });
 
 test('creating a ticket notifies the assigned FSE', () => {
@@ -55,6 +58,7 @@ test('creating a ticket notifies the assigned FSE', () => {
   assert.match(edit, /shouldNotifyAssignee/);
   const route = readFileSync(join(here, '../app/api/tickets/notify-assignee/route.ts'), 'utf8');
   assert.match(route, /sendTicketAssignedEmail/);
+  assert.match(route, /publicSiteOrigin/);
   assert.match(route, /ticket_assigned/);
   assert.match(route, /customerPhone|customer_phone/);
   assert.match(route, /skipped: 'self'/);
