@@ -186,6 +186,7 @@ export function normalizeSocialUrl(network: SocialNetworkKey, raw?: string | nul
   const value = String(raw ?? '').trim();
   if (!value) return null;
   if (looksLikeUrl(value)) return canonicalizeEnteredUrl(value);
+  if (/\s/.test(value)) return null;
   const handle = extractHandle(value);
   if (!handle) return null;
   return handleUrl(network, handle);
