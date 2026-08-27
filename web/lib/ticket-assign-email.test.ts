@@ -40,7 +40,9 @@ test('assignment email names the shop, ticket, and FSE', () => {
 test('creating a ticket notifies the assigned FSE', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const schedule = readFileSync(join(here, '../app/service-schedule/page.tsx'), 'utf8');
-  assert.match(schedule, /\/api\/tickets\/notify-assignee/);
+  const assignLib = readFileSync(join(here, './ticket-assignees.ts'), 'utf8');
+  assert.match(schedule, /notifyTicketAssignee/);
+  assert.match(assignLib, /\/api\/tickets\/notify-assignee/);
   const route = readFileSync(join(here, '../app/api/tickets/notify-assignee/route.ts'), 'utf8');
   assert.match(route, /sendTicketAssignedEmail/);
   assert.match(route, /ticket_assigned/);

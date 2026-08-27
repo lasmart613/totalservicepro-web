@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { sendTicketAssignedEmail } from '@/lib/ticket-assign-email';
+import { ticketAssigneeId } from '@/lib/ticket-assignees';
 
 function siteUrl(req: NextRequest): string {
   const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.URL || process.env.DEPLOY_PRIME_URL;
@@ -101,7 +102,9 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Not a member of this ticket’s shop' }, { status: 403 });
     }
 
-    const assigneeId = String(body.assignedTo || body.assigned_to || ticket.assigned_to || '').trim();
+    const assigneeId = String(
+      body.assignedTo || body.assigned_to || ticketAssigneeId(ticket) || ''
+    ).trim();
     if (!assigneeId) {
       return NextResponse.json({ ok: true, emailed: false, skipped: 'unassigned' });
     }
