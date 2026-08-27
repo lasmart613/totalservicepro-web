@@ -132,7 +132,7 @@ test('New Service Call writes assigned_fse and uses the shared FSE picker', () =
 
 test('assigned_fse migration is uuid and does not reopen CHAR(3) toast work', () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const sql = readFileSync(join(here, '../supabase/migrations/20260827_000003_ticket_assigned_fse.sql'), 'utf8');
+  const sql = readFileSync(join(here, '../supabase/migrations/20260827_000004_ticket_assigned_fse.sql'), 'utf8');
   assert.match(sql, /ADD COLUMN IF NOT EXISTS assigned_fse uuid/);
   assert.match(sql, /assigned_to/);
   const edit = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');

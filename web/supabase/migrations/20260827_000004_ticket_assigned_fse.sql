@@ -4,6 +4,8 @@
 -- (PR #51 omit-and-retry drops the UUID so create does not toast).
 -- assigned_fse is the durable uuid/text slot. JS writes both and retries
 -- when either column is missing or too short.
+--
+-- 000003 is customer social links (PR #50). This is the next slot.
 
 ALTER TABLE public.service_tickets
   ADD COLUMN IF NOT EXISTS assigned_fse uuid;
