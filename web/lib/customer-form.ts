@@ -111,7 +111,8 @@ export function customerOrgPayload(
     notes: form.notes.trim() || null,
     biz_type: biz,
     facility_type: biz,
-    specialties: form.specialties,
+    // Empty array can still be written into a leftover CHAR(n) specialties column.
+    ...(form.specialties.length ? { specialties: form.specialties } : {}),
     contact_name: form.contact_name.trim() || null,
     logo_url: form.logo_url.trim() && !isBlobLogoUrl(form.logo_url) ? form.logo_url.trim() : null,
     ...extras,
@@ -127,19 +128,63 @@ function charLimitFromError(message?: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** Optional address fields that may overflow a leftover CHAR(n) column. */
-const LENGTH_SENSITIVE_ORG_COLUMNS = ['zip', 'state', 'country', 'country_code', 'postal_code'] as const;
+/**
+ * Live `organizations.type` is NOT CHAR(3): public /api/directory returns
+ * `customer`, `service_company`, `laser_rental`, `laser_reseller`, `parts_supplier`.
+ * After PR #48, zip/state strip still left a CHAR(3) toast because the overflowing
+ * value is some other field we always send (UUID `created_by`, phone, biz_type,
+ * specialties, …). Drop any overflowing value except `name`.
+ */
+const CHAR_OVERFLOW_STRIP_ORDER = [
+  'created_by',
+  'specialties',
+  'zip',
+  'postal_code',
+  'country',
+  'country_code',
+  'phone',
+  'email',
+  'website',
+  'notes',
+  'contact_name',
+  'logo_url',
+  'address',
+  'city',
+  'biz_type',
+  'facility_type',
+  'state',
+  'is_active',
+  'updated_at',
+  'type',
+] as const;
 
-function stripOverflowingAddressFields(
+function valueExceedsCharLimit(val: unknown, limit: number): boolean {
+  if (val == null) return false;
+  if (typeof val === 'string') return val.length > limit;
+  if (typeof val === 'number' || typeof val === 'boolean') return String(val).length > limit;
+  if (Array.isArray(val)) {
+    if (!val.length) return false;
+    return val.some((item) => String(item).length > limit);
+  }
+  return false;
+}
+
+/** Omit the next payload field that cannot fit character(n). Never drops `name`. */
+export function stripOverflowingAddressFields(
   payload: Record<string, unknown>,
   limit: number
 ): string | null {
-  for (const col of LENGTH_SENSITIVE_ORG_COLUMNS) {
-    const val = payload[col];
-    if (typeof val === 'string' && val.length > limit) {
-      delete payload[col];
-      return col;
-    }
+  for (const col of CHAR_OVERFLOW_STRIP_ORDER) {
+    if (!(col in payload)) continue;
+    if (!valueExceedsCharLimit(payload[col], limit)) continue;
+    delete payload[col];
+    return col;
+  }
+  for (const [col, val] of Object.entries(payload)) {
+    if (col === 'name' || col === 'id') continue;
+    if (!valueExceedsCharLimit(val, limit)) continue;
+    delete payload[col];
+    return col;
   }
   return null;
 }
@@ -184,7 +229,7 @@ export async function createLinkedCustomer(
   let created: { id: string | number } | null = null;
   let lastError: { message?: string } | null = null;
 
-  for (let attempt = 0; attempt < 10; attempt++) {
+  for (let attempt = 0; attempt < 16; attempt++) {
     const { data, error } = await supabase
       .from('organizations')
       .insert(payload)
@@ -226,6 +271,18 @@ export async function createLinkedCustomer(
     delete linkPayload.created_by;
     linkErr = (await supabase.from('organization_customers').insert(linkPayload)).error;
   }
+  if (linkErr) {
+    const limit = charLimitFromError(linkErr.message);
+    if (limit != null) {
+      const stripped = stripOverflowingAddressFields(linkPayload, limit);
+      if (stripped) {
+        console.warn(
+          `organization_customers.${stripped} omitted — value too long for character(${limit})`
+        );
+        linkErr = (await supabase.from('organization_customers').insert(linkPayload)).error;
+      }
+    }
+  }
   if (linkErr && !/duplicate|unique|23505/i.test(linkErr.message || '')) {
     // Customer row exists; still surface the link failure so Directory can show a reason.
     console.warn('organization_customers link failed:', linkErr);
@@ -259,7 +316,7 @@ export async function updateCustomerOrg(
   });
   let lastError: { message?: string } | null = null;
 
-  for (let attempt = 0; attempt < 10; attempt++) {
+  for (let attempt = 0; attempt < 16; attempt++) {
     const { error } = await supabase.from('organizations').update(payload).eq('id', customerId);
     if (!error) {
       lastError = null;
@@ -292,7 +349,7 @@ export async function updateCustomerOrg(
   return payload;
 }
 
-export { OPTIONAL_ORG_COLUMNS, charLimitFromError, stripOverflowingAddressFields };
+export { OPTIONAL_ORG_COLUMNS, charLimitFromError };
 
 const LINKED_CUSTOMER_TYPES = ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'];
 
