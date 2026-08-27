@@ -55,15 +55,15 @@ const AUDIENCES: {
     label: 'Repair companies',
     signup: '/signup/company',
     lines: [
-      'Schedule and Assign Service Calls',
+      'Color-coded shop calendar — assign calls by FSE',
       'View service history on every job',
       'Keep service manuals in one place',
       'Bid on open service requests',
     ],
     shot: {
-      src: '/landing/dashboard.webp',
-      alt: 'Total Service Pro dashboard with open tickets and upcoming calls',
-      caption: 'Dashboard',
+      src: '/landing/schedule.webp',
+      alt: 'Color-coded shop schedule with Assigned FSE legend for Alex Lee, Jordan Hale, Sam Ortiz, and Unassigned',
+      caption: 'Shop schedule',
     },
   },
   {
@@ -107,9 +107,27 @@ const HERO_SLIDES: {
     audience: 'Repair companies',
     title: 'Schedule and Assign Service Calls',
     shot: {
-      src: '/landing/dashboard.webp',
-      alt: 'Dashboard with open tickets and upcoming calls',
-      caption: 'Dashboard',
+      src: '/landing/schedule.webp',
+      alt: 'Color-coded August shop schedule with Assigned FSE legend',
+      caption: 'Color-coded shop schedule',
+    },
+  },
+  {
+    audience: 'Repair companies',
+    title: 'Assign an FSE and email them the ticket',
+    shot: {
+      src: '/landing/ticket-assign.webp',
+      alt: 'Edit Ticket form with Assign to FSE set to Jordan Hale',
+      caption: 'Assign to FSE',
+    },
+  },
+  {
+    audience: 'Repair companies',
+    title: 'Assign shop test equipment to an FSE',
+    shot: {
+      src: '/landing/team-equipment.webp',
+      alt: 'Team Management test equipment table with assign-to-FSE selects',
+      caption: 'Test equipment',
     },
   },
   {
@@ -136,15 +154,6 @@ const HERO_SLIDES: {
     shot: {
       src: '/landing/reports.webp',
       alt: 'Service reports list with drafts and completed work',
-      caption: 'Service history',
-    },
-  },
-  {
-    audience: 'Clinics',
-    title: 'View service history and track maintenance costs',
-    shot: {
-      src: '/landing/reports.webp',
-      alt: 'Service history that stays with each laser',
       caption: 'Service history',
     },
   },
@@ -327,9 +336,19 @@ export function LandingPage() {
 
       <section className="lp-gallery" aria-label="Product screens">
         <Shot
-          src="/landing/parts.webp"
-          alt="Parts marketplace with live Candela listings and prices"
-          caption="Parts for sale"
+          src="/landing/schedule.webp"
+          alt="Color-coded shop schedule with Assigned FSE legend"
+          caption="Shop schedule"
+        />
+        <Shot
+          src="/landing/ticket-assign.webp"
+          alt="Edit Ticket with Assign to FSE highlighted"
+          caption="Assign to FSE"
+        />
+        <Shot
+          src="/landing/team-equipment.webp"
+          alt="Team Management test equipment assigned to an FSE"
+          caption="Test equipment"
         />
         <Shot
           src="/landing/reports.webp"
@@ -337,9 +356,9 @@ export function LandingPage() {
           caption="Service reports"
         />
         <Shot
-          src="/landing/signup.webp"
-          alt="Register chooser for repair company, clinic, and parts seller"
-          caption="Register"
+          src="/landing/parts.webp"
+          alt="Parts marketplace with live Candela listings and prices"
+          caption="Parts for sale"
         />
         <Shot
           src="/landing/marketplace.webp"
