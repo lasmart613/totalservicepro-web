@@ -7,6 +7,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isBlobLogoUrl, uploadCustomerLogo } from './customer-logo.ts';
 import { normalizeRegionInput } from './geo.ts';
+import { emptySocialFields, socialPayloadFromForm, type SocialFormFields } from './social-links.ts';
 import { chunkIds, fetchAllPages, uniqueLinkedIds } from './supabase/paginate.ts';
 
 export const CUSTOMER_BIZ_TYPES = [
@@ -52,7 +53,7 @@ export type CustomerInfoFormValues = {
   contact_name: string;
   specialties: string[];
   logo_url: string;
-};
+} & SocialFormFields;
 
 export function emptyCustomerForm(): CustomerInfoFormValues {
   return {
@@ -69,6 +70,7 @@ export function emptyCustomerForm(): CustomerInfoFormValues {
     contact_name: '',
     specialties: [],
     logo_url: '',
+    ...emptySocialFields(),
   };
 }
 
@@ -91,6 +93,14 @@ const OPTIONAL_ORG_COLUMNS = [
   'is_active',
   'updated_at',
   'logo_url',
+  'x_url',
+  'instagram_url',
+  'facebook_url',
+  'tiktok_url',
+  'youtube_url',
+  'linkedin_url',
+  'yelp_url',
+  'threads_url',
 ] as const;
 
 export function customerOrgPayload(
@@ -115,6 +125,7 @@ export function customerOrgPayload(
     ...(form.specialties.length ? { specialties: form.specialties } : {}),
     contact_name: form.contact_name.trim() || null,
     logo_url: form.logo_url.trim() && !isBlobLogoUrl(form.logo_url) ? form.logo_url.trim() : null,
+    ...socialPayloadFromForm(form),
     ...extras,
   };
 }
@@ -229,7 +240,7 @@ export async function createLinkedCustomer(
   let created: { id: string | number } | null = null;
   let lastError: { message?: string } | null = null;
 
-  for (let attempt = 0; attempt < 16; attempt++) {
+  for (let attempt = 0; attempt < 24; attempt++) {
     const { data, error } = await supabase
       .from('organizations')
       .insert(payload)
@@ -316,7 +327,7 @@ export async function updateCustomerOrg(
   });
   let lastError: { message?: string } | null = null;
 
-  for (let attempt = 0; attempt < 16; attempt++) {
+  for (let attempt = 0; attempt < 24; attempt++) {
     const { error } = await supabase.from('organizations').update(payload).eq('id', customerId);
     if (!error) {
       lastError = null;
