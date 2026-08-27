@@ -7,6 +7,7 @@ import {
   UNASSIGNED_ASSIGNEE,
   UNASSIGNED_COLOR,
   assigneeColor,
+  buildAssigneeColorMap,
   buildScheduleLegend,
   filterTicketsByLegend,
   filterTicketsByOrg,
@@ -77,6 +78,56 @@ test('unassigned tickets have a distinct color from assigned FSEs', () => {
   assert.equal(assigneeColor('fse-a'), a);
 });
 
+/** These UUIDs collide under the old standalone hash (`h * 31 + charCode` % 10). */
+const HASH_COLLISION_A = '00000000-1111-4111-8111-111111111111';
+const HASH_COLLISION_B = '00000008-1111-4111-8111-111111111111';
+
+function oldHashPaletteIndex(id: string): number {
+  let h = 0;
+  for (let i = 0; i < id.length; i++) {
+    h = (h * 31 + id.charCodeAt(i)) >>> 0;
+  }
+  return h % 10;
+}
+
+test('ids that collide under the old hash get different colors when assigned together', () => {
+  assert.equal(oldHashPaletteIndex(HASH_COLLISION_A), oldHashPaletteIndex(HASH_COLLISION_B));
+  assert.equal(assigneeColor(HASH_COLLISION_A), assigneeColor(HASH_COLLISION_B));
+
+  const colorMap = buildAssigneeColorMap([HASH_COLLISION_A, HASH_COLLISION_B]);
+  const a = assigneeColor(HASH_COLLISION_A, colorMap);
+  const b = assigneeColor(HASH_COLLISION_B, colorMap);
+  assert.notEqual(a, b);
+  assert.notEqual(a, UNASSIGNED_COLOR);
+  assert.notEqual(b, UNASSIGNED_COLOR);
+
+  const legend = buildScheduleLegend(
+    [
+      { assigned_to: HASH_COLLISION_A },
+      { assigned_to: HASH_COLLISION_B },
+    ],
+    [
+      { id: HASH_COLLISION_A, name: 'Larry Smart' },
+      { id: HASH_COLLISION_B, name: 'Tony Martin' },
+    ]
+  );
+  const larry = legend.find((i) => i.id === HASH_COLLISION_A);
+  const tony = legend.find((i) => i.id === HASH_COLLISION_B);
+  assert.ok(larry && tony);
+  assert.notEqual(larry?.color, tony?.color);
+  assert.equal(larry?.color, a);
+  assert.equal(tony?.color, b);
+  assert.equal(legend.find((i) => i.id === UNASSIGNED_ASSIGNEE)?.color, UNASSIGNED_COLOR);
+});
+
+test('more FSEs than the fixed palette still get unique colors', () => {
+  const ids = Array.from({ length: 16 }, (_, i) => `fse-${String(i).padStart(2, '0')}`);
+  const colorMap = buildAssigneeColorMap(ids);
+  const colors = ids.map((id) => assigneeColor(id, colorMap));
+  assert.equal(new Set(colors).size, ids.length);
+  assert.equal(colors.some((c) => c.toLowerCase() === UNASSIGNED_COLOR), false);
+});
+
 test('legend lists FSEs plus Unassigned and click-to-filter toggles', () => {
   const shop = filterTicketsByOrg(TICKETS, 10);
   const legend = buildScheduleLegend(shop, [
@@ -113,5 +164,7 @@ test('schedule page uses role filter, FSE colors, and an All control', () => {
   assert.match(src, /legendFilter/);
   assert.match(src, /Unassigned/);
   assert.match(src, /assigneeColor/);
+  assert.match(src, /buildAssigneeColorMap/);
+  assert.match(src, /colorFor/);
   assert.doesNotMatch(src, /organization_id\.eq\.\$\{oId\},assigned_to\.eq\.\$\{user\.id\}/);
 });
