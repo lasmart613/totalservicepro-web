@@ -33,6 +33,17 @@ test('landing Free Plan CTAs pass role into /plans', () => {
   assert.match(source, /parts: 'supplier'/);
 });
 
+test('logged-out landing shows schedule, assign-FSE, and test-equipment shots', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');
+  assert.match(source, /\/landing\/schedule\.webp/);
+  assert.match(source, /\/landing\/ticket-assign\.webp/);
+  assert.match(source, /\/landing\/team-equipment\.webp/);
+  assert.match(source, /Color-coded shop calendar/);
+  assert.match(source, /Assign an FSE and email them the ticket/);
+  assert.match(source, /Assign shop test equipment to an FSE/);
+});
+
 test('/plans never imports sign-out helpers', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');
