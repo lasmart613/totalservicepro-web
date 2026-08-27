@@ -3,7 +3,12 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { filterLinkedCustomers, matchLinkedCustomer } from './customer-form.ts';
+import {
+  charLimitFromError,
+  filterLinkedCustomers,
+  matchLinkedCustomer,
+  stripOverflowingAddressFields,
+} from './customer-form.ts';
 
 const LUXOR_CUSTOMERS = [
   { id: 1, name: 'Northshore Clinic', city: 'Evanston', state: 'IL' },
@@ -43,6 +48,23 @@ test('new service call form autocompletes assigned customers and can add a new c
   assert.match(src, /assigned_to: assignedTo/);
   assert.match(src, /100dvh/);
   assert.match(src, /overflowY: 'auto'/);
+  assert.match(src, /normalizeStateCode/);
+  assert.match(src, /customer_state: customerState/);
+});
+
+test('postgres character(3) overflow names the limit and optional address fields can be stripped', () => {
+  assert.equal(charLimitFromError('value too long for type character(3)'), 3);
+  const payload: Record<string, unknown> = { name: 'Clinic', zip: '60601', state: 'TX' };
+  assert.equal(stripOverflowingAddressFields(payload, 3), 'zip');
+  assert.equal(payload.zip, undefined);
+  assert.equal(payload.state, 'TX');
+});
+
+test('Add Customer form accepts full state names instead of forcing ISO typing', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, '../components/CustomerInfoForm.tsx'), 'utf8');
+  assert.match(src, /TX or Texas/);
+  assert.doesNotMatch(src, /maxLength=\{2\}/);
 });
 
 test('ticket editor keeps shop organization_id and writes customer_organization_id', () => {

@@ -20,6 +20,7 @@ import {
   matchLinkedCustomer,
   type LinkedCustomerOpt,
 } from '@/lib/customer-form';
+import { normalizeStateCode } from '@/lib/geo';
 
 function parseYmd(ymd: string | null | undefined): { y: number; m: number; d: number } | null {
   const part = ticketDateYmd(ymd);
@@ -503,6 +504,8 @@ export default function ServiceSchedule() {
       if (!linkedCustomerId) {
         linkedCustomerId = matchLinkedCustomer(customers, customer)?.id || null;
       }
+      const customerState = normalizeStateCode(form.customer_state);
+
       if (!linkedCustomerId) {
         const created = await createLinkedCustomer(supabase, {
           serviceOrgId: orgId,
@@ -511,7 +514,7 @@ export default function ServiceSchedule() {
             name: customer,
             address: form.customer_address,
             city: form.customer_city,
-            state: form.customer_state,
+            state: customerState || form.customer_state,
             phone: form.customer_phone,
             email: form.customer_email,
           },
@@ -528,7 +531,7 @@ export default function ServiceSchedule() {
         customer_name: customer,
         customer_address: form.customer_address.trim() || null,
         customer_city: form.customer_city.trim() || null,
-        customer_state: form.customer_state.trim() || null,
+        customer_state: customerState,
         customer_phone: form.customer_phone.trim() || null,
         customer_email: form.customer_email.trim() || null,
         equipment_make: form.equipment_make.trim() || null,
@@ -1251,6 +1254,8 @@ export default function ServiceSchedule() {
                   <input
                     className="input"
                     value={form.customer_state}
+                    placeholder="TX or Texas"
+                    autoComplete="address-level1"
                     onChange={(e) => setForm({ ...form, customer_state: e.target.value })}
                   />
                 </div>

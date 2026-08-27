@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isBlobLogoUrl, uploadCustomerLogo } from './customer-logo.ts';
+import { normalizeRegionInput } from './geo.ts';
 import { chunkIds, fetchAllPages, uniqueLinkedIds } from './supabase/paginate.ts';
 
 export const CUSTOMER_BIZ_TYPES = [
@@ -97,11 +98,12 @@ export function customerOrgPayload(
   extras?: Record<string, unknown>
 ): Record<string, unknown> {
   const biz = form.biz_type.trim() || null;
+  const region = normalizeRegionInput(form.state);
   return {
     name: form.name.trim(),
     address: form.address.trim() || null,
     city: form.city.trim() || null,
-    state: form.state.trim() || null,
+    state: region.state,
     zip: form.zip.trim() || null,
     phone: form.phone.trim() || null,
     email: form.email.trim() || null,
@@ -118,6 +120,28 @@ export function customerOrgPayload(
 
 function missingColumn(message?: string): string | null {
   return message?.match(/Could not find the '([^']+)' column/i)?.[1] || null;
+}
+
+function charLimitFromError(message?: string): number | null {
+  const m = message?.match(/value too long for type character(?: varying)?\((\d+)\)/i);
+  return m ? Number(m[1]) : null;
+}
+
+/** Optional address fields that may overflow a leftover CHAR(n) column. */
+const LENGTH_SENSITIVE_ORG_COLUMNS = ['zip', 'state', 'country', 'country_code', 'postal_code'] as const;
+
+function stripOverflowingAddressFields(
+  payload: Record<string, unknown>,
+  limit: number
+): string | null {
+  for (const col of LENGTH_SENSITIVE_ORG_COLUMNS) {
+    const val = payload[col];
+    if (typeof val === 'string' && val.length > limit) {
+      delete payload[col];
+      return col;
+    }
+  }
+  return null;
 }
 
 /**
@@ -176,6 +200,14 @@ export async function createLinkedCustomer(
     if (col && col in payload) {
       delete payload[col];
       continue;
+    }
+    const limit = charLimitFromError(error?.message);
+    if (limit != null) {
+      const stripped = stripOverflowingAddressFields(payload, limit);
+      if (stripped) {
+        console.warn(`organizations.${stripped} omitted — value too long for character(${limit})`);
+        continue;
+      }
     }
     break;
   }
@@ -239,6 +271,14 @@ export async function updateCustomerOrg(
       delete payload[col];
       continue;
     }
+    const limit = charLimitFromError(error?.message);
+    if (limit != null) {
+      const stripped = stripOverflowingAddressFields(payload, limit);
+      if (stripped) {
+        console.warn(`organizations.${stripped} omitted — value too long for character(${limit})`);
+        continue;
+      }
+    }
     break;
   }
 
@@ -252,7 +292,7 @@ export async function updateCustomerOrg(
   return payload;
 }
 
-export { OPTIONAL_ORG_COLUMNS };
+export { OPTIONAL_ORG_COLUMNS, charLimitFromError, stripOverflowingAddressFields };
 
 const LINKED_CUSTOMER_TYPES = ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'];
 
