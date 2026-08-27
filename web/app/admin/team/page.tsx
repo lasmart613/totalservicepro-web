@@ -3,6 +3,9 @@
 import React, { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { TestEquipmentRoster } from '@/components/TestEquipmentRoster';
+import { canAssignShopTestEquipment } from '@/lib/roles';
+import { roleLabel } from '@/lib/labels';
 
 const ROLES = [
   'fse',
@@ -20,6 +23,8 @@ export default function TeamManagement() {
   const [pendingInvites, setPendingInvites] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [orgId, setOrgId] = useState<number | string | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState('');
   const [newMember, setNewMember] = useState({
     email: '',
     firstName: '',
@@ -39,11 +44,15 @@ export default function TeamManagement() {
     } = await supabase.auth.getUser();
     if (!user) return;
 
+    setUserId(user.id);
+
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('organization_id')
+      .select('organization_id, role')
       .eq('id', user.id)
       .single();
+
+    setUserRole(String(profile?.role || ''));
 
     if (!profile?.organization_id) {
       setLoading(false);
@@ -319,7 +328,7 @@ export default function TeamManagement() {
             >
               {ROLES.map((role) => (
                 <option key={role} value={role}>
-                  {role.replace(/_/g, ' ')}
+                  {roleLabel(role)}
                 </option>
               ))}
             </select>
@@ -440,8 +449,8 @@ export default function TeamManagement() {
                     </td>
                     <td className="py-3 px-4 text-sm">{member.email}</td>
                     <td className="py-3 px-4">
-                      <span className="px-2 py-1 text-xs rounded-full bg-[var(--surface3)] capitalize">
-                        {member.role}
+                      <span className="px-2 py-1 text-xs rounded-full bg-[var(--surface3)]">
+                        {roleLabel(member.role)}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-sm text-[var(--text3)]">
@@ -459,6 +468,20 @@ export default function TeamManagement() {
           </div>
         )}
       </div>
+
+      <TestEquipmentRoster
+        orgId={orgId}
+        userId={userId}
+        members={teamMembers.map((m) => ({
+          id: String(m.id),
+          name:
+            [m.first_name, m.last_name].filter(Boolean).join(' ') ||
+            m.email ||
+            'Team member',
+          role: m.role,
+        }))}
+        canAssign={canAssignShopTestEquipment(userRole)}
+      />
     </div>
   );
 }

@@ -7,9 +7,20 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
-import { isAdmin, isPro } from '@/lib/roles';
+import { canSeeAllShopTickets, isAdmin, isFieldEngineer, isPro } from '@/lib/roles';
+import { roleLabel } from '@/lib/labels';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { ticketDateYmd, toLocalYmd } from '@/lib/tickets';
+import {
+  UNASSIGNED_ASSIGNEE,
+  assigneeColor,
+  buildScheduleLegend,
+  filterTicketsByLegend,
+  filterTicketsByOrg,
+  filterTicketsForScheduleRole,
+  ticketAssigneeId,
+  toggleLegendFilter,
+} from '@/lib/schedule-view';
 import { AddCustomerModal } from '@/components/AddCustomerModal';
 import { AssignFseSelect } from '@/components/AssignFseSelect';
 import { insertOmittingCharOverflow } from '@/lib/char-overflow';
@@ -19,7 +30,6 @@ import {
   loadTicketAssignees,
   notifyTicketAssignee,
   shouldNotifyAssignee,
-  ticketAssigneeId,
   type TicketAssignee,
 } from '@/lib/ticket-assignees';
 import {
@@ -117,6 +127,7 @@ export default function ServiceSchedule() {
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [customerOrgId, setCustomerOrgId] = useState<string | number | null>(null);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
+  const [legendFilter, setLegendFilter] = useState<string | null>(null);
 
   const supabase = getSupabaseClient();
   const router = useRouter();
@@ -125,6 +136,8 @@ export default function ServiceSchedule() {
   const month0 = cursor.getMonth();
   const month1 = month0 + 1;
   const canCreate = isAdmin(userRole) || isPro(userRole);
+  const shopLeadView = canSeeAllShopTickets(userRole);
+  const fseOnlyView = isFieldEngineer(userRole) || !shopLeadView;
 
   const formatTicket = useCallback((ticket: any) => {
     const start = ticket.scheduled_time;
@@ -147,6 +160,7 @@ export default function ServiceSchedule() {
         [ticket.equipment_make, ticket.equipment_model].filter(Boolean).join(' ') || '',
       status: ticket.status,
       assigned_to: ticketAssigneeId(ticket),
+      organization_id: ticket.organization_id,
       priority: ticket.priority,
     };
   }, []);
@@ -202,7 +216,10 @@ export default function ServiceSchedule() {
             priority
           `;
 
-      // Org tickets OR assigned to me (mirrors RLS; avoids empty calendar when org filter is too strict)
+      const role = String(profile?.role || '');
+      const leadView = canSeeAllShopTickets(role);
+
+      // Shop-only. Do not OR assigned_to (that leaked other shops for moonlighting FSEs).
       let data: any[] | null = null;
       let error: any = null;
 
@@ -216,28 +233,31 @@ export default function ServiceSchedule() {
       };
 
       if (oId != null) {
-        const q1 = await supabase
+        let q = supabase
           .from('service_tickets')
           .select(cols)
-          .or(`organization_id.eq.${oId},assigned_to.eq.${user.id}`)
-          .order('service_date', { ascending: true })
-          .limit(500);
+          .eq('organization_id', oId);
+        if (!leadView) {
+          q = q.eq('assigned_to', user.id);
+        }
+        const q1 = await q.order('service_date', { ascending: true }).limit(500);
         data = q1.data;
         error = q1.error;
         if (dropAssignedFse(error)) {
-          const retry = await supabase
+          let retryQ = supabase
             .from('service_tickets')
             .select(cols)
-            .or(`organization_id.eq.${oId},assigned_to.eq.${user.id}`)
-            .order('service_date', { ascending: true })
-            .limit(500);
+            .eq('organization_id', oId);
+          if (!leadView) {
+            retryQ = retryQ.eq('assigned_to', user.id);
+          }
+          const retry = await retryQ.order('service_date', { ascending: true }).limit(500);
           data = retry.data;
           error = retry.error;
         }
 
-        // Fallback: plain org filter if .or() is rejected
         if (error) {
-          console.warn('schedule or-filter failed, retrying org-only', error);
+          console.warn('schedule org filter failed, retrying org-only', error);
           dropAssignedFse(error);
           const q2 = await supabase
             .from('service_tickets')
@@ -269,7 +289,7 @@ export default function ServiceSchedule() {
         }
       }
 
-      // Last resort: RLS-only unfiltered (still scoped by policies)
+      // Last resort: RLS-only, then client-filter by org + role
       if (error) {
         console.warn('schedule filtered query failed, retrying RLS-only', error);
         dropAssignedFse(error);
@@ -285,7 +305,11 @@ export default function ServiceSchedule() {
 
       if (error) throw error;
 
-      const formatted = (data || []).map(formatTicket);
+      const scoped = filterTicketsForScheduleRole(filterTicketsByOrg(data || [], oId), {
+        role,
+        userId: user.id,
+      });
+      const formatted = scoped.map(formatTicket);
       setServiceCalls(formatted);
     } catch (err: any) {
       console.error('Error fetching service calls:', err);
@@ -587,16 +611,6 @@ export default function ServiceSchedule() {
   const dayYmd = toLocalYmd(cursor);
   const todayYmd = toLocalYmd(new Date());
 
-  const agendaCalls = useMemo(() => {
-    return [...serviceCalls]
-      .filter((c) => c.date && /^\d{4}-\d{2}-\d{2}$/.test(c.date) && c.date >= todayYmd)
-      .sort(
-        (a, b) =>
-          String(a.date).localeCompare(String(b.date)) ||
-          String(a.time).localeCompare(String(b.time))
-      );
-  }, [serviceCalls, todayYmd]);
-
   const unscheduledCalls = useMemo(
     () => serviceCalls.filter((c) => !c.date || !/^\d{4}-\d{2}-\d{2}$/.test(c.date)),
     [serviceCalls]
@@ -609,6 +623,33 @@ export default function ServiceSchedule() {
       }).length,
     [serviceCalls, year, month1]
   );
+
+  const legendItems = useMemo(
+    () => buildScheduleLegend(serviceCalls, assignees),
+    [serviceCalls, assignees]
+  );
+
+  const visibleCalls = useMemo(
+    () => (shopLeadView ? filterTicketsByLegend(serviceCalls, legendFilter) : serviceCalls),
+    [serviceCalls, shopLeadView, legendFilter]
+  );
+
+  const visibleAgenda = useMemo(() => {
+    return [...visibleCalls]
+      .filter((c) => c.date && /^\d{4}-\d{2}-\d{2}$/.test(c.date) && c.date >= todayYmd)
+      .sort(
+        (a, b) =>
+          String(a.date).localeCompare(String(b.date)) ||
+          String(a.time).localeCompare(String(b.time))
+      );
+  }, [visibleCalls, todayYmd]);
+
+  const visibleUnscheduled = useMemo(
+    () => visibleCalls.filter((c) => !c.date || !/^\d{4}-\d{2}-\d{2}$/.test(c.date)),
+    [visibleCalls]
+  );
+
+  const myColor = assigneeColor(userId);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -648,12 +689,14 @@ export default function ServiceSchedule() {
         {!loading && (
           <div className="mb-4 text-xs text-[var(--text3)] flex flex-wrap items-center gap-2">
             <span>
-              {serviceCalls.length} ticket{serviceCalls.length === 1 ? '' : 's'} loaded
+              {visibleCalls.length} ticket{visibleCalls.length === 1 ? '' : 's'}
+              {legendFilter ? ' shown' : ' loaded'}
               {' · '}
               {datedThisMonth} dated this month
               {' · '}
               {unscheduledCalls.length} unscheduled
-              {userRole ? ` · role ${userRole}` : ''}
+              {userRole ? ` · ${roleLabel(userRole)}` : ''}
+              {fseOnlyView ? ' · your assignments only' : ' · full shop'}
               {!canCreate && userId ? ' · read-only' : ''}
             </span>
             <button
@@ -663,6 +706,66 @@ export default function ServiceSchedule() {
             >
               Refresh
             </button>
+          </div>
+        )}
+
+        {shopLeadView && (
+          <div className="card p-4 mb-6">
+            <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+              <h2 className="font-bold text-sm">Assigned FSE</h2>
+              <button
+                type="button"
+                className={`btn text-xs ${legendFilter == null ? 'btn-primary' : 'btn-secondary'}`}
+                onClick={() => setLegendFilter(null)}
+              >
+                All
+              </button>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {legendItems.map((item) => {
+                const active = legendFilter === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => setLegendFilter((prev) => toggleLegendFilter(prev, item.id))}
+                    className={
+                      'inline-flex items-center gap-2 px-2.5 py-1.5 rounded-lg border text-xs ' +
+                      (active
+                        ? 'border-[var(--gold)] bg-[var(--gold)]/10'
+                        : 'border-[var(--border)] hover:border-[var(--gold)]')
+                    }
+                    title={
+                      item.id === UNASSIGNED_ASSIGNEE
+                        ? 'Show unassigned tickets'
+                        : `Show ${item.name}'s schedule`
+                    }
+                  >
+                    <span
+                      className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+                      style={{ background: item.color }}
+                    />
+                    <span>
+                      {item.name}
+                      {item.count ? ` (${item.count})` : ''}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className="text-[10px] text-[var(--text3)] mt-2">
+              Click an FSE (or Unassigned) to filter the calendar. Click again or All for the full shop.
+            </p>
+          </div>
+        )}
+
+        {fseOnlyView && userId && (
+          <div className="mb-6 text-xs text-[var(--text3)] flex items-center gap-2">
+            <span
+              className="inline-block w-2.5 h-2.5 rounded-full shrink-0"
+              style={{ background: myColor }}
+            />
+            Your assigned tickets
           </div>
         )}
 
@@ -725,7 +828,7 @@ export default function ServiceSchedule() {
               ))}
               {calendarDays.map((day, i) => {
                 const dayCalls = day
-                  ? serviceCalls.filter((c) => ymdEqualsDay(c.date, year, month1, day))
+                  ? visibleCalls.filter((c) => ymdEqualsDay(c.date, year, month1, day))
                   : [];
                 const cellYmd = day
                   ? `${year}-${String(month1).padStart(2, '0')}-${String(day).padStart(2, '0')}`
@@ -773,12 +876,13 @@ export default function ServiceSchedule() {
                           )}
                         </div>
                         {dayCalls.length > 0 && (
-                          <div className="text-[10px] leading-snug text-[var(--gold)] space-y-0.5">
+                          <div className="text-[10px] leading-snug space-y-0.5">
                             {dayCalls.slice(0, 3).map((call) => (
                               <Link
                                 key={call.id}
                                 href={`/service-tickets/${call.id}`}
-                                className="block break-words hover:underline"
+                                className="block break-words hover:underline rounded px-0.5"
+                                style={{ color: assigneeColor(call.assigned_to) }}
                                 onClick={(ev) => ev.stopPropagation()}
                                 title={`${call.time} • ${call.title}${call.equipment_model ? ` • ${call.equipment_model}` : ''}`}
                               >
@@ -843,12 +947,16 @@ export default function ServiceSchedule() {
                       onDragOver={handleDragOver}
                       onDrop={(e) => handleDrop(e, dayStr, '09:00')}
                     >
-                      {serviceCalls
+                      {visibleCalls
                         .filter((c) => c.date === dayStr)
                         .map((call) => (
                           <div
                             key={call.id}
-                            className="text-[10px] p-1 rounded bg-[var(--gold)]/20 text-[var(--gold)] flex items-start gap-1"
+                            className="text-[10px] p-1 rounded flex items-start gap-1"
+                            style={{
+                              background: `${assigneeColor(call.assigned_to)}22`,
+                              color: assigneeColor(call.assigned_to),
+                            }}
                           >
                             <span
                               className="cursor-grab select-none opacity-70"
@@ -899,20 +1007,21 @@ export default function ServiceSchedule() {
               </button>
             )}
             <div className="space-y-2">
-              {serviceCalls.filter((c) => c.date === dayYmd).length === 0 && (
+              {visibleCalls.filter((c) => c.date === dayYmd).length === 0 && (
                 <div className="text-[var(--text3)] text-sm py-8 text-center">
                   No tickets scheduled this day.
                 </div>
               )}
-              {serviceCalls
+              {visibleCalls
                 .filter((c) => c.date === dayYmd)
                 .map((call) => (
                   <Link
                     key={call.id}
                     href={`/service-tickets/${call.id}`}
                     className="block p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)]"
+                    style={{ borderLeft: `4px solid ${assigneeColor(call.assigned_to)}` }}
                   >
-                    <div className="font-semibold text-[var(--gold)]">
+                    <div className="font-semibold" style={{ color: assigneeColor(call.assigned_to) }}>
                       {call.time} · {call.title}
                     </div>
                     {call.equipment_model && (
@@ -937,15 +1046,16 @@ export default function ServiceSchedule() {
                 </button>
               )}
             </div>
-            {agendaCalls.length === 0 && (
+            {visibleAgenda.length === 0 && (
               <div className="text-[var(--text3)] text-sm py-8 text-center">No upcoming tickets.</div>
             )}
             <div className="space-y-2">
-              {agendaCalls.map((call) => (
+              {visibleAgenda.map((call) => (
                 <Link
                   key={call.id}
                   href={`/service-tickets/${call.id}`}
                   className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] flex justify-between gap-3"
+                  style={{ borderLeft: `4px solid ${assigneeColor(call.assigned_to)}` }}
                 >
                   <div>
                     <div className="font-semibold">{call.title}</div>
@@ -959,17 +1069,18 @@ export default function ServiceSchedule() {
                 </Link>
               ))}
             </div>
-            {unscheduledCalls.length > 0 && (
+            {visibleUnscheduled.length > 0 && (
               <div className="mt-8">
                 <h3 className="text-sm font-bold text-[var(--text3)] uppercase tracking-wide mb-2">
-                  Unscheduled ({unscheduledCalls.length})
+                  Unscheduled ({visibleUnscheduled.length})
                 </h3>
                 <div className="space-y-2">
-                  {unscheduledCalls.map((call) => (
+                  {visibleUnscheduled.map((call) => (
                     <Link
                       key={call.id}
                       href={`/service-tickets/${call.id}`}
                       className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] flex justify-between gap-3"
+                      style={{ borderLeft: `4px solid ${assigneeColor(call.assigned_to)}` }}
                     >
                       <div>
                         <div className="font-semibold">{call.title}</div>

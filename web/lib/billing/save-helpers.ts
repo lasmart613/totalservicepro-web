@@ -104,6 +104,17 @@ export async function writeWithColumnRetry(
         delete body[col];
         continue;
       }
+      // CHAR(3) / value-too-long — omit the field instead of toasting
+      if (/value too long|character\(3\)|char\(3\)/i.test(m)) {
+        let strippedChar = false;
+        for (const key of ['customer_state', 'state', 'tech_company_state']) {
+          if (key in body) {
+            delete body[key];
+            strippedChar = true;
+          }
+        }
+        if (strippedChar) continue;
+      }
       // Broad optional strips used by Android
       let stripped = false;
       if (/estimate_number/i.test(m) && 'estimate_number' in body) {
@@ -154,6 +165,16 @@ export async function writeWithColumnRetry(
       console.warn(`${table} missing column, retry without:`, col);
       delete body[col];
       continue;
+    }
+    if (/value too long|character\(3\)|char\(3\)/i.test(m)) {
+      let strippedChar = false;
+      for (const key of ['customer_state', 'state', 'tech_company_state']) {
+        if (key in body) {
+          delete body[key];
+          strippedChar = true;
+        }
+      }
+      if (strippedChar) continue;
     }
     let stripped = false;
     if (/estimate_number/i.test(m) && 'estimate_number' in body) {

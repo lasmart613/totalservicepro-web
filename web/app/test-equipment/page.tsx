@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { saveShopTestEquipment } from '@/lib/test-equipment';
 
 type TeRow = {
   id: string;
@@ -165,7 +166,9 @@ export default function TestEquipmentPage() {
         .eq('user_id', user.id)
         .eq('is_active', true);
       setRows((r2.data || []) as TeRow[]);
-      if (r2.error) toast.error(error.message);
+      if (r2.error && !/relation .* does not exist|could not find the table|schema cache|column/i.test(r2.error.message || '')) {
+        toast.error(error.message);
+      }
     } else {
       setRows((data || []) as TeRow[]);
     }
@@ -243,29 +246,23 @@ export default function TestEquipmentPage() {
       updated_at: new Date().toISOString(),
     };
     try {
-      if (editing?.id) {
-        let { error } = await supabase.from('test_equipment').update(payload).eq('id', editing.id);
-        if (error) {
-          delete payload.organization_id;
-          delete payload.owned_by;
-          delete payload.assigned_to_fse;
-          const r2 = await supabase.from('test_equipment').update(payload).eq('id', editing.id);
-          if (r2.error) throw r2.error;
-        }
-      } else {
-        let { error } = await supabase.from('test_equipment').insert(payload);
-        if (error) {
-          delete payload.organization_id;
-          delete payload.owned_by;
-          delete payload.assigned_to_fse;
-          const r2 = await supabase.from('test_equipment').insert(payload);
-          if (r2.error) throw r2.error;
-        }
+      const result = await saveShopTestEquipment(supabase, payload, editing?.id || null);
+      if (result.unavailable) {
+        setOpen(false);
+        return;
+      }
+      if (result.error && !result.schemaLag) {
+        throw result.error;
       }
       toast.success('Saved');
       setOpen(false);
       await load();
     } catch (e: any) {
+      const msg = String(e?.message || '');
+      if (/relation .* does not exist|could not find the table|character\(3\)|char\(3\)|value too long|schema cache/i.test(msg)) {
+        setOpen(false);
+        return;
+      }
       toast.error(e.message || 'Save failed');
     } finally {
       setSaving(false);

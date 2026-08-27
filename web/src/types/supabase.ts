@@ -2549,6 +2549,7 @@ export type Database = {
       test_equipment: {
         Row: {
           asset_tag: string | null
+          assigned_to_fse: string | null
           cal_date: string | null
           cal_due: string | null
           cal_lab: string | null
@@ -2558,6 +2559,8 @@ export type Database = {
           make: string | null
           model: string | null
           notes: string | null
+          organization_id: number | null
+          owned_by: string | null
           serial_number: string | null
           type: string
           updated_at: string | null
@@ -2565,6 +2568,7 @@ export type Database = {
         }
         Insert: {
           asset_tag?: string | null
+          assigned_to_fse?: string | null
           cal_date?: string | null
           cal_due?: string | null
           cal_lab?: string | null
@@ -2574,6 +2578,8 @@ export type Database = {
           make?: string | null
           model?: string | null
           notes?: string | null
+          organization_id?: number | null
+          owned_by?: string | null
           serial_number?: string | null
           type: string
           updated_at?: string | null
@@ -2581,6 +2587,7 @@ export type Database = {
         }
         Update: {
           asset_tag?: string | null
+          assigned_to_fse?: string | null
           cal_date?: string | null
           cal_due?: string | null
           cal_lab?: string | null
@@ -2590,6 +2597,8 @@ export type Database = {
           make?: string | null
           model?: string | null
           notes?: string | null
+          organization_id?: number | null
+          owned_by?: string | null
           serial_number?: string | null
           type?: string
           updated_at?: string | null
