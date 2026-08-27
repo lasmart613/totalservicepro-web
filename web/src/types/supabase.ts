@@ -1555,11 +1555,14 @@ export type Database = {
           customer_rating: number | null
           description: string | null
           email: string | null
+          facebook_url: string | null
           facility_type: string | null
           id: number
+          instagram_url: string | null
           is_active: boolean | null
           is_premium: boolean | null
           laser_models: string | null
+          linkedin_url: string | null
           logo_url: string | null
           name: string
           notes: string | null
@@ -1573,11 +1576,16 @@ export type Database = {
           state: string | null
           supported_brands: string[] | null
           tax_id: string | null
+          threads_url: string | null
           ticket_prefix: string | null
+          tiktok_url: string | null
           type: string
           updated_at: string | null
           website: string | null
+          x_url: string | null
           years_in_business: number | null
+          yelp_url: string | null
+          youtube_url: string | null
           zip: string | null
         }
         Insert: {
@@ -1589,11 +1597,14 @@ export type Database = {
           customer_rating?: number | null
           description?: string | null
           email?: string | null
+          facebook_url?: string | null
           facility_type?: string | null
           id?: number
+          instagram_url?: string | null
           is_active?: boolean | null
           is_premium?: boolean | null
           laser_models?: string | null
+          linkedin_url?: string | null
           logo_url?: string | null
           name: string
           notes?: string | null
@@ -1607,11 +1618,16 @@ export type Database = {
           state?: string | null
           supported_brands?: string[] | null
           tax_id?: string | null
+          threads_url?: string | null
           ticket_prefix?: string | null
+          tiktok_url?: string | null
           type: string
           updated_at?: string | null
           website?: string | null
+          x_url?: string | null
           years_in_business?: number | null
+          yelp_url?: string | null
+          youtube_url?: string | null
           zip?: string | null
         }
         Update: {
@@ -1623,11 +1639,14 @@ export type Database = {
           customer_rating?: number | null
           description?: string | null
           email?: string | null
+          facebook_url?: string | null
           facility_type?: string | null
           id?: number
+          instagram_url?: string | null
           is_active?: boolean | null
           is_premium?: boolean | null
           laser_models?: string | null
+          linkedin_url?: string | null
           logo_url?: string | null
           name?: string
           notes?: string | null
@@ -1641,11 +1660,16 @@ export type Database = {
           state?: string | null
           supported_brands?: string[] | null
           tax_id?: string | null
+          threads_url?: string | null
           ticket_prefix?: string | null
+          tiktok_url?: string | null
           type?: string
           updated_at?: string | null
           website?: string | null
+          x_url?: string | null
           years_in_business?: number | null
+          yelp_url?: string | null
+          youtube_url?: string | null
           zip?: string | null
         }
         Relationships: []
@@ -2225,6 +2249,7 @@ export type Database = {
         Row: {
           address: string | null
           arrival_time: string | null
+          assigned_fse: string | null
           assigned_to: string | null
           billable: boolean | null
           city: string | null
@@ -2263,6 +2288,7 @@ export type Database = {
         Insert: {
           address?: string | null
           arrival_time?: string | null
+          assigned_fse?: string | null
           assigned_to?: string | null
           billable?: boolean | null
           city?: string | null
@@ -2301,6 +2327,7 @@ export type Database = {
         Update: {
           address?: string | null
           arrival_time?: string | null
+          assigned_fse?: string | null
           assigned_to?: string | null
           billable?: boolean | null
           city?: string | null

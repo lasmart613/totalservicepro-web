@@ -10,7 +10,6 @@ import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus } from 'lucid
 import { canSeeAllShopTickets, isAdmin, isFieldEngineer, isPro } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
-import { writeWithColumnRetry } from '@/lib/billing/save-helpers';
 import { ticketDateYmd, toLocalYmd } from '@/lib/tickets';
 import {
   UNASSIGNED_ASSIGNEE,
@@ -23,6 +22,16 @@ import {
   toggleLegendFilter,
 } from '@/lib/schedule-view';
 import { AddCustomerModal } from '@/components/AddCustomerModal';
+import { AssignFseSelect } from '@/components/AssignFseSelect';
+import { insertOmittingCharOverflow } from '@/lib/char-overflow';
+import {
+  applyTicketAssignee,
+  assigneeName,
+  loadTicketAssignees,
+  notifyTicketAssignee,
+  shouldNotifyAssignee,
+  type TicketAssignee,
+} from '@/lib/ticket-assignees';
 import {
   createLinkedCustomer,
   emptyCustomerForm,
@@ -31,6 +40,7 @@ import {
   matchLinkedCustomer,
   type LinkedCustomerOpt,
 } from '@/lib/customer-form';
+import { normalizeStateCode } from '@/lib/geo';
 
 function parseYmd(ymd: string | null | undefined): { y: number; m: number; d: number } | null {
   const part = ticketDateYmd(ymd);
@@ -107,7 +117,7 @@ export default function ServiceSchedule() {
   const [orgId, setOrgId] = useState<number | string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [selfName, setSelfName] = useState('');
-  const [assignees, setAssignees] = useState<Array<{ id: string; name: string; role: string }>>([]);
+  const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
   const [assignedTo, setAssignedTo] = useState('');
   const [showNew, setShowNew] = useState(false);
   const [form, setForm] = useState<TicketForm>(() => EMPTY_FORM());
@@ -202,6 +212,7 @@ export default function ServiceSchedule() {
             status,
             organization_id,
             assigned_to,
+            assigned_fse,
             priority
           `;
 
@@ -212,10 +223,19 @@ export default function ServiceSchedule() {
       let data: any[] | null = null;
       let error: any = null;
 
+      let cols = selectCols;
+      const dropAssignedFse = (err: { message?: string } | null) => {
+        if (err && /assigned_fse/i.test(err.message || '')) {
+          cols = cols.replace(/,?assigned_fse,?\s*/g, '\n            ').replace(/,\s*,/g, ',');
+          return true;
+        }
+        return false;
+      };
+
       if (oId != null) {
         let q = supabase
           .from('service_tickets')
-          .select(selectCols)
+          .select(cols)
           .eq('organization_id', oId);
         if (!leadView) {
           q = q.eq('assigned_to', user.id);
@@ -223,12 +243,25 @@ export default function ServiceSchedule() {
         const q1 = await q.order('service_date', { ascending: true }).limit(500);
         data = q1.data;
         error = q1.error;
+        if (dropAssignedFse(error)) {
+          let retryQ = supabase
+            .from('service_tickets')
+            .select(cols)
+            .eq('organization_id', oId);
+          if (!leadView) {
+            retryQ = retryQ.eq('assigned_to', user.id);
+          }
+          const retry = await retryQ.order('service_date', { ascending: true }).limit(500);
+          data = retry.data;
+          error = retry.error;
+        }
 
         if (error) {
           console.warn('schedule org filter failed, retrying org-only', error);
+          dropAssignedFse(error);
           const q2 = await supabase
             .from('service_tickets')
-            .select(selectCols)
+            .select(cols)
             .eq('organization_id', oId)
             .order('service_date', { ascending: true })
             .limit(500);
@@ -238,20 +271,31 @@ export default function ServiceSchedule() {
       } else {
         const q3 = await supabase
           .from('service_tickets')
-          .select(selectCols)
+          .select(cols)
           .eq('assigned_to', user.id)
           .order('service_date', { ascending: true })
           .limit(500);
         data = q3.data;
         error = q3.error;
+        if (dropAssignedFse(error)) {
+          const retry = await supabase
+            .from('service_tickets')
+            .select(cols)
+            .eq('assigned_to', user.id)
+            .order('service_date', { ascending: true })
+            .limit(500);
+          data = retry.data;
+          error = retry.error;
+        }
       }
 
       // Last resort: RLS-only, then client-filter by org + role
       if (error) {
         console.warn('schedule filtered query failed, retrying RLS-only', error);
+        dropAssignedFse(error);
         const q4 = await supabase
           .from('service_tickets')
-          .select(selectCols)
+          .select(cols)
           .order('service_date', { ascending: true })
           .limit(500);
         if (q4.error) throw q4.error;
@@ -294,66 +338,19 @@ export default function ServiceSchedule() {
 
   const refreshAssignees = useCallback(
     async (oId: number | string | null, meId: string | null) => {
-      if (oId == null) {
-        setAssignees([]);
-        return;
-      }
-      const assignable = new Set([
-        'fse',
-        'engineer',
-        'technician',
-        'service_manager',
-        'admin',
-        'company_admin',
-      ]);
-      const toOpt = (m: any) => ({
-        id: String(m.id),
-        name:
-          [m.first_name, m.last_name].filter(Boolean).join(' ') ||
-          m.email ||
-          'Team member',
-        role: String(m.role || 'fse'),
-      });
-      let members: any[] = [];
       try {
-        const { data: sessionData } = await supabase.auth.getSession();
-        const token = sessionData.session?.access_token;
-        if (token) {
-          const res = await fetch('/api/team/list', {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          if (res.ok) {
-            const json = await res.json().catch(() => ({}));
-            if (Array.isArray(json.members)) members = json.members;
-          }
-        }
+        setAssignees(
+          await loadTicketAssignees(supabase, {
+            orgId: oId,
+            meId,
+            selfName,
+            selfRole: userRole,
+          })
+        );
       } catch (e) {
-        console.warn('ticket assignees api', e);
+        console.warn('ticket assignees', e);
+        setAssignees([]);
       }
-      if (!members.length) {
-        const { data, error } = await supabase
-          .from('user_profiles')
-          .select('id, first_name, last_name, email, role')
-          .eq('organization_id', oId);
-        if (error) console.warn('ticket assignees', error.message);
-        members = data || [];
-      }
-      const opts = members
-        .filter((m) => m?.id && (String(m.id) === String(meId) || assignable.has(String(m.role || '').toLowerCase())))
-        .map(toOpt);
-      if (meId && !opts.some((o) => o.id === meId)) {
-        opts.unshift({
-          id: meId,
-          name: selfName || 'Me',
-          role: userRole || 'fse',
-        });
-      }
-      opts.sort((a, b) => {
-        if (meId && a.id === meId) return -1;
-        if (meId && b.id === meId) return 1;
-        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-      });
-      setAssignees(opts);
     },
     [supabase, selfName, userRole]
   );
@@ -526,6 +523,8 @@ export default function ServiceSchedule() {
       if (!linkedCustomerId) {
         linkedCustomerId = matchLinkedCustomer(customers, customer)?.id || null;
       }
+      const customerState = normalizeStateCode(form.customer_state);
+
       if (!linkedCustomerId) {
         const created = await createLinkedCustomer(supabase, {
           serviceOrgId: orgId,
@@ -534,7 +533,7 @@ export default function ServiceSchedule() {
             name: customer,
             address: form.customer_address,
             city: form.customer_city,
-            state: form.customer_state,
+            state: customerState || form.customer_state,
             phone: form.customer_phone,
             email: form.customer_email,
           },
@@ -551,7 +550,7 @@ export default function ServiceSchedule() {
         customer_name: customer,
         customer_address: form.customer_address.trim() || null,
         customer_city: form.customer_city.trim() || null,
-        customer_state: form.customer_state.trim() || null,
+        customer_state: customerState,
         customer_phone: form.customer_phone.trim() || null,
         customer_email: form.customer_email.trim() || null,
         equipment_make: form.equipment_make.trim() || null,
@@ -565,38 +564,34 @@ export default function ServiceSchedule() {
         status,
         notes: form.notes.trim() || null,
         description: form.notes.trim() || null,
-        assigned_to: assignedTo || null,
       };
+      applyTicketAssignee(payload, assignedTo || null);
 
-      const written = await writeWithColumnRetry(supabase, 'service_tickets', payload, null);
-      if (written.error) throw written.error;
-      const data = written.id != null ? { id: written.id } : null;
+      let { data, error } = await insertOmittingCharOverflow(supabase, 'service_tickets', payload, {
+        select: 'id, ticket_number',
+      });
+      if (error && /customer_organization/i.test(error.message || '') && 'customer_organization_id' in payload) {
+        delete payload.customer_organization_id;
+        ({ data, error } = await insertOmittingCharOverflow(supabase, 'service_tickets', payload, {
+          select: 'id, ticket_number',
+        }));
+      }
+
+      if (error) throw error;
 
       setShowNew(false);
       await fetchServiceCalls();
-      if (data?.id && assignedTo && assignedTo !== userId) {
+      if (data?.id && shouldNotifyAssignee({ nextId: assignedTo, actorId: userId })) {
         const who =
           assignees.find((a) => a.id === assignedTo)?.name || 'the assigned FSE';
         try {
-          const { data: sessionData } = await supabase.auth.getSession();
-          const token = sessionData.session?.access_token;
-          if (token) {
-            const res = await fetch('/api/tickets/notify-assignee', {
-              method: 'POST',
-              headers: {
-                Authorization: `Bearer ${token}`,
-                'Content-Type': 'application/json',
-              },
-              body: JSON.stringify({ ticketId: data.id, assignedTo }),
-            });
-            const json = await res.json().catch(() => ({}));
-            if (json.emailed) {
-              toast.success(`Ticket created. ${who} was emailed.`);
-            } else {
-              toast.success(
-                `Ticket created. Could not email ${who}${json.error ? `: ${json.error}` : '.'}`
-              );
-            }
+          const json = await notifyTicketAssignee(supabase, data.id, assignedTo);
+          if (json.emailed) {
+            toast.success(`Ticket created. ${who} was emailed.`);
+          } else {
+            toast.success(
+              `Ticket created. Could not email ${who}${json.error ? `: ${json.error}` : '.'}`
+            );
           }
         } catch (notifyErr) {
           console.warn('notify assignee', notifyErr);
@@ -1032,6 +1027,9 @@ export default function ServiceSchedule() {
                     {call.equipment_model && (
                       <div className="text-xs text-[var(--text3)] mt-1">{call.equipment_model}</div>
                     )}
+                    <div className="text-xs text-[var(--text3)] mt-1">
+                      FSE: {assigneeName(assignees, call.assigned_to, 'Unassigned')}
+                    </div>
                   </Link>
                 ))}
             </div>
@@ -1064,6 +1062,7 @@ export default function ServiceSchedule() {
                     <div className="text-xs text-[var(--text3)]">
                       {call.date} · {call.time}
                       {call.equipment_model ? ` · ${call.equipment_model}` : ''}
+                      {` · ${assigneeName(assignees, call.assigned_to, 'Unassigned')}`}
                     </div>
                   </div>
                   <div className="text-xs text-[var(--gold)]">{call.status}</div>
@@ -1085,7 +1084,9 @@ export default function ServiceSchedule() {
                     >
                       <div>
                         <div className="font-semibold">{call.title}</div>
-                        <div className="text-xs text-[var(--text3)]">No service date</div>
+                        <div className="text-xs text-[var(--text3)]">
+                          No service date · {assigneeName(assignees, call.assigned_to, 'Unassigned')}
+                        </div>
                       </div>
                       <div className="text-xs text-[var(--gold)]">{call.status}</div>
                     </Link>
@@ -1204,26 +1205,15 @@ export default function ServiceSchedule() {
                 </p>
               </div>
               <div>
-                <label className="label">Assign to</label>
-                <select
+                <label className="label">Assign to FSE</label>
+                <AssignFseSelect
                   className="select"
                   value={assignedTo}
-                  onChange={(e) => setAssignedTo(e.target.value)}
-                >
-                  {userId && (
-                    <option value={userId}>
-                      Me{selfName ? ` — ${selfName}` : ''}
-                    </option>
-                  )}
-                  {assignees
-                    .filter((a) => a.id !== userId)
-                    .map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.name} · {roleLabel(a.role)}
-                      </option>
-                    ))}
-                  <option value="">Unassigned</option>
-                </select>
+                  onChange={setAssignedTo}
+                  assignees={assignees}
+                  userId={userId}
+                  selfName={selfName}
+                />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -1349,6 +1339,8 @@ export default function ServiceSchedule() {
                   <input
                     className="input"
                     value={form.customer_state}
+                    placeholder="TX or Texas"
+                    autoComplete="address-level1"
                     onChange={(e) => setForm({ ...form, customer_state: e.target.value })}
                   />
                 </div>

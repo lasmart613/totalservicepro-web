@@ -5,7 +5,17 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  charLimitFromError,
+  insertOmittingCharOverflow,
+  missingColumn,
+  shortTicketPrefix,
+  stripOverflowingAddressFields,
+  updateOmittingCharOverflow,
+} from './char-overflow.ts';
 import { isBlobLogoUrl, uploadCustomerLogo } from './customer-logo.ts';
+import { normalizeRegionInput } from './geo.ts';
+import { emptySocialFields, socialPayloadFromForm, type SocialFormFields } from './social-links.ts';
 import { chunkIds, fetchAllPages, uniqueLinkedIds } from './supabase/paginate.ts';
 
 export const CUSTOMER_BIZ_TYPES = [
@@ -51,7 +61,7 @@ export type CustomerInfoFormValues = {
   contact_name: string;
   specialties: string[];
   logo_url: string;
-};
+} & SocialFormFields;
 
 export function emptyCustomerForm(): CustomerInfoFormValues {
   return {
@@ -68,6 +78,7 @@ export function emptyCustomerForm(): CustomerInfoFormValues {
     contact_name: '',
     specialties: [],
     logo_url: '',
+    ...emptySocialFields(),
   };
 }
 
@@ -90,6 +101,14 @@ const OPTIONAL_ORG_COLUMNS = [
   'is_active',
   'updated_at',
   'logo_url',
+  'x_url',
+  'instagram_url',
+  'facebook_url',
+  'tiktok_url',
+  'youtube_url',
+  'linkedin_url',
+  'yelp_url',
+  'threads_url',
 ] as const;
 
 export function customerOrgPayload(
@@ -97,11 +116,14 @@ export function customerOrgPayload(
   extras?: Record<string, unknown>
 ): Record<string, unknown> {
   const biz = form.biz_type.trim() || null;
+  const region = normalizeRegionInput(form.state);
   return {
     name: form.name.trim(),
     address: form.address.trim() || null,
     city: form.city.trim() || null,
-    state: form.state.trim() || null,
+    state: region.state,
+    // Override a leftover CHAR(3) DEFAULT such as 'United States'.
+    ...(region.country ? { country: region.country } : {}),
     zip: form.zip.trim() || null,
     phone: form.phone.trim() || null,
     email: form.email.trim() || null,
@@ -109,21 +131,15 @@ export function customerOrgPayload(
     notes: form.notes.trim() || null,
     biz_type: biz,
     facility_type: biz,
-    specialties: form.specialties,
+    // Empty array can still be written into a leftover CHAR(n) specialties column.
+    ...(form.specialties.length ? { specialties: form.specialties } : {}),
     contact_name: form.contact_name.trim() || null,
     logo_url: form.logo_url.trim() && !isBlobLogoUrl(form.logo_url) ? form.logo_url.trim() : null,
+    ...socialPayloadFromForm(form),
     ...extras,
   };
 }
 
-function missingColumn(message?: string): string | null {
-  return message?.match(/Could not find the '([^']+)' column/i)?.[1] || null;
-}
-
-/**
- * Create a customer org and link it to the caller's service company.
- * Same tables as the former Company Profile CRM path: organizations + organization_customers.
- */
 export async function persistCustomerLogo(
   supabase: SupabaseClient,
   customerId: string | number,
@@ -131,13 +147,22 @@ export async function persistCustomerLogo(
 ): Promise<string | null> {
   if (!logoFile) return null;
   const url = await uploadCustomerLogo(supabase, customerId, logoFile);
-  const { error } = await supabase.from('organizations').update({ logo_url: url }).eq('id', customerId);
-  if (error && !missingColumn(error.message)) {
+  const { error } = await updateOmittingCharOverflow(
+    supabase,
+    'organizations',
+    { logo_url: url },
+    { column: 'id', value: customerId }
+  );
+  if (error && !missingColumn(error)) {
     throw new Error(error.message || 'Logo uploaded but could not be saved on the customer');
   }
   return url;
 }
 
+/**
+ * Create a customer org and link it to the caller's service company.
+ * Same tables as the former Company Profile CRM path: organizations + organization_customers.
+ */
 export async function createLinkedCustomer(
   supabase: SupabaseClient,
   opts: {
@@ -154,34 +179,18 @@ export async function createLinkedCustomer(
   const payload: Record<string, unknown> = customerOrgPayload(opts.form, {
     type: 'customer',
     is_active: true,
+    // Fits CHAR(3) if a trigger/default copies name into ticket_prefix.
+    ticket_prefix: shortTicketPrefix(opts.form.name),
     ...(opts.createdBy ? { created_by: opts.createdBy } : {}),
   });
 
-  let created: { id: string | number } | null = null;
-  let lastError: { message?: string } | null = null;
-
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const { data, error } = await supabase
-      .from('organizations')
-      .insert(payload)
-      .select('id')
-      .single();
-    if (!error && data?.id != null) {
-      created = data;
-      lastError = null;
-      break;
-    }
-    lastError = error;
-    const col = missingColumn(error?.message);
-    if (col && col in payload) {
-      delete payload[col];
-      continue;
-    }
-    break;
-  }
-
-  if (lastError || !created) {
-    throw new Error(lastError?.message || 'Failed to add customer');
+  const { data, error } = await insertOmittingCharOverflow(supabase, 'organizations', payload, {
+    select: 'id',
+    maxAttempts: 24,
+  });
+  const created = data?.id != null ? { id: data.id as string | number } : null;
+  if (error || !created) {
+    throw new Error(error?.message || 'Failed to add customer');
   }
 
   const linkPayload: Record<string, unknown> = {
@@ -189,11 +198,11 @@ export async function createLinkedCustomer(
     customer_organization_id: created.id,
     ...(opts.createdBy ? { created_by: opts.createdBy } : {}),
   };
-  let linkErr = (await supabase.from('organization_customers').insert(linkPayload)).error;
-  if (linkErr && missingColumn(linkErr.message) === 'created_by' && 'created_by' in linkPayload) {
-    delete linkPayload.created_by;
-    linkErr = (await supabase.from('organization_customers').insert(linkPayload)).error;
-  }
+  const { error: linkErr } = await insertOmittingCharOverflow(
+    supabase,
+    'organization_customers',
+    linkPayload
+  );
   if (linkErr && !/duplicate|unique|23505/i.test(linkErr.message || '')) {
     // Customer row exists; still surface the link failure so Directory can show a reason.
     console.warn('organization_customers link failed:', linkErr);
@@ -225,24 +234,14 @@ export async function updateCustomerOrg(
   const payload: Record<string, unknown> = customerOrgPayload(form, {
     updated_at: new Date().toISOString(),
   });
-  let lastError: { message?: string } | null = null;
-
-  for (let attempt = 0; attempt < 10; attempt++) {
-    const { error } = await supabase.from('organizations').update(payload).eq('id', customerId);
-    if (!error) {
-      lastError = null;
-      break;
-    }
-    lastError = error;
-    const col = missingColumn(error?.message);
-    if (col && col in payload) {
-      delete payload[col];
-      continue;
-    }
-    break;
-  }
-
-  if (lastError) throw new Error(lastError.message || 'Save failed');
+  const { error } = await updateOmittingCharOverflow(
+    supabase,
+    'organizations',
+    payload,
+    { column: 'id', value: customerId },
+    { maxAttempts: 24 }
+  );
+  if (error) throw new Error(error.message || 'Save failed');
 
   if (opts?.logoFile) {
     const url = await persistCustomerLogo(supabase, customerId, opts.logoFile);
@@ -252,7 +251,13 @@ export async function updateCustomerOrg(
   return payload;
 }
 
-export { OPTIONAL_ORG_COLUMNS };
+export {
+  OPTIONAL_ORG_COLUMNS,
+  charLimitFromError,
+  insertOmittingCharOverflow,
+  shortTicketPrefix,
+  stripOverflowingAddressFields,
+};
 
 const LINKED_CUSTOMER_TYPES = ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'];
 
