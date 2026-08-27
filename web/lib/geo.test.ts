@@ -35,6 +35,7 @@ test('customer org payload stores TX not Texas, and keeps a US ZIP', () => {
   assert.equal(payload.state, 'TX');
   assert.equal(payload.zip, '60601');
   assert.equal(payload.type, 'customer');
+  assert.equal(payload.country, 'USA');
   assert.ok(String(payload.state).length <= 3);
 });
 

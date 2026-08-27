@@ -53,6 +53,7 @@ test('new service call form autocompletes assigned customers and can add a new c
   assert.match(src, /overflowY: 'auto'/);
   assert.match(src, /normalizeStateCode/);
   assert.match(src, /customer_state: customerState/);
+  assert.match(src, /insertOmittingCharOverflow/);
 });
 
 test('postgres character(3) overflow names the limit and optional address fields can be stripped', () => {

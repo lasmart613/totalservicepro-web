@@ -5,6 +5,14 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  charLimitFromError,
+  insertOmittingCharOverflow,
+  missingColumn,
+  shortTicketPrefix,
+  stripOverflowingAddressFields,
+  updateOmittingCharOverflow,
+} from './char-overflow.ts';
 import { isBlobLogoUrl, uploadCustomerLogo } from './customer-logo.ts';
 import { normalizeRegionInput } from './geo.ts';
 import { emptySocialFields, socialPayloadFromForm, type SocialFormFields } from './social-links.ts';
@@ -114,6 +122,8 @@ export function customerOrgPayload(
     address: form.address.trim() || null,
     city: form.city.trim() || null,
     state: region.state,
+    // Override a leftover CHAR(3) DEFAULT such as 'United States'.
+    ...(region.country ? { country: region.country } : {}),
     zip: form.zip.trim() || null,
     phone: form.phone.trim() || null,
     email: form.email.trim() || null,
@@ -130,80 +140,6 @@ export function customerOrgPayload(
   };
 }
 
-function missingColumn(message?: string): string | null {
-  return message?.match(/Could not find the '([^']+)' column/i)?.[1] || null;
-}
-
-function charLimitFromError(message?: string): number | null {
-  const m = message?.match(/value too long for type character(?: varying)?\((\d+)\)/i);
-  return m ? Number(m[1]) : null;
-}
-
-/**
- * Live `organizations.type` is NOT CHAR(3): public /api/directory returns
- * `customer`, `service_company`, `laser_rental`, `laser_reseller`, `parts_supplier`.
- * After PR #48, zip/state strip still left a CHAR(3) toast because the overflowing
- * value is some other field we always send (UUID `created_by`, phone, biz_type,
- * specialties, …). Drop any overflowing value except `name`.
- */
-const CHAR_OVERFLOW_STRIP_ORDER = [
-  'created_by',
-  'specialties',
-  'zip',
-  'postal_code',
-  'country',
-  'country_code',
-  'phone',
-  'email',
-  'website',
-  'notes',
-  'contact_name',
-  'logo_url',
-  'address',
-  'city',
-  'biz_type',
-  'facility_type',
-  'state',
-  'is_active',
-  'updated_at',
-  'type',
-] as const;
-
-function valueExceedsCharLimit(val: unknown, limit: number): boolean {
-  if (val == null) return false;
-  if (typeof val === 'string') return val.length > limit;
-  if (typeof val === 'number' || typeof val === 'boolean') return String(val).length > limit;
-  if (Array.isArray(val)) {
-    if (!val.length) return false;
-    return val.some((item) => String(item).length > limit);
-  }
-  return false;
-}
-
-/** Omit the next payload field that cannot fit character(n). Never drops `name`. */
-export function stripOverflowingAddressFields(
-  payload: Record<string, unknown>,
-  limit: number
-): string | null {
-  for (const col of CHAR_OVERFLOW_STRIP_ORDER) {
-    if (!(col in payload)) continue;
-    if (!valueExceedsCharLimit(payload[col], limit)) continue;
-    delete payload[col];
-    return col;
-  }
-  for (const [col, val] of Object.entries(payload)) {
-    if (col === 'name' || col === 'id') continue;
-    if (!valueExceedsCharLimit(val, limit)) continue;
-    delete payload[col];
-    return col;
-  }
-  return null;
-}
-
-/**
- * Create a customer org and link it to the caller's service company.
- * Same tables as the former Company Profile CRM path: organizations + organization_customers.
- */
 export async function persistCustomerLogo(
   supabase: SupabaseClient,
   customerId: string | number,
@@ -211,13 +147,22 @@ export async function persistCustomerLogo(
 ): Promise<string | null> {
   if (!logoFile) return null;
   const url = await uploadCustomerLogo(supabase, customerId, logoFile);
-  const { error } = await supabase.from('organizations').update({ logo_url: url }).eq('id', customerId);
-  if (error && !missingColumn(error.message)) {
+  const { error } = await updateOmittingCharOverflow(
+    supabase,
+    'organizations',
+    { logo_url: url },
+    { column: 'id', value: customerId }
+  );
+  if (error && !missingColumn(error)) {
     throw new Error(error.message || 'Logo uploaded but could not be saved on the customer');
   }
   return url;
 }
 
+/**
+ * Create a customer org and link it to the caller's service company.
+ * Same tables as the former Company Profile CRM path: organizations + organization_customers.
+ */
 export async function createLinkedCustomer(
   supabase: SupabaseClient,
   opts: {
@@ -234,42 +179,18 @@ export async function createLinkedCustomer(
   const payload: Record<string, unknown> = customerOrgPayload(opts.form, {
     type: 'customer',
     is_active: true,
+    // Fits CHAR(3) if a trigger/default copies name into ticket_prefix.
+    ticket_prefix: shortTicketPrefix(opts.form.name),
     ...(opts.createdBy ? { created_by: opts.createdBy } : {}),
   });
 
-  let created: { id: string | number } | null = null;
-  let lastError: { message?: string } | null = null;
-
-  for (let attempt = 0; attempt < 24; attempt++) {
-    const { data, error } = await supabase
-      .from('organizations')
-      .insert(payload)
-      .select('id')
-      .single();
-    if (!error && data?.id != null) {
-      created = data;
-      lastError = null;
-      break;
-    }
-    lastError = error;
-    const col = missingColumn(error?.message);
-    if (col && col in payload) {
-      delete payload[col];
-      continue;
-    }
-    const limit = charLimitFromError(error?.message);
-    if (limit != null) {
-      const stripped = stripOverflowingAddressFields(payload, limit);
-      if (stripped) {
-        console.warn(`organizations.${stripped} omitted — value too long for character(${limit})`);
-        continue;
-      }
-    }
-    break;
-  }
-
-  if (lastError || !created) {
-    throw new Error(lastError?.message || 'Failed to add customer');
+  const { data, error } = await insertOmittingCharOverflow(supabase, 'organizations', payload, {
+    select: 'id',
+    maxAttempts: 24,
+  });
+  const created = data?.id != null ? { id: data.id as string | number } : null;
+  if (error || !created) {
+    throw new Error(error?.message || 'Failed to add customer');
   }
 
   const linkPayload: Record<string, unknown> = {
@@ -277,23 +198,11 @@ export async function createLinkedCustomer(
     customer_organization_id: created.id,
     ...(opts.createdBy ? { created_by: opts.createdBy } : {}),
   };
-  let linkErr = (await supabase.from('organization_customers').insert(linkPayload)).error;
-  if (linkErr && missingColumn(linkErr.message) === 'created_by' && 'created_by' in linkPayload) {
-    delete linkPayload.created_by;
-    linkErr = (await supabase.from('organization_customers').insert(linkPayload)).error;
-  }
-  if (linkErr) {
-    const limit = charLimitFromError(linkErr.message);
-    if (limit != null) {
-      const stripped = stripOverflowingAddressFields(linkPayload, limit);
-      if (stripped) {
-        console.warn(
-          `organization_customers.${stripped} omitted — value too long for character(${limit})`
-        );
-        linkErr = (await supabase.from('organization_customers').insert(linkPayload)).error;
-      }
-    }
-  }
+  const { error: linkErr } = await insertOmittingCharOverflow(
+    supabase,
+    'organization_customers',
+    linkPayload
+  );
   if (linkErr && !/duplicate|unique|23505/i.test(linkErr.message || '')) {
     // Customer row exists; still surface the link failure so Directory can show a reason.
     console.warn('organization_customers link failed:', linkErr);
@@ -325,32 +234,14 @@ export async function updateCustomerOrg(
   const payload: Record<string, unknown> = customerOrgPayload(form, {
     updated_at: new Date().toISOString(),
   });
-  let lastError: { message?: string } | null = null;
-
-  for (let attempt = 0; attempt < 24; attempt++) {
-    const { error } = await supabase.from('organizations').update(payload).eq('id', customerId);
-    if (!error) {
-      lastError = null;
-      break;
-    }
-    lastError = error;
-    const col = missingColumn(error?.message);
-    if (col && col in payload) {
-      delete payload[col];
-      continue;
-    }
-    const limit = charLimitFromError(error?.message);
-    if (limit != null) {
-      const stripped = stripOverflowingAddressFields(payload, limit);
-      if (stripped) {
-        console.warn(`organizations.${stripped} omitted — value too long for character(${limit})`);
-        continue;
-      }
-    }
-    break;
-  }
-
-  if (lastError) throw new Error(lastError.message || 'Save failed');
+  const { error } = await updateOmittingCharOverflow(
+    supabase,
+    'organizations',
+    payload,
+    { column: 'id', value: customerId },
+    { maxAttempts: 24 }
+  );
+  if (error) throw new Error(error.message || 'Save failed');
 
   if (opts?.logoFile) {
     const url = await persistCustomerLogo(supabase, customerId, opts.logoFile);
@@ -360,7 +251,13 @@ export async function updateCustomerOrg(
   return payload;
 }
 
-export { OPTIONAL_ORG_COLUMNS, charLimitFromError };
+export {
+  OPTIONAL_ORG_COLUMNS,
+  charLimitFromError,
+  insertOmittingCharOverflow,
+  shortTicketPrefix,
+  stripOverflowingAddressFields,
+};
 
 const LINKED_CUSTOMER_TYPES = ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'];
 
