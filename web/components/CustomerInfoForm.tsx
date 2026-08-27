@@ -261,9 +261,10 @@ export function CustomerInfoForm({ value, onChange, disabled, onLogoFileChange, 
               </label>
               <input
                 className="input w-full"
-                maxLength={2}
                 value={value.state}
                 disabled={disabled}
+                placeholder="TX or Texas"
+                autoComplete="address-level1"
                 onChange={(e) => setField('state', e.target.value)}
               />
             </div>
