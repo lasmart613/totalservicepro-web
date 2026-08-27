@@ -8,6 +8,7 @@ import {
   type CustomerInfoFormValues,
 } from '@/lib/customer-form';
 import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
+import { normalizeSocialUrl, visibleSocialNetworks } from '@/lib/social-links';
 
 type Props = {
   value: CustomerInfoFormValues;
@@ -16,9 +17,18 @@ type Props = {
   onLogoFileChange?: (file: File | null) => void;
   /** Show the post-create invite hint under Email (Directory add only). */
   inviteHint?: boolean;
+  /** Customer org.type — LinkedIn / Yelp show for laser-clinic customers. */
+  orgType?: string | null;
 };
 
-export function CustomerInfoForm({ value, onChange, disabled, onLogoFileChange, inviteHint }: Props) {
+export function CustomerInfoForm({
+  value,
+  onChange,
+  disabled,
+  onLogoFileChange,
+  inviteHint,
+  orgType,
+}: Props) {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
 
@@ -282,6 +292,52 @@ export function CustomerInfoForm({ value, onChange, disabled, onLogoFileChange, 
             </div>
           </div>
         </div>
+      </div>
+
+      <div className="section">
+        <div className="flex items-center gap-2 mb-3">
+          <span>🔗</span>
+          <h2 className="text-sm font-bold uppercase tracking-wide text-[var(--gold)]">
+            Social Media
+          </h2>
+        </div>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {visibleSocialNetworks(orgType, value).map((network) => {
+            const raw = value[network.column] || '';
+            const href = disabled ? normalizeSocialUrl(network.key, raw) : null;
+            return (
+              <div key={network.column}>
+                <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
+                  {network.label}
+                </label>
+                {href ? (
+                  <a
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    className="input w-full flex items-center text-[var(--gold)] hover:underline truncate"
+                  >
+                    {raw}
+                  </a>
+                ) : (
+                  <input
+                    className="input w-full"
+                    type="text"
+                    inputMode="url"
+                    placeholder={network.placeholder}
+                    value={raw}
+                    disabled={disabled}
+                    autoComplete="off"
+                    onChange={(e) => setField(network.column, e.target.value)}
+                  />
+                )}
+              </div>
+            );
+          })}
+        </div>
+        <p className="text-xs text-[var(--text3)] mt-2">
+          Paste a full URL or an @handle. The company site field is separate, under Business Info.
+        </p>
       </div>
 
       <div className="section">

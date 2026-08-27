@@ -19,6 +19,7 @@ import {
   updateCustomerOrg,
   type CustomerInfoFormValues,
 } from '@/lib/customer-form';
+import { filledSocialLinks, socialFieldsFromOrg } from '@/lib/social-links';
 
 type TabKey = 'overview' | 'equipment' | 'history' | 'contacts';
 
@@ -40,6 +41,14 @@ type CustomerOrg = {
   specialties?: string[] | null;
   laser_models?: string | null;
   logo_url?: string | null;
+  x_url?: string | null;
+  instagram_url?: string | null;
+  facebook_url?: string | null;
+  tiktok_url?: string | null;
+  youtube_url?: string | null;
+  linkedin_url?: string | null;
+  yelp_url?: string | null;
+  threads_url?: string | null;
 };
 
 type EquipmentRow = {
@@ -272,6 +281,7 @@ export default function CustomerProfilePage() {
         contact_name: (org as any).contact_name || '',
         specialties: Array.isArray(org.specialties) ? org.specialties : [],
         logo_url: org.logo_url || '',
+        ...socialFieldsFromOrg(org as Record<string, unknown>),
       });
       setLogoFile(null);
       setDirty(false);
@@ -502,6 +512,8 @@ export default function CustomerProfilePage() {
     return '';
   }, [form.contact_name, contacts]);
 
+  const socialLinks = useMemo(() => filledSocialLinks(form), [form]);
+
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col">
@@ -659,6 +671,21 @@ export default function CustomerProfilePage() {
                     </a>
                   </div>
                 )}
+                {socialLinks.length > 0 && (
+                  <div className="flex flex-wrap gap-x-3 gap-y-1 pt-0.5">
+                    {socialLinks.map((link) => (
+                      <a
+                        key={link.key}
+                        href={link.href}
+                        target="_blank"
+                        rel="noreferrer"
+                        className="text-[var(--gold)] hover:underline"
+                      >
+                        {link.label}
+                      </a>
+                    ))}
+                  </div>
+                )}
                 {primaryContactLabel && (
                   <div>👤 {primaryContactLabel}</div>
                 )}
@@ -718,6 +745,7 @@ export default function CustomerProfilePage() {
               value={form}
               onChange={handleFormChange}
               disabled={!canEdit}
+              orgType={customer.type}
               onLogoFileChange={(file) => {
                 setLogoFile(file);
                 setDirty(true);
