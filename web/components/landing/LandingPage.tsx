@@ -55,14 +55,14 @@ const AUDIENCES: {
     label: 'Repair companies',
     signup: '/signup/company',
     lines: [
-      'Color-coded shop calendar — assign calls by FSE',
+      'Color-coded shop calendar — assign calls by field engineer',
       'View service history on every job',
       'Keep service manuals in one place',
       'Bid on open service requests',
     ],
     shot: {
       src: '/landing/schedule.webp',
-      alt: 'Color-coded shop schedule with Assigned FSE legend for Alex Lee, Jordan Hale, Sam Ortiz, and Unassigned',
+      alt: 'Color-coded shop schedule with assigned field engineer legend for Alex Lee, Jordan Hale, Sam Ortiz, and Unassigned',
       caption: 'Shop schedule',
     },
   },
@@ -76,9 +76,9 @@ const AUDIENCES: {
       'View service history and track maintenance costs',
     ],
     shot: {
-      src: '/landing/reports.webp',
-      alt: 'Service reports list with drafts and completed work',
-      caption: 'Service history',
+      src: '/landing/directory.webp',
+      alt: 'Directory search to find a repair company among service companies, clinics, resellers, and suppliers',
+      caption: 'Directory',
     },
   },
   {
@@ -108,31 +108,31 @@ const HERO_SLIDES: {
     title: 'Schedule and Assign Service Calls',
     shot: {
       src: '/landing/schedule.webp',
-      alt: 'Color-coded August shop schedule with Assigned FSE legend',
+      alt: 'Color-coded August shop schedule with assigned field engineer legend',
       caption: 'Color-coded shop schedule',
     },
   },
   {
     audience: 'Repair companies',
-    title: 'Assign an FSE and email them the ticket',
+    title: 'Assign a field engineer and email them the ticket',
     shot: {
       src: '/landing/ticket-assign.webp',
-      alt: 'Edit Ticket form with Assign to FSE set to Jordan Hale',
-      caption: 'Assign to FSE',
+      alt: 'Edit Ticket form assigning Jordan Hale as field engineer',
+      caption: 'Assign to field engineer',
     },
   },
   {
     audience: 'Repair companies',
-    title: 'Assign shop test equipment to an FSE',
+    title: 'Assign shop test equipment to a field engineer',
     shot: {
       src: '/landing/team-equipment.webp',
-      alt: 'Team Management test equipment table with assign-to-FSE selects',
+      alt: 'Team Management test equipment table with assign-to-field-engineer selects',
       caption: 'Test equipment',
     },
   },
   {
     audience: 'Repair companies',
-    title: 'Bid on open service requests',
+    title: 'Marketplace — parts, used systems, and service needs',
     shot: {
       src: '/landing/marketplace.webp',
       alt: 'Marketplace home for parts, used systems, and service needs',
@@ -143,14 +143,14 @@ const HERO_SLIDES: {
     audience: 'Clinics',
     title: 'Find a Repair Company',
     shot: {
-      src: '/landing/marketplace.webp',
-      alt: 'Marketplace home for parts, used systems, and service needs',
-      caption: 'Marketplace',
+      src: '/landing/directory.webp',
+      alt: 'Directory search to find a repair company among service companies, clinics, resellers, and suppliers',
+      caption: 'Directory',
     },
   },
   {
     audience: 'Clinics',
-    title: 'Receive multiple bids on service requests',
+    title: 'View service history',
     shot: {
       src: '/landing/reports.webp',
       alt: 'Service reports list with drafts and completed work',
@@ -342,23 +342,28 @@ export function LandingPage() {
       <section className="lp-gallery" aria-label="Product screens">
         <Shot
           src="/landing/schedule.webp"
-          alt="Color-coded shop schedule with Assigned FSE legend"
+          alt="Color-coded shop schedule with assigned field engineer legend"
           caption="Shop schedule"
         />
         <Shot
           src="/landing/ticket-assign.webp"
-          alt="Edit Ticket with Assign to FSE highlighted"
-          caption="Assign to FSE"
+          alt="Edit Ticket assigning a field engineer"
+          caption="Assign to field engineer"
         />
         <Shot
           src="/landing/team-equipment.webp"
-          alt="Team Management test equipment assigned to an FSE"
+          alt="Team Management test equipment assigned to a field engineer"
           caption="Test equipment"
+        />
+        <Shot
+          src="/landing/directory.webp"
+          alt="Directory search to find a repair company among service companies, clinics, resellers, and suppliers"
+          caption="Directory"
         />
         <Shot
           src="/landing/reports.webp"
           alt="Service reports list with drafts and completed work"
-          caption="Service reports"
+          caption="Service history"
         />
         <Shot
           src="/landing/parts.webp"
@@ -367,7 +372,7 @@ export function LandingPage() {
         />
         <Shot
           src="/landing/marketplace.webp"
-          alt="Marketplace home for parts, used systems, and consumables"
+          alt="Marketplace home for parts, used systems, and service needs"
           caption="Marketplace"
         />
       </section>
