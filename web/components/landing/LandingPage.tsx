@@ -407,7 +407,7 @@ export function LandingPage() {
 
       <section className="lp-section lp-phones" id="app">
         <div>
-          <h2 className="lp-h2">Same account in the van</h2>
+          <h2 className="lp-h2">Same account in the field</h2>
           <p className="lp-lede">Schedule, parts, manuals, and reports on Android.</p>
         </div>
         <div className="lp-phone-wrap">
@@ -429,7 +429,7 @@ export function LandingPage() {
             <ul>
               <li>Cut the next call’s downtime</li>
               <li>Estimate and invoice the same job</li>
-              <li>Email the report from the van</li>
+              <li>Email the report on the jobsite</li>
             </ul>
             <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
           </Link>
