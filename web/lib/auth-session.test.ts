@@ -48,15 +48,41 @@ test('logged-out landing gives Free Plan a gold outline without making it primar
   assert.match(css, /\.lp-btn-primary\s*\{[^}]*background:\s*#FBBF24/);
 });
 
-test('logged-out landing shows schedule, assign-FSE, and test-equipment shots', () => {
+test('logged-out landing pairs each hero title with a unique matching still', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');
-  assert.match(source, /\/landing\/schedule\.webp/);
-  assert.match(source, /\/landing\/ticket-assign\.webp/);
-  assert.match(source, /\/landing\/team-equipment\.webp/);
-  assert.match(source, /Color-coded shop calendar/);
-  assert.match(source, /Assign an FSE and email them the ticket/);
-  assert.match(source, /Assign shop test equipment to an FSE/);
+  const heroBlock = source.split('const HERO_SLIDES')[1].split('const HERO_AUTO_MS')[0];
+  const titles = [...heroBlock.matchAll(/title: '([^']+)'/g)].map((m) => m[1]);
+  const srcs = [...heroBlock.matchAll(/src: '([^']+)'/g)].map((m) => m[1]);
+  assert.equal(titles.length, srcs.length);
+  assert.equal(new Set(srcs).size, srcs.length, 'hero stills must be unique');
+  const byTitle = Object.fromEntries(titles.map((t, i) => [t, srcs[i]]));
+  assert.equal(titles.length, 9);
+  assert.equal(byTitle['See open tickets and upcoming calls'], '/landing/dashboard.webp');
+  assert.equal(byTitle['Schedule and Assign Service Calls'], '/landing/schedule.webp');
+  assert.equal(byTitle['Assign a field engineer and email them the ticket'], '/landing/ticket-assign.webp');
+  assert.equal(byTitle['Assign shop test equipment to a field engineer'], '/landing/team-equipment.webp');
+  assert.equal(byTitle['Photometry tools on the job'], '/landing/app-calcs.webp');
+  assert.equal(byTitle['Marketplace — parts, used systems, and service needs'], '/landing/marketplace.webp');
+  assert.equal(byTitle['Find a Repair Company'], '/landing/directory.webp');
+  assert.equal(byTitle['View service history'], '/landing/reports.webp');
+  assert.equal(byTitle['Connect with Repair Companies and laser owners'], '/landing/parts.webp');
+  assert.match(source, /caption: 'Shop dashboard'/);
+  assert.match(source, /caption: 'Photometry tools'/);
+  assert.doesNotMatch(heroBlock, /Bid on open service requests/);
+  assert.doesNotMatch(heroBlock, /Receive multiple bids on service requests/);
+  assert.doesNotMatch(heroBlock, /\/landing\/login\.webp|\/landing\/signup\.webp|\/landing\/app-reports\.webp|\/landing\/app-hub\.webp/);
+  const galleryBlock = source.split('aria-label="Product screens"')[1].split('id="features"')[0];
+  assert.match(galleryBlock, /\/landing\/dashboard\.webp/);
+  assert.doesNotMatch(galleryBlock, /\/landing\/app-calcs\.webp/);
+  assert.match(source, /Color-coded shop calendar — assign calls by field engineer/);
+  assert.match(source, /id: 'clinic'[\s\S]*?src: '\/landing\/directory\.webp'/);
+  assert.match(source, /\/landing\/directory\.webp/);
+  assert.match(source, /Same account in the field/);
+  assert.match(source, /Email the report on the jobsite/);
+  assert.doesNotMatch(source, /\bFSE\b/);
+  const shell = readFileSync(join(here, '../components/landing/LandingShell.tsx'), 'utf8');
+  assert.doesNotMatch(shell, /\bFSE\b/);
 });
 
 test('/plans never imports sign-out helpers', () => {

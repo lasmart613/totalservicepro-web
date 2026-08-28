@@ -397,6 +397,13 @@ html.landing-mode body {
   background: #1A2233;
 }
 
+/* Phone stills (e.g. app-calcs.webp 390×844) stay portrait in the hero. */
+.lp-hero-slide .lp-shot.is-phone {
+  justify-self: center;
+  width: min(280px, 100%);
+  background: #1A2233;
+}
+
 .lp-gallery {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
