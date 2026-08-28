@@ -30,14 +30,17 @@ function Shot({
   src,
   alt,
   caption,
+  frame,
 }: {
   src: string;
   alt: string;
   caption?: string;
+  frame?: 'phone';
 }) {
+  const phone = frame === 'phone';
   return (
-    <figure className="lp-shot">
-      <img src={src} alt={alt} width={1400} height={900} />
+    <figure className={`lp-shot${phone ? ' is-phone' : ''}`}>
+      <img src={src} alt={alt} width={phone ? 390 : 1400} height={phone ? 844 : 900} />
       {caption ? <figcaption>{caption}</figcaption> : null}
     </figure>
   );
@@ -101,8 +104,17 @@ const AUDIENCES: {
 const HERO_SLIDES: {
   audience: string;
   title: string;
-  shot: { src: string; alt: string; caption: string };
+  shot: { src: string; alt: string; caption: string; frame?: 'phone' };
 }[] = [
+  {
+    audience: 'Repair companies',
+    title: 'See open tickets and upcoming calls',
+    shot: {
+      src: '/landing/dashboard.webp',
+      alt: 'Shop dashboard for Alex Lee with 7 open tickets, 3 today’s calls, upcoming service calls, and Quick Access to Photometry, Tech Hub, Schedule, and Reports',
+      caption: 'Shop dashboard',
+    },
+  },
   {
     audience: 'Repair companies',
     title: 'Schedule and Assign Service Calls',
@@ -128,6 +140,16 @@ const HERO_SLIDES: {
       src: '/landing/team-equipment.webp',
       alt: 'Team Management test equipment table with assign-to-field-engineer selects',
       caption: 'Test equipment',
+    },
+  },
+  {
+    audience: 'Repair companies',
+    title: 'Photometry tools on the job',
+    shot: {
+      src: '/landing/app-calcs.webp',
+      alt: 'Android Photometry Tools grid with Fluence, Irradiance, Duty Cycle, Wavelength, and Avg Power',
+      caption: 'Photometry tools',
+      frame: 'phone',
     },
   },
   {
@@ -263,7 +285,12 @@ function HeroCarousel() {
                   <p className="lp-title">{s.title}</p>
                 )}
               </div>
-              <Shot src={s.shot.src} alt={s.shot.alt} caption={s.shot.caption} />
+              <Shot
+                src={s.shot.src}
+                alt={s.shot.alt}
+                caption={s.shot.caption}
+                frame={s.shot.frame}
+              />
             </div>
           ))}
         </div>
@@ -340,6 +367,11 @@ export function LandingPage() {
       <HeroCarousel />
 
       <section className="lp-gallery" aria-label="Product screens">
+        <Shot
+          src="/landing/dashboard.webp"
+          alt="Shop dashboard for Alex Lee with open tickets, today’s calls, and upcoming service calls"
+          caption="Shop dashboard"
+        />
         <Shot
           src="/landing/schedule.webp"
           alt="Color-coded shop schedule with assigned field engineer legend"
