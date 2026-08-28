@@ -3,7 +3,7 @@
  * Used by New Service Call and Edit Ticket.
  */
 
-export type TicketAssignee = { id: string; name: string; role: string };
+export type TicketAssignee = { id: string; name: string; role: string; email?: string };
 
 const ASSIGNABLE_ROLES = new Set([
   'fse',
@@ -74,10 +74,12 @@ export function toAssigneeOpt(m: {
   email?: string | null;
   role?: string | null;
 }): TicketAssignee {
+  const email = String(m.email || '').trim();
   return {
     id: String(m.id),
     name: memberDisplayName(m),
     role: String(m.role || 'fse'),
+    ...(email ? { email } : {}),
   };
 }
 
@@ -140,10 +142,11 @@ export async function loadTicketAssignees(
     meId?: string | null;
     selfName?: string;
     selfRole?: string;
+    selfEmail?: string;
     keepIds?: Array<string | null | undefined>;
   }
 ): Promise<TicketAssignee[]> {
-  const { orgId, meId = null, selfName = '', selfRole = '', keepIds = [] } = opts;
+  const { orgId, meId = null, selfName = '', selfRole = '', selfEmail = '', keepIds = [] } = opts;
   if (orgId == null && !meId) return [];
 
   const members = orgId != null ? await fetchShopMembers(supabase, orgId) : [];
@@ -161,10 +164,12 @@ export async function loadTicketAssignees(
   }
 
   if (meId && !optsOut.some((o) => o.id === meId)) {
+    const email = String(selfEmail || '').trim();
     optsOut.unshift({
       id: meId,
       name: selfName || 'Me',
       role: selfRole || 'fse',
+      ...(email ? { email } : {}),
     });
   }
 
@@ -186,11 +191,25 @@ export function shouldNotifyAssignee(opts: {
   return true;
 }
 
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** Manual resend button: assigned FSE with an email on the shop roster. */
+export function canEmailAssignedFse(
+  assignees: TicketAssignee[],
+  assignedId: string | null | undefined
+): boolean {
+  const id = String(assignedId || '').trim();
+  if (!id || !looksLikeUuid(id)) return false;
+  const email = String(assignees.find((a) => a.id === id)?.email || '').trim();
+  return EMAIL_RE.test(email);
+}
+
 export async function notifyTicketAssignee(
   supabase: { auth: { getSession: () => Promise<{ data: { session: { access_token?: string } | null } }> } },
   ticketId: unknown,
-  assignedTo: string
-): Promise<{ emailed?: boolean; error?: string }> {
+  assignedTo: string,
+  opts?: { force?: boolean }
+): Promise<{ emailed?: boolean; error?: string; skipped?: string }> {
   const { data: sessionData } = await supabase.auth.getSession();
   const token = sessionData.session?.access_token;
   if (!token) return { emailed: false, error: 'Not signed in' };
@@ -200,7 +219,11 @@ export async function notifyTicketAssignee(
       Authorization: `Bearer ${token}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ ticketId, assignedTo }),
+    body: JSON.stringify({
+      ticketId,
+      assignedTo,
+      ...(opts?.force ? { force: true } : {}),
+    }),
   });
   return res.json().catch(() => ({}));
 }

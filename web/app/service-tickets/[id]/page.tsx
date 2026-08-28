@@ -5,7 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { ArrowLeft, Edit2, Save, X } from 'lucide-react';
+import { ArrowLeft, Edit2, Mail, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { loadLinkedCustomers } from '@/lib/customer-form';
 import { updateOmittingCharOverflow } from '@/lib/char-overflow';
@@ -13,6 +13,7 @@ import { AssignFseSelect } from '@/components/AssignFseSelect';
 import {
   applyTicketAssignee,
   assigneeName,
+  canEmailAssignedFse,
   loadTicketAssignees,
   looksLikeUuid,
   notifyTicketAssignee,
@@ -53,6 +54,7 @@ export default function ServiceTicketDetail() {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const [saving, setSaving] = useState(false);
+  const [emailingFse, setEmailingFse] = useState(false);
   const [organizations, setOrganizations] = useState<any[]>([]);
   const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
@@ -113,6 +115,7 @@ export default function ServiceTicketDetail() {
         let meId: string | null = null;
         let meName = '';
         let meRole = '';
+        let meEmail = '';
         try {
           const user =
             (await supabase.auth.getSession()).data.session?.user ??
@@ -131,6 +134,7 @@ export default function ServiceTicketDetail() {
               prof?.email ||
               '';
             meRole = prof?.role || '';
+            meEmail = prof?.email || user?.email || '';
             setSelfName(meName);
           }
         } catch (e) {
@@ -144,6 +148,7 @@ export default function ServiceTicketDetail() {
               meId,
               selfName: meName,
               selfRole: meRole,
+              selfEmail: meEmail,
               keepIds: [assigned],
             })
           );
@@ -262,6 +267,32 @@ export default function ServiceTicketDetail() {
     setIsEditing(false);
   };
 
+  const handleEmailFse = async () => {
+    const assignedTo = ticketAssigneeId(ticket);
+    if (!canEmailAssignedFse(assignees, assignedTo)) {
+      toast.error('Assigned FSE has no email on file.');
+      return;
+    }
+    setEmailingFse(true);
+    try {
+      const who = assigneeName(assignees, assignedTo, 'the assigned FSE');
+      const json = await notifyTicketAssignee(supabase, ticketId, assignedTo, { force: true });
+      if (json.emailed) {
+        toast.success(`Ticket emailed to ${who}.`);
+      } else {
+        toast.error(`Could not email ${who}${json.error ? `: ${json.error}` : '.'}`);
+      }
+    } catch (emailErr) {
+      console.warn('email assignee', emailErr);
+      toast.error('Could not email the assigned FSE.');
+    } finally {
+      setEmailingFse(false);
+    }
+  };
+
+  const showEmailFse =
+    canEmailAssignedFse(assignees, ticketAssigneeId(ticket)) && !saving;
+
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -298,6 +329,16 @@ export default function ServiceTicketDetail() {
           </div>
 
           <div className="flex gap-3">
+            {showEmailFse && (
+              <button
+                type="button"
+                onClick={handleEmailFse}
+                disabled={emailingFse}
+                className="btn btn-secondary flex items-center gap-2 disabled:opacity-60"
+              >
+                <Mail size={18} /> {emailingFse ? 'Sending...' : 'Email ticket to FSE'}
+              </button>
+            )}
             {!isEditing ? (
               <button onClick={() => setIsEditing(true)} className="btn btn-primary flex items-center gap-2">
                 <Edit2 size={18} /> Edit Ticket
@@ -431,6 +472,16 @@ export default function ServiceTicketDetail() {
                   )
                 }
               />
+              {showEmailFse && (
+                <button
+                  type="button"
+                  onClick={handleEmailFse}
+                  disabled={emailingFse}
+                  className="btn btn-secondary text-sm flex items-center gap-2 disabled:opacity-60"
+                >
+                  <Mail size={16} /> {emailingFse ? 'Sending...' : 'Resend ticket'}
+                </button>
+              )}
               <Field label="Arrival Time" value={ticket.arrival_time} />
               <Field label="Departure Time" value={ticket.departure_time} />
             </div>

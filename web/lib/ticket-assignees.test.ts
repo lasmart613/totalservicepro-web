@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   applyTicketAssignee,
   assigneeName,
+  canEmailAssignedFse,
   isAssignableMember,
   looksLikeUuid,
   memberDisplayName,
@@ -39,6 +40,18 @@ test('shouldNotifyAssignee emails only a new FSE, not re-save or unassign', () =
   assert.equal(shouldNotifyAssignee({ previousId: TONY, nextId: '', actorId: LARRY }), false);
   assert.equal(shouldNotifyAssignee({ previousId: '', nextId: LARRY, actorId: LARRY }), false);
   assert.equal(shouldNotifyAssignee({ previousId: TONY, nextId: LARRY, actorId: 'other' }), true);
+});
+
+test('canEmailAssignedFse requires a rostered FSE with an email', () => {
+  const roster = [
+    { id: TONY, name: 'Tony Martin', role: 'fse', email: 'tony@shop.test' },
+    { id: LARRY, name: 'Larry Smart', role: 'admin' },
+  ];
+  assert.equal(canEmailAssignedFse(roster, TONY), true);
+  assert.equal(canEmailAssignedFse(roster, LARRY), false);
+  assert.equal(canEmailAssignedFse(roster, ''), false);
+  assert.equal(canEmailAssignedFse(roster, 'Lar'), false);
+  assert.equal(canEmailAssignedFse(roster, '33333333-3333-4333-8333-333333333333'), false);
 });
 
 test('applyTicketAssignee writes both columns and allows clear', () => {
@@ -86,6 +99,7 @@ test('loadTicketAssignees keeps shop FSEs and drops customer accounts', async ()
   const opts = await loadTicketAssignees(supabase, { orgId: 12, meId: LARRY, selfName: 'Larry Smart' });
   assert.deepEqual(opts.map((o) => o.id).sort(), [LARRY, TONY].sort());
   assert.ok(!opts.some((o) => o.role === 'customer'));
+  assert.equal(opts.find((o) => o.id === TONY)?.email, 'tony@shop.test');
 });
 
 test('shop FSEs and admins are assignable; customer accounts are not', () => {
@@ -95,6 +109,10 @@ test('shop FSEs and admins are assignable; customer accounts are not', () => {
   assert.equal(isAssignableMember({ id: 'cust', role: 'customer' }, 'cust'), true);
   assert.equal(memberDisplayName({ first_name: 'Tony', last_name: 'Martin' }), 'Tony Martin');
   assert.equal(toAssigneeOpt({ id: TONY, first_name: 'Tony', last_name: 'Martin', role: 'fse' }).name, 'Tony Martin');
+  assert.equal(
+    toAssigneeOpt({ id: TONY, first_name: 'Tony', last_name: 'Martin', role: 'fse', email: 'tony@shop.test' }).email,
+    'tony@shop.test'
+  );
   const sorted = sortTicketAssignees(
     [
       { id: TONY, name: 'Tony Martin', role: 'fse' },
@@ -121,6 +139,20 @@ test('Edit Ticket has Assign to FSE and persist/reload', () => {
   assert.doesNotMatch(edit, /facebook|instagram|linkedin|twitter/i);
 });
 
+test('Edit Ticket has a manual resend button that force-notifies the saved assignee', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const edit = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
+  assert.match(edit, /canEmailAssignedFse/);
+  assert.match(edit, /Email ticket to FSE|Resend ticket/);
+  assert.match(edit, /handleEmailFse/);
+  assert.match(edit, /notifyTicketAssignee\([\s\S]*force:\s*true/);
+  assert.match(edit, /shouldNotifyAssignee/);
+  assert.doesNotMatch(edit, /shouldNotifyAssignee\([\s\S]*force:\s*true/);
+  const saveIdx = edit.indexOf('if (shouldNotifyAssignee');
+  const forceIdx = edit.indexOf('force: true');
+  assert.ok(saveIdx > 0 && forceIdx > saveIdx, 'manual force notify is separate from auto-assign');
+});
+
 test('New Service Call writes assigned_fse and uses the shared FSE picker', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const schedule = readFileSync(join(here, '../app/service-schedule/page.tsx'), 'utf8');
@@ -128,6 +160,32 @@ test('New Service Call writes assigned_fse and uses the shared FSE picker', () =
   assert.match(schedule, /applyTicketAssignee/);
   assert.match(schedule, /loadTicketAssignees/);
   assert.match(schedule, /insertOmittingCharOverflow/);
+});
+
+test('notifyTicketAssignee posts force only when asked', async () => {
+  const { notifyTicketAssignee } = await import('./ticket-assignees.ts');
+  const calls: Array<{ url: string; init: RequestInit }> = [];
+  const prev = globalThis.fetch;
+  globalThis.fetch = (async (url: string | URL, init?: RequestInit) => {
+    calls.push({ url: String(url), init: init || {} });
+    return new Response(JSON.stringify({ ok: true, emailed: true }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }) as typeof fetch;
+  const supabase = {
+    auth: { getSession: async () => ({ data: { session: { access_token: 'tok' } } }) },
+  };
+  try {
+    await notifyTicketAssignee(supabase, 99, TONY);
+    await notifyTicketAssignee(supabase, 99, TONY, { force: true });
+  } finally {
+    globalThis.fetch = prev;
+  }
+  assert.equal(calls.length, 2);
+  assert.equal(JSON.parse(String(calls[0].init.body)).force, undefined);
+  assert.equal(JSON.parse(String(calls[1].init.body)).force, true);
+  assert.equal(JSON.parse(String(calls[1].init.body)).assignedTo, TONY);
 });
 
 test('assigned_fse migration is uuid and does not reopen CHAR(3) toast work', () => {
