@@ -91,6 +91,13 @@ test('/plans tiles: Premium 15, Team 50, Free does not claim a full library', ()
   const tiles = readFileSync(join(here, './billing/plan-tiles.ts'), 'utf8');
   assert.match(tiles, /export const TEAM_MANUALS_LINE = '50 service manuals'/);
   assert.doesNotMatch(tiles, /Unlimited service manuals/);
+  const companyBlock = tiles.split('const COMPANY_TILES')[1].split('const OWNER_TILES')[0];
+  const ownerBlock = tiles.split('const OWNER_TILES')[1].split('const SUPPLIER_TILES')[0];
+  const supplierBlock = tiles.split('const SUPPLIER_TILES')[1].split('export const PLAN_TILE_COPY')[0];
+  assert.match(companyBlock, /PREMIUM_MANUALS_LINE/);
+  assert.match(companyBlock, /TEAM_MANUALS_LINE/);
+  assert.doesNotMatch(ownerBlock, /PREMIUM_MANUALS_LINE|TEAM_MANUALS_LINE|service manuals/i);
+  assert.doesNotMatch(supplierBlock, /PREMIUM_MANUALS_LINE|TEAM_MANUALS_LINE|service manuals/i);
   const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');
   assert.match(source, /planTileLines/);
   assert.match(source, /PlanAudienceSelector/);

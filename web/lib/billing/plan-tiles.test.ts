@@ -76,9 +76,27 @@ test('shared entitlements appear on every audience and every tier', () => {
     }
     assert.ok(planTileLines(audience, 'free').includes(FREE_AI_LINE));
     assert.ok(planTileLines(audience, 'premium').includes(PREMIUM_AI_LINE));
-    assert.ok(planTileLines(audience, 'premium').includes(PREMIUM_MANUALS_LINE));
     assert.ok(planTileLines(audience, 'team').includes(TEAM_AI_LINE));
-    assert.ok(planTileLines(audience, 'team').includes(TEAM_MANUALS_LINE));
+  }
+});
+
+test('service manuals appear on Service Company tiles only', () => {
+  assert.ok(planTileLines('company', 'premium').includes(PREMIUM_MANUALS_LINE));
+  assert.ok(planTileLines('company', 'team').includes(TEAM_MANUALS_LINE));
+  assert.equal(PREMIUM_MANUALS_LINE, '15 service manuals');
+  assert.equal(TEAM_MANUALS_LINE, '50 service manuals');
+
+  for (const audience of ['owner', 'supplier'] as const) {
+    for (const tile of TILES) {
+      const lines = planTileLines(audience, tile);
+      assert.equal(
+        lines.filter((l) => /service manuals/i.test(l)).length,
+        0,
+        `${audience} ${tile} must not advertise service manuals`
+      );
+      assert.ok(!lines.includes(PREMIUM_MANUALS_LINE), `${audience} ${tile} premium manuals`);
+      assert.ok(!lines.includes(TEAM_MANUALS_LINE), `${audience} ${tile} team manuals`);
+    }
   }
 });
 
