@@ -147,7 +147,12 @@ test('Edit Ticket has a manual resend button that force-notifies the saved assig
   assert.match(edit, /handleEmailFse/);
   assert.match(edit, /notifyTicketAssignee\([\s\S]*force:\s*true/);
   assert.match(edit, /shouldNotifyAssignee/);
-  assert.doesNotMatch(edit, /shouldNotifyAssignee\([\s\S]*force:\s*true/);
+  const autoCall = edit.slice(
+    edit.indexOf('if (shouldNotifyAssignee'),
+    edit.indexOf('} else {', edit.indexOf('if (shouldNotifyAssignee'))
+  );
+  assert.match(autoCall, /notifyTicketAssignee\(supabase, ticketId, assignedTo\)/);
+  assert.doesNotMatch(autoCall, /force:\s*true/);
   const saveIdx = edit.indexOf('if (shouldNotifyAssignee');
   const forceIdx = edit.indexOf('force: true');
   assert.ok(saveIdx > 0 && forceIdx > saveIdx, 'manual force notify is separate from auto-assign');
