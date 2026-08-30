@@ -21,7 +21,10 @@ test('home page does not flash marketing while a session is in localStorage', ()
   assert.match(source, /hasBrowserAuthHint/);
   assert.match(source, /getSession/);
   assert.match(source, /showDashboardSplash/);
+  assert.match(source, /shouldShowHomeDashboardSplash/);
   assert.match(source, /authPending/);
+  assert.match(source, /return <LandingPage \/>/);
+  assert.doesNotMatch(source, /authHintReady/);
 });
 
 test('landing Free Plan CTAs pass role into /plans', () => {
