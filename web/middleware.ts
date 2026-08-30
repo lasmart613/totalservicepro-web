@@ -38,7 +38,7 @@ export function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Skip static assets only
-    '/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)',
+    // Skip CDN/static files so /ads.txt is never rewritten by the app matcher
+    '/((?!_next/static|_next/image|favicon.ico|ads\\.txt|.*\\.(?:svg|png|jpg|jpeg|gif|webp|txt)$).*)',
   ],
 }
