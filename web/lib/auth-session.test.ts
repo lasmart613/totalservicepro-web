@@ -89,11 +89,16 @@ test('logged-out landing pairs each hero title with a unique matching still', ()
   const galleryBlock = source.split('aria-label="Product screens"')[1].split('id="features"')[0];
   assert.match(galleryBlock, /\/landing\/dashboard\.webp/);
   assert.doesNotMatch(galleryBlock, /\/landing\/app-calcs\.webp/);
+  assert.match(source, /What you get/);
   assert.match(source, /Color-coded shop calendar — assign calls by field engineer/);
   assert.match(source, /id: 'clinic'[\s\S]*?src: '\/landing\/directory\.webp'/);
   assert.match(source, /\/landing\/directory\.webp/);
   assert.match(source, /Same account in the field/);
-  assert.match(source, /Email the report on the jobsite/);
+  assert.doesNotMatch(source, /id="join"|lp-paths/);
+  assert.doesNotMatch(source, /Email the report on the jobsite/);
+  assert.doesNotMatch(source, /Cut the next call/);
+  assert.doesNotMatch(source, /Maximize uptime on every box/);
+  assert.doesNotMatch(source, /List what is on the shelf/);
   assert.doesNotMatch(source, /\bFSE\b/);
   const shell = readFileSync(join(here, '../components/landing/LandingShell.tsx'), 'utf8');
   assert.doesNotMatch(shell, /\bFSE\b/);

@@ -459,51 +459,6 @@ export function LandingPage() {
           </div>
         </div>
       </section>
-
-      <section className="lp-section" id="join">
-        <h2 className="lp-h2">Register for Total Service Pro</h2>
-        <p className="lp-lede">Repair company, clinic, or parts seller.</p>
-        <div className="lp-paths">
-          <Link href="/signup/company" className="lp-path">
-            <h3>Repair company</h3>
-            <ul>
-              <li>Cut the next call’s downtime</li>
-              <li>Estimate and invoice the same job</li>
-              <li>Email the report on the jobsite</li>
-            </ul>
-            <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
-          </Link>
-          <Link href="/signup/owner" className="lp-path">
-            <h3>Laser Owner</h3>
-            <ul>
-              <li>Maximize uptime on every box</li>
-              <li>Post a repair and take bids</li>
-              <li>History stays with the serial</li>
-            </ul>
-            <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
-          </Link>
-          <Link href="/signup/supplier" className="lp-path">
-            <h3>Parts seller</h3>
-            <ul>
-              <li>List what is on the shelf</li>
-              <li>Public pages with checkout</li>
-              <li>Answer demand while it is open</li>
-            </ul>
-            <span className="lp-btn lp-btn-primary">Register for Total Service Pro</span>
-          </Link>
-        </div>
-        <div className="lp-actions" style={{ marginTop: 28 }}>
-          <Link href="/plans" className="lp-btn lp-btn-outline">
-            Start on the free plan
-          </Link>
-          <Link href="/login" className="lp-btn lp-btn-ghost">
-            Already registered? Sign in
-          </Link>
-          <Link href="/directory" className="lp-btn lp-btn-ghost">
-            Directory
-          </Link>
-        </div>
-      </section>
     </LandingShell>
   );
 }
