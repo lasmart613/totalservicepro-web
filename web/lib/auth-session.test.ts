@@ -21,7 +21,10 @@ test('home page does not flash marketing while a session is in localStorage', ()
   assert.match(source, /hasBrowserAuthHint/);
   assert.match(source, /getSession/);
   assert.match(source, /showDashboardSplash/);
+  assert.match(source, /shouldShowHomeDashboardSplash/);
   assert.match(source, /authPending/);
+  assert.match(source, /return <LandingPage \/>/);
+  assert.doesNotMatch(source, /authHintReady/);
 });
 
 test('landing Free Plan CTAs pass role into /plans', () => {
@@ -31,6 +34,17 @@ test('landing Free Plan CTAs pass role into /plans', () => {
   assert.match(source, /shop: 'company'/);
   assert.match(source, /clinic: 'owner'/);
   assert.match(source, /parts: 'supplier'/);
+});
+
+test('logged-out hero has one quiet benefits subhead under the H1', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const page = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');
+  const css = readFileSync(join(here, '../components/landing/landing.css'), 'utf8');
+  assert.match(page, /See open tickets and upcoming calls/);
+  assert.match(page, /Tickets, parts, and the marketplace in one shop\. Free to start\./);
+  assert.match(page, /lp-hero-subhead/);
+  assert.match(css, /\.lp-hero-subhead\s*\{/);
+  assert.doesNotMatch(page, /lp-hero-benefits|lp-mini-carousel|hero-cards/);
 });
 
 test('logged-out landing gives Free Plan a gold outline without making it primary', () => {

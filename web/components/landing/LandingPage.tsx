@@ -284,6 +284,9 @@ function HeroCarousel() {
                 ) : (
                   <p className="lp-title">{s.title}</p>
                 )}
+                <p className="lp-hero-subhead">
+                  Tickets, parts, and the marketplace in one shop. Free to start.
+                </p>
               </div>
               <Shot
                 src={s.shot.src}

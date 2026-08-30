@@ -16,6 +16,7 @@ import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel,
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { destAfterInviteClaim, inviteInPlay } from '@/lib/invite-claim';
 import { hasBrowserAuthHint } from '@/lib/auth-session';
+import { shouldShowHomeDashboardSplash } from '@/lib/home-splash';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import {
@@ -57,14 +58,12 @@ export default function HomePage() {
   const [fseStats, setFseStats] = useState<any[]>([]);
   const [upcoming, setUpcoming] = useState<any[]>([]);
   const [authHint, setAuthHint] = useState(false);
-  const [authHintReady, setAuthHintReady] = useState(false);
 
   const supabase = getSupabaseClient();
   const upgrade = useUpgradeEntry();
 
   useEffect(() => {
     setAuthHint(hasBrowserAuthHint());
-    setAuthHintReady(true);
   }, []);
 
   useEffect(() => {
@@ -433,7 +432,10 @@ export default function HomePage() {
     setSupplierStats({ catalog, listings, openDemand, brands });
   }
 
-  const showDashboardSplash = loading && (!!user || !authHintReady || authHint);
+  // No session / no localStorage hint: render marketing on SSR and first paint
+  // so crawlers are not stuck on "Loading dashboard…". Signed-in browsers still
+  // swap to the splash + dashboard after the auth hint is read.
+  const showDashboardSplash = shouldShowHomeDashboardSplash(loading, !!user, authHint);
 
   if (showDashboardSplash) {
     return (
