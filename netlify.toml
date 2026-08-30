@@ -21,6 +21,16 @@
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
+# /ads.txt must stay a static text/plain file (Google AdSense crawler).
+# There is no /* SPA rewrite in this toml; Next.js Runtime still 404s unknown
+# paths as HTML. public/ads.txt is served by Netlify before that handler
+# (same as public/*.svg). This header pins the MIME type the crawler expects.
+[[headers]]
+  for = "/ads.txt"
+  [headers.values]
+    Content-Type = "text/plain; charset=utf-8"
+    X-Content-Type-Options = "nosniff"
+
 [[headers]]
   for = "/*"
   [headers.values]
