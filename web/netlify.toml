@@ -13,6 +13,11 @@
   package = "@netlify/plugin-nextjs"
 
 [[headers]]
+  for = "/ads.txt"
+  [headers.values]
+    Content-Type = "text/plain; charset=utf-8"
+
+[[headers]]
   for = "/*"
   [headers.values]
     X-Frame-Options = "DENY"
