@@ -47,6 +47,10 @@ export function getSupabaseUrl(): string {
   return supabaseUrl();
 }
 
+export function getSupabaseAnonKey(): string {
+  return supabaseAnonKey();
+}
+
 // Types for common rows (expand as needed; or use Supabase generated types later)
 export type UserProfile = {
   id: string;

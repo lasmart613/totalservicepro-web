@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { ReportIssueControl } from '@/components/ReportIssueControl';
 import './landing.css';
 
 export function LandingShell({ children }: { children: React.ReactNode }) {
@@ -33,6 +34,7 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
           <Link href="/plans">Free Plan</Link>
         </nav>
         <div className="lp-nav-cta">
+          <ReportIssueControl variant="landing" />
           <Link href="/login" className="lp-btn lp-btn-ghost">
             Sign in
           </Link>
