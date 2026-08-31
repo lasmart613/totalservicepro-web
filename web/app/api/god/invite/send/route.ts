@@ -8,6 +8,10 @@ import {
   shopInviteHtml,
   shopInviteText,
 } from '@/lib/shop-invite-email';
+import {
+  newUnsubscribeToken,
+  shopInviteResendHeaders,
+} from '@/lib/shop-invite-unsubscribe';
 import { fetchAllPages } from '@/lib/supabase/paginate';
 
 export const dynamic = 'force-dynamic';
@@ -49,7 +53,25 @@ async function loadGodOrgs(): Promise<ReturnType<typeof assembleGodOrgs>> {
   return assembleGodOrgs({ orgs: orgs || [], members });
 }
 
-async function sendResend(to: string): Promise<{ ok: boolean; id?: string; error?: string }> {
+async function recipientUnsubscribed(email: string): Promise<boolean> {
+  try {
+    const { data, error } = await getSupabaseAdmin()
+      .from('god_email_sends')
+      .select('id')
+      .ilike('recipient_email', email)
+      .not('unsubscribed_at', 'is', null)
+      .limit(1);
+    if (error) return false;
+    return Boolean(data?.length);
+  } catch {
+    return false;
+  }
+}
+
+async function sendResend(
+  to: string,
+  unsubscribeToken: string
+): Promise<{ ok: boolean; id?: string; error?: string }> {
   const key = process.env.RESEND_API_KEY;
   if (!key) return { ok: false, error: 'RESEND_API_KEY not configured' };
   const from =
@@ -68,6 +90,7 @@ async function sendResend(to: string): Promise<{ ok: boolean; id?: string; error
       subject: SHOP_INVITE_SUBJECT,
       html: shopInviteHtml(),
       text: shopInviteText(),
+      headers: shopInviteResendHeaders(unsubscribeToken),
     }),
   });
   const result = await rr.json().catch(() => ({}));
@@ -83,19 +106,29 @@ async function logSend(row: {
   recipientEmail: string;
   sentByUserId: string;
   sentByEmail: string;
+  unsubscribeToken: string;
 }): Promise<{ ok: boolean; error?: string }> {
   if (!hasServiceRole()) return { ok: false, error: 'Service role missing' };
+  const payload = {
+    organization_id: row.organizationId,
+    organization_name: row.organizationName,
+    recipient_email: row.recipientEmail,
+    subject: SHOP_INVITE_SUBJECT,
+    template_key: SHOP_INVITE_TEMPLATE_KEY,
+    sent_by_user_id: row.sentByUserId,
+    sent_by_email: row.sentByEmail,
+    unsubscribe_token: row.unsubscribeToken,
+  };
   try {
-    const { error } = await getSupabaseAdmin().from('god_email_sends').insert({
-      organization_id: row.organizationId,
-      organization_name: row.organizationName,
-      recipient_email: row.recipientEmail,
-      subject: SHOP_INVITE_SUBJECT,
-      template_key: SHOP_INVITE_TEMPLATE_KEY,
-      sent_by_user_id: row.sentByUserId,
-      sent_by_email: row.sentByEmail,
-    });
-    if (error) return { ok: false, error: error.message };
+    const first = await getSupabaseAdmin().from('god_email_sends').insert(payload);
+    if (!first.error) return { ok: true };
+    if (!/column|schema cache|does not exist/i.test(first.error.message || '')) {
+      return { ok: false, error: first.error.message };
+    }
+    const { unsubscribe_token, ...legacy } = payload;
+    void unsubscribe_token;
+    const fallback = await getSupabaseAdmin().from('god_email_sends').insert(legacy);
+    if (fallback.error) return { ok: false, error: fallback.error.message };
     return { ok: true };
   } catch (e: unknown) {
     return { ok: false, error: e instanceof Error ? e.message : 'Could not log send' };
@@ -159,7 +192,18 @@ export async function POST(req: NextRequest) {
       });
       continue;
     }
-    const sent = await sendResend(recipient);
+    if (await recipientUnsubscribed(recipient)) {
+      results.push({
+        organizationId: org.id,
+        organizationName: org.name,
+        recipient,
+        ok: false,
+        error: 'Recipient unsubscribed from shop invites',
+      });
+      continue;
+    }
+    const unsubscribeToken = newUnsubscribeToken();
+    const sent = await sendResend(recipient, unsubscribeToken);
     if (sent.ok) {
       const logged = await logSend({
         organizationId: org.id,
@@ -167,6 +211,7 @@ export async function POST(req: NextRequest) {
         recipientEmail: recipient,
         sentByUserId: gate.caller.userId,
         sentByEmail: gate.caller.email,
+        unsubscribeToken,
       });
       results.push({
         organizationId: org.id,

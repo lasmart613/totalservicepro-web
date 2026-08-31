@@ -70,4 +70,6 @@ test('send route never blasts and uses Resend', () => {
   assert.match(route, /selectedOrgIds/);
   assert.doesNotMatch(route, /send to every org|blast|on deploy/i);
   assert.match(route, /organization_ids/);
+  assert.match(route, /shopInviteResendHeaders/);
+  assert.match(route, /List-Unsubscribe|headers: shopInviteResendHeaders/);
 });
