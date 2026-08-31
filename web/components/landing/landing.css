@@ -328,6 +328,48 @@ html.landing-mode body {
   border-color: #FBBF24;
 }
 
+.lp-hero-copy {
+  position: relative;
+  isolation: isolate;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  box-sizing: border-box;
+  min-height: 240px;
+  padding: 28px 18px 32px 4px;
+  background-color: #111827;
+  background-image: var(--lp-hero-cover);
+  background-size: cover;
+  background-position: 18% center;
+  background-repeat: no-repeat;
+}
+
+.lp-hero-copy::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background: linear-gradient(
+    100deg,
+    rgba(17, 24, 39, 0.74) 0%,
+    rgba(17, 24, 39, 0.66) 50%,
+    rgba(17, 24, 39, 0.60) 100%
+  );
+}
+
+.lp-hero-copy > * {
+  position: relative;
+  z-index: 1;
+}
+
+.lp-hero-copy .lp-kicker,
+.lp-hero-copy .lp-title,
+.lp-hero-copy .lp-hero-subhead {
+  text-shadow: 0 1px 16px rgba(17, 24, 39, 0.92);
+}
+
 .lp-kicker {
   font-size: 12px;
   font-weight: 700;
@@ -657,6 +699,21 @@ html.landing-mode body {
   .lp-hero-slide,
   .lp-phones {
     grid-template-columns: 1fr;
+  }
+
+  /* Stacked layout: keep a faint wash so copy stays readable. */
+  .lp-hero-copy {
+    min-height: 0;
+    padding: 16px 12px 20px;
+    background-position: center 28%;
+  }
+
+  .lp-hero-copy::before {
+    background: linear-gradient(
+      180deg,
+      rgba(17, 24, 39, 0.88) 0%,
+      rgba(17, 24, 39, 0.82) 100%
+    );
   }
 
   .lp-role-cols {
