@@ -104,11 +104,13 @@ const AUDIENCES: {
 const HERO_SLIDES: {
   audience: string;
   title: string;
+  sub: string;
   shot: { src: string; alt: string; caption: string; frame?: 'phone' };
 }[] = [
   {
     audience: 'Repair companies',
-    title: 'See open tickets and upcoming calls',
+    title: 'See Open Tickets and Upcoming Calls',
+    sub: 'Color-coded jobs for the whole shop.',
     shot: {
       src: '/landing/dashboard.webp',
       alt: 'Shop dashboard for Alex Lee with 7 open tickets, 3 today’s calls, upcoming service calls, and Quick Access to Photometry, Tech Hub, Schedule, and Reports',
@@ -118,6 +120,7 @@ const HERO_SLIDES: {
   {
     audience: 'Clinics',
     title: 'Find a Repair Company',
+    sub: 'Match your lasers with service companies that can work on them.',
     shot: {
       src: '/landing/directory.webp',
       alt: 'Directory search to find a repair company among service companies, clinics, resellers, and suppliers',
@@ -126,7 +129,8 @@ const HERO_SLIDES: {
   },
   {
     audience: 'Parts sellers',
-    title: 'Connect with Repair Companies and laser owners',
+    title: 'Connect with Repair Companies and Laser Owners',
+    sub: 'Get found when a shop needs a part that’s on your shelf.',
     shot: {
       src: '/landing/parts.webp',
       alt: 'Parts marketplace with live listings and prices',
@@ -136,6 +140,7 @@ const HERO_SLIDES: {
   {
     audience: 'Repair companies',
     title: 'Schedule and Assign Service Calls',
+    sub: 'Assign each call to a field engineer.',
     shot: {
       src: '/landing/schedule.webp',
       alt: 'Color-coded August shop schedule with assigned field engineer legend',
@@ -144,7 +149,8 @@ const HERO_SLIDES: {
   },
   {
     audience: 'Clinics',
-    title: 'View service history',
+    title: 'View Service History',
+    sub: 'Track work and maintenance costs on every laser.',
     shot: {
       src: '/landing/reports.webp',
       alt: 'Service reports list with drafts and completed work',
@@ -153,7 +159,8 @@ const HERO_SLIDES: {
   },
   {
     audience: 'Repair companies',
-    title: 'Assign a field engineer and email them the ticket',
+    title: 'Assign a Field Engineer and Email Them the Ticket',
+    sub: 'They get the job details when you assign it.',
     shot: {
       src: '/landing/ticket-assign.webp',
       alt: 'Edit Ticket form assigning Jordan Hale as field engineer',
@@ -162,7 +169,8 @@ const HERO_SLIDES: {
   },
   {
     audience: 'Repair companies',
-    title: 'Assign shop test equipment to a field engineer',
+    title: 'Assign Shop Test Equipment to a Field Engineer',
+    sub: 'Keep meters and tools with the tech who needs them.',
     shot: {
       src: '/landing/team-equipment.webp',
       alt: 'Team Management test equipment table with assign-to-field-engineer selects',
@@ -171,7 +179,8 @@ const HERO_SLIDES: {
   },
   {
     audience: 'Repair companies',
-    title: 'Photometry tools on the job',
+    title: 'Photometry Tools on the Job',
+    sub: 'Fluence, irradiance, and power in the field.',
     shot: {
       src: '/landing/app-calcs.webp',
       alt: 'Android Photometry Tools grid with Fluence, Irradiance, Duty Cycle, Wavelength, and Avg Power',
@@ -181,7 +190,8 @@ const HERO_SLIDES: {
   },
   {
     audience: 'Repair companies',
-    title: 'Marketplace — parts, used systems, and service needs',
+    title: 'Marketplace — Parts, Used Systems, and Service Needs',
+    sub: 'Bid jobs and find parts from one shop account.',
     shot: {
       src: '/landing/marketplace.webp',
       alt: 'Marketplace home for parts, used systems, and service needs',
@@ -305,9 +315,7 @@ function HeroCarousel() {
                 ) : (
                   <p className="lp-title">{s.title}</p>
                 )}
-                <p className="lp-hero-subhead">
-                  Tickets, parts, and the marketplace in one shop. Free to start.
-                </p>
+                <p className="lp-hero-subhead">{s.sub}</p>
               </div>
               <Shot
                 src={s.shot.src}
@@ -321,7 +329,7 @@ function HeroCarousel() {
       </div>
 
       <p className="lp-sr" aria-live="polite">
-        {slide.audience}. {slide.title}.
+        {slide.audience}. {slide.title}. {slide.sub}
       </p>
 
       <div className="lp-hero-bar">

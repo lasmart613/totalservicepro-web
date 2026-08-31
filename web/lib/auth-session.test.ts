@@ -36,18 +36,45 @@ test('landing Free Plan CTAs pass role into /plans', () => {
   assert.match(source, /parts: 'supplier'/);
 });
 
-test('logged-out hero has one quiet benefits subhead under the H1', () => {
+test('logged-out hero has a unique subtitle on every slide and no trial phrasing', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const page = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');
   const css = readFileSync(join(here, '../components/landing/landing.css'), 'utf8');
-  assert.match(page, /See open tickets and upcoming calls/);
-  assert.match(page, /Tickets, parts, and the marketplace in one shop\. Free to start\./);
+  const heroBlock = page.split('const HERO_SLIDES')[1].split('const HERO_AUTO_MS')[0];
+  const titles = [...heroBlock.matchAll(/title: '([^']+)'/g)].map((m) => m[1]);
+  const subs = [...heroBlock.matchAll(/sub: '([^']+)'/g)].map((m) => m[1]);
+  assert.equal(titles.length, 9);
+  assert.equal(subs.length, 9);
+  assert.equal(new Set(subs).size, 9, 'each hero slide needs its own subtitle');
+  assert.deepEqual(subs, [
+    'Color-coded jobs for the whole shop.',
+    'Match your lasers with service companies that can work on them.',
+    'Get found when a shop needs a part that’s on your shelf.',
+    'Assign each call to a field engineer.',
+    'Track work and maintenance costs on every laser.',
+    'They get the job details when you assign it.',
+    'Keep meters and tools with the tech who needs them.',
+    'Fluence, irradiance, and power in the field.',
+    'Bid jobs and find parts from one shop account.',
+  ]);
+  assert.match(page, /See Open Tickets and Upcoming Calls/);
   assert.match(page, /Matching laser owners with service companies\./);
+  assert.match(page, /Start on the free plan/);
+  assert.match(page, /A free plan is included\./);
   assert.match(page, /lp-hero-subhead/);
   assert.match(page, /lp-hero-mission/);
   assert.match(css, /\.lp-hero-subhead\s*\{/);
   assert.match(css, /\.lp-hero-mission\s*\{/);
+  assert.doesNotMatch(page, /Free to start/);
+  assert.doesNotMatch(page, /Tickets, parts, and the marketplace in one shop/);
   assert.doesNotMatch(page, /lp-hero-benefits|lp-mini-carousel|hero-cards/);
+  const clinicChunks = heroBlock.split(/\{/).filter((chunk) => chunk.includes("audience: 'Clinics'"));
+  assert.equal(clinicChunks.length, 2);
+  for (const chunk of clinicChunks) {
+    assert.doesNotMatch(chunk, /marketplace/i);
+    assert.doesNotMatch(chunk, /\bparts\b/i);
+    assert.doesNotMatch(chunk, /\btickets?\b/i);
+  }
 });
 
 test('logged-out landing gives Free Plan a gold outline without making it primary', () => {
@@ -58,6 +85,7 @@ test('logged-out landing gives Free Plan a gold outline without making it primar
   assert.match(page, /A free plan is included\. Upgrade when you need more\./);
   assert.match(page, /lp-btn-outline/);
   assert.match(page, /Register for Total Service Pro/);
+  assert.doesNotMatch(page, /Free to start/);
   assert.doesNotMatch(page, /lp-btn-primary">\s*Start on the free plan/);
   assert.doesNotMatch(page, /lp-btn-primary">\s*Register for a Free Plan/);
   assert.doesNotMatch(page, /lp-btn-primary">\s*Free Plan/);
@@ -78,26 +106,26 @@ test('logged-out landing pairs each hero title with a unique matching still', ()
   assert.deepEqual(
     titles,
     [
-      'See open tickets and upcoming calls',
+      'See Open Tickets and Upcoming Calls',
       'Find a Repair Company',
-      'Connect with Repair Companies and laser owners',
+      'Connect with Repair Companies and Laser Owners',
       'Schedule and Assign Service Calls',
-      'View service history',
-      'Assign a field engineer and email them the ticket',
-      'Assign shop test equipment to a field engineer',
-      'Photometry tools on the job',
-      'Marketplace — parts, used systems, and service needs',
+      'View Service History',
+      'Assign a Field Engineer and Email Them the Ticket',
+      'Assign Shop Test Equipment to a Field Engineer',
+      'Photometry Tools on the Job',
+      'Marketplace — Parts, Used Systems, and Service Needs',
     ],
   );
-  assert.equal(byTitle['See open tickets and upcoming calls'], '/landing/dashboard.webp');
+  assert.equal(byTitle['See Open Tickets and Upcoming Calls'], '/landing/dashboard.webp');
   assert.equal(byTitle['Schedule and Assign Service Calls'], '/landing/schedule.webp');
-  assert.equal(byTitle['Assign a field engineer and email them the ticket'], '/landing/ticket-assign.webp');
-  assert.equal(byTitle['Assign shop test equipment to a field engineer'], '/landing/team-equipment.webp');
-  assert.equal(byTitle['Photometry tools on the job'], '/landing/app-calcs.webp');
-  assert.equal(byTitle['Marketplace — parts, used systems, and service needs'], '/landing/marketplace.webp');
+  assert.equal(byTitle['Assign a Field Engineer and Email Them the Ticket'], '/landing/ticket-assign.webp');
+  assert.equal(byTitle['Assign Shop Test Equipment to a Field Engineer'], '/landing/team-equipment.webp');
+  assert.equal(byTitle['Photometry Tools on the Job'], '/landing/app-calcs.webp');
+  assert.equal(byTitle['Marketplace — Parts, Used Systems, and Service Needs'], '/landing/marketplace.webp');
   assert.equal(byTitle['Find a Repair Company'], '/landing/directory.webp');
-  assert.equal(byTitle['View service history'], '/landing/reports.webp');
-  assert.equal(byTitle['Connect with Repair Companies and laser owners'], '/landing/parts.webp');
+  assert.equal(byTitle['View Service History'], '/landing/reports.webp');
+  assert.equal(byTitle['Connect with Repair Companies and Laser Owners'], '/landing/parts.webp');
   assert.match(source, /caption: 'Shop dashboard'/);
   assert.match(source, /caption: 'Photometry tools'/);
   assert.doesNotMatch(heroBlock, /Bid on open service requests/);
@@ -133,7 +161,8 @@ test('logged-out hero paints a darkened role cover behind left copy', () => {
   assert.match(css, /\.lp-hero-copy::before/);
   assert.match(css, /\[data-cover='clinic'\]::before/);
   assert.match(css, /\[data-cover='parts'\]::before/);
-  assert.match(css, /\[data-cover='clinic'\]\s*\{[^}]*background-position:\s*62% 28%/);
+  assert.match(css, /\[data-cover='clinic'\]\s*\{[^}]*justify-content:\s*flex-start/);
+  assert.match(css, /\[data-cover='clinic'\]\s*\{[^}]*background-position:\s*12% 72%/);
   assert.match(css, /rgba\(17,\s*24,\s*39/);
   assert.doesNotMatch(page, /lp-hero-benefits|lp-mini-carousel|hero-cards/);
   for (const name of ['hero-bg-shop.webp', 'hero-bg-clinic.webp', 'hero-bg-parts.webp']) {
