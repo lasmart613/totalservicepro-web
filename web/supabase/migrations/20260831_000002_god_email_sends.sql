@@ -10,7 +10,9 @@ CREATE TABLE IF NOT EXISTS public.god_email_sends (
   subject text NOT NULL,
   template_key text NOT NULL DEFAULT 'shop_invite',
   sent_by_user_id uuid,
-  sent_by_email text
+  sent_by_email text,
+  unsubscribe_token text,
+  unsubscribed_at timestamptz
 );
 
 COMMENT ON TABLE public.god_email_sends IS
