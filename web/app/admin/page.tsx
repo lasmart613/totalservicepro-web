@@ -1,9 +1,14 @@
 'use client';
 
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
 
 export default function AdminDashboard() {
+  const [isGod, setIsGod] = useState(false);
+  useEffect(() => {
+    fetchGodMe().then(setIsGod);
+  }, []);
   return (
     <div>
       <h1 className="text-3xl font-extrabold mb-2">Admin Dashboard</h1>
@@ -29,6 +34,14 @@ export default function AdminDashboard() {
           <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">Reports & Analytics</div>
           <p className="text-[var(--text3)]">Organization performance and insights.</p>
         </Link>
+
+        {isGod && (
+          <Link href={GOD_DASHBOARD_PATH} className="card p-6 hover:border-[var(--gold)] group">
+            <div className="text-4xl mb-4">♔</div>
+            <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">God Dashboard</div>
+            <p className="text-[var(--text3)]">All organizations, plans, and the shop-tester invite.</p>
+          </Link>
+        )}
       </div>
     </div>
   );

@@ -23,6 +23,7 @@ import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import { OrgSwitcher } from '@/components/OrgSwitcher';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
+import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
 
 type NavLink = { href: string; label: string };
 type NavGroup = { id: string; label: string; href?: string; items: NavLink[] };
@@ -112,6 +113,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const [navOpenId, setNavOpenId] = useState<string | null>(null);
   const [mobileOpenGroup, setMobileOpenGroup] = useState<string | null>(null);
   const [unread, setUnread] = useState(0);
+  const [isGod, setIsGod] = useState(false);
   const upgrade = useUpgradeEntry();
   const supabase = getSupabaseClient();
 
@@ -159,12 +161,16 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       if (!u) {
         setProfile(null);
         setUnread(0);
+        setIsGod(false);
         setLoading(false);
         return;
       }
       setProfile(null);
       await loadProfileFor(u.id);
-      if (activeUserId === u.id) await refreshUnread(u.id);
+      if (activeUserId === u.id) {
+        await refreshUnread(u.id);
+        setIsGod(await fetchGodMe());
+      }
       setLoading(false);
     };
 
@@ -178,6 +184,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         setUser(null);
         setProfile(null);
         setUnread(0);
+        setIsGod(false);
         return;
       }
       const uid = session.user.id;
@@ -191,6 +198,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       }
       loadProfileFor(uid);
       refreshUnread(uid);
+      fetchGodMe().then(setIsGod);
     });
 
     const t = setInterval(() => {
@@ -393,6 +401,11 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                   Admin Portal
                 </Link>
               )}
+              {isGod && (
+                <Link href={GOD_DASHBOARD_PATH} className="hover:text-[var(--gold)] py-1">
+                  God Dashboard
+                </Link>
+              )}
             </>
           ) : (
             <>
@@ -512,6 +525,15 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                     <Building2 size={16} /> Admin Portal
                   </Link>
                 )}
+                {isGod && (
+                  <Link
+                    href={GOD_DASHBOARD_PATH}
+                    className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"
+                    onClick={() => setDropdownOpen(false)}
+                  >
+                    <Building2 size={16} /> God Dashboard
+                  </Link>
+                )}
 
                 <button
                   onClick={handleLogout}
@@ -599,6 +621,15 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 onClick={closeMobileMenu}
               >
                 Admin Portal
+              </Link>
+            )}
+            {isGod && (
+              <Link
+                href={GOD_DASHBOARD_PATH}
+                className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+                onClick={closeMobileMenu}
+              >
+                God Dashboard
               </Link>
             )}
             {user && (

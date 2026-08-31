@@ -7,6 +7,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink, UPGRADE_LABEL } from '@/components/UpgradePlanLink';
+import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
 
 /**
  * Client-side admin gate.
@@ -19,7 +20,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   const [ready, setReady] = useState(false);
   const [allowed, setAllowed] = useState(false);
   const [orgName, setOrgName] = useState('Your company');
-  const [deniedReason, setDeniedReason] = useState<'login' | 'role' | null>(null);
+  const [deniedReason, setDeniedReason] = useState<'login' | 'role' | 'god' | null>(null);
+  const [isGod, setIsGod] = useState(false);
   const upgrade = useUpgradeEntry();
 
   useEffect(() => {
@@ -46,20 +48,35 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         const { loadOwnNavProfile, roleAllowsAdminPortal } = await import('@/lib/profile-nav');
         const profile = await loadOwnNavProfile(supabase, user.id);
         const allowedByRole = await roleAllowsAdminPortal(profile?.role);
+        const god = await fetchGodMe();
+        const onGodRoute =
+          pathname === GOD_DASHBOARD_PATH || pathname?.startsWith(`${GOD_DASHBOARD_PATH}/`);
 
-        if (!profile || !allowedByRole) {
+        if (onGodRoute && !god) {
           if (!cancelled) {
-            setDeniedReason('role');
+            setDeniedReason('god');
             setAllowed(false);
+            setIsGod(false);
             setReady(true);
           }
           return;
         }
 
-        const oname = profile.organizations?.name;
+        if ((!profile || !allowedByRole) && !god) {
+          if (!cancelled) {
+            setDeniedReason('role');
+            setAllowed(false);
+            setIsGod(false);
+            setReady(true);
+          }
+          return;
+        }
+
+        const oname = profile?.organizations?.name;
         if (oname) setOrgName(oname);
 
         if (!cancelled) {
+          setIsGod(god);
           setAllowed(true);
           setDeniedReason(null);
           setReady(true);
@@ -85,6 +102,21 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <Header />
         <div className="flex-1 flex items-center justify-center text-[var(--text3)]">
           Loading Admin Portal…
+        </div>
+      </div>
+    );
+  }
+
+  if (deniedReason === 'god') {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header />
+        <div className="max-w-lg mx-auto w-full px-4 py-16 text-center">
+          <h1 className="text-3xl font-extrabold">404</h1>
+          <p className="text-[var(--text3)] mt-2 mb-6">This page could not be found.</p>
+          <Link href="/" className="btn btn-primary">
+            Dashboard
+          </Link>
         </div>
       </div>
     );
@@ -132,6 +164,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { href: '/customers', label: 'Customers' },
     { href: '/admin/reports', label: 'Reports' },
     { href: '/admin/settings', label: 'Settings' },
+    ...(isGod ? [{ href: GOD_DASHBOARD_PATH, label: 'God Dashboard' }] : []),
   ];
 
   return (
