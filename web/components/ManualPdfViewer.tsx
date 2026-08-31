@@ -149,11 +149,13 @@ function PdfPageCanvas({
   pageNumber,
   zoom,
   eager,
+  scrollRoot,
 }: {
   pdf: PdfDoc;
   pageNumber: number;
   zoom: number;
   eager?: boolean;
+  scrollRoot?: HTMLElement | null;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -161,17 +163,21 @@ function PdfPageCanvas({
   const [ready, setReady] = useState(false);
 
   useEffect(() => {
+    if (eager) {
+      setInView(true);
+      return;
+    }
     const el = wrapRef.current;
-    if (!el || eager) return;
+    if (!el) return;
     const io = new IntersectionObserver(
       ([entry]) => {
         if (entry?.isIntersecting) setInView(true);
       },
-      { rootMargin: '1200px 0px' }
+      { root: scrollRoot || null, rootMargin: '1600px 0px' }
     );
     io.observe(el);
     return () => io.disconnect();
-  }, [eager]);
+  }, [eager, scrollRoot]);
 
   useEffect(() => {
     if (!inView) return;
@@ -206,9 +212,12 @@ function PdfPageCanvas({
     <div
       ref={wrapRef}
       data-pdf-page={pageNumber}
-      className="flex justify-center py-3 px-2"
-      style={{ minHeight: ready ? undefined : 480 }}
+      className="relative flex justify-center py-3 px-2"
+      style={{ minHeight: ready ? undefined : 520 }}
     >
+      {!ready && (
+        <div className="text-sm text-[#9CA3AF] absolute mt-8">Page {pageNumber}</div>
+      )}
       <canvas ref={canvasRef} className="block max-w-full bg-white shadow-lg" />
     </div>
   );
@@ -247,9 +256,10 @@ export function ManualPdfViewer({
   const [searchNote, setSearchNote] = useState<string | null>(null);
 
   const attachDoc = useCallback((doc: PdfDoc) => {
-    if (pdfRef.current?.destroy) {
+    const prev = pdfRef.current;
+    if (prev && prev !== doc && prev.destroy) {
       try {
-        pdfRef.current.destroy();
+        prev.destroy();
       } catch {
         /* ignore */
       }
@@ -268,18 +278,27 @@ export function ManualPdfViewer({
   }, []);
 
   const openSrc = useCallback(
-    async (src: { url?: string; data?: ArrayBuffer }) => {
+    async (src: { url?: string; data?: ArrayBuffer }, isCancelled?: () => boolean) => {
       const pdfjs = await loadPdfJs();
+      if (isCancelled?.()) return;
       const doc = await openPdfDocument(pdfjs, src, (loaded, total) => {
         if (total > 0) setProgress(Math.min(95, Math.round((loaded / total) * 100)));
       });
+      if (isCancelled?.()) {
+        try {
+          doc.destroy?.();
+        } catch {
+          /* ignore */
+        }
+        return;
+      }
       attachDoc(doc);
     },
     [attachDoc]
   );
 
   const openPath = useCallback(
-    async (payload: ManualViewPayload, storagePath?: string | null) => {
+    async (payload: ManualViewPayload, storagePath?: string | null, isCancelled?: () => boolean) => {
       setLoading(true);
       setError(null);
       setProgress(10);
@@ -287,6 +306,7 @@ export function ManualPdfViewer({
         manual_id: payload.manualId,
         storage_path: storagePath || payload.storagePath,
       });
+      if (isCancelled?.()) return;
       setProgress(35);
       const nextChapters = Array.isArray(json.chapters) ? (json.chapters as ManualChapter[]) : payload.chapters || [];
       if (nextChapters.length > 1) setChapters(nextChapters);
@@ -312,7 +332,7 @@ export function ManualPdfViewer({
         const bin = atob(dataBase64);
         const bytes = new Uint8Array(bin.length);
         for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-        await openSrc({ data: bytes.buffer });
+        await openSrc({ data: bytes.buffer }, isCancelled);
         return;
       }
 
@@ -321,7 +341,7 @@ export function ManualPdfViewer({
       // on Netlify function limits and leave only page 1 parseable.
       if (signedUrl) {
         try {
-          await openSrc({ url: signedUrl });
+          await openSrc({ url: signedUrl }, isCancelled);
           return;
         } catch {
           /* fall through to same-origin proxy */
@@ -334,19 +354,21 @@ export function ManualPdfViewer({
         storagePath: chapterPath,
       });
       setProgress(85);
-      await openSrc({ data: bytes });
+      await openSrc({ data: bytes }, isCancelled);
     },
     [openSrc]
   );
 
   useEffect(() => {
     let cancelled = false;
+    const opened: PdfDoc[] = [];
     (async () => {
       try {
         if (sourceUrl) {
           setLoading(true);
           setError(null);
-          await openSrc({ url: sourceUrl });
+          await openSrc({ url: sourceUrl }, () => cancelled);
+          if (!cancelled && pdfRef.current) opened.push(pdfRef.current);
           return;
         }
         const stashed = readManualView();
@@ -367,8 +389,10 @@ export function ManualPdfViewer({
           setLoading(false);
           return;
         }
-        await openPath(payload);
-        if (!cancelled && typeof sessionStorage !== 'undefined') {
+        await openPath(payload, undefined, () => cancelled);
+        if (cancelled) return;
+        if (pdfRef.current) opened.push(pdfRef.current);
+        if (typeof sessionStorage !== 'undefined') {
           sessionStorage.removeItem(MANUAL_VIEW_STORAGE_KEY);
         }
       } catch (e: unknown) {
@@ -380,6 +404,24 @@ export function ManualPdfViewer({
     })();
     return () => {
       cancelled = true;
+      // Only destroy the document this effect instance opened — never
+      // pdfRef.current, which a newer effect may already own (Strict Mode).
+      for (const doc of opened) {
+        if (doc?.destroy && pdfRef.current !== doc) {
+          try {
+            doc.destroy();
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+    };
+    // Initial open only.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [manualId, sourceUrl]);
+
+  useEffect(() => {
+    return () => {
       if (pdfRef.current?.destroy) {
         try {
           pdfRef.current.destroy();
@@ -388,15 +430,16 @@ export function ManualPdfViewer({
         }
       }
     };
-    // Initial open only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manualId, sourceUrl]);
+  }, []);
 
   const scrollToPage = useCallback((n: number) => {
     const root = scrollRef.current;
     if (!root) return;
-    const el = root.querySelector(`[data-pdf-page="${n}"]`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    const el = root.querySelector(`[data-pdf-page="${n}"]`) as HTMLElement | null;
+    if (!el) return;
+    const elRect = el.getBoundingClientRect();
+    const rootRect = root.getBoundingClientRect();
+    root.scrollTo({ top: root.scrollTop + (elRect.top - rootRect.top) - 8, behavior: 'smooth' });
   }, []);
 
   const goToPage = useCallback(
@@ -622,7 +665,7 @@ export function ManualPdfViewer({
         </div>
       )}
 
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto relative">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto relative overscroll-contain">
         {loading && (
           <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[#9CA3AF] z-10">
             <div>Loading manual in the app…</div>
@@ -663,7 +706,14 @@ export function ManualPdfViewer({
         {!loading && !error && pages.length > 0 && pdf && (
           <div key={docEpoch} className="pb-8">
             {pages.map((n) => (
-              <PdfPageCanvas key={`${docEpoch}-${n}`} pdf={pdf} pageNumber={n} zoom={zoom} eager={n <= 2} />
+              <PdfPageCanvas
+                key={`${docEpoch}-${n}`}
+                pdf={pdf}
+                pageNumber={n}
+                zoom={zoom}
+                eager={pageCount <= 20 || n <= 3}
+                scrollRoot={scrollRef.current}
+              />
             ))}
           </div>
         )}
