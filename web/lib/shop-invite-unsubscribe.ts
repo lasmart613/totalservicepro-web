@@ -91,7 +91,7 @@ export function shopInviteUnsubscribePageHtml(opts: {
       `<form method="POST" action="${esc(action)}">` +
       `<input type="hidden" name="List-Unsubscribe" value="One-Click" />` +
       (isValidUnsubscribeToken(token) ? `<input type="hidden" name="token" value="${esc(token)}" />` : '') +
-      `<button type="submit">Unsubscribe</button>` +
+      `<button type="submit" style="margin:8px 0 16px;padding:12px 22px;font-size:16px;font-weight:700;color:#0b0f14;background:#e8c547;border:0;border-radius:8px;cursor:pointer;">Unsubscribe</button>` +
       `</form>` +
       `<p>Or email <a href="${esc(UNSUBSCRIBE_MAILTO)}">contact@medicalrepairnetwork.com</a>.</p>`;
   }
