@@ -5,25 +5,33 @@ import Link from 'next/link';
 import { getSupabaseClient, getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/client';
 import {
   MANUAL_VIEW_STORAGE_KEY,
-  PDFJS_CDN_VERSION,
+  PDFJS_SCRIPT_SRC,
+  PDFJS_WORKER_SRC,
+  pageTextMatches,
   readManualView,
   type ManualChapter,
   type ManualViewPayload,
 } from '@/lib/manuals';
 
+type PdfPageProxy = {
+  getViewport: (opts: { scale: number }) => { width: number; height: number };
+  render: (opts: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => {
+    promise: Promise<void>;
+  };
+  getTextContent?: () => Promise<{ items: Array<{ str?: string }> }>;
+};
+
+type PdfDoc = {
+  numPages: number;
+  getPage: (n: number) => Promise<PdfPageProxy>;
+  destroy?: () => void;
+};
+
 type PdfJsLib = {
   GlobalWorkerOptions: { workerSrc: string };
-  getDocument: (src: { data: ArrayBuffer } | { url: string }) => {
-    promise: Promise<{
-      numPages: number;
-      getPage: (n: number) => Promise<{
-        getViewport: (opts: { scale: number }) => { width: number; height: number };
-        render: (opts: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => {
-          promise: Promise<void>;
-        };
-      }>;
-      destroy?: () => void;
-    }>;
+  getDocument: (src: Record<string, unknown>) => {
+    promise: Promise<PdfDoc>;
+    onProgress?: ((p: { loaded: number; total: number }) => void) | null;
   };
 };
 
@@ -35,16 +43,23 @@ declare global {
 
 async function loadPdfJs(): Promise<PdfJsLib> {
   if (typeof window === 'undefined') throw new Error('PDF viewer is browser-only');
-  if (window.pdfjsLib) return window.pdfjsLib;
+  if (window.pdfjsLib) {
+    window.pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
+    return window.pdfjsLib;
+  }
   await new Promise<void>((resolve, reject) => {
     const existing = document.querySelector('script[data-tsp-pdfjs]');
     if (existing) {
+      if (window.pdfjsLib) {
+        resolve();
+        return;
+      }
       existing.addEventListener('load', () => resolve());
       existing.addEventListener('error', () => reject(new Error('Could not load PDF viewer')));
       return;
     }
     const s = document.createElement('script');
-    s.src = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_CDN_VERSION}/pdf.min.js`;
+    s.src = PDFJS_SCRIPT_SRC;
     s.async = true;
     s.dataset.tspPdfjs = '1';
     s.onload = () => resolve();
@@ -53,8 +68,35 @@ async function loadPdfJs(): Promise<PdfJsLib> {
   });
   const lib = window.pdfjsLib;
   if (!lib) throw new Error('Could not load the in-app PDF viewer');
-  lib.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${PDFJS_CDN_VERSION}/pdf.worker.min.js`;
+  lib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_SRC;
   return lib;
+}
+
+async function openPdfDocument(
+  pdfjs: PdfJsLib,
+  src: { url?: string; data?: ArrayBuffer },
+  onProgress?: (loaded: number, total: number) => void
+): Promise<PdfDoc> {
+  const base: Record<string, unknown> = {
+    isEvalSupported: false,
+    ...(src.url ? { url: src.url } : {}),
+    ...(src.data ? { data: src.data } : {}),
+  };
+
+  const run = (extra: Record<string, unknown> = {}) => {
+    const task = pdfjs.getDocument({ ...base, ...extra });
+    if (onProgress) {
+      task.onProgress = (p) => onProgress(p.loaded || 0, p.total || 0);
+    }
+    return task.promise;
+  };
+
+  try {
+    return await run();
+  } catch {
+    // Worker blocked (CSP / missing worker) — parse on the main thread.
+    return await run({ disableWorker: true });
+  }
 }
 
 async function fetchManualUrl(payload: Record<string, unknown>) {
@@ -85,16 +127,7 @@ async function fetchPdfBytes(opts: {
   token: string;
   manualId?: string | number | null;
   storagePath?: string | null;
-  signedUrl?: string | null;
-  dataBase64?: string | null;
 }): Promise<ArrayBuffer> {
-  if (opts.dataBase64) {
-    const bin = atob(opts.dataBase64);
-    const bytes = new Uint8Array(bin.length);
-    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
-    return bytes.buffer;
-  }
-
   const res = await fetch('/api/manuals/file', {
     method: 'POST',
     headers: {
@@ -107,30 +140,95 @@ async function fetchPdfBytes(opts: {
     }),
   });
   if (res.ok) return await res.arrayBuffer();
-
-  if (opts.signedUrl) {
-    const direct = await fetch(opts.signedUrl);
-    if (direct.ok) return await direct.arrayBuffer();
-  }
-
   const json = (await res.json().catch(() => ({}))) as { error?: string };
   throw new Error(json.error || 'Could not load the manual in the app viewer');
+}
+
+function PdfPageCanvas({
+  pdf,
+  pageNumber,
+  zoom,
+  eager,
+}: {
+  pdf: PdfDoc;
+  pageNumber: number;
+  zoom: number;
+  eager?: boolean;
+}) {
+  const wrapRef = useRef<HTMLDivElement | null>(null);
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const [inView, setInView] = useState(!!eager);
+  const [ready, setReady] = useState(false);
+
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el || eager) return;
+    const io = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) setInView(true);
+      },
+      { rootMargin: '1200px 0px' }
+    );
+    io.observe(el);
+    return () => io.disconnect();
+  }, [eager]);
+
+  useEffect(() => {
+    if (!inView) return;
+    const canvas = canvasRef.current;
+    const wrap = wrapRef.current;
+    if (!canvas) return;
+    let cancelled = false;
+    (async () => {
+      const pdfPage = await pdf.getPage(pageNumber);
+      if (cancelled) return;
+      const base = pdfPage.getViewport({ scale: 1 });
+      const avail = Math.max(280, (wrap?.clientWidth || 800) - 24);
+      const fit = avail / base.width;
+      const viewport = pdfPage.getViewport({ scale: fit * zoom });
+      const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
+      canvas.width = Math.floor(viewport.width * dpr);
+      canvas.height = Math.floor(viewport.height * dpr);
+      canvas.style.width = `${Math.floor(viewport.width)}px`;
+      canvas.style.height = `${Math.floor(viewport.height)}px`;
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+      if (!cancelled) setReady(true);
+    })().catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [inView, pdf, pageNumber, zoom]);
+
+  return (
+    <div
+      ref={wrapRef}
+      data-pdf-page={pageNumber}
+      className="flex justify-center py-3 px-2"
+      style={{ minHeight: ready ? undefined : 480 }}
+    >
+      <canvas ref={canvasRef} className="block max-w-full bg-white shadow-lg" />
+    </div>
+  );
 }
 
 export function ManualPdfViewer({
   manualId,
   title: titleFromQuery,
   storagePath: storagePathFromQuery,
+  sourceUrl,
 }: {
   manualId?: string | null;
   title?: string | null;
   storagePath?: string | null;
+  /** Same-origin or already-authorized URL (fixture demo). Skips library entitlements. */
+  sourceUrl?: string | null;
 }) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null);
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const pdfRef = useRef<{ numPages: number; getPage: (n: number) => Promise<any>; destroy?: () => void } | null>(
-    null
-  );
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  const pdfRef = useRef<PdfDoc | null>(null);
+  const searchGen = useRef(0);
 
   const [title, setTitle] = useState(titleFromQuery || 'Service Manual');
   const [chapters, setChapters] = useState<ManualChapter[]>([]);
@@ -141,48 +239,43 @@ export function ManualPdfViewer({
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
+  const [docEpoch, setDocEpoch] = useState(0);
+  const [query, setQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [hits, setHits] = useState<number[]>([]);
+  const [hitIndex, setHitIndex] = useState(0);
+  const [searchNote, setSearchNote] = useState<string | null>(null);
 
-  const renderPage = useCallback(async (pageNum: number, zoomLevel: number) => {
-    const pdf = pdfRef.current;
-    const canvas = canvasRef.current;
-    if (!pdf || !canvas) return;
-    const pdfPage = await pdf.getPage(pageNum);
-    const base = pdfPage.getViewport({ scale: 1 });
-    const wrap = containerRef.current;
-    const avail = Math.max(320, (wrap?.clientWidth || 800) - 32);
-    const fit = avail / base.width;
-    const viewport = pdfPage.getViewport({ scale: fit * zoomLevel });
-    const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
-    canvas.width = Math.floor(viewport.width * dpr);
-    canvas.height = Math.floor(viewport.height * dpr);
-    canvas.style.width = `${Math.floor(viewport.width)}px`;
-    canvas.style.height = `${Math.floor(viewport.height)}px`;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-    await pdfPage.render({ canvasContext: ctx, viewport }).promise;
+  const attachDoc = useCallback((doc: PdfDoc) => {
+    if (pdfRef.current?.destroy) {
+      try {
+        pdfRef.current.destroy();
+      } catch {
+        /* ignore */
+      }
+    }
+    pdfRef.current = doc;
+    setPageCount(doc.numPages);
+    setPage(1);
+    setShowChapters(false);
+    setHits([]);
+    setHitIndex(0);
+    setSearchNote(null);
+    setLoading(false);
+    setError(null);
+    setProgress(100);
+    setDocEpoch((n) => n + 1);
   }, []);
 
-  const openBytes = useCallback(
-    async (bytes: ArrayBuffer) => {
+  const openSrc = useCallback(
+    async (src: { url?: string; data?: ArrayBuffer }) => {
       const pdfjs = await loadPdfJs();
-      if (pdfRef.current?.destroy) {
-        try {
-          pdfRef.current.destroy();
-        } catch {
-          /* ignore */
-        }
-      }
-      const doc = await pdfjs.getDocument({ data: bytes }).promise;
-      pdfRef.current = doc;
-      setPageCount(doc.numPages);
-      setPage(1);
-      setShowChapters(false);
-      setLoading(false);
-      setError(null);
-      await renderPage(1, zoom);
+      const doc = await openPdfDocument(pdfjs, src, (loaded, total) => {
+        if (total > 0) setProgress(Math.min(95, Math.round((loaded / total) * 100)));
+      });
+      attachDoc(doc);
     },
-    [renderPage, zoom]
+    [attachDoc]
   );
 
   const openPath = useCallback(
@@ -194,7 +287,7 @@ export function ManualPdfViewer({
         manual_id: payload.manualId,
         storage_path: storagePath || payload.storagePath,
       });
-      setProgress(40);
+      setProgress(35);
       const nextChapters = Array.isArray(json.chapters) ? (json.chapters as ManualChapter[]) : payload.chapters || [];
       if (nextChapters.length > 1) setChapters(nextChapters);
 
@@ -212,23 +305,50 @@ export function ManualPdfViewer({
         nextChapters.find((c) => c.storage_path)?.storage_path ||
         null;
 
+      const signedUrl = json.url || payload.url || null;
+      const dataBase64 = json.data_base64 || payload.dataBase64 || null;
+
+      if (dataBase64) {
+        const bin = atob(dataBase64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        await openSrc({ data: bytes.buffer });
+        return;
+      }
+
+      // Prefer the signed URL so pdf.js can stream the whole file (range/progress).
+      // Proxying every byte through /api/manuals/file can truncate large manuals
+      // on Netlify function limits and leave only page 1 parseable.
+      if (signedUrl) {
+        try {
+          await openSrc({ url: signedUrl });
+          return;
+        } catch {
+          /* fall through to same-origin proxy */
+        }
+      }
+
       const bytes = await fetchPdfBytes({
         token,
         manualId: payload.manualId,
         storagePath: chapterPath,
-        signedUrl: json.url || payload.url,
-        dataBase64: json.data_base64 || payload.dataBase64,
       });
       setProgress(85);
-      await openBytes(bytes);
+      await openSrc({ data: bytes });
     },
-    [openBytes]
+    [openSrc]
   );
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
+        if (sourceUrl) {
+          setLoading(true);
+          setError(null);
+          await openSrc({ url: sourceUrl });
+          return;
+        }
         const stashed = readManualView();
         const payload: ManualViewPayload = {
           manualId: manualId || stashed?.manualId,
@@ -270,12 +390,96 @@ export function ManualPdfViewer({
     };
     // Initial open only.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [manualId]);
+  }, [manualId, sourceUrl]);
+
+  const scrollToPage = useCallback((n: number) => {
+    const root = scrollRef.current;
+    if (!root) return;
+    const el = root.querySelector(`[data-pdf-page="${n}"]`);
+    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }, []);
+
+  const goToPage = useCallback(
+    (n: number) => {
+      if (!pageCount) return;
+      const next = Math.min(pageCount, Math.max(1, n));
+      setPage(next);
+      scrollToPage(next);
+    },
+    [pageCount, scrollToPage]
+  );
 
   useEffect(() => {
-    if (!pdfRef.current || loading) return;
-    renderPage(page, zoom).catch(() => {});
-  }, [page, zoom, loading, renderPage]);
+    const root = scrollRef.current;
+    if (!root || !pageCount || loading) return;
+    const io = new IntersectionObserver(
+      (entries) => {
+        const visible = entries
+          .filter((e) => e.isIntersecting)
+          .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
+        if (!visible) return;
+        const n = Number((visible.target as HTMLElement).dataset.pdfPage);
+        if (n) setPage(n);
+      },
+      { root, threshold: [0.35, 0.6] }
+    );
+    root.querySelectorAll('[data-pdf-page]').forEach((el) => io.observe(el));
+    return () => io.disconnect();
+  }, [pageCount, loading, docEpoch]);
+
+  async function runSearch(direction: 1 | 0 | -1 = 0) {
+    const q = query.trim();
+    if (!q || !pdfRef.current) return;
+    if (direction !== 0 && hits.length) {
+      const next = (hitIndex + direction + hits.length) % hits.length;
+      setHitIndex(next);
+      goToPage(hits[next]);
+      setSearchNote(`Match ${next + 1} of ${hits.length} (page ${hits[next]})`);
+      return;
+    }
+    const gen = ++searchGen.current;
+    setSearching(true);
+    setSearchNote('Searching…');
+    try {
+      const found: number[] = [];
+      for (let i = 1; i <= pdfRef.current.numPages; i++) {
+        if (searchGen.current !== gen) return;
+        const pdfPage = await pdfRef.current.getPage(i);
+        const text = pdfPage.getTextContent ? await pdfPage.getTextContent() : { items: [] };
+        const hay = (text.items || []).map((it) => it.str || '').join(' ');
+        if (pageTextMatches(hay, q)) found.push(i);
+      }
+      if (searchGen.current !== gen) return;
+      setHits(found);
+      if (!found.length) {
+        setSearchNote('No matches');
+        return;
+      }
+      setHitIndex(0);
+      goToPage(found[0]);
+      setSearchNote(`Match 1 of ${found.length} (page ${found[0]})`);
+    } catch {
+      if (searchGen.current === gen) setSearchNote('Search failed');
+    } finally {
+      if (searchGen.current === gen) setSearching(false);
+    }
+  }
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === 'ArrowRight' || e.key === 'PageDown') {
+        e.preventDefault();
+        goToPage(page + 1);
+      } else if (e.key === 'ArrowLeft' || e.key === 'PageUp') {
+        e.preventDefault();
+        goToPage(page - 1);
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [goToPage, page]);
 
   async function openChapter(ch: ManualChapter) {
     if (!ch.storage_path) return;
@@ -296,32 +500,45 @@ export function ManualPdfViewer({
     }
   }
 
+  const pdf = pdfRef.current;
+  const pages = pageCount && pdf ? Array.from({ length: pageCount }, (_, i) => i + 1) : [];
+
   return (
-    <div className="flex flex-col min-h-[calc(100vh-4.5rem)] bg-[#0d1117] text-[#E5E7EB] -mx-4 sm:-mx-6 lg:-mx-8 -my-6">
-      <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-[#1F2937] border-b border-[#374151]">
+    <div className="flex flex-col h-full min-h-0 bg-[#0d1117] text-[#E5E7EB]">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-[#1F2937] border-b border-[#374151] shrink-0">
         <Link
-          href="/manuals"
+          href={sourceUrl ? '/' : '/manuals'}
           className="rounded-lg bg-[var(--gold,#FBBF24)] text-[#111827] font-bold text-sm px-3 py-1.5"
         >
-          ← Library
+          {sourceUrl ? '← Home' : '← Library'}
         </Link>
         <div className="flex-1 min-w-[8rem] font-semibold text-[var(--gold,#FBBF24)] truncate">{title}</div>
-        <div className="flex items-center gap-1 text-sm">
+        <div className="flex flex-wrap items-center gap-1 text-sm">
           <button
             type="button"
             className="rounded-md border border-[#374151] bg-[rgba(251,191,36,0.1)] px-2.5 py-1.5 text-[13px] text-[#fbbf24] disabled:opacity-40"
-            onClick={() => setPage((p) => Math.max(1, p - 1))}
+            onClick={() => goToPage(page - 1)}
             disabled={page <= 1 || loading}
           >
             ◄ Prev
           </button>
-          <span className="tabular-nums px-1">
-            {pageCount ? `${page} / ${pageCount}` : '—'}
-          </span>
+          <label className="tabular-nums px-1 flex items-center gap-1">
+            <span className="sr-only">Page</span>
+            <input
+              type="number"
+              min={1}
+              max={pageCount || 1}
+              value={pageCount ? page : ''}
+              onChange={(e) => goToPage(Number(e.target.value) || 1)}
+              className="w-14 rounded border border-[#374151] bg-[#111827] px-1 py-1 text-center text-[#E5E7EB]"
+              disabled={!pageCount || loading}
+            />
+            <span>/ {pageCount || '—'}</span>
+          </label>
           <button
             type="button"
             className="rounded-md border border-[#374151] bg-[rgba(251,191,36,0.1)] px-2.5 py-1.5 text-[13px] text-[#fbbf24] disabled:opacity-40"
-            onClick={() => setPage((p) => Math.min(pageCount || p, p + 1))}
+            onClick={() => goToPage(page + 1)}
             disabled={!pageCount || page >= pageCount || loading}
           >
             Next ►
@@ -347,6 +564,47 @@ export function ManualPdfViewer({
           >
             ＋
           </button>
+          <form
+            className="flex items-center gap-1"
+            onSubmit={(e) => {
+              e.preventDefault();
+              runSearch(0);
+            }}
+          >
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Find in manual"
+              className="w-36 sm:w-44 rounded border border-[#374151] bg-[#111827] px-2 py-1.5 text-[13px] text-[#E5E7EB]"
+              disabled={loading || !pageCount}
+            />
+            <button
+              type="submit"
+              className="rounded-md border border-[#374151] bg-[rgba(251,191,36,0.1)] px-2.5 py-1.5 text-[13px] text-[#fbbf24] disabled:opacity-40"
+              disabled={loading || !pageCount || searching || !query.trim()}
+            >
+              Find
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-[#374151] bg-[rgba(251,191,36,0.1)] px-2 py-1.5 text-[13px] text-[#fbbf24] disabled:opacity-40"
+              onClick={() => runSearch(-1)}
+              disabled={hits.length < 2}
+              aria-label="Previous match"
+            >
+              ↑
+            </button>
+            <button
+              type="button"
+              className="rounded-md border border-[#374151] bg-[rgba(251,191,36,0.1)] px-2 py-1.5 text-[13px] text-[#fbbf24] disabled:opacity-40"
+              onClick={() => runSearch(1)}
+              disabled={hits.length < 2}
+              aria-label="Next match"
+            >
+              ↓
+            </button>
+          </form>
           {chapters.length > 1 && (
             <button
               type="button"
@@ -358,10 +616,15 @@ export function ManualPdfViewer({
           )}
         </div>
       </div>
+      {searchNote && (
+        <div className="px-3 py-1 text-xs text-[#9CA3AF] bg-[#111827] border-b border-[#374151] shrink-0">
+          {searchNote}
+        </div>
+      )}
 
-      <div ref={containerRef} className="flex-1 overflow-auto relative">
+      <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto relative">
         {loading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[#9CA3AF]">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[#9CA3AF] z-10">
             <div>Loading manual in the app…</div>
             <div className="w-64 h-2 rounded-full bg-[#374151] overflow-hidden">
               <div className="h-full bg-[var(--gold,#FBBF24)]" style={{ width: `${progress}%` }} />
@@ -369,11 +632,11 @@ export function ManualPdfViewer({
           </div>
         )}
         {error && !loading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center z-10">
             <div className="text-lg font-bold text-red-400">Could not open manual</div>
             <div className="text-sm text-[#9CA3AF] max-w-md">{error}</div>
-            <Link href="/manuals" className="btn btn-primary text-sm px-4 py-2">
-              Back to library
+            <Link href={sourceUrl ? '/' : '/manuals'} className="btn btn-primary text-sm px-4 py-2">
+              {sourceUrl ? 'Back home' : 'Back to library'}
             </Link>
           </div>
         )}
@@ -397,9 +660,13 @@ export function ManualPdfViewer({
             </div>
           </div>
         )}
-        <div className="flex justify-center py-4 px-2">
-          <canvas ref={canvasRef} className={loading || error ? 'hidden' : 'block shadow-lg'} />
-        </div>
+        {!loading && !error && pages.length > 0 && pdf && (
+          <div key={docEpoch} className="pb-8">
+            {pages.map((n) => (
+              <PdfPageCanvas key={`${docEpoch}-${n}`} pdf={pdf} pageNumber={n} zoom={zoom} eager={n <= 2} />
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

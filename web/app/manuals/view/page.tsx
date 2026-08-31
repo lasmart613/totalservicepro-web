@@ -15,11 +15,13 @@ function ManualViewInner() {
 
 export default function ManualViewPage() {
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--text)]">
+    <div className="fixed inset-0 z-40 flex flex-col bg-[#0d1117] text-[#E5E7EB]">
       <Header />
-      <Suspense fallback={<div className="p-8 text-center text-[var(--text3)]">Opening manual…</div>}>
-        <ManualViewInner />
-      </Suspense>
+      <div className="flex-1 min-h-0">
+        <Suspense fallback={<div className="p-8 text-center text-[var(--text3)]">Opening manual…</div>}>
+          <ManualViewInner />
+        </Suspense>
+      </div>
     </div>
   );
 }

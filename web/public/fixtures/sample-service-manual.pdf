@@ -1,0 +1,76 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+2 0 obj
+<< /Length 233 >>
+stream
+BT
+/F1 22 Tf
+72 720 Td
+(Total Service Pro - Sample Service Manual) Tj
+0 -32 Td (Page 1 of 3) Tj
+0 -32 Td (Hydraulic pump assembly overview.) Tj
+0 -32 Td (Search term: reservoir) Tj
+0 -32 Td (This fixture is for viewer QA only.) Tj
+ET
+endstream
+endobj
+3 0 obj
+<< /Length 198 >>
+stream
+BT
+/F1 22 Tf
+72 720 Td
+(Cooling circuit - Page 2 of 3) Tj
+0 -32 Td (Inspect the reservoir cap and hoses.) Tj
+0 -32 Td (Search term: reservoir) Tj
+0 -32 Td (Next page covers the optical train.) Tj
+ET
+endstream
+endobj
+4 0 obj
+<< /Length 183 >>
+stream
+BT
+/F1 22 Tf
+72 720 Td
+(Optical train - Page 3 of 3) Tj
+0 -32 Td (Align the aiming beam before lasing.) Tj
+0 -32 Td (Search term: collimator) Tj
+0 -32 Td (End of sample manual.) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Page /Parent 8 0 R /MediaBox [0 0 612 792] /Contents 2 0 R /Resources << /Font << /F1 1 0 R >> >> >>
+endobj
+6 0 obj
+<< /Type /Page /Parent 8 0 R /MediaBox [0 0 612 792] /Contents 3 0 R /Resources << /Font << /F1 1 0 R >> >> >>
+endobj
+7 0 obj
+<< /Type /Page /Parent 8 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 1 0 R >> >> >>
+endobj
+8 0 obj
+<< /Type /Pages /Kids [5 0 R 6 0 R 7 0 R] /Count 3 >>
+endobj
+9 0 obj
+<< /Type /Catalog /Pages 8 0 R >>
+endobj
+xref
+0 10
+0000000000 65535 f 
+0000000009 00000 n 
+0000000079 00000 n 
+0000000363 00000 n 
+0000000612 00000 n 
+0000000846 00000 n 
+0000000972 00000 n 
+0000001098 00000 n 
+0000001224 00000 n 
+0000001293 00000 n 
+trailer
+<< /Size 10 /Root 9 0 R >>
+startxref
+1342
+%%EOF
