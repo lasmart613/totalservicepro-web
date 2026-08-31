@@ -1034,6 +1034,7 @@ export type Database = {
           brand: string
           chapter_metadata: Json
           created_at: string | null
+          doc_kind: string | null
           entry_file_path: string | null
           id: number
           is_folder: boolean
@@ -1047,6 +1048,7 @@ export type Database = {
           brand: string
           chapter_metadata?: Json
           created_at?: string | null
+          doc_kind?: string | null
           entry_file_path?: string | null
           id?: never
           is_folder?: boolean
@@ -1060,6 +1062,7 @@ export type Database = {
           brand?: string
           chapter_metadata?: Json
           created_at?: string | null
+          doc_kind?: string | null
           entry_file_path?: string | null
           id?: never
           is_folder?: boolean

@@ -54,6 +54,21 @@
 
     let manualsData = [];
 
+    /** Known catalog error: VBeam PDF is an Operator's Manual, not a Service Manual. */
+    function catalogTitle(manual) {
+        const raw = String(manual && manual.title || '').trim();
+        const hay = [raw, manual && manual.brand, manual && manual.storage_path, manual && manual.file_path, manual && manual.model].join(' ');
+        const isVbeam = /v[\s_-]*beam/i.test(hay)
+            || (/perfecta|aesthetica/i.test(hay) && /candela|pulsed\s*dye|\bpdl\b/i.test(hay));
+        const kind = String(manual && manual.doc_kind || '').toLowerCase();
+        if (kind === 'service' || !isVbeam) return raw || 'Manual';
+        if (/operator'?s?\s+manual/i.test(raw) && !/service\s+manuals?/i.test(raw)) return raw;
+        if (/\b(service|user|technical)\s+manuals?\b/i.test(raw)) {
+            return raw.replace(/\b(service|user|technical)\s+manuals?\b/gi, "Operator's Manual").replace(/\s{2,}/g, ' ').trim();
+        }
+        return raw ? (raw + " Operator's Manual") : "VBeam Operator's Manual";
+    }
+
     async function loadManuals() {
         const container = document.getElementById('mainContent');
         const { data: { user } } = await supabaseClient.auth.getUser();
@@ -97,7 +112,7 @@
                     <div class="manual-icon">📕</div>
                     <div class="manual-info">
                         <div class="manual-brand">${manual.brand}</div>
-                        <div class="manual-title">${manual.title}</div>
+                        <div class="manual-title">${catalogTitle(manual)}</div>
                     </div>
                 </div>
             `;

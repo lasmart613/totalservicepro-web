@@ -255,6 +255,21 @@
         }
     }
 
+    /** Known catalog error: VBeam PDF is an Operator's Manual, not a Service Manual. */
+    function catalogTitle(manual) {
+        const raw = String(manual && manual.title || '').trim();
+        const hay = [raw, manual && manual.brand, manual && manual.storage_path, manual && manual.model].join(' ');
+        const isVbeam = /v[\s_-]*beam/i.test(hay)
+            || (/perfecta|aesthetica/i.test(hay) && /candela|pulsed\s*dye|\bpdl\b/i.test(hay));
+        const kind = String(manual && manual.doc_kind || '').toLowerCase();
+        if (kind === 'service' || !isVbeam) return raw || 'Manual';
+        if (/operator'?s?\s+manual/i.test(raw) && !/service\s+manuals?/i.test(raw)) return raw;
+        if (/\b(service|user|technical)\s+manuals?\b/i.test(raw)) {
+            return raw.replace(/\b(service|user|technical)\s+manuals?\b/gi, "Operator's Manual").replace(/\s{2,}/g, ' ').trim();
+        }
+        return raw ? (raw + " Operator's Manual") : "VBeam Operator's Manual";
+    }
+
     async function loadManuals() {
         const { data, error } = await supabaseClient.from('manuals').select('*').order('brand').order('title');
         if (error) throw error;
@@ -343,7 +358,7 @@
                                 return `
                                     <div class="book" onclick="handleBookClick('${m.id}')">
                                         <div class="book-spine book-color-${i % 8}">
-                                            <div class="book-title">${m.title}</div>
+                                            <div class="book-title">${catalogTitle(m)}</div>
                                         </div>
                                         ${isOwned ? '<div class="owned-badge">✓</div>' : ''}
                                     </div>
@@ -386,7 +401,7 @@
         const addBtn = document.getElementById('addBtn');
         const upgradePrompt = document.getElementById('upgradePrompt');
 
-        titleEl.textContent = manual.title;
+        titleEl.textContent = catalogTitle(manual);
         const used = userManualIds.size;
 
         slotText.textContent = `${used} of ${FREE_LIMIT} slots used`;
@@ -446,7 +461,7 @@
         // Pass manual_id so the viewer can fetch is_folder + chapter_metadata (Option 1 long-term model).
         const params = new URLSearchParams({
             storage_path: manual.storage_path || '',
-            title: manual.title || 'Service Manual',
+            title: catalogTitle(manual),
             manual_id: manual.id
         });
 
