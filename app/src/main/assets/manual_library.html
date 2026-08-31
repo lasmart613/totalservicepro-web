@@ -255,19 +255,10 @@
         }
     }
 
-    /** Known catalog error: VBeam PDF is an Operator's Manual, not a Service Manual. */
+    /** Stored title only. Do not remap VBeam Service Manuals to Operator's Manual. */
     function catalogTitle(manual) {
         const raw = String(manual && manual.title || '').trim();
-        const hay = [raw, manual && manual.brand, manual && manual.storage_path, manual && manual.model].join(' ');
-        const isVbeam = /v[\s_-]*beam/i.test(hay)
-            || (/perfecta|aesthetica/i.test(hay) && /candela|pulsed\s*dye|\bpdl\b/i.test(hay));
-        const kind = String(manual && manual.doc_kind || '').toLowerCase();
-        if (kind === 'service' || !isVbeam) return raw || 'Manual';
-        if (/operator'?s?\s+manual/i.test(raw) && !/service\s+manuals?/i.test(raw)) return raw;
-        if (/\b(service|user|technical)\s+manuals?\b/i.test(raw)) {
-            return raw.replace(/\b(service|user|technical)\s+manuals?\b/gi, "Operator's Manual").replace(/\s{2,}/g, ' ').trim();
-        }
-        return raw ? (raw + " Operator's Manual") : "VBeam Operator's Manual";
+        return raw || 'Manual';
     }
 
     async function loadManuals() {

@@ -7,7 +7,12 @@ import { getSupabaseClient, getSupabaseUrl } from '@/lib/supabase/client';
 import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
 import { useRouter } from 'next/navigation';
 import { manualViewHref, stashManualView, type ManualViewPayload } from '@/lib/manuals';
-import { catalogManualKind, catalogManualKindLabel, catalogManualTitle } from '@/lib/manual-catalog';
+import {
+  catalogManualKind,
+  catalogManualKindLabel,
+  catalogManualTitle,
+  showOperatorBadge,
+} from '@/lib/manual-catalog';
 import { toast } from 'sonner';
 
 const WAVELENGTH_OPTIONS = [
@@ -626,7 +631,7 @@ export default function ManualsLibrary() {
                             </div>
                           )}
                         </div>
-                        {kind === 'operator' && (
+                        {showOperatorBadge(m) && (
                           <div
                             className="absolute -top-1 -left-1 z-10 rounded-full bg-amber-700 text-white text-[8px] font-extrabold px-1 py-0.5 shadow"
                             title={kindLabel}
