@@ -174,6 +174,38 @@ test('logged-out hero paints a darkened role cover behind left copy', () => {
   }
 });
 
+test('logged-out field section shows coming-soon store badges, not live listings', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const page = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');
+  const css = readFileSync(join(here, '../components/landing/landing.css'), 'utf8');
+  const field = page.split('id="app"')[1];
+  assert.match(field, /Same account in the field/);
+  assert.match(field, /Schedule, parts, manuals, and reports on Android\./);
+  assert.match(field, /Coming soon/);
+  assert.match(field, /lp-kicker/);
+  assert.match(field, /Get it on Google Play/);
+  assert.match(field, /Download on the App Store/);
+  assert.match(field, /Android and iOS/);
+  assert.match(field, /\/landing\/app-hub\.webp/);
+  assert.match(field, /\/landing\/app-calcs\.webp/);
+  assert.match(field, /\/landing\/badge-google-play\.png/);
+  assert.match(field, /\/landing\/badge-app-store\.svg/);
+  assert.match(field, /Mobile apps coming soon/);
+  assert.doesNotMatch(field, /play\.google\.com\/store/);
+  assert.doesNotMatch(field, /apps\.apple\.com/);
+  assert.doesNotMatch(field, /href=["']https?:\/\//);
+  assert.match(css, /\.lp-store-badges\s*\{/);
+  assert.match(css, /\.lp-phones-copy \.lp-kicker\s*\{/);
+  assert.match(css, /\.lp-store-platforms\s*\{[^}]*#9CA3AF/);
+  const play = join(here, '../public/landing/badge-google-play.png');
+  const apple = join(here, '../public/landing/badge-app-store.svg');
+  assert.ok(existsSync(play), 'official Google Play badge');
+  assert.ok(existsSync(apple), 'official App Store badge');
+  assert.ok(statSync(play).size > 2000, 'Play badge should be the official PNG');
+  const appleSvg = readFileSync(apple, 'utf8');
+  assert.match(appleSvg, /Download_on_the_App_Store_Badge_US-UK_RGB_blk/);
+});
+
 test('/plans never imports sign-out helpers', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/plans/page.tsx'), 'utf8');

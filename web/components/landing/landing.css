@@ -606,6 +606,50 @@ html.landing-mode body {
   align-items: center;
 }
 
+.lp-phones-copy .lp-lede {
+  color: #F3E8D8;
+  margin-bottom: 16px;
+}
+
+.lp-phones-copy .lp-kicker {
+  margin: 0 0 16px;
+}
+
+.lp-store-badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  margin: 0 0 10px;
+}
+
+.lp-store-badge {
+  display: inline-flex;
+  line-height: 0;
+}
+
+.lp-store-badge img {
+  display: block;
+  width: auto;
+}
+
+/* Official Play PNG includes required clear space; size so the mark matches Apple. */
+.lp-store-badge-play img {
+  height: 58px;
+  margin: -8px -12px;
+}
+
+.lp-store-badge-apple img {
+  height: 40px;
+}
+
+.lp-store-platforms {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.4;
+  color: #9CA3AF;
+}
+
 .lp-phone-wrap {
   display: flex;
   justify-content: flex-start;
