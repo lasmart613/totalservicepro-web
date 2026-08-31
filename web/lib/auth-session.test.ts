@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -102,6 +102,26 @@ test('logged-out landing pairs each hero title with a unique matching still', ()
   assert.doesNotMatch(source, /\bFSE\b/);
   const shell = readFileSync(join(here, '../components/landing/LandingShell.tsx'), 'utf8');
   assert.doesNotMatch(shell, /\bFSE\b/);
+});
+
+test('logged-out hero paints a darkened role cover behind left copy', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const page = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');
+  const css = readFileSync(join(here, '../components/landing/landing.css'), 'utf8');
+  assert.match(page, /'Repair companies': '\/landing\/hero-bg-shop\.webp'/);
+  assert.match(page, /Clinics: '\/landing\/hero-bg-clinic\.webp'/);
+  assert.match(page, /'Parts sellers': '\/landing\/hero-bg-parts\.webp'/);
+  assert.match(page, /--lp-hero-cover/);
+  assert.match(css, /\.lp-hero-copy::before/);
+  assert.match(css, /rgba\(17,\s*24,\s*39/);
+  assert.doesNotMatch(page, /lp-hero-benefits|lp-mini-carousel|hero-cards/);
+  for (const name of ['hero-bg-shop.webp', 'hero-bg-clinic.webp', 'hero-bg-parts.webp']) {
+    const file = join(here, '../public/landing', name);
+    assert.ok(existsSync(file), name);
+    const bytes = statSync(file).size;
+    assert.ok(bytes > 8_000, `${name} should be a real photo`);
+    assert.ok(bytes < 250_000, `${name} should stay reasonable`);
+  }
 });
 
 test('/plans never imports sign-out helpers', () => {

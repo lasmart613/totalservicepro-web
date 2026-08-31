@@ -192,6 +192,12 @@ const HERO_SLIDES: {
 
 const HERO_AUTO_MS = 7000;
 
+const HERO_COVER: Record<string, string> = {
+  'Repair companies': '/landing/hero-bg-shop.webp',
+  Clinics: '/landing/hero-bg-clinic.webp',
+  'Parts sellers': '/landing/hero-bg-parts.webp',
+};
+
 function HeroCarousel() {
   const n = HERO_SLIDES.length;
   const [i, setI] = useState(0);
@@ -277,7 +283,14 @@ function HeroCarousel() {
               aria-hidden={idx !== i}
               inert={idx !== i ? true : undefined}
             >
-              <div className="lp-hero-copy">
+              <div
+                className="lp-hero-copy"
+                style={
+                  {
+                    '--lp-hero-cover': `url("${HERO_COVER[s.audience]}")`,
+                  } as React.CSSProperties
+                }
+              >
                 <p className="lp-kicker">{s.audience}</p>
                 {idx === i ? (
                   <h1 className="lp-title">{s.title}</h1>
