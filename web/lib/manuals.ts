@@ -5,7 +5,13 @@
 
 export const MANUAL_VIEW_STORAGE_KEY = 'tsp-manual-view';
 export const MANUAL_VIEW_PATH = '/manuals/view';
-export const PDFJS_CDN_VERSION = '3.11.174';
+/** Same-origin pdf.js (vendored). Do not load from a CDN — Netlify CSP is 'self'. */
+export const PDFJS_SCRIPT_SRC = '/pdfjs/pdf.min.js';
+export const PDFJS_WORKER_SRC = '/pdfjs/pdf.worker.min.js';
+/** In-repo multi-page fixture for viewer QA (not a live org manual). */
+export const MANUAL_FIXTURE_PATH = '/fixtures/sample-service-manual.pdf';
+export const MANUAL_FIXTURE_PAGE_COUNT = 3;
+export const MANUAL_FIXTURE_DEMO_PATH = '/pdf-viewer-demo';
 
 export type ManualChapter = {
   title?: string;
@@ -70,4 +76,11 @@ export function readManualView(): ManualViewPayload | null {
 
 export function isLikelyPdfPath(path: string | null | undefined): boolean {
   return /\.pdf($|[?#])/i.test(String(path || ''));
+}
+
+/** Case-insensitive substring match used by in-viewer Find. */
+export function pageTextMatches(haystack: string, query: string): boolean {
+  const q = String(query || '').trim().toLowerCase();
+  if (!q) return false;
+  return String(haystack || '').toLowerCase().includes(q);
 }
