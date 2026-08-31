@@ -1,19 +1,17 @@
 /**
  * Manual library catalog labels.
  *
- * Rows live in production `public.manuals` (not a repo seed JSON). The
- * bookshelf shows `manuals.title` and an OP badge when the document is an
- * Operator's Manual.
+ * Larry’s mapping (PR #70 preview):
+ * - Title essentially **"VBeam"** (V-Beam / Vbeam, no model suffix) is the
+ *   Operator’s Manual → OP badge + “Operator’s Manual”.
+ * - Title **"VBeam Perfecta"** (and other model-specific VBeam titles:
+ *   Platinum, Aesthetica, 2, …) is a Service Manual → no OP badge.
+ * Do not blanket-remap the VBeam family. Do not require the stored title
+ * to already contain the words “Operator’s Manual”.
  *
- * Larry (live repairplanet.net after #69): do NOT blanket-remap every
- * VBeam / Perfecta / Platinum / Aesthetica title. Real VBeam Service
- * Manuals stay Service Manual with no OP badge. Only the document whose
- * title (or PDF first pages, when we have that text) already says
- * Operator / Operator's / User Manual gets OP + Operator's Manual.
- *
- * When the title already says Service Manual / Technical Manual / repair,
- * treat as service — never retitle those to Operator's Manual.
- * Do not scrape or replace PDFs. Do not infer type from brand/model alone.
+ * If the stored title already says Service Manual, leave it service.
+ * If it already says Operator / User Manual, keep OP.
+ * Do not scrape or replace PDFs.
  */
 
 export type ManualDocKind = 'service' | 'operator' | 'user' | 'technical' | 'parts';
@@ -42,6 +40,8 @@ const OPERATOR_RE = /operator'?s?\s+manual|\boperator\s+manual\b/i;
 const USER_RE = /\buser\s+manual\b/i;
 const SERVICE_RE = /\bservice\s+manuals?\b|\btechnical\s+manuals?\b|\brepair\s+manuals?\b/i;
 const REPAIR_RE = /\brepair\b/i;
+/** Model suffixes that mean a specific VBeam platform (service docs), not the bare "VBeam" operator row. */
+const VBEAM_MODEL_SUFFIX_RE = /\b(perfecta|platinum|aesthetica|classic|pro|[0-9]+)\b/i;
 
 export function normalizeManualDocKind(raw: string | null | undefined): ManualDocKind | null {
   const k = String(raw || '')
@@ -60,6 +60,30 @@ export function isVbeamFamily(manual: ManualCatalogFields): boolean {
   if (/perfecta|aesthetica/i.test(hay) && /candela|pulsed\s*dye|\bpdl\b/i.test(hay)) return true;
   if (/platinum/i.test(hay) && /candela/i.test(hay) && /dye|595|\bpdl\b/i.test(hay)) return true;
   return false;
+}
+
+function strippedBrandPrefix(title: string): string {
+  return String(title || '')
+    .replace(/^\s*syneron(?:\s*candela)?\b[\s\-:\/]*/i, '')
+    .replace(/^\s*candela\b[\s\-:\/]*/i, '')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * Catalog title is just VBeam / V-Beam / Vbeam (optional Candela prefix),
+ * with no Perfecta / Platinum / Aesthetica / 2 / … suffix.
+ */
+export function isBareVbeamOperatorTitle(title: string | null | undefined): boolean {
+  const t = strippedBrandPrefix(String(title || ''));
+  if (!t || VBEAM_MODEL_SUFFIX_RE.test(t)) return false;
+  return /^v[\s_-]*beam$/i.test(t);
+}
+
+/** VBeam + a model/trim word — Larry: these are service docs (e.g. VBeam Perfecta). */
+export function isVbeamModelSpecificTitle(title: string | null | undefined): boolean {
+  const t = strippedBrandPrefix(String(title || ''));
+  return /v[\s_-]*beam/i.test(t) && VBEAM_MODEL_SUFFIX_RE.test(t);
 }
 
 /**
@@ -82,14 +106,18 @@ export function inferKindFromDocumentText(text: string | null | undefined): Manu
 }
 
 /**
- * Document type for library UI. Title / path / PDF text decide.
- * Brand or "this is a VBeam" never implies operator.
- * A blanket `doc_kind = operator` without title evidence is ignored
- * (that was the #69 SQL mistake).
+ * Document type for library UI.
+ * 1) Type words on the stored title win (Service Manual vs Operator/User).
+ * 2) Bare "VBeam" (no model suffix) is the operator PDF.
+ * 3) "VBeam Perfecta" and other model-specific VBeam titles are service.
+ * Path / PDF text do not override those two named rows.
  */
 export function catalogManualKind(manual: ManualCatalogFields): ManualDocKind {
   const fromTitle = inferKindFromDocumentText(manual.title);
   if (fromTitle) return fromTitle;
+
+  if (isBareVbeamOperatorTitle(manual.title)) return 'operator';
+  if (isVbeamModelSpecificTitle(manual.title)) return 'service';
 
   const fromPath = inferKindFromDocumentText(manual.storage_path);
   if (fromPath) return fromPath;
@@ -100,7 +128,6 @@ export function catalogManualKind(manual: ManualCatalogFields): ManualDocKind {
   const explicit = normalizeManualDocKind(manual.doc_kind);
   if (explicit === 'service' || explicit === 'technical' || explicit === 'parts') return explicit;
   if (explicit === 'user') return 'operator';
-  // explicit === 'operator' with no title/path/PDF evidence: do not badge OP
   return 'service';
 }
 
@@ -108,9 +135,13 @@ export function catalogManualKindLabel(kind: ManualDocKind): string {
   return KIND_LABEL[kind];
 }
 
-/** Display title: stored title as-is. Never rewrite Service Manual → Operator's Manual. */
+/** Stored title, plus “Operator's Manual” when this row is the bare-VBeam operator PDF. */
 export function catalogManualTitle(manual: ManualCatalogFields): string {
-  return String(manual.title || '').trim() || 'Manual';
+  const raw = String(manual.title || '').trim() || 'Manual';
+  const kind = catalogManualKind(manual);
+  if (kind !== 'operator') return raw;
+  if (OPERATOR_RE.test(raw) || USER_RE.test(raw)) return raw;
+  return `${raw} Operator's Manual`;
 }
 
 export function presentManual<T extends ManualCatalogFields>(manual: T): T & {

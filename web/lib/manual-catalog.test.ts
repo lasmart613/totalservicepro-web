@@ -8,12 +8,36 @@ import {
   catalogManualKindLabel,
   catalogManualTitle,
   inferKindFromDocumentText,
+  isBareVbeamOperatorTitle,
   isVbeamFamily,
+  isVbeamModelSpecificTitle,
   presentManual,
   showOperatorBadge,
 } from './manual-catalog.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
+
+test('title "VBeam" is the Operator\'s Manual and gets the OP badge', () => {
+  const row = { brand: 'Candela', title: 'VBeam' };
+  assert.equal(isBareVbeamOperatorTitle(row.title), true);
+  assert.equal(catalogManualKind(row), 'operator');
+  assert.equal(showOperatorBadge(row), true);
+  assert.equal(catalogManualTitle(row), "VBeam Operator's Manual");
+  assert.equal(catalogManualKindLabel(catalogManualKind(row)), "Operator's Manual");
+  assert.equal(catalogManualKind({ title: 'V-Beam' }), 'operator');
+  assert.equal(showOperatorBadge({ title: 'Vbeam' }), true);
+  assert.equal(catalogManualKind({ title: 'Candela VBeam' }), 'operator');
+});
+
+test('title "VBeam Perfecta" is the Service Manual and has no OP badge', () => {
+  const row = { brand: 'Candela', title: 'VBeam Perfecta' };
+  assert.equal(isVbeamModelSpecificTitle(row.title), true);
+  assert.equal(isBareVbeamOperatorTitle(row.title), false);
+  assert.equal(catalogManualKind(row), 'service');
+  assert.equal(showOperatorBadge(row), false);
+  assert.equal(catalogManualTitle(row), 'VBeam Perfecta');
+  assert.equal(catalogManualKindLabel(catalogManualKind(row)), 'Service Manual');
+});
 
 test('VBeam Service Manual stays Service Manual with no OP badge', () => {
   const row = { brand: 'Candela', title: 'VBeam Service Manual', storage_path: 'shared/candela/vbeam.pdf' };
@@ -21,63 +45,51 @@ test('VBeam Service Manual stays Service Manual with no OP badge', () => {
   assert.equal(catalogManualKind(row), 'service');
   assert.equal(catalogManualTitle(row), 'VBeam Service Manual');
   assert.equal(showOperatorBadge(row), false);
-  assert.equal(catalogManualKindLabel(catalogManualKind(row)), 'Service Manual');
 });
 
-test('VBeam Perfecta / V-Beam 1 / Platinum / Aesthetica service titles are not remapped', () => {
-  assert.equal(catalogManualTitle({ title: 'VBeam Perfecta Service Manual' }), 'VBeam Perfecta Service Manual');
+test('model-specific VBeam titles stay service (no family blanket)', () => {
   assert.equal(catalogManualKind({ title: 'VBeam Perfecta Service Manual' }), 'service');
   assert.equal(showOperatorBadge({ title: 'VBeam Perfecta Service Manual' }), false);
-  assert.equal(catalogManualKind({ title: 'Candela V-Beam 1 Service Manual' }), 'service');
-  assert.equal(catalogManualKind({ brand: 'Candela', title: 'Aesthetica Service Manual' }), 'service');
-  assert.equal(catalogManualKind({ brand: 'Candela', title: 'VBeam Platinum', model: 'Platinum' }), 'service');
-  assert.equal(showOperatorBadge({ brand: 'Candela', title: 'Perfecta', model: 'Perfecta' }), false);
+  assert.equal(catalogManualKind({ title: 'VBeam Platinum' }), 'service');
+  assert.equal(showOperatorBadge({ title: 'VBeam Aesthetica' }), false);
+  assert.equal(catalogManualKind({ title: 'VBeam 2' }), 'service');
+  assert.equal(showOperatorBadge({ title: 'V-Beam 1' }), false);
 });
 
-test('only titles that already say Operator / User Manual get OP', () => {
+test('stored Operator / User Manual wording keeps OP', () => {
   const op = { title: "VBeam Perfecta Operator's Manual" };
   assert.equal(catalogManualKind(op), 'operator');
   assert.equal(catalogManualTitle(op), "VBeam Perfecta Operator's Manual");
   assert.equal(showOperatorBadge(op), true);
-
-  assert.equal(catalogManualKind({ title: 'VBeam Operator Manual' }), 'operator');
   assert.equal(showOperatorBadge({ title: 'Candela VBeam User Manual' }), true);
-  assert.equal(catalogManualTitle({ title: 'VBeam Perfecta' }), 'VBeam Perfecta');
-  assert.equal(showOperatorBadge({ title: 'VBeam Perfecta' }), false);
 });
 
-test('storage_path Operator Manual is enough when title is a model-only name', () => {
-  const row = {
-    title: 'VBeam Perfecta',
-    storage_path: "shared/candela/VBeam Operator's Manual/8501-00-0000.pdf",
-  };
-  assert.equal(catalogManualKind(row), 'operator');
-  assert.equal(showOperatorBadge(row), true);
-  assert.equal(catalogManualTitle(row), 'VBeam Perfecta');
+test('path or PDF text does not flip the two named VBeam rows', () => {
+  assert.equal(
+    catalogManualKind({
+      title: 'VBeam Perfecta',
+      storage_path: "shared/candela/VBeam Operator's Manual/8501-00-0000.pdf",
+    }),
+    'service'
+  );
+  assert.equal(showOperatorBadge({ title: 'VBeam Perfecta', pdfText: "OPERATOR'S MANUAL" }), false);
+  assert.equal(
+    catalogManualKind({
+      title: 'VBeam',
+      storage_path: 'shared/candela/VBeam Service Manual/foo.pdf',
+    }),
+    'operator'
+  );
+  assert.equal(showOperatorBadge({ title: 'VBeam', pdfText: 'Service Manual' }), true);
 });
 
-test('storage_path Service Manual does not get OP even if doc_kind was blanket-set', () => {
-  const row = {
-    title: 'VBeam',
-    storage_path: 'shared/candela/VBeam Service Manual/foo.pdf',
-    doc_kind: 'operator',
-  };
-  assert.equal(catalogManualKind(row), 'service');
-  assert.equal(showOperatorBadge(row), false);
-});
-
-test('PDF first-page text can classify when title is ambiguous', () => {
-  const op = { title: 'VBeam Perfecta', pdfText: "OPERATOR'S MANUAL\nVBeam Perfecta" };
+test('PDF first-page text can still classify unrelated ambiguous titles', () => {
+  const op = { title: 'Unknown dye laser', pdfText: "OPERATOR'S MANUAL\nVBeam Perfecta" };
   assert.equal(inferKindFromDocumentText(op.pdfText), 'operator');
   assert.equal(catalogManualKind(op), 'operator');
-  assert.equal(showOperatorBadge(op), true);
-
-  const svc = { title: 'VBeam Perfecta', pdfText: 'Service Manual\nRepair procedures' };
-  assert.equal(catalogManualKind(svc), 'service');
-  assert.equal(showOperatorBadge(svc), false);
 });
 
-test('blanket doc_kind=operator without title evidence does not apply OP', () => {
+test('blanket doc_kind=operator does not OP VBeam Perfecta', () => {
   const row = { title: 'VBeam Perfecta', doc_kind: 'operator' };
   assert.equal(catalogManualKind(row), 'service');
   assert.equal(showOperatorBadge(row), false);
@@ -91,23 +103,25 @@ test('non-VBeam service manuals are unchanged', () => {
   assert.equal(showOperatorBadge(row), false);
 });
 
-test('presentManual keeps storage_path and the stored service title', () => {
-  const shown = presentManual({
+test('presentManual keeps a service title and remaps bare VBeam for display', () => {
+  const svc = presentManual({
     id: 9,
     title: 'VBeam Service Manual',
     storage_path: 'shared/candela/vbeam.pdf',
   });
-  assert.equal(shown.displayTitle, 'VBeam Service Manual');
-  assert.equal(shown.docKind, 'service');
-  assert.equal(shown.storage_path, 'shared/candela/vbeam.pdf');
-  assert.equal(shown.title, 'VBeam Service Manual');
+  assert.equal(svc.displayTitle, 'VBeam Service Manual');
+  assert.equal(svc.docKind, 'service');
+
+  const op = presentManual({ id: 10, title: 'VBeam' });
+  assert.equal(op.displayTitle, "VBeam Operator's Manual");
+  assert.equal(op.docKind, 'operator');
 });
 
 test('bookshelf gates the OP badge on catalogManualKind / showOperatorBadge', () => {
   const page = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
   const catalog = readFileSync(join(here, 'manual-catalog.ts'), 'utf8');
   assert.match(page, /catalogManualTitle/);
-  assert.match(page, /catalogManualKind/);
   assert.match(page, /showOperatorBadge/);
+  assert.match(catalog, /isBareVbeamOperatorTitle/);
   assert.doesNotMatch(catalog, /isVbeamFamily\(manual\) return 'operator'/);
 });

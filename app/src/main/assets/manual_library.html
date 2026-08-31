@@ -255,10 +255,17 @@
         }
     }
 
-    /** Stored title only. Do not remap VBeam Service Manuals to Operator's Manual. */
+    /** Bare "VBeam" is the operator PDF; "VBeam Perfecta" stays a service title. */
     function catalogTitle(manual) {
         const raw = String(manual && manual.title || '').trim();
-        return raw || 'Manual';
+        if (!raw) return 'Manual';
+        if (/\b(service|technical|repair)\s+manuals?\b/i.test(raw)) return raw;
+        if (/operator'?s?\s+manual|\buser\s+manual\b/i.test(raw)) return raw;
+        const stripped = raw.replace(/^\s*(syneron(?:\s*candela)?|candela)\b[\s\-:\/]*/i, '').trim();
+        if (/^v[\s_-]*beam$/i.test(stripped) && !/\b(perfecta|platinum|aesthetica|classic|pro|[0-9]+)\b/i.test(stripped)) {
+            return raw + " Operator's Manual";
+        }
+        return raw;
     }
 
     async function loadManuals() {
