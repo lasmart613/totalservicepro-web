@@ -116,12 +116,39 @@ const HERO_SLIDES: {
     },
   },
   {
+    audience: 'Clinics',
+    title: 'Find a Repair Company',
+    shot: {
+      src: '/landing/directory.webp',
+      alt: 'Directory search to find a repair company among service companies, clinics, resellers, and suppliers',
+      caption: 'Directory',
+    },
+  },
+  {
+    audience: 'Parts sellers',
+    title: 'Connect with Repair Companies and laser owners',
+    shot: {
+      src: '/landing/parts.webp',
+      alt: 'Parts marketplace with live listings and prices',
+      caption: 'Parts for sale',
+    },
+  },
+  {
     audience: 'Repair companies',
     title: 'Schedule and Assign Service Calls',
     shot: {
       src: '/landing/schedule.webp',
       alt: 'Color-coded August shop schedule with assigned field engineer legend',
       caption: 'Color-coded shop schedule',
+    },
+  },
+  {
+    audience: 'Clinics',
+    title: 'View service history',
+    shot: {
+      src: '/landing/reports.webp',
+      alt: 'Service reports list with drafts and completed work',
+      caption: 'Service history',
     },
   },
   {
@@ -161,33 +188,6 @@ const HERO_SLIDES: {
       caption: 'Marketplace',
     },
   },
-  {
-    audience: 'Clinics',
-    title: 'Find a Repair Company',
-    shot: {
-      src: '/landing/directory.webp',
-      alt: 'Directory search to find a repair company among service companies, clinics, resellers, and suppliers',
-      caption: 'Directory',
-    },
-  },
-  {
-    audience: 'Clinics',
-    title: 'View service history',
-    shot: {
-      src: '/landing/reports.webp',
-      alt: 'Service reports list with drafts and completed work',
-      caption: 'Service history',
-    },
-  },
-  {
-    audience: 'Parts sellers',
-    title: 'Connect with Repair Companies and laser owners',
-    shot: {
-      src: '/landing/parts.webp',
-      alt: 'Parts marketplace with live listings and prices',
-      caption: 'Parts for sale',
-    },
-  },
 ];
 
 const HERO_AUTO_MS = 7000;
@@ -196,6 +196,12 @@ const HERO_COVER: Record<string, string> = {
   'Repair companies': '/landing/hero-bg-shop.webp',
   Clinics: '/landing/hero-bg-clinic.webp',
   'Parts sellers': '/landing/hero-bg-parts.webp',
+};
+
+const HERO_COVER_ID: Record<string, string> = {
+  'Repair companies': 'shop',
+  Clinics: 'clinic',
+  'Parts sellers': 'parts',
 };
 
 function HeroCarousel() {
@@ -259,6 +265,7 @@ function HeroCarousel() {
         }
       }}
     >
+      <p className="lp-hero-mission">Matching laser owners with service companies.</p>
       <div
         className="lp-hero-viewport"
         tabIndex={0}
@@ -285,6 +292,7 @@ function HeroCarousel() {
             >
               <div
                 className="lp-hero-copy"
+                data-cover={HERO_COVER_ID[s.audience]}
                 style={
                   {
                     '--lp-hero-cover': `url("${HERO_COVER[s.audience]}")`,
