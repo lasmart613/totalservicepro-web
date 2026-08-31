@@ -42,8 +42,11 @@ test('logged-out hero has one quiet benefits subhead under the H1', () => {
   const css = readFileSync(join(here, '../components/landing/landing.css'), 'utf8');
   assert.match(page, /See open tickets and upcoming calls/);
   assert.match(page, /Tickets, parts, and the marketplace in one shop\. Free to start\./);
+  assert.match(page, /Matching laser owners with service companies\./);
   assert.match(page, /lp-hero-subhead/);
+  assert.match(page, /lp-hero-mission/);
   assert.match(css, /\.lp-hero-subhead\s*\{/);
+  assert.match(css, /\.lp-hero-mission\s*\{/);
   assert.doesNotMatch(page, /lp-hero-benefits|lp-mini-carousel|hero-cards/);
 });
 
@@ -72,6 +75,20 @@ test('logged-out landing pairs each hero title with a unique matching still', ()
   assert.equal(new Set(srcs).size, srcs.length, 'hero stills must be unique');
   const byTitle = Object.fromEntries(titles.map((t, i) => [t, srcs[i]]));
   assert.equal(titles.length, 9);
+  assert.deepEqual(
+    titles,
+    [
+      'See open tickets and upcoming calls',
+      'Find a Repair Company',
+      'Connect with Repair Companies and laser owners',
+      'Schedule and Assign Service Calls',
+      'View service history',
+      'Assign a field engineer and email them the ticket',
+      'Assign shop test equipment to a field engineer',
+      'Photometry tools on the job',
+      'Marketplace — parts, used systems, and service needs',
+    ],
+  );
   assert.equal(byTitle['See open tickets and upcoming calls'], '/landing/dashboard.webp');
   assert.equal(byTitle['Schedule and Assign Service Calls'], '/landing/schedule.webp');
   assert.equal(byTitle['Assign a field engineer and email them the ticket'], '/landing/ticket-assign.webp');
@@ -112,7 +129,11 @@ test('logged-out hero paints a darkened role cover behind left copy', () => {
   assert.match(page, /Clinics: '\/landing\/hero-bg-clinic\.webp'/);
   assert.match(page, /'Parts sellers': '\/landing\/hero-bg-parts\.webp'/);
   assert.match(page, /--lp-hero-cover/);
+  assert.match(page, /data-cover=\{HERO_COVER_ID\[s\.audience\]\}/);
   assert.match(css, /\.lp-hero-copy::before/);
+  assert.match(css, /\[data-cover='clinic'\]::before/);
+  assert.match(css, /\[data-cover='parts'\]::before/);
+  assert.match(css, /\[data-cover='clinic'\]\s*\{[^}]*background-position:\s*62% 28%/);
   assert.match(css, /rgba\(17,\s*24,\s*39/);
   assert.doesNotMatch(page, /lp-hero-benefits|lp-mini-carousel|hero-cards/);
   for (const name of ['hero-bg-shop.webp', 'hero-bg-clinic.webp', 'hero-bg-parts.webp']) {
