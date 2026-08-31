@@ -12,6 +12,7 @@ import {
   grokChat,
 } from '@/lib/ai/grok-client';
 import { toast } from 'sonner';
+import { catalogManualTitle } from '@/lib/manual-catalog';
 
 type ManualRow = {
   title: string;
@@ -81,12 +82,12 @@ export default function AIAssistantClient() {
     if (!brand) return [];
     return manuals
       .filter((m) => m.brand === brand)
-      .sort((a, b) => a.title.localeCompare(b.title));
+      .sort((a, b) => catalogManualTitle(a).localeCompare(catalogManualTitle(b)));
   }, [manuals, brand]);
 
   const selectedManualLabel = useMemo(() => {
     const m = manuals.find((x) => x.storage_path === manualPath);
-    return m ? `${m.brand || ''} · ${m.title}`.trim() : '';
+    return m ? `${m.brand || ''} · ${catalogManualTitle(m)}`.trim() : '';
   }, [manuals, manualPath]);
 
   const activeStorageKey = useMemo(() => {
@@ -395,7 +396,7 @@ export default function AIAssistantClient() {
               <option value="">{brand ? 'Select model / manual…' : 'Pick a brand first'}</option>
               {manualsForBrand.map((m) => (
                 <option key={m.storage_path} value={m.storage_path}>
-                  {m.title}
+                  {catalogManualTitle(m)}
                 </option>
               ))}
             </select>

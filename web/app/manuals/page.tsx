@@ -7,6 +7,7 @@ import { getSupabaseClient, getSupabaseUrl } from '@/lib/supabase/client';
 import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
 import { useRouter } from 'next/navigation';
 import { manualViewHref, stashManualView, type ManualViewPayload } from '@/lib/manuals';
+import { catalogManualKind, catalogManualKindLabel, catalogManualTitle } from '@/lib/manual-catalog';
 import { toast } from 'sonner';
 
 const WAVELENGTH_OPTIONS = [
@@ -235,10 +236,14 @@ export default function ManualsLibrary() {
     return true;
   }
 
+  function libraryTitle(manual: any, titleHint?: string) {
+    return titleHint || catalogManualTitle(manual) || 'Manual';
+  }
+
   function openInAppViewer(json: any, manual: any, titleHint?: string) {
     const payload: ManualViewPayload = {
       manualId: manual?.id ?? null,
-      title: titleHint || manual?.title || 'Service Manual',
+      title: libraryTitle(manual, titleHint),
       storagePath: json?.storage_path || manual?.storage_path || null,
       url: json?.url || null,
       dataBase64: json?.data_base64 || null,
@@ -274,7 +279,8 @@ export default function ManualsLibrary() {
       };
       const { json, status } = await callGetManualUrl(payload);
 
-      const opened = openPayloadUrl(json, m, m.title);
+      const shownTitle = catalogManualTitle(m);
+      const opened = openPayloadUrl(json, m, shownTitle);
       if (opened === true) return;
       if (opened === 'chapter') {
         const chapterPath = (openPayloadUrl as any)._pendingChapter;
@@ -282,7 +288,7 @@ export default function ManualsLibrary() {
           manual_id: m.id,
           storage_path: chapterPath,
         });
-        if (openPayloadUrl({ ...chRes.json, chapters: json.chapters }, m, m.title) === true) return;
+        if (openPayloadUrl({ ...chRes.json, chapters: json.chapters }, m, shownTitle) === true) return;
         toast.error(chRes.json.error || 'Could not open first chapter');
         return;
       }
@@ -306,7 +312,7 @@ export default function ManualsLibrary() {
           return;
         }
         const confirmAdd = window.confirm(
-          `Add "${m.title}" to your company library?\n\n` +
+          `Add "${shownTitle}" to your company library?\n\n` +
             `Slots used: ${used} of ${isUnlimitedManualSlots(limit) ? 'unlimited' : limit}` +
             `${isUnlimitedManualSlots(limit) ? '' : ` (${remaining} left)`}.\n` +
             `Everyone in your service company can open it after you add it.`
@@ -317,7 +323,7 @@ export default function ManualsLibrary() {
         if (!added) return;
         await loadData();
         const openRes = await callGetManualUrl(payload);
-        if (openPayloadUrl(openRes.json, m, m.title) === true) {
+        if (openPayloadUrl(openRes.json, m, shownTitle) === true) {
           toast.success('Added to company library');
         } else {
           toast.error(openRes.json.error || 'Added, but could not open PDF yet. Try again from My Library.');
@@ -332,7 +338,7 @@ export default function ManualsLibrary() {
       ) {
         toast.error(
           json.error ||
-            `No PDF uploaded yet for "${m.title}". The catalog entry exists, but files are missing under ${m.storage_path || 'storage'}.`
+            `No PDF uploaded yet for "${shownTitle}". The catalog entry exists, but files are missing under ${m.storage_path || 'storage'}.`
         );
         return;
       }
@@ -580,6 +586,9 @@ export default function ManualsLibrary() {
                     {brandManuals.map((m, index) => {
                       const stripes = getWavelengthStripes(m);
                       const wlHint = stripes.map((s) => s.label).filter((v, i, a) => a.indexOf(v) === i).join(' · ');
+                      const shownTitle = catalogManualTitle(m);
+                      const kind = catalogManualKind(m);
+                      const kindLabel = catalogManualKindLabel(kind);
                       return (
                       <div
                         key={m.id != null ? String(m.id) : index}
@@ -587,8 +596,9 @@ export default function ManualsLibrary() {
                         className="book relative w-12 flex-shrink-0 cursor-pointer active:scale-[0.98]"
                         title={
                           (isOwned(m)
-                            ? `${m.title} (in library — tap to open)`
-                            : `${m.title} (tap to add to company library)`) +
+                            ? `${shownTitle} (in library — tap to open)`
+                            : `${shownTitle} (tap to add to company library)`) +
+                          `\n${kindLabel}` +
                           (wlHint ? `\n${wlHint}` : '')
                         }
                         style={{ width: 50 + (index % 4) * 2 }}
@@ -601,7 +611,7 @@ export default function ManualsLibrary() {
                           }}
                         >
                           <div className="book-title relative z-10 px-0.5 text-neutral-900">
-                            {getSpineTitle(m.title, m.brand)}
+                            {getSpineTitle(shownTitle, m.brand)}
                           </div>
                           {stripes.length > 0 && (
                             <div className="wl-stripes" aria-hidden>
@@ -616,6 +626,14 @@ export default function ManualsLibrary() {
                             </div>
                           )}
                         </div>
+                        {kind === 'operator' && (
+                          <div
+                            className="absolute -top-1 -left-1 z-10 rounded-full bg-amber-700 text-white text-[8px] font-extrabold px-1 py-0.5 shadow"
+                            title={kindLabel}
+                          >
+                            OP
+                          </div>
+                        )}
                         {isOwned(m) && (
                           <div className="absolute -top-1 -right-1 z-10 rounded-full bg-green-600 text-white text-[9px] font-bold px-1.5 py-0.5 shadow">
                             ✓

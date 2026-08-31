@@ -42,6 +42,7 @@ test('bookshelf opens the in-app viewer and does not window.open the PDF', () =>
   const fileRoute = readFileSync(join(here, '../app/api/manuals/file/route.ts'), 'utf8');
   assert.match(page, /openInAppViewer|stashManualView/);
   assert.match(page, /manualViewHref/);
+  assert.match(page, /catalogManualTitle/);
   assert.match(page, /\/api\/manuals\/library/);
   assert.match(page, /manualSlotLimit/);
   assert.doesNotMatch(page, /window\.open/);
