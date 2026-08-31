@@ -475,9 +475,29 @@ export function LandingPage() {
       </section>
 
       <section className="lp-section lp-phones" id="app">
-        <div>
+        <div className="lp-phones-copy">
           <h2 className="lp-h2">Same account in the field</h2>
           <p className="lp-lede">Schedule, parts, manuals, and reports on Android.</p>
+          <p className="lp-kicker">Coming soon</p>
+          <div className="lp-store-badges" role="group" aria-label="Mobile apps coming soon">
+            <span className="lp-store-badge lp-store-badge-play">
+              <img
+                src="/landing/badge-google-play.png"
+                alt="Get it on Google Play"
+                width={646}
+                height={250}
+              />
+            </span>
+            <span className="lp-store-badge lp-store-badge-apple">
+              <img
+                src="/landing/badge-app-store.svg"
+                alt="Download on the App Store"
+                width={120}
+                height={40}
+              />
+            </span>
+          </div>
+          <p className="lp-store-platforms">Android and iOS</p>
         </div>
         <div className="lp-phone-wrap">
           <div className="lp-phone">
