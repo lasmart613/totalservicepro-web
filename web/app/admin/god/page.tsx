@@ -14,6 +14,7 @@ type SendLog = {
   organization_name: string | null;
   recipient_email: string;
   subject: string;
+  unsubscribed_at?: string | null;
 };
 
 const TYPE_FILTERS = [
@@ -384,6 +385,7 @@ export default function GodDashboardPage() {
                 <th className="p-3">When</th>
                 <th className="p-3">Organization</th>
                 <th className="p-3">Recipient</th>
+                <th className="p-3">Status</th>
               </tr>
             </thead>
             <tbody>
@@ -392,11 +394,12 @@ export default function GodDashboardPage() {
                   <td className="p-3 whitespace-nowrap">{formatDate(row.created_at)}</td>
                   <td className="p-3">{row.organization_name || row.organization_id}</td>
                   <td className="p-3">{row.recipient_email}</td>
+                  <td className="p-3">{row.unsubscribed_at ? 'Unsubscribed' : 'Sent'}</td>
                 </tr>
               ))}
               {sends.length === 0 && (
                 <tr>
-                  <td colSpan={3} className="p-6 text-center text-[var(--text3)]">
+                  <td colSpan={4} className="p-6 text-center text-[var(--text3)]">
                     No invites sent from this dashboard yet.
                   </td>
                 </tr>
