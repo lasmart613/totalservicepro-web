@@ -102,6 +102,19 @@
             font-weight: 700;
             box-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
+        .op-badge {
+            position: absolute;
+            top: -4px;
+            left: -4px;
+            background: #b45309;
+            color: white;
+            font-size: 8px;
+            padding: 1px 5px;
+            border-radius: 8px;
+            font-weight: 800;
+            letter-spacing: 0.3px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
         .tabs {
             display: flex;
             border-bottom: 1px solid var(--border);
@@ -256,15 +269,22 @@
     }
 
     /** Bare "VBeam" is the operator PDF; "VBeam Perfecta" stays a service title. */
+    function isBareVbeamOperatorTitle(title) {
+        const stripped = String(title || '').replace(/^\s*(syneron(?:\s*candela)?|candela)\b[\s\-:\/]*/i, '').trim();
+        return /^v[\s_-]*beam$/i.test(stripped) && !/\b(perfecta|platinum|aesthetica|classic|pro|[0-9]+)\b/i.test(stripped);
+    }
+    function isOperatorManual(manual) {
+        const raw = String(manual && manual.title || '').trim();
+        if (/\b(service|technical|repair)\s+manuals?\b/i.test(raw)) return false;
+        if (/operator'?s?\s+manual|\buser\s+manual\b/i.test(raw)) return true;
+        return isBareVbeamOperatorTitle(raw);
+    }
     function catalogTitle(manual) {
         const raw = String(manual && manual.title || '').trim();
         if (!raw) return 'Manual';
         if (/\b(service|technical|repair)\s+manuals?\b/i.test(raw)) return raw;
         if (/operator'?s?\s+manual|\buser\s+manual\b/i.test(raw)) return raw;
-        const stripped = raw.replace(/^\s*(syneron(?:\s*candela)?|candela)\b[\s\-:\/]*/i, '').trim();
-        if (/^v[\s_-]*beam$/i.test(stripped) && !/\b(perfecta|platinum|aesthetica|classic|pro|[0-9]+)\b/i.test(stripped)) {
-            return raw + " Operator's Manual";
-        }
+        if (isBareVbeamOperatorTitle(raw)) return raw + " Operator's Manual";
         return raw;
     }
 
@@ -353,11 +373,13 @@
                         <div class="books-row">
                             ${books.map((m, i) => {
                                 const isOwned = userManualIds.has(m.id);
+                                const isOp = isOperatorManual(m);
                                 return `
                                     <div class="book" onclick="handleBookClick('${m.id}')">
                                         <div class="book-spine book-color-${i % 8}">
                                             <div class="book-title">${catalogTitle(m)}</div>
                                         </div>
+                                        ${isOp ? '<div class="op-badge" title="Operators Manual">OP</div>' : ''}
                                         ${isOwned ? '<div class="owned-badge">✓</div>' : ''}
                                     </div>
                                 `;

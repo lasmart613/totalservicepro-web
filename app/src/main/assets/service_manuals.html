@@ -55,15 +55,22 @@
     let manualsData = [];
 
     /** Bare "VBeam" is the operator PDF; "VBeam Perfecta" stays a service title. */
+    function isBareVbeamOperatorTitle(title) {
+        const stripped = String(title || '').replace(/^\s*(syneron(?:\s*candela)?|candela)\b[\s\-:\/]*/i, '').trim();
+        return /^v[\s_-]*beam$/i.test(stripped) && !/\b(perfecta|platinum|aesthetica|classic|pro|[0-9]+)\b/i.test(stripped);
+    }
+    function isOperatorManual(manual) {
+        const raw = String(manual && manual.title || '').trim();
+        if (/\b(service|technical|repair)\s+manuals?\b/i.test(raw)) return false;
+        if (/operator'?s?\s+manual|\buser\s+manual\b/i.test(raw)) return true;
+        return isBareVbeamOperatorTitle(raw);
+    }
     function catalogTitle(manual) {
         const raw = String(manual && manual.title || '').trim();
         if (!raw) return 'Manual';
         if (/\b(service|technical|repair)\s+manuals?\b/i.test(raw)) return raw;
         if (/operator'?s?\s+manual|\buser\s+manual\b/i.test(raw)) return raw;
-        const stripped = raw.replace(/^\s*(syneron(?:\s*candela)?|candela)\b[\s\-:\/]*/i, '').trim();
-        if (/^v[\s_-]*beam$/i.test(stripped) && !/\b(perfecta|platinum|aesthetica|classic|pro|[0-9]+)\b/i.test(stripped)) {
-            return raw + " Operator's Manual";
-        }
+        if (isBareVbeamOperatorTitle(raw)) return raw + " Operator's Manual";
         return raw;
     }
 
@@ -109,7 +116,7 @@
                 <div class="manual-item" onclick="openManual(${index})">
                     <div class="manual-icon">📕</div>
                     <div class="manual-info">
-                        <div class="manual-brand">${manual.brand}</div>
+                        <div class="manual-brand">${manual.brand}${isOperatorManual(manual) ? ' · OP' : ''}</div>
                         <div class="manual-title">${catalogTitle(manual)}</div>
                     </div>
                 </div>
@@ -139,20 +146,16 @@
         `;
 
         try {
-            let filePath = manual.file_path;
-            if (!filePath.startsWith('shared/')) {
+            let filePath = manual.file_path || manual.storage_path || '';
+            if (filePath && !filePath.startsWith('shared/') && !filePath.startsWith('http')) {
                 filePath = `shared/${filePath}`;
             }
-
-            const { data: signedUrlData, error } = await supabaseClient
-                .storage
-                .from('manuals')
-                .createSignedUrl(filePath, 3600);
-
-            if (error) throw error;
-
-            window.location.href = signedUrlData.signedUrl;
-
+            const qs = new URLSearchParams();
+            if (manual.id != null) qs.set('manual_id', String(manual.id));
+            if (filePath) qs.set('storage_path', filePath);
+            qs.set('title', catalogTitle(manual));
+            window.location.href = 'pdf_viewer.html?' + qs.toString();
+            return;
         } catch (err) {
             console.error(err);
             alert('Failed to open manual: ' + err.message);

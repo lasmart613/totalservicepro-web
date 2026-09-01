@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
 import { normalizeOrgId } from '@/lib/billing/upgrade-session';
+import { canAccessServiceManuals } from '@/lib/roles';
 
 export const dynamic = 'force-dynamic';
 
@@ -71,9 +72,17 @@ export async function POST(req: NextRequest) {
 
     const { data: profile } = await supabase
       .from('user_profiles')
-      .select('organization_id')
+      .select('role, organization_id, organizations(type)')
       .eq('id', user.id)
       .maybeSingle();
+    const orgJoin = profile?.organizations as { type?: string } | { type?: string }[] | null;
+    const orgType = Array.isArray(orgJoin) ? orgJoin[0]?.type : orgJoin?.type;
+    if (!canAccessServiceManuals(profile?.role, orgType)) {
+      return NextResponse.json(
+        { error: 'Service manuals are for service companies.' },
+        { status: 403 }
+      );
+    }
     let orgId = normalizeOrgId(profile?.organization_id);
     const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
     if (!orgId && hasServiceRole()) {

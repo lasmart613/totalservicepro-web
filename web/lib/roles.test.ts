@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  canAccessRepairAi,
+  canAccessServiceManuals,
   canAssignShopTestEquipment,
   canSeeAllShopTickets,
   isAdmin,
@@ -40,6 +42,15 @@ test('unknown or empty role does not get the full shop schedule', () => {
   assert.equal(canSeeAllShopTickets(null), false);
   assert.equal(canSeeAllShopTickets('viewer'), false);
   assert.equal(canSeeAllShopTickets('crm'), false);
+});
+
+test('service manuals and repair AI are service-company only', () => {
+  assert.equal(canAccessServiceManuals('fse', 'service_company'), true);
+  assert.equal(canAccessRepairAi('admin', 'service_company'), true);
+  assert.equal(canAccessServiceManuals('owner', 'laser_clinic'), false);
+  assert.equal(canAccessRepairAi('owner', 'laser_clinic'), false);
+  assert.equal(canAccessServiceManuals('parts_supplier', 'parts_supplier'), false);
+  assert.equal(canAccessRepairAi('supplier', 'vendor'), false);
 });
 
 test('admin and owner can assign shop test equipment', () => {

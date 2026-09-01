@@ -119,6 +119,22 @@ export function isServiceCompany(role?: RoleLike, orgType?: OrgTypeLike): boolea
 }
 
 /**
+ * Service manuals (bookshelf + in-app viewer).
+ * Service Company only — Laser Owners and Parts Suppliers do not get this tile/route.
+ */
+export function canAccessServiceManuals(role?: RoleLike, orgType?: OrgTypeLike): boolean {
+  return isServiceCompany(role, orgType);
+}
+
+/**
+ * Repair / manuals AI assistant.
+ * Service Company only — Laser Owners and Parts Suppliers do not get this tile/route.
+ */
+export function canAccessRepairAi(role?: RoleLike, orgType?: OrgTypeLike): boolean {
+  return isServiceCompany(role, orgType);
+}
+
+/**
  * Create or edit CRM customers (Customer Directory).
  * Service-company staff only — suppliers may view, owners use their own profile.
  */

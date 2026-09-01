@@ -14,6 +14,7 @@ import {
   showOperatorBadge,
 } from '@/lib/manual-catalog';
 import { toast } from 'sonner';
+import { canAccessServiceManuals } from '@/lib/roles';
 
 const WAVELENGTH_OPTIONS = [
   { label: 'All Wavelengths', value: '' },
@@ -58,9 +59,18 @@ export default function ManualsLibrary() {
 
       const { data: prof } = await supabase
         .from('user_profiles')
-        .select('organization_id')
+        .select('role, organization_id, organizations(type)')
         .eq('id', user.id)
         .maybeSingle();
+      const orgType =
+        (prof?.organizations as { type?: string } | null)?.type ||
+        user.user_metadata?.organization_type ||
+        null;
+      if (!canAccessServiceManuals(prof?.role, orgType)) {
+        toast.error('Service manuals are for service companies.');
+        router.replace('/hub');
+        return;
+      }
       const oId = prof?.organization_id ?? null;
       setOrgId(oId);
       if (oId != null) {

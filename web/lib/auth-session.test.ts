@@ -180,11 +180,11 @@ test('logged-out field section shows coming-soon store badges, not live listings
   const css = readFileSync(join(here, '../components/landing/landing.css'), 'utf8');
   const field = page.split('id="app"')[1];
   assert.match(field, /Same account in the field/);
-  assert.match(field, /Schedule, parts, manuals, and reports on Android\./);
+  assert.match(field, /View or edit Schedule, find parts, search service manuals, and create service reports on Android or IOS\./);
   assert.match(field, /Coming soon/);
   assert.match(field, /lp-kicker/);
-  assert.match(field, /Get it on Google Play/);
-  assert.match(field, /Download on the App Store/);
+  assert.match(field, /Google Play — coming soon/);
+  assert.match(field, /App Store — coming soon/);
   assert.match(field, /Android and iOS/);
   assert.match(field, /\/landing\/app-hub\.webp/);
   assert.match(field, /\/landing\/app-calcs\.webp/);
