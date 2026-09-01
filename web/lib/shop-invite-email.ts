@@ -7,8 +7,7 @@ export const SHOP_INVITE_SUBJECT = 'Find Laser Repair Jobs in Your Area';
 export const SHOP_INVITE_TEMPLATE_KEY = 'shop_invite';
 export const SHOP_INVITE_SIGNUP_URL = 'https://repairplanet.net/signup';
 export const SHOP_INVITE_UNSUBSCRIBE_URL = 'https://repairplanet.net/unsubscribe';
-export const SHOP_INVITE_POSTAL_ADDRESS =
-  'Medical Repair Network, 17465 Santa Rosa Mine Rd, Perris, CA 92570';
+export const SHOP_INVITE_POSTAL_ADDRESS = '3349 Somis Rd, Somis, CA 93066-9997';
 export const SHOP_INVITE_IMAGE_ORIGIN = 'https://repairplanet.net/email/shop-invite';
 
 export const SHOP_INVITE_IMAGE_FILES = [
