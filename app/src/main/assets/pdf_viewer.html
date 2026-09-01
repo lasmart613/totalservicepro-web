@@ -29,6 +29,7 @@
         .toolbar {
             background: #1a2233; border-bottom: 1px solid #374151;
             padding: 8px 14px; display: flex; align-items: center; gap: 8px;
+            flex-wrap: wrap;
         }
         .tool-btn {
             background: rgba(251,191,36,0.1); border: 1px solid #374151;
@@ -130,6 +131,10 @@
     <button class="tool-btn" onclick="zoomOut()">－</button>
     <span class="zoom-info" id="zoomInfo" onclick="resetZoom()">100%</span>
     <button class="tool-btn" onclick="zoomIn()">＋</button>
+    <input id="findInput" type="search" placeholder="Find in manual" style="flex:1;min-width:90px;max-width:180px;background:#111827;border:1px solid #374151;border-radius:6px;color:#E5E7EB;padding:6px 8px;font-size:13px;" onkeydown="if (event.key === 'Enter') { event.preventDefault(); findNext(); }">
+    <button class="tool-btn" onclick="findPrev()" title="Previous match">Find ◄</button>
+    <button class="tool-btn" onclick="findNext()" title="Next match">Find ►</button>
+    <span id="findInfo" style="color:#9CA3AF;font-size:11px;white-space:nowrap;"></span>
     <button class="tool-btn" id="chaptersBtn" onclick="showChapterSelector()" style="display:none; background:rgba(251,191,36,0.25); border-color:#FBBF24;">📚 Chapters</button>
 </div>
 
@@ -294,6 +299,11 @@
             pdfDoc = await loadingTask.promise;
             totalPages = pdfDoc.numPages;
             currentPage = 1;
+            pageTextCache = [];
+            findMatches = [];
+            findIndex = -1;
+            const findInfo = document.getElementById('findInfo');
+            if (findInfo) findInfo.textContent = '';
 
             hideLoading();
             await renderPage(currentPage);
@@ -1027,6 +1037,68 @@
         }
         updatePageInfo();
     }
+
+    let pageTextCache = [];
+    let findMatches = [];
+    let findIndex = -1;
+
+    function pageTextMatches(haystack, query) {
+        const q = String(query || '').trim().toLowerCase();
+        if (!q) return false;
+        return String(haystack || '').toLowerCase().includes(q);
+    }
+
+    async function ensurePageTextCache() {
+        if (!pdfDoc || (pageTextCache.length === totalPages && pageTextCache.every(Boolean))) return;
+        pageTextCache = new Array(totalPages);
+        for (let i = 1; i <= totalPages; i++) {
+            try {
+                const page = await pdfDoc.getPage(i);
+                const content = await page.getTextContent();
+                pageTextCache[i - 1] = (content.items || []).map(it => it.str || '').join(' ');
+            } catch (e) {
+                pageTextCache[i - 1] = '';
+            }
+        }
+    }
+
+    async function runFind(direction) {
+        const input = document.getElementById('findInput');
+        const info = document.getElementById('findInfo');
+        const q = input ? input.value : '';
+        if (!pdfDoc || !String(q).trim()) {
+            findMatches = [];
+            findIndex = -1;
+            if (info) info.textContent = '';
+            return;
+        }
+        await ensurePageTextCache();
+        findMatches = [];
+        for (let i = 0; i < pageTextCache.length; i++) {
+            if (pageTextMatches(pageTextCache[i], q)) findMatches.push(i + 1);
+        }
+        if (!findMatches.length) {
+            findIndex = -1;
+            if (info) info.textContent = '0 matches';
+            return;
+        }
+        if (direction < 0) {
+            const prev = findMatches.filter(p => p < currentPage);
+            findIndex = prev.length ? findMatches.indexOf(prev[prev.length - 1]) : findMatches.length - 1;
+        } else {
+            const next = findMatches.find(p => p > currentPage);
+            findIndex = next != null ? findMatches.indexOf(next) : 0;
+        }
+        const page = findMatches[findIndex];
+        if (info) info.textContent = (findIndex + 1) + '/' + findMatches.length;
+        if (page && page !== currentPage) {
+            currentPage = page;
+            renderPage(currentPage);
+            updatePageInfo();
+        }
+    }
+    function findNext() { runFind(1); }
+    function findPrev() { runFind(-1); }
 
     async function goBack() {
         if (typeof Android !== 'undefined' && Android.goBack) {

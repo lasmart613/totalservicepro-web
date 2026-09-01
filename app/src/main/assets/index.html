@@ -1128,11 +1128,6 @@
 
             document.getElementById('statOpen').textContent     = open.length;
 
-            // Temporary debug - remove after testing
-            try {
-                const dbg = document.getElementById('greetingSub');
-                if (dbg) dbg.textContent = 'Org: ' + (userOrgId || 'null') + ' | Tickets loaded: ' + allTickets.length;
-            } catch(e){}
             document.getElementById('statToday').textContent    = todayCalls.length;
             document.getElementById('statAwaiting').textContent = awaiting.length;
             document.getElementById('statCompleted').textContent= completed.length;

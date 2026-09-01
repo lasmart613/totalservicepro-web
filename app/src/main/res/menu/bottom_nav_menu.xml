@@ -2,28 +2,28 @@
 <menu xmlns:android="http://schemas.android.com/apk/res/android">
 
     <item
-        android:id="@+id/nav_fluence"
+        android:id="@+id/nav_home"
+        android:icon="@drawable/ic_service"
+        android:title="@string/nav_home" />
+
+    <item
+        android:id="@+id/nav_schedule"
         android:icon="@drawable/ic_fluence"
-        android:title="@string/nav_fluence" />
+        android:title="@string/nav_schedule" />
 
     <item
-        android:id="@+id/nav_irradiance"
-        android:icon="@drawable/ic_irradiance"
-        android:title="@string/nav_irradiance" />
+        android:id="@+id/nav_manuals"
+        android:icon="@drawable/ic_manual"
+        android:title="@string/nav_manuals" />
 
     <item
-        android:id="@+id/nav_wavelength"
-        android:icon="@drawable/ic_wavelength"
-        android:title="@string/nav_wavelength" />
+        android:id="@+id/nav_reports"
+        android:icon="@drawable/ic_service"
+        android:title="@string/nav_reports" />
 
     <item
-        android:id="@+id/nav_duty_cycle"
-        android:icon="@drawable/ic_duty_cycle"
-        android:title="@string/nav_duty_cycle" />
-
-    <item
-        android:id="@+id/nav_avg_power"
+        android:id="@+id/nav_calc"
         android:icon="@drawable/ic_avg_power"
-        android:title="@string/nav_avg_power" />
+        android:title="@string/nav_calc" />
 
 </menu>

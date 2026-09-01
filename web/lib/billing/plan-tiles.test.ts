@@ -74,9 +74,26 @@ test('shared entitlements appear on every audience and every tier', () => {
         `${audience} ${tile} must not say unlimited`
       );
     }
-    assert.ok(planTileLines(audience, 'free').includes(FREE_AI_LINE));
-    assert.ok(planTileLines(audience, 'premium').includes(PREMIUM_AI_LINE));
-    assert.ok(planTileLines(audience, 'team').includes(TEAM_AI_LINE));
+  }
+});
+
+test('repair AI appears on Service Company tiles only', () => {
+  assert.ok(planTileLines('company', 'free').includes(FREE_AI_LINE));
+  assert.ok(planTileLines('company', 'premium').includes(PREMIUM_AI_LINE));
+  assert.ok(planTileLines('company', 'team').includes(TEAM_AI_LINE));
+
+  for (const audience of ['owner', 'supplier'] as const) {
+    for (const tile of TILES) {
+      const lines = planTileLines(audience, tile);
+      assert.ok(!lines.includes(FREE_AI_LINE), `${audience} ${tile} free AI`);
+      assert.ok(!lines.includes(PREMIUM_AI_LINE), `${audience} ${tile} premium AI`);
+      assert.ok(!lines.includes(TEAM_AI_LINE), `${audience} ${tile} team AI`);
+      assert.equal(
+        lines.filter((l) => /AI quer/i.test(l)).length,
+        0,
+        `${audience} ${tile} must not advertise repair AI`
+      );
+    }
   }
 });
 

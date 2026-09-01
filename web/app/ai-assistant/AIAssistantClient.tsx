@@ -13,6 +13,7 @@ import {
 } from '@/lib/ai/grok-client';
 import { toast } from 'sonner';
 import { catalogManualTitle } from '@/lib/manual-catalog';
+import { canAccessRepairAi } from '@/lib/roles';
 
 type ManualRow = {
   title: string;
@@ -143,9 +144,18 @@ export default function AIAssistantClient() {
       try {
         const { data: prof } = await supabase
           .from('user_profiles')
-          .select('organization_id')
+          .select('role, organization_id, organizations(type)')
           .eq('id', session.user.id)
           .maybeSingle();
+        const orgType =
+          (prof?.organizations as { type?: string } | null)?.type ||
+          session.user.user_metadata?.organization_type ||
+          null;
+        if (!canAccessRepairAi(prof?.role, orgType)) {
+          toast.error('Repair AI is for service companies.');
+          router.replace('/hub');
+          return;
+        }
         resolvedOrg = prof?.organization_id ?? null;
       } catch {
         resolvedOrg = null;

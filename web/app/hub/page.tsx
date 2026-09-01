@@ -65,7 +65,6 @@ export default function TechHub() {
         { href: '/service-requests', icon: '🛠️', label: 'Service Requests', desc: 'Request repair / PM for your systems' },
         { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Parts, used systems & consumables' },
         { href: '/reports', icon: '📋', label: 'Service History', desc: 'Completed work on your systems' },
-        { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Reference bookshelf' },
         { href: '/directory', icon: '📒', label: 'TSP Directory', desc: 'Find service companies (free listings)' },
       ]
     : supplier

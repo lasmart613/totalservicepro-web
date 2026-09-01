@@ -44,6 +44,7 @@ test('bookshelf opens the in-app viewer and does not window.open the PDF', () =>
   assert.match(page, /manualViewHref/);
   assert.match(page, /catalogManualTitle/);
   assert.match(page, /\/api\/manuals\/library/);
+  assert.match(page, /canAccessServiceManuals/);
   assert.match(page, /manualSlotLimit/);
   assert.doesNotMatch(page, /window\.open/);
   assert.match(viewer, /pdf\.js|pdfjs/);
@@ -91,4 +92,14 @@ test('fixture demo page uses the in-repo PDF and the same viewer', () => {
   assert.match(demo, /ManualPdfViewer/);
   assert.match(demo, /MANUAL_FIXTURE_PATH|sample-service-manual\.pdf/);
   assert.doesNotMatch(demo, /get-manual-url|repairplanet|window\.open/i);
+});
+
+test('Owner Hub does not expose Service Manuals or repair AI tiles', () => {
+  const hub = readFileSync(join(here, '../app/hub/page.tsx'), 'utf8');
+  const ownerBlock = hub.split('const techCards')[1].split(': supplier')[0];
+  const serviceBlock = hub.split(': supplier')[1];
+  assert.doesNotMatch(ownerBlock, /href: '\/manuals'/);
+  assert.doesNotMatch(ownerBlock, /href: '\/ai-assistant'/);
+  assert.match(serviceBlock, /href: '\/manuals'/);
+  assert.match(serviceBlock, /href: '\/ai-assistant'/);
 });

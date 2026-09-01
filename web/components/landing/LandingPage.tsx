@@ -483,7 +483,7 @@ export function LandingPage() {
             <span className="lp-store-badge lp-store-badge-play">
               <img
                 src="/landing/badge-google-play.png"
-                alt="Get it on Google Play"
+                alt="Google Play — coming soon"
                 width={646}
                 height={250}
               />
@@ -491,7 +491,7 @@ export function LandingPage() {
             <span className="lp-store-badge lp-store-badge-apple">
               <img
                 src="/landing/badge-app-store.svg"
-                alt="Download on the App Store"
+                alt="App Store — coming soon"
                 width={120}
                 height={40}
               />

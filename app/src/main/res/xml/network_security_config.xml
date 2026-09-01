@@ -10,14 +10,11 @@
 
     <!-- Allow specific known domains (all should be HTTPS) -->
     <domain-config cleartextTrafficPermitted="false">
-        <!-- Supabase Backend -->
+        <domain includeSubdomains="true">repairplanet.net</domain>
         <domain includeSubdomains="true">yljztfajyvjzqikxdddf.supabase.co</domain>
-
-        <!-- Google / AdMob / Fonts -->
+        <domain includeSubdomains="true">stripe.com</domain>
         <domain includeSubdomains="true">google.com</domain>
         <domain includeSubdomains="true">googleapis.com</domain>
         <domain includeSubdomains="true">gstatic.com</domain>
-        <domain includeSubdomains="true">googleadservices.com</domain>
-        <domain includeSubdomains="true">googlesyndication.com</domain>
     </domain-config>
 </network-security-config>
