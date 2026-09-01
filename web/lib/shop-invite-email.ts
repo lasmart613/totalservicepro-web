@@ -9,6 +9,9 @@ export const SHOP_INVITE_SIGNUP_URL = 'https://repairplanet.net/signup';
 export const SHOP_INVITE_UNSUBSCRIBE_URL = 'https://repairplanet.net/unsubscribe';
 export const SHOP_INVITE_POSTAL_ADDRESS = '3349 Somis Rd, Somis, CA 93066-9997';
 export const SHOP_INVITE_IMAGE_ORIGIN = 'https://repairplanet.net/email/shop-invite';
+export const SHOP_INVITE_CTA_BUTTON = 'Claim your business for Free';
+export const SHOP_INVITE_CTA_SUBLINE = "Grow your shop's revenue";
+export const SHOP_INVITE_CTA_PLAIN = `${SHOP_INVITE_CTA_BUTTON}. ${SHOP_INVITE_CTA_SUBLINE}.`;
 
 export const SHOP_INVITE_IMAGE_FILES = [
   'shot-hero.jpg',
@@ -49,12 +52,32 @@ function shot(file: ShopInviteImageFile, alt: string): string {
 
 function ctaButton(href: string, label: string): string {
   return (
-    `<table role="presentation" cellspacing="0" cellpadding="0" align="center" style="margin:8px auto 20px;">` +
+    `<table role="presentation" cellspacing="0" cellpadding="0" align="center" style="margin:8px auto 8px;">` +
     `<tr><td align="center" style="border-radius:8px;background:#e8c547;">` +
     `<a href="${esc(href)}" style="display:inline-block;padding:14px 28px;font-size:16px;font-weight:700;color:#0b0f14;text-decoration:none;border-radius:8px;">` +
     `${esc(label)}` +
     `</a>` +
     `</td></tr></table>`
+  );
+}
+
+function ctaSubline(text: string): string {
+  return `<p style="margin:0 0 20px;font-size:15px;line-height:1.5;color:#e8edf4;text-align:center;">${esc(text)}</p>`;
+}
+
+function signupUrlLine(): string {
+  return (
+    `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#8b95a5;word-break:break-all;">` +
+    `<a href="${esc(SHOP_INVITE_SIGNUP_URL)}" style="color:#e8c547;text-decoration:none;">${esc(SHOP_INVITE_SIGNUP_URL)}</a>` +
+    `</p>`
+  );
+}
+
+function shopInviteCta(options?: { includeSignupUrl?: boolean }): string {
+  return (
+    ctaButton(SHOP_INVITE_SIGNUP_URL, SHOP_INVITE_CTA_BUTTON) +
+    ctaSubline(SHOP_INVITE_CTA_SUBLINE) +
+    (options?.includeSignupUrl ? signupUrlLine() : '')
   );
 }
 
@@ -66,7 +89,8 @@ export function shopInviteText(): string {
     '',
     'The report, the estimate, and the invoice live on that same job, so you are not rebuilding the paperwork in the truck.',
     '',
-    `Claim your shop. Take the work. ${SHOP_INVITE_SIGNUP_URL}`,
+    SHOP_INVITE_CTA_PLAIN,
+    SHOP_INVITE_SIGNUP_URL,
     '',
     'Two months of Premium on us.',
     '',
@@ -80,7 +104,8 @@ export function shopInviteText(): string {
     '',
     'We are asking a handful of laser shops to try this on repairplanet.net before we get loud. It is early. That is the point. You will see rough edges, and we want the notes from people who actually turn wrenches.',
     '',
-    `Claim your shop. Take the work. ${SHOP_INVITE_SIGNUP_URL}`,
+    SHOP_INVITE_CTA_PLAIN,
+    SHOP_INVITE_SIGNUP_URL,
     '',
     'If you own the company, register it. First login is admin. Invite your techs from Team. If you are in the field, do not sign up alone. Forward this to the owner.',
     '',
@@ -102,7 +127,7 @@ export function shopInviteHtml(): string {
     paragraph(
       'The report, the estimate, and the invoice live on that same job, so you are not rebuilding the paperwork in the truck.'
     ) +
-    ctaButton(SHOP_INVITE_SIGNUP_URL, 'Claim your shop. Take the work.') +
+    shopInviteCta() +
     paragraph('Two months of Premium on us.') +
     shot('shot-hero.jpg', 'Shop dashboard — open tickets and upcoming calls') +
     paragraph(
@@ -125,10 +150,7 @@ export function shopInviteHtml(): string {
     paragraph(
       'We are asking a handful of laser shops to try this on repairplanet.net before we get loud. It is early. That is the point. You will see rough edges, and we want the notes from people who actually turn wrenches.'
     ) +
-    ctaButton(SHOP_INVITE_SIGNUP_URL, 'Claim your shop. Take the work.') +
-    `<p style="margin:0 0 16px;font-size:15px;line-height:1.6;color:#8b95a5;word-break:break-all;">` +
-    `<a href="${esc(SHOP_INVITE_SIGNUP_URL)}" style="color:#e8c547;text-decoration:none;">${esc(SHOP_INVITE_SIGNUP_URL)}</a>` +
-    `</p>` +
+    shopInviteCta({ includeSignupUrl: true }) +
     paragraph(
       'If you own the company, register it. First login is admin. Invite your techs from Team. If you are in the field, do not sign up alone. Forward this to the owner.'
     ) +
