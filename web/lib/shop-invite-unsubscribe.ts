@@ -1,6 +1,6 @@
 /**
  * RFC 8058 one-click unsubscribe for the locked shop-invite send.
- * Headers only on the Resend payload — does not rewrite invite HTML/PNGs.
+ * RFC 8058 headers stay on the Resend payload. Visible footer link is in shop-invite-email.
  */
 
 import { randomBytes } from 'node:crypto';

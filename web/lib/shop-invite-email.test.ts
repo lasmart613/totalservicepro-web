@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -8,6 +8,7 @@ import {
   SHOP_INVITE_IMAGE_FILES,
   SHOP_INVITE_SIGNUP_URL,
   SHOP_INVITE_SUBJECT,
+  SHOP_INVITE_UNSUBSCRIBE_URL,
   shopInviteHtml,
   shopInviteImageUrl,
   shopInviteText,
@@ -41,11 +42,19 @@ test('HTML is table-based dark gold and hosts images on repairplanet.net', () =>
   assert.match(html, /stay on the free plan, keep Premium, or walk away/);
   assert.match(html, /Total Service Pro \/ Medical Repair Network/);
   assert.match(html, /href="https:\/\/repairplanet\.net\/signup"/);
+  assert.equal(SHOP_INVITE_UNSUBSCRIBE_URL, 'https://repairplanet.net/unsubscribe');
+  assert.match(html, /href="https:\/\/repairplanet\.net\/unsubscribe"/);
+  assert.match(html, />Unsubscribe</);
+  assert.equal(SHOP_INVITE_IMAGE_FILES.length, 6);
   for (const file of SHOP_INVITE_IMAGE_FILES) {
+    assert.match(file, /\.jpg$/);
     const url = shopInviteImageUrl(file);
     assert.equal(url, `https://repairplanet.net/email/shop-invite/${file}`);
     assert.match(html, new RegExp(url.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
     assert.equal(existsSync(join(publicDir, file)), true);
+    assert.equal(existsSync(join(publicDir, file.replace(/\.jpg$/, '.png'))), false);
+    const bytes = statSync(join(publicDir, file)).size;
+    assert.ok(bytes > 10_000 && bytes <= 150_000, `${file} should be ~40-150 KB, got ${bytes}`);
   }
   assert.doesNotMatch(html, /invite-assets/);
   assert.doesNotMatch(html, /src="\/email\//);
@@ -60,6 +69,7 @@ test('plain text carries the same locked body without image markup', () => {
   assert.match(text, /Find Laser Repair Jobs in Your Area/);
   assert.match(text, /https:\/\/repairplanet\.net\/signup/);
   assert.match(text, /Total Service Pro \/ Medical Repair Network \/ repairplanet\.net/);
+  assert.match(text, /https:\/\/repairplanet\.net\/unsubscribe/);
   assert.doesNotMatch(text, /Free to start|No card to start|This is the juicy part/);
 });
 
