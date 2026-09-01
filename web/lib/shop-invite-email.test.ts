@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   SHOP_INVITE_FORBIDDEN_PHRASES,
   SHOP_INVITE_IMAGE_FILES,
+  SHOP_INVITE_POSTAL_ADDRESS,
   SHOP_INVITE_SIGNUP_URL,
   SHOP_INVITE_SUBJECT,
   SHOP_INVITE_UNSUBSCRIBE_URL,
@@ -45,6 +46,8 @@ test('HTML is table-based dark gold and hosts images on repairplanet.net', () =>
   assert.equal(SHOP_INVITE_UNSUBSCRIBE_URL, 'https://repairplanet.net/unsubscribe');
   assert.match(html, /href="https:\/\/repairplanet\.net\/unsubscribe"/);
   assert.match(html, />Unsubscribe</);
+  assert.equal(SHOP_INVITE_POSTAL_ADDRESS, '3349 Somis Rd, Somis, CA 93066-9997');
+  assert.match(html, /3349 Somis Rd, Somis, CA 93066-9997/);
   assert.equal(SHOP_INVITE_IMAGE_FILES.length, 6);
   for (const file of SHOP_INVITE_IMAGE_FILES) {
     assert.match(file, /\.jpg$/);
@@ -70,6 +73,7 @@ test('plain text carries the same locked body without image markup', () => {
   assert.match(text, /https:\/\/repairplanet\.net\/signup/);
   assert.match(text, /Total Service Pro \/ Medical Repair Network \/ repairplanet\.net/);
   assert.match(text, /https:\/\/repairplanet\.net\/unsubscribe/);
+  assert.match(text, /3349 Somis Rd, Somis, CA 93066-9997/);
   assert.doesNotMatch(text, /Free to start|No card to start|This is the juicy part/);
 });
 
@@ -82,4 +86,5 @@ test('send route never blasts and uses Resend', () => {
   assert.match(route, /organization_ids/);
   assert.match(route, /shopInviteResendHeaders/);
   assert.match(route, /List-Unsubscribe|headers: shopInviteResendHeaders/);
+  assert.match(route, /reply_to:\s*'contact@medicalrepairnetwork\.com'/);
 });

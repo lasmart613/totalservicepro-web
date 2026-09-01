@@ -87,6 +87,7 @@ async function sendResend(
     body: JSON.stringify({
       from,
       to: [to],
+      reply_to: 'contact@medicalrepairnetwork.com',
       subject: SHOP_INVITE_SUBJECT,
       html: shopInviteHtml(),
       text: shopInviteText(),
