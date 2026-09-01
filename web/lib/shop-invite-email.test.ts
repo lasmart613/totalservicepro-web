@@ -26,7 +26,7 @@ test('subject and CTA stay locked', () => {
   assert.equal(SHOP_INVITE_SIGNUP_URL, 'https://repairplanet.net/signup');
   assert.equal(SHOP_INVITE_CTA_BUTTON, 'Claim your business for Free');
   assert.equal(SHOP_INVITE_CTA_SUBLINE, "Grow your shop's revenue");
-  assert.equal(SHOP_INVITE_CTA_PLAIN, "Claim your business for Free. Grow your shop's revenue");
+  assert.equal(SHOP_INVITE_CTA_PLAIN, "Claim your business for Free. Grow your shop's revenue.");
   assert.ok(SHOP_INVITE_FORBIDDEN_PHRASES.includes('Free to start'));
   assert.doesNotMatch(SHOP_INVITE_CTA_BUTTON, /Free to start/);
   assert.doesNotMatch(SHOP_INVITE_CTA_SUBLINE, /Free to start/);

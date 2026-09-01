@@ -11,7 +11,7 @@ export const SHOP_INVITE_POSTAL_ADDRESS = '3349 Somis Rd, Somis, CA 93066-9997';
 export const SHOP_INVITE_IMAGE_ORIGIN = 'https://repairplanet.net/email/shop-invite';
 export const SHOP_INVITE_CTA_BUTTON = 'Claim your business for Free';
 export const SHOP_INVITE_CTA_SUBLINE = "Grow your shop's revenue";
-export const SHOP_INVITE_CTA_PLAIN = `${SHOP_INVITE_CTA_BUTTON}. ${SHOP_INVITE_CTA_SUBLINE}`;
+export const SHOP_INVITE_CTA_PLAIN = `${SHOP_INVITE_CTA_BUTTON}. ${SHOP_INVITE_CTA_SUBLINE}.`;
 
 export const SHOP_INVITE_IMAGE_FILES = [
   'shot-hero.jpg',
