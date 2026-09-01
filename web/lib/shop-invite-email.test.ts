@@ -4,6 +4,9 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  SHOP_INVITE_CTA_BUTTON,
+  SHOP_INVITE_CTA_PLAIN,
+  SHOP_INVITE_CTA_SUBLINE,
   SHOP_INVITE_FORBIDDEN_PHRASES,
   SHOP_INVITE_IMAGE_FILES,
   SHOP_INVITE_POSTAL_ADDRESS,
@@ -21,6 +24,12 @@ const publicDir = join(here, '../public/email/shop-invite');
 test('subject and CTA stay locked', () => {
   assert.equal(SHOP_INVITE_SUBJECT, 'Find Laser Repair Jobs in Your Area');
   assert.equal(SHOP_INVITE_SIGNUP_URL, 'https://repairplanet.net/signup');
+  assert.equal(SHOP_INVITE_CTA_BUTTON, 'Claim your business for Free');
+  assert.equal(SHOP_INVITE_CTA_SUBLINE, "Grow your shop's revenue");
+  assert.equal(SHOP_INVITE_CTA_PLAIN, "Claim your business for Free. Grow your shop's revenue");
+  assert.ok(SHOP_INVITE_FORBIDDEN_PHRASES.includes('Free to start'));
+  assert.doesNotMatch(SHOP_INVITE_CTA_BUTTON, /Free to start/);
+  assert.doesNotMatch(SHOP_INVITE_CTA_SUBLINE, /Free to start/);
 });
 
 test('HTML is table-based dark gold and hosts images on repairplanet.net', () => {
@@ -32,7 +41,12 @@ test('HTML is table-based dark gold and hosts images on repairplanet.net', () =>
   assert.match(html, /Find Laser Repair Jobs in Your Area/);
   assert.match(html, /They post the job\. You see it\. You take it\./);
   assert.match(html, /rebuilding the paperwork in the truck/);
-  assert.match(html, /Claim your shop\. Take the work\./);
+  assert.match(html, /Claim your business for Free/);
+  assert.match(html, /Grow your shop's revenue/);
+  assert.equal((html.match(/Claim your business for Free/g) || []).length, 2);
+  assert.equal((html.match(/Grow your shop's revenue/g) || []).length, 2);
+  assert.doesNotMatch(html, /Claim your shop\. Take the work\./);
+  assert.doesNotMatch(html, /Free to start/);
   assert.match(html, /Two months of Premium on us\./);
   assert.match(html, /machine and the symptom already on the ticket/);
   assert.match(html, /No more guessing from photos in a group chat!/);
@@ -71,6 +85,9 @@ test('plain text carries the same locked body without image markup', () => {
   const text = shopInviteText();
   assert.match(text, /Find Laser Repair Jobs in Your Area/);
   assert.match(text, /https:\/\/repairplanet\.net\/signup/);
+  assert.match(text, /Claim your business for Free\. Grow your shop's revenue\.\nhttps:\/\/repairplanet\.net\/signup/);
+  assert.equal((text.match(/Claim your business for Free\. Grow your shop's revenue\./g) || []).length, 2);
+  assert.doesNotMatch(text, /Claim your shop\. Take the work\./);
   assert.match(text, /Total Service Pro \/ Medical Repair Network \/ repairplanet\.net/);
   assert.match(text, /https:\/\/repairplanet\.net\/unsubscribe/);
   assert.match(text, /3349 Somis Rd, Somis, CA 93066-9997/);
