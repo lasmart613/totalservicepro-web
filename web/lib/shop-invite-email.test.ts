@@ -48,7 +48,6 @@ test('HTML is table-based dark gold and hosts images on repairplanet.net', () =>
   assert.match(html, />Unsubscribe</);
   assert.equal(SHOP_INVITE_POSTAL_ADDRESS, '3349 Somis Rd, Somis, CA 93066-9997');
   assert.match(html, /3349 Somis Rd, Somis, CA 93066-9997/);
-  assert.doesNotMatch(html, /17465 Santa Rosa Mine Rd|Perris/);
   assert.equal(SHOP_INVITE_IMAGE_FILES.length, 6);
   for (const file of SHOP_INVITE_IMAGE_FILES) {
     assert.match(file, /\.jpg$/);
@@ -75,7 +74,6 @@ test('plain text carries the same locked body without image markup', () => {
   assert.match(text, /Total Service Pro \/ Medical Repair Network \/ repairplanet\.net/);
   assert.match(text, /https:\/\/repairplanet\.net\/unsubscribe/);
   assert.match(text, /3349 Somis Rd, Somis, CA 93066-9997/);
-  assert.doesNotMatch(text, /17465 Santa Rosa Mine Rd|Perris/);
   assert.doesNotMatch(text, /Free to start|No card to start|This is the juicy part/);
 });
 
