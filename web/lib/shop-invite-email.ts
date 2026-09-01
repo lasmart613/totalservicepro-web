@@ -7,6 +7,8 @@ export const SHOP_INVITE_SUBJECT = 'Find Laser Repair Jobs in Your Area';
 export const SHOP_INVITE_TEMPLATE_KEY = 'shop_invite';
 export const SHOP_INVITE_SIGNUP_URL = 'https://repairplanet.net/signup';
 export const SHOP_INVITE_UNSUBSCRIBE_URL = 'https://repairplanet.net/unsubscribe';
+export const SHOP_INVITE_POSTAL_ADDRESS =
+  'Medical Repair Network, 17465 Santa Rosa Mine Rd, Perris, CA 92570';
 export const SHOP_INVITE_IMAGE_ORIGIN = 'https://repairplanet.net/email/shop-invite';
 
 export const SHOP_INVITE_IMAGE_FILES = [
@@ -88,6 +90,8 @@ export function shopInviteText(): string {
     'Total Service Pro / Medical Repair Network / repairplanet.net',
     '',
     `Unsubscribe: ${SHOP_INVITE_UNSUBSCRIBE_URL}`,
+    '',
+    SHOP_INVITE_POSTAL_ADDRESS,
   ].join('\n');
 }
 
@@ -163,6 +167,9 @@ export function shopInviteHtml(): string {
               </div>
               <div style="margin-top:10px;font-size:11px;line-height:1.6;color:#6b7380;">
                 <a href="${esc(SHOP_INVITE_UNSUBSCRIBE_URL)}" style="color:#6b7380;text-decoration:underline;">Unsubscribe</a>
+              </div>
+              <div style="margin-top:10px;font-size:11px;line-height:1.6;color:#6b7380;">
+                ${esc(SHOP_INVITE_POSTAL_ADDRESS)}
               </div>
             </td>
           </tr>
