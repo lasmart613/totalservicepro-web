@@ -6,15 +6,16 @@
 export const SHOP_INVITE_SUBJECT = 'Find Laser Repair Jobs in Your Area';
 export const SHOP_INVITE_TEMPLATE_KEY = 'shop_invite';
 export const SHOP_INVITE_SIGNUP_URL = 'https://repairplanet.net/signup';
+export const SHOP_INVITE_UNSUBSCRIBE_URL = 'https://repairplanet.net/unsubscribe';
 export const SHOP_INVITE_IMAGE_ORIGIN = 'https://repairplanet.net/email/shop-invite';
 
 export const SHOP_INVITE_IMAGE_FILES = [
-  'shot-hero.png',
-  'shot-find-work.png',
-  'shot-reports-email.png',
-  'shot-billing.png',
-  'shot-manuals-shelf.png',
-  'shot-pdf-viewer.png',
+  'shot-hero.jpg',
+  'shot-find-work.jpg',
+  'shot-reports-email.jpg',
+  'shot-billing.jpg',
+  'shot-manuals-shelf.jpg',
+  'shot-pdf-viewer.jpg',
 ] as const;
 
 export type ShopInviteImageFile = (typeof SHOP_INVITE_IMAGE_FILES)[number];
@@ -85,6 +86,8 @@ export function shopInviteText(): string {
     'After the two months you can stay on the free plan, keep Premium, or walk away.',
     '',
     'Total Service Pro / Medical Repair Network / repairplanet.net',
+    '',
+    `Unsubscribe: ${SHOP_INVITE_UNSUBSCRIBE_URL}`,
   ].join('\n');
 }
 
@@ -98,24 +101,24 @@ export function shopInviteHtml(): string {
     ) +
     ctaButton(SHOP_INVITE_SIGNUP_URL, 'Claim your shop. Take the work.') +
     paragraph('Two months of Premium on us.') +
-    shot('shot-hero.png', 'Shop dashboard — open tickets and upcoming calls') +
+    shot('shot-hero.jpg', 'Shop dashboard — open tickets and upcoming calls') +
     paragraph(
       'Repair and PM requests from clinics near you, with the machine and the symptom already on the ticket.'
     ) +
-    shot('shot-find-work.png', 'Open repair requests near you') +
+    shot('shot-find-work.jpg', 'Open repair requests near you') +
     paragraph(
       'Service history stays with the device. It is available to you regardless of who performed it. No more guessing from photos in a group chat!'
     ) +
-    shot('shot-reports-email.png', 'Service reports list') +
+    shot('shot-reports-email.jpg', 'Service reports list') +
     paragraph(
       'Write the estimate once. They approve it. Convert the approved estimate to an invoice draft with one click.'
     ) +
-    shot('shot-billing.png', 'Estimate and invoice on the same job') +
+    shot('shot-billing.jpg', 'Estimate and invoice on the same job') +
     paragraph(
       'Service manuals live on the website, on shelves by brand. View your manuals online or in the app.'
     ) +
-    shot('shot-manuals-shelf.png', 'Service manuals on shelves by brand') +
-    shot('shot-pdf-viewer.png', 'VersaPulse Select / PowerSuite service manual viewer') +
+    shot('shot-manuals-shelf.jpg', 'Service manuals on shelves by brand') +
+    shot('shot-pdf-viewer.jpg', 'VersaPulse Select / PowerSuite service manual viewer') +
     paragraph(
       'We are asking a handful of laser shops to try this on repairplanet.net before we get loud. It is early. That is the point. You will see rough edges, and we want the notes from people who actually turn wrenches.'
     ) +
@@ -157,6 +160,9 @@ export function shopInviteHtml(): string {
               <div style="font-size:12px;line-height:1.6;color:#8b95a5;">
                 Total Service Pro / Medical Repair Network /
                 <a href="https://repairplanet.net" style="color:#8b95a5;text-decoration:none;">repairplanet.net</a>
+              </div>
+              <div style="margin-top:10px;font-size:11px;line-height:1.6;color:#6b7380;">
+                <a href="${esc(SHOP_INVITE_UNSUBSCRIBE_URL)}" style="color:#6b7380;text-decoration:underline;">Unsubscribe</a>
               </div>
             </td>
           </tr>
