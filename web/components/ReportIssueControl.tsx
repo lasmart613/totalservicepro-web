@@ -13,11 +13,17 @@ export function ReportIssueControl({ variant = 'app' }: { variant?: Variant }) {
   const [open, setOpen] = useState(false);
   const [whatHappened, setWhatHappened] = useState('');
   const [pageUrl, setPageUrl] = useState('');
+  const [guestEmail, setGuestEmail] = useState('');
+  const [sessionEmail, setSessionEmail] = useState<string | null>(null);
   const [sending, setSending] = useState(false);
 
   useEffect(() => {
     if (!open) return;
     setPageUrl(typeof window !== 'undefined' ? window.location.href : '');
+    const supabase = getSupabaseClient();
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setSessionEmail(session?.user?.email || null);
+    });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') setOpen(false);
     };
@@ -44,6 +50,7 @@ export function ReportIssueControl({ variant = 'app' }: { variant?: Variant }) {
           whatHappened,
           pageUrl,
           userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
+          email: session?.user?.email ? undefined : guestEmail.trim() || undefined,
         }),
       });
       const json = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
@@ -53,6 +60,7 @@ export function ReportIssueControl({ variant = 'app' }: { variant?: Variant }) {
       }
       toast.success(json.message || 'Thanks — the Total Service Pro team has your report.');
       setWhatHappened('');
+      setGuestEmail('');
       setOpen(false);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : 'Could not send the report');
@@ -137,6 +145,23 @@ export function ReportIssueControl({ variant = 'app' }: { variant?: Variant }) {
                   className="w-full rounded-lg border border-[var(--border,#4B5563)] bg-[var(--surface,#111827)] px-3 py-2 text-xs"
                 />
               </label>
+              {sessionEmail ? (
+                <p className="text-[11px] text-[var(--text3,#9CA3AF)]">
+                  We will email a confirmation to {sessionEmail}.
+                </p>
+              ) : (
+                <label className="block text-sm">
+                  <span className="block text-xs font-semibold mb-1">Email (optional)</span>
+                  <input
+                    type="email"
+                    value={guestEmail}
+                    onChange={(e) => setGuestEmail(e.target.value)}
+                    placeholder="So we can confirm we received your report"
+                    autoComplete="email"
+                    className="w-full rounded-lg border border-[var(--border,#4B5563)] bg-[var(--surface,#111827)] px-3 py-2 text-sm"
+                  />
+                </label>
+              )}
               <p className="text-[11px] text-[var(--text3,#9CA3AF)]">
                 Optional screenshot: not required for this tester build.
               </p>

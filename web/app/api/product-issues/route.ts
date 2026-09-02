@@ -3,10 +3,15 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import {
   parseProductIssue,
+  planProductIssueMail,
+  productIssueConfirmationHtml,
+  productIssueConfirmationSubject,
+  productIssueConfirmationText,
   productIssueHtml,
   productIssueSubject,
   productIssueText,
-  productIssuesInbox,
+  productIssuesFromAddress,
+  PRODUCT_ISSUE_CONFIRM_REPLY_TO,
 } from '@/lib/product-issues';
 
 export const dynamic = 'force-dynamic';
@@ -60,31 +65,33 @@ async function optionalCaller(req: NextRequest): Promise<{
   }
 }
 
-async function deliverToProductInbox(opts: {
+async function sendResendEmail(opts: {
+  to: string[];
   subject: string;
   html: string;
   text: string;
+  replyTo?: string;
 }): Promise<{ ok: boolean; error?: string }> {
   const key = process.env.RESEND_API_KEY;
   if (!key) return { ok: false, error: 'RESEND_API_KEY not configured' };
-  const to = productIssuesInbox();
-  const from =
-    process.env.NOTIFY_FROM_EMAIL ||
-    process.env.RESEND_FROM ||
-    'Total Service Pro <contact@medicalrepairnetwork.com>';
+  const to = opts.to.filter(Boolean);
+  if (!to.length) return { ok: false, error: 'No recipients' };
+  const from = productIssuesFromAddress();
+  const body: Record<string, unknown> = {
+    from,
+    to,
+    subject: opts.subject,
+    html: opts.html,
+    text: opts.text,
+  };
+  if (opts.replyTo) body.reply_to = opts.replyTo;
   const rr = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${key}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      from,
-      to: [to],
-      subject: opts.subject,
-      html: opts.html,
-      text: opts.text,
-    }),
+    body: JSON.stringify(body),
   });
   if (!rr.ok) {
     const result = await rr.json().catch(() => ({}));
@@ -93,10 +100,30 @@ async function deliverToProductInbox(opts: {
   return { ok: true };
 }
 
+async function confirmationAlreadySent(opts: {
+  email: string;
+  whatHappened: string;
+}): Promise<boolean> {
+  if (!hasServiceRole()) return false;
+  try {
+    const admin = getSupabaseAdmin();
+    const { data } = await admin
+      .from('product_issue_reports')
+      .select('id')
+      .eq('reporter_email', opts.email)
+      .eq('what_happened', opts.whatHappened)
+      .eq('confirmation_sent', true)
+      .limit(1);
+    return Array.isArray(data) && data.length > 0;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * POST /api/product-issues
- * Short tester report. Delivers to the product contact inbox and/or product_issue_reports.
- * Never emails the reporter.
+ * Short tester report. Delivers to the product inbox and QA, then sends one
+ * confirmation to the reporter when we have a valid address.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -118,46 +145,87 @@ export async function POST(req: NextRequest) {
     }
 
     const caller = await optionalCaller(req);
+    const planned = planProductIssueMail({
+      sessionEmail: caller.email,
+      submittedEmail: body.email ?? body.reporterEmail ?? body.reporter_email,
+    });
+    if (!planned.ok) {
+      return NextResponse.json({ error: planned.error }, { status: 400 });
+    }
+    const alreadySent = planned.plan.reporterEmail
+      ? await confirmationAlreadySent({
+          email: planned.plan.reporterEmail,
+          whatHappened: parsed.report.whatHappened,
+        })
+      : false;
+    const plan = {
+      ...planned.plan,
+      confirmationTo: alreadySent ? null : planned.plan.confirmationTo,
+    };
+
     const subject = productIssueSubject(parsed.report);
     const text = productIssueText({
       report: parsed.report,
-      reporterEmail: caller.email,
+      reporterEmail: plan.reporterEmail,
       reporterUserId: caller.userId,
+      confirmationSent: !!plan.confirmationTo,
     });
     const html = productIssueHtml({
       report: parsed.report,
-      reporterEmail: caller.email,
+      reporterEmail: plan.reporterEmail,
       reporterUserId: caller.userId,
+      confirmationSent: !!plan.confirmationTo,
     });
 
     let stored = false;
+    let storedId: string | null = null;
     if (hasServiceRole()) {
       try {
         const admin = getSupabaseAdmin();
-        const { error } = await admin.from('product_issue_reports').insert({
-          what_happened: parsed.report.whatHappened,
-          page_url: parsed.report.pageUrl || null,
-          user_agent: parsed.report.userAgent || null,
-          reporter_user_id: caller.userId || null,
-          reporter_email: caller.email || null,
-        });
-        if (!error) stored = true;
-        else if (!/schema cache|does not exist|relation/i.test(error.message || '')) {
+        const { data, error } = await admin
+          .from('product_issue_reports')
+          .insert({
+            what_happened: parsed.report.whatHappened,
+            page_url: parsed.report.pageUrl || null,
+            user_agent: parsed.report.userAgent || null,
+            reporter_user_id: caller.userId || null,
+            reporter_email: plan.reporterEmail || null,
+            confirmation_sent: false,
+          })
+          .select('id')
+          .maybeSingle();
+        if (!error) {
+          stored = true;
+          storedId = data?.id ? String(data.id) : null;
+        } else if (!/schema cache|does not exist|relation|confirmation_sent/i.test(error.message || '')) {
           console.error('[product-issues] persist', error.message);
+        } else {
+          const retry = await admin.from('product_issue_reports').insert({
+            what_happened: parsed.report.whatHappened,
+            page_url: parsed.report.pageUrl || null,
+            user_agent: parsed.report.userAgent || null,
+            reporter_user_id: caller.userId || null,
+            reporter_email: plan.reporterEmail || null,
+          });
+          if (!retry.error) stored = true;
         }
       } catch (e) {
         console.error('[product-issues] persist', e);
       }
     }
 
-    const delivered = await deliverToProductInbox({ subject, html, text });
-    if (delivered.ok && stored && hasServiceRole()) {
+    const delivered = await sendResendEmail({
+      to: plan.teamRecipients,
+      subject,
+      html,
+      text,
+    });
+    if (delivered.ok && stored && storedId && hasServiceRole()) {
       try {
         await getSupabaseAdmin()
           .from('product_issue_reports')
           .update({ delivered_to_inbox: true })
-          .eq('what_happened', parsed.report.whatHappened)
-          .eq('page_url', parsed.report.pageUrl || '');
+          .eq('id', storedId);
       } catch {
         /* ignore */
       }
@@ -178,9 +246,34 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    let confirmed = false;
+    if (plan.confirmationTo) {
+      const confirm = await sendResendEmail({
+        to: [plan.confirmationTo],
+        subject: productIssueConfirmationSubject(),
+        html: productIssueConfirmationHtml(),
+        text: productIssueConfirmationText(),
+        replyTo: PRODUCT_ISSUE_CONFIRM_REPLY_TO,
+      });
+      confirmed = confirm.ok;
+      if (!confirm.ok) {
+        console.error('[product-issues] confirmation', confirm.error);
+      } else if (stored && storedId && hasServiceRole()) {
+        try {
+          await getSupabaseAdmin()
+            .from('product_issue_reports')
+            .update({ confirmation_sent: true })
+            .eq('id', storedId);
+        } catch {
+          /* ignore */
+        }
+      }
+    }
+
     console.info('[product-issues] accepted', {
       stored,
       emailed: delivered.ok,
+      confirmed,
       pageUrl: parsed.report.pageUrl,
     });
 
@@ -188,7 +281,10 @@ export async function POST(req: NextRequest) {
       ok: true,
       stored,
       emailed: delivered.ok,
-      message: 'Thanks — the Total Service Pro team has your report.',
+      confirmed,
+      message: plan.confirmationTo
+        ? 'Thanks — the Total Service Pro team has your report. We emailed you a confirmation.'
+        : 'Thanks — the Total Service Pro team has your report.',
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'Could not send report';
