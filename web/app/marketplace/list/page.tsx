@@ -589,6 +589,12 @@ function MarketplaceListContent() {
         <h1 className="text-3xl font-extrabold mt-1 mb-2">Post a Marketplace Listing</h1>
         <p className="text-sm text-[var(--text3)] mb-6">
           Each listing type uses a form tailored to that product — same structure as the Android app.
+          {' '}
+          Suppliers and laser sellers can also{' '}
+          <Link href="/marketplace/uploads" className="text-[var(--gold)] hover:underline">
+            upload a CSV / Excel catalog
+          </Link>
+          .
         </p>
 
         <div className="flex flex-wrap gap-2 mb-8">

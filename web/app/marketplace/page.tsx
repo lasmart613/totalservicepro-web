@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { canPostMarketplaceNeed, isPro, isSupplier } from '@/lib/roles';
+import { canBulkUploadCatalog, canPostMarketplaceNeed, isPro, isSupplier } from '@/lib/roles';
 
 export default function Marketplace() {
   const [notifications, setNotifications] = useState<any[]>([]);
@@ -100,23 +100,30 @@ export default function Marketplace() {
             <p className="text-[var(--text3)]">Buy, sell, and connect in the laser service ecosystem</p>
           </div>
 
-          {(isPro(userRole) || isSupplier(userRole, orgType)) && (
-            <Link
-              href={
-                isSupplier(userRole, orgType)
-                  ? '/marketplace/list?type=part'
-                  : '/marketplace/list'
-              }
-              className="btn btn-primary whitespace-nowrap"
-            >
-              + Create New Listing
-            </Link>
-          )}
-          {canPostMarketplaceNeed(userRole, orgType) && !isPro(userRole) && (
-            <Link href="/service-requests" className="btn btn-primary whitespace-nowrap">
-              Post Service Request
-            </Link>
-          )}
+          <div className="flex flex-wrap gap-2">
+            {canBulkUploadCatalog(userRole, orgType) && (
+              <Link href="/marketplace/uploads" className="btn btn-secondary whitespace-nowrap">
+                Bulk upload CSV / Excel
+              </Link>
+            )}
+            {(isPro(userRole) || isSupplier(userRole, orgType)) && (
+              <Link
+                href={
+                  isSupplier(userRole, orgType)
+                    ? '/marketplace/list?type=part'
+                    : '/marketplace/list'
+                }
+                className="btn btn-primary whitespace-nowrap"
+              >
+                + Create New Listing
+              </Link>
+            )}
+            {canPostMarketplaceNeed(userRole, orgType) && !isPro(userRole) && (
+              <Link href="/service-requests" className="btn btn-primary whitespace-nowrap">
+                Post Service Request
+              </Link>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
@@ -162,6 +169,14 @@ export default function Marketplace() {
             <div className="text-4xl mb-4">📝</div>
             <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">My Listings</h3>
             <p className="text-sm text-[var(--text3)] flex-1">View and manage your own listings</p>
+          </Link>
+
+          <Link href="/marketplace/uploads" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+            <div className="text-4xl mb-4">📤</div>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Bulk Catalog Upload</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">
+              Suppliers and laser sellers: upload CSV / Excel. Rows stage for listing under your org.
+            </p>
           </Link>
         </div>
 

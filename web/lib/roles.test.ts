@@ -4,7 +4,9 @@ import {
   canAccessRepairAi,
   canAccessServiceManuals,
   canAssignShopTestEquipment,
+  canBulkUploadCatalog,
   canSeeAllShopTickets,
+  hasMarketplaceSellerRole,
   isAdmin,
   isFieldEngineer,
 } from './roles.ts';
@@ -60,4 +62,19 @@ test('admin and owner can assign shop test equipment', () => {
   assert.equal(canAssignShopTestEquipment('service_manager'), true);
   assert.equal(canAssignShopTestEquipment('fse'), false);
   assert.equal(canAssignShopTestEquipment('technician'), false);
+});
+
+test('bulk catalog upload is for suppliers and owner-side sellers only', () => {
+  assert.equal(hasMarketplaceSellerRole('parts_supplier'), true);
+  assert.equal(hasMarketplaceSellerRole('owner'), true);
+  assert.equal(hasMarketplaceSellerRole('fse'), false);
+  assert.equal(canBulkUploadCatalog('parts_supplier', 'parts_supplier'), true);
+  assert.equal(canBulkUploadCatalog('supplier', 'vendor'), true);
+  assert.equal(canBulkUploadCatalog('owner', 'laser_reseller'), true);
+  assert.equal(canBulkUploadCatalog('owner', 'customer'), true);
+  assert.equal(canBulkUploadCatalog('admin', 'laser_rental'), true);
+  assert.equal(canBulkUploadCatalog('owner', 'service_company'), false);
+  assert.equal(canBulkUploadCatalog('admin', 'service_company'), false);
+  assert.equal(canBulkUploadCatalog('fse', 'parts_supplier'), false);
+  assert.equal(canBulkUploadCatalog('technician', 'laser_reseller'), false);
 });

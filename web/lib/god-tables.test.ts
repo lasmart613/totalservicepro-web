@@ -43,6 +43,8 @@ test('God table registry covers Equipment, Users, Auth, and business tables', ()
     'clinic_service_leads',
     'subscriptions',
     'engineer_invitations',
+    'marketplace_upload_batches',
+    'marketplace_upload_rows',
   ]) {
     assert.ok(keys.includes(key), `missing ${key}`);
   }

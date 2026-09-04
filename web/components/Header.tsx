@@ -304,6 +304,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
             { href: '/marketplace/parts', label: 'Parts Marketplace' },
             { href: '/marketplace/consumables', label: 'Consumables' },
             { href: '/marketplace/my-listings', label: 'My Listings' },
+            { href: '/marketplace/uploads', label: 'Bulk Catalog Upload' },
             { href: '/directory', label: 'TSP Directory' },
           ],
         }
@@ -337,6 +338,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       { href: '/marketplace/consumables', label: 'Consumables' },
       { href: '/service-requests', label: 'Service Requests' },
       { href: '/marketplace/my-listings', label: 'My Listings' },
+      { href: '/marketplace/uploads', label: 'Bulk Catalog Upload' },
       { href: '/marketplace/list', label: 'Post a Listing' },
     ],
   };

@@ -509,7 +509,7 @@ export default function HomePage() {
               <h3 className="font-bold text-lg mb-4">
                 {ownerDashboardHeading(orgType, facilityType, user?.user_metadata?.organization_type)}
               </h3>
-              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Link href="/my-lasers" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Zap size={32} className="mx-auto mb-3 text-[var(--gold)]" />
                   <div className="font-bold">My Lasers</div>
@@ -521,6 +521,10 @@ export default function HomePage() {
                 <Link href="/marketplace" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
                   <div className="font-bold">Marketplace</div>
+                </Link>
+                <Link href="/marketplace/uploads" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Bulk Catalog Upload</div>
                 </Link>
                 <Link href="/reports" className="card p-6 text-center hover:border-[var(--gold)]">
                   <FileText size={32} className="mx-auto mb-3 text-[var(--gold)]" />
@@ -573,6 +577,10 @@ export default function HomePage() {
                 <Link href="/marketplace" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
                   <div className="font-bold">Marketplace</div>
+                </Link>
+                <Link href="/marketplace/uploads" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Bulk Catalog Upload</div>
                 </Link>
                 <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />

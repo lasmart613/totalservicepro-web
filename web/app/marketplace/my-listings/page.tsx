@@ -105,7 +105,10 @@ export default function MyListings() {
       <div className="max-w-7xl mx-auto w-full px-4 py-8">
         <div className="flex justify-between items-center mb-8">
           <h1 className="text-3xl font-extrabold">My Marketplace Listings</h1>
-          <Link href="/marketplace/list" className="btn btn-primary">+ Create New Listing</Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/marketplace/uploads" className="btn btn-secondary">Bulk upload CSV / Excel</Link>
+            <Link href="/marketplace/list" className="btn btn-primary">+ Create New Listing</Link>
+          </div>
         </div>
 
         {listings.length === 0 ? (
