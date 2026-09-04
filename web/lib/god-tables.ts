@@ -462,9 +462,10 @@ export const GOD_TABLES: GodTableDef[] = [
     table: 'manuals',
     label: 'Manuals',
     group: 'catalog',
-    description: 'Service manual library. PR 82 equipment-type rooms is not required here.',
-    listColumns: ['id', 'brand', 'title', 'storage_path', 'created_at'],
-    searchColumns: ['brand', 'title'],
+    description:
+      'Service manual library. equipment_type is the room: laser | lithotriptor | c_arm | other. Quanta Litho / Cyber Ho / Litho EVO are laser (holmium), not lithotriptor.',
+    listColumns: ['id', 'brand', 'title', 'equipment_type', 'storage_path', 'created_at'],
+    searchColumns: ['brand', 'title', 'equipment_type'],
   }),
   crud({
     key: 'user_manuals',

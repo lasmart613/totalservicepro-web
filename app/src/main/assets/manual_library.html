@@ -242,13 +242,19 @@
     let currentUser = null;
 
     function manualRoom(m) {
+        const hay = [m && m.title, m && m.brand, m && m.model, m && m.storage_path].join(' ').toLowerCase();
+        const shock = /\bdornier\b|shock\s*wave|shockwave|\beswl\b|\bswl\b|ultrasonic\s+litho|electrohydraulic|extracorporeal|\blithotrip(tor|ter|sy|sie)\b/.test(hay);
+        if (shock) return 'lithotriptor';
+        const holmiumLitho = /\bcyber\s*ho\b/.test(hay)
+            || /\blitho\s*(evo|60|100)\b/.test(hay)
+            || (/\bquanta\b/.test(hay) && /\blitho\b/.test(hay))
+            || (/\blitho\b/.test(hay) && !/\blithotrip/.test(hay));
+        if (holmiumLitho) return 'laser';
         const explicit = String(m && m.equipment_type || '').toLowerCase().replace(/[\s-]+/g, '_');
         if (explicit === 'lithotriptor' || explicit === 'c_arm' || explicit === 'other' || explicit === 'laser') {
             return explicit;
         }
-        const hay = [m && m.title, m && m.brand, m && m.model, m && m.storage_path].join(' ').toLowerCase();
         if (/\bc[-\s_]?arm\b|\boec\b|fluoroscop/.test(hay)) return 'c_arm';
-        if (/\blitho|\blithotrips|\bcyber\s*ho\b/.test(hay)) return 'lithotriptor';
         return 'laser';
     }
 

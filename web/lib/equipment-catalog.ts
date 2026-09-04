@@ -1,6 +1,7 @@
 /**
  * Seed catalog for biomed expansion manuals (no PDF binaries).
- * Manufacturers / models Larry will attach the first litho + C-arm PDFs to.
+ * Manufacturers / models Larry will attach the first holmium Litho + C-arm PDFs to.
+ * Quanta Litho / Cyber Ho / Litho EVO are holmium lasers, not lithotriptors.
  */
 import {
   DEFAULT_EQUIPMENT_TYPE,
@@ -32,7 +33,7 @@ export const BIOMED_MANUAL_SEEDS = [
     suggestedPath: 'shared/ge-oec/9900/GE-OEC-9900-Service-Manual.pdf',
   },
   {
-    equipmentType: 'lithotriptor' as const,
+    equipmentType: 'laser' as const,
     manufacturer: 'Quanta System',
     model: 'Litho',
     title: 'Quanta System Litho Service Manual DGM001063',
@@ -41,7 +42,7 @@ export const BIOMED_MANUAL_SEEDS = [
     suggestedPath: 'shared/quanta-system/litho/DGM001063.pdf',
   },
   {
-    equipmentType: 'lithotriptor' as const,
+    equipmentType: 'laser' as const,
     manufacturer: 'Quanta System',
     model: 'Litho 60',
     title: 'Quanta System Cyber Ho 60 / Litho 60 Service Manual DGM001311',
@@ -50,7 +51,7 @@ export const BIOMED_MANUAL_SEEDS = [
     suggestedPath: 'shared/quanta-system/litho-60/DGM001311.pdf',
   },
   {
-    equipmentType: 'lithotriptor' as const,
+    equipmentType: 'laser' as const,
     manufacturer: 'Quanta System',
     model: 'Litho 100',
     title: 'Quanta System Cyber Ho 100 / Litho 100 Service Manual DGM001341',
@@ -59,7 +60,7 @@ export const BIOMED_MANUAL_SEEDS = [
     suggestedPath: 'shared/quanta-system/litho-100/DGM001341.pdf',
   },
   {
-    equipmentType: 'lithotriptor' as const,
+    equipmentType: 'laser' as const,
     manufacturer: 'Quanta System',
     model: 'Litho EVO',
     title: 'Quanta System Litho EVO User Manual DGM001435',
@@ -74,20 +75,20 @@ export const EQUIPMENT_CATALOG: EquipmentCatalogManufacturer[] = [
     name: 'Quanta System',
     aliases: ['Quanta', 'QuantaSystem'],
     models: [
-      { name: 'Litho', label: 'Litho', equipmentType: 'lithotriptor' },
+      { name: 'Litho', label: 'Litho', equipmentType: 'laser' },
       {
         name: 'Litho 60',
         label: 'Litho 60 / Cyber Ho 60',
-        equipmentType: 'lithotriptor',
+        equipmentType: 'laser',
         aliases: ['Cyber Ho 60', 'Litho60'],
       },
       {
         name: 'Litho 100',
         label: 'Litho 100 / Cyber Ho 100',
-        equipmentType: 'lithotriptor',
+        equipmentType: 'laser',
         aliases: ['Cyber Ho 100', 'Litho100'],
       },
-      { name: 'Litho EVO', label: 'Litho EVO', equipmentType: 'lithotriptor', aliases: ['LithoEVO'] },
+      { name: 'Litho EVO', label: 'Litho EVO', equipmentType: 'laser', aliases: ['LithoEVO'] },
     ],
   },
   {
