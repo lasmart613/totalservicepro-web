@@ -24,14 +24,14 @@ export const EQUIPMENT_TYPES: readonly EquipmentTypeMeta[] = [
     value: 'laser',
     label: 'Laser',
     roomLabel: 'Laser room',
-    blurb: 'Aesthetic and surgical lasers — the original bookshelf.',
+    blurb: 'Aesthetic and surgical lasers, including holmium (Quanta Litho / Cyber Ho / Litho EVO).',
     icon: '🔦',
   },
   {
     value: 'lithotriptor',
     label: 'Lithotriptor',
     roomLabel: 'Lithotriptor room',
-    blurb: 'Holmium / lithotripsy platforms (Quanta Litho, Cyber Ho, and more).',
+    blurb: 'True shockwave / ultrasonic stone systems (Dornier and similar) — not holmium lasers.',
     icon: '💧',
   },
   {
@@ -92,9 +92,37 @@ export function equipmentTypeMeta(value: unknown): EquipmentTypeMeta {
   return EQUIPMENT_TYPES.find((row) => row.value === t) || EQUIPMENT_TYPES[0];
 }
 
+/** Shockwave / ultrasonic ESWL — the Lithotriptor room. Not holmium. */
+export function isShockwaveLithotriptor(hay: string): boolean {
+  const t = String(hay || '').toLowerCase();
+  return (
+    /\bdornier\b/.test(t) ||
+    /shock\s*wave|shockwave/.test(t) ||
+    /\beswl\b|\bswl\b/.test(t) ||
+    /ultrasonic\s+litho|electrohydraulic|extracorporeal/.test(t) ||
+    /\blithotrip(tor|ter|sy|sie)\b/.test(t)
+  );
+}
+
 /**
- * When equipment_type is missing (pre-migration rows), guess from title / brand / path.
- * Holmium-only titles stay Laser — Cyber Ho / Litho wording is what maps to lithotriptor.
+ * Quanta Litho / Cyber Ho / Litho EVO are holmium lasers. The product name
+ * "Litho" is not a shockwave lithotriptor. Also covers live "Litho IFU" rows.
+ */
+export function isHolmiumLithoLaserFamily(hay: string): boolean {
+  const t = String(hay || '').toLowerCase();
+  if (isShockwaveLithotriptor(t)) return false;
+  if (/\bcyber\s*ho\b/.test(t)) return true;
+  if (/\blitho\s*(evo|60|100)\b/.test(t)) return true;
+  if (/\bquanta\b/.test(t) && /\blitho\b/.test(t)) return true;
+  if (/\bholmium\b/.test(t) && /\blitho\b/.test(t)) return true;
+  // Bare product name: "Litho IFU (EN)", "Litho Service Manual" — not "lithotriptor".
+  if (/\blitho\b/.test(t) && !/\blithotrip/.test(t)) return true;
+  return false;
+}
+
+/**
+ * Room for a catalog row. Holmium Litho / Cyber Ho always Laser, even if a
+ * row was saved as lithotriptor (PR 82 mis-seed). True ESWL stays Lithotriptor.
  */
 export function inferEquipmentType(fields: {
   equipment_type?: string | null;
@@ -103,15 +131,17 @@ export function inferEquipmentType(fields: {
   model?: string | null;
   storage_path?: string | null;
 }): EquipmentType {
-  const explicit = normalizeEquipmentType(fields.equipment_type);
-  if (explicit) return explicit;
-
   const hay = [fields.title, fields.brand, fields.model, fields.storage_path]
     .map((s) => String(s || ''))
     .join(' ')
     .toLowerCase();
 
+  if (isShockwaveLithotriptor(hay)) return 'lithotriptor';
+  if (isHolmiumLithoLaserFamily(hay)) return DEFAULT_EQUIPMENT_TYPE;
   if (/\bc[-\s_]?arm\b|\boec\b|fluoroscop/.test(hay)) return 'c_arm';
-  if (/\blitho|\blithotrips|\bcyber\s*ho\b/.test(hay)) return 'lithotriptor';
+
+  const explicit = normalizeEquipmentType(fields.equipment_type);
+  if (explicit) return explicit;
+
   return DEFAULT_EQUIPMENT_TYPE;
 }

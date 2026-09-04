@@ -64,14 +64,15 @@ COMMENT ON COLUMN public.laser_models.equipment_type IS
 COMMENT ON TABLE public.laser_models IS
   'Manufacturer models for dropdowns and manuals attach. Not lasers-only after 2026-09 biomed expansion.';
 
--- 3. Manufacturers Larry will attach the first litho + C-arm manuals to
+-- 3. Manufacturers Larry will attach the first holmium Litho + C-arm manuals to
+--    Quanta Litho / Cyber Ho / Litho EVO are holmium lasers (not lithotriptors).
 INSERT INTO public.manufacturers (name)
 VALUES ('Quanta System'), ('GE OEC')
 ON CONFLICT (name) DO NOTHING;
 
 -- 4. Models (idempotent by manufacturer + name)
 INSERT INTO public.laser_models (name, label, manufacturer_id, equipment_type)
-SELECT 'Litho', 'Litho', m.id, 'lithotriptor'
+SELECT 'Litho', 'Litho', m.id, 'laser'
 FROM public.manufacturers m
 WHERE m.name = 'Quanta System'
   AND NOT EXISTS (
@@ -80,7 +81,7 @@ WHERE m.name = 'Quanta System'
   );
 
 INSERT INTO public.laser_models (name, label, manufacturer_id, equipment_type)
-SELECT 'Litho 60', 'Litho 60 / Cyber Ho 60', m.id, 'lithotriptor'
+SELECT 'Litho 60', 'Litho 60 / Cyber Ho 60', m.id, 'laser'
 FROM public.manufacturers m
 WHERE m.name = 'Quanta System'
   AND NOT EXISTS (
@@ -89,7 +90,7 @@ WHERE m.name = 'Quanta System'
   );
 
 INSERT INTO public.laser_models (name, label, manufacturer_id, equipment_type)
-SELECT 'Litho 100', 'Litho 100 / Cyber Ho 100', m.id, 'lithotriptor'
+SELECT 'Litho 100', 'Litho 100 / Cyber Ho 100', m.id, 'laser'
 FROM public.manufacturers m
 WHERE m.name = 'Quanta System'
   AND NOT EXISTS (
@@ -98,7 +99,7 @@ WHERE m.name = 'Quanta System'
   );
 
 INSERT INTO public.laser_models (name, label, manufacturer_id, equipment_type)
-SELECT 'Litho EVO', 'Litho EVO', m.id, 'lithotriptor'
+SELECT 'Litho EVO', 'Litho EVO', m.id, 'laser'
 FROM public.manufacturers m
 WHERE m.name = 'Quanta System'
   AND NOT EXISTS (

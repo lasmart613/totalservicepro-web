@@ -36,12 +36,19 @@ test('equipment types match find-a-rep and default to Laser', () => {
   assert.equal(equipmentTypeLabel('c_arm'), 'C-arm');
 });
 
-test('infer litho and C-arm from titles; existing lasers stay Laser', () => {
+test('Quanta Litho / Cyber Ho / Litho IFU are laser; Dornier ESWL is lithotriptor', () => {
   assert.equal(inferEquipmentType({ title: 'VBeam Perfecta Service Manual' }), 'laser');
-  assert.equal(inferEquipmentType({ title: 'Quanta System Litho Service Manual DGM001063' }), 'lithotriptor');
-  assert.equal(inferEquipmentType({ title: 'Cyber Ho 60 Service Manual' }), 'lithotriptor');
+  assert.equal(inferEquipmentType({ title: 'Quanta System Litho Service Manual DGM001063' }), 'laser');
+  assert.equal(inferEquipmentType({ title: 'Cyber Ho 60 Service Manual' }), 'laser');
+  assert.equal(inferEquipmentType({ title: 'Litho EVO User Manual' }), 'laser');
+  assert.equal(
+    inferEquipmentType({ title: 'Litho IFU (EN)', equipment_type: 'lithotriptor' }),
+    'laser'
+  );
   assert.equal(inferEquipmentType({ brand: 'GE OEC', model: '9900', title: 'OEC 9900 Service Manual' }), 'c_arm');
   assert.equal(inferEquipmentType({ title: 'PowerSuite 100W Holmium', brand: 'Lumenis' }), 'laser');
+  assert.equal(inferEquipmentType({ title: 'Dornier Compact Delta Lithotripter' }), 'lithotriptor');
+  assert.equal(inferEquipmentType({ title: 'Shockwave ESWL Service Manual', brand: 'Dornier' }), 'lithotriptor');
   assert.equal(
     inferEquipmentType({ equipment_type: 'lithotriptor', title: 'Something laser-ish' }),
     'lithotriptor'
@@ -60,6 +67,8 @@ test('seed catalog covers Larry’s first five manuals without PDF binaries', ()
     (quanta?.models || []).map((m) => m.name),
     ['Litho', 'Litho 60', 'Litho 100', 'Litho EVO']
   );
+  assert.ok((quanta?.models || []).every((m) => m.equipmentType === 'laser'));
+  assert.ok(BIOMED_MANUAL_SEEDS.filter((s) => s.manufacturer === 'Quanta System').every((s) => s.equipmentType === 'laser'));
   assert.equal(suggestedManualStoragePath({ brand: 'GE OEC', model: '9900' }), 'shared/ge-oec/9900/9900.pdf');
 });
 
@@ -95,7 +104,7 @@ test('catalog insert requires type, brand, model, title, and a bucket path', () 
   assert.equal(badPath.ok, false);
 
   const inferredPath = parseManualCatalogInsert({
-    equipment_type: 'lithotriptor',
+    equipment_type: 'laser',
     manufacturer: 'Quanta System',
     model: 'Litho EVO',
     title: 'Quanta System Litho EVO User Manual DGM001435',
@@ -122,7 +131,17 @@ test('migration backfills lasers and seeds Quanta / GE OEC models', () => {
   assert.match(migration, /Cyber Ho 60/);
   assert.match(migration, /OEC 9900/);
   assert.match(migration, /laser_models/);
+  assert.match(migration, /m\.id, 'laser'/);
+  assert.doesNotMatch(migration, /m\.id, 'lithotriptor'/);
   assert.doesNotMatch(migration, /\.pdf['"]\s*,/);
+
+  const fix = readFileSync(
+    join(here, '../supabase/migrations/20260905_000001_quanta_litho_is_laser.sql'),
+    'utf8'
+  );
+  assert.match(fix, /id::text = '144'/);
+  assert.match(fix, /equipment_type = 'laser'/);
+  assert.match(fix, /dornier/);
 });
 
 test('library rooms default to Laser and keep access + bookshelf', () => {
