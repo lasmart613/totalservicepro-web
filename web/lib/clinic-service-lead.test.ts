@@ -258,6 +258,7 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   const layout = readFileSync(join(here, '../app/layout.tsx'), 'utf8');
   const findPage = readFileSync(join(here, '../app/find-a-rep/page.tsx'), 'utf8');
   const form = readFileSync(join(here, '../components/landing/FindRepForm.tsx'), 'utf8');
+  const nextConfig = readFileSync(join(here, '../next.config.mjs'), 'utf8');
 
   assert.match(page, /FindRepForm/);
   assert.match(page, /variant="hero"/);
@@ -315,6 +316,7 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.match(page, /shouldAutoOpenFindRep/);
   assert.match(page, /scrollIntoView/);
   assert.doesNotMatch(page, /router\.replace\('\/find-a-rep'\)/);
+  assert.doesNotMatch(nextConfig, /destination: '\/find-a-rep'/);
   assert.doesNotMatch(page, /Free to start/);
   assert.doesNotMatch(page, /Perris/);
   assert.doesNotMatch(page, /\bFSE\b/);
