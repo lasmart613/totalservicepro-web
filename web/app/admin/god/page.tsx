@@ -195,7 +195,11 @@ export default function GodDashboardPage() {
       <h1 className="text-3xl font-extrabold mb-2">God Dashboard</h1>
       <p className="text-[var(--text3)] mb-4 max-w-3xl">
         Every organization and user. Send the locked shop-tester invite only to the shops you
-        check. Nothing is selected by default. This is not a Stripe plan.
+        check. Nothing is selected by default. This is not a Stripe plan.{' '}
+        <Link href="/admin/god/manuals" className="text-[var(--gold)] hover:underline">
+          Manuals catalog
+        </Link>{' '}
+        attaches PDFs to Laser / Lithotriptor / C-arm rooms.
       </p>
       <p className="text-sm text-[var(--text3)] mb-6 max-w-3xl">
         Need a row that is not an org invite? Use{' '}

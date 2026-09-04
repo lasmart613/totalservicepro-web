@@ -2,11 +2,13 @@
  * Shared manufacturer / model lists for clinic onboarding, My Lasers, service requests.
  * Prefers MODELS map (always available offline); can merge DB-driven lists later.
  */
+import { extraManufacturerNames } from './equipment-catalog';
 import { MODELS } from './models';
 
 const FALLBACK_MFRS = [
   'Alma', 'Candela', 'Coherent', 'Cutera', 'Cynosure', 'Fotona',
   'HOYA ConBio', 'InMode', 'Iridex', 'Lumenis', 'Lutronic', 'Quanta', 'Sciton', 'Syneron',
+  ...extraManufacturerNames(),
 ];
 
 /** Alphabetized manufacturer names from MODELS (+ fallbacks). */

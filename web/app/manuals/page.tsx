@@ -15,6 +15,14 @@ import {
 } from '@/lib/manual-catalog';
 import { toast } from 'sonner';
 import { canAccessServiceManuals } from '@/lib/roles';
+import {
+  DEFAULT_EQUIPMENT_TYPE,
+  EQUIPMENT_TYPES,
+  equipmentTypeMeta,
+  equipmentTypeOrDefault,
+  inferEquipmentType,
+  type EquipmentType,
+} from '@/lib/equipment-types';
 
 const WAVELENGTH_OPTIONS = [
   { label: 'All Wavelengths', value: '' },
@@ -35,20 +43,49 @@ export default function ManualsLibrary() {
   const [ownedIds, setOwnedIds] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<'browse' | 'library'>('browse');
   const [loading, setLoading] = useState(true);
+  const [room, setRoom] = useState<EquipmentType>(DEFAULT_EQUIPMENT_TYPE);
   const [selectedWavelength, setSelectedWavelength] = useState('');
   const [slotLimit, setSlotLimit] = useState(DEFAULT_SLOT_LIMIT);
   const [orgId, setOrgId] = useState<string | number | null>(null);
 
   useEffect(() => {
+    const q = new URLSearchParams(window.location.search).get('room');
+    setRoom(equipmentTypeOrDefault(q));
     loadData();
   }, []);
+
+  function selectRoom(next: EquipmentType) {
+    setRoom(next);
+    if (next !== 'laser') setSelectedWavelength('');
+    const url = new URL(window.location.href);
+    if (next === DEFAULT_EQUIPMENT_TYPE) url.searchParams.delete('room');
+    else url.searchParams.set('room', next);
+    window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+  }
+
+  function manualRoom(m: any): EquipmentType {
+    return inferEquipmentType({
+      equipment_type: m?.equipment_type,
+      title: m?.title,
+      brand: m?.brand,
+      model: m?.model,
+      storage_path: m?.storage_path,
+    });
+  }
 
   async function loadData() {
     setLoading(true);
     const supabase = getSupabaseClient();
     try {
-      const { data: all } = await supabase.from('manuals').select('*').order('brand').order('title');
-      setManuals(all || []);
+      let manRes = await supabase.from('manuals').select('*').order('brand').order('title');
+      if (manRes.error && /equipment_type|schema cache|column/i.test(manRes.error.message || '')) {
+        manRes = await supabase
+          .from('manuals')
+          .select('id, brand, title, model, storage_path, doc_kind, is_folder')
+          .order('brand')
+          .order('title');
+      }
+      setManuals(manRes.data || []);
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
@@ -394,18 +431,36 @@ export default function ManualsLibrary() {
     return false;
   };
 
+  const roomCounts = React.useMemo(() => {
+    const source = tab === 'browse' ? manuals : myLibrary;
+    const counts: Record<EquipmentType, number> = {
+      laser: 0,
+      lithotriptor: 0,
+      c_arm: 0,
+      other: 0,
+    };
+    source.forEach((m) => {
+      counts[manualRoom(m)] += 1;
+    });
+    return counts;
+  }, [manuals, myLibrary, tab]);
+
   const groupedManuals = React.useMemo(() => {
     const groups: { [key: string]: any[] } = {};
     const list = tab === 'browse' ? manuals : myLibrary;
+    const applyWavelength = room === 'laser';
 
     list.forEach((m) => {
-      if (!matchesWavelength(m, selectedWavelength)) return;
+      if (manualRoom(m) !== room) return;
+      if (applyWavelength && !matchesWavelength(m, selectedWavelength)) return;
       const brand = m.brand || 'Other';
       if (!groups[brand]) groups[brand] = [];
       groups[brand].push(m);
     });
     return groups;
-  }, [manuals, myLibrary, tab, selectedWavelength]);
+  }, [manuals, myLibrary, tab, selectedWavelength, room]);
+
+  const activeRoom = equipmentTypeMeta(room);
 
   /** Light spines so books contrast with the wood shelf; dark text on top */
   const getBookColor = (manual: any) => {
@@ -510,6 +565,11 @@ export default function ManualsLibrary() {
     if (/v-?beam.*perfecta/i.test(t)) return 'VBEAM PF';
     if (/gentlemax\s*pro/i.test(t)) return 'GENTLEMAX PRO';
     if (/excel\s*hr/i.test(t)) return 'EXCEL HR';
+    if (/litho\s*evo/i.test(t)) return 'LITHO EVO';
+    if (/litho\s*100|cyber\s*ho\s*100/i.test(t)) return 'LITHO 100';
+    if (/litho\s*60|cyber\s*ho\s*60/i.test(t)) return 'LITHO 60';
+    if (/\blitho\b/i.test(t) && !/litho\s*(60|100|evo)/i.test(t)) return 'LITHO';
+    if (/\b9900\b/i.test(t) || /oec\s*9900/i.test(t)) return 'OEC 9900';
 
     if (t.length > 32) t = t.slice(0, 30).trimEnd() + '…';
     return t;
@@ -524,25 +584,57 @@ export default function ManualsLibrary() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
           <div>
             <h1 className="text-3xl font-extrabold">📚 Service Manuals</h1>
-            <p className="text-sm text-[var(--text3)]">Bookshelf view • Filter by wavelength</p>
+            <p className="text-sm text-[var(--text3)]">
+              {activeRoom.roomLabel} • Bookshelf by manufacturer
+              {room === 'laser' ? ' • Filter by wavelength' : ''}
+            </p>
           </div>
 
-          {/* Wavelength Filter Pills */}
-          <div className="flex flex-wrap gap-2">
-            {WAVELENGTH_OPTIONS.map((option) => (
+          {room === 'laser' && (
+            <div className="flex flex-wrap gap-2">
+              {WAVELENGTH_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  onClick={() => setSelectedWavelength(option.value)}
+                  className={`px-3 py-1.5 text-xs rounded-full border transition-all ${
+                    selectedWavelength === option.value
+                      ? 'bg-[var(--gold)] text-black border-[var(--gold)]'
+                      : 'border-[var(--border)] text-[var(--text3)] hover:border-[var(--gold)]'
+                  }`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="manual-rooms mb-6" role="tablist" aria-label="Equipment rooms">
+          {EQUIPMENT_TYPES.map((t) => {
+            const selected = room === t.value;
+            const count = roomCounts[t.value];
+            return (
               <button
-                key={option.value}
-                onClick={() => setSelectedWavelength(option.value)}
-                className={`px-3 py-1.5 text-xs rounded-full border transition-all ${
-                  selectedWavelength === option.value
-                    ? 'bg-[var(--gold)] text-black border-[var(--gold)]'
-                    : 'border-[var(--border)] text-[var(--text3)] hover:border-[var(--gold)]'
-                }`}
+                key={t.value}
+                type="button"
+                role="tab"
+                aria-selected={selected}
+                onClick={() => selectRoom(t.value)}
+                className={`manual-room ${selected ? 'is-selected' : ''}`}
+                title={t.blurb}
               >
-                {option.label}
+                <span className="manual-room-icon" aria-hidden>
+                  {t.icon}
+                </span>
+                <span className="manual-room-copy">
+                  <span className="manual-room-label">{t.label}</span>
+                  <span className="manual-room-meta">
+                    {loading ? '…' : `${count} ${count === 1 ? 'manual' : 'manuals'}`}
+                  </span>
+                </span>
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
 
         {/* Tabs */}
@@ -583,7 +675,21 @@ export default function ManualsLibrary() {
         ) : (
           <div className="space-y-12">
             {Object.keys(groupedManuals).length === 0 && (
-              <div className="text-center py-12 text-[var(--text3)]">No manuals found for this filter.</div>
+              <div className="text-center py-12 px-4 text-[var(--text3)]">
+                {selectedWavelength && room === 'laser' ? (
+                  <p>No manuals found for this wavelength in the Laser room.</p>
+                ) : (
+                  <>
+                    <p className="text-lg font-semibold text-[var(--text)] mb-2">
+                      This room&apos;s bookshelf is empty
+                    </p>
+                    <p>
+                      No manuals in the {activeRoom.roomLabel.toLowerCase()} yet. They&apos;ll appear on
+                      these shelves by manufacturer after they&apos;re added to the catalog.
+                    </p>
+                  </>
+                )}
+              </div>
             )}
 
             {Object.entries(groupedManuals).map(([brand, brandManuals]) => (

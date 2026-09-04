@@ -172,6 +172,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           { href: GOD_EQUIPMENT_PATH, label: 'God Equipment' },
           { href: GOD_USERS_PATH, label: 'God Users' },
           { href: GOD_AUTH_PATH, label: 'God Auth' },
+          { href: '/admin/god/manuals', label: 'Manuals catalog' },
         ]
       : []),
   ];

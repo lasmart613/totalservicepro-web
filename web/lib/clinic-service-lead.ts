@@ -12,6 +12,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { insertOmittingCharOverflow, shortTicketPrefix } from './char-overflow.ts';
 import { customerOrgPayload, emptyCustomerForm } from './customer-form.ts';
+import { EQUIPMENT_TYPES, type EquipmentType } from './equipment-types.ts';
 import { normalizeRegionInput } from './geo.ts';
 import {
   parseSubmittedEmail,
@@ -42,14 +43,13 @@ export const FIND_REP_HASH = 'find-a-rep';
 
 export const CLINIC_LEAD_EQUIPMENT_OTHER_MAX = 80;
 
-export const CLINIC_LEAD_EQUIPMENT_TYPES = [
-  { value: 'laser', label: 'Laser' },
-  { value: 'lithotriptor', label: 'Lithotriptor' },
-  { value: 'c_arm', label: 'C-arm' },
-  { value: 'other', label: 'Other' },
-] as const;
+/** Same values as manuals rooms / catalog (`laser | lithotriptor | c_arm | other`). */
+export const CLINIC_LEAD_EQUIPMENT_TYPES = EQUIPMENT_TYPES.map((t) => ({
+  value: t.value,
+  label: t.label,
+})) as ReadonlyArray<{ value: EquipmentType; label: string }>;
 
-export type ClinicLeadEquipmentType = (typeof CLINIC_LEAD_EQUIPMENT_TYPES)[number]['value'];
+export type ClinicLeadEquipmentType = EquipmentType;
 
 export const CLINIC_LEAD_URGENCY = SERVICE_REQUEST_URGENCY.map((value) => ({
   value,

@@ -1036,6 +1036,7 @@ export type Database = {
           created_at: string | null
           doc_kind: string | null
           entry_file_path: string | null
+          equipment_type: string
           id: number
           is_folder: boolean
           model: string
@@ -1050,6 +1051,7 @@ export type Database = {
           created_at?: string | null
           doc_kind?: string | null
           entry_file_path?: string | null
+          equipment_type?: string
           id?: never
           is_folder?: boolean
           model: string
@@ -1064,6 +1066,7 @@ export type Database = {
           created_at?: string | null
           doc_kind?: string | null
           entry_file_path?: string | null
+          equipment_type?: string
           id?: never
           is_folder?: boolean
           model?: string

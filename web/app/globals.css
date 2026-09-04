@@ -320,6 +320,67 @@ html.landing-mode main {
   touch-action: none;
 }
 
+/* Manuals rooms — pick a type (hallway), then the existing wood bookshelf */
+.manual-rooms {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+@media (min-width: 768px) {
+  .manual-rooms {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+.manual-room {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-align: left;
+  padding: 12px 12px;
+  border-radius: 14px;
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  min-height: 64px;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
+}
+.manual-room:hover {
+  border-color: var(--gold);
+}
+.manual-room.is-selected {
+  border-color: var(--gold);
+  box-shadow: inset 0 0 0 1px var(--gold), 0 6px 16px rgba(0, 0, 0, 0.18);
+  background: var(--surface2, var(--surface));
+}
+.manual-room-icon {
+  font-size: 22px;
+  line-height: 1;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(251, 191, 36, 0.12);
+  flex-shrink: 0;
+}
+.manual-room-copy {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.manual-room-label {
+  font-weight: 800;
+  font-size: 14px;
+  line-height: 1.2;
+}
+.manual-room-meta {
+  font-size: 11px;
+  color: var(--text3);
+  margin-top: 2px;
+}
+
 /* Manuals bookshelf — light books on dark wood, books rest on the ledge */
 .shelf {
   background: linear-gradient(180deg, #5a4634 0%, #3d2e22 55%, #2f241c 100%);

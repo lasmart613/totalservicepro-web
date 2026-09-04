@@ -37,6 +37,8 @@ test('bundled manuals stay in-app with VBeam OP vs Perfecta and find', () => {
   assert.match(library, /isBareVbeamOperatorTitle/);
   assert.match(library, /op-badge/);
   assert.match(library, /Operator's Manual/);
+  assert.match(library, /currentRoom/);
+  assert.match(library, /lithotriptor/);
   assert.match(list, /pdf_viewer\.html/);
   assert.doesNotMatch(list, /createSignedUrl/);
   assert.match(viewer, /Find in manual/);
