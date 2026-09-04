@@ -236,9 +236,21 @@
     let allManuals = [];
     let userManualIds = new Set();
     let currentTab = 'browse';
+    let currentRoom = 'laser';
     let currentManual = null;
     let FREE_LIMIT = 5;
     let currentUser = null;
+
+    function manualRoom(m) {
+        const explicit = String(m && m.equipment_type || '').toLowerCase().replace(/[\s-]+/g, '_');
+        if (explicit === 'lithotriptor' || explicit === 'c_arm' || explicit === 'other' || explicit === 'laser') {
+            return explicit;
+        }
+        const hay = [m && m.title, m && m.brand, m && m.model, m && m.storage_path].join(' ').toLowerCase();
+        if (/\bc[-\s_]?arm\b|\boec\b|fluoroscop/.test(hay)) return 'c_arm';
+        if (/\blitho|\blithotrips|\bcyber\s*ho\b/.test(hay)) return 'lithotriptor';
+        return 'laser';
+    }
 
     async function init() {
         try {
@@ -351,9 +363,24 @@
         if (currentTab === 'library') {
             filtered = filtered.filter(m => userManualIds.has(m.id));
         }
+        const roomCounts = { laser: 0, lithotriptor: 0, c_arm: 0, other: 0 };
+        filtered.forEach((m) => { roomCounts[manualRoom(m)] = (roomCounts[manualRoom(m)] || 0) + 1; });
+        filtered = filtered.filter((m) => manualRoom(m) === currentRoom);
+
+        const rooms = [
+            { value: 'laser', label: 'Laser' },
+            { value: 'lithotriptor', label: 'Lithotriptor' },
+            { value: 'c_arm', label: 'C-arm' },
+            { value: 'other', label: 'Other' },
+        ];
+        const roomBar = `<div style="display:flex;gap:8px;overflow-x:auto;padding:12px 16px 0;">` +
+            rooms.map((r) => {
+                const on = currentRoom === r.value;
+                return `<button onclick="selectRoom('${r.value}')" style="flex:1;min-width:88px;padding:8px 6px;border-radius:10px;border:1px solid ${on ? '#d4af37' : 'var(--border)'};background:${on ? 'var(--surface3)' : 'var(--surface)'};color:${on ? '#d4af37' : 'var(--text)'};font-weight:700;font-size:12px;">${r.label}<div style="font-size:10px;font-weight:600;color:var(--text3)">${roomCounts[r.value] || 0}</div></button>`;
+            }).join('') + `</div>`;
 
         if (filtered.length === 0) {
-            container.innerHTML = `<div class="empty-state"><h3>No manuals found</h3></div>`;
+            container.innerHTML = roomBar + `<div class="empty-state"><h3>This room's bookshelf is empty</h3><p>Manuals will appear here after they are added to the catalog.</p></div>`;
             return;
         }
 
@@ -390,7 +417,12 @@
             `;
         });
 
-        container.innerHTML = html;
+        container.innerHTML = roomBar + html;
+    }
+
+    function selectRoom(room) {
+        currentRoom = room || 'laser';
+        renderContent();
     }
 
     async function handleBookClick(manualId) {

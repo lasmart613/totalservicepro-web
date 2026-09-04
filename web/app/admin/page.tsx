@@ -44,6 +44,16 @@ export default function AdminDashboard() {
             </p>
           </Link>
         )}
+
+        {isGod && (
+          <Link href="/admin/god/manuals" className="card p-6 hover:border-[var(--gold)] group">
+            <div className="text-4xl mb-4">📚</div>
+            <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">Manuals catalog</div>
+            <p className="text-[var(--text3)]">
+              Attach a PDF path to a room (Laser, Lithotriptor, C-arm, Other).
+            </p>
+          </Link>
+        )}
       </div>
     </div>
   );
