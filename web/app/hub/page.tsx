@@ -64,12 +64,14 @@ export default function TechHub() {
         { href: '/company', icon: '🏢', label: 'Facility Profile', desc: 'Edit your clinic details, logo & contacts' },
         { href: '/service-requests', icon: '🛠️', label: 'Service Requests', desc: 'Request repair / PM for your systems' },
         { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Parts, used systems & consumables' },
+        { href: '/marketplace/uploads', icon: '📤', label: 'Bulk Catalog Upload', desc: 'CSV / Excel of lasers for Marketplace' },
         { href: '/reports', icon: '📋', label: 'Service History', desc: 'Completed work on your systems' },
         { href: '/directory', icon: '📒', label: 'TSP Directory', desc: 'Find service companies (free listings)' },
       ]
     : supplier
       ? [
           { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Master list & listings' },
+          { href: '/marketplace/uploads', icon: '📤', label: 'Bulk Catalog Upload', desc: 'CSV / Excel of parts for Marketplace' },
           { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Demand & your listings' },
           { href: '/company', icon: '🏢', label: 'Supplier Profile', desc: 'Company & brands' },
           { href: '/directory', icon: '📒', label: 'TSP Directory', desc: 'Listed organizations (free)' },

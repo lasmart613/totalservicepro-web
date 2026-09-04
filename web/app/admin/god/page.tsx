@@ -214,7 +214,11 @@ export default function GodDashboardPage() {
         <Link href="/admin/god/auth" className="text-[var(--gold)] hover:underline">
           Auth / Users
         </Link>
-        .
+        . Catalog spreadsheets land in{' '}
+        <Link href="/admin/god/tables/marketplace_upload_batches" className="text-[var(--gold)] hover:underline">
+          Catalog upload batches
+        </Link>
+        {' '}— mark rows listed via <code>PATCH /api/god/marketplace-uploads/:id</code>.
       </p>
 
       <div className="flex flex-wrap gap-3 mb-4">

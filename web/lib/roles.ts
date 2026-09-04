@@ -190,3 +190,29 @@ export function getDashboardPersona(role?: RoleLike, orgType?: OrgTypeLike): Das
   if (isSupplier(role, orgType)) return 'supplier';
   return 'service';
 }
+
+/**
+ * Roles that may sell on Marketplace for their org (not FSE / dispatcher / viewer).
+ * Soft-beta bulk catalog upload uses this plus an eligible org type.
+ */
+export function hasMarketplaceSellerRole(role?: RoleLike): boolean {
+  const r = normalizeRole(role);
+  return (
+    isAdmin(role) ||
+    r === 'owner' ||
+    r === 'customer' ||
+    r === 'parts_supplier' ||
+    r === 'supplier'
+  );
+}
+
+/**
+ * Bulk CSV/XLSX catalog upload: Parts Suppliers and owner-side marketplace
+ * sellers (laser reseller, clinic, rental). Not service-company shops.
+ */
+export function canBulkUploadCatalog(role?: RoleLike, orgType?: OrgTypeLike): boolean {
+  if (isServiceOrgType(orgType)) return false;
+  if (!hasMarketplaceSellerRole(role)) return false;
+  if (isSupplierOrgType(orgType) || isOwnerOrgType(orgType)) return true;
+  return isSupplier(role) || isOwnerish(role);
+}
