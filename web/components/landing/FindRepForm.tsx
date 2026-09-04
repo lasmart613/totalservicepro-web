@@ -12,11 +12,15 @@ import {
 
 export function FindRepForm({
   id = 'find-rep-form',
+  variant = 'page',
   onCancel,
 }: {
   id?: string;
+  variant?: 'hero' | 'page';
   onCancel?: () => void;
 }) {
+  const compact = variant === 'hero';
+  const TitleTag = compact ? 'h2' : 'h1';
   const [equipmentType, setEquipmentType] = useState('');
   const [equipmentTypeOther, setEquipmentTypeOther] = useState('');
   const [manufacturer, setManufacturer] = useState('');
@@ -86,8 +90,8 @@ export function FindRepForm({
 
   if (sent) {
     return (
-      <div className="lp-find-card" id={id}>
-        <h1 className="lp-modal-title">Request sent</h1>
+      <div className={`lp-find-card${compact ? ' is-hero' : ''}`} id={id}>
+        <TitleTag className="lp-modal-title">Request sent</TitleTag>
         <p className="lp-modal-lede">
           RepairPlanet has your note. If you left an email, we sent a short confirmation.
           A nearby shop will be matched — you do not need a Total Service Pro account for this.
@@ -100,12 +104,12 @@ export function FindRepForm({
   }
 
   return (
-    <div className="lp-find-card" id={id}>
-      <h1 className="lp-modal-title">Find a service rep near you</h1>
+    <div className={`lp-find-card${compact ? ' is-hero' : ''}`} id={id}>
+      <TitleTag className="lp-modal-title">Find a Service/Repair Company Near Me</TitleTag>
       <p className="lp-modal-lede">
-        Tell us the equipment type and what is going on. No Total Service Pro account
-        required — RepairPlanet matches you with a nearby biomedical service shop.
-        Lasers, lithotriptors, and C-arms first.
+        {compact
+          ? 'Lasers, lithotriptors, and C-arms first. No Total Service Pro account required — we match you with a nearby biomedical service shop.'
+          : 'Tell us the equipment type and what is going on. No Total Service Pro account required — RepairPlanet matches you with a nearby biomedical service shop. Lasers, lithotriptors, and C-arms first.'}
       </p>
       <form onSubmit={submit} className="lp-lead-form">
         <label className="lp-field lp-hp" aria-hidden="true">
@@ -147,16 +151,18 @@ export function FindRepForm({
             />
           </label>
         ) : null}
-        <label className="lp-field">
-          <span>Brand / model</span>
-          <input
-            type="text"
-            maxLength={80}
-            value={manufacturer}
-            onChange={(e) => setManufacturer(e.target.value)}
-            placeholder="Optional — e.g. Candela Vbeam, Dornier, GE OEC"
-          />
-        </label>
+        {compact ? null : (
+          <label className="lp-field">
+            <span>Brand / model</span>
+            <input
+              type="text"
+              maxLength={80}
+              value={manufacturer}
+              onChange={(e) => setManufacturer(e.target.value)}
+              placeholder="Optional — e.g. Candela Vbeam, Dornier, GE OEC"
+            />
+          </label>
+        )}
         <label className="lp-field">
           <span>Clinic or organization</span>
           <input
@@ -219,24 +225,26 @@ export function FindRepForm({
           </label>
         </div>
         <p className="lp-field-hint">Email or phone — whichever is easier.</p>
-        <label className="lp-field">
-          <span>Urgency</span>
-          <select value={urgency} onChange={(e) => setUrgency(e.target.value)}>
-            <option value="">Optional</option>
-            {CLINIC_LEAD_URGENCY.map((u) => (
-              <option key={u.value} value={u.value}>
-                {u.label}
-              </option>
-            ))}
-          </select>
-        </label>
-        <label className="lp-field">
+        {compact ? null : (
+          <label className="lp-field">
+            <span>Urgency</span>
+            <select value={urgency} onChange={(e) => setUrgency(e.target.value)}>
+              <option value="">Optional</option>
+              {CLINIC_LEAD_URGENCY.map((u) => (
+                <option key={u.value} value={u.value}>
+                  {u.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        <label className={`lp-field${compact ? ' lp-field-span' : ''}`}>
           <span>What is going on</span>
           <textarea
             required
             minLength={CLINIC_LEAD_DESCRIPTION_MIN}
             maxLength={CLINIC_LEAD_DESCRIPTION_MAX}
-            rows={4}
+            rows={compact ? 2 : 4}
             value={description}
             onChange={(e) => setDescription(e.target.value)}
             placeholder="Error codes, no power, PM due, install — a short note is enough."

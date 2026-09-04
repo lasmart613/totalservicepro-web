@@ -9,6 +9,7 @@ import {
   clinicLeadHtml,
   clinicLeadSubject,
   clinicLeadText,
+  insertOrganizationFromClinicLead,
   parseClinicLead,
   planClinicLeadMail,
 } from '@/lib/clinic-service-lead';
@@ -96,8 +97,9 @@ async function confirmationAlreadySent(opts: {
 
 /**
  * POST /api/clinic-service-leads
- * Guest clinic lead from the logged-out landing. Persists when the service
- * role is available, emails the product inbox + QA, and sends one
+ * Guest clinic lead from the logged-out landing. Inserts a new clinic/owner
+ * organizations row (never updates live orgs), persists clinic_service_leads
+ * as an audit queue, emails the product inbox + QA, and sends one
  * confirmation when the clinic left a valid email. Does not require TSP
  * registration and does not post a marketplace RFQ.
  */
@@ -149,40 +151,49 @@ export async function POST(req: NextRequest) {
       confirmationAlreadySent: alreadySent,
     });
 
-    const subject = clinicLeadSubject(parsed.lead);
-    const text = clinicLeadText({
-      lead: parsed.lead,
-      confirmationSent: !!plan.confirmationTo,
-    });
-    const html = clinicLeadHtml({
-      lead: parsed.lead,
-      confirmationSent: !!plan.confirmationTo,
-    });
-
     let stored = false;
     let storedId: string | null = null;
+    let organizationId: string | number | null = null;
     if (hasServiceRole()) {
       try {
         const admin = getSupabaseAdmin();
-        const { data, error } = await admin
+        // Always INSERT a new clinic/owner org. Never update/upsert live orgs.
+        const org = await insertOrganizationFromClinicLead(admin, parsed.lead);
+        if ('id' in org) {
+          organizationId = org.id;
+        } else {
+          console.error('[clinic-service-leads] organization', org.error);
+        }
+
+        const leadRow: Record<string, unknown> = {
+          clinic_name: parsed.lead.clinicName,
+          location: parsed.lead.location,
+          contact_name: parsed.lead.contactName,
+          email: parsed.lead.email,
+          phone: parsed.lead.phone,
+          equipment_type: parsed.lead.equipmentType,
+          equipment_type_other: parsed.lead.equipmentTypeOther,
+          manufacturer: parsed.lead.manufacturer,
+          description: parsed.lead.description,
+          urgency: parsed.lead.urgency,
+          source: 'landing',
+          user_agent: String(body.userAgent ?? body.user_agent ?? '').trim().slice(0, 500) || null,
+          confirmation_sent: false,
+          organization_id: organizationId,
+        };
+        let { data, error } = await admin
           .from('clinic_service_leads')
-          .insert({
-            clinic_name: parsed.lead.clinicName,
-            location: parsed.lead.location,
-            contact_name: parsed.lead.contactName,
-            email: parsed.lead.email,
-            phone: parsed.lead.phone,
-            equipment_type: parsed.lead.equipmentType,
-            equipment_type_other: parsed.lead.equipmentTypeOther,
-            manufacturer: parsed.lead.manufacturer,
-            description: parsed.lead.description,
-            urgency: parsed.lead.urgency,
-            source: 'landing',
-            user_agent: String(body.userAgent ?? body.user_agent ?? '').trim().slice(0, 500) || null,
-            confirmation_sent: false,
-          })
+          .insert(leadRow)
           .select('id')
           .maybeSingle();
+        if (error && /organization_id|column|schema cache/i.test(error.message || '')) {
+          delete leadRow.organization_id;
+          ({ data, error } = await admin
+            .from('clinic_service_leads')
+            .insert(leadRow)
+            .select('id')
+            .maybeSingle());
+        }
         if (!error) {
           stored = true;
           storedId = data?.id ? String(data.id) : null;
@@ -193,6 +204,18 @@ export async function POST(req: NextRequest) {
         console.error('[clinic-service-leads] persist', e);
       }
     }
+
+    const subject = clinicLeadSubject(parsed.lead);
+    const text = clinicLeadText({
+      lead: parsed.lead,
+      confirmationSent: !!plan.confirmationTo,
+      organizationId,
+    });
+    const html = clinicLeadHtml({
+      lead: parsed.lead,
+      confirmationSent: !!plan.confirmationTo,
+      organizationId,
+    });
 
     const delivered = await sendResendEmail({
       to: plan.teamRecipients,
@@ -212,7 +235,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    if (!delivered.ok && !stored) {
+    if (!delivered.ok && !stored && organizationId == null) {
       console.error('[clinic-service-leads] undelivered', {
         clinic: parsed.lead.clinicName,
         location: parsed.lead.location,
@@ -253,6 +276,7 @@ export async function POST(req: NextRequest) {
 
     console.info('[clinic-service-leads] accepted', {
       stored,
+      organizationCreated: organizationId != null,
       emailed: delivered.ok,
       confirmed,
       location: parsed.lead.location,
@@ -261,6 +285,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       stored,
+      organizationCreated: organizationId != null,
       emailed: delivered.ok,
       confirmed,
       message: plan.confirmationTo

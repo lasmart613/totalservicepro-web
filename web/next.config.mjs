@@ -27,8 +27,6 @@ const nextConfig = {
       { source: '/service_schedule.html', destination: '/service-schedule', permanent: false },
       { source: '/marketplace.html', destination: '/marketplace', permanent: false },
       { source: '/index.html', destination: '/', permanent: false },
-      { source: '/', has: [{ type: 'query', key: 'find', value: '1' }], destination: '/find-a-rep', permanent: false },
-      { source: '/', has: [{ type: 'query', key: 'find', value: 'rep' }], destination: '/find-a-rep', permanent: false },
     ];
   },
 };

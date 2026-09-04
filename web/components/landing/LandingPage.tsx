@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { LandingShell } from './LandingShell';
 import { FindRepControl } from './FindRepControl';
+import { FindRepForm } from './FindRepForm';
 import { plansHrefForAudience, type PlanAudience } from '@/lib/billing/plan-tiles';
 import { shouldAutoOpenFindRep } from '@/lib/clinic-service-lead';
 import './landing.css';
@@ -231,8 +232,11 @@ function HeroCarousel() {
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (shouldAutoOpenFindRep(window.location.search, window.location.hash)) {
-      router.replace('/find-a-rep');
+    if (!shouldAutoOpenFindRep(window.location.search, window.location.hash)) return;
+    const el = document.getElementById('find-a-rep');
+    el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (new URLSearchParams(window.location.search).has('find')) {
+      router.replace('/#find-a-rep', { scroll: false });
     }
   }, [router]);
 
@@ -291,6 +295,9 @@ function HeroCarousel() {
         RepairPlanet is a biomedical equipment service network — lasers, lithotriptors,
         and C-arms first. Total Service Pro is the operating system behind it.
       </p>
+      <aside className="lp-hero-find" id="find-a-rep" aria-label="Find a service or repair company">
+        <FindRepForm variant="hero" />
+      </aside>
       <div
         className="lp-hero-viewport"
         tabIndex={0}
@@ -389,7 +396,6 @@ function HeroCarousel() {
         </div>
         <div className="lp-hero-cta">
           <div className="lp-actions">
-            <FindRepControl variant="hero" label="Find a service rep near me" />
             <Link href="/plans" className="lp-btn lp-btn-outline">
               Start on the free plan
             </Link>
