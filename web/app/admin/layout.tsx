@@ -8,6 +8,7 @@ import { Header } from '@/components/Header';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink, UPGRADE_LABEL } from '@/components/UpgradePlanLink';
 import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
+import { GOD_AUTH_PATH, GOD_EQUIPMENT_PATH, GOD_TABLES_PATH, GOD_USERS_PATH } from '@/lib/god-tables';
 
 /**
  * Client-side admin gate.
@@ -164,7 +165,15 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     { href: '/customers', label: 'Customers' },
     { href: '/admin/reports', label: 'Reports' },
     { href: '/admin/settings', label: 'Settings' },
-    ...(isGod ? [{ href: GOD_DASHBOARD_PATH, label: 'God Dashboard' }] : []),
+    ...(isGod
+      ? [
+          { href: GOD_DASHBOARD_PATH, label: 'God Dashboard' },
+          { href: GOD_TABLES_PATH, label: 'God Tables' },
+          { href: GOD_EQUIPMENT_PATH, label: 'God Equipment' },
+          { href: GOD_USERS_PATH, label: 'God Users' },
+          { href: GOD_AUTH_PATH, label: 'God Auth' },
+        ]
+      : []),
   ];
 
   return (
@@ -182,8 +191,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <nav className="space-y-1 text-sm">
             {nav.map((item) => {
               const active =
-                item.href === '/admin'
-                  ? pathname === '/admin'
+                item.href === '/admin' || item.href === GOD_DASHBOARD_PATH
+                  ? pathname === item.href
                   : pathname?.startsWith(item.href);
               return (
                 <Link

@@ -39,7 +39,9 @@ export default function AdminDashboard() {
           <Link href={GOD_DASHBOARD_PATH} className="card p-6 hover:border-[var(--gold)] group">
             <div className="text-4xl mb-4">♔</div>
             <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">God Dashboard</div>
-            <p className="text-[var(--text3)]">All organizations, plans, and the shop-tester invite.</p>
+            <p className="text-[var(--text3)]">
+              All orgs, Equipment / Users / Auth tables, and the shop-tester invite.
+            </p>
           </Link>
         )}
       </div>

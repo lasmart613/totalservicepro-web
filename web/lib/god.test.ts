@@ -62,6 +62,7 @@ test('God chrome is API-gated and the allowlist stays server-side', () => {
   assert.doesNotMatch(header, /larrysmart@gmail\.com/);
   assert.match(layout, /fetchGodMe/);
   assert.match(layout, /deniedReason === 'god'/);
+  assert.match(layout, /GOD_EQUIPMENT_PATH|God Equipment/);
   assert.match(god, /GOD_ADMIN_EMAILS/);
   assert.match(god, /larrysmart@gmail\.com/);
   assert.doesNotMatch(god, /NEXT_PUBLIC_/);
