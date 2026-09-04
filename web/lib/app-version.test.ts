@@ -36,6 +36,9 @@ test('bundled manuals stay in-app with VBeam OP vs Perfecta and find', () => {
   const viewer = readFileSync(join(here, '../../app/src/main/assets/pdf_viewer.html'), 'utf8');
   assert.match(library, /isBareVbeamOperatorTitle/);
   assert.match(library, /op-badge/);
+  assert.match(library, /inc-badge/);
+  assert.match(library, /Incomplete/);
+  assert.match(library, /isDornierHolmium/);
   assert.match(library, /Operator's Manual/);
   assert.match(library, /currentRoom/);
   assert.match(library, /lithotriptor/);

@@ -25,6 +25,16 @@
             flex: 1; font-size: 15px; font-weight: 600; color: #FBBF24;
             overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
         }
+        .inc-badge {
+            flex-shrink: 0;
+            background: #57534e;
+            color: #fff;
+            font-size: 10px;
+            font-weight: 800;
+            padding: 2px 8px;
+            border-radius: 999px;
+            display: none;
+        }
 
         .toolbar {
             background: #1a2233; border-bottom: 1px solid #374151;
@@ -121,6 +131,7 @@
 <div class="header">
     <button class="back-btn" onclick="goBack()">← Back</button>
     <div class="header-title" id="headerTitle">Service Manual</div>
+    <span class="inc-badge" id="incompleteBadge" title="This document is incomplete">Incomplete</span>
 </div>
 
 <div class="toolbar">
@@ -220,9 +231,15 @@
     const progressText = document.getElementById('progressText');
     const loadingText = document.getElementById('loadingText');
 
+    function showIncompleteBadge(on) {
+        const el = document.getElementById('incompleteBadge');
+        if (el) el.style.display = on ? 'inline-block' : 'none';
+    }
+
     async function init() {
         const headerTitleEl = document.querySelector('.header-title');
         if (headerTitleEl) headerTitleEl.textContent = title;
+        showIncompleteBadge(params.get('incomplete') === '1');
 
         // Ensure Chapters button is hidden until we know this is a folder manual
         const chaptersBtn = document.getElementById('chaptersBtn');
@@ -651,14 +668,24 @@
         // Preferred path: library passed ?manual_id → we can fetch rich folder info
         if (currentManualId) {
             try {
-                const { data: manual, error } = await supabaseClient
+                let { data: manual, error } = await supabaseClient
                     .from('manuals')
-                    .select('id, title, is_folder, entry_file_path, chapter_metadata, storage_path')
+                    .select('id, title, is_folder, entry_file_path, chapter_metadata, storage_path, is_incomplete')
                     .eq('id', currentManualId)
                     .single();
+                if (error && /is_incomplete|schema cache|column/i.test(error.message || '')) {
+                    const retry = await supabaseClient
+                        .from('manuals')
+                        .select('id, title, is_folder, entry_file_path, chapter_metadata, storage_path')
+                        .eq('id', currentManualId)
+                        .single();
+                    manual = retry.data;
+                    error = retry.error;
+                }
                 if (!error && manual) {
                     // Remember the row for the "Try loading default chapter" button in the notice
                     window._lastQueriedManual = manual;
+                    if (manual.is_incomplete === true) showIncompleteBadge(true);
 
                     const hasGoodChapters = Array.isArray(manual.chapter_metadata) && manual.chapter_metadata.length > 0;
 

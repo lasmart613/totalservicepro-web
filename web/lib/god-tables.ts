@@ -463,8 +463,8 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Manuals',
     group: 'catalog',
     description:
-      'Service manual library. equipment_type is the room: laser | lithotriptor | c_arm | other. Quanta Litho / Cyber Ho / Litho EVO are laser (holmium), not lithotriptor.',
-    listColumns: ['id', 'brand', 'title', 'equipment_type', 'storage_path', 'created_at'],
+      'Service manual library. equipment_type is the room: laser | lithotriptor | c_arm | other. Quanta Litho / Cyber Ho / Litho EVO and Dornier H20 / H30 (Medilas) are laser (holmium), not lithotriptor. is_incomplete marks a known-incomplete PDF.',
+    listColumns: ['id', 'brand', 'title', 'equipment_type', 'is_incomplete', 'storage_path', 'created_at'],
     searchColumns: ['brand', 'title', 'equipment_type'],
   }),
   crud({

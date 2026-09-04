@@ -1,7 +1,8 @@
 /**
  * Seed catalog for biomed expansion manuals (no PDF binaries).
  * Manufacturers / models Larry will attach the first holmium Litho + C-arm PDFs to.
- * Quanta Litho / Cyber Ho / Litho EVO are holmium lasers, not lithotriptors.
+ * Quanta Litho / Cyber Ho / Litho EVO and Dornier H20 / H30 (Medilas) are
+ * holmium lasers, not lithotriptors. True ESWL (Compact Delta, etc.) stays lithotriptor.
  */
 import {
   DEFAULT_EQUIPMENT_TYPE,
@@ -89,6 +90,24 @@ export const EQUIPMENT_CATALOG: EquipmentCatalogManufacturer[] = [
         aliases: ['Cyber Ho 100', 'Litho100'],
       },
       { name: 'Litho EVO', label: 'Litho EVO', equipmentType: 'laser', aliases: ['LithoEVO'] },
+    ],
+  },
+  {
+    name: 'Dornier',
+    aliases: ['Dornier MedTech', 'Dornier Medilas', 'Medilas'],
+    models: [
+      {
+        name: 'H20',
+        label: 'H20 (Medilas holmium)',
+        equipmentType: 'laser',
+        aliases: ['H-20', 'Medilas H20', 'H20/H30'],
+      },
+      {
+        name: 'H30',
+        label: 'H30 (Medilas holmium)',
+        equipmentType: 'laser',
+        aliases: ['H-30', 'Medilas H30'],
+      },
     ],
   },
   {

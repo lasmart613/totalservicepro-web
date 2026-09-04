@@ -11,6 +11,7 @@ import {
   catalogManualKind,
   catalogManualKindLabel,
   catalogManualTitle,
+  showIncompleteBadge,
   showOperatorBadge,
 } from '@/lib/manual-catalog';
 import { toast } from 'sonner';
@@ -301,6 +302,7 @@ export default function ManualsLibrary() {
       dataBase64: json?.data_base64 || null,
       contentType: json?.content_type || null,
       chapters: Array.isArray(json?.chapters) ? json.chapters : null,
+      isIncomplete: showIncompleteBadge(manual),
     };
     stashManualView(payload);
     router.push(manualViewHref({ id: payload.manualId, title: payload.title }));
@@ -553,6 +555,7 @@ export default function ManualsLibrary() {
       /\blumenis\b[\s\-/:]*|\bcoherent\b[\s\-/:]*|\bcynosure\b[\s\-/:]*|\bpalomar\b[\s\-/:]*/gi,
       /\bcutera\b[\s\-/:]*|\balma\b[\s\-/:]*|\bdeka\b[\s\-/:]*|\bzeiss\b[\s\-/:]*|\bnidek\b[\s\-/:]*/gi,
       /\bquanta(?:\s*system)?\b[\s\-/:]*|\biridex\b[\s\-/:]*|\blutronic\b[\s\-/:]*|\bjeisys\b[\s\-/:]*/gi,
+      /\bdornier(?:\s*med(?:tech|ilas))?\b[\s\-/:]*|\bmedilas\b[\s\-/:]*/gi,
       /\bsciton\b[\s\-/:]*|\bfotona\b[\s\-/:]*|\bellex\b[\s\-/:]*|\blightmed\b[\s\-/:]*/gi,
       /\brohrer(?:\s*aesthetics)?\b[\s\-/:]*/gi,
     ];
@@ -570,6 +573,9 @@ export default function ManualsLibrary() {
     if (/litho\s*60|cyber\s*ho\s*60/i.test(t)) return 'LITHO 60';
     if (/\blitho\b/i.test(t) && !/litho\s*(60|100|evo)/i.test(t)) return 'LITHO';
     if (/\b9900\b/i.test(t) || /oec\s*9900/i.test(t)) return 'OEC 9900';
+    if (/\bh[- ]?20\b/i.test(t) && /\bh[- ]?30\b/i.test(t)) return 'H20/H30';
+    if (/\bh[- ]?20\b/i.test(t)) return 'H20';
+    if (/\bh[- ]?30\b/i.test(t)) return 'H30';
 
     if (t.length > 32) t = t.slice(0, 30).trimEnd() + '…';
     return t;
@@ -720,6 +726,7 @@ export default function ManualsLibrary() {
                             ? `${shownTitle} (in library — tap to open)`
                             : `${shownTitle} (tap to add to company library)`) +
                           `\n${kindLabel}` +
+                          (showIncompleteBadge(m) ? '\nIncomplete document' : '') +
                           (wlHint ? `\n${wlHint}` : '')
                         }
                         style={{ width: 50 + (index % 4) * 2 }}
@@ -753,6 +760,14 @@ export default function ManualsLibrary() {
                             title={kindLabel}
                           >
                             OP
+                          </div>
+                        )}
+                        {showIncompleteBadge(m) && (
+                          <div
+                            className="absolute -bottom-1 -left-1 z-10 rounded-full bg-stone-700 text-white text-[7px] font-extrabold px-1 py-0.5 shadow"
+                            title="This document is incomplete"
+                          >
+                            Incomplete
                           </div>
                         )}
                         {isOwned(m) && (

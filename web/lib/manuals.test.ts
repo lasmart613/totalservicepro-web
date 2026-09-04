@@ -66,6 +66,8 @@ test('viewer loads same-origin pdf.js, not a CDN, and can turn pages', () => {
   assert.match(viewer, /openSrc\(\{ url:/);
   assert.match(viewer, /data-pdf-page/);
   assert.match(viewer, /Find in manual/);
+  assert.match(viewer, /Incomplete/);
+  assert.match(viewer, /isIncomplete|is_incomplete/);
   assert.match(viewer, /Next ►/);
   assert.match(viewer, /◄ Prev/);
   assert.doesNotMatch(viewer, /cdnjs\.cloudflare|cdn\.jsdelivr|unpkg\.com/);

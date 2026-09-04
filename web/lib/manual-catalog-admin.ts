@@ -23,6 +23,8 @@ export type ManualCatalogInsertInput = {
   storage_path?: unknown;
   storagePath?: unknown;
   filename?: unknown;
+  is_incomplete?: unknown;
+  isIncomplete?: unknown;
 };
 
 export type ManualCatalogInsertRow = {
@@ -32,7 +34,12 @@ export type ManualCatalogInsertRow = {
   title: string;
   doc_kind: ManualDocKind;
   storage_path: string;
+  is_incomplete: boolean;
 };
+
+function truthyFlag(value: unknown): boolean {
+  return value === true || value === 1 || value === '1' || value === 'true' || value === 't';
+}
 
 function clip(value: unknown, max: number): string {
   return String(value ?? '')
@@ -77,7 +84,15 @@ export function parseManualCatalogInsert(
 
   return {
     ok: true,
-    row: { equipment_type, brand, model, title, doc_kind, storage_path },
+    row: {
+      equipment_type,
+      brand,
+      model,
+      title,
+      doc_kind,
+      storage_path,
+      is_incomplete: truthyFlag(body.is_incomplete ?? body.isIncomplete),
+    },
   };
 }
 

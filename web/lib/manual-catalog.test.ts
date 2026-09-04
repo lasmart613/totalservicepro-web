@@ -12,6 +12,8 @@ import {
   isVbeamFamily,
   isVbeamModelSpecificTitle,
   presentManual,
+  isManualIncomplete,
+  showIncompleteBadge,
   showOperatorBadge,
 } from './manual-catalog.ts';
 
@@ -124,4 +126,16 @@ test('bookshelf gates the OP badge on catalogManualKind / showOperatorBadge', ()
   assert.match(page, /showOperatorBadge/);
   assert.match(catalog, /isBareVbeamOperatorTitle/);
   assert.doesNotMatch(catalog, /isVbeamFamily\(manual\) return 'operator'/);
+});
+
+test('Incomplete badge follows is_incomplete, not the H20/H30 title', () => {
+  assert.equal(showIncompleteBadge({ title: 'Dornier H20/H30' }), false);
+  assert.equal(isManualIncomplete({ title: 'Dornier H20/H30', is_incomplete: true }), true);
+  assert.equal(showIncompleteBadge({ title: 'Any title', isIncomplete: true }), true);
+  const page = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
+  const viewer = readFileSync(join(here, '../components/ManualPdfViewer.tsx'), 'utf8');
+  assert.match(page, /showIncompleteBadge/);
+  assert.match(page, />\s*Incomplete\s*</);
+  assert.match(viewer, /Incomplete/);
+  assert.match(viewer, /is_incomplete/);
 });
