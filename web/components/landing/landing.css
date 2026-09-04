@@ -623,6 +623,32 @@ html.landing-mode body {
   margin-top: 4px;
 }
 
+.lp-find-page {
+  display: flex;
+  justify-content: center;
+  padding-top: 28px;
+  border-top: none;
+  margin-top: 0;
+}
+
+.lp-find-card {
+  width: min(560px, 100%);
+  background: #1F2937;
+  color: #F3E8D8;
+  border: 1px solid #FBBF24;
+  border-radius: 12px;
+  padding: 22px 22px 8px;
+  box-shadow: 0 24px 48px rgba(0, 0, 0, 0.45);
+}
+
+.lp-find-card .lp-lead-form {
+  padding: 8px 0 20px;
+}
+
+.lp-find-card .lp-btn-primary {
+  margin-bottom: 20px;
+}
+
 .lp-shot {
   margin: 0;
   background: #1F2937;

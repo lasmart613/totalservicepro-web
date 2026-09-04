@@ -1,6 +1,16 @@
-import { redirect } from 'next/navigation';
+'use client';
 
-/** Shareable clinic onramp. Opens the landing find-a-rep form. */
+import { LandingShell } from '@/components/landing/LandingShell';
+import { FindRepForm } from '@/components/landing/FindRepForm';
+import '@/components/landing/landing.css';
+
+/** Guest clinic onramp — no Total Service Pro account required. */
 export default function FindARepPage() {
-  redirect('/?find=1');
+  return (
+    <LandingShell>
+      <section className="lp-section lp-find-page" aria-label="Find a service rep">
+        <FindRepForm />
+      </section>
+    </LandingShell>
+  );
 }

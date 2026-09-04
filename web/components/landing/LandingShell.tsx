@@ -56,7 +56,7 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
         </div>
         <div className="lp-footer-links">
           <Link href="/">Home</Link>
-          <Link href="/?find=1">Find a service rep</Link>
+          <Link href="/find-a-rep">Find a service rep</Link>
           <Link href="/signup/company">Register your shop</Link>
           <Link href="/plans">Free Plan</Link>
           <Link href="/directory">Directory</Link>

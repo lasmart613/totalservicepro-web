@@ -147,6 +147,7 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   const css = readFileSync(join(here, '../components/landing/landing.css'), 'utf8');
   const layout = readFileSync(join(here, '../app/layout.tsx'), 'utf8');
   const findPage = readFileSync(join(here, '../app/find-a-rep/page.tsx'), 'utf8');
+  const form = readFileSync(join(here, '../components/landing/FindRepForm.tsx'), 'utf8');
 
   assert.match(page, /FindRepControl/);
   assert.match(page, /Find a service rep near me/);
@@ -164,18 +165,20 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.match(shell, /FindRepControl/);
   assert.match(shell, /Medical Repair Network/);
   assert.match(shell, /Total Service Pro/);
-  assert.match(control, /\/api\/clinic-service-leads/);
-  assert.match(control, /No Total Service Pro/);
-  assert.match(control, /clinicName/);
-  assert.match(css, /\.lp-modal\s*\{/);
+  assert.match(control, /\/find-a-rep/);
+  assert.match(form, /\/api\/clinic-service-leads/);
+  assert.match(form, /No Total Service Pro/);
+  assert.match(form, /clinicName/);
+  assert.match(css, /\.lp-find-card\s*\{/);
   assert.match(layout, /RepairPlanet/);
-  assert.match(findPage, /redirect\('\/\?find=1'\)/);
+  assert.match(findPage, /FindRepForm/);
+  assert.match(page, /shouldAutoOpenFindRep/);
   assert.doesNotMatch(page, /Free to start/);
   assert.doesNotMatch(page, /Perris/);
   assert.doesNotMatch(page, /\bFSE\b/);
   assert.doesNotMatch(shell, /\bFSE\b/);
   assert.doesNotMatch(page, /id="join"|lp-paths/);
-  assert.doesNotMatch(control, /service_requests/);
+  assert.doesNotMatch(form, /service_requests/);
   assert.doesNotMatch(page, /lp-btn-primary">\s*Start on the free plan/);
 });
 

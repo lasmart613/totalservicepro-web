@@ -2,9 +2,11 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { LandingShell } from './LandingShell';
 import { FindRepControl } from './FindRepControl';
 import { plansHrefForAudience, type PlanAudience } from '@/lib/billing/plan-tiles';
+import { shouldAutoOpenFindRep } from '@/lib/clinic-service-lead';
 import './landing.css';
 
 const LANDING_PLAN_ROLE: Record<'shop' | 'clinic' | 'parts', PlanAudience> = {
@@ -217,6 +219,7 @@ const HERO_COVER_ID: Record<string, string> = {
 };
 
 function HeroCarousel() {
+  const router = useRouter();
   const n = HERO_SLIDES.length;
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -225,6 +228,13 @@ function HeroCarousel() {
 
   const go = (dir: number) => setI((x) => (x + dir + n) % n);
   const goTo = (idx: number) => setI(((idx % n) + n) % n);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (shouldAutoOpenFindRep(window.location.search, window.location.hash)) {
+      router.replace('/find-a-rep');
+    }
+  }, [router]);
 
   useEffect(() => {
     if (paused || hold) return;
