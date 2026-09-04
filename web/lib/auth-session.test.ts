@@ -23,10 +23,12 @@ test('home page does not flash marketing while a session is in localStorage', ()
   assert.match(source, /showDashboardSplash/);
   assert.match(source, /shouldShowHomeDashboardSplash/);
   assert.match(source, /return <LandingPage \/>/);
-  assert.match(source, /dynamic\(/);
+  assert.match(source, /import\('@\/components\/home\/HomeDashboard'\)/);
   assert.match(source, /HomeDashboard/);
+  assert.doesNotMatch(source, /from '@\/components\/home\/HomeDashboard'/);
   assert.doesNotMatch(source, /from '@\/components\/Header'/);
   assert.doesNotMatch(source, /from 'lucide-react'/);
+  assert.doesNotMatch(source, /from 'next\/dynamic'/);
   assert.match(dash, /getSession/);
   assert.match(dash, /authPending/);
   assert.doesNotMatch(source, /authHintReady/);

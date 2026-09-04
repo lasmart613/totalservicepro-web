@@ -25,6 +25,8 @@ test('root layout does not inject AdSense on every marketing hit', () => {
   assert.match(gate, /hasBrowserAuthHint/);
   assert.match(gate, /adsenseAllowedOnHost/);
   assert.match(gate, /requestIdleCallback/);
+  assert.match(gate, /import\('\.\/AdBanner'\)/);
+  assert.doesNotMatch(gate, /next\/dynamic/);
   assert.match(banner, /lazyOnload/);
   assert.match(banner, /adsenseAllowedOnHost/);
 });
