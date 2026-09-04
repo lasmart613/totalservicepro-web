@@ -2,6 +2,8 @@
 export const ADSENSE_CLIENT = 'ca-pub-5353320292042327';
 export const ADSENSE_SLOT = '8443570568';
 
+export { adsenseAllowedOnHost } from './adsense-host';
+
 export { PAID_SUBSCRIPTION_TIERS, orgIsPaid } from './org-plan';
 
 export function onboardingFlagsDone(profile: {

@@ -18,12 +18,17 @@ test('admin portal loads role without embedding organizations from user_profiles
 test('home page does not flash marketing while a session is in localStorage', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/page.tsx'), 'utf8');
+  const dash = readFileSync(join(here, '../components/home/HomeDashboard.tsx'), 'utf8');
   assert.match(source, /hasBrowserAuthHint/);
-  assert.match(source, /getSession/);
   assert.match(source, /showDashboardSplash/);
   assert.match(source, /shouldShowHomeDashboardSplash/);
-  assert.match(source, /authPending/);
   assert.match(source, /return <LandingPage \/>/);
+  assert.match(source, /dynamic\(/);
+  assert.match(source, /HomeDashboard/);
+  assert.doesNotMatch(source, /from '@\/components\/Header'/);
+  assert.doesNotMatch(source, /from 'lucide-react'/);
+  assert.match(dash, /getSession/);
+  assert.match(dash, /authPending/);
   assert.doesNotMatch(source, /authHintReady/);
 });
 
@@ -173,6 +178,14 @@ test('logged-out hero paints a darkened role cover behind left copy', () => {
     assert.ok(bytes > 8_000, `${name} should be a real photo`);
     assert.ok(bytes < 250_000, `${name} should stay reasonable`);
   }
+  for (const name of ['hero-bg-shop-640.webp', 'hero-bg-clinic-640.webp', 'hero-bg-parts-640.webp']) {
+    const file = join(here, '../public/landing', name);
+    assert.ok(existsSync(file), name);
+    assert.ok(statSync(file).size < 80_000, `${name} should be the mobile cover`);
+  }
+  assert.match(page, /HERO_COVER_SM/);
+  assert.match(page, /is-cover-on/);
+  assert.match(css, /\.lp-hero-copy\.is-cover-on/);
 });
 
 test('logged-out field section shows coming-soon store badges, not live listings', () => {
@@ -190,7 +203,10 @@ test('logged-out field section shows coming-soon store badges, not live listings
   assert.match(field, /\/landing\/app-hub\.webp/);
   assert.match(field, /\/landing\/app-calcs\.webp/);
   assert.match(field, /\/landing\/badge-google-play\.png/);
+  assert.match(field, /width=\{646\}/);
+  assert.match(field, /height=\{250\}/);
   assert.match(field, /\/landing\/badge-app-store\.svg/);
+  assert.match(css, /aspect-ratio:\s*646\s*\/\s*250/);
   assert.match(field, /Mobile apps coming soon/);
   assert.doesNotMatch(field, /play\.google\.com\/store/);
   assert.doesNotMatch(field, /apps\.apple\.com/);
@@ -298,7 +314,7 @@ test('Upgrade chrome goes to /plans and never starts Stripe Checkout', () => {
   assert.match(link, /href=\{UPGRADE_HREF\}/);
   assert.match(link, /export const UPGRADE_HREF = '\/plans'/);
   assert.doesNotMatch(link, /startClientUpgradeCheckout|team_monthly|preventDefault/);
-  for (const rel of ['../app/page.tsx', '../app/company/page.tsx', '../app/admin/layout.tsx', '../components/Header.tsx']) {
+  for (const rel of ['../components/home/HomeDashboard.tsx', '../app/company/page.tsx', '../app/admin/layout.tsx', '../components/Header.tsx']) {
     const source = readFileSync(join(here, rel), 'utf8');
     assert.match(source, /UpgradePlanLink/);
     assert.doesNotMatch(source, /startClientUpgradeCheckout|team_monthly/);
