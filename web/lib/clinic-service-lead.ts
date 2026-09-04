@@ -1,11 +1,12 @@
 /**
  * Guest clinic / facility service leads from the logged-out RepairPlanet
- * landing. Not a marketplace RFQ and not a TSP product-issue report.
- * Team copy follows the product-inbox pattern (contact@ + QA).
+ * landing. Team copy follows the product-inbox pattern (contact@ + QA).
  *
- * Submit also inserts a new owner/clinic row on `organizations` (type=customer),
- * using the same payload helper as CRM customer create. Insert only — never
- * update a live Premium, service-company, or claimed customer org.
+ * Submit inserts (1) a new owner/clinic organizations row (type=customer),
+ * (2) a real service_requests row linked to that org (same payload as the
+ * in-app create flow), and (3) a clinic_service_leads audit row.
+ * Insert only — never update a live Premium, service-company, or claimed org.
+ * Guest has no auth user, so posted_by / created_by stay null.
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -18,6 +19,17 @@ import {
   productIssuesTeamRecipients,
   PRODUCT_ISSUE_CONFIRM_REPLY_TO,
 } from './product-issues.ts';
+import {
+  ownerServiceRequestPayload,
+  normalizeServiceRequestType,
+  normalizeServiceRequestUrgency,
+  SERVICE_REQUEST_TYPES,
+  SERVICE_REQUEST_URGENCY,
+  type ServiceRequestType,
+  type ServiceRequestUrgency,
+} from './service-request-create.ts';
+
+export { SERVICE_REQUEST_TYPES, SERVICE_REQUEST_URGENCY };
 
 /** Guest landing source flag. Safe to persist when the column exists. */
 export const CLINIC_LEAD_ORG_SOURCE = 'landing_find_a_rep';
@@ -39,13 +51,12 @@ export const CLINIC_LEAD_EQUIPMENT_TYPES = [
 
 export type ClinicLeadEquipmentType = (typeof CLINIC_LEAD_EQUIPMENT_TYPES)[number]['value'];
 
-export const CLINIC_LEAD_URGENCY = [
-  { value: 'now', label: 'Down now' },
-  { value: 'this_week', label: 'This week' },
-  { value: 'flexible', label: 'Flexible' },
-] as const;
+export const CLINIC_LEAD_URGENCY = SERVICE_REQUEST_URGENCY.map((value) => ({
+  value,
+  label: value === 'Emergency' ? 'Down now / emergency' : value,
+}));
 
-export type ClinicLeadUrgency = (typeof CLINIC_LEAD_URGENCY)[number]['value'];
+export type ClinicLeadUrgency = ServiceRequestUrgency;
 
 export type ClinicLeadInput = {
   clinicName?: unknown;
@@ -56,8 +67,13 @@ export type ClinicLeadInput = {
   equipmentType?: unknown;
   equipmentTypeOther?: unknown;
   manufacturer?: unknown;
+  model?: unknown;
+  serialNumber?: unknown;
+  serviceType?: unknown;
   description?: unknown;
   urgency?: unknown;
+  preferredDate?: unknown;
+  errorCodes?: unknown;
   website?: unknown;
   companyWebsite?: unknown;
 };
@@ -70,9 +86,14 @@ export type ClinicLead = {
   phone: string | null;
   equipmentType: ClinicLeadEquipmentType;
   equipmentTypeOther: string | null;
-  manufacturer: string | null;
+  manufacturer: string;
+  model: string;
+  serialNumber: string | null;
+  serviceType: ServiceRequestType;
   description: string;
-  urgency: ClinicLeadUrgency | null;
+  urgency: ClinicLeadUrgency;
+  preferredDate: string | null;
+  errorCodes: string | null;
 };
 
 export type ClinicLeadMailPlan = {
@@ -162,6 +183,18 @@ export function parseClinicLead(body: ClinicLeadInput):
   }
 
   const manufacturer = clip(body.manufacturer, 80);
+  if (manufacturer.length < 2) {
+    return { ok: false, error: 'Please enter the brand / manufacturer.' };
+  }
+  const model = clip(body.model, 80);
+  if (model.length < 1) {
+    return { ok: false, error: 'Please enter the model.' };
+  }
+  const serialNumber = clip(body.serialNumber, 80) || null;
+  const errorCodes = clip(body.errorCodes, 120) || null;
+  const preferredRaw = clip(body.preferredDate, 12);
+  const preferredDate = /^\d{4}-\d{2}-\d{2}$/.test(preferredRaw) ? preferredRaw : null;
+  const serviceType = normalizeServiceRequestType(clip(body.serviceType, 40));
 
   const description = String(body.description || '').trim();
   if (description.length < CLINIC_LEAD_DESCRIPTION_MIN) {
@@ -177,9 +210,7 @@ export function parseClinicLead(body: ClinicLeadInput):
     };
   }
 
-  const urgencyRaw = clip(body.urgency, 20);
-  const urgency =
-    CLINIC_LEAD_URGENCY.find((u) => u.value === urgencyRaw)?.value ?? null;
+  const urgency = normalizeServiceRequestUrgency(clip(body.urgency, 20));
 
   return {
     ok: true,
@@ -191,9 +222,14 @@ export function parseClinicLead(body: ClinicLeadInput):
       phone,
       equipmentType,
       equipmentTypeOther: equipmentType === 'other' ? equipmentTypeOther : null,
-      manufacturer: manufacturer || null,
+      manufacturer,
+      model,
+      serialNumber,
+      serviceType,
       description,
       urgency,
+      preferredDate,
+      errorCodes,
     },
   };
 }
@@ -240,8 +276,11 @@ export function clinicLeadOrgNotes(lead: ClinicLead): string {
   return [
     `[${CLINIC_LEAD_ORG_SOURCE}] Guest clinic service request — not a live TSP customer account.`,
     `Equipment: ${equipmentTypeLabel(lead)}`,
-    lead.manufacturer ? `Brand/model: ${lead.manufacturer}` : '',
-    lead.urgency ? `Urgency: ${lead.urgency}` : '',
+    `Brand: ${lead.manufacturer}`,
+    `Model: ${lead.model}`,
+    lead.serialNumber ? `Serial: ${lead.serialNumber}` : '',
+    `Service type: ${lead.serviceType}`,
+    `Urgency: ${lead.urgency}`,
     `Location (as entered): ${lead.location}`,
     '',
     lead.description,
@@ -315,6 +354,84 @@ export async function insertOrganizationFromClinicLead(
   return { id: data.id };
 }
 
+export function serviceRequestInsertFromClinicLead(
+  lead: ClinicLead,
+  organizationId: string | number
+): Record<string, unknown> {
+  const loc = clinicLeadLocationParts(lead.location);
+  const location =
+    [loc.city, loc.state].filter(Boolean).join(', ') || lead.location;
+  const { full } = ownerServiceRequestPayload({
+    organizationId,
+    manufacturer: lead.manufacturer,
+    model: lead.model,
+    description: lead.description,
+    serviceType: lead.serviceType,
+    urgency: lead.urgency,
+    serialNumber: lead.serialNumber,
+    preferredDate: lead.preferredDate,
+    errorCodes: lead.errorCodes,
+    city: loc.city || null,
+    state: loc.state,
+    location,
+    facilityContact: {
+      organization_id: organizationId,
+      name: lead.clinicName,
+      contact_name: lead.contactName,
+      contact_person: lead.contactName,
+      contact_email: lead.email,
+      contact_phone: lead.phone,
+      email: lead.email,
+      phone: lead.phone,
+      city: loc.city || null,
+      state: loc.state,
+      zip: loc.zip || null,
+      location,
+      source: CLINIC_LEAD_ORG_SOURCE,
+    },
+  });
+  return full;
+}
+
+/**
+ * Insert a service_requests row for the new guest clinic org.
+ * Same columns as the in-app post form. Never updates an existing request.
+ * Does not set posted_by / created_by (guest has no user).
+ */
+export async function insertServiceRequestFromClinicLead(
+  supabase: SupabaseClient,
+  lead: ClinicLead,
+  organizationId: string | number
+): Promise<{ id: string } | { error: string }> {
+  const full = serviceRequestInsertFromClinicLead(lead, organizationId);
+  const first = await insertOmittingCharOverflow(supabase, 'service_requests', full, {
+    select: 'id',
+    maxAttempts: 24,
+  });
+  if (first.data?.id != null) return { id: String(first.data.id) };
+
+  const loc = clinicLeadLocationParts(lead.location);
+  const { slim } = ownerServiceRequestPayload({
+    organizationId,
+    manufacturer: lead.manufacturer,
+    model: lead.model,
+    description: lead.description,
+    serviceType: lead.serviceType,
+    urgency: lead.urgency,
+    city: loc.city || null,
+    state: loc.state,
+    location: [loc.city, loc.state].filter(Boolean).join(', ') || lead.location,
+  });
+  const retry = await insertOmittingCharOverflow(supabase, 'service_requests', slim, {
+    select: 'id',
+    maxAttempts: 16,
+  });
+  if (retry.data?.id != null) return { id: String(retry.data.id) };
+  return {
+    error: retry.error?.message || first.error?.message || 'Could not create service request',
+  };
+}
+
 export function equipmentTypeLabel(lead: Pick<ClinicLead, 'equipmentType' | 'equipmentTypeOther'>): string {
   if (lead.equipmentType === 'other') {
     return lead.equipmentTypeOther || 'Other';
@@ -351,14 +468,22 @@ function organizationNote(organizationId?: string | number | null): string {
   return 'Organizations row: insert was attempted as type=customer (clinic/owner). If missing, check service-role logs. Never attach this lead to a live customer org by name.';
 }
 
+function serviceRequestNote(serviceRequestId?: string | null): string {
+  if (serviceRequestId) {
+    return `service_requests row: ${serviceRequestId} (status=open, category=service) linked to the new guest clinic org. Do not blast shops. Delete the QA request with the test org after review.`;
+  }
+  return 'service_requests row: insert was attempted (same payload as the in-app post form). If missing, check service-role logs.';
+}
+
 export function clinicLeadText(opts: {
   lead: ClinicLead;
   confirmationSent?: boolean;
   organizationId?: string | number | null;
+  serviceRequestId?: string | null;
 }): string {
   const { lead } = opts;
   return [
-    'RepairPlanet — clinic service lead (no TSP account)',
+    'RepairPlanet — clinic service request (no TSP account)',
     '',
     `Clinic / org: ${lead.clinicName}`,
     `Location: ${lead.location}`,
@@ -366,16 +491,22 @@ export function clinicLeadText(opts: {
     `Email: ${lead.email || '(not provided)'}`,
     `Phone: ${lead.phone || '(not provided)'}`,
     `Equipment type: ${equipmentTypeLabel(lead)}`,
-    `Brand / model: ${lead.manufacturer || '(not provided)'}`,
+    `Brand: ${lead.manufacturer}`,
+    `Model: ${lead.model}`,
+    `Serial: ${lead.serialNumber || '(not provided)'}`,
+    `Service type: ${lead.serviceType}`,
     `Urgency: ${urgencyLabel(lead.urgency)}`,
+    `Preferred date: ${lead.preferredDate || '(not provided)'}`,
+    `Error codes: ${lead.errorCodes || '(not provided)'}`,
     '',
     'What is going on:',
     lead.description,
     '',
     organizationNote(opts.organizationId),
+    serviceRequestNote(opts.serviceRequestId),
     confirmationNote({ email: lead.email, confirmationSent: opts.confirmationSent }),
     '',
-    'Do not treat this as a live marketplace RFQ. Match a nearby shop; do not blast shops.',
+    'A real service_requests row was created on the new guest clinic org. Do not blast shops.',
   ].join('\n');
 }
 
@@ -391,13 +522,15 @@ export function clinicLeadHtml(opts: {
   lead: ClinicLead;
   confirmationSent?: boolean;
   organizationId?: string | number | null;
+  serviceRequestId?: string | null;
 }): string {
   const { lead } = opts;
   return `<!DOCTYPE html>
 <html><body style="font-family:system-ui,sans-serif;color:#111827;line-height:1.45">
-  <h2 style="color:#92400e;margin:0 0 12px">RepairPlanet — clinic service lead</h2>
+  <h2 style="color:#92400e;margin:0 0 12px">RepairPlanet — clinic service request</h2>
   <p style="margin:0 0 8px;color:#6b7280;font-size:13px">Guest landing form. No Total Service Pro account. ${esc(confirmationNote({ email: lead.email, confirmationSent: opts.confirmationSent }))}</p>
   <p style="margin:0 0 8px;color:#6b7280;font-size:13px">${esc(organizationNote(opts.organizationId))}</p>
+  <p style="margin:0 0 8px;color:#6b7280;font-size:13px">${esc(serviceRequestNote(opts.serviceRequestId))}</p>
   <table style="border-collapse:collapse;font-size:14px">
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Clinic / org</td><td>${esc(lead.clinicName)}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Location</td><td>${esc(lead.location)}</td></tr>
@@ -405,12 +538,17 @@ export function clinicLeadHtml(opts: {
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Email</td><td>${esc(lead.email || '(not provided)')}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Phone</td><td>${esc(lead.phone || '(not provided)')}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Equipment type</td><td>${esc(equipmentTypeLabel(lead))}</td></tr>
-    <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Brand / model</td><td>${esc(lead.manufacturer || '(not provided)')}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Brand</td><td>${esc(lead.manufacturer)}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Model</td><td>${esc(lead.model)}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Serial</td><td>${esc(lead.serialNumber || '(not provided)')}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Service type</td><td>${esc(lead.serviceType)}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Urgency</td><td>${esc(urgencyLabel(lead.urgency))}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Preferred date</td><td>${esc(lead.preferredDate || '(not provided)')}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Error codes</td><td>${esc(lead.errorCodes || '(not provided)')}</td></tr>
   </table>
   <p style="margin:16px 0 4px;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.04em">What is going on</p>
   <pre style="white-space:pre-wrap;background:#f9fafb;border:1px solid #e5e7eb;padding:12px;border-radius:8px">${esc(lead.description)}</pre>
-  <p style="color:#6b7280;font-size:12px">Do not treat this as a live marketplace RFQ. Match a nearby shop; do not blast shops.</p>
+  <p style="color:#6b7280;font-size:12px">A real service_requests row was created on the new guest clinic org. Do not blast shops.</p>
 </body></html>`;
 }
 

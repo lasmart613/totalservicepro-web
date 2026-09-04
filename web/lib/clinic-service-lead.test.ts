@@ -18,8 +18,13 @@ import {
   organizationInsertFromClinicLead,
   parseClinicLead,
   planClinicLeadMail,
+  serviceRequestInsertFromClinicLead,
   shouldAutoOpenFindRep,
 } from './clinic-service-lead.ts';
+import {
+  normalizeServiceRequestUrgency,
+  ownerServiceRequestTitle,
+} from './service-request-create.ts';
 import {
   PRODUCT_ISSUES_INBOX_DEFAULT,
   PRODUCT_ISSUES_QA_INBOX,
@@ -51,9 +56,11 @@ const SAMPLE = {
   email: 'pat@qa-test.example',
   phone: '805-555-0148',
   equipmentType: 'laser',
-  manufacturer: 'Candela Vbeam',
+  manufacturer: 'Candela',
+  model: 'Vbeam',
   description: 'Vbeam is down with no standby light after a power blip.',
-  urgency: 'this_week',
+  urgency: 'High',
+  serviceType: 'Emergency Repair',
 };
 
 test('clinic lead requires equipment type, name, location, contact, a short problem, and email or phone', () => {
@@ -66,11 +73,14 @@ test('clinic lead requires equipment type, name, location, contact, a short prob
   assert.equal(parseClinicLead({ ...SAMPLE, email: '', phone: '' }).ok, false);
   assert.equal(parseClinicLead({ ...SAMPLE, email: 'not-an-email', phone: '' }).ok, false);
   assert.equal(parseClinicLead({ ...SAMPLE, email: '', phone: '12' }).ok, false);
+  assert.equal(parseClinicLead({ ...SAMPLE, manufacturer: '' }).ok, false);
+  assert.equal(parseClinicLead({ ...SAMPLE, model: '' }).ok, false);
 
   const litho = parseClinicLead({
     ...SAMPLE,
     equipmentType: 'lithotriptor',
     manufacturer: 'Dornier',
+    model: 'Compact Delta',
     description: 'No shock wave output after a self-test fail on the lithotriptor.',
   });
   assert.equal(litho.ok, true);
@@ -102,6 +112,15 @@ test('clinic lead requires equipment type, name, location, contact, a short prob
   if (phoneOnly.ok && !phoneOnly.spam) {
     assert.equal(phoneOnly.lead.email, null);
     assert.match(phoneOnly.lead.phone || '', /805/);
+  }
+
+  const mapped = parseClinicLead({ ...SAMPLE, urgency: 'this_week', serviceType: '' });
+  assert.equal(mapped.ok, true);
+  if (mapped.ok && !mapped.spam) {
+    assert.equal(mapped.lead.urgency, 'High');
+    assert.equal(mapped.lead.serviceType, 'Emergency Repair');
+    assert.equal(mapped.lead.manufacturer, 'Candela');
+    assert.equal(mapped.lead.model, 'Vbeam');
   }
 });
 
@@ -211,13 +230,65 @@ test('guest lead builds a new clinic/owner org insert and never a live-org updat
   );
 });
 
+test('guest lead builds a service_requests insert linked to the new clinic org', () => {
+  const parsed = parseClinicLead({
+    ...SAMPLE,
+    serialNumber: 'SN-QA-1',
+    errorCodes: 'E12',
+    preferredDate: '2026-09-12',
+  });
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok || parsed.spam) return;
+
+  const row = serviceRequestInsertFromClinicLead(parsed.lead, 4242);
+  assert.equal(row.organization_id, 4242);
+  assert.equal(row.title, ownerServiceRequestTitle({
+    serviceType: 'Emergency Repair',
+    manufacturer: 'Candela',
+    model: 'Vbeam',
+  }));
+  assert.equal(row.title, 'Emergency Repair: Candela Vbeam');
+  assert.equal(row.manufacturer, 'Candela');
+  assert.equal(row.model, 'Vbeam');
+  assert.equal(row.model_type, 'Vbeam');
+  assert.equal(row.serial_number, 'SN-QA-1');
+  assert.equal(row.service_type, 'Emergency Repair');
+  assert.equal(row.urgency, 'High');
+  assert.equal(row.status, 'open');
+  assert.equal(row.category, 'service');
+  assert.equal(row.city, 'Somis');
+  assert.equal(row.state, 'CA');
+  assert.equal(row.preferred_date, '2026-09-12');
+  assert.equal(row.error_codes, 'E12');
+  assert.equal(row.posted_by, undefined);
+  assert.equal(row.created_by, undefined);
+  assert.match(String(row.description), /no standby light/);
+  const contact = row.facility_contact as Record<string, unknown>;
+  assert.equal(contact.contact_name, 'Pat Rivera');
+  assert.equal(contact.source, CLINIC_LEAD_ORG_SOURCE);
+
+  assert.equal(normalizeServiceRequestUrgency('now'), 'Emergency');
+  assert.equal(normalizeServiceRequestUrgency('this_week'), 'High');
+  assert.equal(normalizeServiceRequestUrgency(''), 'Medium');
+});
+
 test('lead emails stay RepairPlanet-branded and avoid forbidden copy', () => {
   const parsed = parseClinicLead(SAMPLE);
   assert.equal(parsed.ok, true);
   if (!parsed.ok || parsed.spam) return;
   const subject = clinicLeadSubject(parsed.lead);
-  const text = clinicLeadText({ lead: parsed.lead, confirmationSent: true, organizationId: 4242 });
-  const html = clinicLeadHtml({ lead: parsed.lead, confirmationSent: true, organizationId: 4242 });
+  const text = clinicLeadText({
+    lead: parsed.lead,
+    confirmationSent: true,
+    organizationId: 4242,
+    serviceRequestId: 'sr-qa-1',
+  });
+  const html = clinicLeadHtml({
+    lead: parsed.lead,
+    confirmationSent: true,
+    organizationId: 4242,
+    serviceRequestId: 'sr-qa-1',
+  });
   const confirmText = clinicLeadConfirmationText();
   const confirmHtml = clinicLeadConfirmationHtml();
   assert.match(subject, /RepairPlanet clinic lead/);
@@ -225,11 +296,13 @@ test('lead emails stay RepairPlanet-branded and avoid forbidden copy', () => {
   assert.match(subject, /QA Test Clinic/);
   assert.match(text, /Equipment type: Laser/);
   assert.match(text, /no TSP account/i);
-  assert.match(text, /Do not treat this as a live marketplace RFQ/);
+  assert.match(text, /A real service_requests row was created/);
   assert.match(text, /do not blast shops/i);
   assert.match(text, /Organizations row: #4242/);
+  assert.match(text, /service_requests row: sr-qa-1/);
   assert.match(text, /Do not merge this into a live Premium/);
   assert.match(html, /Organizations row: #4242/);
+  assert.match(html, /service_requests row: sr-qa-1/);
   assert.match(html, /RepairPlanet/);
   assert.match(clinicLeadConfirmationSubject(), /RepairPlanet/);
   assert.match(confirmText, /nearby service rep/);
@@ -300,9 +373,18 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.match(page, /C-arms first/);
   assert.match(form, /Equipment type/);
   assert.match(form, /Choose one/);
+  assert.match(form, />Brand</);
+  assert.match(form, />Model</);
+  assert.match(form, /Service type/);
+  assert.match(form, /Emergency Repair/);
+  assert.match(form, /serialNumber/);
   assert.ok(
-    form.indexOf('Equipment type') < form.indexOf('Brand / model'),
-    'equipment type must come before brand/model'
+    form.indexOf('Equipment type') < form.indexOf('>Brand<'),
+    'equipment type must come before brand'
+  );
+  assert.ok(
+    form.indexOf('>Brand<') < form.indexOf('>Model<'),
+    'brand must come before model'
   );
   assert.ok(
     form.indexOf('Equipment type') < form.indexOf('Clinic or organization'),
@@ -322,11 +404,10 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.doesNotMatch(page, /\bFSE\b/);
   assert.doesNotMatch(shell, /\bFSE\b/);
   assert.doesNotMatch(page, /id="join"|lp-paths/);
-  assert.doesNotMatch(form, /service_requests/);
   assert.doesNotMatch(page, /lp-btn-primary">\s*Start on the free plan/);
 });
 
-test('clinic-service-leads API persists guest rows and emails the team, not service_requests', () => {
+test('clinic-service-leads API creates a guest org plus a real service_requests row', () => {
   const route = readFileSync(join(here, '../app/api/clinic-service-leads/route.ts'), 'utf8');
   const migration = readFileSync(
     join(here, '../supabase/migrations/20260904_000000_clinic_service_leads.sql'),
@@ -336,17 +417,24 @@ test('clinic-service-leads API persists guest rows and emails the team, not serv
     join(here, '../supabase/migrations/20260904_000002_clinic_lead_organization.sql'),
     'utf8'
   );
+  const reqMigration = readFileSync(
+    join(here, '../supabase/migrations/20260904_000003_clinic_lead_service_request.sql'),
+    'utf8'
+  );
   const helper = readFileSync(join(here, './clinic-service-lead.ts'), 'utf8');
+  const create = readFileSync(join(here, './service-request-create.ts'), 'utf8');
   assert.match(route, /clinic_service_leads/);
   assert.match(route, /insertOrganizationFromClinicLead/);
+  assert.match(route, /insertServiceRequestFromClinicLead/);
   assert.match(route, /organizationCreated/);
+  assert.match(route, /serviceRequestCreated/);
   assert.match(route, /planClinicLeadMail/);
   assert.match(route, /RESEND_API_KEY/);
   assert.match(route, /clinicLeadConfirmation/);
   assert.match(route, /Does not require TSP/);
-  assert.doesNotMatch(route, /service_requests/);
   assert.doesNotMatch(route, /product_issue_reports/);
   assert.doesNotMatch(route, /from\('organizations'\)\.(update|upsert)/);
+  assert.doesNotMatch(route, /from\('service_requests'\)\.(update|upsert)/);
   assert.doesNotMatch(route, /\.upsert\(/);
   assert.match(helper, /insertOmittingCharOverflow/);
   assert.match(helper, /customerOrgPayload/);
@@ -357,5 +445,9 @@ test('clinic-service-leads API persists guest rows and emails the team, not serv
   assert.match(migration, /Not marketplace RFQs/);
   assert.match(orgMigration, /lead_source/);
   assert.match(orgMigration, /organization_id bigint REFERENCES public\.organizations/);
+  assert.match(reqMigration, /service_request_id uuid REFERENCES public\.service_requests/);
+  assert.match(helper, /insertServiceRequestFromClinicLead/);
+  assert.match(create, /ownerServiceRequestPayload/);
+  assert.match(create, /status: SERVICE_REQUEST_STATUS_OPEN/);
   assert.match(route, /equipment_type/);
 });
