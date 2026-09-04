@@ -363,13 +363,14 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.match(form, /clinicName/);
   assert.doesNotMatch(form, /Free to start/);
   const types = readFileSync(join(here, './clinic-service-lead.ts'), 'utf8');
-  assert.match(types, /value: 'laser'/);
-  assert.match(types, /value: 'lithotriptor'/);
-  assert.match(types, /value: 'c_arm'/);
   assert.match(types, /CLINIC_LEAD_EQUIPMENT_TYPES/);
+  assert.match(types, /EQUIPMENT_TYPES/);
   const equipmentTypes = readFileSync(join(here, 'equipment-types.ts'), 'utf8');
+  assert.match(equipmentTypes, /value: 'laser'/);
+  assert.match(equipmentTypes, /value: 'lithotriptor'/);
+  assert.match(equipmentTypes, /value: 'c_arm'/);
+  assert.match(equipmentTypes, /value: 'other'/);
   assert.match(equipmentTypes, /label: 'C-arm'/);
-  assert.match(types, /value: 'other'/);
   assert.match(page, /biomedical equipment service network/);
   assert.match(page, /lithotriptors/);
   assert.match(page, /C-arms first/);

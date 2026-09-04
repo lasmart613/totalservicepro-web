@@ -122,7 +122,7 @@ export function suggestedManualStoragePath(opts: {
 }): string {
   const brand = slugPart(opts.brand) || 'manuals';
   const model = slugPart(opts.model || '') || 'general';
-  const file = String(opts.filename || 'manual.pdf')
+  const file = String(opts.filename || opts.model || 'manual.pdf')
     .replace(/[^a-zA-Z0-9._-]+/g, '-')
     .replace(/^-+|-+$/g, '')
     .replace(/\.pdf$/i, '')
