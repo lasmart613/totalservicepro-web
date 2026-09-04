@@ -3,9 +3,10 @@
 import React, { useState } from 'react';
 import { toast } from 'sonner';
 import {
-  CLINIC_LEAD_BRANDS,
   CLINIC_LEAD_DESCRIPTION_MAX,
   CLINIC_LEAD_DESCRIPTION_MIN,
+  CLINIC_LEAD_EQUIPMENT_OTHER_MAX,
+  CLINIC_LEAD_EQUIPMENT_TYPES,
   CLINIC_LEAD_URGENCY,
 } from '@/lib/clinic-service-lead';
 
@@ -16,12 +17,14 @@ export function FindRepForm({
   id?: string;
   onCancel?: () => void;
 }) {
+  const [equipmentType, setEquipmentType] = useState('');
+  const [equipmentTypeOther, setEquipmentTypeOther] = useState('');
+  const [manufacturer, setManufacturer] = useState('');
   const [clinicName, setClinicName] = useState('');
   const [location, setLocation] = useState('');
   const [contactName, setContactName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
-  const [manufacturer, setManufacturer] = useState('');
   const [description, setDescription] = useState('');
   const [urgency, setUrgency] = useState('');
   const [website, setWebsite] = useState('');
@@ -29,12 +32,14 @@ export function FindRepForm({
   const [sent, setSent] = useState(false);
 
   function reset() {
+    setEquipmentType('');
+    setEquipmentTypeOther('');
+    setManufacturer('');
     setClinicName('');
     setLocation('');
     setContactName('');
     setEmail('');
     setPhone('');
-    setManufacturer('');
     setDescription('');
     setUrgency('');
     setWebsite('');
@@ -49,12 +54,14 @@ export function FindRepForm({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          equipmentType,
+          equipmentTypeOther: equipmentType === 'other' ? equipmentTypeOther : undefined,
+          manufacturer: manufacturer.trim() || undefined,
           clinicName,
           location,
           contactName,
           email: email.trim() || undefined,
           phone: phone.trim() || undefined,
-          manufacturer: manufacturer || undefined,
           description,
           urgency: urgency || undefined,
           website,
@@ -96,8 +103,9 @@ export function FindRepForm({
     <div className="lp-find-card" id={id}>
       <h1 className="lp-modal-title">Find a service rep near you</h1>
       <p className="lp-modal-lede">
-        Tell us where the laser is and what is going on. No Total Service Pro account
-        required — RepairPlanet matches you with a nearby shop.
+        Tell us the equipment type and what is going on. No Total Service Pro account
+        required — RepairPlanet matches you with a nearby biomedical service shop.
+        Lasers, lithotriptors, and C-arms first.
       </p>
       <form onSubmit={submit} className="lp-lead-form">
         <label className="lp-field lp-hp" aria-hidden="true">
@@ -111,6 +119,45 @@ export function FindRepForm({
           />
         </label>
         <label className="lp-field">
+          <span>Equipment type</span>
+          <select
+            required
+            value={equipmentType}
+            onChange={(e) => setEquipmentType(e.target.value)}
+          >
+            <option value="">Choose one</option>
+            {CLINIC_LEAD_EQUIPMENT_TYPES.map((t) => (
+              <option key={t.value} value={t.value}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        {equipmentType === 'other' ? (
+          <label className="lp-field">
+            <span>What kind of equipment</span>
+            <input
+              type="text"
+              required
+              minLength={2}
+              maxLength={CLINIC_LEAD_EQUIPMENT_OTHER_MAX}
+              value={equipmentTypeOther}
+              onChange={(e) => setEquipmentTypeOther(e.target.value)}
+              placeholder="Short description"
+            />
+          </label>
+        ) : null}
+        <label className="lp-field">
+          <span>Brand / model</span>
+          <input
+            type="text"
+            maxLength={80}
+            value={manufacturer}
+            onChange={(e) => setManufacturer(e.target.value)}
+            placeholder="Optional — e.g. Candela Vbeam, Dornier, GE OEC"
+          />
+        </label>
+        <label className="lp-field">
           <span>Clinic or organization</span>
           <input
             type="text"
@@ -119,7 +166,7 @@ export function FindRepForm({
             maxLength={120}
             value={clinicName}
             onChange={(e) => setClinicName(e.target.value)}
-            placeholder="Practice or spa name"
+            placeholder="Practice, hospital, or spa name"
             autoComplete="organization"
           />
         </label>
@@ -172,30 +219,17 @@ export function FindRepForm({
           </label>
         </div>
         <p className="lp-field-hint">Email or phone — whichever is easier.</p>
-        <div className="lp-field-row">
-          <label className="lp-field">
-            <span>Equipment / brand</span>
-            <select value={manufacturer} onChange={(e) => setManufacturer(e.target.value)}>
-              <option value="">Optional</option>
-              {CLINIC_LEAD_BRANDS.map((brand) => (
-                <option key={brand} value={brand}>
-                  {brand}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="lp-field">
-            <span>Urgency</span>
-            <select value={urgency} onChange={(e) => setUrgency(e.target.value)}>
-              <option value="">Optional</option>
-              {CLINIC_LEAD_URGENCY.map((u) => (
-                <option key={u.value} value={u.value}>
-                  {u.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        </div>
+        <label className="lp-field">
+          <span>Urgency</span>
+          <select value={urgency} onChange={(e) => setUrgency(e.target.value)}>
+            <option value="">Optional</option>
+            {CLINIC_LEAD_URGENCY.map((u) => (
+              <option key={u.value} value={u.value}>
+                {u.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="lp-field">
           <span>What is going on</span>
           <textarea

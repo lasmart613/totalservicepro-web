@@ -46,12 +46,15 @@ const SAMPLE = {
   contactName: 'Pat Rivera',
   email: 'pat@qa-test.example',
   phone: '805-555-0148',
-  manufacturer: 'Candela',
+  equipmentType: 'laser',
+  manufacturer: 'Candela Vbeam',
   description: 'Vbeam is down with no standby light after a power blip.',
   urgency: 'this_week',
 };
 
-test('clinic lead requires name, location, contact, a short problem, and email or phone', () => {
+test('clinic lead requires equipment type, name, location, contact, a short problem, and email or phone', () => {
+  assert.equal(parseClinicLead({ ...SAMPLE, equipmentType: '' }).ok, false);
+  assert.equal(parseClinicLead({ ...SAMPLE, equipmentType: 'other', equipmentTypeOther: '' }).ok, false);
   assert.equal(parseClinicLead({ ...SAMPLE, clinicName: 'A' }).ok, false);
   assert.equal(parseClinicLead({ ...SAMPLE, location: '' }).ok, false);
   assert.equal(parseClinicLead({ ...SAMPLE, contactName: 'X' }).ok, false);
@@ -59,6 +62,29 @@ test('clinic lead requires name, location, contact, a short problem, and email o
   assert.equal(parseClinicLead({ ...SAMPLE, email: '', phone: '' }).ok, false);
   assert.equal(parseClinicLead({ ...SAMPLE, email: 'not-an-email', phone: '' }).ok, false);
   assert.equal(parseClinicLead({ ...SAMPLE, email: '', phone: '12' }).ok, false);
+
+  const litho = parseClinicLead({
+    ...SAMPLE,
+    equipmentType: 'lithotriptor',
+    manufacturer: 'Dornier',
+    description: 'No shock wave output after a self-test fail on the lithotriptor.',
+  });
+  assert.equal(litho.ok, true);
+  if (litho.ok && !litho.spam) {
+    assert.equal(litho.lead.equipmentType, 'lithotriptor');
+    assert.equal(litho.lead.equipmentTypeOther, null);
+  }
+
+  const other = parseClinicLead({
+    ...SAMPLE,
+    equipmentType: 'other',
+    equipmentTypeOther: 'Ultrasound',
+  });
+  assert.equal(other.ok, true);
+  if (other.ok && !other.spam) {
+    assert.equal(other.lead.equipmentType, 'other');
+    assert.equal(other.lead.equipmentTypeOther, 'Ultrasound');
+  }
 
   const emailOnly = parseClinicLead({ ...SAMPLE, phone: '' });
   assert.equal(emailOnly.ok, true);
@@ -116,7 +142,9 @@ test('lead emails stay RepairPlanet-branded and avoid forbidden copy', () => {
   const confirmText = clinicLeadConfirmationText();
   const confirmHtml = clinicLeadConfirmationHtml();
   assert.match(subject, /RepairPlanet clinic lead/);
+  assert.match(subject, /Laser/);
   assert.match(subject, /QA Test Clinic/);
+  assert.match(text, /Equipment type: Laser/);
   assert.match(text, /no TSP account/i);
   assert.match(text, /Do not treat this as a live marketplace RFQ/);
   assert.match(text, /do not blast shops/i);
@@ -168,7 +196,30 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.match(control, /\/find-a-rep/);
   assert.match(form, /\/api\/clinic-service-leads/);
   assert.match(form, /No Total Service Pro/);
+  assert.match(form, /equipmentType/);
+  assert.match(form, /CLINIC_LEAD_EQUIPMENT_TYPES/);
+  assert.match(form, /lithotriptors/);
+  assert.match(form, /C-arms first/);
   assert.match(form, /clinicName/);
+  const types = readFileSync(join(here, './clinic-service-lead.ts'), 'utf8');
+  assert.match(types, /value: 'laser'/);
+  assert.match(types, /value: 'lithotriptor'/);
+  assert.match(types, /value: 'c_arm'/);
+  assert.match(types, /label: 'C-arm'/);
+  assert.match(types, /value: 'other'/);
+  assert.match(page, /biomedical equipment service network/);
+  assert.match(page, /lithotriptors/);
+  assert.match(page, /C-arms first/);
+  assert.match(form, /Equipment type/);
+  assert.match(form, /Choose one/);
+  assert.ok(
+    form.indexOf('Equipment type') < form.indexOf('Brand / model'),
+    'equipment type must come before brand/model'
+  );
+  assert.ok(
+    form.indexOf('Equipment type') < form.indexOf('Clinic or organization'),
+    'equipment type must sit near the top of the form'
+  );
   assert.match(css, /\.lp-find-card\s*\{/);
   assert.match(layout, /RepairPlanet/);
   assert.match(findPage, /FindRepForm/);
@@ -197,6 +248,8 @@ test('clinic-service-leads API persists guest rows and emails the team, not serv
   assert.doesNotMatch(route, /product_issue_reports/);
   assert.doesNotMatch(route, /from\('organizations'\)\.insert/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.clinic_service_leads/);
+  assert.match(migration, /equipment_type/);
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/);
   assert.match(migration, /Not marketplace RFQs/);
+  assert.match(route, /equipment_type/);
 });

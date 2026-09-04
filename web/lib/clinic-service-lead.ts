@@ -1,5 +1,5 @@
 /**
- * Guest clinic / laser-owner service leads from the logged-out RepairPlanet
+ * Guest clinic / facility service leads from the logged-out RepairPlanet
  * landing. Not a marketplace RFQ and not a TSP product-issue report.
  * Team copy follows the product-inbox pattern (contact@ + QA).
  */
@@ -17,23 +17,16 @@ export const CLINIC_LEAD_NAME_MAX = 120;
 export const CLINIC_LEAD_LOCATION_MAX = 80;
 export const FIND_REP_HASH = 'find-a-rep';
 
-export const CLINIC_LEAD_BRANDS = [
-  'Alma',
-  'Candela',
-  'Coherent',
-  'Cutera',
-  'Cynosure',
-  'Fotona',
-  'HOYA ConBio',
-  'InMode',
-  'Iridex',
-  'Lumenis',
-  'Lutronic',
-  'Quanta',
-  'Sciton',
-  'Syneron',
-  'Other',
+export const CLINIC_LEAD_EQUIPMENT_OTHER_MAX = 80;
+
+export const CLINIC_LEAD_EQUIPMENT_TYPES = [
+  { value: 'laser', label: 'Laser' },
+  { value: 'lithotriptor', label: 'Lithotriptor' },
+  { value: 'c_arm', label: 'C-arm' },
+  { value: 'other', label: 'Other' },
 ] as const;
+
+export type ClinicLeadEquipmentType = (typeof CLINIC_LEAD_EQUIPMENT_TYPES)[number]['value'];
 
 export const CLINIC_LEAD_URGENCY = [
   { value: 'now', label: 'Down now' },
@@ -49,6 +42,8 @@ export type ClinicLeadInput = {
   contactName?: unknown;
   email?: unknown;
   phone?: unknown;
+  equipmentType?: unknown;
+  equipmentTypeOther?: unknown;
   manufacturer?: unknown;
   description?: unknown;
   urgency?: unknown;
@@ -62,6 +57,8 @@ export type ClinicLead = {
   contactName: string;
   email: string | null;
   phone: string | null;
+  equipmentType: ClinicLeadEquipmentType;
+  equipmentTypeOther: string | null;
   manufacturer: string | null;
   description: string;
   urgency: ClinicLeadUrgency | null;
@@ -114,6 +111,17 @@ export function parseClinicLead(body: ClinicLeadInput):
   const honeypot = clip(body.website ?? body.companyWebsite, 200);
   if (honeypot) return { ok: true, spam: true };
 
+  const equipmentRaw = clip(body.equipmentType, 20);
+  const equipmentType =
+    CLINIC_LEAD_EQUIPMENT_TYPES.find((t) => t.value === equipmentRaw)?.value ?? null;
+  if (!equipmentType) {
+    return { ok: false, error: 'Please choose an equipment type.' };
+  }
+  const equipmentTypeOther = clip(body.equipmentTypeOther, CLINIC_LEAD_EQUIPMENT_OTHER_MAX);
+  if (equipmentType === 'other' && equipmentTypeOther.length < 2) {
+    return { ok: false, error: 'Please say what kind of equipment (a short note is enough).' };
+  }
+
   const clinicName = clip(body.clinicName, CLINIC_LEAD_NAME_MAX);
   if (clinicName.length < 2) {
     return { ok: false, error: 'Please enter the clinic or organization name.' };
@@ -142,11 +150,7 @@ export function parseClinicLead(body: ClinicLeadInput):
     return { ok: false, error: 'Add an email or a phone number so we can reach you.' };
   }
 
-  let manufacturer = clip(body.manufacturer, 80);
-  if (!manufacturer) manufacturer = '';
-  if (manufacturer && !CLINIC_LEAD_BRANDS.includes(manufacturer as (typeof CLINIC_LEAD_BRANDS)[number])) {
-    manufacturer = manufacturer.slice(0, 80);
-  }
+  const manufacturer = clip(body.manufacturer, 80);
 
   const description = String(body.description || '').trim();
   if (description.length < CLINIC_LEAD_DESCRIPTION_MIN) {
@@ -174,6 +178,8 @@ export function parseClinicLead(body: ClinicLeadInput):
       contactName,
       email,
       phone,
+      equipmentType,
+      equipmentTypeOther: equipmentType === 'other' ? equipmentTypeOther : null,
       manufacturer: manufacturer || null,
       description,
       urgency,
@@ -193,8 +199,15 @@ export function planClinicLeadMail(opts: {
   };
 }
 
+export function equipmentTypeLabel(lead: Pick<ClinicLead, 'equipmentType' | 'equipmentTypeOther'>): string {
+  if (lead.equipmentType === 'other') {
+    return lead.equipmentTypeOther || 'Other';
+  }
+  return CLINIC_LEAD_EQUIPMENT_TYPES.find((t) => t.value === lead.equipmentType)?.label || lead.equipmentType;
+}
+
 export function clinicLeadSubject(lead: ClinicLead): string {
-  return `RepairPlanet clinic lead: ${lead.clinicName} · ${lead.location}`;
+  return `RepairPlanet clinic lead: ${equipmentTypeLabel(lead)} · ${lead.clinicName} · ${lead.location}`;
 }
 
 function urgencyLabel(value: ClinicLeadUrgency | null): string {
@@ -228,7 +241,8 @@ export function clinicLeadText(opts: {
     `Contact: ${lead.contactName}`,
     `Email: ${lead.email || '(not provided)'}`,
     `Phone: ${lead.phone || '(not provided)'}`,
-    `Equipment / brand: ${lead.manufacturer || '(not provided)'}`,
+    `Equipment type: ${equipmentTypeLabel(lead)}`,
+    `Brand / model: ${lead.manufacturer || '(not provided)'}`,
     `Urgency: ${urgencyLabel(lead.urgency)}`,
     '',
     'What is going on:',
@@ -263,7 +277,8 @@ export function clinicLeadHtml(opts: {
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Contact</td><td>${esc(lead.contactName)}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Email</td><td>${esc(lead.email || '(not provided)')}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Phone</td><td>${esc(lead.phone || '(not provided)')}</td></tr>
-    <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Equipment / brand</td><td>${esc(lead.manufacturer || '(not provided)')}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Equipment type</td><td>${esc(equipmentTypeLabel(lead))}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Brand / model</td><td>${esc(lead.manufacturer || '(not provided)')}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Urgency</td><td>${esc(urgencyLabel(lead.urgency))}</td></tr>
   </table>
   <p style="margin:16px 0 4px;font-size:12px;color:#6b7280;text-transform:uppercase;letter-spacing:.04em">What is going on</p>

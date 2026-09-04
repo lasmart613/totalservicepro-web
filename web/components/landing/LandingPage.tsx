@@ -23,7 +23,7 @@ export function LandingSplash() {
         <div className="lp-brand-name" style={{ fontSize: 28 }}>
           RepairPlanet
         </div>
-        <div className="lp-brand-sub">Total Service Pro · Laser Equipment Service</div>
+        <div className="lp-brand-sub">Total Service Pro · Medical Equipment Service</div>
       </div>
     </div>
   );
@@ -79,7 +79,7 @@ const AUDIENCES: {
     signup: '/signup/owner',
     lines: [
       'Find a service rep near you — no account required',
-      'Receive multiple bids on service requests',
+      'Lasers, lithotriptors, and C-arms first',
       'View service history and track maintenance costs',
     ],
     shot: {
@@ -93,7 +93,7 @@ const AUDIENCES: {
     label: 'Parts sellers',
     signup: '/signup/supplier',
     lines: [
-      'Connect with Repair Companies and laser owners',
+      'Connect with Repair Companies and clinics',
       'Get found when they need a part',
       'List parts that are on the shelf',
     ],
@@ -124,7 +124,7 @@ const HERO_SLIDES: {
   {
     audience: 'Clinics',
     title: 'Find a Repair Company',
-    sub: 'Match your lasers with service companies that can work on them.',
+    sub: 'Match lasers, lithotriptors, and C-arms with shops that can work on them.',
     shot: {
       src: '/landing/directory.webp',
       alt: 'Directory search to find a repair company among service companies, clinics, resellers, and suppliers',
@@ -133,7 +133,7 @@ const HERO_SLIDES: {
   },
   {
     audience: 'Parts sellers',
-    title: 'Connect with Repair Companies and Laser Owners',
+    title: 'Connect with Repair Companies and Clinics',
     sub: 'Get found when a shop needs a part that’s on your shelf.',
     shot: {
       src: '/landing/parts.webp',
@@ -154,7 +154,7 @@ const HERO_SLIDES: {
   {
     audience: 'Clinics',
     title: 'View Service History',
-    sub: 'Track work and maintenance costs on every laser.',
+    sub: 'Track work and maintenance costs on every system.',
     shot: {
       src: '/landing/reports.webp',
       alt: 'Service reports list with drafts and completed work',
@@ -288,8 +288,8 @@ function HeroCarousel() {
       }}
     >
       <p className="lp-hero-mission">
-        RepairPlanet matches laser owners with nearby service companies. Total Service
-        Pro is the operating system behind the network.
+        RepairPlanet is a biomedical equipment service network — lasers, lithotriptors,
+        and C-arms first. Total Service Pro is the operating system behind it.
       </p>
       <div
         className="lp-hero-viewport"
@@ -463,8 +463,8 @@ export function LandingPage() {
       <section className="lp-section" id="features">
         <h2 className="lp-h2">What you get</h2>
         <p className="lp-lede">
-          RepairPlanet is the network. Total Service Pro is the shop, clinic, and
-          parts operating system behind it.
+          RepairPlanet is the biomedical service network. Total Service Pro is the
+          shop, clinic, and parts operating system behind it.
         </p>
         <div className="lp-role-cols">
           {AUDIENCES.map((r) => (

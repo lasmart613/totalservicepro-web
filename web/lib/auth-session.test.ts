@@ -48,17 +48,17 @@ test('logged-out hero has a unique subtitle on every slide and no trial phrasing
   assert.equal(new Set(subs).size, 9, 'each hero slide needs its own subtitle');
   assert.deepEqual(subs, [
     'Color-coded jobs for the whole shop.',
-    'Match your lasers with service companies that can work on them.',
+    'Match lasers, lithotriptors, and C-arms with shops that can work on them.',
     'Get found when a shop needs a part that’s on your shelf.',
     'Assign each call to a field engineer.',
-    'Track work and maintenance costs on every laser.',
+    'Track work and maintenance costs on every system.',
     'They get the job details when you assign it.',
     'Keep meters and tools with the tech who needs them.',
     'Fluence, irradiance, and power in the field.',
     'Bid jobs and find parts from one shop account.',
   ]);
   assert.match(page, /See Open Tickets and Upcoming Calls/);
-  assert.match(page, /RepairPlanet matches laser owners with nearby service companies/);
+  assert.match(page, /RepairPlanet is a biomedical equipment service network/);
   assert.match(page, /Start on the free plan/);
   assert.match(page, /A free plan is included\./);
   assert.match(page, /lp-hero-subhead/);
@@ -109,7 +109,7 @@ test('logged-out landing pairs each hero title with a unique matching still', ()
     [
       'See Open Tickets and Upcoming Calls',
       'Find a Repair Company',
-      'Connect with Repair Companies and Laser Owners',
+      'Connect with Repair Companies and Clinics',
       'Schedule and Assign Service Calls',
       'View Service History',
       'Assign a Field Engineer and Email Them the Ticket',
@@ -126,7 +126,7 @@ test('logged-out landing pairs each hero title with a unique matching still', ()
   assert.equal(byTitle['Marketplace — Parts, Used Systems, and Service Needs'], '/landing/marketplace.webp');
   assert.equal(byTitle['Find a Repair Company'], '/landing/directory.webp');
   assert.equal(byTitle['View Service History'], '/landing/reports.webp');
-  assert.equal(byTitle['Connect with Repair Companies and Laser Owners'], '/landing/parts.webp');
+  assert.equal(byTitle['Connect with Repair Companies and Clinics'], '/landing/parts.webp');
   assert.match(source, /caption: 'Shop dashboard'/);
   assert.match(source, /caption: 'Photometry tools'/);
   assert.doesNotMatch(heroBlock, /Bid on open service requests/);

@@ -1,4 +1,4 @@
--- Guest clinic / laser-owner service leads from the logged-out RepairPlanet landing.
+-- Guest clinic / facility service leads from the logged-out RepairPlanet landing.
 -- Not marketplace RFQs (service_requests) and not product-issue reports.
 CREATE TABLE IF NOT EXISTS public.clinic_service_leads (
   id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -8,6 +8,8 @@ CREATE TABLE IF NOT EXISTS public.clinic_service_leads (
   contact_name text NOT NULL,
   email text,
   phone text,
+  equipment_type text,
+  equipment_type_other text,
   manufacturer text,
   description text NOT NULL,
   urgency text,
@@ -18,7 +20,7 @@ CREATE TABLE IF NOT EXISTS public.clinic_service_leads (
 );
 
 COMMENT ON TABLE public.clinic_service_leads IS
-  'Guest clinic / laser-owner service leads from the logged-out RepairPlanet landing. Written by the app API (service role). Not marketplace RFQs.';
+  'Guest clinic / facility service leads from the logged-out RepairPlanet landing. Written by the app API (service role). Not marketplace RFQs. Equipment types start at laser, lithotriptor, C-arm, other.';
 
 ALTER TABLE public.clinic_service_leads ENABLE ROW LEVEL SECURITY;
 
