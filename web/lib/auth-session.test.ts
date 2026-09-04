@@ -58,7 +58,7 @@ test('logged-out hero has a unique subtitle on every slide and no trial phrasing
     'Bid jobs and find parts from one shop account.',
   ]);
   assert.match(page, /See Open Tickets and Upcoming Calls/);
-  assert.match(page, /Matching laser owners with service companies\./);
+  assert.match(page, /RepairPlanet matches laser owners with nearby service companies/);
   assert.match(page, /Start on the free plan/);
   assert.match(page, /A free plan is included\./);
   assert.match(page, /lp-hero-subhead/);
@@ -84,6 +84,7 @@ test('logged-out landing gives Free Plan a gold outline without making it primar
   assert.match(page, /Start on the free plan/);
   assert.match(page, /A free plan is included\. Upgrade when you need more\./);
   assert.match(page, /lp-btn-outline/);
+  assert.match(page, /Find a service rep near me/);
   assert.match(page, /Register for Total Service Pro/);
   assert.doesNotMatch(page, /Free to start/);
   assert.doesNotMatch(page, /lp-btn-primary">\s*Start on the free plan/);

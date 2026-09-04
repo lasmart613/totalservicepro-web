@@ -3,6 +3,7 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
+import { FindRepControl } from './FindRepControl';
 import './landing.css';
 
 export function LandingShell({ children }: { children: React.ReactNode }) {
@@ -24,8 +25,8 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
       <header className={`lp-nav ${scrolled ? 'is-scrolled' : ''}`}>
         <Link href="/" className="lp-brand">
           <span className="lp-brand-biz">Medical Repair Network</span>
-          <span className="lp-brand-name">Total Service Pro</span>
-          <span className="lp-brand-sub">Laser Equipment Service</span>
+          <span className="lp-brand-name">RepairPlanet</span>
+          <span className="lp-brand-sub">Total Service Pro</span>
         </Link>
         <nav className="lp-nav-links" aria-label="Public">
           <Link href="/directory">Directory</Link>
@@ -35,10 +36,11 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
         </nav>
         <div className="lp-nav-cta">
           <ReportIssueControl variant="landing" />
+          <FindRepControl variant="nav" />
           <Link href="/login" className="lp-btn lp-btn-ghost">
             Sign in
           </Link>
-          <Link href="/signup" className="lp-btn lp-btn-primary">
+          <Link href="/signup" className="lp-btn lp-btn-outline">
             Register for Total Service Pro
           </Link>
         </div>
@@ -46,12 +48,16 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
       {children}
       <footer className="lp-footer">
         <div>
-          <strong style={{ color: '#FBBF24' }}>Medical Repair Network</strong>
+          <strong style={{ color: '#FBBF24' }}>RepairPlanet</strong>
+          {' · '}
+          Medical Repair Network
           {' · '}
           Total Service Pro
         </div>
         <div className="lp-footer-links">
           <Link href="/">Home</Link>
+          <Link href="/?find=1">Find a service rep</Link>
+          <Link href="/signup/company">Register your shop</Link>
           <Link href="/plans">Free Plan</Link>
           <Link href="/directory">Directory</Link>
           <Link href="/marketplace">Marketplace</Link>
