@@ -115,6 +115,19 @@
             letter-spacing: 0.3px;
             box-shadow: 0 2px 4px rgba(0,0,0,0.3);
         }
+        .inc-badge {
+            position: absolute;
+            bottom: -4px;
+            left: -4px;
+            background: #44403c;
+            color: white;
+            font-size: 7px;
+            padding: 1px 5px;
+            border-radius: 8px;
+            font-weight: 800;
+            letter-spacing: 0.2px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+        }
         .tabs {
             display: flex;
             border-bottom: 1px solid var(--border);
@@ -241,9 +254,18 @@
     let FREE_LIMIT = 5;
     let currentUser = null;
 
+    function isDornierHolmium(hay) {
+        return /\bmedilas\b/.test(hay) || /\bh[- ]?20\b/.test(hay) || /\bh[- ]?30\b/.test(hay);
+    }
+    function isManualIncomplete(m) {
+        const v = m && (m.is_incomplete != null ? m.is_incomplete : m.isIncomplete);
+        return v === true || v === 1 || v === '1' || v === 'true' || v === 't';
+    }
     function manualRoom(m) {
         const hay = [m && m.title, m && m.brand, m && m.model, m && m.storage_path].join(' ').toLowerCase();
-        const shock = /\bdornier\b|shock\s*wave|shockwave|\beswl\b|\bswl\b|ultrasonic\s+litho|electrohydraulic|extracorporeal|\blithotrip(tor|ter|sy|sie)\b/.test(hay);
+        if (isDornierHolmium(hay)) return 'laser';
+        const shock = /shock\s*wave|shockwave|\beswl\b|\bswl\b|ultrasonic\s+litho|electrohydraulic|extracorporeal|\blithotrip(tor|ter|sy|sie)\b/.test(hay)
+            || (/\bdornier\b/.test(hay) && /\b(compact|delta|sigma|doli|gemini|hm3|mpl)\b/.test(hay));
         if (shock) return 'lithotriptor';
         const holmiumLitho = /\bcyber\s*ho\b/.test(hay)
             || /\blitho\s*(evo|60|100)\b/.test(hay)
@@ -407,12 +429,14 @@
                             ${books.map((m, i) => {
                                 const isOwned = userManualIds.has(m.id);
                                 const isOp = isOperatorManual(m);
+                                const isInc = isManualIncomplete(m);
                                 return `
                                     <div class="book" onclick="handleBookClick('${m.id}')">
                                         <div class="book-spine book-color-${i % 8}">
                                             <div class="book-title">${catalogTitle(m)}</div>
                                         </div>
                                         ${isOp ? '<div class="op-badge" title="Operators Manual">OP</div>' : ''}
+                                        ${isInc ? '<div class="inc-badge" title="This document is incomplete">Incomplete</div>' : ''}
                                         ${isOwned ? '<div class="owned-badge">✓</div>' : ''}
                                     </div>
                                 `;
@@ -520,7 +544,8 @@
         const params = new URLSearchParams({
             storage_path: manual.storage_path || '',
             title: catalogTitle(manual),
-            manual_id: manual.id
+            manual_id: manual.id,
+            incomplete: isManualIncomplete(manual) ? '1' : '0'
         });
 
         window.location.href = `pdf_viewer.html?${params.toString()}`;

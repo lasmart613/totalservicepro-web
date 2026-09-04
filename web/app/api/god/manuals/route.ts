@@ -32,11 +32,12 @@ export async function POST(req: NextRequest) {
     storage_path: parsed.row.storage_path,
     doc_kind: parsed.row.doc_kind,
     equipment_type: parsed.row.equipment_type,
+    is_incomplete: parsed.row.is_incomplete,
   };
 
   let { data, error } = await admin.from('manuals').insert(payload).select('id, title').maybeSingle();
-  if (error && /equipment_type|schema cache|column/i.test(error.message || '')) {
-    const { equipment_type: _type, ...legacy } = payload;
+  if (error && /equipment_type|is_incomplete|schema cache|column/i.test(error.message || '')) {
+    const { equipment_type: _type, is_incomplete: _inc, ...legacy } = payload;
     const retry = await admin.from('manuals').insert(legacy).select('id, title').maybeSingle();
     data = retry.data;
     error = retry.error;

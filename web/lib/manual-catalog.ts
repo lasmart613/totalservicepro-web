@@ -22,6 +22,9 @@ export type ManualCatalogFields = {
   model?: string | null;
   storage_path?: string | null;
   doc_kind?: string | null;
+  is_incomplete?: unknown;
+  isIncomplete?: unknown;
+  completeness_note?: string | null;
   /** First-page PDF text when reachable without an org login. Never fetched from live orgs. */
   pdfText?: string | null;
 };
@@ -161,4 +164,16 @@ export function presentManual<T extends ManualCatalogFields>(manual: T): T & {
 /** OP badge only when the document is actually an operator/user manual. */
 export function showOperatorBadge(manual: ManualCatalogFields): boolean {
   return catalogManualKind(manual) === 'operator';
+}
+
+/** Incomplete badge from the durable manuals.is_incomplete flag — not a title hardcode. */
+export function isManualIncomplete(manual: ManualCatalogFields | null | undefined): boolean {
+  const v = manual?.is_incomplete ?? manual?.isIncomplete;
+  if (v === true || v === 1 || v === '1' || v === 'true' || v === 't') return true;
+  if (String(manual?.completeness_note || '').trim()) return true;
+  return false;
+}
+
+export function showIncompleteBadge(manual: ManualCatalogFields | null | undefined): boolean {
+  return isManualIncomplete(manual);
 }

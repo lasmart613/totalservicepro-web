@@ -27,6 +27,7 @@ export type ManualViewPayload = {
   dataBase64?: string | null;
   contentType?: string | null;
   chapters?: ManualChapter[] | null;
+  isIncomplete?: boolean;
 };
 
 export type ManualUrlResult = {

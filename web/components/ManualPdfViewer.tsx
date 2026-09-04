@@ -231,6 +231,7 @@ export function ManualPdfViewer({
   const searchGen = useRef(0);
 
   const [title, setTitle] = useState(titleFromQuery || 'Service Manual');
+  const [isIncomplete, setIsIncomplete] = useState(false);
   const [chapters, setChapters] = useState<ManualChapter[]>([]);
   const [showChapters, setShowChapters] = useState(false);
   const [page, setPage] = useState(1);
@@ -357,8 +358,30 @@ export function ManualPdfViewer({
           url: stashed?.url,
           dataBase64: stashed?.dataBase64,
           chapters: stashed?.chapters,
+          isIncomplete: stashed?.isIncomplete,
         };
         if (payload.title) setTitle(payload.title);
+        let incomplete = payload.isIncomplete === true;
+        if (payload.manualId) {
+          try {
+            const supabase = getSupabaseClient();
+            let row = await supabase
+              .from('manuals')
+              .select('is_incomplete')
+              .eq('id', payload.manualId)
+              .maybeSingle();
+            if (row.error && /is_incomplete|schema cache|column/i.test(row.error.message || '')) {
+              incomplete = payload.isIncomplete === true;
+            } else if (row.data && (row.data as { is_incomplete?: unknown }).is_incomplete === true) {
+              incomplete = true;
+            } else if (row.data) {
+              incomplete = false;
+            }
+          } catch {
+            /* keep stashed flag */
+          }
+        }
+        if (!cancelled) setIsIncomplete(incomplete);
         if (Array.isArray(payload.chapters) && payload.chapters.length > 1) {
           setChapters(payload.chapters);
         }
@@ -513,6 +536,14 @@ export function ManualPdfViewer({
           {sourceUrl ? '← Home' : '← Library'}
         </Link>
         <div className="flex-1 min-w-[8rem] font-semibold text-[var(--gold,#FBBF24)] truncate">{title}</div>
+        {isIncomplete && (
+          <span
+            className="shrink-0 rounded-full bg-stone-600 text-white text-[10px] font-extrabold px-2 py-0.5"
+            title="This document is incomplete"
+          >
+            Incomplete
+          </span>
+        )}
         <div className="flex flex-wrap items-center gap-1 text-sm">
           <button
             type="button"

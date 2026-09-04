@@ -1039,6 +1039,7 @@ export type Database = {
           equipment_type: string
           id: number
           is_folder: boolean
+          is_incomplete: boolean
           model: string
           storage_path: string
           tier_required: string | null
@@ -1054,6 +1055,7 @@ export type Database = {
           equipment_type?: string
           id?: never
           is_folder?: boolean
+          is_incomplete?: boolean
           model: string
           storage_path: string
           tier_required?: string | null
@@ -1069,6 +1071,7 @@ export type Database = {
           equipment_type?: string
           id?: never
           is_folder?: boolean
+          is_incomplete?: boolean
           model?: string
           storage_path?: string
           tier_required?: string | null

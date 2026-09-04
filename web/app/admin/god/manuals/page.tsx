@@ -21,6 +21,7 @@ export default function GodManualsCatalogPage() {
   const [title, setTitle] = useState('');
   const [docKind, setDocKind] = useState('');
   const [storagePath, setStoragePath] = useState('');
+  const [isIncomplete, setIsIncomplete] = useState(false);
   const [saving, setSaving] = useState(false);
 
   useEffect(() => {
@@ -57,6 +58,7 @@ export default function GodManualsCatalogPage() {
     setTitle(seed.title);
     setDocKind(seed.docKind);
     setStoragePath(seed.suggestedPath);
+    setIsIncomplete(false);
   }
 
   function onBrandModelChange(nextBrand: string, nextModel: string) {
@@ -88,6 +90,7 @@ export default function GodManualsCatalogPage() {
           title,
           doc_kind: docKind || undefined,
           storage_path: storagePath,
+          is_incomplete: isIncomplete,
         }),
       });
       const json = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
@@ -97,6 +100,7 @@ export default function GodManualsCatalogPage() {
       }
       toast.success('Catalog row added. Upload the PDF to that storage_path in the manuals bucket.');
       setTitle('');
+      setIsIncomplete(false);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Could not add catalog row');
     } finally {
@@ -179,7 +183,7 @@ export default function GodManualsCatalogPage() {
             list="god-manual-brands"
             value={brand}
             onChange={(e) => onBrandModelChange(e.target.value, model)}
-            placeholder="e.g. Quanta System, GE OEC, Candela"
+            placeholder="e.g. Quanta System, GE OEC, Candela, Dornier"
           />
           <datalist id="god-manual-brands">
             {manufacturers.map((name) => (
@@ -196,7 +200,7 @@ export default function GodManualsCatalogPage() {
             list="god-manual-models"
             value={model}
             onChange={(e) => onBrandModelChange(brand, e.target.value)}
-            placeholder="e.g. Litho EVO, 9900"
+            placeholder="e.g. Litho EVO, 9900, H20"
           />
           <datalist id="god-manual-models">
             {models.map((m) => (
@@ -228,6 +232,15 @@ export default function GodManualsCatalogPage() {
             <option value="technical">Technical Manual</option>
             <option value="parts">Parts Manual</option>
           </select>
+        </label>
+
+        <label className="flex items-center gap-2">
+          <input
+            type="checkbox"
+            checked={isIncomplete}
+            onChange={(e) => setIsIncomplete(e.target.checked)}
+          />
+          <span className="text-sm">Incomplete document (shows an Incomplete badge on the shelf and in the viewer)</span>
         </label>
 
         <label className="block">

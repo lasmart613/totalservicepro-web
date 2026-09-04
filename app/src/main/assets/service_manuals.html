@@ -59,6 +59,10 @@
         const stripped = String(title || '').replace(/^\s*(syneron(?:\s*candela)?|candela)\b[\s\-:\/]*/i, '').trim();
         return /^v[\s_-]*beam$/i.test(stripped) && !/\b(perfecta|platinum|aesthetica|classic|pro|[0-9]+)\b/i.test(stripped);
     }
+    function isManualIncomplete(manual) {
+        const v = manual && (manual.is_incomplete != null ? manual.is_incomplete : manual.isIncomplete);
+        return v === true || v === 1 || v === '1' || v === 'true' || v === 't';
+    }
     function isOperatorManual(manual) {
         const raw = String(manual && manual.title || '').trim();
         if (/\b(service|technical|repair)\s+manuals?\b/i.test(raw)) return false;
@@ -116,7 +120,7 @@
                 <div class="manual-item" onclick="openManual(${index})">
                     <div class="manual-icon">📕</div>
                     <div class="manual-info">
-                        <div class="manual-brand">${manual.brand}${isOperatorManual(manual) ? ' · OP' : ''}</div>
+                        <div class="manual-brand">${manual.brand}${isOperatorManual(manual) ? ' · OP' : ''}${isManualIncomplete(manual) ? ' · Incomplete' : ''}</div>
                         <div class="manual-title">${catalogTitle(manual)}</div>
                     </div>
                 </div>

@@ -24,14 +24,16 @@ export const EQUIPMENT_TYPES: readonly EquipmentTypeMeta[] = [
     value: 'laser',
     label: 'Laser',
     roomLabel: 'Laser room',
-    blurb: 'Aesthetic and surgical lasers, including holmium (Quanta Litho / Cyber Ho / Litho EVO).',
+    blurb:
+      'Aesthetic and surgical lasers, including holmium (Quanta Litho / Cyber Ho / Litho EVO, Dornier H20 / H30 / Medilas).',
     icon: '🔦',
   },
   {
     value: 'lithotriptor',
     label: 'Lithotriptor',
     roomLabel: 'Lithotriptor room',
-    blurb: 'True shockwave / ultrasonic stone systems (Dornier and similar) — not holmium lasers.',
+    blurb:
+      'True shockwave / ultrasonic stone systems (Dornier Compact Delta and similar ESWL) — not holmium lasers.',
     icon: '💧',
   },
   {
@@ -92,15 +94,27 @@ export function equipmentTypeMeta(value: unknown): EquipmentTypeMeta {
   return EQUIPMENT_TYPES.find((row) => row.value === t) || EQUIPMENT_TYPES[0];
 }
 
+/**
+ * Dornier H20 / H30 and Medilas-class holmium lasers. Not shockwave ESWL.
+ * Word-bounded so "H20" does not match wavelengths like 2100.
+ */
+export function isDornierHolmiumLaser(hay: string): boolean {
+  const t = String(hay || '').toLowerCase();
+  if (/\bmedilas\b/.test(t)) return true;
+  if (/\bh[- ]?20\b/.test(t) || /\bh[- ]?30\b/.test(t)) return true;
+  return false;
+}
+
 /** Shockwave / ultrasonic ESWL — the Lithotriptor room. Not holmium. */
 export function isShockwaveLithotriptor(hay: string): boolean {
   const t = String(hay || '').toLowerCase();
+  if (isDornierHolmiumLaser(t)) return false;
   return (
-    /\bdornier\b/.test(t) ||
     /shock\s*wave|shockwave/.test(t) ||
     /\beswl\b|\bswl\b/.test(t) ||
     /ultrasonic\s+litho|electrohydraulic|extracorporeal/.test(t) ||
-    /\blithotrip(tor|ter|sy|sie)\b/.test(t)
+    /\blithotrip(tor|ter|sy|sie)\b/.test(t) ||
+    (/\bdornier\b/.test(t) && /\b(compact|delta|sigma|doli|gemini|hm3|mpl)\b/.test(t))
   );
 }
 
@@ -121,8 +135,8 @@ export function isHolmiumLithoLaserFamily(hay: string): boolean {
 }
 
 /**
- * Room for a catalog row. Holmium Litho / Cyber Ho always Laser, even if a
- * row was saved as lithotriptor (PR 82 mis-seed). True ESWL stays Lithotriptor.
+ * Room for a catalog row. Holmium Litho / Cyber Ho / Dornier H20/H30 always
+ * Laser, even if a row was saved as lithotriptor. True ESWL stays Lithotriptor.
  */
 export function inferEquipmentType(fields: {
   equipment_type?: string | null;
@@ -136,8 +150,9 @@ export function inferEquipmentType(fields: {
     .join(' ')
     .toLowerCase();
 
-  if (isShockwaveLithotriptor(hay)) return 'lithotriptor';
+  if (isDornierHolmiumLaser(hay)) return DEFAULT_EQUIPMENT_TYPE;
   if (isHolmiumLithoLaserFamily(hay)) return DEFAULT_EQUIPMENT_TYPE;
+  if (isShockwaveLithotriptor(hay)) return 'lithotriptor';
   if (/\bc[-\s_]?arm\b|\boec\b|fluoroscop/.test(hay)) return 'c_arm';
 
   const explicit = normalizeEquipmentType(fields.equipment_type);

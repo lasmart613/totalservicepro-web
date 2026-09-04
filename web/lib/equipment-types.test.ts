@@ -18,7 +18,7 @@ import {
   suggestedManualStoragePath,
 } from './equipment-catalog.ts';
 import { parseManualCatalogInsert } from './manual-catalog-admin.ts';
-import { catalogManualKind, showOperatorBadge } from './manual-catalog.ts';
+import { catalogManualKind, isManualIncomplete, showOperatorBadge } from './manual-catalog.ts';
 import { CLINIC_LEAD_EQUIPMENT_TYPES } from './clinic-service-lead.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -55,6 +55,17 @@ test('Quanta Litho / Cyber Ho / Litho IFU are laser; Dornier ESWL is lithotripto
   );
 });
 
+test('Dornier H20 / H30 / Medilas are laser, not lithotriptor', () => {
+  assert.equal(
+    inferEquipmentType({ title: 'Dornier H20 Service Manual', equipment_type: 'lithotriptor' }),
+    'laser'
+  );
+  assert.equal(inferEquipmentType({ title: 'Dornier H30', brand: 'Dornier' }), 'laser');
+  assert.equal(inferEquipmentType({ title: 'Medilas H20/H30', brand: 'Dornier' }), 'laser');
+  assert.equal(inferEquipmentType({ model: 'H-20', brand: 'Dornier MedTech' }), 'laser');
+  assert.equal(inferEquipmentType({ title: 'Dornier Compact Delta' }), 'lithotriptor');
+});
+
 test('seed catalog covers Larry’s first five manuals without PDF binaries', () => {
   assert.equal(BIOMED_MANUAL_SEEDS.length, 5);
   assert.equal(BIOMED_MANUAL_SEEDS[0].manufacturer, 'GE OEC');
@@ -62,6 +73,10 @@ test('seed catalog covers Larry’s first five manuals without PDF binaries', ()
   assert.equal(BIOMED_MANUAL_SEEDS[0].equipmentType, 'c_arm');
   assert.ok(EQUIPMENT_CATALOG.some((m) => m.name === 'Quanta System'));
   assert.ok(EQUIPMENT_CATALOG.some((m) => m.name === 'GE OEC'));
+  const dornier = EQUIPMENT_CATALOG.find((m) => m.name === 'Dornier');
+  assert.ok(dornier);
+  assert.ok((dornier?.models || []).every((m) => m.equipmentType === 'laser'));
+  assert.deepEqual((dornier?.models || []).map((m) => m.name), ['H20', 'H30']);
   const quanta = EQUIPMENT_CATALOG.find((m) => m.name === 'Quanta System');
   assert.deepEqual(
     (quanta?.models || []).map((m) => m.name),
@@ -90,6 +105,21 @@ test('catalog insert requires type, brand, model, title, and a bucket path', () 
   if (ok.ok) {
     assert.equal(ok.row.equipment_type, 'c_arm');
     assert.equal(ok.row.doc_kind, 'service');
+    assert.equal(ok.row.is_incomplete, false);
+  }
+
+  const incomplete = parseManualCatalogInsert({
+    equipmentType: 'laser',
+    brand: 'Dornier',
+    model: 'H20',
+    title: 'Dornier H20/H30 Service Manual',
+    storage_path: 'shared/dornier/h20/dornier-h20-h30.pdf',
+    is_incomplete: true,
+  });
+  assert.equal(incomplete.ok, true);
+  if (incomplete.ok) {
+    assert.equal(incomplete.row.equipment_type, 'laser');
+    assert.equal(incomplete.row.is_incomplete, true);
   }
 
   const missing = parseManualCatalogInsert({ brand: 'GE OEC', title: 'x' });
@@ -142,6 +172,24 @@ test('migration backfills lasers and seeds Quanta / GE OEC models', () => {
   assert.match(fix, /id::text = '144'/);
   assert.match(fix, /equipment_type = 'laser'/);
   assert.match(fix, /dornier/);
+
+  const h20 = readFileSync(
+    join(here, '../supabase/migrations/20260905_000002_dornier_h20_h30_laser_incomplete.sql'),
+    'utf8'
+  );
+  assert.match(h20, /is_incomplete/);
+  assert.match(h20, /equipment_type = 'laser'/);
+  assert.match(h20, /h\[- \]\?20/);
+  assert.match(h20, /h\[- \]\?30/);
+  assert.match(h20, /medilas/i);
+  assert.match(h20, /compact\\s\+delta/);
+  assert.doesNotMatch(h20, /\.pdf['"]\s*,/);
+});
+
+test('incomplete badge is a stored flag, not a hardcoded H20 title', () => {
+  assert.equal(isManualIncomplete({ title: 'Dornier H20 Service Manual' }), false);
+  assert.equal(isManualIncomplete({ title: 'Dornier H20 Service Manual', is_incomplete: true }), true);
+  assert.equal(isManualIncomplete({ title: 'Other', is_incomplete: false }), false);
 });
 
 test('library rooms default to Laser and keep access + bookshelf', () => {
@@ -151,6 +199,8 @@ test('library rooms default to Laser and keep access + bookshelf', () => {
   assert.match(page, /canAccessServiceManuals/);
   assert.match(page, /ShelfScroller/);
   assert.match(page, /empty.*room|No manuals in this room|bookshelf is empty/i);
+  assert.match(page, /showIncompleteBadge/);
+  assert.match(page, /Incomplete/);
 });
 
 test('god catalog form requires equipment type and does not commit PDFs', () => {
@@ -158,6 +208,7 @@ test('god catalog form requires equipment type and does not commit PDFs', () => 
   const api = readFileSync(join(here, '../app/api/god/manuals/route.ts'), 'utf8');
   assert.match(page, /equipment_type|equipmentType/);
   assert.match(page, /storage_path/);
+  assert.match(page, /is_incomplete|isIncomplete/);
   assert.match(api, /requireGodCaller/);
   assert.match(api, /parseManualCatalogInsert/);
   assert.match(api, /equipment_type/);
