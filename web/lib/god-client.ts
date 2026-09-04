@@ -2,6 +2,12 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 
 export const GOD_DASHBOARD_PATH = '/admin/god';
 export const GOD_ALIAS_PATH = '/god';
+export {
+  GOD_AUTH_PATH,
+  GOD_EQUIPMENT_PATH,
+  GOD_TABLES_PATH,
+  GOD_USERS_PATH,
+} from './god-tables';
 
 export async function godAuthHeader(): Promise<Record<string, string>> {
   const supabase = getSupabaseClient();

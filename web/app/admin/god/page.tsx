@@ -193,9 +193,28 @@ export default function GodDashboardPage() {
   return (
     <div>
       <h1 className="text-3xl font-extrabold mb-2">God Dashboard</h1>
-      <p className="text-[var(--text3)] mb-6 max-w-3xl">
+      <p className="text-[var(--text3)] mb-4 max-w-3xl">
         Every organization and user. Send the locked shop-tester invite only to the shops you
         check. Nothing is selected by default. This is not a Stripe plan.
+      </p>
+      <p className="text-sm text-[var(--text3)] mb-6 max-w-3xl">
+        Need a row that is not an org invite? Use{' '}
+        <Link href="/admin/god/tables" className="text-[var(--gold)] hover:underline">
+          Tables
+        </Link>
+        ,{' '}
+        <Link href="/admin/god/equipment" className="text-[var(--gold)] hover:underline">
+          Equipment
+        </Link>
+        ,{' '}
+        <Link href="/admin/god/users" className="text-[var(--gold)] hover:underline">
+          Users
+        </Link>
+        , or{' '}
+        <Link href="/admin/god/auth" className="text-[var(--gold)] hover:underline">
+          Auth / Users
+        </Link>
+        .
       </p>
 
       <div className="flex flex-wrap gap-3 mb-4">
