@@ -176,6 +176,11 @@ export function GodTableBrowser({
     const next: Record<string, string> = {};
     const names = columns.length ? columns.map((c) => c.name) : Object.keys(row);
     for (const name of names) next[name] = fieldValue(row[name]);
+    if (info?.virtual) {
+      next.password = '';
+      next.ban_duration = '';
+      next.email_confirm = row.email_confirmed_at ? 'true' : '';
+    }
     setForm(next);
     setEditingId(row.id as string | number);
     setCreating(false);

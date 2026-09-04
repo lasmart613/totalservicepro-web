@@ -94,6 +94,21 @@ test('secret columns are redacted and not writable', () => {
   }
 });
 
+test('Auth create keeps write-only password and still redacts it from rows', () => {
+  const auth = getGodTable('auth_users')!;
+  const created = sanitizeWritePayload(
+    auth,
+    { email: 'new@shop.test', password: 'temp-pass-1', first_name: 'New' },
+    'create'
+  );
+  assert.equal(created.ok, true);
+  if (created.ok) {
+    assert.equal(created.payload.password, 'temp-pass-1');
+    assert.equal(created.payload.email, 'new@shop.test');
+  }
+  assert.equal(redactRow({ id: 'u1', email: 'a@b.co', password: 'HASH' })?.password, undefined);
+});
+
 test('user_profiles create requires an Auth user id', () => {
   const missing = sanitizeWritePayload(getGodTable('user_profiles')!, { email: 'x@y.z', role: 'fse' }, 'create');
   assert.equal(missing.ok, false);

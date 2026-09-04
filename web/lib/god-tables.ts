@@ -758,7 +758,12 @@ export function sanitizeWritePayload(
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     const name = String(key || '').trim();
     if (!name || name.startsWith('_')) continue;
-    if (isSecretColumn(name)) continue;
+    if (isSecretColumn(name)) {
+      if (def.virtual && name === 'password' && value != null && String(value) !== '') {
+        payload[name] = String(value);
+      }
+      continue;
+    }
     if (mode === 'update' && (name === def.pk || name === 'id')) continue;
     if (ALWAYS_READ_ONLY_COLUMNS.has(name) && name !== 'id') continue;
     if (mode === 'create' && name === def.pk && def.virtual) continue;
