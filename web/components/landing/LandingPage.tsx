@@ -2,8 +2,11 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { LandingShell } from './LandingShell';
+import { FindRepControl } from './FindRepControl';
 import { plansHrefForAudience, type PlanAudience } from '@/lib/billing/plan-tiles';
+import { shouldAutoOpenFindRep } from '@/lib/clinic-service-lead';
 import './landing.css';
 
 const LANDING_PLAN_ROLE: Record<'shop' | 'clinic' | 'parts', PlanAudience> = {
@@ -18,9 +21,9 @@ export function LandingSplash() {
       <div className="text-center">
         <div className="lp-brand-biz">Medical Repair Network</div>
         <div className="lp-brand-name" style={{ fontSize: 28 }}>
-          Total Service Pro
+          RepairPlanet
         </div>
-        <div className="lp-brand-sub">Laser Equipment Service</div>
+        <div className="lp-brand-sub">Total Service Pro · Medical Equipment Service</div>
       </div>
     </div>
   );
@@ -58,6 +61,7 @@ const AUDIENCES: {
     label: 'Repair companies',
     signup: '/signup/company',
     lines: [
+      'Jobs near you when clinics need a technician',
       'Color-coded shop calendar — assign calls by field engineer',
       'View service history on every job',
       'Keep service manuals in one place',
@@ -74,8 +78,8 @@ const AUDIENCES: {
     label: 'Clinics',
     signup: '/signup/owner',
     lines: [
-      'Find a Repair Company',
-      'Receive multiple bids on service requests',
+      'Find a service rep near you — no account required',
+      'Lasers, lithotriptors, and C-arms first',
       'View service history and track maintenance costs',
     ],
     shot: {
@@ -89,7 +93,7 @@ const AUDIENCES: {
     label: 'Parts sellers',
     signup: '/signup/supplier',
     lines: [
-      'Connect with Repair Companies and laser owners',
+      'Connect with Repair Companies and clinics',
       'Get found when they need a part',
       'List parts that are on the shelf',
     ],
@@ -120,7 +124,7 @@ const HERO_SLIDES: {
   {
     audience: 'Clinics',
     title: 'Find a Repair Company',
-    sub: 'Match your lasers with service companies that can work on them.',
+    sub: 'Match lasers, lithotriptors, and C-arms with shops that can work on them.',
     shot: {
       src: '/landing/directory.webp',
       alt: 'Directory search to find a repair company among service companies, clinics, resellers, and suppliers',
@@ -129,7 +133,7 @@ const HERO_SLIDES: {
   },
   {
     audience: 'Parts sellers',
-    title: 'Connect with Repair Companies and Laser Owners',
+    title: 'Connect with Repair Companies and Clinics',
     sub: 'Get found when a shop needs a part that’s on your shelf.',
     shot: {
       src: '/landing/parts.webp',
@@ -150,7 +154,7 @@ const HERO_SLIDES: {
   {
     audience: 'Clinics',
     title: 'View Service History',
-    sub: 'Track work and maintenance costs on every laser.',
+    sub: 'Track work and maintenance costs on every system.',
     shot: {
       src: '/landing/reports.webp',
       alt: 'Service reports list with drafts and completed work',
@@ -215,6 +219,7 @@ const HERO_COVER_ID: Record<string, string> = {
 };
 
 function HeroCarousel() {
+  const router = useRouter();
   const n = HERO_SLIDES.length;
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -223,6 +228,13 @@ function HeroCarousel() {
 
   const go = (dir: number) => setI((x) => (x + dir + n) % n);
   const goTo = (idx: number) => setI(((idx % n) + n) % n);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (shouldAutoOpenFindRep(window.location.search, window.location.hash)) {
+      router.replace('/find-a-rep');
+    }
+  }, [router]);
 
   useEffect(() => {
     if (paused || hold) return;
@@ -265,7 +277,7 @@ function HeroCarousel() {
     <section
       className="lp-hero-carousel"
       aria-roledescription="carousel"
-      aria-label="Who Total Service Pro is for"
+      aria-label="Who RepairPlanet and Total Service Pro are for"
       onMouseEnter={() => setHold(true)}
       onMouseLeave={() => setHold(false)}
       onFocusCapture={() => setHold(true)}
@@ -275,7 +287,10 @@ function HeroCarousel() {
         }
       }}
     >
-      <p className="lp-hero-mission">Matching laser owners with service companies.</p>
+      <p className="lp-hero-mission">
+        RepairPlanet is a biomedical equipment service network — lasers, lithotriptors,
+        and C-arms first. Total Service Pro is the operating system behind it.
+      </p>
       <div
         className="lp-hero-viewport"
         tabIndex={0}
@@ -374,9 +389,7 @@ function HeroCarousel() {
         </div>
         <div className="lp-hero-cta">
           <div className="lp-actions">
-            <Link href="/signup" className="lp-btn lp-btn-primary">
-              Register for Total Service Pro
-            </Link>
+            <FindRepControl variant="hero" label="Find a service rep near me" />
             <Link href="/plans" className="lp-btn lp-btn-outline">
               Start on the free plan
             </Link>
@@ -386,6 +399,12 @@ function HeroCarousel() {
           </div>
           <p className="lp-hero-note">
             A free plan is included. Upgrade when you need more.
+          </p>
+          <p className="lp-hero-note">
+            Service company?{' '}
+            <Link href="/signup/company">Jobs near you — register your shop</Link>
+            . Field engineers join through their shop.{' '}
+            <Link href="/signup">Register for Total Service Pro</Link>
           </p>
         </div>
       </div>
@@ -443,7 +462,10 @@ export function LandingPage() {
 
       <section className="lp-section" id="features">
         <h2 className="lp-h2">What you get</h2>
-        <p className="lp-lede">Repair company, clinic, or parts seller.</p>
+        <p className="lp-lede">
+          RepairPlanet is the biomedical service network. Total Service Pro is the
+          shop, clinic, and parts operating system behind it.
+        </p>
         <div className="lp-role-cols">
           {AUDIENCES.map((r) => (
             <article key={r.id} className="lp-role-col">
@@ -459,7 +481,18 @@ export function LandingPage() {
                 caption={r.shot.caption}
               />
               <div className="lp-actions">
-                <Link href={r.signup} className="lp-btn lp-btn-primary">
+                {r.id === 'clinic' ? (
+                  <FindRepControl variant="column" label="Find a service rep near me" />
+                ) : null}
+                {r.id === 'shop' ? (
+                  <Link href={r.signup} className="lp-btn lp-btn-primary">
+                    Get jobs near you
+                  </Link>
+                ) : null}
+                <Link
+                  href={r.signup}
+                  className={r.id === 'parts' ? 'lp-btn lp-btn-primary' : 'lp-btn lp-btn-ghost'}
+                >
                   Register for Total Service Pro
                 </Link>
                 <Link
