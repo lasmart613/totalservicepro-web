@@ -341,6 +341,54 @@ html.landing-mode body {
   color: #9CA3AF;
 }
 
+.lp-hero-find {
+  scroll-margin-top: 88px;
+  margin: 0 0 22px;
+}
+
+.lp-find-card.is-hero {
+  width: 100%;
+  max-width: none;
+  padding: 18px 18px 4px;
+  box-shadow: 0 16px 32px rgba(0, 0, 0, 0.32);
+}
+
+.lp-find-card.is-hero .lp-modal-title {
+  font-size: 22px;
+  line-height: 1.25;
+  margin: 0 0 8px;
+}
+
+.lp-find-card.is-hero .lp-modal-lede {
+  margin: 0 0 4px;
+  font-size: 13px;
+}
+
+.lp-find-card.is-hero .lp-lead-form {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px 14px;
+  padding: 8px 0 12px;
+}
+
+.lp-find-card.is-hero .lp-field-row,
+.lp-find-card.is-hero .lp-field-hint,
+.lp-find-card.is-hero .lp-field-span,
+.lp-find-card.is-hero .lp-modal-actions,
+.lp-find-card.is-hero .lp-hp {
+  grid-column: 1 / -1;
+}
+
+.lp-find-card.is-hero .lp-field input,
+.lp-find-card.is-hero .lp-field select,
+.lp-find-card.is-hero .lp-field textarea {
+  padding: 8px 10px;
+}
+
+.lp-find-card.is-hero .lp-btn-primary {
+  margin-bottom: 12px;
+}
+
 .lp-hero-copy {
   position: relative;
   isolation: isolate;
@@ -1049,7 +1097,8 @@ html.landing-mode body {
     display: none;
   }
 
-  .lp-field-row {
+  .lp-field-row,
+  .lp-find-card.is-hero .lp-lead-form {
     grid-template-columns: 1fr;
   }
 

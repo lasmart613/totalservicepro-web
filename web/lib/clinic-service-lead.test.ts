@@ -4,14 +4,18 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  CLINIC_LEAD_ORG_SOURCE,
   clinicLeadConfirmationHtml,
   clinicLeadConfirmationSubject,
   clinicLeadConfirmationText,
   clinicLeadFromAddress,
   clinicLeadHtml,
+  clinicLeadLocationParts,
   clinicLeadSubject,
   clinicLeadTeamRecipients,
   clinicLeadText,
+  isReusableGuestClinicOrg,
+  organizationInsertFromClinicLead,
   parseClinicLead,
   planClinicLeadMail,
   shouldAutoOpenFindRep,
@@ -132,13 +136,88 @@ test('team mail follows the product inbox pattern and confirms the clinic when e
   });
 });
 
+test('guest lead builds a new clinic/owner org insert and never a live-org update', () => {
+  const parsed = parseClinicLead(SAMPLE);
+  assert.equal(parsed.ok, true);
+  if (!parsed.ok || parsed.spam) return;
+
+  const loc = clinicLeadLocationParts(parsed.lead.location);
+  assert.equal(loc.city, 'Somis');
+  assert.equal(loc.zip, '93066');
+  assert.equal(loc.state, 'CA');
+  assert.deepEqual(clinicLeadLocationParts('93066'), { city: '', zip: '93066', state: null });
+
+  const payload = organizationInsertFromClinicLead(parsed.lead);
+  assert.equal(payload.type, 'customer');
+  assert.equal(payload.is_premium, false);
+  assert.equal(payload.is_active, false);
+  assert.equal(payload.lead_source, CLINIC_LEAD_ORG_SOURCE);
+  assert.equal(payload.list_in_directory, false);
+  assert.equal(payload.name, 'QA Test Clinic');
+  assert.equal(payload.contact_name, 'Pat Rivera');
+  assert.equal(payload.email, 'pat@qa-test.example');
+  assert.equal(payload.city, 'Somis');
+  assert.equal(payload.zip, '93066');
+  assert.equal(payload.state, 'CA');
+  assert.equal(payload.created_by, undefined);
+  assert.match(String(payload.notes), /landing_find_a_rep/);
+  assert.match(String(payload.notes), /Laser/);
+  assert.doesNotMatch(String(payload.type), /service_company/);
+
+  assert.equal(
+    isReusableGuestClinicOrg({
+      type: 'customer',
+      is_premium: false,
+      is_active: false,
+      lead_source: CLINIC_LEAD_ORG_SOURCE,
+    }),
+    true
+  );
+  assert.equal(
+    isReusableGuestClinicOrg({
+      type: 'service_company',
+      is_premium: false,
+      is_active: false,
+      lead_source: CLINIC_LEAD_ORG_SOURCE,
+    }),
+    false
+  );
+  assert.equal(
+    isReusableGuestClinicOrg({
+      type: 'customer',
+      is_premium: true,
+      is_active: false,
+      lead_source: CLINIC_LEAD_ORG_SOURCE,
+    }),
+    false
+  );
+  assert.equal(
+    isReusableGuestClinicOrg({
+      type: 'customer',
+      is_premium: false,
+      is_active: true,
+      lead_source: CLINIC_LEAD_ORG_SOURCE,
+    }),
+    false
+  );
+  assert.equal(
+    isReusableGuestClinicOrg({
+      type: 'customer',
+      is_premium: false,
+      is_active: false,
+      lead_source: null,
+    }),
+    false
+  );
+});
+
 test('lead emails stay RepairPlanet-branded and avoid forbidden copy', () => {
   const parsed = parseClinicLead(SAMPLE);
   assert.equal(parsed.ok, true);
   if (!parsed.ok || parsed.spam) return;
   const subject = clinicLeadSubject(parsed.lead);
-  const text = clinicLeadText({ lead: parsed.lead, confirmationSent: true });
-  const html = clinicLeadHtml({ lead: parsed.lead, confirmationSent: true });
+  const text = clinicLeadText({ lead: parsed.lead, confirmationSent: true, organizationId: 4242 });
+  const html = clinicLeadHtml({ lead: parsed.lead, confirmationSent: true, organizationId: 4242 });
   const confirmText = clinicLeadConfirmationText();
   const confirmHtml = clinicLeadConfirmationHtml();
   assert.match(subject, /RepairPlanet clinic lead/);
@@ -148,6 +227,9 @@ test('lead emails stay RepairPlanet-branded and avoid forbidden copy', () => {
   assert.match(text, /no TSP account/i);
   assert.match(text, /Do not treat this as a live marketplace RFQ/);
   assert.match(text, /do not blast shops/i);
+  assert.match(text, /Organizations row: #4242/);
+  assert.match(text, /Do not merge this into a live Premium/);
+  assert.match(html, /Organizations row: #4242/);
   assert.match(html, /RepairPlanet/);
   assert.match(clinicLeadConfirmationSubject(), /RepairPlanet/);
   assert.match(confirmText, /nearby service rep/);
@@ -177,8 +259,11 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   const findPage = readFileSync(join(here, '../app/find-a-rep/page.tsx'), 'utf8');
   const form = readFileSync(join(here, '../components/landing/FindRepForm.tsx'), 'utf8');
 
-  assert.match(page, /FindRepControl/);
+  assert.match(page, /FindRepForm/);
+  assert.match(page, /variant="hero"/);
+  assert.match(page, /id="find-a-rep"/);
   assert.match(page, /Find a service rep near me/);
+  assert.doesNotMatch(page, /FindRepControl variant="hero"/);
   assert.match(page, /Jobs near you — register your shop/);
   assert.match(page, /\/signup\/company/);
   assert.match(page, /Register for Total Service Pro/);
@@ -193,7 +278,8 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.match(shell, /FindRepControl/);
   assert.match(shell, /Medical Repair Network/);
   assert.match(shell, /Total Service Pro/);
-  assert.match(control, /\/find-a-rep/);
+  assert.match(control, /\/#find-a-rep/);
+  assert.match(form, /Find a Service\/Repair Company Near Me/);
   assert.match(form, /\/api\/clinic-service-leads/);
   assert.match(form, /No Total Service Pro/);
   assert.match(form, /equipmentType/);
@@ -201,6 +287,7 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.match(form, /lithotriptors/);
   assert.match(form, /C-arms first/);
   assert.match(form, /clinicName/);
+  assert.doesNotMatch(form, /Free to start/);
   const types = readFileSync(join(here, './clinic-service-lead.ts'), 'utf8');
   assert.match(types, /value: 'laser'/);
   assert.match(types, /value: 'lithotriptor'/);
@@ -221,9 +308,13 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
     'equipment type must sit near the top of the form'
   );
   assert.match(css, /\.lp-find-card\s*\{/);
+  assert.match(css, /\.lp-hero-find\s*\{/);
+  assert.match(css, /\.lp-find-card\.is-hero/);
   assert.match(layout, /RepairPlanet/);
   assert.match(findPage, /FindRepForm/);
   assert.match(page, /shouldAutoOpenFindRep/);
+  assert.match(page, /scrollIntoView/);
+  assert.doesNotMatch(page, /router\.replace\('\/find-a-rep'\)/);
   assert.doesNotMatch(page, /Free to start/);
   assert.doesNotMatch(page, /Perris/);
   assert.doesNotMatch(page, /\bFSE\b/);
@@ -239,17 +330,30 @@ test('clinic-service-leads API persists guest rows and emails the team, not serv
     join(here, '../supabase/migrations/20260904_000000_clinic_service_leads.sql'),
     'utf8'
   );
+  const orgMigration = readFileSync(
+    join(here, '../supabase/migrations/20260904_000002_clinic_lead_organization.sql'),
+    'utf8'
+  );
+  const helper = readFileSync(join(here, './clinic-service-lead.ts'), 'utf8');
   assert.match(route, /clinic_service_leads/);
+  assert.match(route, /insertOrganizationFromClinicLead/);
+  assert.match(route, /organizationCreated/);
   assert.match(route, /planClinicLeadMail/);
   assert.match(route, /RESEND_API_KEY/);
   assert.match(route, /clinicLeadConfirmation/);
   assert.match(route, /Does not require TSP/);
   assert.doesNotMatch(route, /service_requests/);
   assert.doesNotMatch(route, /product_issue_reports/);
-  assert.doesNotMatch(route, /from\('organizations'\)\.insert/);
+  assert.doesNotMatch(route, /from\('organizations'\)\.(update|upsert)/);
+  assert.doesNotMatch(route, /\.upsert\(/);
+  assert.match(helper, /insertOmittingCharOverflow/);
+  assert.match(helper, /customerOrgPayload/);
+  assert.match(helper, /Never updates/);
   assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.clinic_service_leads/);
   assert.match(migration, /equipment_type/);
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/);
   assert.match(migration, /Not marketplace RFQs/);
+  assert.match(orgMigration, /lead_source/);
+  assert.match(orgMigration, /organization_id bigint REFERENCES public\.organizations/);
   assert.match(route, /equipment_type/);
 });

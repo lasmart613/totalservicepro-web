@@ -4,7 +4,7 @@ import Link from 'next/link';
 
 type Variant = 'hero' | 'nav' | 'column';
 
-/** Primary clinic onramp. A real route so the form works even if JS is slow. */
+/** Scrolls to the inline home form. /find-a-rep still works as a dedicated page. */
 export function FindRepControl({
   variant = 'hero',
   label,
@@ -19,7 +19,7 @@ export function FindRepControl({
     variant === 'nav' ? 'lp-btn lp-btn-primary lp-find-nav' : 'lp-btn lp-btn-primary';
 
   return (
-    <Link href="/find-a-rep" className={triggerClass}>
+    <Link href="/#find-a-rep" className={triggerClass}>
       {buttonLabel}
     </Link>
   );

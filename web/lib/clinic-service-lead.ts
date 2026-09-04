@@ -2,14 +2,25 @@
  * Guest clinic / facility service leads from the logged-out RepairPlanet
  * landing. Not a marketplace RFQ and not a TSP product-issue report.
  * Team copy follows the product-inbox pattern (contact@ + QA).
+ *
+ * Submit also inserts a new owner/clinic row on `organizations` (type=customer),
+ * using the same payload helper as CRM customer create. Insert only — never
+ * update a live Premium, service-company, or claimed customer org.
  */
 
+import type { SupabaseClient } from '@supabase/supabase-js';
+import { insertOmittingCharOverflow, shortTicketPrefix } from './char-overflow.ts';
+import { customerOrgPayload, emptyCustomerForm } from './customer-form.ts';
+import { normalizeRegionInput } from './geo.ts';
 import {
   parseSubmittedEmail,
   productIssuesFromAddress,
   productIssuesTeamRecipients,
   PRODUCT_ISSUE_CONFIRM_REPLY_TO,
 } from './product-issues.ts';
+
+/** Guest landing source flag. Safe to persist when the column exists. */
+export const CLINIC_LEAD_ORG_SOURCE = 'landing_find_a_rep';
 
 export const CLINIC_LEAD_DESCRIPTION_MIN = 10;
 export const CLINIC_LEAD_DESCRIPTION_MAX = 2000;
@@ -199,6 +210,111 @@ export function planClinicLeadMail(opts: {
   };
 }
 
+export type ClinicLeadLocationParts = {
+  city: string;
+  zip: string;
+  state: string | null;
+};
+
+/** Split "Somis, CA 93066" / "93066" / "Los Angeles" for organizations columns. */
+export function clinicLeadLocationParts(location: string): ClinicLeadLocationParts {
+  const raw = String(location || '').trim();
+  const zipMatch = raw.match(/\b(\d{5})(?:-\d{4})?\b/);
+  const zip = zipMatch?.[1] ?? '';
+  let rest = raw.replace(/\b\d{5}(?:-\d{4})?\b/, '').replace(/[,\s]+$/g, '').trim();
+  let stateRaw = '';
+  const stateMatch = rest.match(/,\s*([A-Za-z][A-Za-z.\s]{1,40})$/);
+  if (stateMatch) {
+    stateRaw = stateMatch[1].trim();
+    rest = rest.slice(0, stateMatch.index).trim();
+  }
+  const region = normalizeRegionInput(stateRaw);
+  return {
+    city: rest,
+    zip,
+    state: region.state,
+  };
+}
+
+export function clinicLeadOrgNotes(lead: ClinicLead): string {
+  return [
+    `[${CLINIC_LEAD_ORG_SOURCE}] Guest clinic service request — not a live TSP customer account.`,
+    `Equipment: ${equipmentTypeLabel(lead)}`,
+    lead.manufacturer ? `Brand/model: ${lead.manufacturer}` : '',
+    lead.urgency ? `Urgency: ${lead.urgency}` : '',
+    `Location (as entered): ${lead.location}`,
+    '',
+    lead.description,
+  ]
+    .filter((line) => line !== '')
+    .join('\n');
+}
+
+/**
+ * New owner/clinic org row for a guest landing lead.
+ * Reuses customerOrgPayload (same as CRM create). Always a new insert —
+ * callers must not upsert/update existing live orgs by name.
+ */
+export function organizationInsertFromClinicLead(lead: ClinicLead): Record<string, unknown> {
+  const loc = clinicLeadLocationParts(lead.location);
+  const form = {
+    ...emptyCustomerForm(),
+    name: lead.clinicName,
+    contact_name: lead.contactName,
+    email: lead.email || '',
+    phone: lead.phone || '',
+    city: loc.city,
+    state: loc.state || '',
+    zip: loc.zip,
+    notes: clinicLeadOrgNotes(lead),
+  };
+  return customerOrgPayload(form, {
+    type: 'customer',
+    is_active: false,
+    is_premium: false,
+    facility_type: 'Laser Clinic / Medical Practice',
+    ticket_prefix: shortTicketPrefix(lead.clinicName),
+    lead_source: CLINIC_LEAD_ORG_SOURCE,
+    list_in_directory: false,
+  });
+}
+
+/** True only for a prior guest landing row — never a Premium or shop org. */
+export function isReusableGuestClinicOrg(row: {
+  type?: string | null;
+  is_premium?: boolean | null;
+  is_active?: boolean | null;
+  lead_source?: string | null;
+} | null | undefined): boolean {
+  if (!row) return false;
+  if (row.lead_source !== CLINIC_LEAD_ORG_SOURCE) return false;
+  if (row.is_premium === true) return false;
+  if (row.is_active !== false) return false;
+  const type = String(row.type || '').toLowerCase();
+  return type === 'customer' || type === 'laser_clinic';
+}
+
+/**
+ * Insert a new organizations row for this guest clinic. Never updates.
+ * Missing columns (lead_source, list_in_directory, is_premium) are omitted
+ * and retried via insertOmittingCharOverflow.
+ */
+export async function insertOrganizationFromClinicLead(
+  supabase: SupabaseClient,
+  lead: ClinicLead
+): Promise<{ id: string | number } | { error: string }> {
+  const payload = organizationInsertFromClinicLead(lead);
+  delete payload.created_by;
+  const { data, error } = await insertOmittingCharOverflow(supabase, 'organizations', payload, {
+    select: 'id',
+    maxAttempts: 24,
+  });
+  if (error || data?.id == null) {
+    return { error: error?.message || 'Could not create organization' };
+  }
+  return { id: data.id };
+}
+
 export function equipmentTypeLabel(lead: Pick<ClinicLead, 'equipmentType' | 'equipmentTypeOther'>): string {
   if (lead.equipmentType === 'other') {
     return lead.equipmentTypeOther || 'Other';
@@ -228,9 +344,17 @@ function confirmationNote(opts: {
   return 'No clinic email — confirmation was not sent.';
 }
 
+function organizationNote(organizationId?: string | number | null): string {
+  if (organizationId != null && organizationId !== '') {
+    return `Organizations row: #${organizationId} (type=customer, guest lead, is_active=false). Do not merge this into a live Premium or service-company org. Delete QA test orgs after review.`;
+  }
+  return 'Organizations row: insert was attempted as type=customer (clinic/owner). If missing, check service-role logs. Never attach this lead to a live customer org by name.';
+}
+
 export function clinicLeadText(opts: {
   lead: ClinicLead;
   confirmationSent?: boolean;
+  organizationId?: string | number | null;
 }): string {
   const { lead } = opts;
   return [
@@ -248,6 +372,7 @@ export function clinicLeadText(opts: {
     'What is going on:',
     lead.description,
     '',
+    organizationNote(opts.organizationId),
     confirmationNote({ email: lead.email, confirmationSent: opts.confirmationSent }),
     '',
     'Do not treat this as a live marketplace RFQ. Match a nearby shop; do not blast shops.',
@@ -265,12 +390,14 @@ function esc(s: string): string {
 export function clinicLeadHtml(opts: {
   lead: ClinicLead;
   confirmationSent?: boolean;
+  organizationId?: string | number | null;
 }): string {
   const { lead } = opts;
   return `<!DOCTYPE html>
 <html><body style="font-family:system-ui,sans-serif;color:#111827;line-height:1.45">
   <h2 style="color:#92400e;margin:0 0 12px">RepairPlanet — clinic service lead</h2>
   <p style="margin:0 0 8px;color:#6b7280;font-size:13px">Guest landing form. No Total Service Pro account. ${esc(confirmationNote({ email: lead.email, confirmationSent: opts.confirmationSent }))}</p>
+  <p style="margin:0 0 8px;color:#6b7280;font-size:13px">${esc(organizationNote(opts.organizationId))}</p>
   <table style="border-collapse:collapse;font-size:14px">
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Clinic / org</td><td>${esc(lead.clinicName)}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Location</td><td>${esc(lead.location)}</td></tr>
