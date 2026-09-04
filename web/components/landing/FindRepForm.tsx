@@ -8,6 +8,7 @@ import {
   CLINIC_LEAD_EQUIPMENT_OTHER_MAX,
   CLINIC_LEAD_EQUIPMENT_TYPES,
   CLINIC_LEAD_URGENCY,
+  SERVICE_REQUEST_TYPES,
 } from '@/lib/clinic-service-lead';
 
 export function FindRepForm({
@@ -24,13 +25,18 @@ export function FindRepForm({
   const [equipmentType, setEquipmentType] = useState('');
   const [equipmentTypeOther, setEquipmentTypeOther] = useState('');
   const [manufacturer, setManufacturer] = useState('');
+  const [model, setModel] = useState('');
+  const [serialNumber, setSerialNumber] = useState('');
+  const [serviceType, setServiceType] = useState('Emergency Repair');
   const [clinicName, setClinicName] = useState('');
   const [location, setLocation] = useState('');
   const [contactName, setContactName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
   const [description, setDescription] = useState('');
-  const [urgency, setUrgency] = useState('');
+  const [urgency, setUrgency] = useState('Medium');
+  const [preferredDate, setPreferredDate] = useState('');
+  const [errorCodes, setErrorCodes] = useState('');
   const [website, setWebsite] = useState('');
   const [sending, setSending] = useState(false);
   const [sent, setSent] = useState(false);
@@ -39,13 +45,18 @@ export function FindRepForm({
     setEquipmentType('');
     setEquipmentTypeOther('');
     setManufacturer('');
+    setModel('');
+    setSerialNumber('');
+    setServiceType('Emergency Repair');
     setClinicName('');
     setLocation('');
     setContactName('');
     setEmail('');
     setPhone('');
     setDescription('');
-    setUrgency('');
+    setUrgency('Medium');
+    setPreferredDate('');
+    setErrorCodes('');
     setWebsite('');
   }
 
@@ -60,14 +71,19 @@ export function FindRepForm({
         body: JSON.stringify({
           equipmentType,
           equipmentTypeOther: equipmentType === 'other' ? equipmentTypeOther : undefined,
-          manufacturer: manufacturer.trim() || undefined,
+          manufacturer: manufacturer.trim(),
+          model: model.trim(),
+          serialNumber: serialNumber.trim() || undefined,
+          serviceType,
           clinicName,
           location,
           contactName,
           email: email.trim() || undefined,
           phone: phone.trim() || undefined,
           description,
-          urgency: urgency || undefined,
+          urgency,
+          preferredDate: preferredDate || undefined,
+          errorCodes: errorCodes.trim() || undefined,
           website,
           userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : '',
         }),
@@ -93,8 +109,8 @@ export function FindRepForm({
       <div className={`lp-find-card${compact ? ' is-hero' : ''}`} id={id}>
         <TitleTag className="lp-modal-title">Request sent</TitleTag>
         <p className="lp-modal-lede">
-          RepairPlanet has your note. If you left an email, we sent a short confirmation.
-          A nearby shop will be matched — you do not need a Total Service Pro account for this.
+          RepairPlanet posted a service request for a nearby shop. If you left an email, we sent a
+          short confirmation. You do not need a Total Service Pro account for this.
         </p>
         <button type="button" className="lp-btn lp-btn-primary" onClick={() => setSent(false)}>
           Send another request
@@ -108,8 +124,8 @@ export function FindRepForm({
       <TitleTag className="lp-modal-title">Find a Service/Repair Company Near Me</TitleTag>
       <p className="lp-modal-lede">
         {compact
-          ? 'Lasers, lithotriptors, and C-arms first. No Total Service Pro account required — we match you with a nearby biomedical service shop.'
-          : 'Tell us the equipment type and what is going on. No Total Service Pro account required — RepairPlanet matches you with a nearby biomedical service shop. Lasers, lithotriptors, and C-arms first.'}
+          ? 'Lasers, lithotriptors, and C-arms first. No Total Service Pro account required — this creates a real service request for a nearby biomedical shop.'
+          : 'Tell us the equipment and what is going on. No Total Service Pro account required — RepairPlanet posts a service request for a nearby biomedical shop. Lasers, lithotriptors, and C-arms first.'}
       </p>
       <form onSubmit={submit} className="lp-lead-form">
         <label className="lp-field lp-hp" aria-hidden="true">
@@ -151,18 +167,54 @@ export function FindRepForm({
             />
           </label>
         ) : null}
-        {compact ? null : (
-          <label className="lp-field">
-            <span>Brand / model</span>
-            <input
-              type="text"
-              maxLength={80}
-              value={manufacturer}
-              onChange={(e) => setManufacturer(e.target.value)}
-              placeholder="Optional — e.g. Candela Vbeam, Dornier, GE OEC"
-            />
-          </label>
-        )}
+        <label className="lp-field">
+          <span>Brand</span>
+          <input
+            type="text"
+            required
+            minLength={2}
+            maxLength={80}
+            value={manufacturer}
+            onChange={(e) => setManufacturer(e.target.value)}
+            placeholder="e.g. Candela, Dornier, GE"
+          />
+        </label>
+        <label className="lp-field">
+          <span>Model</span>
+          <input
+            type="text"
+            required
+            minLength={1}
+            maxLength={80}
+            value={model}
+            onChange={(e) => setModel(e.target.value)}
+            placeholder="e.g. Vbeam, OEC 9900"
+          />
+        </label>
+        <label className="lp-field">
+          <span>Serial #</span>
+          <input
+            type="text"
+            maxLength={80}
+            value={serialNumber}
+            onChange={(e) => setSerialNumber(e.target.value)}
+            placeholder="Optional"
+          />
+        </label>
+        <label className="lp-field">
+          <span>Service type</span>
+          <select
+            required
+            value={serviceType}
+            onChange={(e) => setServiceType(e.target.value)}
+          >
+            {SERVICE_REQUEST_TYPES.map((t) => (
+              <option key={t} value={t}>
+                {t}
+              </option>
+            ))}
+          </select>
+        </label>
         <label className="lp-field">
           <span>Clinic or organization</span>
           <input
@@ -225,19 +277,34 @@ export function FindRepForm({
           </label>
         </div>
         <p className="lp-field-hint">Email or phone — whichever is easier.</p>
-        {compact ? null : (
-          <label className="lp-field">
-            <span>Urgency</span>
-            <select value={urgency} onChange={(e) => setUrgency(e.target.value)}>
-              <option value="">Optional</option>
-              {CLINIC_LEAD_URGENCY.map((u) => (
-                <option key={u.value} value={u.value}>
-                  {u.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
+        <label className="lp-field">
+          <span>Urgency</span>
+          <select required value={urgency} onChange={(e) => setUrgency(e.target.value)}>
+            {CLINIC_LEAD_URGENCY.map((u) => (
+              <option key={u.value} value={u.value}>
+                {u.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="lp-field">
+          <span>Preferred date</span>
+          <input
+            type="date"
+            value={preferredDate}
+            onChange={(e) => setPreferredDate(e.target.value)}
+          />
+        </label>
+        <label className="lp-field">
+          <span>Error codes</span>
+          <input
+            type="text"
+            maxLength={120}
+            value={errorCodes}
+            onChange={(e) => setErrorCodes(e.target.value)}
+            placeholder="Optional"
+          />
+        </label>
         <label className={`lp-field${compact ? ' lp-field-span' : ''}`}>
           <span>What is going on</span>
           <textarea
