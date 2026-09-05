@@ -66,3 +66,17 @@ test('creating a ticket notifies the assigned FSE', () => {
   assert.match(route, /Assignee is not on this shop/);
   assert.doesNotMatch(route, /hasServiceRole\(\) \? getSupabaseAdmin\(\) : userClient;\s*\n\s*const \{ data: ticket/);
 });
+
+test('manual resend can email the assigned FSE including self', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const route = readFileSync(join(here, '../app/api/tickets/notify-assignee/route.ts'), 'utf8');
+  assert.match(route, /body\.force === true/);
+  assert.match(route, /sameId\(assigneeId, user\.id\) && !force/);
+  assert.match(route, /sendTicketAssignedEmail/);
+  const assignLib = readFileSync(join(here, './ticket-assignees.ts'), 'utf8');
+  assert.match(assignLib, /force \? \{ force: true \}/);
+  const edit = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
+  assert.match(edit, /Email ticket to FSE/);
+  assert.match(edit, /canEmailAssignedFse/);
+  assert.match(edit, /force:\s*true/);
+});

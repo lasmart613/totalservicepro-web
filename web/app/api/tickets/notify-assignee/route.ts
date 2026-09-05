@@ -24,7 +24,8 @@ function addressLine(ticket: any): string {
 /**
  * POST /api/tickets/notify-assignee
  * Emails the assigned FSE and writes an in-app notification.
- * Skips email when the assignee is the person creating/saving the ticket.
+ * Skips email when the assignee is the person creating/saving the ticket,
+ * unless force=true (manual resend from Edit Ticket).
  */
 export async function POST(req: NextRequest) {
   try {
@@ -105,7 +106,8 @@ export async function POST(req: NextRequest) {
     if (!assigneeId) {
       return NextResponse.json({ ok: true, emailed: false, skipped: 'unassigned' });
     }
-    if (sameId(assigneeId, user.id)) {
+    const force = body.force === true || body.manual === true;
+    if (sameId(assigneeId, user.id) && !force) {
       return NextResponse.json({ ok: true, emailed: false, skipped: 'self' });
     }
 
