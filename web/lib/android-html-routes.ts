@@ -57,10 +57,17 @@ function param(search: string, name: string): string | null {
 
 /** Return a Next.js path (with query) or null if this is not an Android HTML asset. */
 export function mapAndroidHtmlPath(pathname: string, search = ''): string | null {
-  const base = fileBase(pathname);
+  let path = pathname;
+  let q = search;
+  const cut = pathname.indexOf('?');
+  if (cut >= 0) {
+    path = pathname.slice(0, cut);
+    if (!q) q = pathname.slice(cut);
+  }
+  const base = fileBase(path);
   if (!base) return null;
 
-  const id = param(search, 'id') || param(search, 'request');
+  const id = param(q, 'id') || param(q, 'request');
 
   if (base === 'accepted_bids') {
     return id ? `/accepted-bids?id=${encodeURIComponent(id)}` : '/accepted-bids';
@@ -75,11 +82,11 @@ export function mapAndroidHtmlPath(pathname: string, search = ''): string | null
 
   const dest = FILE_TO_PATH[base];
   if (!dest) {
-    return `/${base.replace(/_/g, '-')}${search || ''}`;
+    return `/${base.replace(/_/g, '-')}${q || ''}`;
   }
-  if (search && dest !== '/') {
+  if (q && dest !== '/') {
     // Keep extra query except we already handled id special cases
-    return dest + (search.startsWith('?') ? search : `?${search}`);
+    return dest + (q.startsWith('?') ? q : `?${q}`);
   }
   return dest;
 }
