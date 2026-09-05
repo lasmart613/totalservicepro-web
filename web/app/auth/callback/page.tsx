@@ -7,6 +7,7 @@ import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/clien
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { claimCustomerInvite } from '@/lib/customer-invite-client';
 import { destAfterInviteClaim, inviteInPlay, type InviteClaimResult } from '@/lib/invite-claim';
+import { isTspAndroidWebView } from '@/lib/android-session';
 
 function safeNextPath(raw: string | null): string {
   if (!raw) return '';
@@ -292,6 +293,9 @@ async function maybeHandoffToAndroid(
   setMessage: (v: string) => void
 ) {
   try {
+    // Already inside the TSP WebView — stay on the live site, do not bounce
+    // out through the custom scheme (that is for Chrome → app handoff).
+    if (isTspAndroidWebView()) return;
     const { data } = await supabase.auth.getSession();
     const access = data.session?.access_token;
     const refresh = data.session?.refresh_token || '';

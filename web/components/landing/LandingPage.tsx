@@ -573,7 +573,7 @@ export function LandingPage() {
       <section className="lp-section lp-phones" id="app">
         <div className="lp-phones-copy">
           <h2 className="lp-h2">Same account in the field</h2>
-          <p className="lp-lede">View or edit Schedule, find parts, search service manuals, and create service reports on Android or IOS.</p>
+          <p className="lp-lede">View or edit Schedule, find parts, search service manuals, and create service reports on Android or iOS.</p>
           <p className="lp-kicker">Coming soon</p>
           <div className="lp-store-badges" role="group" aria-label="Mobile apps coming soon">
             <span className="lp-store-badge lp-store-badge-play">

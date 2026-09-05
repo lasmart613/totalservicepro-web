@@ -203,6 +203,7 @@ test('Header and landing chrome always expose Report an Issue with a guest email
   assert.match(control, /\/api\/product-issues/);
   assert.match(control, /pageUrl/);
   assert.match(control, /screenshot/i);
+  assert.doesNotMatch(control, /tester build/i);
   assert.match(control, /Email \(optional\)/);
   assert.match(control, /guestEmail/);
   assert.match(control, /sessionEmail/);
