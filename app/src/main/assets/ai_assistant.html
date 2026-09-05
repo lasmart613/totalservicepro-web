@@ -382,6 +382,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="service-company-gate.js"></script>
 <script>
     const supabaseClient = supabase.createClient(
         'https://yljztfajyvjzqikxdddf.supabase.co',
@@ -453,10 +454,13 @@
         const { data: { user } } = await supabaseClient.auth.getUser();
         if (!user) { navigateTo('index.html'); return; }
         currentUserId = user.id;
+        const access = await tspLoadServiceAccess(supabaseClient, user);
+        if (!access.allowed) {
+            buildGateUI();
+            return;
+        }
 
-        const { data: sub } = await supabaseClient.from('subscriptions').select('tier,status,expires_at').eq('user_id', user.id).single();
-        const isPremium = sub && ['premium','team','enterprise'].includes(sub.tier) && sub.status === 'active';
-        buildUI(isPremium);
+        buildUI(true);
         loadState();
         await loadManuals();
         renderSavedMessages();
@@ -581,9 +585,9 @@
         document.getElementById('chatOuter').innerHTML = `
             <div class="premium-gate">
                 <div class="premium-gate-icon">🤖</div>
-                <div class="premium-gate-title">Premium Feature</div>
-                <div class="premium-gate-sub">The AI troubleshooting assistant requires a Premium subscription.</div>
-                <button class="btn btn-primary" onclick="navigateTo('paywall.html')">Upgrade to Premium</button>
+                <div class="premium-gate-title">Service Company only</div>
+                <div class="premium-gate-sub">The repair AI assistant is for service companies. Laser owners and parts suppliers do not get this tool.</div>
+                <button class="btn btn-primary" onclick="navigateTo('index.html')">Back</button>
             </div>
         `;
     }

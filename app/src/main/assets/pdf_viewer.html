@@ -6,6 +6,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Service Manual Viewer</title>
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <script src="service-company-gate.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -237,6 +238,17 @@
     }
 
     async function init() {
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) {
+            showError('Please log in. Service manuals are for service companies.');
+            return;
+        }
+        const access = await tspLoadServiceAccess(supabaseClient, user);
+        if (!access.allowed) {
+            showError('Service manuals are for service companies.');
+            return;
+        }
+
         const headerTitleEl = document.querySelector('.header-title');
         if (headerTitleEl) headerTitleEl.textContent = title;
         showIncompleteBadge(params.get('incomplete') === '1');

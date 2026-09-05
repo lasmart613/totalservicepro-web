@@ -240,6 +240,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="service-company-gate.js"></script>
 <script>
     const supabaseClient = supabase.createClient(
         'https://yljztfajyvjzqikxdddf.supabase.co',
@@ -296,6 +297,19 @@
         } catch(e) {}
 
         updateAuthUI();
+
+        const { data: { user } } = await supabaseClient.auth.getUser();
+        if (!user) {
+            document.getElementById('mainContent').innerHTML =
+                `<div class="empty-state"><h3>Please log in</h3><p>Service manuals are for service companies.</p></div>`;
+            return;
+        }
+        const access = await tspLoadServiceAccess(supabaseClient, user);
+        if (!access.allowed) {
+            document.getElementById('mainContent').innerHTML =
+                `<div class="empty-state"><h3>Service Company only</h3><p>Service manuals are for service companies.</p></div>`;
+            return;
+        }
 
         try {
             await loadManuals();

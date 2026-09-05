@@ -109,7 +109,7 @@ export function ReportIssueControl({ variant = 'app' }: { variant?: Variant }) {
                   Report an Issue
                 </h2>
                 <p className="text-xs text-[var(--text3,#9CA3AF)] mt-0.5">
-                  Sends a short note to the Total Service Pro product team. Screenshot upload can wait.
+                  Sends a short note to the Total Service Pro product team. A screenshot is optional.
                 </p>
               </div>
               <button
@@ -163,7 +163,7 @@ export function ReportIssueControl({ variant = 'app' }: { variant?: Variant }) {
                 </label>
               )}
               <p className="text-[11px] text-[var(--text3,#9CA3AF)]">
-                Optional screenshot: not required for this tester build.
+                Optional screenshot: a short description is enough. Add your email if you want a confirmation.
               </p>
               <div className="flex items-center justify-end gap-2">
                 <button type="button" className="btn btn-secondary text-sm px-3 py-1.5" onClick={() => setOpen(false)}>

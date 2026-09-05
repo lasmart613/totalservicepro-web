@@ -98,6 +98,7 @@ public class MainActivity extends AppCompatActivity {
         ASSET_TO_PATH.put("service_hub", "/hub");
         ASSET_TO_PATH.put("paywall", "/plans");
         ASSET_TO_PATH.put("coming_soon", "/#app");
+        ASSET_TO_PATH.put("find_a_rep", "/find-a-rep");
     }
 
     private WebView webView;
@@ -107,12 +108,15 @@ public class MainActivity extends AppCompatActivity {
     private BiometricPrompt biometricPrompt;
     private ValueCallback<Uri[]> filePathCallback;
     private ActivityResultLauncher<Intent> fileChooserLauncher;
+    private String pendingLaunchUrl = null;
 
     @SuppressLint("SetJavaScriptEnabled")
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        captureLaunchIntent(getIntent());
 
         android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         storedSession = prefs.getString(PREFS_SESSION_KEY, null);
@@ -136,6 +140,16 @@ public class MainActivity extends AppCompatActivity {
             showBiometricPrompt(this::loadApp);
         } else {
             loadApp();
+        }
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        captureLaunchIntent(intent);
+        if (webView != null) {
+            applyPendingLaunch();
         }
     }
 
@@ -375,7 +389,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/1.3");
+        settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/1.4");
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
         CookieManager cookies = CookieManager.getInstance();
@@ -424,11 +438,15 @@ public class MainActivity extends AppCompatActivity {
                     || (name != null && name.toLowerCase(Locale.US).endsWith(".pdf"))
                     || (url != null && url.toLowerCase(Locale.US).contains(".pdf"));
             if (pdf) {
-                Toast.makeText(MainActivity.this,
-                        "Manuals stay in the in-app viewer — download is disabled.",
-                        Toast.LENGTH_LONG).show();
                 if (url != null && isManualHost(url)) {
+                    Toast.makeText(MainActivity.this,
+                            "Manuals stay in the in-app viewer — download is disabled.",
+                            Toast.LENGTH_LONG).show();
                     webView.loadUrl(PRODUCTION_ORIGIN + "/manuals/view");
+                } else {
+                    Toast.makeText(MainActivity.this,
+                            "Open this file in the app — download is not used here.",
+                            Toast.LENGTH_SHORT).show();
                 }
                 return;
             }
@@ -474,6 +492,11 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String chooseStartUrl() {
+        if (pendingLaunchUrl != null) {
+            String launch = pendingLaunchUrl;
+            pendingLaunchUrl = null;
+            return launch;
+        }
         String last = getSharedPreferences(PREFS_NAME, MODE_PRIVATE).getString(PREFS_LAST_URL, null);
         if (isNetworkAvailable()) {
             if (last != null && isAllowedWebUrl(last) && !looksLikePdfDownload(last)) {
@@ -504,6 +527,11 @@ public class MainActivity extends AppCompatActivity {
             } catch (Exception ignored) {
             }
             return false;
+        }
+        if (lower.startsWith("totalservicepro://")) {
+            captureLaunchIntent(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            applyPendingLaunch();
+            return true;
         }
         if (lower.startsWith("intent:") || lower.startsWith("market:")) return false;
         if (lower.contains("play.google.com/store") || lower.contains("apps.apple.com")) {
@@ -597,19 +625,116 @@ public class MainActivity extends AppCompatActivity {
 
     private void injectStoredSession(WebView view) {
         if (storedSession == null || storedSession.isEmpty()) return;
-        String escaped = storedSession.replace("\\", "\\\\").replace("'", "\\'");
+        String payload = persistableSessionJson(storedSession);
+        if (payload == null) payload = storedSession;
+        String escaped = payload.replace("\\", "\\\\").replace("'", "\\'");
         view.evaluateJavascript(
                 "(function(){" +
                         "try{" +
                         "var sessStr='" + escaped + "';" +
-                        "if(sessStr){" +
+                        "if(!sessStr) return;" +
                         "try{localStorage.setItem('tsp-auth-token', sessStr);}catch(e){}" +
                         "if(typeof restoreSession==='function'){restoreSession(sessStr);}" +
-                        "}" +
+                        "if(window.__tspRestoreAndroidSession){window.__tspRestoreAndroidSession(sessStr);}" +
                         "}catch(e){}" +
                         "})();",
                 null
         );
+    }
+
+    private String persistableSessionJson(String raw) {
+        try {
+            org.json.JSONObject parsed = new org.json.JSONObject(raw);
+            org.json.JSONObject sess = parsed.has("currentSession")
+                    ? parsed.getJSONObject("currentSession")
+                    : parsed;
+            String access = sess.optString("access_token", "");
+            if (access.isEmpty()) return null;
+            org.json.JSONObject current = new org.json.JSONObject();
+            current.put("access_token", access);
+            current.put("refresh_token", sess.optString("refresh_token", ""));
+            if (sess.has("expires_at")) current.put("expires_at", sess.get("expires_at"));
+            org.json.JSONObject stored = new org.json.JSONObject();
+            stored.put("currentSession", current);
+            if (sess.has("expires_at")) stored.put("expiresAt", sess.get("expires_at"));
+            return stored.toString();
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
+    private void captureLaunchIntent(Intent intent) {
+        if (intent == null) return;
+        Uri uri = intent.getData();
+        if (uri == null) return;
+        String scheme = uri.getScheme();
+        if (scheme == null) return;
+        if ("totalservicepro".equalsIgnoreCase(scheme)) {
+            pendingLaunchUrl = productionAuthCallbackUrl(uri);
+            rememberSessionFromAuthUri(uri);
+            return;
+        }
+        if (("https".equalsIgnoreCase(scheme) || "http".equalsIgnoreCase(scheme))
+                && isAllowedWebUrl(uri.toString())
+                && !looksLikePdfDownload(uri.toString())) {
+            pendingLaunchUrl = uri.toString();
+        }
+    }
+
+    private void applyPendingLaunch() {
+        if (webView == null || pendingLaunchUrl == null) return;
+        String url = pendingLaunchUrl;
+        pendingLaunchUrl = null;
+        webView.loadUrl(url);
+    }
+
+    private String productionAuthCallbackUrl(Uri uri) {
+        String fragment = uri.getEncodedFragment();
+        if (fragment == null || fragment.isEmpty()) {
+            String query = uri.getEncodedQuery();
+            fragment = query != null ? query : "";
+        }
+        String next = "/";
+        try {
+            String raw = uri.getFragment() != null ? uri.getFragment() : uri.getQuery();
+            if (raw != null) {
+                android.net.Uri q = android.net.Uri.parse("https://repairplanet.net/?" + raw);
+                String candidate = q.getQueryParameter("next");
+                if (candidate != null && candidate.startsWith("/") && !candidate.startsWith("//")) {
+                    next = candidate;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        String dest = PRODUCTION_ORIGIN + "/auth/callback";
+        if (!"/".equals(next)) {
+            dest += "?next=" + Uri.encode(next);
+        }
+        if (fragment != null && !fragment.isEmpty()) {
+            dest += "#" + fragment;
+        }
+        return dest;
+    }
+
+    private void rememberSessionFromAuthUri(Uri uri) {
+        try {
+            String raw = uri.getFragment() != null ? uri.getFragment() : uri.getQuery();
+            if (raw == null) return;
+            android.net.Uri q = android.net.Uri.parse("https://repairplanet.net/?" + raw);
+            String access = q.getQueryParameter("access_token");
+            String refresh = q.getQueryParameter("refresh_token");
+            if (access == null || access.isEmpty()) return;
+            org.json.JSONObject sess = new org.json.JSONObject();
+            sess.put("access_token", access);
+            sess.put("refresh_token", refresh != null ? refresh : "");
+            storedSession = sess.toString();
+            getSharedPreferences(PREFS_NAME, MODE_PRIVATE)
+                    .edit()
+                    .putString(PREFS_SESSION_KEY, storedSession)
+                    .apply();
+        } catch (Exception e) {
+            Log.w(TAG, "Could not cache auth-callback tokens", e);
+        }
     }
 
     private boolean isNetworkAvailable() {

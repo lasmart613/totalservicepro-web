@@ -31,6 +31,13 @@ const FILE_TO_PATH: Record<string, string> = {
   onboarding: '/onboarding',
   list_equipment: '/marketplace',
   list_parts: '/marketplace/parts',
+  settings: '/settings',
+  user_profile: '/profile',
+  parts_catalog: '/parts',
+  service_hub: '/hub',
+  paywall: '/plans',
+  coming_soon: '/',
+  find_a_rep: '/find-a-rep',
 };
 
 function fileBase(pathname: string): string | null {
