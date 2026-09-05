@@ -334,9 +334,8 @@ function HeroCarousel() {
         }
       }}
     >
-      <p className="lp-hero-mission">
-        RepairPlanet is a biomedical equipment service network — lasers, lithotriptors,
-        and C-arms first. Total Service Pro is the operating system behind it.
+      <p className="lp-hero-tagline">
+        Connecting Medical Equipment Owners to Top Service Professionals
       </p>
       <aside className="lp-hero-find" id="find-a-rep" aria-label="Find a service or repair company">
         <FindRepForm variant="hero" />

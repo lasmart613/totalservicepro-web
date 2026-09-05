@@ -65,13 +65,16 @@ test('logged-out hero has a unique subtitle on every slide and no trial phrasing
     'Bid jobs and find parts from one shop account.',
   ]);
   assert.match(page, /See Open Tickets and Upcoming Calls/);
-  assert.match(page, /RepairPlanet is a biomedical equipment service network/);
+  assert.match(page, /Connecting Medical Equipment Owners to Top Service Professionals/);
+  assert.doesNotMatch(page, /RepairPlanet is a biomedical equipment service network/);
   assert.match(page, /Start on the free plan/);
   assert.match(page, /A free plan is included\./);
   assert.match(page, /lp-hero-subhead/);
-  assert.match(page, /lp-hero-mission/);
+  assert.match(page, /lp-hero-tagline/);
   assert.match(css, /\.lp-hero-subhead\s*\{/);
-  assert.match(css, /\.lp-hero-mission\s*\{/);
+  assert.match(css, /\.lp-hero-tagline\s*\{/);
+  assert.match(css, /--lp-fluke-green:\s*#8BC53F/);
+  assert.match(css, /color:\s*var\(--lp-fluke-green\)/);
   assert.doesNotMatch(page, /Free to start/);
   assert.doesNotMatch(page, /Tickets, parts, and the marketplace in one shop/);
   assert.doesNotMatch(page, /lp-hero-benefits|lp-mini-carousel|hero-cards/);
