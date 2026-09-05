@@ -3,7 +3,7 @@
    page #111827 · nav #1F2937 · amber #FBBF24 / ink #111827
    secondary #1A2233 / text #F3E8D8 / border #4B5563
    heading #F3E8D8 · muted #9CA3AF · font DM Sans
-   mint accent #00D4AA (--lp-mint) for the hero tagline
+   Fluke button green #8BC53F (--lp-fluke-green) for the hero tagline
 */
 
 html.landing-mode main {
@@ -17,7 +17,7 @@ html.landing-mode body {
 }
 
 .lp-root {
-  --lp-mint: #00D4AA;
+  --lp-fluke-green: #8BC53F;
   background: #111827;
   color: #F3E8D8;
   min-height: 100vh;
@@ -348,7 +348,7 @@ html.landing-mode body {
   font-weight: 700;
   line-height: 1.28;
   letter-spacing: -0.015em;
-  color: var(--lp-mint);
+  color: var(--lp-fluke-green);
   text-wrap: balance;
 }
 

@@ -73,8 +73,8 @@ test('logged-out hero has a unique subtitle on every slide and no trial phrasing
   assert.match(page, /lp-hero-tagline/);
   assert.match(css, /\.lp-hero-subhead\s*\{/);
   assert.match(css, /\.lp-hero-tagline\s*\{/);
-  assert.match(css, /--lp-mint:\s*#00D4AA/);
-  assert.match(css, /color:\s*var\(--lp-mint\)/);
+  assert.match(css, /--lp-fluke-green:\s*#8BC53F/);
+  assert.match(css, /color:\s*var\(--lp-fluke-green\)/);
   assert.doesNotMatch(page, /Free to start/);
   assert.doesNotMatch(page, /Tickets, parts, and the marketplace in one shop/);
   assert.doesNotMatch(page, /lp-hero-benefits|lp-mini-carousel|hero-cards/);
