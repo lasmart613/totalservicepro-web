@@ -7,6 +7,7 @@ import { getSupabaseClient } from '../lib/supabase/client';
 import {
   ADSENSE_CLIENT,
   ADSENSE_SLOT,
+  adsenseAllowedOnHost,
   onboardingFlagsDone,
   orgIsPaid,
 } from '../lib/adsense';
@@ -45,7 +46,7 @@ export default function AdBanner() {
   useEffect(() => {
     let cancelled = false;
 
-    if (pathHidesAds(pathname)) {
+    if (pathHidesAds(pathname) || !adsenseAllowedOnHost(window.location.hostname)) {
       setShowAd(false);
       return;
     }
@@ -132,7 +133,7 @@ export default function AdBanner() {
         id="tsp-adsense"
         src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${ADSENSE_CLIENT}`}
         crossOrigin="anonymous"
-        strategy="afterInteractive"
+        strategy="lazyOnload"
         onLoad={pushAdSlot}
       />
     </div>

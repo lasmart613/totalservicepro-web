@@ -8,6 +8,7 @@ import { FindRepControl } from './FindRepControl';
 import { FindRepForm } from './FindRepForm';
 import { plansHrefForAudience, type PlanAudience } from '@/lib/billing/plan-tiles';
 import { shouldAutoOpenFindRep } from '@/lib/clinic-service-lead';
+import { LANDING_SHOT_SIZE, landingSizes, landingSrcSet } from '@/lib/landing-images';
 import './landing.css';
 
 const LANDING_PLAN_ROLE: Record<'shop' | 'clinic' | 'parts', PlanAudience> = {
@@ -35,16 +36,42 @@ function Shot({
   alt,
   caption,
   frame,
+  priority,
+  sizesKind = 'hero',
+  mount = true,
 }: {
   src: string;
   alt: string;
   caption?: string;
   frame?: 'phone';
+  priority?: boolean;
+  sizesKind?: 'hero' | 'gallery' | 'role' | 'phone';
+  mount?: boolean;
 }) {
   const phone = frame === 'phone';
+  const dim = LANDING_SHOT_SIZE[src] || { width: phone ? 390 : 1400, height: phone ? 844 : 900 };
+  const srcSet = landingSrcSet(src);
   return (
     <figure className={`lp-shot${phone ? ' is-phone' : ''}`}>
-      <img src={src} alt={alt} width={phone ? 390 : 1400} height={phone ? 844 : 900} />
+      {mount ? (
+        <img
+          src={src}
+          srcSet={srcSet}
+          sizes={srcSet ? landingSizes(phone ? 'phone' : sizesKind) : undefined}
+          alt={alt}
+          width={dim.width}
+          height={dim.height}
+          loading={priority ? 'eager' : 'lazy'}
+          decoding="async"
+          fetchPriority={priority ? 'high' : 'low'}
+        />
+      ) : (
+        <div
+          className="lp-shot-ph"
+          style={{ aspectRatio: `${dim.width} / ${dim.height}` }}
+          aria-hidden
+        />
+      )}
       {caption ? <figcaption>{caption}</figcaption> : null}
     </figure>
   );
@@ -213,6 +240,12 @@ const HERO_COVER: Record<string, string> = {
   'Parts sellers': '/landing/hero-bg-parts.webp',
 };
 
+const HERO_COVER_SM: Record<string, string> = {
+  'Repair companies': '/landing/hero-bg-shop-640.webp',
+  Clinics: '/landing/hero-bg-clinic-640.webp',
+  'Parts sellers': '/landing/hero-bg-parts-640.webp',
+};
+
 const HERO_COVER_ID: Record<string, string> = {
   'Repair companies': 'shop',
   Clinics: 'clinic',
@@ -225,7 +258,17 @@ function HeroCarousel() {
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
   const [hold, setHold] = useState(false);
+  const [visited, setVisited] = useState(() => new Set([0]));
   const start = React.useRef<{ x: number; y: number } | null>(null);
+
+  useEffect(() => {
+    setVisited((prev) => {
+      if (prev.has(i)) return prev;
+      const next = new Set(prev);
+      next.add(i);
+      return next;
+    });
+  }, [i]);
 
   const go = (dir: number) => setI((x) => (x + dir + n) % n);
   const goTo = (idx: number) => setI(((idx % n) + n) % n);
@@ -323,12 +366,15 @@ function HeroCarousel() {
               inert={idx !== i ? true : undefined}
             >
               <div
-                className="lp-hero-copy"
+                className={`lp-hero-copy${visited.has(idx) ? ' is-cover-on' : ''}`}
                 data-cover={HERO_COVER_ID[s.audience]}
                 style={
-                  {
-                    '--lp-hero-cover': `url("${HERO_COVER[s.audience]}")`,
-                  } as React.CSSProperties
+                  visited.has(idx)
+                    ? ({
+                        '--lp-hero-cover': `url("${HERO_COVER[s.audience]}")`,
+                        '--lp-hero-cover-sm': `url("${HERO_COVER_SM[s.audience]}")`,
+                      } as React.CSSProperties)
+                    : undefined
                 }
               >
                 <p className="lp-kicker">{s.audience}</p>
@@ -344,6 +390,9 @@ function HeroCarousel() {
                 alt={s.shot.alt}
                 caption={s.shot.caption}
                 frame={s.shot.frame}
+                sizesKind="hero"
+                priority={idx === 0}
+                mount={visited.has(idx)}
               />
             </div>
           ))}
@@ -428,41 +477,49 @@ export function LandingPage() {
           src="/landing/dashboard.webp"
           alt="Shop dashboard for Alex Lee with open tickets, today’s calls, and upcoming service calls"
           caption="Shop dashboard"
+          sizesKind="gallery"
         />
         <Shot
           src="/landing/schedule.webp"
           alt="Color-coded shop schedule with assigned field engineer legend"
           caption="Shop schedule"
+          sizesKind="gallery"
         />
         <Shot
           src="/landing/ticket-assign.webp"
           alt="Edit Ticket assigning a field engineer"
           caption="Assign to field engineer"
+          sizesKind="gallery"
         />
         <Shot
           src="/landing/team-equipment.webp"
           alt="Team Management test equipment assigned to a field engineer"
           caption="Test equipment"
+          sizesKind="gallery"
         />
         <Shot
           src="/landing/directory.webp"
           alt="Directory search to find a repair company among service companies, clinics, resellers, and suppliers"
           caption="Directory"
+          sizesKind="gallery"
         />
         <Shot
           src="/landing/reports.webp"
           alt="Service reports list with drafts and completed work"
           caption="Service history"
+          sizesKind="gallery"
         />
         <Shot
           src="/landing/parts.webp"
           alt="Parts marketplace with live Candela listings and prices"
           caption="Parts for sale"
+          sizesKind="gallery"
         />
         <Shot
           src="/landing/marketplace.webp"
           alt="Marketplace home for parts, used systems, and service needs"
           caption="Marketplace"
+          sizesKind="gallery"
         />
       </section>
 
@@ -485,6 +542,7 @@ export function LandingPage() {
                 src={r.shot.src}
                 alt={r.shot.alt}
                 caption={r.shot.caption}
+                sizesKind="role"
               />
               <div className="lp-actions">
                 {r.id === 'clinic' ? (
@@ -525,6 +583,8 @@ export function LandingPage() {
                 alt="Google Play — coming soon"
                 width={646}
                 height={250}
+                loading="lazy"
+                decoding="async"
               />
             </span>
             <span className="lp-store-badge lp-store-badge-apple">
@@ -533,6 +593,8 @@ export function LandingPage() {
                 alt="App Store — coming soon"
                 width={120}
                 height={40}
+                loading="lazy"
+                decoding="async"
               />
             </span>
           </div>
@@ -540,10 +602,24 @@ export function LandingPage() {
         </div>
         <div className="lp-phone-wrap">
           <div className="lp-phone">
-            <img src="/landing/app-hub.webp" alt="Android Service Hub" width={390} height={844} />
+            <img
+              src="/landing/app-hub.webp"
+              alt="Android Service Hub"
+              width={390}
+              height={844}
+              loading="lazy"
+              decoding="async"
+            />
           </div>
           <div className="lp-phone">
-            <img src="/landing/app-calcs.webp" alt="Photometry tools on Android" width={390} height={844} />
+            <img
+              src="/landing/app-calcs.webp"
+              alt="Photometry tools on Android"
+              width={390}
+              height={844}
+              loading="lazy"
+              decoding="async"
+            />
           </div>
         </div>
       </section>

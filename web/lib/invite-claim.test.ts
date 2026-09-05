@@ -94,7 +94,7 @@ test('applyPendingSignup claims a team invite instead of creating a new shop', (
 });
 
 test('home and login claim a pending invite before sending someone to founder onboarding', () => {
-  const home = readFileSync(join(here, '../app/page.tsx'), 'utf8');
+  const home = readFileSync(join(here, '../components/home/HomeDashboard.tsx'), 'utf8');
   assert.match(home, /claimPendingInvitations/);
   assert.match(home, /inviteInPlay/);
 

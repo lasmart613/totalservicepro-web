@@ -10,6 +10,7 @@ html.landing-mode main {
   max-width: none !important;
 }
 
+html.landing-mode,
 html.landing-mode body {
   overflow-x: hidden;
 }
@@ -18,6 +19,7 @@ html.landing-mode body {
   background: #111827;
   color: #F3E8D8;
   min-height: 100vh;
+  max-width: 100%;
   font-family: var(--font-dm-sans), var(--font-geist-sans), system-ui, sans-serif;
 }
 
@@ -90,8 +92,11 @@ html.landing-mode body {
 .lp-nav-cta {
   display: flex;
   align-items: center;
+  justify-content: flex-end;
+  flex-wrap: wrap;
   gap: 10px;
-  flex-shrink: 0;
+  min-width: 0;
+  flex-shrink: 1;
 }
 
 .lp-report-btn {
@@ -161,6 +166,7 @@ html.landing-mode body {
 .lp-hero-carousel {
   position: relative;
   padding: 48px 8vw 20px;
+  max-width: 100%;
 }
 
 .lp-hero-viewport {
@@ -400,10 +406,20 @@ html.landing-mode body {
   min-height: 240px;
   padding: 28px 18px 32px 4px;
   background-color: #111827;
-  background-image: var(--lp-hero-cover);
+  background-image: none;
   background-size: cover;
   background-position: 58% 42%;
   background-repeat: no-repeat;
+}
+
+.lp-hero-copy.is-cover-on {
+  background-image: var(--lp-hero-cover-sm, var(--lp-hero-cover));
+}
+
+@media (min-width: 800px) {
+  .lp-hero-copy.is-cover-on {
+    background-image: var(--lp-hero-cover);
+  }
 }
 
 .lp-hero-copy[data-cover='clinic'] {
@@ -706,10 +722,15 @@ html.landing-mode body {
   box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
 }
 
-.lp-shot img {
+.lp-shot img,
+.lp-shot-ph {
   display: block;
   width: 100%;
   height: auto;
+}
+
+.lp-shot-ph {
+  background: #1A2233;
 }
 
 .lp-shot figcaption {
@@ -852,9 +873,19 @@ html.landing-mode body {
   width: auto;
 }
 
-/* Official Play PNG includes required clear space; size so the mark matches Apple. */
+/* Official Play PNG includes required clear space; clip it so the mark matches Apple
+   without overflowing the content width (646×250 intrinsic). */
+.lp-store-badge-play {
+  overflow: hidden;
+  height: 42px;
+  width: calc(42px * 646 / 250);
+}
+
 .lp-store-badge-play img {
   height: 58px;
+  width: calc(58px * 646 / 250);
+  aspect-ratio: 646 / 250;
+  max-width: none;
   margin: -8px -12px;
 }
 
