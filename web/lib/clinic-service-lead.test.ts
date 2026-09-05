@@ -371,7 +371,9 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.match(equipmentTypes, /value: 'c_arm'/);
   assert.match(equipmentTypes, /value: 'other'/);
   assert.match(equipmentTypes, /label: 'C-arm'/);
-  assert.match(page, /biomedical equipment service network/);
+  assert.match(page, /Connecting Medical Equipment Owners to Top Service Professionals/);
+  assert.match(page, /lp-hero-tagline/);
+  assert.doesNotMatch(page, /RepairPlanet is a biomedical equipment service network/);
   assert.match(page, /lithotriptors/);
   assert.match(page, /C-arms first/);
   assert.match(form, /Equipment type/);

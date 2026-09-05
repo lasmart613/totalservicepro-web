@@ -3,6 +3,7 @@
    page #111827 · nav #1F2937 · amber #FBBF24 / ink #111827
    secondary #1A2233 / text #F3E8D8 / border #4B5563
    heading #F3E8D8 · muted #9CA3AF · font DM Sans
+   mint accent #00D4AA (--lp-mint) for the hero tagline
 */
 
 html.landing-mode main {
@@ -16,6 +17,7 @@ html.landing-mode body {
 }
 
 .lp-root {
+  --lp-mint: #00D4AA;
   background: #111827;
   color: #F3E8D8;
   min-height: 100vh;
@@ -339,12 +341,15 @@ html.landing-mode body {
   border-color: #FBBF24;
 }
 
-.lp-hero-mission {
-  margin: 0 0 16px;
-  font-size: 13px;
-  font-weight: 600;
-  letter-spacing: 0.04em;
-  color: #9CA3AF;
+.lp-hero-tagline {
+  margin: 0 0 18px;
+  max-width: 22em;
+  font-size: clamp(20px, 2.8vw, 28px);
+  font-weight: 700;
+  line-height: 1.28;
+  letter-spacing: -0.015em;
+  color: var(--lp-mint);
+  text-wrap: balance;
 }
 
 .lp-hero-find {
@@ -1139,5 +1144,10 @@ html.landing-mode body {
   .lp-footer {
     padding-left: 18px;
     padding-right: 18px;
+  }
+
+  .lp-hero-tagline {
+    max-width: none;
+    font-size: clamp(18px, 5.2vw, 22px);
   }
 }
