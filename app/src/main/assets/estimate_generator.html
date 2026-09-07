@@ -418,22 +418,62 @@
         }
     }
 
-    // ========== CUSTOMER AUTOCOMPLETE (adapted from service_report.html) ==========
-    let allCustomers = [];
+    // ========== CUSTOMER AUTOCOMPLETE (linked via organization_customers) ==========
+    let serviceOrgId = null;
     let custSearchTimeout = null;
 
-    async function loadCustomers() {
+    function sanitizeIlike(raw) {
+        return String(raw || '').replace(/[%_,.()]/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    async function ensureServiceOrgId() {
+        if (serviceOrgId) return serviceOrgId;
         try {
-            const { data } = await supabaseClient
-                .from('organizations')
-                .select('id, name, address, city, state, phone, email')
-                .eq('type', 'customer')
-                .eq('is_active', true)
-                .order('name');
-            allCustomers = data || [];
-        } catch(e) {
-            console.warn('Could not load customers for autocomplete');
+            const { data: { user } } = await supabaseClient.auth.getUser();
+            if (!user) return null;
+            const { data: profile } = await supabaseClient
+                .from('user_profiles')
+                .select('organization_id')
+                .eq('id', user.id)
+                .maybeSingle();
+            serviceOrgId = profile?.organization_id || null;
+        } catch (e) {
+            console.warn('service org', e);
         }
+        return serviceOrgId;
+    }
+
+    async function searchLinkedCustomers(query) {
+        const orgId = await ensureServiceOrgId();
+        if (!orgId) return [];
+        const term = sanitizeIlike(query);
+        let req = supabaseClient
+            .from('organization_customers')
+            .select('customer_organization_id, created_at, organizations:customer_organization_id!inner(id, name, address, city, state, zip, phone, email, contact_name)')
+            .eq('service_organization_id', orgId);
+        if (!term) {
+            req = req.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(12);
+        } else {
+            req = req.or(`name.ilike.%${term}%,city.ilike.%${term}%`, { referencedTable: 'organizations' }).limit(20);
+        }
+        const { data, error } = await req;
+        if (error) {
+            console.warn('linked customer search', error);
+            return [];
+        }
+        const seen = new Set();
+        const out = [];
+        (data || []).forEach((row) => {
+            const org = Array.isArray(row.organizations) ? row.organizations[0] : row.organizations;
+            if (!org?.id || seen.has(String(org.id))) return;
+            seen.add(String(org.id));
+            out.push(org);
+        });
+        return out;
+    }
+
+    async function loadCustomers() {
+        await ensureServiceOrgId();
     }
 
     function onCustSearch() {
@@ -441,20 +481,17 @@
         custSearchTimeout = setTimeout(showCustDropdown, 180);
     }
 
-    function showCustDropdown() {
+    async function showCustDropdown() {
         const input = document.getElementById('customer');
         const dropdown = document.getElementById('custDropdown');
         if (!input || !dropdown) return;
 
-        const q = input.value.trim().toLowerCase();
-
-        const matches = q 
-            ? allCustomers.filter(c => c.name.toLowerCase().includes(q) || (c.city||'').toLowerCase().includes(q))
-            : allCustomers.slice(0, 8);
+        const q = input.value.trim();
+        const matches = await searchLinkedCustomers(q);
 
         dropdown.innerHTML = '';
 
-        matches.slice(0, 8).forEach(org => {
+        matches.forEach(org => {
             const div = document.createElement('div');
             div.className = 'cust-option';
             const loc = [org.city, org.state].filter(Boolean).join(', ');
@@ -465,7 +502,7 @@
         });
 
         // Option to use typed name (new customer)
-        if (q && !matches.find(m => m.name.toLowerCase() === q)) {
+        if (q && !matches.find(m => (m.name || '').toLowerCase() === q.toLowerCase())) {
             const div = document.createElement('div');
             div.className = 'cust-option';
             div.innerHTML = `<div class="cust-option-new">＋ Use "${input.value.trim()}" (new customer)</div>`;

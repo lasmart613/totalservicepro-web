@@ -413,19 +413,42 @@
     let currentReportId = null; // null = new report, uuid = editing existing
     let techCompanyCache = {}; // cached tech/company info for report snapshots
     let custSearchTimeout = null;
-    let allCustomers = []; // cached customer list
+    function sanitizeIlike(raw) {
+        return String(raw || '').replace(/[%_,.()]/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    async function searchLinkedCustomers(query) {
+        const orgId = currentUserOrgId;
+        if (!orgId) return [];
+        const term = sanitizeIlike(query);
+        let req = supabaseClient
+            .from('organization_customers')
+            .select('customer_organization_id, created_at, organizations:customer_organization_id!inner(id, name, address, city, state, zip, phone, email, contact_name)')
+            .eq('service_organization_id', orgId);
+        if (!term) {
+            req = req.order('created_at', { ascending: false }).order('id', { ascending: false }).limit(12);
+        } else {
+            req = req.or(`name.ilike.%${term}%,city.ilike.%${term}%`, { referencedTable: 'organizations' }).limit(20);
+        }
+        const { data, error } = await req;
+        if (error) {
+            console.warn('linked customer search', error);
+            return [];
+        }
+        const seen = new Set();
+        const out = [];
+        (data || []).forEach((row) => {
+            const org = Array.isArray(row.organizations) ? row.organizations[0] : row.organizations;
+            if (!org?.id || seen.has(String(org.id))) return;
+            seen.add(String(org.id));
+            out.push(org);
+        });
+        return out;
+    }
 
     async function loadCustomers() {
-        if (!currentUser) return;
-        try {
-            const { data } = await supabaseClient
-                .from('organizations')
-                .select('id, name, address, city, state, phone, email')
-                .eq('type', 'customer')
-                .or('is_active.is.null,is_active.eq.true')
-                .order('name');
-            allCustomers = data || [];
-        } catch(e) {}
+        // Kept as a no-op refresh hook after creating a customer; search is server-side.
+        return searchLinkedCustomers('');
     }
 
     // Helper to create (or ensure) a customer organization record when a new name is used.
@@ -518,17 +541,10 @@
     }
 
     async function showCustDropdown() {
-        // Refresh from DB so that customers added manually in Supabase (or by other users/devices)
-        // appear immediately without requiring a full page reload.
-        await loadCustomers();
-
         const input = document.getElementById('custName');
         const dropdown = document.getElementById('custDropdown');
-        const q = input.value.trim().toLowerCase();
-
-        const matches = q
-            ? allCustomers.filter(c => c.name.toLowerCase().includes(q) || (c.city||'').toLowerCase().includes(q))
-            : allCustomers.slice(0, 15);
+        const q = input.value.trim();
+        const matches = await searchLinkedCustomers(q);
 
         if (!matches.length && !q) { dropdown.classList.remove('open'); return; }
 
@@ -545,7 +561,7 @@
         });
 
         // "Use what I typed" option if no exact match
-        if (q && !matches.find(m => m.name.toLowerCase() === q)) {
+        if (q && !matches.find(m => (m.name || '').toLowerCase() === q.toLowerCase())) {
             const div = document.createElement('div');
             div.className = 'cust-option';
             const typedName = input.value.trim();

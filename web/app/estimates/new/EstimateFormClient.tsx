@@ -23,18 +23,9 @@ import {
   type LineItem,
 } from '@/lib/billing/save-helpers';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
+import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 
-type CustomerOpt = {
-  id: string | number;
-  name: string;
-  address?: string | null;
-  city?: string | null;
-  state?: string | null;
-  phone?: string | null;
-  email?: string | null;
-  zip?: string | null;
-  contact?: string | null;
-};
+type CustomerOpt = LinkedCustomerOpt;
 
 export default function EstimateFormClient() {
   const supabase = getSupabaseClient();
@@ -53,7 +44,7 @@ export default function EstimateFormClient() {
   const [company, setCompany] = useState<DocCompany>({});
   const [emailing, setEmailing] = useState(false);
 
-  // Customer
+  // Customer — full linked set (paged), typeahead is client-side only
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
   const [custSearch, setCustSearch] = useState('');
   const [showCustDrop, setShowCustDrop] = useState(false);
@@ -171,50 +162,15 @@ export default function EstimateFormClient() {
     if (!depositRequired) setDeposit(0);
   }, [totals.suggestedDeposit, depositManual, depositRequired]);
 
-  const filteredCustomers = useMemo(() => {
-    const q = custSearch.trim().toLowerCase();
-    if (!q) return customers.slice(0, 12);
-    return customers
-      .filter((c) => {
-        const hay = [c.name, c.city, c.state, c.phone, c.email].filter(Boolean).join(' ').toLowerCase();
-        return hay.includes(q);
-      })
-      .slice(0, 12);
-  }, [customers, custSearch]);
+  const filteredCustomers = useMemo(
+    () => filterLinkedCustomers(customers, custSearch, 12),
+    [customers, custSearch]
+  );
 
   const loadCustomers = useCallback(
     async (orgId: string | number) => {
       try {
-        const { data: links } = await supabase
-          .from('organization_customers')
-          .select('customer_organization_id')
-          .eq('service_organization_id', orgId)
-          .limit(500);
-        const ids = Array.from(
-          new Set((links || []).map((r: any) => r.customer_organization_id).filter(Boolean))
-        );
-        if (!ids.length) {
-          setCustomers([]);
-          return;
-        }
-        const { data: custs } = await supabase
-          .from('organizations')
-          .select('id, name, address, city, state, phone, email, zip, contact_name')
-          .in('id', ids)
-          .order('name', { ascending: true });
-        setCustomers(
-          (custs || []).map((c: any) => ({
-            id: c.id,
-            name: c.name || '',
-            address: c.address,
-            city: c.city,
-            state: c.state,
-            phone: c.phone,
-            email: c.email,
-            zip: c.zip,
-            contact: c.contact_name,
-          }))
-        );
+        setCustomers(await loadLinkedCustomerOrgs(supabase, orgId));
       } catch (e) {
         console.warn('load customers', e);
         setCustomers([]);

@@ -261,6 +261,8 @@ export {
 
 const LINKED_CUSTOMER_TYPES = ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'];
 
+export const LINKED_CUSTOMER_DROPDOWN_LIMIT = 12;
+
 export type LinkedCustomerOpt = {
   id: string | number;
   name: string;
@@ -271,21 +273,48 @@ export type LinkedCustomerOpt = {
   phone?: string | null;
   email?: string | null;
   contact?: string | null;
+  /** organization_customers.created_at — used only for empty-dropdown recency. */
+  linkedAt?: string | null;
 };
 
-/** Customers assigned to this service company via organization_customers (Luxor directory, etc.). */
+type LinkRow = { customer_organization_id?: string | number | null; created_at?: string | null };
+
+function latestLinkedAt(links: LinkRow[] | null | undefined): Map<string, string> {
+  const latest = new Map<string, string>();
+  for (const row of links || []) {
+    const id = row?.customer_organization_id;
+    if (id == null || !row.created_at) continue;
+    const key = String(id);
+    const prev = latest.get(key);
+    if (!prev || row.created_at > prev) latest.set(key, row.created_at);
+  }
+  return latest;
+}
+
+/**
+ * Customers assigned to this service company via organization_customers.
+ * Pages every link (same as /customers) — never a silent 500 cap.
+ */
 export async function loadLinkedCustomers(
   supabase: SupabaseClient,
   serviceOrgId: string | number
 ): Promise<LinkedCustomerOpt[]> {
-  const { data: links, error: linkErr } = await fetchAllPages<{ customer_organization_id: any }>(
-    (from, to) =>
+  let { data: links, error: linkErr } = await fetchAllPages<LinkRow>((from, to) =>
+    supabase
+      .from('organization_customers')
+      .select('customer_organization_id, created_at')
+      .eq('service_organization_id', serviceOrgId)
+      .range(from, to)
+  );
+  if (linkErr) {
+    ({ data: links, error: linkErr } = await fetchAllPages<LinkRow>((from, to) =>
       supabase
         .from('organization_customers')
         .select('customer_organization_id')
         .eq('service_organization_id', serviceOrgId)
         .range(from, to)
-  );
+    ));
+  }
   if (linkErr) {
     console.warn('organization_customers load failed:', linkErr);
     return [];
@@ -293,6 +322,7 @@ export async function loadLinkedCustomers(
 
   const customerIds = uniqueLinkedIds(links);
   if (!customerIds.length) return [];
+  const linkedAt = latestLinkedAt(links);
 
   const orgSelect = 'id, name, address, city, state, zip, phone, email, contact_name, type';
   const rows: any[] = [];
@@ -324,14 +354,18 @@ export async function loadLinkedCustomers(
       phone: c.phone,
       email: c.email,
       contact: c.contact_name,
+      linkedAt: linkedAt.get(String(c.id)) || null,
     }))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 }
 
+/** Alias used by estimate / invoice / report company pickers. */
+export const loadLinkedCustomerOrgs = loadLinkedCustomers;
+
 export function filterLinkedCustomers(
   customers: LinkedCustomerOpt[],
   query: string,
-  limit = 15
+  limit = LINKED_CUSTOMER_DROPDOWN_LIMIT
 ): LinkedCustomerOpt[] {
   const q = query.trim().toLowerCase();
   const list = q
@@ -342,7 +376,13 @@ export function filterLinkedCustomers(
           .toLowerCase();
         return hay.includes(q);
       })
-    : customers;
+    : [...customers].sort((a, b) => {
+        const at = a.linkedAt || '';
+        const bt = b.linkedAt || '';
+        if (at !== bt) return bt.localeCompare(at);
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      });
+  // Slice is UI-only. The caller must keep the full loaded set uncapped.
   return list.slice(0, limit);
 }
 

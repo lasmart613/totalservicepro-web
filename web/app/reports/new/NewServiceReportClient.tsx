@@ -11,6 +11,7 @@ import { MODELS, resolveModelDef } from '@/lib/models';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
+import { filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
 
 /** Admin / manager roles may edit Service Engineer (Android parity). */
 function canEditServiceEngineer(profile: any): boolean {
@@ -81,9 +82,10 @@ export default function NewServiceReport() {
   const [currentProfile, setCurrentProfile] = useState<any>(null);
   const [techCompanyCache, setTechCompanyCache] = useState<any>({});
 
-  // Customer (direct orgs type=customer like Android)
+  // Customer — full linked set (paged), typeahead is client-side only
   const [customerOptions, setCustomerOptions] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [showCustDrop, setShowCustDrop] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: '', address: '', city: '', state: '', phone: '', email: '', contactName: '' });
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
@@ -318,8 +320,9 @@ export default function NewServiceReport() {
         // Default Service Engineer to signed-in tech (Android applyEngineerFieldAccess)
         setServiceEngineer((prev) => (prev && prev.trim() ? prev : techName));
       }
-      // Always load customers for dropdown (type=customer)
-      await loadCustomers(profile?.organization_id || null);
+      if (profile?.organization_id) {
+        await loadCustomers(profile.organization_id);
+      }
       // default date
       if (!dateOut) setDateOut(new Date().toISOString().slice(0,10));
     })();
@@ -538,40 +541,19 @@ export default function NewServiceReport() {
   }, [dbManufacturers, selectedDbModel, selectedDbMfr, equipName]);
 
   async function loadCustomers(orgId: any) {
-    // Only customers linked to this service org via organization_customers
     try {
       if (!orgId) {
         setCustomerOptions([]);
         return;
       }
-      const { data: junc, error } = await supabase
-        .from('organization_customers')
-        .select(`organizations:customer_organization_id (id, name, address, city, state, phone, email, contact_name)`)
-        .eq('service_organization_id', orgId)
-        .limit(500);
-      if (error) {
-        console.warn('organization_customers load failed:', error);
-        setCustomerOptions([]);
-        return;
-      }
-      const opts = (junc || [])
-        .map((j: any) => j.organizations)
-        .filter(Boolean);
-      // de-dupe by id
-      const seen = new Set<any>();
-      setCustomerOptions(
-        opts.filter((o: any) => {
-          if (!o?.id || seen.has(o.id)) return false;
-          seen.add(o.id);
-          return true;
-        })
-      );
-    } catch (e) { console.warn(e); }
+      setCustomerOptions(await loadLinkedCustomerOrgs(supabase, orgId));
+    } catch (e) {
+      console.warn(e);
+      setCustomerOptions([]);
+    }
   }
 
-  const filteredCustomers = customerOptions.filter((c: any) =>
-    (c.name || '').toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredCustomers = filterLinkedCustomers(customerOptions, searchTerm, 12);
 
   const handleSelectCustomer = (customer: any) => {
     setSelectedCustomer(customer);
@@ -579,10 +561,11 @@ export default function NewServiceReport() {
     setCustAddress(customer.address || '');
     setCustCity(customer.city || '');
     setCustState(customer.state || '');
-    setCustContactName(customer.contact_name || '');
+    setCustContactName(customer.contact_name || customer.contact || '');
     setCustPhone(customer.phone || '');
     setCustEmail(customer.email || '');
     setCustWebsite(customer.website || '');
+    setShowCustDrop(false);
   };
 
   const handleAddNewCustomer = async () => {
@@ -1070,41 +1053,44 @@ export default function NewServiceReport() {
         <div className="section mb-6 p-6">
           <h3 className="text-xl font-semibold mb-4">🏥 Customer Info</h3>
           <div className="flex gap-2 items-end mb-3">
-            <div className="flex-1">
-              <label className="text-xs text-[var(--text3)]">Select Customer</label>
-              <select 
-                className="input w-full text-lg py-3" 
-                value={selectedCustomer ? selectedCustomer.id : ''}
+            <div className="flex-1 relative">
+              <label className="text-xs text-[var(--text3)]">Search / select customer</label>
+              <input
+                type="text"
+                className="input w-full text-lg py-3"
+                value={searchTerm}
                 onChange={(e) => {
-                  const val = e.target.value;
-                  if (val === '__new__') {
-                    setShowAddModal(true);
-                  } else if (val) {
-                    const cust = customerOptions.find((c:any) => String(c.id) === val);
-                    if (cust) handleSelectCustomer(cust);
-                  } else {
-                    setSelectedCustomer(null);
-                    setSearchTerm('');
-                    setCustAddress(''); setCustCity(''); setCustState('');
-                    setCustContactName(''); setCustPhone(''); setCustEmail(''); setCustWebsite('');
-                  }
+                  setSearchTerm(e.target.value);
+                  setShowCustDrop(true);
+                  if (!e.target.value) setSelectedCustomer(null);
                 }}
-              >
-                <option value="">-- Select Customer --</option>
-                {customerOptions.map((c:any) => (
-                  <option key={c.id} value={c.id}>{c.name}{c.city ? ` (${c.city})` : ''}</option>
-                ))}
-                <option value="__new__">+ Add New Customer</option>
-              </select>
+                onFocus={() => setShowCustDrop(true)}
+                placeholder="Type clinic / facility name…"
+                autoComplete="off"
+              />
+              {showCustDrop && filteredCustomers.length > 0 && (
+                <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
+                  {filteredCustomers.map((c: any) => (
+                    <button
+                      key={String(c.id)}
+                      type="button"
+                      className="w-full text-left px-3 py-2 hover:bg-[var(--surface)] text-sm"
+                      onMouseDown={(e) => e.preventDefault()}
+                      onClick={() => handleSelectCustomer(c)}
+                    >
+                      <div className="font-semibold">{c.name}</div>
+                      <div className="text-xs text-[var(--text3)]">
+                        {[c.city, c.state].filter(Boolean).join(', ')}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <button onClick={()=>setShowAddModal(true)} className="btn btn-secondary text-sm py-3">+ Add</button>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-            <div className="md:col-span-2">
-              <label className="label">Customer Name</label>
-              <input type="text" className="input w-full" value={searchTerm} onChange={e=>setSearchTerm(e.target.value)} placeholder="Clinic / facility name" />
-            </div>
             <div className="md:col-span-2">
               <label className="label">Address</label>
               <input className="input w-full" value={custAddress} onChange={e=>setCustAddress(e.target.value)} placeholder="123 Main St" />
