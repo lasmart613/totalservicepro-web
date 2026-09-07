@@ -23,8 +23,7 @@ import {
   type LineItem,
 } from '@/lib/billing/save-helpers';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
-import { useLinkedCustomerSearch } from '@/lib/use-linked-customer-search';
-import type { LinkedCustomerOpt } from '@/lib/customer-form';
+import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 
 type CustomerOpt = LinkedCustomerOpt;
 
@@ -45,7 +44,8 @@ export default function EstimateFormClient() {
   const [company, setCompany] = useState<DocCompany>({});
   const [emailing, setEmailing] = useState(false);
 
-  // Customer
+  // Customer — full linked set (paged), typeahead is client-side only
+  const [customers, setCustomers] = useState<CustomerOpt[]>([]);
   const [custSearch, setCustSearch] = useState('');
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [customerName, setCustomerName] = useState('');
@@ -162,10 +162,21 @@ export default function EstimateFormClient() {
     if (!depositRequired) setDeposit(0);
   }, [totals.suggestedDeposit, depositManual, depositRequired]);
 
-  const { customers: filteredCustomers } = useLinkedCustomerSearch(
-    supabase,
-    userOrgId,
-    custSearch
+  const filteredCustomers = useMemo(
+    () => filterLinkedCustomers(customers, custSearch, 12),
+    [customers, custSearch]
+  );
+
+  const loadCustomers = useCallback(
+    async (orgId: string | number) => {
+      try {
+        setCustomers(await loadLinkedCustomerOrgs(supabase, orgId));
+      } catch (e) {
+        console.warn('load customers', e);
+        setCustomers([]);
+      }
+    },
+    [supabase]
   );
 
   const loadParts = useCallback(async () => {
@@ -338,6 +349,7 @@ export default function EstimateFormClient() {
             tech_name: techName,
           });
         }
+        if (orgId) await loadCustomers(orgId);
         await loadParts();
 
         // Restore local pricing defaults
@@ -361,7 +373,7 @@ export default function EstimateFormClient() {
         setLoading(false);
       }
     })();
-  }, [supabase, router, editIdParam, loadParts, loadEstimate]);
+  }, [supabase, router, editIdParam, loadCustomers, loadParts, loadEstimate]);
 
   // Persist pricing prefs
   useEffect(() => {

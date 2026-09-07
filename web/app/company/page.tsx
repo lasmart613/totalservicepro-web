@@ -16,7 +16,7 @@ import {
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { listManufacturers } from '@/lib/laser-catalog';
 import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
-import { persistCustomerLogo, searchLinkedCustomers } from '@/lib/customer-form';
+import { persistCustomerLogo, loadLinkedCustomers } from '@/lib/customer-form';
 import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
 import { orgCanUpgrade, upgradeTargetForOrg } from '@/lib/org-plan';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
@@ -586,7 +586,7 @@ function CompanyProfile() {
       return;
     }
     // Newest linked customers only — full directory lives on /customers (paginated).
-    setCustomers(await searchLinkedCustomers(supabase, sid, ''));
+    setCustomers(await loadLinkedCustomers(supabase, sid));
   }
 
   async function loadFacilityContacts(orgId?: string | number | null) {

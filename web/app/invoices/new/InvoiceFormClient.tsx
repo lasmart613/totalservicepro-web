@@ -21,8 +21,7 @@ import {
   type LineItem,
 } from '@/lib/billing/save-helpers';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
-import { useLinkedCustomerSearch } from '@/lib/use-linked-customer-search';
-import type { LinkedCustomerOpt } from '@/lib/customer-form';
+import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 
 type CustomerOpt = LinkedCustomerOpt;
 
@@ -51,6 +50,7 @@ export default function InvoiceFormClient() {
   const [company, setCompany] = useState<DocCompany>({});
   const [emailing, setEmailing] = useState(false);
 
+  const [customers, setCustomers] = useState<CustomerOpt[]>([]);
   const [custSearch, setCustSearch] = useState('');
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [customerName, setCustomerName] = useState('');
@@ -92,10 +92,20 @@ export default function InvoiceFormClient() {
   const total = totalOverride != null ? totalOverride : computedTotal;
   const balanceDue = Math.max(0, Math.round((total - (Number(deposit) || 0)) * 100) / 100);
 
-  const { customers: filteredCustomers } = useLinkedCustomerSearch(
-    supabase,
-    userOrgId,
-    custSearch
+  const filteredCustomers = useMemo(
+    () => filterLinkedCustomers(customers, custSearch, 12),
+    [customers, custSearch]
+  );
+
+  const loadCustomers = useCallback(
+    async (orgId: string | number) => {
+      try {
+        setCustomers(await loadLinkedCustomerOrgs(supabase, orgId));
+      } catch {
+        setCustomers([]);
+      }
+    },
+    [supabase]
   );
 
   const loadParts = useCallback(async () => {
@@ -329,6 +339,7 @@ export default function InvoiceFormClient() {
             tech_name: techName,
           });
         }
+        if (orgId) await loadCustomers(orgId);
         await loadParts();
 
         if (editIdParam) {

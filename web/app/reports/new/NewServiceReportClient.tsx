@@ -11,7 +11,7 @@ import { MODELS, resolveModelDef } from '@/lib/models';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
-import { useLinkedCustomerSearch } from '@/lib/use-linked-customer-search';
+import { filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
 
 /** Admin / manager roles may edit Service Engineer (Android parity). */
 function canEditServiceEngineer(profile: any): boolean {
@@ -82,17 +82,13 @@ export default function NewServiceReport() {
   const [currentProfile, setCurrentProfile] = useState<any>(null);
   const [techCompanyCache, setTechCompanyCache] = useState<any>({});
 
-  // Customer — server-side search among this service org's organization_customers
+  // Customer — full linked set (paged), typeahead is client-side only
+  const [customerOptions, setCustomerOptions] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: '', address: '', city: '', state: '', phone: '', email: '', contactName: '' });
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
-  const { customers: customerOptions } = useLinkedCustomerSearch(
-    supabase,
-    currentUserOrgId,
-    searchTerm
-  );
 
   // Core report fields
   const [selectedModelKey, setSelectedModelKey] = useState('');
@@ -324,7 +320,9 @@ export default function NewServiceReport() {
         // Default Service Engineer to signed-in tech (Android applyEngineerFieldAccess)
         setServiceEngineer((prev) => (prev && prev.trim() ? prev : techName));
       }
-      // Customer picker loads via useLinkedCustomerSearch (no 500-row dump)
+      if (profile?.organization_id) {
+        await loadCustomers(profile.organization_id);
+      }
       // default date
       if (!dateOut) setDateOut(new Date().toISOString().slice(0,10));
     })();
@@ -542,6 +540,21 @@ export default function NewServiceReport() {
     else setSelectedDbMfr(mfgName);
   }, [dbManufacturers, selectedDbModel, selectedDbMfr, equipName]);
 
+  async function loadCustomers(orgId: any) {
+    try {
+      if (!orgId) {
+        setCustomerOptions([]);
+        return;
+      }
+      setCustomerOptions(await loadLinkedCustomerOrgs(supabase, orgId));
+    } catch (e) {
+      console.warn(e);
+      setCustomerOptions([]);
+    }
+  }
+
+  const filteredCustomers = filterLinkedCustomers(customerOptions, searchTerm, 12);
+
   const handleSelectCustomer = (customer: any) => {
     setSelectedCustomer(customer);
     setSearchTerm(customer.name || '');
@@ -580,6 +593,7 @@ export default function NewServiceReport() {
         /* ignore link failure */
       }
 
+      await loadCustomers(currentUserOrgId);
       handleSelectCustomer(org);
       setShowAddModal(false);
       setNewCustomer({ name: '', address: '', city: '', state: '', phone: '', email: '', contactName: '' });
@@ -1054,9 +1068,9 @@ export default function NewServiceReport() {
                 placeholder="Type clinic / facility name…"
                 autoComplete="off"
               />
-              {showCustDrop && customerOptions.length > 0 && (
+              {showCustDrop && filteredCustomers.length > 0 && (
                 <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
-                  {customerOptions.map((c: any) => (
+                  {filteredCustomers.map((c: any) => (
                     <button
                       key={String(c.id)}
                       type="button"

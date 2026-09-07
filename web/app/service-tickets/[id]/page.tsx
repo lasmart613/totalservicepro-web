@@ -7,8 +7,7 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { ArrowLeft, Edit2, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { type LinkedCustomerOpt } from '@/lib/customer-form';
-import { useLinkedCustomerSearch } from '@/lib/use-linked-customer-search';
+import { filterLinkedCustomers, loadLinkedCustomers, type LinkedCustomerOpt } from '@/lib/customer-form';
 import { updateOmittingCharOverflow } from '@/lib/char-overflow';
 import { AssignFseSelect } from '@/components/AssignFseSelect';
 import {
@@ -54,7 +53,7 @@ export default function ServiceTicketDetail() {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const [saving, setSaving] = useState(false);
-  const [shopId, setShopId] = useState<string | number | null>(null);
+  const [organizations, setOrganizations] = useState<LinkedCustomerOpt[]>([]);
   const [custSearch, setCustSearch] = useState('');
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
@@ -66,7 +65,7 @@ export default function ServiceTicketDetail() {
   const [dbLaserModels, setDbLaserModels] = useState<any[]>([]);
 
   const supabase = getSupabaseClient();
-  const { customers: organizations } = useLinkedCustomerSearch(supabase, shopId, custSearch);
+  const filteredOrgs = filterLinkedCustomers(organizations, custSearch, 12);
 
   // Load DB manufacturers and models for dropdowns (independent of ticket)
   useEffect(() => {
@@ -108,8 +107,12 @@ export default function ServiceTicketDetail() {
         setFormData(normalized);
 
         const nextShopId = ticketData.organization_id;
-        setShopId(nextShopId ?? null);
         setCustSearch(ticketData.customer_name || '');
+        if (nextShopId != null) {
+          setOrganizations(await loadLinkedCustomers(supabase, nextShopId));
+        } else {
+          setOrganizations([]);
+        }
 
         let meId: string | null = null;
         let meName = '';
@@ -359,9 +362,9 @@ export default function ServiceTicketDetail() {
                     placeholder="Type to find a company assigned to this shop"
                     autoComplete="off"
                   />
-                  {showCustDrop && organizations.length > 0 && (
+                  {showCustDrop && filteredOrgs.length > 0 && (
                     <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
-                      {organizations.map((org) => (
+                      {filteredOrgs.map((org) => (
                         <button
                           key={String(org.id)}
                           type="button"

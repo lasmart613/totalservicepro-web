@@ -36,11 +36,11 @@ import {
 import {
   createLinkedCustomer,
   emptyCustomerForm,
+  filterLinkedCustomers,
+  loadLinkedCustomers,
   matchLinkedCustomer,
-  searchLinkedCustomers,
   type LinkedCustomerOpt,
 } from '@/lib/customer-form';
-import { useLinkedCustomerSearch } from '@/lib/use-linked-customer-search';
 import { normalizeStateCode } from '@/lib/geo';
 
 function parseYmd(ymd: string | null | undefined): { y: number; m: number; d: number } | null {
@@ -124,6 +124,7 @@ export default function ServiceSchedule() {
   const [form, setForm] = useState<TicketForm>(() => EMPTY_FORM());
   const [saving, setSaving] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const [customers, setCustomers] = useState<LinkedCustomerOpt[]>([]);
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [customerOrgId, setCustomerOrgId] = useState<string | number | null>(null);
   const [showAddCustomer, setShowAddCustomer] = useState(false);
@@ -131,7 +132,6 @@ export default function ServiceSchedule() {
 
   const supabase = getSupabaseClient();
   const router = useRouter();
-  const { customers } = useLinkedCustomerSearch(supabase, orgId, form.customer_name);
 
   const year = cursor.getFullYear();
   const month0 = cursor.getMonth();
@@ -321,6 +321,22 @@ export default function ServiceSchedule() {
     }
   }, [supabase, formatTicket]);
 
+  const refreshCustomers = useCallback(
+    async (oId: number | string | null) => {
+      if (oId == null) {
+        setCustomers([]);
+        return;
+      }
+      try {
+        setCustomers(await loadLinkedCustomers(supabase, oId));
+      } catch (e) {
+        console.warn('ticket customers', e);
+        setCustomers([]);
+      }
+    },
+    [supabase]
+  );
+
   const refreshAssignees = useCallback(
     async (oId: number | string | null, meId: string | null) => {
       try {
@@ -341,10 +357,17 @@ export default function ServiceSchedule() {
   );
 
   useEffect(() => {
+    refreshCustomers(orgId);
+  }, [orgId, refreshCustomers]);
+
+  useEffect(() => {
     refreshAssignees(orgId, userId);
   }, [orgId, userId, refreshAssignees]);
 
-  const filteredCustomers = customers;
+  const filteredCustomers = useMemo(
+    () => filterLinkedCustomers(customers, form.customer_name),
+    [customers, form.customer_name]
+  );
 
   function applyCustomer(c: LinkedCustomerOpt) {
     setCustomerOrgId(c.id);
@@ -459,6 +482,9 @@ export default function ServiceSchedule() {
     setShowAddCustomer(false);
     setAssignedTo(userId || '');
     setShowNew(true);
+    if (orgId != null && customers.length === 0) {
+      refreshCustomers(orgId);
+    }
   }
 
   async function createTicket(e: React.FormEvent) {
@@ -496,8 +522,7 @@ export default function ServiceSchedule() {
 
       let linkedCustomerId = customerOrgId;
       if (!linkedCustomerId) {
-        const hits = await searchLinkedCustomers(supabase, orgId, customer);
-        linkedCustomerId = matchLinkedCustomer(hits, customer)?.id || null;
+        linkedCustomerId = matchLinkedCustomer(customers, customer)?.id || null;
       }
       const customerState = normalizeStateCode(form.customer_state);
 
@@ -516,6 +541,7 @@ export default function ServiceSchedule() {
           createdBy: userId,
         });
         linkedCustomerId = created.id;
+        await refreshCustomers(orgId);
       }
 
       const payload: Record<string, any> = {
@@ -1372,8 +1398,9 @@ export default function ServiceSchedule() {
           initialName={form.customer_name}
           onClose={() => setShowAddCustomer(false)}
           onCreated={async (id) => {
-            const hits = await searchLinkedCustomers(supabase, orgId, form.customer_name);
-            const hit = hits.find((c) => String(c.id) === String(id));
+            const list = await loadLinkedCustomers(supabase, orgId);
+            setCustomers(list);
+            const hit = list.find((c) => String(c.id) === String(id));
             if (hit) applyCustomer(hit);
             else setCustomerOrgId(id);
             setShowAddCustomer(false);

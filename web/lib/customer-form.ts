@@ -261,14 +261,7 @@ export {
 
 const LINKED_CUSTOMER_TYPES = ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'];
 
-export const LINKED_CUSTOMER_RECENT_LIMIT = 12;
-export const LINKED_CUSTOMER_SEARCH_LIMIT = 20;
-
-const LINKED_CUSTOMER_ORG_SELECT =
-  'id, name, address, city, state, zip, phone, email, contact_name';
-
-const LINKED_CUSTOMER_EMBED =
-  'customer_organization_id, created_at, organizations:customer_organization_id!inner(id, name, address, city, state, zip, phone, email, contact_name)';
+export const LINKED_CUSTOMER_DROPDOWN_LIMIT = 12;
 
 export type LinkedCustomerOpt = {
   id: string | number;
@@ -280,21 +273,48 @@ export type LinkedCustomerOpt = {
   phone?: string | null;
   email?: string | null;
   contact?: string | null;
+  /** organization_customers.created_at — used only for empty-dropdown recency. */
+  linkedAt?: string | null;
 };
 
-/** Customers assigned to this service company via organization_customers (Luxor directory, etc.). */
+type LinkRow = { customer_organization_id?: string | number | null; created_at?: string | null };
+
+function latestLinkedAt(links: LinkRow[] | null | undefined): Map<string, string> {
+  const latest = new Map<string, string>();
+  for (const row of links || []) {
+    const id = row?.customer_organization_id;
+    if (id == null || !row.created_at) continue;
+    const key = String(id);
+    const prev = latest.get(key);
+    if (!prev || row.created_at > prev) latest.set(key, row.created_at);
+  }
+  return latest;
+}
+
+/**
+ * Customers assigned to this service company via organization_customers.
+ * Pages every link (same as /customers) — never a silent 500 cap.
+ */
 export async function loadLinkedCustomers(
   supabase: SupabaseClient,
   serviceOrgId: string | number
 ): Promise<LinkedCustomerOpt[]> {
-  const { data: links, error: linkErr } = await fetchAllPages<{ customer_organization_id: any }>(
-    (from, to) =>
+  let { data: links, error: linkErr } = await fetchAllPages<LinkRow>((from, to) =>
+    supabase
+      .from('organization_customers')
+      .select('customer_organization_id, created_at')
+      .eq('service_organization_id', serviceOrgId)
+      .range(from, to)
+  );
+  if (linkErr) {
+    ({ data: links, error: linkErr } = await fetchAllPages<LinkRow>((from, to) =>
       supabase
         .from('organization_customers')
         .select('customer_organization_id')
         .eq('service_organization_id', serviceOrgId)
         .range(from, to)
-  );
+    ));
+  }
   if (linkErr) {
     console.warn('organization_customers load failed:', linkErr);
     return [];
@@ -302,6 +322,7 @@ export async function loadLinkedCustomers(
 
   const customerIds = uniqueLinkedIds(links);
   if (!customerIds.length) return [];
+  const linkedAt = latestLinkedAt(links);
 
   const orgSelect = 'id, name, address, city, state, zip, phone, email, contact_name, type';
   const rows: any[] = [];
@@ -333,171 +354,18 @@ export async function loadLinkedCustomers(
       phone: c.phone,
       email: c.email,
       contact: c.contact_name,
+      linkedAt: linkedAt.get(String(c.id)) || null,
     }))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 }
 
-/** Strip PostgREST `.or()` / `ilike` metacharacters so user input cannot break the filter. */
-export function sanitizeIlikeTerm(raw: string): string {
-  return String(raw || '')
-    .replace(/[%_,.()]/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-function mapOrgRow(c: any): LinkedCustomerOpt | null {
-  if (c?.id == null) return null;
-  const name = String(c.name || '').trim();
-  if (!name) return null;
-  return {
-    id: c.id,
-    name,
-    address: c.address ?? null,
-    city: c.city ?? null,
-    state: c.state ?? null,
-    zip: c.zip ?? null,
-    phone: c.phone ?? null,
-    email: c.email ?? null,
-    contact: c.contact_name ?? c.contact ?? null,
-  };
-}
-
-function unwrapEmbeddedOrg(row: any): any | null {
-  const org = row?.organizations;
-  if (!org) return null;
-  return Array.isArray(org) ? org[0] || null : org;
-}
-
-function mapEmbeddedLinks(rows: any[] | null | undefined): LinkedCustomerOpt[] {
-  const seen = new Set<string>();
-  const out: LinkedCustomerOpt[] = [];
-  for (const row of rows || []) {
-    const mapped = mapOrgRow(unwrapEmbeddedOrg(row));
-    if (!mapped) continue;
-    const key = String(mapped.id);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(mapped);
-  }
-  return out;
-}
-
-async function fetchOrgsByIds(
-  supabase: SupabaseClient,
-  ids: Array<string | number>
-): Promise<LinkedCustomerOpt[]> {
-  if (!ids.length) return [];
-  const { data, error } = await supabase
-    .from('organizations')
-    .select(LINKED_CUSTOMER_ORG_SELECT)
-    .in('id', ids);
-  if (error) {
-    console.warn('linked customer orgs by id failed:', error);
-    return [];
-  }
-  const byId = new Map<string, LinkedCustomerOpt>();
-  for (const row of data || []) {
-    const mapped = mapOrgRow(row);
-    if (mapped) byId.set(String(mapped.id), mapped);
-  }
-  return ids.map((id) => byId.get(String(id))).filter((c): c is LinkedCustomerOpt => !!c);
-}
-
-function applyOrgNameCityOr<T extends { or: (filters: string, opts?: Record<string, string>) => T }>(
-  query: T,
-  term: string
-): T {
-  const filter = `name.ilike.%${term}%,city.ilike.%${term}%`;
-  return query.or(filter, { referencedTable: 'organizations' });
-}
-
-/**
- * Typeahead loader for estimate / invoice / report / ticket company pickers.
- * Empty query → ~12 most recently linked customers (created_at desc, then id desc).
- * Typed query → server-side ilike on org name/city among THIS service org's links (~20).
- * Never dumps the full 1,700+ directory into the client or PostgREST `.in()` URL.
- */
-export async function searchLinkedCustomers(
-  supabase: SupabaseClient,
-  serviceOrgId: string | number,
-  query: string,
-  opts?: { recentLimit?: number; searchLimit?: number }
-): Promise<LinkedCustomerOpt[]> {
-  if (serviceOrgId == null || serviceOrgId === '') return [];
-  const recentLimit = opts?.recentLimit ?? LINKED_CUSTOMER_RECENT_LIMIT;
-  const searchLimit = opts?.searchLimit ?? LINKED_CUSTOMER_SEARCH_LIMIT;
-  const term = sanitizeIlikeTerm(query);
-
-  if (!term) {
-    let { data: links, error } = await supabase
-      .from('organization_customers')
-      .select(LINKED_CUSTOMER_EMBED)
-      .eq('service_organization_id', serviceOrgId)
-      .order('created_at', { ascending: false, nullsFirst: false })
-      .order('id', { ascending: false })
-      .limit(recentLimit);
-
-    if (error) {
-      ({ data: links, error } = await supabase
-        .from('organization_customers')
-        .select('customer_organization_id, created_at, id')
-        .eq('service_organization_id', serviceOrgId)
-        .order('created_at', { ascending: false, nullsFirst: false })
-        .order('id', { ascending: false })
-        .limit(recentLimit));
-      if (error) {
-        ({ data: links, error } = await supabase
-          .from('organization_customers')
-          .select('customer_organization_id, id')
-          .eq('service_organization_id', serviceOrgId)
-          .order('id', { ascending: false })
-          .limit(recentLimit));
-      }
-      if (error) {
-        console.warn('recent linked customers failed:', error);
-        return [];
-      }
-      return fetchOrgsByIds(supabase, uniqueLinkedIds(links));
-    }
-
-    const embedded = mapEmbeddedLinks(links);
-    if (embedded.length) return embedded;
-    return fetchOrgsByIds(supabase, uniqueLinkedIds(links));
-  }
-
-  let search = supabase
-    .from('organization_customers')
-    .select(LINKED_CUSTOMER_EMBED)
-    .eq('service_organization_id', serviceOrgId);
-  search = applyOrgNameCityOr(search, term);
-
-  let { data: hits, error: searchErr } = await search.limit(searchLimit);
-
-  if (searchErr) {
-    let retry = supabase
-      .from('organization_customers')
-      .select(LINKED_CUSTOMER_EMBED)
-      .eq('service_organization_id', serviceOrgId);
-    retry = retry.or(`name.ilike.%${term}%,city.ilike.%${term}%`, {
-      foreignTable: 'organizations',
-    });
-    ({ data: hits, error: searchErr } = await retry.limit(searchLimit));
-  }
-
-  if (searchErr) {
-    console.warn('linked customer search failed:', searchErr);
-    return [];
-  }
-
-  const embedded = mapEmbeddedLinks(hits);
-  if (embedded.length) return embedded;
-  return fetchOrgsByIds(supabase, uniqueLinkedIds(hits));
-}
+/** Alias used by estimate / invoice / report company pickers. */
+export const loadLinkedCustomerOrgs = loadLinkedCustomers;
 
 export function filterLinkedCustomers(
   customers: LinkedCustomerOpt[],
   query: string,
-  limit = 15
+  limit = LINKED_CUSTOMER_DROPDOWN_LIMIT
 ): LinkedCustomerOpt[] {
   const q = query.trim().toLowerCase();
   const list = q
@@ -508,7 +376,13 @@ export function filterLinkedCustomers(
           .toLowerCase();
         return hay.includes(q);
       })
-    : customers;
+    : [...customers].sort((a, b) => {
+        const at = a.linkedAt || '';
+        const bt = b.linkedAt || '';
+        if (at !== bt) return bt.localeCompare(at);
+        return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+      });
+  // Slice is UI-only. The caller must keep the full loaded set uncapped.
   return list.slice(0, limit);
 }
 
