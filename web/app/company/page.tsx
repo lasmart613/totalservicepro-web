@@ -16,7 +16,7 @@ import {
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { listManufacturers } from '@/lib/laser-catalog';
 import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
-import { persistCustomerLogo } from '@/lib/customer-form';
+import { persistCustomerLogo, searchLinkedCustomers } from '@/lib/customer-form';
 import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
 import { orgCanUpgrade, upgradeTargetForOrg } from '@/lib/org-plan';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
@@ -585,38 +585,8 @@ function CompanyProfile() {
       setCustomers([]);
       return;
     }
-    // Scope to customers linked to this service org only
-    const { data: links, error: linkErr } = await supabase
-      .from('organization_customers')
-      .select('customer_organization_id')
-      .eq('service_organization_id', sid)
-      .limit(500);
-
-    if (linkErr) {
-      console.warn('organization_customers load failed:', linkErr);
-      setCustomers([]);
-      return;
-    }
-
-    const ids = Array.from(
-      new Set(
-        (links || [])
-          .map((r: any) => r.customer_organization_id)
-          .filter((id: any) => id != null)
-      )
-    );
-    if (ids.length === 0) {
-      setCustomers([]);
-      return;
-    }
-
-    const { data: custs } = await supabase
-      .from('organizations')
-      .select('*')
-      .in('id', ids)
-      .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'])
-      .order('name');
-    setCustomers(custs || []);
+    // Newest linked customers only — full directory lives on /customers (paginated).
+    setCustomers(await searchLinkedCustomers(supabase, sid, ''));
   }
 
   async function loadFacilityContacts(orgId?: string | number | null) {

@@ -261,6 +261,15 @@ export {
 
 const LINKED_CUSTOMER_TYPES = ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'];
 
+export const LINKED_CUSTOMER_RECENT_LIMIT = 12;
+export const LINKED_CUSTOMER_SEARCH_LIMIT = 20;
+
+const LINKED_CUSTOMER_ORG_SELECT =
+  'id, name, address, city, state, zip, phone, email, contact_name';
+
+const LINKED_CUSTOMER_EMBED =
+  'customer_organization_id, created_at, organizations:customer_organization_id!inner(id, name, address, city, state, zip, phone, email, contact_name)';
+
 export type LinkedCustomerOpt = {
   id: string | number;
   name: string;
@@ -326,6 +335,163 @@ export async function loadLinkedCustomers(
       contact: c.contact_name,
     }))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+}
+
+/** Strip PostgREST `.or()` / `ilike` metacharacters so user input cannot break the filter. */
+export function sanitizeIlikeTerm(raw: string): string {
+  return String(raw || '')
+    .replace(/[%_,.()]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function mapOrgRow(c: any): LinkedCustomerOpt | null {
+  if (c?.id == null) return null;
+  const name = String(c.name || '').trim();
+  if (!name) return null;
+  return {
+    id: c.id,
+    name,
+    address: c.address ?? null,
+    city: c.city ?? null,
+    state: c.state ?? null,
+    zip: c.zip ?? null,
+    phone: c.phone ?? null,
+    email: c.email ?? null,
+    contact: c.contact_name ?? c.contact ?? null,
+  };
+}
+
+function unwrapEmbeddedOrg(row: any): any | null {
+  const org = row?.organizations;
+  if (!org) return null;
+  return Array.isArray(org) ? org[0] || null : org;
+}
+
+function mapEmbeddedLinks(rows: any[] | null | undefined): LinkedCustomerOpt[] {
+  const seen = new Set<string>();
+  const out: LinkedCustomerOpt[] = [];
+  for (const row of rows || []) {
+    const mapped = mapOrgRow(unwrapEmbeddedOrg(row));
+    if (!mapped) continue;
+    const key = String(mapped.id);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(mapped);
+  }
+  return out;
+}
+
+async function fetchOrgsByIds(
+  supabase: SupabaseClient,
+  ids: Array<string | number>
+): Promise<LinkedCustomerOpt[]> {
+  if (!ids.length) return [];
+  const { data, error } = await supabase
+    .from('organizations')
+    .select(LINKED_CUSTOMER_ORG_SELECT)
+    .in('id', ids);
+  if (error) {
+    console.warn('linked customer orgs by id failed:', error);
+    return [];
+  }
+  const byId = new Map<string, LinkedCustomerOpt>();
+  for (const row of data || []) {
+    const mapped = mapOrgRow(row);
+    if (mapped) byId.set(String(mapped.id), mapped);
+  }
+  return ids.map((id) => byId.get(String(id))).filter((c): c is LinkedCustomerOpt => !!c);
+}
+
+function applyOrgNameCityOr<T extends { or: (filters: string, opts?: Record<string, string>) => T }>(
+  query: T,
+  term: string
+): T {
+  const filter = `name.ilike.%${term}%,city.ilike.%${term}%`;
+  return query.or(filter, { referencedTable: 'organizations' });
+}
+
+/**
+ * Typeahead loader for estimate / invoice / report / ticket company pickers.
+ * Empty query → ~12 most recently linked customers (created_at desc, then id desc).
+ * Typed query → server-side ilike on org name/city among THIS service org's links (~20).
+ * Never dumps the full 1,700+ directory into the client or PostgREST `.in()` URL.
+ */
+export async function searchLinkedCustomers(
+  supabase: SupabaseClient,
+  serviceOrgId: string | number,
+  query: string,
+  opts?: { recentLimit?: number; searchLimit?: number }
+): Promise<LinkedCustomerOpt[]> {
+  if (serviceOrgId == null || serviceOrgId === '') return [];
+  const recentLimit = opts?.recentLimit ?? LINKED_CUSTOMER_RECENT_LIMIT;
+  const searchLimit = opts?.searchLimit ?? LINKED_CUSTOMER_SEARCH_LIMIT;
+  const term = sanitizeIlikeTerm(query);
+
+  if (!term) {
+    let { data: links, error } = await supabase
+      .from('organization_customers')
+      .select(LINKED_CUSTOMER_EMBED)
+      .eq('service_organization_id', serviceOrgId)
+      .order('created_at', { ascending: false, nullsFirst: false })
+      .order('id', { ascending: false })
+      .limit(recentLimit);
+
+    if (error) {
+      ({ data: links, error } = await supabase
+        .from('organization_customers')
+        .select('customer_organization_id, created_at, id')
+        .eq('service_organization_id', serviceOrgId)
+        .order('created_at', { ascending: false, nullsFirst: false })
+        .order('id', { ascending: false })
+        .limit(recentLimit));
+      if (error) {
+        ({ data: links, error } = await supabase
+          .from('organization_customers')
+          .select('customer_organization_id, id')
+          .eq('service_organization_id', serviceOrgId)
+          .order('id', { ascending: false })
+          .limit(recentLimit));
+      }
+      if (error) {
+        console.warn('recent linked customers failed:', error);
+        return [];
+      }
+      return fetchOrgsByIds(supabase, uniqueLinkedIds(links));
+    }
+
+    const embedded = mapEmbeddedLinks(links);
+    if (embedded.length) return embedded;
+    return fetchOrgsByIds(supabase, uniqueLinkedIds(links));
+  }
+
+  let search = supabase
+    .from('organization_customers')
+    .select(LINKED_CUSTOMER_EMBED)
+    .eq('service_organization_id', serviceOrgId);
+  search = applyOrgNameCityOr(search, term);
+
+  let { data: hits, error: searchErr } = await search.limit(searchLimit);
+
+  if (searchErr) {
+    let retry = supabase
+      .from('organization_customers')
+      .select(LINKED_CUSTOMER_EMBED)
+      .eq('service_organization_id', serviceOrgId);
+    retry = retry.or(`name.ilike.%${term}%,city.ilike.%${term}%`, {
+      foreignTable: 'organizations',
+    });
+    ({ data: hits, error: searchErr } = await retry.limit(searchLimit));
+  }
+
+  if (searchErr) {
+    console.warn('linked customer search failed:', searchErr);
+    return [];
+  }
+
+  const embedded = mapEmbeddedLinks(hits);
+  if (embedded.length) return embedded;
+  return fetchOrgsByIds(supabase, uniqueLinkedIds(hits));
 }
 
 export function filterLinkedCustomers(

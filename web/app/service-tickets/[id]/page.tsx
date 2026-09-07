@@ -7,7 +7,8 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { ArrowLeft, Edit2, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
-import { loadLinkedCustomers } from '@/lib/customer-form';
+import { type LinkedCustomerOpt } from '@/lib/customer-form';
+import { useLinkedCustomerSearch } from '@/lib/use-linked-customer-search';
 import { updateOmittingCharOverflow } from '@/lib/char-overflow';
 import { AssignFseSelect } from '@/components/AssignFseSelect';
 import {
@@ -53,7 +54,9 @@ export default function ServiceTicketDetail() {
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState<any>({});
   const [saving, setSaving] = useState(false);
-  const [organizations, setOrganizations] = useState<any[]>([]);
+  const [shopId, setShopId] = useState<string | number | null>(null);
+  const [custSearch, setCustSearch] = useState('');
+  const [showCustDrop, setShowCustDrop] = useState(false);
   const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [selfName, setSelfName] = useState('');
@@ -63,6 +66,7 @@ export default function ServiceTicketDetail() {
   const [dbLaserModels, setDbLaserModels] = useState<any[]>([]);
 
   const supabase = getSupabaseClient();
+  const { customers: organizations } = useLinkedCustomerSearch(supabase, shopId, custSearch);
 
   // Load DB manufacturers and models for dropdowns (independent of ticket)
   useEffect(() => {
@@ -103,12 +107,9 @@ export default function ServiceTicketDetail() {
         setTicket(normalized);
         setFormData(normalized);
 
-        const shopId = ticketData.organization_id;
-        if (shopId != null) {
-          setOrganizations(await loadLinkedCustomers(supabase, shopId));
-        } else {
-          setOrganizations([]);
-        }
+        const nextShopId = ticketData.organization_id;
+        setShopId(nextShopId ?? null);
+        setCustSearch(ticketData.customer_name || '');
 
         let meId: string | null = null;
         let meName = '';
@@ -140,7 +141,7 @@ export default function ServiceTicketDetail() {
         try {
           setAssignees(
             await loadTicketAssignees(supabase, {
-              orgId: shopId ?? null,
+              orgId: nextShopId ?? null,
               meId,
               selfName: meName,
               selfRole: meRole,
@@ -173,26 +174,25 @@ export default function ServiceTicketDetail() {
     setFormData((prev: any) => ({ ...prev, [field]: value }));
   };
 
-  const handleCustomerSelect = (orgId: string) => {
-    if (orgId === 'new') {
+  const handleCustomerSelect = (selectedOrg: LinkedCustomerOpt | 'new') => {
+    if (selectedOrg === 'new') {
       setFormData((prev: any) => ({ ...prev, customer_organization_id: null }));
       return;
     }
 
-    const selectedOrg = organizations.find((org) => String(org.id) === String(orgId));
-    if (selectedOrg) {
-      setFormData((prev: any) => ({
-        ...prev,
-        customer_name: selectedOrg.name,
-        customer_address: selectedOrg.address || prev.customer_address,
-        customer_city: selectedOrg.city || prev.customer_city,
-        customer_state: selectedOrg.state || prev.customer_state,
-        zip: selectedOrg.zip || prev.zip,
-        customer_phone: selectedOrg.phone || prev.customer_phone,
-        customer_email: selectedOrg.email || prev.customer_email,
-        customer_organization_id: selectedOrg.id,
-      }));
-    }
+    setCustSearch(selectedOrg.name);
+    setShowCustDrop(false);
+    setFormData((prev: any) => ({
+      ...prev,
+      customer_name: selectedOrg.name,
+      customer_address: selectedOrg.address || prev.customer_address,
+      customer_city: selectedOrg.city || prev.customer_city,
+      customer_state: selectedOrg.state || prev.customer_state,
+      zip: selectedOrg.zip || prev.zip,
+      customer_phone: selectedOrg.phone || prev.customer_phone,
+      customer_email: selectedOrg.email || prev.customer_email,
+      customer_organization_id: selectedOrg.id,
+    }));
   };
 
   const handleSave = async () => {
@@ -343,22 +343,40 @@ export default function ServiceTicketDetail() {
             <div className="space-y-4">
               {/* Customer Dropdown */}
               {isEditing && (
-                <div>
-                  <div className="text-xs text-[var(--text3)] mb-1">Select Existing Customer</div>
-                  <select 
-                    className="input mb-3" 
-                    onChange={(e) => handleCustomerSelect(e.target.value)}
-                    value={
-                      formData.customer_organization_id != null && formData.customer_organization_id !== ''
-                        ? String(formData.customer_organization_id)
-                        : 'new'
-                    }
-                  >
-                    <option value="new">New / Custom Customer</option>
-                    {organizations.map(org => (
-                      <option key={org.id} value={org.id}>{org.name}</option>
-                    ))}
-                  </select>
+                <div className="relative">
+                  <div className="text-xs text-[var(--text3)] mb-1">Search existing customer</div>
+                  <input
+                    className="input mb-1"
+                    value={custSearch}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      setCustSearch(value);
+                      setShowCustDrop(true);
+                      handleInputChange('customer_name', value);
+                      if (!value) handleCustomerSelect('new');
+                    }}
+                    onFocus={() => setShowCustDrop(true)}
+                    placeholder="Type to find a company assigned to this shop"
+                    autoComplete="off"
+                  />
+                  {showCustDrop && organizations.length > 0 && (
+                    <div className="absolute z-20 left-0 right-0 mt-1 max-h-48 overflow-auto rounded-lg border border-[var(--border2)] bg-[var(--surface3)] shadow-lg">
+                      {organizations.map((org) => (
+                        <button
+                          key={String(org.id)}
+                          type="button"
+                          className="w-full text-left px-3 py-2 hover:bg-[var(--surface)] text-sm"
+                          onMouseDown={(e) => e.preventDefault()}
+                          onClick={() => handleCustomerSelect(org)}
+                        >
+                          <div className="font-semibold">{org.name}</div>
+                          <div className="text-xs text-[var(--text3)]">
+                            {[org.city, org.state].filter(Boolean).join(', ')}
+                          </div>
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
