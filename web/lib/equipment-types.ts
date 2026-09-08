@@ -1,10 +1,23 @@
 /**
  * Shared biomedical equipment types for RepairPlanet.
- * Same values as clinic find-a-rep leads: laser | lithotriptor | c_arm | other.
- * Lasers stay the default "room" so the existing manuals library is unchanged.
+ * Same values as clinic find-a-rep leads. Lasers stay the default "room"
+ * so the existing manuals library is unchanged.
  */
 
-export const EQUIPMENT_TYPE_VALUES = ['laser', 'lithotriptor', 'c_arm', 'other'] as const;
+export const EQUIPMENT_TYPE_VALUES = [
+  'laser',
+  'lithotriptor',
+  'c_arm',
+  'anesthesia',
+  'beds',
+  'defibrillator',
+  'endoscope',
+  'infusion_pump',
+  'patient_monitor',
+  'sterile_processing',
+  'ultrasound',
+  'ventilator',
+] as const;
 
 export type EquipmentType = (typeof EQUIPMENT_TYPE_VALUES)[number];
 
@@ -40,15 +53,71 @@ export const EQUIPMENT_TYPES: readonly EquipmentTypeMeta[] = [
     value: 'c_arm',
     label: 'C-arm',
     roomLabel: 'C-arm room',
-    blurb: 'Mobile fluoroscopy (GE OEC and other C-arms).',
+    blurb: 'Mobile fluoroscopy (GE OEC, UroView, and other C-arms).',
     icon: '🖥️',
   },
   {
-    value: 'other',
-    label: 'Other',
-    roomLabel: 'Other room',
-    blurb: 'Extensible catch-all for equipment that is not a laser, litho, or C-arm.',
-    icon: '📦',
+    value: 'anesthesia',
+    label: 'Anesthesia',
+    roomLabel: 'Anesthesia room',
+    blurb: 'Anesthesia workstations (Draeger Fabius, Narkomed, and similar).',
+    icon: '🫁',
+  },
+  {
+    value: 'beds',
+    label: 'Beds',
+    roomLabel: 'Beds room',
+    blurb: 'Hospital beds, stretchers, and infant warmers.',
+    icon: '🛏️',
+  },
+  {
+    value: 'defibrillator',
+    label: 'Defibrillator',
+    roomLabel: 'Defibrillator room',
+    blurb: 'Defibrillators and AEDs (CU Medical iPAD, Burdick, and similar).',
+    icon: '⚡',
+  },
+  {
+    value: 'endoscope',
+    label: 'Endoscope',
+    roomLabel: 'Endoscope room',
+    blurb: 'Flexible and rigid endoscopes and endoscopy processors.',
+    icon: '🔍',
+  },
+  {
+    value: 'infusion_pump',
+    label: 'Infusion pump',
+    roomLabel: 'Infusion pump room',
+    blurb: 'Infusion and syringe pumps (CME BodyGuard, QCore Sapphire, and similar).',
+    icon: '💉',
+  },
+  {
+    value: 'patient_monitor',
+    label: 'Patient monitor',
+    roomLabel: 'Patient monitor room',
+    blurb: 'Bedside and vital-signs monitors (GE Dash, Contec CMS, and similar).',
+    icon: '📈',
+  },
+  {
+    value: 'sterile_processing',
+    label: 'Sterile processing',
+    roomLabel: 'Sterile processing room',
+    blurb: 'Steam sterilizers, washers, autoclaves, and SPD equipment.',
+    icon: '♨️',
+  },
+  {
+    value: 'ultrasound',
+    label: 'Ultrasound',
+    roomLabel: 'Ultrasound room',
+    blurb: 'Diagnostic ultrasound systems (Samsung HS / RS and similar).',
+    icon: '📡',
+  },
+  {
+    value: 'ventilator',
+    label: 'Ventilator',
+    roomLabel: 'Ventilator room',
+    blurb: 'Critical-care ventilators and respirators.',
+    icon: '🌬️',
   },
 ] as const;
 
@@ -62,7 +131,30 @@ const ALIASES: Record<string, EquipmentType> = {
   'c-arm': 'c_arm',
   carm: 'c_arm',
   'c arm': 'c_arm',
-  other: 'other',
+  anesthesia: 'anesthesia',
+  anaesthesia: 'anesthesia',
+  beds: 'beds',
+  bed: 'beds',
+  stretcher: 'beds',
+  defibrillator: 'defibrillator',
+  defib: 'defibrillator',
+  aed: 'defibrillator',
+  endoscope: 'endoscope',
+  endoscopy: 'endoscope',
+  infusion_pump: 'infusion_pump',
+  infusion: 'infusion_pump',
+  syringe_pump: 'infusion_pump',
+  patient_monitor: 'patient_monitor',
+  monitor: 'patient_monitor',
+  vital_signs: 'patient_monitor',
+  sterile_processing: 'sterile_processing',
+  sterilizer: 'sterile_processing',
+  autoclave: 'sterile_processing',
+  spd: 'sterile_processing',
+  ultrasound: 'ultrasound',
+  sonograph: 'ultrasound',
+  ventilator: 'ventilator',
+  respirator: 'ventilator',
 };
 
 export function isEquipmentType(value: unknown): value is EquipmentType {
@@ -153,7 +245,21 @@ export function inferEquipmentType(fields: {
   if (isDornierHolmiumLaser(hay)) return DEFAULT_EQUIPMENT_TYPE;
   if (isHolmiumLithoLaserFamily(hay)) return DEFAULT_EQUIPMENT_TYPE;
   if (isShockwaveLithotriptor(hay)) return 'lithotriptor';
-  if (/\bc[-\s_]?arm\b|\boec\b|fluoroscop/.test(hay)) return 'c_arm';
+  if (/\bc[-\s_]?arm\b|\boec\b|fluoroscop|\buroview\b/.test(hay)) return 'c_arm';
+
+  if (/steriliz|autoclave|washer[- ]disinfect|\bspd\b|sterile\s+processing/.test(hay)) {
+    return 'sterile_processing';
+  }
+  if (/\bventilator|\brespirator\b/.test(hay)) return 'ventilator';
+  if (/\binfant\s+warmer\b|\bstretcher|\bhospital\s+beds?\b|\b(?:hospital\s+)?beds?\b/.test(hay)) {
+    return 'beds';
+  }
+  if (/\bdefibrillator|\baeds?\b|\bdefib\b/.test(hay)) return 'defibrillator';
+  if (/infusion|syringe\s+pump/.test(hay)) return 'infusion_pump';
+  if (/patient\s+monitor|vital\s+signs/.test(hay)) return 'patient_monitor';
+  if (/\bultrasound\b|\bsonograph/.test(hay)) return 'ultrasound';
+  if (/\banesthe|\bfabius\b|\bnarkomed\b/.test(hay)) return 'anesthesia';
+  if (/\bendoscop/.test(hay)) return 'endoscope';
 
   const explicit = normalizeEquipmentType(fields.equipment_type);
   if (explicit) return explicit;

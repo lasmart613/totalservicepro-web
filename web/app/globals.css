@@ -320,15 +320,21 @@ html.landing-mode main {
   touch-action: none;
 }
 
-/* Manuals rooms — pick a type (hallway), then the existing wood bookshelf */
+/* Manuals rooms — pick a type (hallway), then the existing wood bookshelf.
+   Many rooms: wrap on desktop, horizontal scroll on narrow screens. */
 .manual-rooms {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  display: flex;
+  flex-wrap: nowrap;
   gap: 10px;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: thin;
+  padding-bottom: 4px;
 }
 @media (min-width: 768px) {
   .manual-rooms {
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    flex-wrap: wrap;
+    overflow-x: visible;
   }
 }
 .manual-room {
@@ -343,6 +349,8 @@ html.landing-mode main {
   color: var(--text);
   cursor: pointer;
   min-height: 64px;
+  min-width: 10.5rem;
+  flex: 0 0 auto;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
 .manual-room:hover {

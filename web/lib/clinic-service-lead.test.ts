@@ -66,6 +66,7 @@ const SAMPLE = {
 test('clinic lead requires equipment type, name, location, contact, a short problem, and email or phone', () => {
   assert.equal(parseClinicLead({ ...SAMPLE, equipmentType: '' }).ok, false);
   assert.equal(parseClinicLead({ ...SAMPLE, equipmentType: 'other', equipmentTypeOther: '' }).ok, false);
+  assert.equal(parseClinicLead({ ...SAMPLE, equipmentType: 'other', equipmentTypeOther: 'Ultrasound' }).ok, false);
   assert.equal(parseClinicLead({ ...SAMPLE, clinicName: 'A' }).ok, false);
   assert.equal(parseClinicLead({ ...SAMPLE, location: '' }).ok, false);
   assert.equal(parseClinicLead({ ...SAMPLE, contactName: 'X' }).ok, false);
@@ -89,15 +90,30 @@ test('clinic lead requires equipment type, name, location, contact, a short prob
     assert.equal(litho.lead.equipmentTypeOther, null);
   }
 
-  const other = parseClinicLead({
+  const ultrasound = parseClinicLead({
     ...SAMPLE,
-    equipmentType: 'other',
-    equipmentTypeOther: 'Ultrasound',
+    equipmentType: 'ultrasound',
+    manufacturer: 'Samsung',
+    model: 'RS80A',
+    description: 'Image frozen after a probe swap; no live B-mode on the ultrasound.',
   });
-  assert.equal(other.ok, true);
-  if (other.ok && !other.spam) {
-    assert.equal(other.lead.equipmentType, 'other');
-    assert.equal(other.lead.equipmentTypeOther, 'Ultrasound');
+  assert.equal(ultrasound.ok, true);
+  if (ultrasound.ok && !ultrasound.spam) {
+    assert.equal(ultrasound.lead.equipmentType, 'ultrasound');
+    assert.equal(ultrasound.lead.equipmentTypeOther, null);
+  }
+
+  const vent = parseClinicLead({
+    ...SAMPLE,
+    equipmentType: 'ventilator',
+    manufacturer: 'Puritan Bennett',
+    model: '840',
+    description: 'High-priority alarm after a circuit change; no assist breaths.',
+  });
+  assert.equal(vent.ok, true);
+  if (vent.ok && !vent.spam) {
+    assert.equal(vent.lead.equipmentType, 'ventilator');
+    assert.equal(vent.lead.equipmentTypeOther, null);
   }
 
   const emailOnly = parseClinicLead({ ...SAMPLE, phone: '' });
@@ -357,6 +373,8 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.match(form, /\/api\/clinic-service-leads/);
   assert.match(form, /No Total Service Pro/);
   assert.match(form, /equipmentType/);
+  assert.doesNotMatch(form, /equipmentTypeOther/);
+  assert.doesNotMatch(form, /What kind of equipment/);
   assert.match(form, /CLINIC_LEAD_EQUIPMENT_TYPES/);
   assert.match(form, /lithotriptors/);
   assert.match(form, /C-arms first/);
@@ -369,7 +387,9 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.match(equipmentTypes, /value: 'laser'/);
   assert.match(equipmentTypes, /value: 'lithotriptor'/);
   assert.match(equipmentTypes, /value: 'c_arm'/);
-  assert.match(equipmentTypes, /value: 'other'/);
+  assert.match(equipmentTypes, /value: 'ventilator'/);
+  assert.match(equipmentTypes, /value: 'sterile_processing'/);
+  assert.doesNotMatch(equipmentTypes, /value: 'other'/);
   assert.match(equipmentTypes, /label: 'C-arm'/);
   assert.match(page, /Connecting Medical Equipment Owners to Top Service Professionals/);
   assert.match(page, /lp-hero-tagline/);

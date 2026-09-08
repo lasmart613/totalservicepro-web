@@ -5,7 +5,6 @@ import { toast } from 'sonner';
 import {
   CLINIC_LEAD_DESCRIPTION_MAX,
   CLINIC_LEAD_DESCRIPTION_MIN,
-  CLINIC_LEAD_EQUIPMENT_OTHER_MAX,
   CLINIC_LEAD_EQUIPMENT_TYPES,
   CLINIC_LEAD_URGENCY,
   SERVICE_REQUEST_TYPES,
@@ -23,7 +22,6 @@ export function FindRepForm({
   const compact = variant === 'hero';
   const TitleTag = compact ? 'h2' : 'h1';
   const [equipmentType, setEquipmentType] = useState('');
-  const [equipmentTypeOther, setEquipmentTypeOther] = useState('');
   const [manufacturer, setManufacturer] = useState('');
   const [model, setModel] = useState('');
   const [serialNumber, setSerialNumber] = useState('');
@@ -43,7 +41,6 @@ export function FindRepForm({
 
   function reset() {
     setEquipmentType('');
-    setEquipmentTypeOther('');
     setManufacturer('');
     setModel('');
     setSerialNumber('');
@@ -70,7 +67,6 @@ export function FindRepForm({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           equipmentType,
-          equipmentTypeOther: equipmentType === 'other' ? equipmentTypeOther : undefined,
           manufacturer: manufacturer.trim(),
           model: model.trim(),
           serialNumber: serialNumber.trim() || undefined,
@@ -153,20 +149,6 @@ export function FindRepForm({
             ))}
           </select>
         </label>
-        {equipmentType === 'other' ? (
-          <label className="lp-field">
-            <span>What kind of equipment</span>
-            <input
-              type="text"
-              required
-              minLength={2}
-              maxLength={CLINIC_LEAD_EQUIPMENT_OTHER_MAX}
-              value={equipmentTypeOther}
-              onChange={(e) => setEquipmentTypeOther(e.target.value)}
-              placeholder="Short description"
-            />
-          </label>
-        ) : null}
         <label className="lp-field">
           <span>Brand</span>
           <input

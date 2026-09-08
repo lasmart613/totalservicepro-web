@@ -41,9 +41,10 @@ export const CLINIC_LEAD_NAME_MAX = 120;
 export const CLINIC_LEAD_LOCATION_MAX = 80;
 export const FIND_REP_HASH = 'find-a-rep';
 
+/** @deprecated Other free-text path removed; kept so older clients can still post the field. */
 export const CLINIC_LEAD_EQUIPMENT_OTHER_MAX = 80;
 
-/** Same values as manuals rooms / catalog (`laser | lithotriptor | c_arm | other`). */
+/** Same values as manuals rooms / catalog (`EQUIPMENT_TYPE_VALUES`). */
 export const CLINIC_LEAD_EQUIPMENT_TYPES = EQUIPMENT_TYPES.map((t) => ({
   value: t.value,
   label: t.label,
@@ -143,15 +144,11 @@ export function parseClinicLead(body: ClinicLeadInput):
   const honeypot = clip(body.website ?? body.companyWebsite, 200);
   if (honeypot) return { ok: true, spam: true };
 
-  const equipmentRaw = clip(body.equipmentType, 20);
+  const equipmentRaw = clip(body.equipmentType, 40);
   const equipmentType =
     CLINIC_LEAD_EQUIPMENT_TYPES.find((t) => t.value === equipmentRaw)?.value ?? null;
   if (!equipmentType) {
     return { ok: false, error: 'Please choose an equipment type.' };
-  }
-  const equipmentTypeOther = clip(body.equipmentTypeOther, CLINIC_LEAD_EQUIPMENT_OTHER_MAX);
-  if (equipmentType === 'other' && equipmentTypeOther.length < 2) {
-    return { ok: false, error: 'Please say what kind of equipment (a short note is enough).' };
   }
 
   const clinicName = clip(body.clinicName, CLINIC_LEAD_NAME_MAX);
@@ -221,7 +218,7 @@ export function parseClinicLead(body: ClinicLeadInput):
       email,
       phone,
       equipmentType,
-      equipmentTypeOther: equipmentType === 'other' ? equipmentTypeOther : null,
+      equipmentTypeOther: null,
       manufacturer,
       model,
       serialNumber,
@@ -433,9 +430,6 @@ export async function insertServiceRequestFromClinicLead(
 }
 
 export function equipmentTypeLabel(lead: Pick<ClinicLead, 'equipmentType' | 'equipmentTypeOther'>): string {
-  if (lead.equipmentType === 'other') {
-    return lead.equipmentTypeOther || 'Other';
-  }
   return CLINIC_LEAD_EQUIPMENT_TYPES.find((t) => t.value === lead.equipmentType)?.label || lead.equipmentType;
 }
 

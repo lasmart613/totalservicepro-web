@@ -19,6 +19,7 @@ import { canAccessServiceManuals } from '@/lib/roles';
 import {
   DEFAULT_EQUIPMENT_TYPE,
   EQUIPMENT_TYPES,
+  EQUIPMENT_TYPE_VALUES,
   equipmentTypeMeta,
   equipmentTypeOrDefault,
   inferEquipmentType,
@@ -435,12 +436,10 @@ export default function ManualsLibrary() {
 
   const roomCounts = React.useMemo(() => {
     const source = tab === 'browse' ? manuals : myLibrary;
-    const counts: Record<EquipmentType, number> = {
-      laser: 0,
-      lithotriptor: 0,
-      c_arm: 0,
-      other: 0,
-    };
+    const counts = Object.fromEntries(EQUIPMENT_TYPE_VALUES.map((value) => [value, 0])) as Record<
+      EquipmentType,
+      number
+    >;
     source.forEach((m) => {
       counts[manualRoom(m)] += 1;
     });
