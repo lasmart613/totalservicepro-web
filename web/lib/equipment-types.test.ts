@@ -24,7 +24,25 @@ import { CLINIC_LEAD_EQUIPMENT_TYPES } from './clinic-service-lead.ts';
 const here = dirname(fileURLToPath(import.meta.url));
 
 test('equipment types match find-a-rep and default to Laser', () => {
-  assert.deepEqual([...EQUIPMENT_TYPE_VALUES], ['laser', 'lithotriptor', 'c_arm', 'other']);
+  assert.deepEqual(
+    [...EQUIPMENT_TYPE_VALUES],
+    [
+      'laser',
+      'lithotriptor',
+      'c_arm',
+      'anesthesia',
+      'beds',
+      'defibrillator',
+      'endoscope',
+      'infusion_pump',
+      'patient_monitor',
+      'sterile_processing',
+      'ultrasound',
+      'ventilator',
+    ]
+  );
+  assert.ok(!EQUIPMENT_TYPE_VALUES.includes('other' as never));
+  assert.ok(EQUIPMENT_TYPES.every((t) => t.value !== 'other'));
   assert.equal(DEFAULT_EQUIPMENT_TYPE, 'laser');
   assert.deepEqual(
     EQUIPMENT_TYPES.map((t) => t.value),
@@ -32,8 +50,11 @@ test('equipment types match find-a-rep and default to Laser', () => {
   );
   assert.equal(normalizeEquipmentType('C-arm'), 'c_arm');
   assert.equal(normalizeEquipmentType('litho'), 'lithotriptor');
+  assert.equal(normalizeEquipmentType('other'), null);
+  assert.equal(equipmentTypeOrDefault('other'), 'laser');
   assert.equal(equipmentTypeOrDefault(null), 'laser');
   assert.equal(equipmentTypeLabel('c_arm'), 'C-arm');
+  assert.equal(equipmentTypeLabel('ventilator'), 'Ventilator');
 });
 
 test('Quanta Litho / Cyber Ho / Litho IFU are laser; Dornier ESWL is lithotriptor', () => {
@@ -53,6 +74,28 @@ test('Quanta Litho / Cyber Ho / Litho IFU are laser; Dornier ESWL is lithotripto
     inferEquipmentType({ equipment_type: 'lithotriptor', title: 'Something laser-ish' }),
     'lithotriptor'
   );
+});
+
+test('infer maps migrated Other titles into real BMET rooms', () => {
+  assert.equal(inferEquipmentType({ title: 'Euronda E9 Steam Sterilizer' }), 'sterile_processing');
+  assert.equal(inferEquipmentType({ title: 'Trans SMART Steam Sterilizer' }), 'sterile_processing');
+  assert.equal(inferEquipmentType({ title: 'CU Medical iPAD NF1200 Defibrillator' }), 'defibrillator');
+  assert.equal(inferEquipmentType({ title: 'CME BodyGuard infusion' }), 'infusion_pump');
+  assert.equal(inferEquipmentType({ title: 'Burdick Medic5 Defibrillator' }), 'defibrillator');
+  assert.equal(inferEquipmentType({ title: 'Samsung HS50A/HS60A Ultrasound' }), 'ultrasound');
+  assert.equal(inferEquipmentType({ title: 'QCore Sapphire Infusion' }), 'infusion_pump');
+  assert.equal(inferEquipmentType({ title: 'Contec CMS8000 Patient Monitor' }), 'patient_monitor');
+  assert.equal(inferEquipmentType({ title: 'Ohmeda Ohio Infant Warmer' }), 'beds');
+  assert.equal(inferEquipmentType({ title: 'GE Dash 3000/4000 Patient Monitor' }), 'patient_monitor');
+  assert.equal(inferEquipmentType({ title: 'Samsung RS80A Ultrasound' }), 'ultrasound');
+  assert.equal(inferEquipmentType({ title: 'Draeger Fabius GS Anesthesia' }), 'anesthesia');
+  assert.equal(inferEquipmentType({ title: 'Draeger Narkomed 6000 Anesthesia' }), 'anesthesia');
+  assert.equal(inferEquipmentType({ title: 'UroView 2800' }), 'c_arm');
+  assert.equal(inferEquipmentType({ title: 'Olympus GIF Endoscope Service Manual' }), 'endoscope');
+  assert.equal(inferEquipmentType({ title: 'Puritan Bennett 840 Ventilator' }), 'ventilator');
+  assert.equal(inferEquipmentType({ title: 'Philips HeartStart AED' }), 'defibrillator');
+  assert.equal(inferEquipmentType({ title: 'Stryker Stretcher' }), 'beds');
+  assert.equal(inferEquipmentType({ title: 'Getinge autoclave washer' }), 'sterile_processing');
 });
 
 test('Dornier H20 / H30 / Medilas are laser, not lithotriptor', () => {
@@ -184,6 +227,38 @@ test('migration backfills lasers and seeds Quanta / GE OEC models', () => {
   assert.match(h20, /medilas/i);
   assert.match(h20, /compact\\s\+delta/);
   assert.doesNotMatch(h20, /\.pdf['"]\s*,/);
+
+  const rooms = readFileSync(
+    join(here, '../supabase/migrations/20260908_000000_expand_manuals_equipment_rooms.sql'),
+    'utf8'
+  );
+  assert.match(rooms, /DROP CONSTRAINT IF EXISTS manuals_equipment_type_check/);
+  assert.match(rooms, /id::text = '212'/);
+  assert.match(rooms, /id::text = '216'/);
+  assert.match(rooms, /id::text = '217'/);
+  assert.match(rooms, /id::text = '224'/);
+  assert.match(rooms, /id::text = '225'/);
+  assert.match(rooms, /id::text = '227'/);
+  assert.match(rooms, /id::text = '228'/);
+  assert.match(rooms, /id::text = '229'/);
+  assert.match(rooms, /id::text = '231'/);
+  assert.match(rooms, /id::text = '232'/);
+  assert.match(rooms, /id::text = '233'/);
+  assert.match(rooms, /id::text = '235'/);
+  assert.match(rooms, /id::text = '236'/);
+  assert.match(rooms, /id::text = '245'/);
+  assert.match(rooms, /equipment_type = 'sterile_processing'/);
+  assert.match(rooms, /equipment_type = 'defibrillator'/);
+  assert.match(rooms, /equipment_type = 'infusion_pump'/);
+  assert.match(rooms, /equipment_type = 'ultrasound'/);
+  assert.match(rooms, /equipment_type = 'patient_monitor'/);
+  assert.match(rooms, /equipment_type = 'beds'/);
+  assert.match(rooms, /equipment_type = 'anesthesia'/);
+  assert.match(rooms, /equipment_type = 'c_arm'/);
+  assert.match(rooms, /WHERE equipment_type = 'other'/);
+  assert.match(rooms, /ELSE 'laser'/);
+  assert.doesNotMatch(rooms, /ADD CONSTRAINT manuals_equipment_type_check/);
+  assert.doesNotMatch(rooms, /ADD CONSTRAINT laser_models_equipment_type_check/);
 });
 
 test('incomplete badge is a stored flag, not a hardcoded H20 title', () => {
@@ -194,13 +269,20 @@ test('incomplete badge is a stored flag, not a hardcoded H20 title', () => {
 
 test('library rooms default to Laser and keep access + bookshelf', () => {
   const page = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
+  const css = readFileSync(join(here, '../app/globals.css'), 'utf8');
   assert.match(page, /equipmentTypeOrDefault|DEFAULT_EQUIPMENT_TYPE|room=/);
   assert.match(page, /Laser room|Lithotriptor|C-arm/);
+  assert.match(page, /EQUIPMENT_TYPE_VALUES/);
+  assert.doesNotMatch(page, /other:\s*0/);
   assert.match(page, /canAccessServiceManuals/);
   assert.match(page, /ShelfScroller/);
   assert.match(page, /empty.*room|No manuals in this room|bookshelf is empty/i);
   assert.match(page, /showIncompleteBadge/);
   assert.match(page, /Incomplete/);
+  assert.match(css, /\.manual-rooms/);
+  assert.match(css, /flex-wrap:\s*nowrap/);
+  assert.match(css, /overflow-x:\s*auto/);
+  assert.match(css, /flex-wrap:\s*wrap/);
 });
 
 test('god catalog form requires equipment type and does not commit PDFs', () => {
