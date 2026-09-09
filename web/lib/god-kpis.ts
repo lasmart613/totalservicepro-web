@@ -235,6 +235,11 @@ export function assembleGodKpis(input: {
   };
 }
 
+export type GodKpiCountResult = {
+  count: number | null;
+  error: { message?: string } | null;
+};
+
 export type GodKpiQuery = {
   select: (
     columns: string,
@@ -244,9 +249,7 @@ export type GodKpiQuery = {
   eq: (column: string, value: unknown) => GodKpiQuery;
   in: (column: string, values: readonly string[]) => GodKpiQuery;
   filter: (column: string, operator: string, value: string) => GodKpiQuery;
-  then: (
-    onFulfilled?: (value: { count: number | null; error: { message?: string } | null }) => unknown
-  ) => Promise<unknown>;
+  then: (onFulfilled?: (value: GodKpiCountResult) => unknown) => Promise<unknown>;
 };
 
 export type GodKpiAdmin = {
@@ -265,15 +268,22 @@ export type GodKpiAdmin = {
   };
 };
 
+/** Real Supabase admin clients are structurally wider than the mock used in tests. */
+export type GodKpiAdminLike = {
+  from: (table: string) => unknown;
+  schema?: (name: string) => { from: (table: string) => unknown };
+  auth?: GodKpiAdmin['auth'];
+};
+
 function isUnavailableError(message?: string | null): boolean {
   return /relation .* does not exist|could not find the table|Could not find the table|schema cache|column|permission denied|not expose/i.test(
     String(message || '')
   );
 }
 
-async function settleCount(query: PromiseLike<{ count: number | null; error: { message?: string } | null }>): Promise<number | null> {
+async function settleCount(query: unknown): Promise<number | null> {
   try {
-    const { count, error } = await query;
+    const { count, error } = (await query) as GodKpiCountResult;
     if (error) return null;
     return count ?? 0;
   } catch {
@@ -304,7 +314,7 @@ async function countAuthTable(
   try {
     let query = admin.schema('auth').from(table).select('id', { count: 'exact', head: true });
     if (apply) query = apply(query);
-    const result = await query;
+    const result = (await query) as GodKpiCountResult;
     if (result.error) {
       if (isUnavailableError(result.error.message)) return null;
       return null;
@@ -345,7 +355,7 @@ async function countLoginEvents(admin: GodKpiAdmin, startIso: string): Promise<n
   return null;
 }
 
-export async function fetchGodKpiCounts(admin: GodKpiAdmin | (object & { from: GodKpiAdmin['from'] }), startIso: string): Promise<GodKpiCounts> {
+export async function fetchGodKpiCounts(admin: GodKpiAdminLike, startIso: string): Promise<GodKpiCounts> {
   const client = admin as GodKpiAdmin;
   const listed = await listAllAuthUsers(client);
   const listedCounts = listed ? countAuthInRange(listed, startIso) : null;
@@ -401,7 +411,7 @@ export async function fetchGodKpiCounts(admin: GodKpiAdmin | (object & { from: G
 }
 
 export async function loadGodKpis(
-  admin: GodKpiAdmin | (object & { from: GodKpiAdmin['from'] }),
+  admin: GodKpiAdminLike,
   days: KpiDays,
   now: Date = new Date()
 ): Promise<GodKpiPayload> {
