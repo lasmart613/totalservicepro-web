@@ -154,6 +154,7 @@ test('God table APIs and pages stay behind requireGodCaller / admin god gate', (
     '../app/api/god/tables/route.ts',
     '../app/api/god/tables/[table]/route.ts',
     '../app/api/god/tables/[table]/[id]/route.ts',
+    '../app/api/god/kpis/route.ts',
     '../app/admin/god/layout.tsx',
     '../app/admin/god/tables/page.tsx',
     '../app/admin/god/equipment/page.tsx',
