@@ -4,6 +4,7 @@ import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { toast } from 'sonner';
 import { fetchGodMe, godAuthHeader } from '@/lib/god-client';
+import { GodKpiBoard } from '@/components/god/GodKpiBoard';
 import { orgTypeLabel } from '@/lib/labels';
 import type { GodOrgRow } from '@/lib/god-orgs';
 
@@ -220,6 +221,8 @@ export default function GodDashboardPage() {
         </Link>
         .
       </p>
+
+      <GodKpiBoard />
 
       <div className="flex flex-wrap gap-3 mb-4">
         <input
