@@ -388,9 +388,9 @@ export async function createPartCheckoutSession(input: {
 }
 
 const LISTING_SELECTS = [
-  'id, title, description, notes, status, condition, price, price_type, manufacturer, model, serial_number, part_number, quantity, qty, listing_type, category, city, state, images, photos, details, created_at, organization_id, stripe_product_id, stripe_price_id, currency',
-  'id, title, description, notes, status, condition, price, price_type, manufacturer, model, serial_number, part_number, quantity, listing_type, category, city, state, images, photos, details, created_at, organization_id',
-  'id, title, description, status, condition, price, manufacturer, model, serial_number, part_number, quantity, listing_type, category, images, details, created_at, organization_id',
+  'id, title, description, notes, status, condition, price, price_type, manufacturer, model, serial_number, part_number, quantity, qty, listing_type, category, city, state, images, photos, details, created_at, organization_id, seller_id, created_by, stripe_product_id, stripe_price_id, currency',
+  'id, title, description, notes, status, condition, price, price_type, manufacturer, model, serial_number, part_number, quantity, listing_type, category, city, state, images, photos, details, created_at, organization_id, seller_id, created_by',
+  'id, title, description, status, condition, price, manufacturer, model, serial_number, part_number, quantity, listing_type, category, images, details, created_at, organization_id, seller_id, created_by',
   'id, title, description, status, condition, price, manufacturer, model, listing_type, images, details, created_at',
 ];
 

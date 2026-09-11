@@ -2,13 +2,14 @@
 
 import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams, useSearchParams } from 'next/navigation';
+import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { ShareButton } from '@/components/ShareButton';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { listingShareText } from '@/lib/share';
 import { loginHref } from '@/lib/login-next';
 import { ListingDescription } from '@/components/ListingDescription';
+import { marketplaceAuthHeaders } from '@/lib/marketplace/client-auth';
 import {
   formatListingPrice,
   isPartListing,
@@ -17,6 +18,7 @@ import {
   listingQuantity,
   listingSellerName,
   partsDetailPath,
+  partsEditPath,
 } from '@/lib/marketplace/parts';
 import { toast } from 'sonner';
 import { ArrowLeft, Image as ImageIcon, Package } from 'lucide-react';
@@ -24,6 +26,7 @@ import { useGuestSignupRedirect } from '@/lib/use-signed-in';
 
 function PartDetail() {
   const params = useParams();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const id = params.id as string;
   const { ready: authReady, signedIn } = useGuestSignupRedirect();
@@ -51,6 +54,8 @@ function PartDetail() {
   const [selectedPhoto, setSelectedPhoto] = useState(0);
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
+  const [canManage, setCanManage] = useState(false);
+  const [removing, setRemoving] = useState(false);
   const [buying, setBuying] = useState(false);
   const [showBidForm, setShowBidForm] = useState(false);
   const [bidPrice, setBidPrice] = useState('');
@@ -77,12 +82,17 @@ function PartDetail() {
 
     let data: typeof listing = null;
     try {
+      const headers = await marketplaceAuthHeaders();
       const res = await fetch(`/api/marketplace/parts/${encodeURIComponent(id)}`, {
         method: 'GET',
         cache: 'no-store',
+        headers,
       });
       const json = await res.json().catch(() => ({}));
-      if (res.ok && json?.listing) data = json.listing;
+      if (res.ok && json?.listing) {
+        data = json.listing;
+        setCanManage(!!json.can_manage);
+      }
     } catch (e) {
       console.warn('parts detail API', e);
     }
@@ -130,6 +140,32 @@ function PartDetail() {
 
   const images = useMemo(() => (listing ? listingImages(listing) : []), [listing]);
   const detailHref = partsDetailPath(id);
+
+  const removeListing = async () => {
+    if (!canManage || removing) return;
+    if (!confirm('Remove this listing from the public marketplace? Past orders stay in history.')) {
+      return;
+    }
+    setRemoving(true);
+    try {
+      const headers = await marketplaceAuthHeaders();
+      const res = await fetch(`/api/marketplace/parts/${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers,
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast.error(json?.error || 'Could not remove listing');
+        return;
+      }
+      toast.success('Listing removed from the marketplace');
+      router.push('/marketplace/my-listings');
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Could not remove listing');
+    } finally {
+      setRemoving(false);
+    }
+  };
 
   const startPurchase = async () => {
     if (!listing || buying) return;
@@ -296,19 +332,36 @@ function PartDetail() {
                     </p>
                   )}
                 </div>
-                <ShareButton
-                  {...listingShareText({
-                    id,
-                    title: listing.title,
-                    manufacturer: listing.manufacturer,
-                    model: listing.model,
-                    price: listing.price,
-                    condition: listing.condition,
-                    description: listing.description,
-                    listingType: listing.listing_type || 'part',
-                    category: listing.category,
-                  })}
-                />
+                <div className="flex items-center gap-2 shrink-0">
+                  {canManage && (
+                    <>
+                      <Link href={partsEditPath(id)} className="btn btn-secondary text-sm px-3 py-2">
+                        Edit listing
+                      </Link>
+                      <button
+                        type="button"
+                        onClick={removeListing}
+                        disabled={removing}
+                        className="btn btn-secondary text-sm px-3 py-2 text-red-400"
+                      >
+                        {removing ? 'Removing…' : 'Remove listing'}
+                      </button>
+                    </>
+                  )}
+                  <ShareButton
+                    {...listingShareText({
+                      id,
+                      title: listing.title,
+                      manufacturer: listing.manufacturer,
+                      model: listing.model,
+                      price: listing.price,
+                      condition: listing.condition,
+                      description: listing.description,
+                      listingType: listing.listing_type || 'part',
+                      category: listing.category,
+                    })}
+                  />
+                </div>
               </div>
 
               <div className="mt-6 flex flex-wrap items-end gap-4">

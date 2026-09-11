@@ -380,11 +380,12 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
     } catch { /* ignore */ }
 
     try {
-      const { data: myList } = await supabase
-        .from('marketplace_listings')
-        .select('id, status')
-        .eq('seller_id', userId)
-        .limit(200);
+      let listQuery = supabase.from('marketplace_listings').select('id, status').limit(200);
+      listQuery =
+        orgId != null
+          ? listQuery.or(`seller_id.eq.${userId},created_by.eq.${userId},organization_id.eq.${orgId}`)
+          : listQuery.or(`seller_id.eq.${userId},created_by.eq.${userId}`);
+      const { data: myList } = await listQuery;
       listings = (myList || []).filter(
         (r: any) => !r.status || r.status === 'open' || r.status === 'active'
       ).length;
