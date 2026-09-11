@@ -8,6 +8,8 @@ import {
   isConsumableListing,
   isPartListing,
   listingPartCategory,
+  partsDetailPath,
+  partsEditPath,
   type MarketplaceListingLike,
 } from './parts.ts';
 
@@ -87,6 +89,20 @@ test('inferPartKind does not treat dye-laser sliders as dye kits', () => {
   assert.equal(inferPartKind(slider), null);
   assert.equal(isPartListing(slider), true);
   assert.equal(isConsumableListing(slider), false);
+});
+
+test('parts edit path is a seller manage route under the listing id', () => {
+  assert.equal(partsDetailPath('e6350c18-94a8-4a36-9ad6-ad22f6971a93'), '/marketplace/parts/e6350c18-94a8-4a36-9ad6-ad22f6971a93');
+  assert.equal(
+    partsEditPath('e6350c18-94a8-4a36-9ad6-ad22f6971a93'),
+    '/marketplace/parts/e6350c18-94a8-4a36-9ad6-ad22f6971a93/edit'
+  );
+});
+
+test('public parts catalog hides removed listings', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(join(here, '../../app/marketplace/parts/page.tsx'), 'utf8');
+  assert.match(source, /isPublicListingStatus/);
 });
 
 test('consumables page filters with isConsumableListing instead of dumping all parts', () => {

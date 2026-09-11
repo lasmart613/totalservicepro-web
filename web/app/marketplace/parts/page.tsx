@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { ListingDescriptionSnippet } from '@/components/ListingDescription';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { isPublicListingStatus } from '@/lib/marketplace/ownership';
 import {
   EMPTY_PARTS_FILTERS,
   filterPartsListings,
@@ -55,13 +56,17 @@ export default function PartsMarketplace() {
         data = retry.data;
         error = retry.error;
       }
-      let rows: MarketplaceListingLike[] = !error && data ? data.filter(isPartListing) : [];
+      let rows: MarketplaceListingLike[] = !error && data
+        ? data.filter((row) => isPartListing(row) && isPublicListingStatus(row.status))
+        : [];
       if (rows.length === 0) {
         try {
           const res = await fetch('/api/marketplace/parts', { cache: 'no-store' });
           const json = await res.json().catch(() => ({}));
           if (res.ok && Array.isArray(json?.listings)) {
-            rows = json.listings.filter(isPartListing) as MarketplaceListingLike[];
+            rows = (json.listings as MarketplaceListingLike[]).filter(
+              (row) => isPartListing(row) && isPublicListingStatus(row.status)
+            );
           }
         } catch (e) {
           console.warn('public parts catalog fallback', e);

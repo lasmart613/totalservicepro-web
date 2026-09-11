@@ -23,6 +23,11 @@ export type MarketplaceListingLike = {
   quantity?: number | string | null;
   stripe_product_id?: string | null;
   stripe_price_id?: string | null;
+  seller_id?: string | null;
+  created_by?: string | null;
+  organization_id?: string | number | null;
+  city?: string | null;
+  state?: string | null;
   details?: Record<string, unknown> | null;
 };
 
@@ -301,6 +306,10 @@ export function storedStripeIds(row: MarketplaceListingLike | null | undefined):
 
 export function partsDetailPath(id: string): string {
   return `/marketplace/parts/${encodeURIComponent(id)}`;
+}
+
+export function partsEditPath(id: string): string {
+  return `/marketplace/parts/${encodeURIComponent(id)}/edit`;
 }
 
 export function listingBrand(row: MarketplaceListingLike | null | undefined): string {
