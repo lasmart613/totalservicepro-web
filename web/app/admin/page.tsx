@@ -40,7 +40,7 @@ export default function AdminDashboard() {
             <div className="text-4xl mb-4">♔</div>
             <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">God Dashboard</div>
             <p className="text-[var(--text3)]">
-              All orgs, Equipment / Users / Auth tables, and the shop-tester invite.
+              All orgs, CRM, Equipment / Users / Auth tables, and the shop-tester invite.
             </p>
           </Link>
         )}

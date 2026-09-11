@@ -8,6 +8,7 @@ export const GOD_TABLES_PATH = '/admin/god/tables';
 export const GOD_EQUIPMENT_PATH = '/admin/god/equipment';
 export const GOD_USERS_PATH = '/admin/god/users';
 export const GOD_AUTH_PATH = '/admin/god/auth';
+export const GOD_CRM_PATH = '/admin/god/crm';
 
 export type GodTableGroup =
   | 'people'

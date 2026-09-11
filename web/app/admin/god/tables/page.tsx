@@ -70,8 +70,12 @@ export default function GodTablesIndexPage() {
       <h1 className="text-3xl font-extrabold mb-2">God Tables</h1>
       <p className="text-[var(--text3)] mb-4 max-w-3xl">
         Browse and edit the live Supabase business tables. Equipment, Users, and Auth / Users
-        are also pinned in the God nav. Password hashes, recovery tokens, vault secrets, and
-        storage internals are omitted.
+        are also pinned in the God nav.{' '}
+        <Link href="/admin/god/crm" className="text-[var(--gold)] hover:underline">
+          CRM
+        </Link>{' '}
+        is the composed pipeline / accounts / contacts view. Password hashes, recovery tokens,
+        vault secrets, and storage internals are omitted.
       </p>
       <input
         type="search"

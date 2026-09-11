@@ -204,6 +204,10 @@ export default function GodDashboardPage() {
       </p>
       <p className="text-sm text-[var(--text3)] mb-6 max-w-3xl">
         Need a row that is not an org invite? Use{' '}
+        <Link href="/admin/god/crm" className="text-[var(--gold)] hover:underline">
+          CRM
+        </Link>
+        ,{' '}
         <Link href="/admin/god/tables" className="text-[var(--gold)] hover:underline">
           Tables
         </Link>

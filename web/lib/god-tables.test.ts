@@ -9,6 +9,7 @@ import {
   featuredGodTables,
   getGodTable,
   GOD_AUTH_PATH,
+  GOD_CRM_PATH,
   GOD_EQUIPMENT_PATH,
   GOD_OMITTED_TABLES,
   GOD_TABLES,
@@ -155,22 +156,26 @@ test('God table APIs and pages stay behind requireGodCaller / admin god gate', (
     '../app/api/god/tables/[table]/route.ts',
     '../app/api/god/tables/[table]/[id]/route.ts',
     '../app/api/god/kpis/route.ts',
+    '../app/api/god/crm/route.ts',
     '../app/admin/god/layout.tsx',
     '../app/admin/god/tables/page.tsx',
     '../app/admin/god/equipment/page.tsx',
     '../app/admin/god/users/page.tsx',
     '../app/admin/god/auth/page.tsx',
+    '../app/admin/god/crm/page.tsx',
   ];
   for (const rel of files) {
     const src = readFileSync(join(here, rel), 'utf8');
     if (rel.includes('/api/')) {
       assert.match(src, /requireGodCaller/);
     } else {
-      assert.match(src, /GodSubnav|GodTableBrowser|god-tables/);
+      assert.match(src, /GodSubnav|GodTableBrowser|god-tables|GodCrmPanel/);
     }
   }
   const nav = readFileSync(join(here, '../components/god/GodSubnav.tsx'), 'utf8');
   assert.match(nav, /Equipment/);
   assert.match(nav, /Users/);
   assert.match(nav, /Auth \/ Users/);
+  assert.match(nav, /CRM/);
+  assert.equal(GOD_CRM_PATH, '/admin/god/crm');
 });
