@@ -4,6 +4,7 @@ export const GOD_DASHBOARD_PATH = '/admin/god';
 export const GOD_ALIAS_PATH = '/god';
 export {
   GOD_AUTH_PATH,
+  GOD_CRM_PATH,
   GOD_EQUIPMENT_PATH,
   GOD_TABLES_PATH,
   GOD_USERS_PATH,
