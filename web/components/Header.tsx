@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
+import { usePathname } from 'next/navigation';
 import { getSupabaseClient } from '../lib/supabase/client';
 import { signOutAndClearIdentity } from '@/lib/auth-session';
 import { User } from '@supabase/supabase-js';
@@ -62,7 +63,7 @@ function NavDropdown({
       {group.href ? (
         <Link
           href={group.href}
-          className="inline-flex items-center gap-1 hover:text-[var(--gold)] py-1"
+          className="inline-flex items-center gap-1 hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0"
           onFocus={() => setOpenId(group.id)}
         >
           {group.label}
@@ -71,7 +72,7 @@ function NavDropdown({
       ) : (
         <button
           type="button"
-          className="inline-flex items-center gap-1 hover:text-[var(--gold)] py-1 bg-transparent border-0 text-inherit font-medium cursor-pointer"
+          className="inline-flex items-center gap-1 hover:text-[var(--gold)] py-1 bg-transparent border-0 text-inherit font-medium cursor-pointer whitespace-nowrap shrink-0"
           aria-expanded={open}
           aria-haspopup="true"
           onClick={() => setOpenId(open ? null : group.id)}
@@ -116,6 +117,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const [isGod, setIsGod] = useState(false);
   const upgrade = useUpgradeEntry();
   const supabase = getSupabaseClient();
+  const pathname = usePathname();
 
   async function refreshUnread(uid: string) {
     try {
@@ -225,6 +227,22 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, []);
+
+  useEffect(() => {
+    setMobileMenuOpen(false);
+    setMobileOpenGroup(null);
+    setDropdownOpen(false);
+    setNavOpenId(null);
+  }, [pathname]);
+
+  useEffect(() => {
+    if (!mobileMenuOpen) return;
+    const prev = document.body.style.overflow;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = prev;
+    };
+  }, [mobileMenuOpen]);
 
   const handleLogout = async () => {
     setDropdownOpen(false);
@@ -357,12 +375,14 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
 
   if (loading || authPending) {
     return (
-      <header className="header px-4 py-3 flex items-center justify-between">
-        <Link href="/" className="font-extrabold text-xl" style={{ color: 'var(--gold)' }}>
+      <header className="header px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2">
+        <Link href="/" className="font-extrabold text-lg sm:text-xl min-w-0 truncate" style={{ color: 'var(--gold)' }}>
           Total Service Pro
         </Link>
-        <div className="flex items-center gap-3">
-          <ReportIssueControl />
+        <div className="flex items-center gap-2 shrink-0">
+          <div className="hidden lg:block">
+            <ReportIssueControl />
+          </div>
           <div className="w-8 h-8 rounded-full bg-[var(--surface3)] animate-pulse" />
         </div>
       </header>
@@ -370,25 +390,25 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   }
 
   return (
-    <header className="header px-4 py-3 flex items-center justify-between relative z-50">
-      <div className="flex items-center gap-3 min-w-0">
-        <Link href="/" className="flex flex-col leading-none shrink-0">
+    <header className="header px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2">
+      <div className="flex items-center gap-3 min-w-0 flex-1 relative z-[100]">
+        <Link href="/" className="flex flex-col leading-none min-w-0">
           <span
-            className="font-extrabold text-xl tracking-[-0.5px]"
+            className="font-extrabold text-lg sm:text-xl tracking-[-0.5px] truncate"
             style={{ color: 'var(--gold)' }}
           >
             Total Service Pro
           </span>
-          <span className="text-[10px] font-medium tracking-[1.5px] text-[var(--text3)] uppercase -mt-0.5">
+          <span className="hidden sm:block text-[10px] font-medium tracking-[1.5px] text-[var(--text3)] uppercase -mt-0.5 truncate">
             Laser Equipment Service
           </span>
         </Link>
 
-        {/* Desktop: limited top-level items + hover dropdowns */}
-        <nav className="ml-6 hidden md:flex items-center gap-5 text-base font-medium text-[var(--text2)]">
+        {/* Desktop / large tablet: inline groups. Phones + small tablets use the drawer. */}
+        <nav className="ml-4 xl:ml-6 hidden lg:flex items-center gap-3 xl:gap-5 text-sm xl:text-base font-medium text-[var(--text2)] min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           {user ? (
             <>
-              <Link href="/" className="hover:text-[var(--gold)] py-1">
+              <Link href="/" className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
                 Dashboard
               </Link>
               <NavDropdown group={hubGroup} openId={navOpenId} setOpenId={setNavOpenId} />
@@ -397,22 +417,22 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 <NavDropdown group={businessGroup} openId={navOpenId} setOpenId={setNavOpenId} />
               )}
               {canAdminPortal && (
-                <Link href="/admin" className="hover:text-[var(--gold)] py-1">
+                <Link href="/admin" className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
                   Admin Portal
                 </Link>
               )}
               {isGod && (
-                <Link href={GOD_DASHBOARD_PATH} className="hover:text-[var(--gold)] py-1">
+                <Link href={GOD_DASHBOARD_PATH} className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
                   God Dashboard
                 </Link>
               )}
             </>
           ) : (
             <>
-              <Link href="/directory" className="hover:text-[var(--gold)] py-1">
+              <Link href="/directory" className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
                 Directory
               </Link>
-              <Link href="/marketplace" className="hover:text-[var(--gold)] py-1">
+              <Link href="/marketplace" className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
                 Marketplace
               </Link>
             </>
@@ -420,34 +440,29 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         </nav>
       </div>
 
-      <div className="flex items-center gap-3 shrink-0">
-        <ReportIssueControl />
-        {user && <OrgSwitcher compact />}
-        {user && (
-          <Link
-            href="/notifications"
-            className="relative p-2 text-[var(--text2)] hover:text-[var(--gold)]"
-            aria-label="Notifications"
-            title="Notifications"
-          >
-            <Bell size={20} />
-            {unread > 0 && (
-              <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
-                {unread > 99 ? '99+' : unread}
-              </span>
-            )}
-          </Link>
-        )}
-        <button
-          onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-          className="md:hidden p-2 text-[var(--text)] hover:text-[var(--gold)]"
-          aria-label="Toggle menu"
-        >
-          {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
-        </button>
+      <div className="flex items-center gap-1 sm:gap-2 shrink-0 relative z-[100]">
+        <div className="hidden lg:flex items-center gap-2 xl:gap-3">
+          <ReportIssueControl />
+          {user && <OrgSwitcher compact />}
+          {user && (
+            <Link
+              href="/notifications"
+              className="relative inline-flex items-center justify-center min-h-11 min-w-11 p-2 text-[var(--text2)] hover:text-[var(--gold)]"
+              aria-label="Notifications"
+              title="Notifications"
+            >
+              <Bell size={20} />
+              {unread > 0 && (
+                <span className="absolute top-1 right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                  {unread > 99 ? '99+' : unread}
+                </span>
+              )}
+            </Link>
+          )}
+        </div>
 
-        {!user ? (
-          <div className="flex items-center gap-2">
+        {!user && (
+          <div className="hidden lg:flex items-center gap-2">
             <Link href="/login" className="btn btn-primary text-sm px-4 py-1.5">
               Sign In
             </Link>
@@ -455,17 +470,37 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
               Sign Up
             </Link>
           </div>
-        ) : (
+        )}
+
+        <button
+          type="button"
+          onClick={() => {
+            setMobileMenuOpen(!mobileMenuOpen);
+            setDropdownOpen(false);
+          }}
+          className="lg:hidden inline-flex items-center justify-center min-h-11 min-w-11 p-2 text-[var(--text)] hover:text-[var(--gold)]"
+          aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+          aria-expanded={mobileMenuOpen}
+          aria-controls="app-mobile-nav"
+        >
+          {mobileMenuOpen ? <X size={22} /> : <Menu size={22} />}
+        </button>
+
+        {user && (
           <div className="relative">
             <button
-              onClick={() => setDropdownOpen(!dropdownOpen)}
-              className="flex items-center gap-2 rounded-full border border-[var(--gold-border)] pl-1 pr-3 py-1 hover:bg-[var(--surface3)]"
+              type="button"
+              onClick={() => {
+                setDropdownOpen(!dropdownOpen);
+                setMobileMenuOpen(false);
+              }}
+              className="flex items-center gap-2 rounded-full border border-[var(--gold-border)] pl-1 pr-1.5 lg:pr-3 py-1 min-h-11 hover:bg-[var(--surface3)]"
               aria-label="Account menu"
             >
               <div className="w-8 h-8 rounded-full bg-[var(--gold)] text-[#111827] flex items-center justify-center text-xs font-bold border-2 border-[var(--gold)]">
                 {initials}
               </div>
-              <span className="hidden sm:block text-sm font-semibold text-[var(--text)] max-w-[140px] truncate">
+              <span className="hidden lg:block text-sm font-semibold text-[var(--text)] max-w-[140px] truncate">
                 {chipLabel}
               </span>
             </button>
@@ -488,21 +523,21 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
 
                 <Link
                   href="/profile"
-                  className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"
+                  className="flex items-center gap-2 px-4 py-2.5 min-h-11 hover:bg-[var(--surface)]"
                   onClick={() => setDropdownOpen(false)}
                 >
                   <UserIcon size={16} /> User Profile
                 </Link>
                 <Link
                   href="/company"
-                  className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"
+                  className="flex items-center gap-2 px-4 py-2.5 min-h-11 hover:bg-[var(--surface)]"
                   onClick={() => setDropdownOpen(false)}
                 >
                   <Building2 size={16} /> {companyLabel}
                 </Link>
                 {upgrade.show && (
                   <UpgradePlanLink
-                    className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"
+                    className="flex items-center gap-2 px-4 py-2.5 min-h-11 hover:bg-[var(--surface)]"
                     onClick={() => setDropdownOpen(false)}
                     target={upgrade.target}
                   >
@@ -511,7 +546,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 )}
                 <Link
                   href="/settings"
-                  className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"
+                  className="flex items-center gap-2 px-4 py-2.5 min-h-11 hover:bg-[var(--surface)]"
                   onClick={() => setDropdownOpen(false)}
                 >
                   <Settings size={16} /> Settings
@@ -519,7 +554,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 {canAdminPortal && (
                   <Link
                     href="/admin"
-                    className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"
+                    className="flex items-center gap-2 px-4 py-2.5 min-h-11 hover:bg-[var(--surface)]"
                     onClick={() => setDropdownOpen(false)}
                   >
                     <Building2 size={16} /> Admin Portal
@@ -528,7 +563,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 {isGod && (
                   <Link
                     href={GOD_DASHBOARD_PATH}
-                    className="flex items-center gap-2 px-4 py-2.5 hover:bg-[var(--surface)]"
+                    className="flex items-center gap-2 px-4 py-2.5 min-h-11 hover:bg-[var(--surface)]"
                     onClick={() => setDropdownOpen(false)}
                   >
                     <Building2 size={16} /> God Dashboard
@@ -537,7 +572,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
 
                 <button
                   onClick={handleLogout}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 text-left text-red-400 hover:bg-[var(--surface)] border-t border-[var(--border)]"
+                  className="w-full flex items-center gap-2 px-4 py-2.5 min-h-11 text-left text-red-400 hover:bg-[var(--surface)] border-t border-[var(--border)]"
                 >
                   <LogOut size={16} /> Log Out
                 </button>
@@ -547,30 +582,41 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         )}
       </div>
 
-      {/* Mobile: same groups as accordion */}
       {mobileMenuOpen && (
-        <div className="md:hidden absolute top-full left-0 right-0 bg-[var(--surface3)] border-b border-[var(--border)] z-[90] shadow-lg max-h-[75vh] overflow-y-auto">
-          <nav className="flex flex-col px-4 py-2 text-base font-medium">
+        <button
+          type="button"
+          className="lg:hidden fixed inset-0 z-[80] bg-black/40"
+          aria-label="Close menu"
+          onClick={closeMobileMenu}
+        />
+      )}
+
+      {mobileMenuOpen && (
+        <div
+          id="app-mobile-nav"
+          className="lg:hidden absolute top-full left-0 right-0 bg-[var(--surface3)] border-b border-[var(--gold)] z-[90] shadow-lg max-h-[min(75vh,calc(100dvh-4rem))] overflow-y-auto"
+        >
+          <nav className="flex flex-col px-4 py-1 text-base font-medium">
             {user ? (
-            <Link
-              href="/"
-              className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
-              onClick={closeMobileMenu}
-            >
-              Dashboard
-            </Link>
+              <Link
+                href="/"
+                className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+                onClick={closeMobileMenu}
+              >
+                Dashboard
+              </Link>
             ) : (
               <>
                 <Link
                   href="/directory"
-                  className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+                  className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                   onClick={closeMobileMenu}
                 >
                   Directory
                 </Link>
                 <Link
                   href="/marketplace"
-                  className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+                  className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                   onClick={closeMobileMenu}
                 >
                   Marketplace
@@ -578,16 +624,16 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
               </>
             )}
 
-            {user && [hubGroup, marketplaceGroup, businessGroup]
-              .filter(Boolean)
-              .map((g) => {
+            {user &&
+              [hubGroup, marketplaceGroup, businessGroup].filter(Boolean).map((g) => {
                 const group = g as NavGroup;
                 const open = mobileOpenGroup === group.id;
                 return (
                   <div key={group.id} className="border-b border-[var(--border)]">
                     <button
                       type="button"
-                      className="w-full flex items-center justify-between py-3 hover:text-[var(--gold)] bg-transparent border-0 text-inherit font-medium text-left cursor-pointer"
+                      className="w-full flex items-center justify-between min-h-11 py-3 hover:text-[var(--gold)] bg-transparent border-0 text-inherit font-medium text-left cursor-pointer"
+                      aria-expanded={open}
                       onClick={() => setMobileOpenGroup(open ? null : group.id)}
                     >
                       {group.label}
@@ -597,12 +643,12 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                       />
                     </button>
                     {open && (
-                      <div className="pb-2 pl-3 flex flex-col gap-0.5">
+                      <div className="pb-2 pl-3 flex flex-col">
                         {group.items.map((item) => (
                           <Link
                             key={item.href}
                             href={item.href}
-                            className="py-2 text-sm text-[var(--text3)] hover:text-[var(--gold)]"
+                            className="flex items-center min-h-11 py-2 text-sm text-[var(--text3)] hover:text-[var(--gold)]"
                             onClick={closeMobileMenu}
                           >
                             {item.label}
@@ -617,7 +663,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
             {canAdminPortal && (
               <Link
                 href="/admin"
-                className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+                className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                 onClick={closeMobileMenu}
               >
                 Admin Portal
@@ -626,7 +672,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
             {isGod && (
               <Link
                 href={GOD_DASHBOARD_PATH}
-                className="py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+                className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                 onClick={closeMobileMenu}
               >
                 God Dashboard
@@ -637,17 +683,27 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 <OrgSwitcher variant="menu" />
               </div>
             )}
-            <div className="py-3">
-              <ReportIssueControl />
+            <div className="py-3 border-b border-[var(--border)]">
+              <ReportIssueControl showLabel />
             </div>
             {user && (
               <Link
                 href="/notifications"
-                className="py-3 hover:text-[var(--gold)]"
+                className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                 onClick={closeMobileMenu}
               >
                 Notifications{unread > 0 ? ` (${unread})` : ''}
               </Link>
+            )}
+            {!user && (
+              <div className="flex flex-col gap-2 py-3">
+                <Link href="/login" className="btn btn-primary min-h-11" onClick={closeMobileMenu}>
+                  Sign In
+                </Link>
+                <Link href="/signup" className="btn btn-secondary min-h-11" onClick={closeMobileMenu}>
+                  Sign Up
+                </Link>
+              </div>
             )}
           </nav>
         </div>
