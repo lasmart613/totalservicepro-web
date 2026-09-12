@@ -23,6 +23,8 @@ export default function GodManualsCatalogPage() {
   const [storagePath, setStoragePath] = useState('');
   const [isIncomplete, setIsIncomplete] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [reindexing, setReindexing] = useState(false);
+  const [reindexNote, setReindexNote] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -72,6 +74,43 @@ export default function GodManualsCatalogPage() {
           filename: nextModel,
         })
       );
+    }
+  }
+
+  async function reindexBatch(force = false) {
+    setReindexing(true);
+    try {
+      const headers = await godAuthHeader();
+      let indexed = 0;
+      let processed = 0;
+      for (let i = 0; i < 80; i++) {
+        const res = await fetch('/api/god/manuals/reindex', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ limit: 4, force: force && i === 0 }),
+        });
+        const json = (await res.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+          processed?: number;
+          indexed?: number;
+          remaining?: number;
+        };
+        if (!res.ok || !json.ok) {
+          toast.error(json.error || 'Reindex failed');
+          return;
+        }
+        processed += json.processed || 0;
+        indexed += json.indexed || 0;
+        if (!json.processed || !json.remaining) break;
+      }
+      const note = `Indexed ${indexed} PDF(s) this run (${processed} attempted). Repeat if the catalog is large.`;
+      setReindexNote(note);
+      toast.success(note);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Reindex failed');
+    } finally {
+      setReindexing(false);
     }
   }
 
@@ -136,6 +175,24 @@ export default function GodManualsCatalogPage() {
         Add a bookshelf row after the PDF is in the <code>manuals</code> Storage bucket. Equipment
         type is required so the book lands in the right room. Default room is Laser.
       </p>
+
+      <div className="card p-4 mb-6">
+        <div className="text-sm font-semibold mb-2">PDF text index (library search)</div>
+        <p className="text-sm text-[var(--text3)] mb-3">
+          The library search box looks inside extracted PDF text. Apply the{' '}
+          <code>manual_search_index</code> migration, then backfill existing files. New catalog rows
+          try to index automatically when the PDF is already in the bucket.
+        </p>
+        <button
+          type="button"
+          className="btn btn-secondary text-sm"
+          disabled={reindexing}
+          onClick={() => reindexBatch(false)}
+        >
+          {reindexing ? 'Indexing…' : 'Index missing PDF text'}
+        </button>
+        {reindexNote ? <p className="text-xs text-[var(--text3)] mt-2">{reindexNote}</p> : null}
+      </div>
 
       <div className="card p-4 mb-6">
         <div className="text-sm font-semibold mb-2">First five uploads (suggested paths)</div>

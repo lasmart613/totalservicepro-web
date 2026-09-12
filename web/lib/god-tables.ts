@@ -464,7 +464,7 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Manuals',
     group: 'catalog',
     description:
-      'Service manual library. equipment_type is the room (laser, lithotriptor, c_arm, plus BMET rooms — no Other). Quanta Litho / Cyber Ho / Litho EVO and Dornier H20 / H30 (Medilas) are laser (holmium), not lithotriptor. is_incomplete marks a known-incomplete PDF.',
+      'Service manual library. equipment_type is the room (laser, lithotriptor, c_arm, plus BMET rooms — no Other). Quanta Litho / Cyber Ho / Litho EVO and Dornier H20 / H30 (Medilas) are laser (holmium), not lithotriptor. is_incomplete marks a known-incomplete PDF. PDF body text lives in manual_search_index, not this table.',
     listColumns: ['id', 'brand', 'title', 'equipment_type', 'is_incomplete', 'storage_path', 'created_at'],
     searchColumns: ['brand', 'title', 'equipment_type'],
   }),
@@ -660,6 +660,7 @@ export const GOD_OMITTED_TABLES: Array<{ name: string; reason: string }> = [
   { name: 'auth.users (raw)', reason: 'Use Auth / Users. Raw rows include password hashes and tokens.' },
   { name: 'auth.identities / sessions / refresh_tokens / mfa_*', reason: 'Session and secret material. Identities show sanitized on Auth / Users.' },
   { name: 'storage.objects / storage.buckets', reason: 'File internals. Use manuals.storage_path and photo_url fields instead.' },
+  { name: 'manual_search_index', reason: 'Extracted PDF bodies. Search via the library API only — never expose search_text.' },
   { name: 'vault / pgsodium / secrets', reason: 'Encryption secrets. Never exposed in God UI.' },
   { name: 'schema_migrations / supabase_migrations', reason: 'Framework junk.' },
 ];
@@ -706,6 +707,7 @@ export function isSecretColumn(name?: string | null): boolean {
   const n = String(name || '').trim();
   if (!n) return false;
   if (ALLOW_TOKENISH.test(n)) return false;
+  if (/^(search_text|search_tsv)$/i.test(n)) return true;
   return SECRET_COLUMN.test(n) || SECRET_COLUMN_PART.test(n);
 }
 
@@ -848,7 +850,7 @@ export function isOmittedDiscoveredTable(name: string): boolean {
   return (
     !n ||
     n.startsWith('_') ||
-    /^(schema_migrations|supabase_migrations|realtime|storage|vault|pgsodium|net|cron|http_|wrappers_|pgmq|pgbouncer)/.test(
+    /^(schema_migrations|supabase_migrations|realtime|storage|vault|pgsodium|net|cron|http_|wrappers_|pgmq|pgbouncer|manual_search_index)/.test(
       n
     )
   );
