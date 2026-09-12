@@ -5,30 +5,14 @@
  */
 
 import { inflateRawSync, inflateSync } from 'node:zlib';
+import { clipManualSearchText } from './manual-search-text.ts';
 
-export const MANUAL_SEARCH_TEXT_MAX = 200_000;
+export { clipManualSearchText, normalizeManualSearchText, MANUAL_SEARCH_TEXT_MAX } from './manual-search-text.ts';
+
 export const MANUAL_SEARCH_PDF_MAX_BYTES = 18_000_000;
 
 const STREAM_RE = /stream\r?\n([\s\S]*?)endstream/g;
 const FILTER_WINDOW = 400;
-
-export function normalizeManualSearchText(value: unknown): string {
-  return String(value ?? '')
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-}
-
-export function clipManualSearchText(value: unknown, max = MANUAL_SEARCH_TEXT_MAX): string {
-  return String(value ?? '')
-    .replace(/\u0000/g, ' ')
-    .replace(/[ \t]+\n/g, '\n')
-    .replace(/\n{3,}/g, '\n\n')
-    .replace(/[ \t]{2,}/g, ' ')
-    .trim()
-    .slice(0, max);
-}
 
 function decodePdfLiteral(inner: string): string {
   let out = '';

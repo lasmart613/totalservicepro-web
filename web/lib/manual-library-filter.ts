@@ -11,7 +11,7 @@ import {
   inferEquipmentType,
   type EquipmentType,
 } from './equipment-types.ts';
-import { normalizeManualSearchText } from './manual-pdf-text.ts';
+import { normalizeManualSearchText } from './manual-search-text.ts';
 
 export type ManualLibraryRow = {
   id?: string | number | null;

@@ -124,4 +124,6 @@ test('library page wires search UI and keeps open/get-manual-url gating', () => 
   assert.doesNotMatch(searchApi, /organization_manuals|user_manuals|get-manual-url/);
   assert.match(MANUAL_LIBRARY_SELECT, /brand, title, model/);
   assert.doesNotMatch(MANUAL_LIBRARY_SELECT, /search_text/);
+  const filterLib = readFileSync(join(here, 'manual-library-filter.ts'), 'utf8');
+  assert.doesNotMatch(filterLib, /manual-pdf-text|node:zlib|inflateSync/);
 });
