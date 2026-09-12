@@ -52,6 +52,23 @@ export interface ModelDef {
   };
 }
 
+const CYNOSURE_ALEX_YAG_WAVELENGTHS: WavelengthSpec[] = [
+  { name: '755 nm Alexandrite', mode: 'SP', sets: [6, 8, 10, 12, 14, 16, 18, 20, 25, 30], unit: 'J/cm²', spotMm: 15, tolLabel: 'Tol ±10%' },
+  { name: '1064 nm Nd:YAG', mode: 'SP', sets: [10, 20, 30, 40, 50, 60, 80, 100, 120], unit: 'J/cm²', spotMm: 10, tolLabel: 'Tol ±10%' }
+];
+
+const CYNOSURE_ELITE_PARAMS = [
+  'Total System Shots',
+  'Alexandrite Lamp Shots',
+  'Nd:YAG Lamp Shots',
+  'Handpiece Shots',
+  'HV @ Reference Fluence (VDC)',
+  'Fiber Transmission %',
+  'Coolant Level / Status',
+  'Coolant Temp (°C)',
+  'DI Conductivity (µS/cm)'
+];
+
 export const MODELS: Record<string, ModelDef> = {
   PowerSuite: {
     mfg: 'Coherent / Lumenis',
@@ -664,6 +681,243 @@ export const MODELS: Record<string, ModelDef> = {
       'Coolant Temp (°C)',
       'Firmware Version'
     ]
+  },
+
+  /* ── Cynosure (estimate / My Lasers dropdown catalog) ── */
+  'Cynosure Apogee': {
+    mfg: 'Cynosure',
+    label: 'Apogee',
+    wavelengths: [
+      { name: '755 nm Alexandrite', mode: 'SP', sets: [6, 8, 10, 12, 15, 18, 20, 25, 30], unit: 'J/cm²', spotMm: 15, tolLabel: 'Tol ±10%' }
+    ],
+    params: CYNOSURE_ELITE_PARAMS
+  },
+  'Cynosure Apogee+': {
+    mfg: 'Cynosure',
+    label: 'Apogee+',
+    wavelengths: [
+      { name: '755 nm Alexandrite', mode: 'SP', sets: [6, 8, 10, 12, 15, 18, 20, 25, 30], unit: 'J/cm²', spotMm: 15, tolLabel: 'Tol ±10%' }
+    ],
+    params: CYNOSURE_ELITE_PARAMS
+  },
+  'Cynosure Apogee Elite': {
+    mfg: 'Cynosure',
+    label: 'Apogee Elite',
+    wavelengths: CYNOSURE_ALEX_YAG_WAVELENGTHS,
+    params: CYNOSURE_ELITE_PARAMS
+  },
+  'Cynosure Apogee Elite+': {
+    mfg: 'Cynosure',
+    label: 'Apogee Elite+ / Elite Plus',
+    wavelengths: CYNOSURE_ALEX_YAG_WAVELENGTHS,
+    params: CYNOSURE_ELITE_PARAMS
+  },
+  'Cynosure Apogee Elite MPX': {
+    mfg: 'Cynosure',
+    label: 'Apogee Elite MPX',
+    wavelengths: [
+      ...CYNOSURE_ALEX_YAG_WAVELENGTHS,
+      {
+        name: 'MPX Multiplex (755 + 1064)',
+        mode: 'SP',
+        sets: [6, 8, 10, 12, 15, 18, 20, 25, 30],
+        unit: 'J/cm²',
+        spotMm: 12,
+        tolLabel: 'Tol ±10%'
+      }
+    ],
+    params: CYNOSURE_ELITE_PARAMS
+  },
+  'Cynosure Elite': {
+    mfg: 'Cynosure',
+    label: 'Elite',
+    wavelengths: CYNOSURE_ALEX_YAG_WAVELENGTHS,
+    params: CYNOSURE_ELITE_PARAMS
+  },
+  'Cynosure Elite+': {
+    mfg: 'Cynosure',
+    label: 'Elite+',
+    wavelengths: CYNOSURE_ALEX_YAG_WAVELENGTHS,
+    params: CYNOSURE_ELITE_PARAMS
+  },
+  'Cynosure Elite iQ': {
+    mfg: 'Cynosure',
+    label: 'Elite iQ',
+    wavelengths: CYNOSURE_ALEX_YAG_WAVELENGTHS,
+    params: CYNOSURE_ELITE_PARAMS
+  },
+  'Cynosure Accolade': {
+    mfg: 'Cynosure',
+    label: 'Accolade',
+    wavelengths: [
+      { name: '755 nm Q-Switched Alexandrite', mode: 'SP', sets: [1, 2, 3, 4, 5, 6, 8, 10], unit: 'J/cm²', spotMm: 4, tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'HV @ Reference Fluence (VDC)', 'Coolant Level / Status']
+  },
+  'Cynosure Cynergy': {
+    mfg: 'Cynosure',
+    label: 'Cynergy',
+    wavelengths: [
+      { name: '585 nm Pulsed Dye', mode: 'SP', sets: [4, 6, 8, 10, 12], unit: 'J/cm²', spotMm: 7, tolLabel: 'Tol ±10%' },
+      { name: '1064 nm Nd:YAG', mode: 'SP', sets: [10, 20, 40, 60, 80, 100], unit: 'J/cm²', spotMm: 7, tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total System Shots', 'PDL Shots', 'Nd:YAG Shots', 'Dye Kit S/N', 'Coolant Level / Status'],
+    dyeParams: true
+  },
+  'Cynosure Cynergy Multiplex': {
+    mfg: 'Cynosure',
+    label: 'Cynergy Multiplex',
+    wavelengths: [
+      { name: '585 nm Pulsed Dye', mode: 'SP', sets: [4, 6, 8, 10, 12], unit: 'J/cm²', spotMm: 7, tolLabel: 'Tol ±10%' },
+      { name: '1064 nm Nd:YAG', mode: 'SP', sets: [10, 20, 40, 60, 80, 100], unit: 'J/cm²', spotMm: 7, tolLabel: 'Tol ±10%' },
+      { name: 'Multiplex (PDL + 1064)', mode: 'SP', sets: [4, 6, 8, 10, 12], unit: 'J/cm²', spotMm: 7, tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total System Shots', 'PDL Shots', 'Nd:YAG Shots', 'Dye Kit S/N', 'Coolant Level / Status'],
+    dyeParams: true
+  },
+  'Cynosure PicoSure': {
+    mfg: 'Cynosure',
+    label: 'PicoSure',
+    wavelengths: [
+      { name: '755 nm Picosecond', mode: 'SP', sets: [0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6], unit: 'J/cm²', spotMm: 6, tolLabel: 'Tol ±10%' },
+      { name: '532 nm Picosecond', mode: 'SP', sets: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2], unit: 'J/cm²', spotMm: 4, tolLabel: 'Tol ±10%', optional: true, optionalLabel: '532 nm handpiece installed' },
+      { name: '1064 nm Picosecond', mode: 'SP', sets: [0.5, 1, 1.5, 2, 2.5, 3], unit: 'J/cm²', spotMm: 6, tolLabel: 'Tol ±10%', optional: true, optionalLabel: '1064 nm handpiece installed' }
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'HV @ Reference Fluence (VDC)', 'Coolant Level / Status', 'Firmware Version']
+  },
+  'Cynosure PicoSure Pro': {
+    mfg: 'Cynosure',
+    label: 'PicoSure Pro',
+    wavelengths: [
+      { name: '755 nm Picosecond', mode: 'SP', sets: [0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6], unit: 'J/cm²', spotMm: 6, tolLabel: 'Tol ±10%' },
+      { name: '532 nm Picosecond', mode: 'SP', sets: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2], unit: 'J/cm²', spotMm: 4, tolLabel: 'Tol ±10%', optional: true, optionalLabel: '532 nm handpiece installed' }
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'HV @ Reference Fluence (VDC)', 'Coolant Level / Status', 'Firmware Version']
+  },
+  'Cynosure SmartLipo': {
+    mfg: 'Cynosure',
+    label: 'SmartLipo',
+    wavelengths: [
+      { name: '1064 nm', mode: 'CW', sets: [6, 10, 15, 20, 25, 30], unit: 'W', tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total Lasing Time', 'Fiber Condition', 'Aiming Beam Check', 'Coolant Level / Status'],
+    fiberTest: true
+  },
+  'Cynosure SmartLipo MPX': {
+    mfg: 'Cynosure',
+    label: 'SmartLipo MPX',
+    wavelengths: [
+      { name: '1064 nm', mode: 'CW', sets: [6, 10, 15, 20, 25, 30], unit: 'W', tolLabel: 'Tol ±10%' },
+      { name: '1320 nm', mode: 'CW', sets: [6, 10, 15, 20], unit: 'W', tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total Lasing Time', 'Fiber Condition', 'Aiming Beam Check', 'Coolant Level / Status'],
+    fiberTest: true
+  },
+  'Cynosure SmartLipo Triplex': {
+    mfg: 'Cynosure',
+    label: 'SmartLipo Triplex',
+    wavelengths: [
+      { name: '1064 nm', mode: 'CW', sets: [6, 10, 15, 20, 25, 30, 40], unit: 'W', tolLabel: 'Tol ±10%' },
+      { name: '1320 nm', mode: 'CW', sets: [6, 10, 15, 20], unit: 'W', tolLabel: 'Tol ±10%' },
+      { name: '1440 nm', mode: 'CW', sets: [4, 8, 12, 16], unit: 'W', tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total Lasing Time', 'Fiber Condition', 'Aiming Beam Check', 'Coolant Level / Status'],
+    fiberTest: true
+  },
+  'Cynosure Affirm': {
+    mfg: 'Cynosure',
+    label: 'Affirm',
+    wavelengths: [
+      { name: '1440 nm', mode: 'SP', sets: [2, 4, 6, 8, 10, 12], unit: 'J/cm²', tolLabel: 'Tol ±15%' },
+      { name: '1320 nm', mode: 'SP', sets: [4, 8, 12, 16, 20], unit: 'J/cm²', tolLabel: 'Tol ±15%' }
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'Coolant Level / Status']
+  },
+  'Cynosure Icon': {
+    mfg: 'Cynosure',
+    label: 'Icon',
+    wavelengths: [
+      { name: 'IPL Broadband', mode: 'SP', sets: [5, 8, 10, 12, 15, 18, 20, 25, 30], unit: 'J/cm²', bblRect: true, bblWidthMm: 15, bblLengthMm: 40, tolLabel: 'Tol ±15%' },
+      { name: '1540 nm Fractional', mode: 'SP', sets: [10, 20, 30, 40, 50, 60], unit: 'mJ/spot', tolLabel: 'Tol ±15%' }
+    ],
+    params: ['Total System Shots', 'IPL Lamp Shots', '1540 Shots', 'Filter Used (nm)', 'Coolant Level / Status'],
+    bblTest: true
+  },
+  'Cynosure Vectus': {
+    mfg: 'Cynosure',
+    label: 'Vectus',
+    wavelengths: [
+      { name: '810 nm Diode', mode: 'PR', sets: [10, 20, 30, 40, 50, 60, 80], unit: 'J/cm²', spotMm: 12, tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'Sapphire Window Condition', 'Coolant Level / Status']
+  },
+  'Cynosure SculpSure': {
+    mfg: 'Cynosure',
+    label: 'SculpSure',
+    wavelengths: [
+      { name: '1060 nm Diode', mode: 'CW', sets: [0.9, 1.0, 1.1, 1.2, 1.3, 1.4], unit: 'W/cm²', tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total Treatment Cycles', 'Applicators Connected', 'Cooling Temp (°C)', 'Firmware Version']
+  },
+  'Cynosure RevLite SI': {
+    mfg: 'Cynosure',
+    label: 'RevLite SI',
+    wavelengths: [
+      { name: '1064 nm Q-Switch', mode: 'SP', sets: [1, 2, 3, 4, 5, 6, 8, 10], unit: 'J/cm²', spotMm: 4, tolLabel: 'Tol ±10%' },
+      { name: '532 nm Q-Switch', mode: 'SP', sets: [0.5, 1, 1.5, 2, 2.5, 3], unit: 'J/cm²', spotMm: 3, tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'HV @ Reference Fluence (VDC)', 'Coolant Level / Status']
+  },
+  'Cynosure Potenza': {
+    mfg: 'Cynosure',
+    label: 'Potenza',
+    wavelengths: [
+      { name: 'RF Microneedling Output', mode: 'CW', sets: [5, 10, 15, 20, 25, 30, 40], unit: 'W', tolLabel: 'Tol ±15%' }
+    ],
+    params: ['Total Treatment Cycles', 'Tip Type', 'Needle Depth Cal Check (mm)', 'Firmware Version']
+  },
+  'Cynosure MonaLisa Touch': {
+    mfg: 'Cynosure',
+    label: 'MonaLisa Touch',
+    wavelengths: [
+      { name: '10600 nm CO₂ Fractional', mode: 'SP', sets: [5, 10, 15, 20, 25, 30, 40], unit: 'W', tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total Lasing Time', 'Scanner Calibration Check', 'Aiming Beam Check', 'Gas / Tube Status'],
+    gasTest: true
+  },
+  'Cynosure TempSure': {
+    mfg: 'Cynosure',
+    label: 'TempSure',
+    wavelengths: [
+      { name: 'RF Output', mode: 'CW', sets: [5, 10, 15, 20, 25, 30, 40, 50], unit: 'W', tolLabel: 'Tol ±15%' }
+    ],
+    params: ['Total Treatment Cycles', 'Handpiece Type', 'Temperature Probe Check', 'Firmware Version']
+  },
+  'Cynosure PrecisionTx': {
+    mfg: 'Cynosure',
+    label: 'PrecisionTx',
+    wavelengths: [
+      { name: '1440 nm', mode: 'CW', sets: [4, 6, 8, 10, 12, 14], unit: 'W', tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total Lasing Time', 'Fiber Condition', 'Aiming Beam Check'],
+    fiberTest: true
+  },
+  'Cynosure Cellulaze': {
+    mfg: 'Cynosure',
+    label: 'Cellulaze',
+    wavelengths: [
+      { name: '1440 nm', mode: 'CW', sets: [4, 6, 8, 10, 12, 14], unit: 'W', tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total Lasing Time', 'Fiber Condition', 'Aiming Beam Check'],
+    fiberTest: true
+  },
+  'Cynosure PinPointe': {
+    mfg: 'Cynosure',
+    label: 'PinPointe FootLaser',
+    wavelengths: [
+      { name: '1064 nm', mode: 'SP', sets: [10, 20, 30, 40], unit: 'J/cm²', spotMm: 2, tolLabel: 'Tol ±10%' }
+    ],
+    params: ['Total System Shots', 'Handpiece Condition', 'Aiming Beam Check']
   }
 };
 
@@ -697,6 +951,35 @@ export function resolveModelDef(
     if (/pro/i.test(hay) && MODELS['Candela GentleMAX_PRO']) return MODELS['Candela GentleMAX_PRO'];
     if (MODELS['Candela GentleMAX']) return MODELS['Candela GentleMAX'];
     if (MODELS['Candela GentleMAX_PRO']) return MODELS['Candela GentleMAX_PRO'];
+  }
+
+  // Cynosure Apogee / Elite family (Larry: Apogee Elite MPX on estimate form)
+  if (/apogee|cynosure|elite\s*iq|elite\s*\+|elite\s*plus|picosure|smart\s*lipo|cynergy/i.test(hay)) {
+    if (/apogee/i.test(hay) && /elite/i.test(hay) && /mpx/i.test(hay) && MODELS['Cynosure Apogee Elite MPX']) {
+      return MODELS['Cynosure Apogee Elite MPX'];
+    }
+    if (/apogee/i.test(hay) && /elite/i.test(hay) && /(\+|plus)/i.test(hay) && MODELS['Cynosure Apogee Elite+']) {
+      return MODELS['Cynosure Apogee Elite+'];
+    }
+    if (/apogee/i.test(hay) && /elite/i.test(hay) && MODELS['Cynosure Apogee Elite']) {
+      return MODELS['Cynosure Apogee Elite'];
+    }
+    if (/apogee\s*\+/i.test(hay) && MODELS['Cynosure Apogee+']) return MODELS['Cynosure Apogee+'];
+    if (/apogee/i.test(hay) && MODELS['Cynosure Apogee']) return MODELS['Cynosure Apogee'];
+    if (/elite\s*iq/i.test(hay) && MODELS['Cynosure Elite iQ']) return MODELS['Cynosure Elite iQ'];
+    if (/picosure/i.test(hay) && /pro/i.test(hay) && MODELS['Cynosure PicoSure Pro']) return MODELS['Cynosure PicoSure Pro'];
+    if (/picosure/i.test(hay) && MODELS['Cynosure PicoSure']) return MODELS['Cynosure PicoSure'];
+    if (/smart\s*lipo/i.test(hay) && /triplex/i.test(hay) && MODELS['Cynosure SmartLipo Triplex']) {
+      return MODELS['Cynosure SmartLipo Triplex'];
+    }
+    if (/smart\s*lipo/i.test(hay) && /mpx/i.test(hay) && MODELS['Cynosure SmartLipo MPX']) {
+      return MODELS['Cynosure SmartLipo MPX'];
+    }
+    if (/smart\s*lipo/i.test(hay) && MODELS['Cynosure SmartLipo']) return MODELS['Cynosure SmartLipo'];
+    if (/cynergy/i.test(hay) && /multiplex/i.test(hay) && MODELS['Cynosure Cynergy Multiplex']) {
+      return MODELS['Cynosure Cynergy Multiplex'];
+    }
+    if (/cynergy/i.test(hay) && MODELS['Cynosure Cynergy']) return MODELS['Cynosure Cynergy'];
   }
 
   // Rohrer Aesthetics catalog

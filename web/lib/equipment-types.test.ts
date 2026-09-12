@@ -294,5 +294,7 @@ test('god catalog form requires equipment type and does not commit PDFs', () => 
   assert.match(api, /requireGodCaller/);
   assert.match(api, /parseManualCatalogInsert/);
   assert.match(api, /equipment_type/);
+  assert.match(page, /reindex|Index missing PDF text/);
+  assert.match(api, /indexManualSearchText/);
   assert.doesNotMatch(page, /sample-service-manual|\.pdf'/);
 });

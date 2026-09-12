@@ -9,6 +9,7 @@ import { claimCustomerInvite } from '@/lib/customer-invite-client';
 import { clearPendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session';
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
+import { publicAuthMessage } from '@/lib/auth-errors';
 
 function LoginInner() {
   const [email, setEmail] = useState('');
@@ -63,12 +64,7 @@ function LoginInner() {
   }
 
   function publicAuthError(raw: unknown): string {
-    const s = String(raw || '').trim();
-    if (!s) return 'Something went wrong. Please try again.';
-    if (/supabase\.co|yljztfaj|anon key|service_role|jwt|apikey|NEXT_PUBLIC_|eyJ[A-Za-z0-9_-]{20,}/i.test(s)) {
-      return 'Sign-in failed. Please try again.';
-    }
-    return s;
+    return publicAuthMessage(raw, 'Something went wrong. Please try again.');
   }
 
   function authRedirect(path: string) {
