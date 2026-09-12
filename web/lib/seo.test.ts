@@ -96,6 +96,6 @@ test('Netlify pins crawler MIME types and middleware skips sitemap.xml', () => {
     assert.match(toml, /application\/xml; charset=utf-8/);
   }
   const middleware = readFileSync(join(webDir, 'middleware.ts'), 'utf8');
-  assert.match(middleware, /robots\\.txt/);
-  assert.match(middleware, /sitemap\\.xml/);
+  assert.match(middleware, /robots\.txt/);
+  assert.match(middleware, /sitemap\.xml/);
 });
