@@ -3,8 +3,10 @@ import { Geist, Geist_Mono, DM_Sans } from "next/font/google";
 import "./globals.css";
 import { Providers } from "@/components/providers";
 import { AdBannerGate } from "@/components/AdBannerGate";
+import { JsonLd } from "@/components/seo/JsonLd";
 import { ThemeScript } from "@/components/ThemeScript";
 import { ThemeSync } from "@/components/ThemeSync";
+import { rootMetadata } from "@/lib/seo";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -23,14 +25,7 @@ const dmSans = DM_Sans({
   weight: ["400", "500", "600", "700", "800"],
 });
 
-export const metadata: Metadata = {
-  title: "RepairPlanet · Total Service Pro",
-  description:
-    "RepairPlanet is a biomedical equipment service network for clinics — lasers, lithotriptors, and C-arms first. Total Service Pro from Medical Repair Network is the operating system behind the network.",
-  icons: {
-    icon: "/favicon.ico",
-  },
-};
+export const metadata: Metadata = rootMetadata;
 
 export default function RootLayout({
   children,
@@ -45,6 +40,7 @@ export default function RootLayout({
     >
       <head>
         <ThemeScript />
+        <JsonLd />
       </head>
       <body className="min-h-full flex flex-col bg-[var(--bg)] text-[var(--text)]">
         <Providers>

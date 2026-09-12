@@ -5,7 +5,7 @@ import EstimateCustomerClient from './EstimateCustomerClient';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'Review estimate · Total Service Pro',
+  title: { absolute: 'Review estimate · Total Service Pro' },
   description: 'Approve this service estimate. Your clinic account is required.',
   robots: { index: false, follow: false },
 };

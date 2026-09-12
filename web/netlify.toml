@@ -22,6 +22,20 @@
     Content-Type = "text/plain; charset=utf-8"
     X-Content-Type-Options = "nosniff"
 
+# Same static-file pattern as ads.txt: public/robots.txt and public/sitemap.xml
+# are served by Netlify before the Next 404 HTML shell.
+[[headers]]
+  for = "/robots.txt"
+  [headers.values]
+    Content-Type = "text/plain; charset=utf-8"
+    X-Content-Type-Options = "nosniff"
+
+[[headers]]
+  for = "/sitemap.xml"
+  [headers.values]
+    Content-Type = "application/xml; charset=utf-8"
+    X-Content-Type-Options = "nosniff"
+
 [[headers]]
   for = "/*"
   [headers.values]
