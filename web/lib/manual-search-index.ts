@@ -188,9 +188,11 @@ export async function findManualIdsByBodyText(
     .select('manual_id')
     .textSearch('search_tsv', fts, { type: 'plain', config: 'simple' });
   if (!viaFts.error) {
-    const ids = (viaFts.data || [])
-      .map((row: { manual_id?: unknown }) => String(row.manual_id || '').trim())
-      .filter(Boolean);
+    const ids: string[] = [];
+    for (const row of viaFts.data || []) {
+      const id = String((row as { manual_id?: unknown })?.manual_id || '').trim();
+      if (id) ids.push(id);
+    }
     return { ids: [...new Set(ids)], available: true };
   }
 
@@ -210,8 +212,10 @@ export async function findManualIdsByBodyText(
     }
     return { ids: [], available: false, error: viaLike.error.message };
   }
-  const ids = (viaLike.data || [])
-    .map((row: { manual_id?: unknown }) => String(row.manual_id || '').trim())
-    .filter(Boolean);
+  const ids: string[] = [];
+  for (const row of viaLike.data || []) {
+    const id = String((row as { manual_id?: unknown })?.manual_id || '').trim();
+    if (id) ids.push(id);
+  }
   return { ids: [...new Set(ids)], available: true };
 }

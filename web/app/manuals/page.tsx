@@ -123,7 +123,7 @@ export default function ManualsLibrary() {
     setLoading(true);
     const supabase = getSupabaseClient();
     try {
-      let manRes = await fetchAllPages<any>((from, to) =>
+      let manRes = await fetchAllPages<any>(async (from, to) =>
         supabase
           .from('manuals')
           .select(MANUAL_LIBRARY_SELECT)
@@ -132,7 +132,7 @@ export default function ManualsLibrary() {
           .range(from, to)
       );
       if (manRes.error && /equipment_type|schema cache|column|wavelengths|completeness/i.test(manRes.error.message || '')) {
-        manRes = await fetchAllPages<any>((from, to) =>
+        manRes = await fetchAllPages<any>(async (from, to) =>
           supabase
             .from('manuals')
             .select(MANUAL_LIBRARY_SELECT_LEGACY)

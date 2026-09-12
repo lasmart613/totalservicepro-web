@@ -27,13 +27,14 @@ export async function POST(req: NextRequest) {
   const force = body.force === true || body.force === '1';
 
   const admin = getSupabaseAdmin();
-  const { data: manuals, error: manErr } = await fetchAllPages<Record<string, unknown>>((from, to) =>
-    admin
-      .from('manuals')
-      .select('id, storage_path, is_folder, chapter_metadata')
-      .order('brand')
-      .order('title')
-      .range(from, to)
+  const { data: manuals, error: manErr } = await fetchAllPages<Record<string, unknown>>(
+    async (from, to) =>
+      admin
+        .from('manuals')
+        .select('id, storage_path, is_folder, chapter_metadata')
+        .order('brand')
+        .order('title')
+        .range(from, to)
   );
   if (manErr) {
     return NextResponse.json({ error: manErr.message || 'Could not list manuals' }, { status: 400 });
