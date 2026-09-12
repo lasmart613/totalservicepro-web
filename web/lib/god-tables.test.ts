@@ -73,6 +73,8 @@ test('secret columns are redacted and not writable', () => {
   assert.equal(isSecretColumn('recovery_token'), true);
   assert.equal(isSecretColumn('email'), false);
   assert.equal(isSecretColumn('ticket_number'), false);
+  assert.equal(isSecretColumn('search_text'), true);
+  assert.equal(isSecretColumn('search_tsv'), true);
   const row = redactRow({
     id: 1,
     email: 'a@b.co',
@@ -141,6 +143,7 @@ test('omitted system tables stay out of the picker', () => {
   assert.equal(isOmittedDiscoveredTable('storage'), true);
   assert.equal(isOmittedDiscoveredTable('vault'), true);
   assert.equal(isOmittedDiscoveredTable('equipment'), false);
+  assert.equal(isOmittedDiscoveredTable('manual_search_index'), true);
   assert.ok(GOD_OMITTED_TABLES.some((t) => /password hash/i.test(t.reason)));
 });
 
@@ -157,6 +160,7 @@ test('God table APIs and pages stay behind requireGodCaller / admin god gate', (
     '../app/api/god/tables/[table]/[id]/route.ts',
     '../app/api/god/kpis/route.ts',
     '../app/api/god/crm/route.ts',
+    '../app/api/god/manuals/reindex/route.ts',
     '../app/admin/god/layout.tsx',
     '../app/admin/god/tables/page.tsx',
     '../app/admin/god/equipment/page.tsx',

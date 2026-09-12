@@ -3,6 +3,7 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { requireGodCaller } from '@/lib/god-auth';
 import { parseManualCatalogInsert } from '@/lib/manual-catalog-admin';
 import { EQUIPMENT_CATALOG } from '@/lib/equipment-catalog';
+import { indexManualSearchText } from '@/lib/manual-search-index';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +47,20 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: error.message || 'Could not add catalog row' }, { status: 400 });
   }
 
-  return NextResponse.json({ ok: true, manual: data, catalog: payload });
+  let indexed: { ok: boolean; chars?: number; skipped?: string } | null = null;
+  if (data?.id != null) {
+    try {
+      const result = await indexManualSearchText(admin, {
+        id: data.id,
+        storage_path: parsed.row.storage_path,
+      });
+      indexed = { ok: result.ok, chars: result.chars, skipped: result.skipped };
+    } catch {
+      indexed = { ok: false, skipped: 'index_failed' };
+    }
+  }
+
+  return NextResponse.json({ ok: true, manual: data, catalog: payload, indexed });
 }
 
 export async function GET(req: NextRequest) {

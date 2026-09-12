@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Header } from '@/components/Header';
 import { ShelfScroller } from '@/components/ShelfScroller';
 import { getSupabaseClient, getSupabaseUrl } from '@/lib/supabase/client';
+import { fetchAllPages } from '@/lib/supabase/paginate';
 import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
 import { useRouter } from 'next/navigation';
 import { manualViewHref, stashManualView, type ManualViewPayload } from '@/lib/manuals';
@@ -25,6 +26,18 @@ import {
   inferEquipmentType,
   type EquipmentType,
 } from '@/lib/equipment-types';
+import {
+  ALL_MANUAL_ROOMS,
+  filterManualLibrary,
+  groupManualsByBrand,
+  MANUAL_LIBRARY_SELECT,
+  MANUAL_LIBRARY_SELECT_LEGACY,
+  manualLibraryFiltersActive,
+  manualLibrarySearchParams,
+  parseManualLibrarySearchParams,
+  uniqueManualBrands,
+  type ManualLibraryRoom,
+} from '@/lib/manual-library-filter';
 
 const WAVELENGTH_OPTIONS = [
   { label: 'All Wavelengths', value: '' },
@@ -45,24 +58,55 @@ export default function ManualsLibrary() {
   const [ownedIds, setOwnedIds] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<'browse' | 'library'>('browse');
   const [loading, setLoading] = useState(true);
-  const [room, setRoom] = useState<EquipmentType>(DEFAULT_EQUIPMENT_TYPE);
+  const [room, setRoom] = useState<ManualLibraryRoom>(DEFAULT_EQUIPMENT_TYPE);
   const [selectedWavelength, setSelectedWavelength] = useState('');
+  const [query, setQuery] = useState('');
+  const [selectedBrand, setSelectedBrand] = useState('');
+  const [incompleteOnly, setIncompleteOnly] = useState(false);
+  const [bodyMatchIds, setBodyMatchIds] = useState<Set<string> | null>(null);
+  const [bodySearchReady, setBodySearchReady] = useState(true);
   const [slotLimit, setSlotLimit] = useState(DEFAULT_SLOT_LIMIT);
   const [orgId, setOrgId] = useState<string | number | null>(null);
 
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get('room');
-    setRoom(equipmentTypeOrDefault(q));
+    const parsed = parseManualLibrarySearchParams(window.location.search);
+    if (parsed.room === 'all') setRoom('all');
+    else if (parsed.room) setRoom(equipmentTypeOrDefault(parsed.room));
+    if (parsed.query) setQuery(parsed.query);
+    if (parsed.brand) setSelectedBrand(parsed.brand);
+    if (parsed.incompleteOnly) setIncompleteOnly(true);
     loadData();
   }, []);
 
-  function selectRoom(next: EquipmentType) {
+  function syncFilterUrl(next: {
+    room?: ManualLibraryRoom;
+    query?: string;
+    brand?: string;
+    incompleteOnly?: boolean;
+  }) {
+    const qs = manualLibrarySearchParams({
+      room: next.room ?? room,
+      query: next.query ?? query,
+      brand: next.brand ?? selectedBrand,
+      incompleteOnly: next.incompleteOnly ?? incompleteOnly,
+    });
+    const path = `${window.location.pathname}${qs ? `?${qs}` : ''}`;
+    window.history.replaceState(null, '', path);
+  }
+
+  function selectRoom(next: ManualLibraryRoom) {
     setRoom(next);
     if (next !== 'laser') setSelectedWavelength('');
-    const url = new URL(window.location.href);
-    if (next === DEFAULT_EQUIPMENT_TYPE) url.searchParams.delete('room');
-    else url.searchParams.set('room', next);
-    window.history.replaceState(null, '', `${url.pathname}${url.search}`);
+    syncFilterUrl({ room: next });
+  }
+
+  function clearLibraryFilters() {
+    setQuery('');
+    setSelectedBrand('');
+    setIncompleteOnly(false);
+    setSelectedWavelength('');
+    setBodyMatchIds(null);
+    syncFilterUrl({ query: '', brand: '', incompleteOnly: false });
   }
 
   function manualRoom(m: any): EquipmentType {
@@ -79,13 +123,23 @@ export default function ManualsLibrary() {
     setLoading(true);
     const supabase = getSupabaseClient();
     try {
-      let manRes = await supabase.from('manuals').select('*').order('brand').order('title');
-      if (manRes.error && /equipment_type|schema cache|column/i.test(manRes.error.message || '')) {
-        manRes = await supabase
+      let manRes = await fetchAllPages<any>((from, to) =>
+        supabase
           .from('manuals')
-          .select('id, brand, title, model, storage_path, doc_kind, is_folder')
+          .select(MANUAL_LIBRARY_SELECT)
           .order('brand')
-          .order('title');
+          .order('title')
+          .range(from, to)
+      );
+      if (manRes.error && /equipment_type|schema cache|column|wavelengths|completeness/i.test(manRes.error.message || '')) {
+        manRes = await fetchAllPages<any>((from, to) =>
+          supabase
+            .from('manuals')
+            .select(MANUAL_LIBRARY_SELECT_LEGACY)
+            .order('brand')
+            .order('title')
+            .range(from, to)
+        );
       }
       setManuals(manRes.data || []);
 
@@ -405,63 +459,109 @@ export default function ManualsLibrary() {
     }
   }
 
-  /** Prefer DB wavelengths[] tags; fall back to title heuristics for older rows. */
-  const matchesWavelength = (manual: any, wavelength: string) => {
-    if (!wavelength) return true;
+  const discoveryActive = manualLibraryFiltersActive({
+    query,
+    brand: selectedBrand,
+    incompleteOnly,
+    wavelength: selectedWavelength,
+  });
 
-    const tags: string[] = Array.isArray(manual?.wavelengths)
-      ? manual.wavelengths.map((w: any) => String(w).toLowerCase())
-      : [];
-
-    if (tags.length) {
-      if (wavelength === 'multi') {
-        // Multi pill: explicit multi tag, or 2+ primary aesthetic wavelengths
-        if (tags.includes('multi')) return true;
-        const primary = ['532', '755', '1064', '10600', '595'];
-        return primary.filter((p) => tags.includes(p)).length >= 2;
-      }
-      return tags.includes(String(wavelength).toLowerCase());
+  useEffect(() => {
+    const q = query.trim();
+    if (!q) {
+      setBodyMatchIds(null);
+      setBodySearchReady(true);
+      return;
     }
+    let cancelled = false;
+    setBodySearchReady(false);
+    const timer = window.setTimeout(async () => {
+      try {
+        const supabase = getSupabaseClient();
+        const { data: { session } } = await supabase.auth.getSession();
+        const token = session?.access_token;
+        if (!token) {
+          if (!cancelled) {
+            setBodyMatchIds(new Set());
+            setBodySearchReady(true);
+          }
+          return;
+        }
+        const res = await fetch('/api/manuals/search', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ q }),
+        });
+        const json = (await res.json().catch(() => ({}))) as { ids?: unknown };
+        const ids = new Set(
+          (Array.isArray(json.ids) ? json.ids : []).map((id) => String(id).trim()).filter(Boolean)
+        );
+        if (!cancelled) setBodyMatchIds(ids);
+      } catch {
+        if (!cancelled) setBodyMatchIds(new Set());
+      } finally {
+        if (!cancelled) setBodySearchReady(true);
+      }
+    }, 280);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [query]);
 
-    // Legacy title fallback (pre-wavelengths column)
-    const title = (manual.title || '').toLowerCase();
-    if (wavelength === 'multi') return title.includes('multi') || title.includes('combination');
-    if (wavelength === '532') return title.includes('532') || title.includes('ktp') || title.includes('greenlight');
-    if (wavelength === '755') return title.includes('755') || title.includes('alex') || title.includes('gentlelase');
-    if (wavelength === '1064') return title.includes('1064') || title.includes('nd:yag') || title.includes('gentleyag');
-    if (wavelength === '10600') return title.includes('co2') || title.includes('10600') || title.includes('ultrapulse') || title.includes('acupulse');
-    if (wavelength === '595') return title.includes('595') || title.includes('dye') || title.includes('pdl') || title.includes('vbeam') || title.includes('sclero');
-    return false;
-  };
+  /** Discovery (search / make / incomplete) always uses the full catalog, not owned-only. */
+  const sourceManuals = useMemo(() => {
+    if (tab === 'browse' || discoveryActive) return manuals;
+    return myLibrary;
+  }, [tab, discoveryActive, manuals, myLibrary]);
 
-  const roomCounts = React.useMemo(() => {
-    const source = tab === 'browse' ? manuals : myLibrary;
+  const filteredManuals = useMemo(
+    () =>
+      filterManualLibrary(
+        sourceManuals,
+        {
+          query,
+          brand: selectedBrand,
+          room,
+          wavelength: selectedWavelength,
+          incompleteOnly,
+        },
+        bodyMatchIds
+      ),
+    [sourceManuals, query, selectedBrand, room, selectedWavelength, incompleteOnly, bodyMatchIds]
+  );
+
+  const roomCounts = useMemo(() => {
+    const preRoom = filterManualLibrary(
+      sourceManuals,
+      {
+        query,
+        brand: selectedBrand,
+        room: ALL_MANUAL_ROOMS,
+        incompleteOnly,
+      },
+      bodyMatchIds
+    );
     const counts = Object.fromEntries(EQUIPMENT_TYPE_VALUES.map((value) => [value, 0])) as Record<
       EquipmentType,
       number
     >;
-    source.forEach((m) => {
+    preRoom.forEach((m) => {
       counts[manualRoom(m)] += 1;
     });
     return counts;
-  }, [manuals, myLibrary, tab]);
+  }, [sourceManuals, query, selectedBrand, incompleteOnly, bodyMatchIds]);
 
-  const groupedManuals = React.useMemo(() => {
-    const groups: { [key: string]: any[] } = {};
-    const list = tab === 'browse' ? manuals : myLibrary;
-    const applyWavelength = room === 'laser';
-
-    list.forEach((m) => {
-      if (manualRoom(m) !== room) return;
-      if (applyWavelength && !matchesWavelength(m, selectedWavelength)) return;
-      const brand = m.brand || 'Other';
-      if (!groups[brand]) groups[brand] = [];
-      groups[brand].push(m);
-    });
-    return groups;
-  }, [manuals, myLibrary, tab, selectedWavelength, room]);
-
-  const activeRoom = equipmentTypeMeta(room);
+  const groupedManuals = useMemo(() => groupManualsByBrand(filteredManuals), [filteredManuals]);
+  const makeOptions = useMemo(() => uniqueManualBrands(manuals), [manuals]);
+  const filtersOn = discoveryActive || selectedWavelength !== '';
+  const activeRoom =
+    room === ALL_MANUAL_ROOMS
+      ? { roomLabel: 'All rooms', label: 'All equipment', blurb: 'Every catalog room.' }
+      : equipmentTypeMeta(room);
 
   /** Light spines so books contrast with the wood shelf; dark text on top */
   const getBookColor = (manual: any) => {
@@ -614,7 +714,101 @@ export default function ManualsLibrary() {
           )}
         </div>
 
+        <div className="card p-4 md:p-5 mb-6 hover:transform-none">
+          <label className="label" htmlFor="manuals-search">
+            Search manuals
+          </label>
+          <input
+            id="manuals-search"
+            className="input mb-4"
+            type="search"
+            placeholder="Title, make, model, or text inside the PDF"
+            value={query}
+            onChange={(e) => {
+              const next = e.target.value;
+              setQuery(next);
+              syncFilterUrl({ query: next });
+            }}
+            autoComplete="off"
+          />
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="label" htmlFor="manuals-make">
+                Manufacturer
+              </label>
+              <select
+                id="manuals-make"
+                className="input"
+                value={selectedBrand}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setSelectedBrand(next);
+                  syncFilterUrl({ brand: next });
+                }}
+              >
+                <option value="">All manufacturers</option>
+                {makeOptions.map((brand) => (
+                  <option key={brand} value={brand}>
+                    {brand}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col justify-end gap-2">
+              <label className="flex items-center gap-2 text-sm text-[var(--text2)] min-h-[42px]">
+                <input
+                  type="checkbox"
+                  checked={incompleteOnly}
+                  onChange={(e) => {
+                    const next = e.target.checked;
+                    setIncompleteOnly(next);
+                    syncFilterUrl({ incompleteOnly: next });
+                  }}
+                />
+                Incomplete PDFs only
+              </label>
+            </div>
+          </div>
+          <div className="flex flex-wrap items-center justify-between gap-2 mt-4 text-sm text-[var(--text3)]">
+            <span>
+              {loading
+                ? 'Loading catalog…'
+                : !bodySearchReady && query.trim()
+                  ? 'Searching inside manuals…'
+                  : `Showing ${filteredManuals.length} of ${manuals.length} in the catalog`}
+              {discoveryActive && tab === 'library' ? ' • full catalog (not just My Library)' : ''}
+            </span>
+            {filtersOn && (
+              <button type="button" className="btn btn-secondary text-sm py-1 px-3" onClick={clearLibraryFilters}>
+                Clear filters
+              </button>
+            )}
+          </div>
+        </div>
+
         <div className="manual-rooms mb-6" role="tablist" aria-label="Equipment rooms">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={room === ALL_MANUAL_ROOMS}
+            onClick={() => selectRoom(ALL_MANUAL_ROOMS)}
+            className={`manual-room ${room === ALL_MANUAL_ROOMS ? 'is-selected' : ''}`}
+            title="Search every equipment room"
+          >
+            <span className="manual-room-icon" aria-hidden>
+              📚
+            </span>
+            <span className="manual-room-copy">
+              <span className="manual-room-label">All</span>
+              <span className="manual-room-meta">
+                {loading
+                  ? '…'
+                  : `${Object.values(roomCounts).reduce((n, c) => n + c, 0)} ${
+                      Object.values(roomCounts).reduce((n, c) => n + c, 0) === 1 ? 'manual' : 'manuals'
+                    }`}
+              </span>
+            </span>
+          </button>
           {EQUIPMENT_TYPES.map((t) => {
             const selected = room === t.value;
             const count = roomCounts[t.value];
@@ -669,7 +863,7 @@ export default function ManualsLibrary() {
             Manuals are shared with everyone in your service company.
           </p>
         )}
-        {tab === 'library' && ownedIds.size === 0 && (
+        {tab === 'library' && ownedIds.size === 0 && !discoveryActive && (
           <p className="text-sm text-[var(--text3)] mb-4">
             Your company library is empty. Switch to <strong className="text-[var(--gold)]">Browse All</strong> and tap a book to add it.
           </p>
@@ -681,7 +875,18 @@ export default function ManualsLibrary() {
           <div className="space-y-12">
             {Object.keys(groupedManuals).length === 0 && (
               <div className="text-center py-12 px-4 text-[var(--text3)]">
-                {selectedWavelength && room === 'laser' ? (
+                {filtersOn || query.trim() ? (
+                  <>
+                    <p className="text-lg font-semibold text-[var(--text)] mb-2">No manuals match</p>
+                    <p className="mb-4">
+                      Nothing in the catalog matches that search and filter combination. Try a different
+                      string, another manufacturer, or All rooms.
+                    </p>
+                    <button type="button" className="btn btn-secondary" onClick={clearLibraryFilters}>
+                      Clear filters
+                    </button>
+                  </>
+                ) : selectedWavelength && room === 'laser' ? (
                   <p>No manuals found for this wavelength in the Laser room.</p>
                 ) : (
                   <>

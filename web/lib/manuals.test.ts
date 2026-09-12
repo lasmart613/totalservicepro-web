@@ -48,6 +48,8 @@ test('bookshelf opens the in-app viewer and does not window.open the PDF', () =>
   assert.match(page, /manualSlotLimit/);
   assert.match(page, /DEFAULT_EQUIPMENT_TYPE|equipmentTypeOrDefault/);
   assert.match(page, /manual-rooms/);
+  assert.match(page, /manuals-search|Search manuals/);
+  assert.match(page, /filterManualLibrary/);
   assert.doesNotMatch(page, /window\.open/);
   assert.match(viewer, /pdf\.js|pdfjs/);
   assert.doesNotMatch(viewer, /Download|Save as|Open in (Acrobat|Adobe)|window\.open/i);
