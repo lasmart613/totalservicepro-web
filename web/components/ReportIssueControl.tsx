@@ -8,7 +8,13 @@ import { WHAT_HAPPENED_MAX, WHAT_HAPPENED_MIN } from '@/lib/product-issues';
 
 type Variant = 'app' | 'landing';
 
-export function ReportIssueControl({ variant = 'app' }: { variant?: Variant }) {
+export function ReportIssueControl({
+  variant = 'app',
+  showLabel = false,
+}: {
+  variant?: Variant;
+  showLabel?: boolean;
+}) {
   const titleId = useId();
   const [open, setOpen] = useState(false);
   const [whatHappened, setWhatHappened] = useState('');
@@ -86,7 +92,9 @@ export function ReportIssueControl({ variant = 'app' }: { variant?: Variant }) {
         aria-label="Report an Issue"
       >
         <CircleAlert size={16} aria-hidden className={variant === 'landing' ? undefined : 'shrink-0'} />
-        <span className={variant === 'app' ? 'hidden sm:inline' : undefined}>Report an Issue</span>
+        <span className={variant === 'app' && !showLabel ? 'hidden xl:inline' : undefined}>
+          Report an Issue
+        </span>
       </button>
 
       {open && (

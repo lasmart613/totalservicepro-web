@@ -156,7 +156,7 @@ export function OrgSwitcher({
         type="button"
         disabled={busy}
         onClick={() => setOpen(!open)}
-        className="inline-flex items-center gap-1.5 max-w-[220px] rounded-full border border-[var(--gold-border)] px-2.5 py-1 text-xs hover:bg-[var(--surface3)]"
+        className="inline-flex items-center gap-1.5 max-w-[8.5rem] xl:max-w-[14rem] rounded-full border border-[var(--gold-border)] px-2.5 py-1 text-xs hover:bg-[var(--surface3)]"
         aria-label="Switch company"
         title="Switch which company you are working as"
       >
