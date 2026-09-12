@@ -8,25 +8,12 @@ import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { claimCustomerInvite } from '@/lib/customer-invite-client';
 import { destAfterInviteClaim, inviteInPlay, type InviteClaimResult } from '@/lib/invite-claim';
 import { isTspAndroidWebView } from '@/lib/android-session';
+import { publicAuthMessage } from '@/lib/auth-errors';
 
 function safeNextPath(raw: string | null): string {
   if (!raw) return '';
   if (!raw.startsWith('/') || raw.startsWith('//')) return '';
   return raw;
-}
-
-/** Never dump Supabase project URLs, JWTs, or keys into the UI. */
-function publicAuthMessage(raw: unknown): string {
-  const s = String(raw || '').trim();
-  if (!s) return 'Sign-in failed. Please try again.';
-  if (
-    /supabase\.co|yljztfaj|anon key|service_role|jwt|apikey|NEXT_PUBLIC_|eyJ[A-Za-z0-9_-]{20,}/i.test(
-      s
-    )
-  ) {
-    return 'Sign-in failed. Please try again or use the login page.';
-  }
-  return s;
 }
 
 function isInviteAuthType(authType: string): boolean {
@@ -82,7 +69,7 @@ function AuthCallbackInner() {
         }
 
         if (err) {
-          setMessage(publicAuthMessage(err));
+          setMessage(publicAuthMessage(err, 'Sign-in failed. Please try again or use the login page.'));
           return;
         }
 
