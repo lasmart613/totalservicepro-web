@@ -24,6 +24,19 @@ export type ManualIndexResult = {
   skipped?: string;
 };
 
+/** Live public.manuals.id is bigint, not uuid. */
+export function asManualCatalogId(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isSafeInteger(value)) return value;
+  if (typeof value === 'bigint') {
+    const n = Number(value);
+    return Number.isSafeInteger(n) ? n : null;
+  }
+  const s = String(value ?? '').trim();
+  if (!/^-?\d+$/.test(s)) return null;
+  const n = Number(s);
+  return Number.isSafeInteger(n) ? n : null;
+}
+
 type StorageClient = {
   from: (bucket: string) => {
     download: (path: string) => Promise<{ data: Blob | null; error: { message?: string } | null }>;
@@ -136,8 +149,10 @@ export async function upsertManualSearchIndex(
   manualId: string | number,
   searchText: string
 ): Promise<{ ok: boolean; error?: string }> {
+  const id = asManualCatalogId(manualId);
+  if (id == null) return { ok: false, error: 'manual_id must be a bigint catalog id' };
   const payload = {
-    manual_id: manualId,
+    manual_id: id,
     search_text: searchText,
     indexed_at: new Date().toISOString(),
   };
@@ -150,14 +165,11 @@ export async function indexManualSearchText(
   client: TableClient & { storage: StorageClient },
   manual: ManualIndexRow
 ): Promise<ManualIndexResult> {
-  const manualId = manual.id == null ? '' : String(manual.id);
-  if (!manualId) return { manualId: '', ok: false, chars: 0, files: 0, skipped: 'missing_id' };
+  const catalogId = asManualCatalogId(manual.id);
+  const manualId = catalogId == null ? '' : String(catalogId);
+  if (catalogId == null) return { manualId: '', ok: false, chars: 0, files: 0, skipped: 'missing_id' };
   const extracted = await extractManualBodyText(client.storage, manual);
-  const saved = await upsertManualSearchIndex(
-    client,
-    manual.id as string | number,
-    extracted.text || ''
-  );
+  const saved = await upsertManualSearchIndex(client, catalogId, extracted.text || '');
   if (!extracted.text) {
     return { manualId, ok: false, chars: 0, files: extracted.files, skipped: extracted.skipped || saved.error };
   }
