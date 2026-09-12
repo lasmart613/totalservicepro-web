@@ -203,7 +203,7 @@ export const PUBLIC_PAGE_SEO: Record<PublicPageKey, PageSeo> = {
 };
 
 export function canonicalUrl(path: string): string {
-  if (path === '/') return `${SEO_ORIGIN}/`;
+  if (path === '/') return SEO_ORIGIN;
   return `${SEO_ORIGIN}${path}`;
 }
 
@@ -279,12 +279,15 @@ export function siteJsonLd(): Record<string, unknown> {
   };
 }
 
+function displayTitle(page: PageSeo): string {
+  return page.absoluteTitle ? page.title : `${page.title} · RepairPlanet`;
+}
+
 function openGraphFor(page: PageSeo): NonNullable<Metadata['openGraph']> {
-  const title = page.absoluteTitle ? page.title : undefined;
   return {
     type: 'website',
     siteName: 'RepairPlanet',
-    title: title || page.title,
+    title: displayTitle(page),
     description: page.description,
     url: page.path,
   };
@@ -299,7 +302,7 @@ export function publicPageMetadata(key: PublicPageKey): Metadata {
     openGraph: openGraphFor(page),
     twitter: {
       card: 'summary',
-      title: page.absoluteTitle ? page.title : page.title,
+      title: displayTitle(page),
       description: page.description,
     },
   };

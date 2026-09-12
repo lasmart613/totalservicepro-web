@@ -10,6 +10,7 @@ import {
   ROBOTS_ALLOW,
   ROBOTS_DISALLOW,
   SEO_ORIGIN,
+  canonicalUrl,
   publicPageMetadata,
   robotsTxt,
   siteJsonLd,
@@ -42,7 +43,7 @@ test('public/sitemap.xml lists only public URLs', () => {
   assert.equal(body, sitemapXml());
   assert.match(body, /<urlset xmlns="http:\/\/www.sitemaps.org\/schemas\/sitemap\/0.9">/);
   for (const path of PUBLIC_SITEMAP_PATHS) {
-    assert.match(body, new RegExp(`<loc>${SEO_ORIGIN}${path === '/' ? '/' : path}</loc>`));
+    assert.match(body, new RegExp(`<loc>${canonicalUrl(path)}</loc>`));
   }
   for (const banned of ['/admin', '/god', '/hub', '/reports', '/bids', '/service-tickets', '/e/']) {
     assert.doesNotMatch(body, new RegExp(`<loc>${SEO_ORIGIN}${banned}`));
