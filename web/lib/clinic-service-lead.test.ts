@@ -345,6 +345,7 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   const control = readFileSync(join(here, '../components/landing/FindRepControl.tsx'), 'utf8');
   const css = readFileSync(join(here, '../components/landing/landing.css'), 'utf8');
   const layout = readFileSync(join(here, '../app/layout.tsx'), 'utf8');
+  const seo = readFileSync(join(here, './seo.ts'), 'utf8');
   const findPage = readFileSync(join(here, '../app/find-a-rep/page.tsx'), 'utf8');
   const form = readFileSync(join(here, '../components/landing/FindRepForm.tsx'), 'utf8');
   const nextConfig = readFileSync(join(here, '../next.config.mjs'), 'utf8');
@@ -418,7 +419,8 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.match(css, /\.lp-find-card\s*\{/);
   assert.match(css, /\.lp-hero-find\s*\{/);
   assert.match(css, /\.lp-find-card\.is-hero/);
-  assert.match(layout, /RepairPlanet/);
+  assert.match(layout, /rootMetadata|RepairPlanet/);
+  assert.match(seo, /RepairPlanet/);
   assert.match(findPage, /FindRepForm/);
   assert.match(page, /shouldAutoOpenFindRep/);
   assert.match(page, /scrollIntoView/);

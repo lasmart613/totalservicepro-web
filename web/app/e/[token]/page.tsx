@@ -9,7 +9,7 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
-  title: 'Review estimate · Total Service Pro',
+  title: { absolute: 'Review estimate · Total Service Pro' },
   description: 'Approve this service estimate. Sign in with your clinic account.',
   robots: { index: false, follow: false },
 };
