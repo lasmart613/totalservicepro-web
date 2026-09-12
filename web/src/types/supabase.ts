@@ -1080,6 +1080,35 @@ export type Database = {
         }
         Relationships: []
       }
+      manual_search_index: {
+        Row: {
+          indexed_at: string
+          manual_id: number
+          search_text: string
+          search_tsv: unknown
+        }
+        Insert: {
+          indexed_at?: string
+          manual_id: number
+          search_text?: string
+          search_tsv?: never
+        }
+        Update: {
+          indexed_at?: string
+          manual_id?: number
+          search_text?: string
+          search_tsv?: never
+        }
+        Relationships: [
+          {
+            foreignKeyName: "manual_search_index_manual_id_fkey"
+            columns: ["manual_id"]
+            isOneToOne: true
+            referencedRelation: "manuals"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       marketplace_conversations: {
         Row: {
           buyer_id: string
@@ -2833,6 +2862,7 @@ export type Database = {
           }
       get_my_org_id: { Args: never; Returns: number }
       is_admin: { Args: never; Returns: boolean }
+      search_manual_catalog: { Args: { q: string }; Returns: { manual_id: number }[] }
     }
     Enums: {
       [_ in never]: never

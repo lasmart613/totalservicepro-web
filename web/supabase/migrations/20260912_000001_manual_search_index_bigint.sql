@@ -1,12 +1,15 @@
--- Full-text index for service-manual PDF bodies (library search box).
--- Apply in the Supabase SQL editor if you are not running `supabase db push`.
--- search_text is NOT on public.manuals so select('*') in the library UI
--- cannot download every PDF body. RLS: no client policies (service role / RPC only).
--- Backfill: God → Manuals catalog → "Index PDF text", or POST /api/god/manuals/reindex.
+-- Follow-up to 20260912_000000_manual_search_index.sql (PR #95).
+-- That migration used uuid and failed on live Supabase:
+--   ERROR 42804: foreign key constraint "manual_search_index_manual_id_fkey"
+--   cannot be implemented
+--   DETAIL: Key columns "manual_id" and "id" are of incompatible types: uuid and bigint
+-- Live public.manuals.id is bigint. Drop/recreate the index table + RPC to match.
 
--- Live public.manuals.id is bigint (int8), not uuid. A uuid FK fails with:
---   ERROR 42804: foreign key "manual_search_index_manual_id_fkey" cannot be implemented
-CREATE TABLE IF NOT EXISTS public.manual_search_index (
+DROP FUNCTION IF EXISTS public.search_manual_catalog(text);
+
+DROP TABLE IF EXISTS public.manual_search_index;
+
+CREATE TABLE public.manual_search_index (
   manual_id bigint PRIMARY KEY REFERENCES public.manuals(id) ON DELETE CASCADE,
   search_text text NOT NULL DEFAULT '',
   indexed_at timestamptz NOT NULL DEFAULT now()
@@ -25,6 +28,9 @@ COMMENT ON TABLE public.manual_search_index IS
 
 COMMENT ON COLUMN public.manual_search_index.search_text IS
   'Extracted body text (capped in app). Used for FTS; never returned by the library search API.';
+
+COMMENT ON COLUMN public.manual_search_index.manual_id IS
+  'FK to public.manuals.id (bigint / int8). Not uuid.';
 
 ALTER TABLE public.manual_search_index ENABLE ROW LEVEL SECURITY;
 
@@ -55,6 +61,6 @@ GRANT EXECUTE ON FUNCTION public.search_manual_catalog(text) TO authenticated;
 GRANT EXECUTE ON FUNCTION public.search_manual_catalog(text) TO service_role;
 
 COMMENT ON FUNCTION public.search_manual_catalog(text) IS
-  'Returns catalog ids whose indexed PDF body matches q. Does not return search_text. Does not filter by ownership.';
+  'Returns catalog ids (bigint) whose indexed PDF body matches q. Does not return search_text. Does not filter by ownership.';
 
 NOTIFY pgrst, 'reload schema';
