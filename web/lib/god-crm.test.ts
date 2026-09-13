@@ -28,6 +28,7 @@ test('parseCrmTab defaults to pipeline', () => {
   assert.equal(parseCrmTab('accounts'), 'accounts');
   assert.equal(parseCrmTab('CONTACTS'), 'contacts');
   assert.equal(parseCrmTab('work'), 'work');
+  assert.equal(parseCrmTab('blast'), 'blast');
   assert.equal(parseCrmTab('nope'), 'pipeline');
   assert.equal(parseCrmTab(undefined), 'pipeline');
 });
@@ -306,6 +307,7 @@ test('CRM API, page, and nav stay behind the God gate', () => {
   assert.match(page, /GodCrmPanel/);
   assert.match(panel, /fetchGodMe/);
   assert.match(panel, /\/api\/god\/crm/);
+  assert.match(panel, /GodEmailBlast/);
   assert.match(panel, /This page could not be found/);
   assert.match(nav, /CRM/);
   assert.match(nav, /GOD_CRM_PATH/);

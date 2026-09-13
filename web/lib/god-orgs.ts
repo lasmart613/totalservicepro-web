@@ -33,6 +33,7 @@ export type GodOrgRow = {
   planKey: string;
   planLabel: string;
   seats: number;
+  orgEmail: string;
   adminEmail: string;
   createdAt: string | null;
   users: Array<{
@@ -126,6 +127,7 @@ export function assembleGodOrgs(input: {
       planKey: godPlanKey(org),
       planLabel: godPlanLabel(org),
       seats: users.length,
+      orgEmail: String(org.email || '').trim(),
       adminEmail: pickAdminEmail({ orgEmail: org.email, members }),
       createdAt: org.created_at || null,
       users,
@@ -150,6 +152,7 @@ export function filterGodOrgs(orgs: GodOrgRow[], filters: GodOrgFilters = {}): G
     if (!q) return true;
     const hay = [
       org.name,
+      org.orgEmail,
       org.adminEmail,
       org.typeLabel,
       org.planLabel,

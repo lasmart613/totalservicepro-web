@@ -63,6 +63,7 @@ test('assemble rows include type, plan, seats, admin email, users', () => {
   assert.equal(shop?.typeLabel, 'Repair company');
   assert.equal(shop?.planLabel, 'Premium');
   assert.equal(shop?.seats, 2);
+  assert.equal(shop?.orgEmail, 'shop@glow.test');
   assert.equal(shop?.adminEmail, 'owner@glow.test');
   assert.equal(shop?.users.some((u) => u.email === 'tony@glow.test'), true);
   const unpaid = rows.find((r) => r.id === 90);

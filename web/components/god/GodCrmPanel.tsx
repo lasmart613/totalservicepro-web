@@ -16,6 +16,7 @@ import {
   type GodCrmPayload,
 } from '@/lib/god-crm';
 import { GOD_TABLES_PATH, godTableHref } from '@/lib/god-tables';
+import { GodEmailBlast } from '@/components/god/GodEmailBlast';
 
 const TYPE_FILTERS = [
   { value: 'all', label: 'All types' },
@@ -75,6 +76,7 @@ const TAB_LABEL: Record<CrmTab, string> = {
   accounts: 'Accounts',
   contacts: 'Contacts',
   work: 'Work',
+  blast: 'Email blast',
 };
 
 function formatCount(value: number | null | undefined): string {
@@ -311,6 +313,10 @@ export function GodCrmPanel() {
         })}
       </div>
 
+      {tab === 'blast' ? <GodEmailBlast variant="crm" /> : null}
+
+      {tab !== 'blast' ? (
+      <>
       <div className="flex flex-wrap gap-3 mb-4">
         <input
           type="search"
@@ -494,6 +500,8 @@ export function GodCrmPanel() {
             formatCrmDate(row.createdAt),
           ])}
         />
+      ) : null}
+      </>
       ) : null}
 
       {data?.notes?.length ? (
