@@ -333,6 +333,7 @@ export const rootMetadata: Metadata = {
   icons: {
     // Stable public URLs (also shipped as app/ file conventions). Google wants 48×48+.
     icon: [
+      { url: '/icon.svg', type: 'image/svg+xml' },
       { url: '/icon-48.png', type: 'image/png', sizes: '48x48' },
       { url: '/favicon.ico', sizes: '48x48' },
     ],

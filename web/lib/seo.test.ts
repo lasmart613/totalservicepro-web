@@ -129,9 +129,11 @@ test('BMET favicon replaces the default Next/Vercel triangle', () => {
   assert.doesNotMatch(svg, /vercel|triangle/i);
 
   const seo = readFileSync(join(here, 'seo.ts'), 'utf8');
+  assert.match(seo, /icon\.svg/);
   assert.match(seo, /icon-48\.png/);
   assert.match(seo, /favicon\.ico/);
   assert.match(seo, /apple-icon\.png/);
+  assert.ok(existsSync(join(webDir, 'public', 'icon.svg')));
 
   const leftoverNames = new Set(['favicon.ico', 'icon.ico', 'icon.png', 'icon.svg', 'apple-icon.png', 'apple-touch-icon.png']);
   for (const dir of [join(webDir, 'app'), join(webDir, 'public')]) {
