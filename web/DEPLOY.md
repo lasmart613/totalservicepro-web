@@ -199,6 +199,28 @@ In `lib/supabase/client.ts` there are fallback values, but **set these in Netlif
 3. Redeploy after setting (or use "Deploy" button in dashboard for existing deploys).
 4. (Optional) Add other secrets if server-only code is added later.
 
+### God Analytics (GA4 Data API)
+
+`/admin/god/analytics` (Larry only) reads **Google Analytics Data API**, not the browser gtag snippet. Site tagging (`G-GNBJQ2DMQB`) is already on the web app; the dashboard shows data once a service account is linked (and the stream has hits). Soft beta: do **not** link Google Ads.
+
+**Property:** Living Free - GA4 (`365480892`)  
+**Stream:** RepairPlanet → https://repairplanet.net (`G-GNBJQ2DMQB`)  
+**Account:** larrysmart@gmail.com
+
+Add these **server-only** Netlify env vars (never `NEXT_PUBLIC_`, never commit the key):
+
+1. Google Cloud Console → enable **Google Analytics Data API**.
+2. Create a service account and download a JSON key.
+3. GA4 Admin → Property access management for Living Free - GA4 → add the service account email as **Viewer**.
+4. Set in Netlify (Production; Previews if you want the dashboard there too):
+   - `GA4_PROPERTY_ID` = `365480892` (optional; this is the default)
+   - `GA4_MEASUREMENT_ID` = `G-GNBJQ2DMQB` (optional display)
+   - `GA4_SERVICE_ACCOUNT_JSON` = the full JSON key **or** base64 of that JSON  
+     **or** `GA4_CLIENT_EMAIL` + `GA4_PRIVATE_KEY` (use literal `\n` in the PEM on Netlify)
+5. Redeploy. Names only belong in `.env.example`; paste values only in Netlify / `web/.env.local`.
+
+Without credentials the Analytics board shows a setup empty state instead of inventing numbers.
+
 Without these, the web app will fall back to the (public demo?) values in the source—fine for testing but use the production/shared Supabase project.
 
 ## Other Notes

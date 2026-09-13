@@ -9,6 +9,7 @@ import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink, UPGRADE_LABEL } from '@/components/UpgradePlanLink';
 import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
 import {
+  GOD_ANALYTICS_PATH,
   GOD_AUTH_PATH,
   GOD_CRM_PATH,
   GOD_EQUIPMENT_PATH,
@@ -174,6 +175,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     ...(isGod
       ? [
           { href: GOD_DASHBOARD_PATH, label: 'God Dashboard' },
+          { href: GOD_ANALYTICS_PATH, label: 'God Analytics' },
           { href: GOD_CRM_PATH, label: 'God CRM' },
           { href: GOD_TABLES_PATH, label: 'God Tables' },
           { href: GOD_EQUIPMENT_PATH, label: 'God Equipment' },

@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
+  GOD_ANALYTICS_PATH,
   GOD_AUTH_PATH,
   GOD_CRM_PATH,
   GOD_EQUIPMENT_PATH,
@@ -13,6 +14,7 @@ import { GOD_DASHBOARD_PATH } from '@/lib/god-client';
 
 const LINKS = [
   { href: GOD_DASHBOARD_PATH, label: 'Invites', exact: true },
+  { href: GOD_ANALYTICS_PATH, label: 'Analytics' },
   { href: GOD_CRM_PATH, label: 'CRM' },
   { href: GOD_TABLES_PATH, label: 'Tables' },
   { href: GOD_EQUIPMENT_PATH, label: 'Equipment' },

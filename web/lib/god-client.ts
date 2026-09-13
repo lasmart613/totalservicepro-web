@@ -3,6 +3,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 export const GOD_DASHBOARD_PATH = '/admin/god';
 export const GOD_ALIAS_PATH = '/god';
 export {
+  GOD_ANALYTICS_PATH,
   GOD_AUTH_PATH,
   GOD_CRM_PATH,
   GOD_EQUIPMENT_PATH,

@@ -246,4 +246,5 @@ test('God KPI API stays behind requireGodCaller and the home page mounts the boa
   assert.match(board, /\/api\/god\/kpis\?days=/);
   assert.match(board, /Site performance/);
   assert.match(board, /Google Analytics/);
+  assert.match(board, /GOD_ANALYTICS_PATH|\/admin\/god\/analytics/);
 });

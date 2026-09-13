@@ -44,3 +44,8 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# Google service-account keys (God Analytics / GA4). Never commit.
+*service-account*.json
+*-sa.json
+ga4*.json

@@ -12,9 +12,9 @@ export const DEFAULT_KPI_DAYS: KpiDays = 30;
 export const LOGIN_AUDIT_ACTIONS = ['login'] as const;
 export const ACTIVE_SUBSCRIPTION_STATUSES = ['active', 'trialing'] as const;
 
-export const ANALYTICS_CONNECT_NOTE = 'Time on site — connect Google Analytics';
+export const ANALYTICS_CONNECT_NOTE = 'Time on site — see Analytics (GA4)';
 export const ANALYTICS_DETAIL_NOTE =
-  'Page views, bounce rate, and visitor geography are not stored in Supabase. Connect Google Analytics (GA4) to measure time on site.';
+  'Page views, bounce rate, and visitor geography come from GA4 on the Analytics tab. Product counts here stay on Supabase.';
 
 export type AuthUserLite = {
   created_at?: string | null;
