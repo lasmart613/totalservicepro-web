@@ -7,7 +7,6 @@ import { fetchAllPages } from '@/lib/supabase/paginate';
 import {
   BLAST_ALREADY_SENT_WINDOW_MS,
   BLAST_SEND_CHUNK_SIZE,
-  BLAST_SEND_MAX_DURATION_SECONDS,
   BLAST_TEMPLATES,
   blastFromAddress,
   blastReplyTo,
@@ -23,7 +22,8 @@ import {
 import { newUnsubscribeToken, shopInviteResendHeaders } from '@/lib/shop-invite-unsubscribe';
 
 export const dynamic = 'force-dynamic';
-export const maxDuration = BLAST_SEND_MAX_DURATION_SECONDS;
+/** Must be a numeric literal for the Next/OpenNext plugin. Keep in sync with BLAST_SEND_MAX_DURATION_SECONDS. */
+export const maxDuration = 60;
 
 async function recipientUnsubscribed(email: string): Promise<boolean> {
   try {

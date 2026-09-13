@@ -450,8 +450,8 @@ test('blast API, CRM tab, and God UI stay god-only and unselected by default', (
   assert.match(crm, /GodEmailBlast/);
   assert.match(home, /GodEmailBlast/);
   assert.match(crmLib, /'blast'/);
-  assert.match(send, /maxDuration/);
-  assert.match(send, /BLAST_SEND_MAX_DURATION_SECONDS|BLAST_SEND_CHUNK_SIZE/);
+  assert.match(send, /export const maxDuration = 60/);
+  assert.match(send, /BLAST_SEND_CHUNK_SIZE/);
   assert.doesNotMatch(netlify, /\[functions/);
   assert.doesNotMatch(webNetlify, /\[functions/);
   assert.match(lib, /BLAST_RESUME_STORAGE_KEY/);
