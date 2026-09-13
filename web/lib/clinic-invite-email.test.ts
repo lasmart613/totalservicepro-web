@@ -109,5 +109,7 @@ test('blast send route is god-gated and never auto-selects orgs', () => {
   assert.match(route, /shop_invite/);
   assert.match(route, /shopInviteResendHeaders/);
   assert.match(route, /List-Unsubscribe|headers: shopInviteResendHeaders/);
+  assert.match(route, /maxDuration/);
+  assert.match(route, /remaining_organization_ids/);
   assert.doesNotMatch(route, /send to every org|on deploy/i);
 });

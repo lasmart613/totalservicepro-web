@@ -12,6 +12,17 @@
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
+# God Email blast (/api/god/blast/send) is still a sync Next.js route:
+# sequential Resend + god_email_sends writes. A 647-clinic send died mid-flight
+# (~155 logged) on the default serverless timeout.
+#
+# The route exports maxDuration = 60 and processes at most 50 recipients per
+# invocation. The God UI auto-loops remaining_organization_ids / resume_token.
+# OpenNext maps App Router API routes through ___netlify-server-handler, so
+# this timeout applies to the shared Next server function.
+[functions."___netlify-server-handler"]
+  timeout = 60
+
 # /ads.txt must stay a static text/plain file (Google AdSense crawler).
 # There is no /* SPA rewrite in this toml; Next.js Runtime still 404s unknown
 # paths as HTML. public/ads.txt is served by Netlify before that handler
