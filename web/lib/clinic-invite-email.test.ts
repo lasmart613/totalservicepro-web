@@ -84,13 +84,14 @@ test('plain text carries the same locked body without image markup', () => {
   assert.doesNotMatch(text, /Free to start|No card to start|This is the juicy part|AdSense|Google Ads/);
 });
 
-test('hero public path is documented and present when the JPG can be committed', () => {
+test('hero public path is the locked clinic-blast JPEG, not a landing still', () => {
   assert.match(readme, /https:\/\/repairplanet\.net\/email\/laser-clinic-hero-locked\.jpg/);
   assert.match(readme, /laser-clinic-hero-locked\.jpg/);
-  if (existsSync(heroPath)) {
-    const bytes = statSync(heroPath).size;
-    assert.ok(bytes > 2_000, `hero jpg should not be empty, got ${bytes}`);
-  }
+  assert.match(readme, /Locked clinic-blast hero/);
+  assert.doesNotMatch(readme, /placeholder|hero-bg-clinic/i);
+  assert.equal(existsSync(heroPath), true);
+  const bytes = statSync(heroPath).size;
+  assert.ok(bytes > 100_000, `locked hero should be the production JPEG (~125101), got ${bytes}`);
 });
 
 test('blast send route is god-gated and never auto-selects orgs', () => {
