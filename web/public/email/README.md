@@ -1,27 +1,23 @@
-# Email static assets
+# God email assets
 
-Files here are served from the Next.js `public/` folder. After a production deploy they are reachable as:
+Hosted at `https://repairplanet.net/email/…`. Email HTML must use those absolute URLs — clients cannot load relative `/email/` paths.
 
-`https://repairplanet.net/email/<path>`
+## Shop invite
 
-Resend HTML must use those absolute HTTPS URLs. Email clients cannot load relative or localhost paths.
+Locked shots live under `shop-invite/`:
 
-## Shop tester invite
+- `https://repairplanet.net/email/shop-invite/shot-hero.jpg`
+- `https://repairplanet.net/email/shop-invite/shot-find-work.jpg`
+- `https://repairplanet.net/email/shop-invite/shot-reports-email.jpg`
+- `https://repairplanet.net/email/shop-invite/shot-billing.jpg`
+- `https://repairplanet.net/email/shop-invite/shot-manuals-shelf.jpg`
+- `https://repairplanet.net/email/shop-invite/shot-pdf-viewer.jpg`
 
-`shop-invite/*.jpg` — locked screenshots referenced by `web/lib/shop-invite-email.ts`.
+## Clinic invite
 
-Example: `https://repairplanet.net/email/shop-invite/shot-hero.jpg`
+Locked clinic-blast hero (facial / med-spa photo). Production JPEG from the clinic blast, not generated from a landing background.
 
-## Clinic blast hero
+- **Public URL:** `https://repairplanet.net/email/laser-clinic-hero-locked.jpg`
+- **Repo path:** `web/public/email/laser-clinic-hero-locked.jpg`
 
-`laser-clinic-hero-locked.jpg` — locked facial / med-spa hero for clinic-blast Resend HTML.
-
-Production URL (200 after this file is merged and deployed):
-
-`https://repairplanet.net/email/laser-clinic-hero-locked.jpg`
-
-Replace the binary in place (from repo root):
-
-```bash
-curl -fsSL -o web/public/email/laser-clinic-hero-locked.jpg '<source-jpg-url>'
-```
+Clinic HTML must keep that absolute URL. Do not switch the email to `/register` or a relative image path.

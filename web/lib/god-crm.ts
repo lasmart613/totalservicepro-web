@@ -12,7 +12,7 @@ import { GOD_CRM_PATH, godTableHref } from './god-tables.ts';
 
 export { GOD_CRM_PATH };
 
-export const CRM_TABS = ['pipeline', 'accounts', 'contacts', 'work'] as const;
+export const CRM_TABS = ['pipeline', 'accounts', 'contacts', 'work', 'blast'] as const;
 export type CrmTab = (typeof CRM_TABS)[number];
 
 export const CRM_PIPELINE_SOURCES = [
