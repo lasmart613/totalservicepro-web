@@ -9,13 +9,18 @@ import {
   BLAST_SEND_CHUNK_SIZE,
   BLAST_TEMPLATES,
   blastFromAddress,
+  blastOrgSkipCode,
   blastReplyTo,
+  classifyBlastSkip,
   encodeBlastResumeToken,
   nextBlastChunk,
   parseBlastSendBody,
   pickBlastRecipient,
+  remainingAfterBlastChunk,
+  tallyBlastSkipCounts,
   type BlastRecentSend,
   type BlastSendContent,
+  type BlastSkipReasonCode,
   type BlastTemplate,
   type BlastTemplateKey,
 } from '@/lib/god-email-blast';
@@ -189,68 +194,108 @@ export async function POST(req: NextRequest) {
     recipient: string;
     ok: boolean;
     error?: string;
+    skip_reason?: BlastSkipReasonCode;
   }> = [];
   const sentEmails = new Set<string>();
 
   for (const org of chunkOrgs) {
     const recipient = pickBlastRecipient(org);
     const emailKey = recipient.toLowerCase();
-    if (sentEmails.has(emailKey)) {
+    try {
+      if (sentEmails.has(emailKey)) {
+        results.push({
+          organizationId: org.id,
+          organizationName: org.name,
+          recipient,
+          ok: false,
+          error: 'Duplicate email already sent in this blast',
+          skip_reason: 'duplicate',
+        });
+        continue;
+      }
+      if (await recipientUnsubscribed(recipient)) {
+        results.push({
+          organizationId: org.id,
+          organizationName: org.name,
+          recipient,
+          ok: false,
+          error: 'Recipient unsubscribed from God email',
+          skip_reason: 'unsubscribed',
+        });
+        continue;
+      }
+      const unsubscribeToken = newUnsubscribeToken();
+      const sent = await sendResend({ to: recipient, template, content, unsubscribeToken });
+      if (sent.ok) {
+        sentEmails.add(emailKey);
+        const logged = await logSend({
+          organizationId: org.id,
+          organizationName: org.name,
+          recipientEmail: recipient,
+          subject: content.subject,
+          templateKey,
+          sentByUserId: gate.caller.userId,
+          sentByEmail: gate.caller.email,
+          unsubscribeToken,
+        });
+        results.push({
+          organizationId: org.id,
+          organizationName: org.name,
+          recipient,
+          ok: true,
+          error: logged.ok ? undefined : `Sent, but log failed: ${logged.error}`,
+        });
+      } else {
+        const error = sent.error || 'Email provider error';
+        results.push({
+          organizationId: org.id,
+          organizationName: org.name,
+          recipient,
+          ok: false,
+          error,
+          skip_reason: classifyBlastSkip(error),
+        });
+      }
+    } catch (e: unknown) {
+      const error = e instanceof Error ? e.message : 'Unexpected send error';
       results.push({
         organizationId: org.id,
         organizationName: org.name,
         recipient,
         ok: false,
-        error: 'Duplicate email already sent in this blast',
-      });
-      continue;
-    }
-    if (await recipientUnsubscribed(recipient)) {
-      results.push({
-        organizationId: org.id,
-        organizationName: org.name,
-        recipient,
-        ok: false,
-        error: 'Recipient unsubscribed from God email',
-      });
-      continue;
-    }
-    const unsubscribeToken = newUnsubscribeToken();
-    const sent = await sendResend({ to: recipient, template, content, unsubscribeToken });
-    if (sent.ok) {
-      sentEmails.add(emailKey);
-      const logged = await logSend({
-        organizationId: org.id,
-        organizationName: org.name,
-        recipientEmail: recipient,
-        subject: content.subject,
-        templateKey,
-        sentByUserId: gate.caller.userId,
-        sentByEmail: gate.caller.email,
-        unsubscribeToken,
-      });
-      results.push({
-        organizationId: org.id,
-        organizationName: org.name,
-        recipient,
-        ok: true,
-        error: logged.ok ? undefined : `Sent, but log failed: ${logged.error}`,
-      });
-    } else {
-      results.push({
-        organizationId: org.id,
-        organizationName: org.name,
-        recipient,
-        ok: false,
-        error: sent.error || 'Email provider error',
+        error,
+        skip_reason: 'provider_error',
       });
     }
   }
 
-  const remaining_organization_ids = leftoverIds;
+  const plannedIds = new Set([
+    ...chunkOrgs.map((org) => String(org.id)),
+    ...leftoverIds.map((id) => String(id)),
+  ]);
+  const skip_counts = tallyBlastSkipCounts(results);
+  for (const id of ids) {
+    if (plannedIds.has(String(id))) continue;
+    const org = byId.get(String(id));
+    if (!org) continue;
+    const code = blastOrgSkipCode({
+      templateKey,
+      org,
+      recentSends,
+      subject: content.subject,
+    });
+    if (code) skip_counts[code] += 1;
+  }
+
+  const remainder = remainingAfterBlastChunk({ leftoverIds, results });
+  const remaining_organization_ids = remainder.remainingIds;
+  const unprocessed_organization_ids = remainder.unprocessedIds;
+  const retryable_organization_ids = remainder.retryableIds;
 
   const sentCount = results.filter((r) => r.ok).length;
-  const complete = remaining_organization_ids.length === 0;
+  const failed = skip_counts.provider_error;
+  const skipped = Object.values(skip_counts).reduce((sum, n) => sum + n, 0);
+  const complete = remainder.complete;
   const resume_token = complete
     ? null
     : encodeBlastResumeToken({
@@ -262,12 +307,16 @@ export async function POST(req: NextRequest) {
   return NextResponse.json({
     ok: sentCount > 0 || complete,
     sentCount,
-    skipped: results.length - sentCount,
+    skipped,
+    failed,
     processed: results.length,
     queued: ids.length,
     remaining: remaining_organization_ids.length,
     remaining_organization_ids,
+    unprocessed_organization_ids,
+    retryable_organization_ids,
     complete,
+    skip_counts,
     chunk_size: BLAST_SEND_CHUNK_SIZE,
     blast_id: blastId,
     resume_token,

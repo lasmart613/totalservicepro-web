@@ -11,8 +11,10 @@ import {
   BLAST_SEND_CHUNK_SIZE,
   BLAST_SEND_MAX_DURATION_SECONDS,
   BLAST_TEMPLATES,
+  addBlastSkipCounts,
   alreadySentBlastRecipient,
   blastChunkCount,
+  blastOrgSkipCode,
   blastDraftStorageKey,
   blastFromAddress,
   blastReplyTo,
@@ -20,8 +22,11 @@ import {
   clinicInviteAudience,
   clinicInviteSkipReason,
   dedupeBlastRecipients,
+  classifyBlastSkip,
   eligibleBlastOrganizationIds,
   encodeBlastResumeToken,
+  emptyBlastSkipCounts,
+  formatBlastSkipToast,
   ensureBlastHtmlFooter,
   ensureBlastTextFooter,
   htmlHasBlastFooter,
@@ -34,6 +39,7 @@ import {
   parseBlastSendBody,
   parseBlastTemplateKey,
   pickBlastRecipient,
+  remainingAfterBlastChunk,
   remainingBlastOrganizationIds,
   resolveBlastSendContent,
   selectedWithEmails,
@@ -379,6 +385,90 @@ test('clinic_invite chunking skips service_company shops', () => {
   assert.deepEqual(planned.remainingIds, []);
   assert.equal(isRetryableBlastError('clinic_invite excludes service_company'), false);
   assert.equal(isRetryableBlastError('RESEND_API_KEY not configured'), true);
+  assert.equal(isRetryableBlastError('Email provider error (429)'), true);
+  assert.equal(isRetryableBlastError('Unexpected send error'), true);
+  assert.equal(classifyBlastSkip('Already sent this template to this email in the last 24 hours'), 'already_sent');
+  assert.equal(classifyBlastSkip('No valid organization email'), 'no_email');
+  assert.equal(classifyBlastSkip('Duplicate email already sent in this blast'), 'duplicate');
+  assert.equal(classifyBlastSkip('Recipient unsubscribed from God email'), 'unsubscribed');
+  assert.equal(classifyBlastSkip('clinic_invite excludes service_company'), 'service_company');
+  assert.equal(classifyBlastSkip('Too many requests'), 'provider_error');
+});
+
+test('provider and unexpected failures stay on remaining for retry', () => {
+  const leftover = [51, 52, 53];
+  const remainder = remainingAfterBlastChunk({
+    leftoverIds: leftover,
+    results: [
+      { organizationId: 1, ok: true },
+      { organizationId: 2, ok: false, error: 'Email provider error (429)', skip_reason: 'provider_error' },
+      { organizationId: 3, ok: false, error: 'Duplicate email already sent in this blast', skip_reason: 'duplicate' },
+      { organizationId: 4, ok: false, error: 'Recipient unsubscribed from God email', skip_reason: 'unsubscribed' },
+      { organizationId: 5, ok: false, error: 'fetch failed' },
+    ],
+  });
+  assert.deepEqual(remainder.unprocessedIds, leftover);
+  assert.deepEqual(remainder.retryableIds, [2, 5]);
+  assert.deepEqual(remainder.remainingIds, [51, 52, 53, 2, 5]);
+  assert.equal(remainder.complete, false);
+
+  const lastChunk = remainingAfterBlastChunk({
+    leftoverIds: [],
+    results: [
+      { organizationId: 190, ok: true },
+      { organizationId: 191, ok: false, error: 'Email provider error (429)' },
+      { organizationId: 192, ok: false, error: BLAST_ALREADY_SENT_SKIP, skip_reason: 'already_sent' },
+    ],
+  });
+  assert.deepEqual(lastChunk.unprocessedIds, []);
+  assert.deepEqual(lastChunk.retryableIds, [191]);
+  assert.deepEqual(lastChunk.remainingIds, [191]);
+  assert.equal(lastChunk.complete, false);
+
+  const allDone = remainingAfterBlastChunk({
+    leftoverIds: [],
+    results: [
+      { organizationId: 1, ok: true },
+      { organizationId: 2, ok: false, error: BLAST_ALREADY_SENT_SKIP },
+    ],
+  });
+  assert.deepEqual(allDone.remainingIds, []);
+  assert.equal(allDone.complete, true);
+
+  assert.equal(
+    blastOrgSkipCode({
+      templateKey: 'clinic_invite',
+      org: { id: 1, type: 'service_company', orgEmail: 'shop@glow.test' },
+    }),
+    'service_company'
+  );
+  assert.equal(
+    blastOrgSkipCode({
+      templateKey: 'clinic_invite',
+      org: { id: 2, type: 'laser_clinic' },
+    }),
+    'no_email'
+  );
+  assert.equal(
+    blastOrgSkipCode({
+      templateKey: 'clinic_invite',
+      org: { id: 3, type: 'laser_clinic', orgEmail: 'pat@lakeview.test' },
+      recentSends: [
+        {
+          template_key: 'clinic_invite',
+          recipient_email: 'pat@lakeview.test',
+          created_at: '2026-09-13T12:00:00.000Z',
+        },
+      ],
+      now: new Date('2026-09-13T23:00:00.000Z'),
+    }),
+    'already_sent'
+  );
+
+  const toast = formatBlastSkipToast(
+    addBlastSkipCounts(emptyBlastSkipCounts(), { already_sent: 4, provider_error: 442, no_email: 0 })
+  );
+  assert.equal(toast, '446 skipped (4 already sent, 442 provider error)');
 });
 
 test('resume token carries remaining org ids for the same blast', () => {
@@ -422,6 +512,11 @@ test('blast API, CRM tab, and God UI stay god-only and unselected by default', (
   assert.match(send, /maxDuration/);
   assert.match(send, /BLAST_SEND_CHUNK_SIZE|nextBlastChunk/);
   assert.match(send, /remaining_organization_ids/);
+  assert.match(send, /remainingAfterBlastChunk/);
+  assert.match(send, /unprocessed_organization_ids/);
+  assert.match(send, /retryable_organization_ids/);
+  assert.match(send, /skip_reason/);
+  assert.match(send, /skip_counts/);
   assert.match(send, /resume_token/);
   assert.match(send, /shopInviteResendHeaders/);
   assert.match(lib, /confirm !== true/);
@@ -437,7 +532,11 @@ test('blast API, CRM tab, and God UI stay god-only and unselected by default', (
   assert.match(panel, /\/api\/god\/blast\/send/);
   assert.match(panel, /confirm:\s*true/);
   assert.match(panel, /remaining_organization_ids/);
+  assert.match(panel, /unprocessed_organization_ids/);
+  assert.match(panel, /retryable_organization_ids/);
+  assert.match(panel, /formatBlastSkipToast/);
   assert.match(panel, /Continue remaining/);
+  assert.match(panel, /failed send/);
   assert.match(panel, /Nothing is selected by default|selected by default/);
   assert.match(panel, /useState<Set<string>>\(new Set\(\)\)/);
   assert.match(panel, /Reply-To|replyTo|reply_to/);
