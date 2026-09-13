@@ -144,6 +144,16 @@ export function selectedWithEmails(orgs: GodOrgRow[]): GodOrgRow[] {
 export const BLAST_POSTAL_ADDRESS = CLINIC_INVITE_POSTAL_ADDRESS;
 export const BLAST_UNSUBSCRIBE_URL = CLINIC_INVITE_UNSUBSCRIBE_URL;
 export const BLAST_DRAFT_STORAGE_PREFIX = 'tsp.god-blast-draft.v1.';
+export const BLAST_RESUME_STORAGE_KEY = 'tsp.god-blast-resume.v1';
+
+/** Max recipients processed per /api/god/blast/send invocation. Keeps Netlify sync under timeout. */
+export const BLAST_SEND_CHUNK_SIZE = 50;
+/** Skip Resend if the same template_key + email already landed in god_email_sends. */
+export const BLAST_ALREADY_SENT_WINDOW_MS = 24 * 60 * 60 * 1000;
+/** Next.js / Netlify sync ceiling for the blast route (seconds). */
+export const BLAST_SEND_MAX_DURATION_SECONDS = 60;
+export const BLAST_ALREADY_SENT_SKIP =
+  'Already sent this template to this email in the last 24 hours';
 
 export type BlastDraft = {
   subject: string;
@@ -348,11 +358,218 @@ export function resolveBlastSendContent(
   };
 }
 
+export type BlastRecentSend = {
+  template_key?: string | null;
+  recipient_email?: string | null;
+  subject?: string | null;
+  created_at?: string | null;
+  organization_id?: number | string | null;
+};
+
+export type BlastResumePayload = {
+  v: 1;
+  blast_id: string;
+  template_key: BlastTemplateKey;
+  organization_ids: Array<number | string>;
+};
+
+export type BlastOrgLike = {
+  id: number | string;
+  type?: string | null;
+  orgEmail?: string | null;
+  email?: string | null;
+  adminEmail?: string | null;
+};
+
+export function blastEmailKey(email?: string | null): string {
+  return String(email || '')
+    .trim()
+    .toLowerCase();
+}
+
+export function parseOptionalBlastId(raw?: unknown): string | null {
+  const value = String(raw ?? '').trim();
+  if (!value) return null;
+  return /^[A-Za-z0-9_-]{8,80}$/.test(value) ? value : null;
+}
+
+export function takeBlastChunk<T>(ids: T[], chunkSize: number = BLAST_SEND_CHUNK_SIZE): T[] {
+  const size = Math.min(
+    BLAST_SEND_CHUNK_SIZE,
+    Math.max(1, Math.floor(Number(chunkSize) || BLAST_SEND_CHUNK_SIZE))
+  );
+  return ids.slice(0, size);
+}
+
+export function blastChunkCount(total: number, chunkSize: number = BLAST_SEND_CHUNK_SIZE): number {
+  if (!Number.isFinite(total) || total <= 0) return 0;
+  return Math.ceil(total / Math.max(1, chunkSize));
+}
+
+export function alreadySentBlastRecipient(opts: {
+  templateKey: string;
+  email?: string | null;
+  recentSends: BlastRecentSend[];
+  subject?: string | null;
+  now?: Date;
+  windowMs?: number;
+}): boolean {
+  const emailKey = blastEmailKey(opts.email);
+  if (!emailKey) return false;
+  const now = opts.now ?? new Date();
+  const cutoff = now.getTime() - (opts.windowMs ?? BLAST_ALREADY_SENT_WINDOW_MS);
+  const today = now.toISOString().slice(0, 10);
+  const subject = opts.subject != null ? String(opts.subject).trim() : '';
+
+  return opts.recentSends.some((row) => {
+    if (blastEmailKey(row.recipient_email) !== emailKey) return false;
+    if (String(row.template_key || '').toLowerCase() !== String(opts.templateKey).toLowerCase()) {
+      return false;
+    }
+    const at = new Date(row.created_at || 0);
+    const atMs = at.getTime();
+    if (Number.isFinite(atMs) && atMs >= cutoff) return true;
+    if (subject && String(row.subject || '').trim() === subject && Number.isFinite(atMs)) {
+      return at.toISOString().slice(0, 10) === today;
+    }
+    return false;
+  });
+}
+
+export function isRetryableBlastError(error?: string | null): boolean {
+  const text = String(error || '').trim();
+  if (!text) return false;
+  if (text === BLAST_ALREADY_SENT_SKIP) return false;
+  if (/excludes service_company/i.test(text)) return false;
+  if (/no valid organization email/i.test(text)) return false;
+  if (/unsubscribed/i.test(text)) return false;
+  if (/duplicate email/i.test(text)) return false;
+  return true;
+}
+
+export function eligibleBlastOrganizationIds<T extends BlastOrgLike>(opts: {
+  organizationIds: Array<number | string>;
+  orgs: T[];
+  templateKey: BlastTemplateKey;
+  recentSends: BlastRecentSend[];
+  subject?: string | null;
+  extraSentEmails?: Iterable<string>;
+  now?: Date;
+}): Array<number | string> {
+  const orgById = new Map(opts.orgs.map((org) => [String(org.id), org]));
+  const extraSent = new Set(
+    [...(opts.extraSentEmails || [])].map((email) => blastEmailKey(email)).filter(Boolean)
+  );
+  const out: Array<number | string> = [];
+  const seen = new Set<string>();
+
+  for (const id of opts.organizationIds) {
+    const key = String(id);
+    if (seen.has(key)) continue;
+    const org = orgById.get(key);
+    if (!org) continue;
+    if (blastSkipReason(opts.templateKey, org)) continue;
+    const email = pickBlastRecipient(org);
+    if (extraSent.has(blastEmailKey(email))) continue;
+    if (
+      alreadySentBlastRecipient({
+        templateKey: opts.templateKey,
+        email,
+        recentSends: opts.recentSends,
+        subject: opts.subject,
+        now: opts.now,
+      })
+    ) {
+      continue;
+    }
+    seen.add(key);
+    out.push(org.id);
+  }
+  return out;
+}
+
+export function nextBlastChunk<T extends BlastOrgLike>(opts: {
+  organizationIds: Array<number | string>;
+  orgs: T[];
+  templateKey: BlastTemplateKey;
+  recentSends: BlastRecentSend[];
+  subject?: string | null;
+  extraSentEmails?: Iterable<string>;
+  chunkSize?: number;
+  now?: Date;
+}): { chunkOrgs: T[]; remainingIds: Array<number | string> } {
+  const orgById = new Map(opts.orgs.map((org) => [String(org.id), org]));
+  const eligible = eligibleBlastOrganizationIds(opts);
+  const chunkIds = takeBlastChunk(eligible, opts.chunkSize);
+  return {
+    chunkOrgs: chunkIds
+      .map((id) => orgById.get(String(id)))
+      .filter((org): org is T => Boolean(org)),
+    remainingIds: eligible.slice(chunkIds.length),
+  };
+}
+
+export function remainingBlastOrganizationIds<T extends BlastOrgLike>(opts: {
+  organizationIds: Array<number | string>;
+  processedIds?: Iterable<number | string>;
+  orgs: T[];
+  templateKey: BlastTemplateKey;
+  recentSends: BlastRecentSend[];
+  extraSentEmails?: Iterable<string>;
+  retryableIds?: Iterable<number | string>;
+  subject?: string | null;
+  now?: Date;
+}): Array<number | string> {
+  const processed = new Set([...(opts.processedIds || [])].map(String));
+  const retryable = new Set([...(opts.retryableIds || [])].map(String));
+  return eligibleBlastOrganizationIds({
+    organizationIds: opts.organizationIds.filter(
+      (id) => !processed.has(String(id)) || retryable.has(String(id))
+    ),
+    orgs: opts.orgs,
+    templateKey: opts.templateKey,
+    recentSends: opts.recentSends,
+    extraSentEmails: opts.extraSentEmails,
+    subject: opts.subject,
+    now: opts.now,
+  });
+}
+
+export function encodeBlastResumeToken(payload: {
+  blast_id: string;
+  template_key: BlastTemplateKey;
+  organization_ids: Array<number | string>;
+}): string {
+  return JSON.stringify({
+    v: 1,
+    blast_id: payload.blast_id,
+    template_key: payload.template_key,
+    organization_ids: payload.organization_ids,
+  });
+}
+
+export function parseBlastResumeToken(raw: unknown): BlastResumePayload | null {
+  if (typeof raw !== 'string' || !raw.trim()) return null;
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const templateKey = parseBlastTemplateKey(
+      typeof parsed.template_key === 'string' ? parsed.template_key : null
+    );
+    const blastId = parseOptionalBlastId(parsed.blast_id);
+    const organizationIds = selectedOrgIds(parsed.organization_ids);
+    if (!templateKey || !blastId || !organizationIds.length) return null;
+    return { v: 1, blast_id: blastId, template_key: templateKey, organization_ids: organizationIds };
+  } catch {
+    return null;
+  }
+}
+
 export function parseBlastSendBody(body: unknown):
   | {
       ok: true;
       templateKey: BlastTemplateKey;
       organizationIds: Array<number | string>;
+      blastId: string | null;
       content: BlastSendContent;
     }
   | { ok: false; error: string; status: number } {
@@ -365,12 +582,13 @@ export function parseBlastSendBody(body: unknown):
     };
   }
 
+  const resume = parseBlastResumeToken(raw.resume_token ?? raw.resumeToken);
   const templateKey = parseBlastTemplateKey(
     typeof raw.template_key === 'string'
       ? raw.template_key
       : typeof raw.templateKey === 'string'
         ? raw.templateKey
-        : null
+        : resume?.template_key || null
   );
   if (!templateKey) {
     return {
@@ -381,7 +599,8 @@ export function parseBlastSendBody(body: unknown):
   }
 
   const organizationIds = selectedOrgIds(raw.organization_ids ?? raw.organizationIds);
-  if (!organizationIds.length) {
+  const ids = organizationIds.length ? organizationIds : resume?.organization_ids || [];
+  if (!ids.length) {
     return {
       ok: false,
       status: 400,
@@ -401,7 +620,8 @@ export function parseBlastSendBody(body: unknown):
   return {
     ok: true,
     templateKey,
-    organizationIds,
+    organizationIds: ids,
+    blastId: parseOptionalBlastId(raw.blast_id ?? raw.blastId) || resume?.blast_id || null,
     content: resolved.content,
   };
 }

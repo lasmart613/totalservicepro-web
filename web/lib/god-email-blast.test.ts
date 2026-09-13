@@ -5,7 +5,14 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { assembleGodOrgs, selectedOrgIds } from './god-orgs.ts';
 import {
+  BLAST_ALREADY_SENT_SKIP,
+  BLAST_ALREADY_SENT_WINDOW_MS,
+  BLAST_RESUME_STORAGE_KEY,
+  BLAST_SEND_CHUNK_SIZE,
+  BLAST_SEND_MAX_DURATION_SECONDS,
   BLAST_TEMPLATES,
+  alreadySentBlastRecipient,
+  blastChunkCount,
   blastDraftStorageKey,
   blastFromAddress,
   blastReplyTo,
@@ -13,17 +20,24 @@ import {
   clinicInviteAudience,
   clinicInviteSkipReason,
   dedupeBlastRecipients,
+  eligibleBlastOrganizationIds,
+  encodeBlastResumeToken,
   ensureBlastHtmlFooter,
   ensureBlastTextFooter,
   htmlHasBlastFooter,
+  isRetryableBlastError,
   isValidBlastEmail,
   lockedBlastPreview,
+  nextBlastChunk,
   parseBlastDraft,
+  parseBlastResumeToken,
   parseBlastSendBody,
   parseBlastTemplateKey,
   pickBlastRecipient,
+  remainingBlastOrganizationIds,
   resolveBlastSendContent,
   selectedWithEmails,
+  takeBlastChunk,
 } from './god-email-blast.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -230,6 +244,168 @@ test('this-send drafts stay keyed by template and do not invent a store', () => 
   assert.equal(parseBlastDraft({ subject: 'A' }), null);
 });
 
+test('blast send chunks at most 50 orgs per invocation', () => {
+  const ids = Array.from({ length: 647 }, (_, i) => i + 1);
+  assert.equal(BLAST_SEND_CHUNK_SIZE, 50);
+  assert.ok(BLAST_SEND_CHUNK_SIZE >= 50 && BLAST_SEND_CHUNK_SIZE <= 100);
+  assert.deepEqual(takeBlastChunk(ids), ids.slice(0, 50));
+  assert.equal(takeBlastChunk(ids, 200).length, 50);
+  assert.equal(takeBlastChunk(ids, 0).length, 50);
+  assert.equal(blastChunkCount(647), 13);
+  assert.equal(blastChunkCount(50), 1);
+  assert.equal(BLAST_SEND_MAX_DURATION_SECONDS, 60);
+
+  const orgs = ids.map((id) => ({
+    id,
+    type: 'laser_clinic',
+    orgEmail: `clinic${id}@lakeview.test`,
+  }));
+  const first = nextBlastChunk({
+    organizationIds: ids,
+    orgs,
+    templateKey: 'clinic_invite',
+    recentSends: [],
+  });
+  assert.equal(first.chunkOrgs.length, 50);
+  assert.deepEqual(
+    first.chunkOrgs.map((org) => org.id),
+    ids.slice(0, 50)
+  );
+  assert.equal(first.remainingIds.length, 597);
+  assert.deepEqual(first.remainingIds, ids.slice(50));
+});
+
+test('skip already-sent for same template_key + email within 24h', () => {
+  const now = new Date('2026-09-13T23:00:00.000Z');
+  const recent = [
+    {
+      template_key: 'clinic_invite',
+      recipient_email: 'pat@lakeview.test',
+      subject: 'Wish your laser repair tech was closer?',
+      created_at: '2026-09-13T12:00:00.000Z',
+      organization_id: 2,
+    },
+  ];
+  assert.equal(BLAST_ALREADY_SENT_WINDOW_MS, 24 * 60 * 60 * 1000);
+  assert.match(BLAST_ALREADY_SENT_SKIP, /last 24 hours/);
+  assert.equal(
+    alreadySentBlastRecipient({
+      templateKey: 'clinic_invite',
+      email: 'Pat@Lakeview.test',
+      recentSends: recent,
+      now,
+    }),
+    true
+  );
+  assert.equal(
+    alreadySentBlastRecipient({
+      templateKey: 'shop_invite',
+      email: 'pat@lakeview.test',
+      recentSends: recent,
+      now,
+    }),
+    false
+  );
+  assert.equal(
+    alreadySentBlastRecipient({
+      templateKey: 'clinic_invite',
+      email: 'pat@lakeview.test',
+      recentSends: [
+        {
+          template_key: 'clinic_invite',
+          recipient_email: 'pat@lakeview.test',
+          created_at: '2026-09-12T22:00:00.000Z',
+        },
+      ],
+      now,
+    }),
+    false
+  );
+  assert.equal(
+    alreadySentBlastRecipient({
+      templateKey: 'clinic_invite',
+      email: 'other@clinic.test',
+      recentSends: recent,
+      now,
+    }),
+    false
+  );
+
+  const remaining = remainingBlastOrganizationIds({
+    organizationIds: [2, 4, 9],
+    orgs: [
+      { id: 2, type: 'laser_clinic', orgEmail: 'pat@lakeview.test' },
+      { id: 4, type: 'laser_clinic', orgEmail: 'owner@clinic.test' },
+      { id: 9, type: 'laser_clinic', orgEmail: 'Pat@Lakeview.test' },
+    ],
+    templateKey: 'clinic_invite',
+    recentSends: recent,
+    subject: 'Wish your laser repair tech was closer?',
+    now,
+  });
+  assert.deepEqual(remaining, [4]);
+});
+
+test('clinic_invite chunking skips service_company shops', () => {
+  const orgs = [
+    { id: 1, type: 'service_company', orgEmail: 'shop@glow.test' },
+    { id: 2, type: 'laser_clinic', orgEmail: 'pat@lakeview.test' },
+    { id: 3, type: 'service_company', orgEmail: 'parts@glow.test' },
+    { id: 4, type: 'laser_clinic', orgEmail: 'owner@clinic.test' },
+  ];
+  assert.equal(
+    blastSkipReason('clinic_invite', { type: 'service_company', orgEmail: 'shop@glow.test' }),
+    'clinic_invite excludes service_company'
+  );
+  assert.deepEqual(
+    eligibleBlastOrganizationIds({
+      organizationIds: [1, 2, 3, 4],
+      orgs,
+      templateKey: 'clinic_invite',
+      recentSends: [],
+    }),
+    [2, 4]
+  );
+  const planned = nextBlastChunk({
+    organizationIds: [1, 2, 3, 4],
+    orgs,
+    templateKey: 'clinic_invite',
+    recentSends: [],
+  });
+  assert.deepEqual(
+    planned.chunkOrgs.map((org) => org.id),
+    [2, 4]
+  );
+  assert.deepEqual(planned.remainingIds, []);
+  assert.equal(isRetryableBlastError('clinic_invite excludes service_company'), false);
+  assert.equal(isRetryableBlastError('RESEND_API_KEY not configured'), true);
+});
+
+test('resume token carries remaining org ids for the same blast', () => {
+  const token = encodeBlastResumeToken({
+    blast_id: 'blast-continue-1',
+    template_key: 'clinic_invite',
+    organization_ids: [51, 52, 53],
+  });
+  const parsed = parseBlastResumeToken(token);
+  assert.deepEqual(parsed, {
+    v: 1,
+    blast_id: 'blast-continue-1',
+    template_key: 'clinic_invite',
+    organization_ids: [51, 52, 53],
+  });
+  const resumed = parseBlastSendBody({
+    confirm: true,
+    resume_token: token,
+  });
+  assert.equal(resumed.ok, true);
+  if (resumed.ok) {
+    assert.equal(resumed.templateKey, 'clinic_invite');
+    assert.deepEqual(resumed.organizationIds, [51, 52, 53]);
+    assert.equal(resumed.blastId, 'blast-continue-1');
+  }
+});
+
 test('blast API, CRM tab, and God UI stay god-only and unselected by default', () => {
   const send = readFileSync(join(here, '../app/api/god/blast/send/route.ts'), 'utf8');
   const preview = readFileSync(join(here, '../app/api/god/blast/preview/route.ts'), 'utf8');
@@ -239,8 +415,15 @@ test('blast API, CRM tab, and God UI stay god-only and unselected by default', (
   const crmLib = readFileSync(join(here, './god-crm.ts'), 'utf8');
   const auth = readFileSync(join(here, './god-auth.ts'), 'utf8');
   const lib = readFileSync(join(here, './god-email-blast.ts'), 'utf8');
+  const netlify = readFileSync(join(here, '../../netlify.toml'), 'utf8');
+  const webNetlify = readFileSync(join(here, '../netlify.toml'), 'utf8');
   assert.match(send, /requireGodCaller/);
   assert.match(send, /parseBlastSendBody/);
+  assert.match(send, /maxDuration/);
+  assert.match(send, /BLAST_SEND_CHUNK_SIZE|nextBlastChunk/);
+  assert.match(send, /remaining_organization_ids/);
+  assert.match(send, /resume_token/);
+  assert.match(send, /shopInviteResendHeaders/);
   assert.match(lib, /confirm !== true/);
   assert.match(send, /template_key/);
   assert.match(send, /god_email_sends/);
@@ -253,6 +436,8 @@ test('blast API, CRM tab, and God UI stay god-only and unselected by default', (
   assert.match(panel, /Email blast/);
   assert.match(panel, /\/api\/god\/blast\/send/);
   assert.match(panel, /confirm:\s*true/);
+  assert.match(panel, /remaining_organization_ids/);
+  assert.match(panel, /Continue remaining/);
   assert.match(panel, /Nothing is selected by default|selected by default/);
   assert.match(panel, /useState<Set<string>>\(new Set\(\)\)/);
   assert.match(panel, /Reply-To|replyTo|reply_to/);
@@ -265,6 +450,12 @@ test('blast API, CRM tab, and God UI stay god-only and unselected by default', (
   assert.match(crm, /GodEmailBlast/);
   assert.match(home, /GodEmailBlast/);
   assert.match(crmLib, /'blast'/);
+  assert.match(send, /export const maxDuration = 60/);
+  assert.match(send, /BLAST_SEND_CHUNK_SIZE/);
+  assert.doesNotMatch(netlify, /\[functions/);
+  assert.doesNotMatch(webNetlify, /\[functions/);
+  assert.match(lib, /BLAST_RESUME_STORAGE_KEY/);
+  assert.equal(BLAST_RESUME_STORAGE_KEY, 'tsp.god-blast-resume.v1');
   assert.doesNotMatch(send, /stripe/i);
   assert.doesNotMatch(panel, /adsense|google ads/i);
   assert.doesNotMatch(lib, /from\('god_email_templates'\)|create table god_email/i);

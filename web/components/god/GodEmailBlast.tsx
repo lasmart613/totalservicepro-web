@@ -6,11 +6,16 @@ import { godAuthHeader } from '@/lib/god-client';
 import { orgTypeLabel } from '@/lib/labels';
 import type { GodOrgRow } from '@/lib/god-orgs';
 import {
+  BLAST_RESUME_STORAGE_KEY,
+  BLAST_SEND_CHUNK_SIZE,
   BLAST_TEMPLATES,
+  blastChunkCount,
   blastDraftDiffersFromLocked,
   blastDraftStorageKey,
   clinicInviteAudience,
+  encodeBlastResumeToken,
   parseBlastDraft,
+  parseBlastResumeToken,
   pickBlastRecipient,
   selectedWithEmails,
   type BlastDraft,
@@ -100,6 +105,57 @@ function clearStoredDraft(templateKey: BlastTemplateKey) {
   }
 }
 
+function newBrowserBlastId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  return `blast-${Date.now()}-${Math.random().toString(16).slice(2, 10)}`;
+}
+
+function readStoredResume(templateKey: BlastTemplateKey): {
+  blast_id: string;
+  organization_ids: Array<number | string>;
+} | null {
+  try {
+    const parsed = parseBlastResumeToken(sessionStorage.getItem(BLAST_RESUME_STORAGE_KEY));
+    if (!parsed || parsed.template_key !== templateKey) return null;
+    return { blast_id: parsed.blast_id, organization_ids: parsed.organization_ids };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredResume(opts: {
+  blast_id: string;
+  template_key: BlastTemplateKey;
+  organization_ids: Array<number | string>;
+}) {
+  try {
+    if (!opts.organization_ids.length) {
+      sessionStorage.removeItem(BLAST_RESUME_STORAGE_KEY);
+      return;
+    }
+    sessionStorage.setItem(
+      BLAST_RESUME_STORAGE_KEY,
+      encodeBlastResumeToken({
+        blast_id: opts.blast_id,
+        template_key: opts.template_key,
+        organization_ids: opts.organization_ids,
+      })
+    );
+  } catch {
+    /* private mode / quota */
+  }
+}
+
+function clearStoredResume() {
+  try {
+    sessionStorage.removeItem(BLAST_RESUME_STORAGE_KEY);
+  } catch {
+    /* ignore */
+  }
+}
+
 export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }) {
   const [orgs, setOrgs] = useState<GodOrgRow[]>([]);
   const [sends, setSends] = useState<SendLog[]>([]);
@@ -116,6 +172,17 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
   const [confirming, setConfirming] = useState(false);
   const [sending, setSending] = useState(false);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [blastId, setBlastId] = useState<string | null>(null);
+  const [resumeIds, setResumeIds] = useState<Array<number | string>>([]);
+  const [progress, setProgress] = useState<{
+    queued: number;
+    sent: number;
+    skipped: number;
+    remaining: number;
+    chunk: number;
+    chunks: number;
+    error?: string;
+  } | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -157,6 +224,13 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
           }
         }
         setSends(logJson.sends || []);
+        const storedResume = readStoredResume(templateKey);
+        if (storedResume?.organization_ids.length) {
+          setBlastId(storedResume.blast_id);
+          setResumeIds(storedResume.organization_ids);
+        } else {
+          setResumeIds([]);
+        }
       } catch (e) {
         console.error('god email blast load', e);
         toast.error('Could not load Email blast');
@@ -256,8 +330,8 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
     setConfirming(true);
   }
 
-  async function sendSelected() {
-    if (!selectedEmailRows.length) {
+  async function sendChunks(organizationIds: Array<number | string>, existingBlastId?: string | null) {
+    if (!organizationIds.length) {
       toast.error('Select one or more organizations with an email first.');
       return;
     }
@@ -265,38 +339,130 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
       toast.error('Subject and HTML body cannot be empty.');
       return;
     }
+    const runId = existingBlastId || newBrowserBlastId();
+    setBlastId(runId);
     setSending(true);
+    setProgress({
+      queued: organizationIds.length,
+      sent: 0,
+      skipped: 0,
+      remaining: organizationIds.length,
+      chunk: 0,
+      chunks: Math.max(1, blastChunkCount(organizationIds.length)),
+    });
+    let remaining = [...organizationIds];
+    let sent = 0;
+    let skipped = 0;
+    let chunk = 0;
     try {
       const headers = await godAuthHeader();
-      const res = await fetch('/api/god/blast/send', {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({
-          confirm: true,
+      while (remaining.length) {
+        chunk += 1;
+        setProgress({
+          queued: organizationIds.length,
+          sent,
+          skipped,
+          remaining: remaining.length,
+          chunk,
+          chunks: Math.max(chunk, blastChunkCount(organizationIds.length)),
+        });
+        const res = await fetch('/api/god/blast/send', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            confirm: true,
+            template_key: templateKey,
+            organization_ids: remaining,
+            blast_id: runId,
+            subject,
+            html,
+            text,
+          }),
+        });
+        const json = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          setResumeIds(remaining);
+          writeStoredResume({
+            blast_id: runId,
+            template_key: templateKey,
+            organization_ids: remaining,
+          });
+          setProgress({
+            queued: organizationIds.length,
+            sent,
+            skipped,
+            remaining: remaining.length,
+            chunk,
+            chunks: Math.max(chunk, blastChunkCount(organizationIds.length)),
+            error: json.error || 'Send failed',
+          });
+          toast.error(json.error || 'Send failed');
+          return;
+        }
+        sent += Number(json.sentCount) || 0;
+        skipped += Number(json.skipped) || 0;
+        remaining = Array.isArray(json.remaining_organization_ids) ? json.remaining_organization_ids : [];
+        setResumeIds(remaining);
+        writeStoredResume({
+          blast_id: json.blast_id || runId,
           template_key: templateKey,
-          organization_ids: selectedRows.map((o) => o.id),
-          subject,
-          html,
-          text,
-        }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        toast.error(json.error || 'Send failed');
-        return;
+          organization_ids: remaining,
+        });
+        setProgress({
+          queued: organizationIds.length,
+          sent,
+          skipped,
+          remaining: remaining.length,
+          chunk,
+          chunks: Math.max(chunk, blastChunkCount(organizationIds.length)),
+        });
+        if (json.complete || !remaining.length) break;
       }
-      toast.success(`Sent ${json.sentCount || 0} ${locked?.template_name || 'blast'}${json.sentCount === 1 ? '' : 's'}.`);
-      if (json.skipped) toast.message(`${json.skipped} skipped (no email, duplicate, unsubscribed, or provider error).`);
+      toast.success(`Sent ${sent} ${locked?.template_name || 'blast'}${sent === 1 ? '' : 's'}.`);
+      if (skipped) {
+        toast.message(`${skipped} skipped (already sent, no email, duplicate, unsubscribed, or provider error).`);
+      }
       const logRes = await fetch('/api/god/invite/log', { headers, cache: 'no-store' });
       const logJson = await logRes.json().catch(() => ({}));
       setSends(logJson.sends || []);
       setConfirming(false);
       setSelected(new Set());
+      setResumeIds([]);
+      clearStoredResume();
     } catch (e: unknown) {
+      setResumeIds(remaining);
+      writeStoredResume({
+        blast_id: runId,
+        template_key: templateKey,
+        organization_ids: remaining,
+      });
+      setProgress((prev) => ({
+        queued: organizationIds.length,
+        sent,
+        skipped,
+        remaining: remaining.length,
+        chunk,
+        chunks: Math.max(chunk, blastChunkCount(organizationIds.length)),
+        error: e instanceof Error ? e.message : 'Send failed',
+      }));
       toast.error(e instanceof Error ? e.message : 'Send failed');
     } finally {
       setSending(false);
     }
+  }
+
+  async function sendSelected() {
+    await sendChunks(selectedRows.map((org) => org.id), null);
+  }
+
+  async function continueRemaining() {
+    const ids = resumeIds.length ? resumeIds : readStoredResume(templateKey)?.organization_ids || [];
+    if (!ids.length) {
+      toast.error('Nothing left to continue.');
+      return;
+    }
+    setConfirming(true);
+    await sendChunks(ids, blastId);
   }
 
   return (
@@ -536,6 +702,11 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
         <button type="button" className="btn btn-primary" disabled={!canSend} onClick={openConfirm}>
           Send blast to {selectedEmailRows.length} with email
         </button>
+        {resumeIds.length ? (
+          <button type="button" className="btn btn-secondary" disabled={sending} onClick={continueRemaining}>
+            Continue remaining ({resumeIds.length})
+          </button>
+        ) : null}
       </div>
 
       {confirming && (
@@ -571,12 +742,26 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
                 <dt className="inline text-[var(--text3)]">Recipient count: </dt>
                 <dd className="inline">{selectedEmailRows.length}</dd>
               </div>
+              <div>
+                <dt className="inline text-[var(--text3)]">Chunk size: </dt>
+                <dd className="inline">{BLAST_SEND_CHUNK_SIZE} per request</dd>
+              </div>
             </dl>
             <p className="text-sm text-[var(--text3)] mb-3">
-              This emails the edited subject and body to each selected organization email. Edits apply
-              to this send only. Duplicates and missing addresses are skipped. Nothing else is written
-              on those orgs.
+              This emails the edited subject and body to each selected organization email. Large
+              sends go in chunks of {BLAST_SEND_CHUNK_SIZE} so Netlify cannot time out mid-flight.
+              Already-logged recipients for this template in the last 24 hours are skipped. Edits
+              apply to this send only. Nothing else is written on those orgs.
             </p>
+            {progress ? (
+              <p className="text-sm mb-3" aria-live="polite">
+                {progress.error
+                  ? `Stopped after chunk ${progress.chunk}: ${progress.error}. ${progress.remaining} remaining.`
+                  : sending
+                    ? `Sending chunk ${progress.chunk} of ${progress.chunks} · ${progress.sent} sent · ${progress.skipped} skipped · ${progress.remaining} remaining`
+                    : `${progress.sent} sent · ${progress.skipped} skipped · ${progress.remaining} remaining`}
+              </p>
+            ) : null}
             <ul className="text-sm mb-5 max-h-40 overflow-y-auto space-y-1">
               {selectedRows.map((org) => (
                 <li key={String(org.id)}>
@@ -585,12 +770,23 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
               ))}
             </ul>
             <div className="flex gap-2 justify-end">
-              <button type="button" className="btn btn-secondary" onClick={() => setConfirming(false)}>
-                Cancel
+              <button
+                type="button"
+                className="btn btn-secondary"
+                disabled={sending}
+                onClick={() => setConfirming(false)}
+              >
+                {progress?.error && resumeIds.length ? 'Hide' : 'Cancel'}
               </button>
-              <button type="button" className="btn btn-primary" disabled={sending} onClick={sendSelected}>
-                {sending ? 'Sending…' : 'Confirm send'}
-              </button>
+              {progress?.error && resumeIds.length ? (
+                <button type="button" className="btn btn-primary" disabled={sending} onClick={continueRemaining}>
+                  Continue remaining ({resumeIds.length})
+                </button>
+              ) : (
+                <button type="button" className="btn btn-primary" disabled={sending} onClick={sendSelected}>
+                  {sending ? 'Sending…' : 'Confirm send'}
+                </button>
+              )}
             </div>
           </div>
         </div>
