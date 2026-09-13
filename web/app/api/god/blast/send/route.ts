@@ -141,6 +141,8 @@ async function loadRecentBlastSends(
  * Body: { template_key: 'clinic_invite' | 'shop_invite', organization_ids, confirm: true, subject?, html?, text?, blast_id?, resume_token? }
  * Optional subject/html/text apply to this send only. Locked source files are not overwritten.
  * Processes at most BLAST_SEND_CHUNK_SIZE recipients per invocation so Netlify cannot time out mid-blast.
+ * Duration is raised via export const maxDuration = BLAST_SEND_MAX_DURATION_SECONDS (60).
+ * Do not set a generated OpenNext handler timeout in netlify.toml; that key fails deploy.
  * Never sends to every org. Never sends without confirm. Dedupes emails in one send and last 24h.
  */
 export async function POST(req: NextRequest) {

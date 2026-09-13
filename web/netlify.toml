@@ -12,12 +12,6 @@
 [[plugins]]
   package = "@netlify/plugin-nextjs"
 
-# God Email blast send is a sync Next.js route. Duration is raised on the route
-# via export const maxDuration = 60 (BLAST_SEND_MAX_DURATION_SECONDS). Each
-# invocation caps at 50 recipients (BLAST_SEND_CHUNK_SIZE). The God UI
-# auto-loops remaining organization IDs. Do not add a generated-handler
-# function timeout key here; that setting is invalid for OpenNext and fails deploy.
-
 # /ads.txt must stay a static text/plain file (Google AdSense crawler).
 # There is no /* SPA rewrite in this toml; Next.js Runtime still 404s unknown
 # paths as HTML. public/ads.txt is served by Netlify before that handler
