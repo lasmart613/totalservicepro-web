@@ -37,8 +37,15 @@ export async function POST(req: NextRequest) {
   };
 
   let { data, error } = await admin.from('manuals').insert(payload).select('id, title').maybeSingle();
+  // Live manuals has equipment_type / is_incomplete but not doc_kind.
+  if (error && /doc_kind|schema cache|column/i.test(error.message || '')) {
+    const { doc_kind: _kind, ...withoutKind } = payload;
+    const retry = await admin.from('manuals').insert(withoutKind).select('id, title').maybeSingle();
+    data = retry.data;
+    error = retry.error;
+  }
   if (error && /equipment_type|is_incomplete|schema cache|column/i.test(error.message || '')) {
-    const { equipment_type: _type, is_incomplete: _inc, ...legacy } = payload;
+    const { equipment_type: _type, is_incomplete: _inc, doc_kind: _kind, ...legacy } = payload;
     const retry = await admin.from('manuals').insert(legacy).select('id, title').maybeSingle();
     data = retry.data;
     error = retry.error;

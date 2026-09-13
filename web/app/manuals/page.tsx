@@ -30,8 +30,7 @@ import {
   ALL_MANUAL_ROOMS,
   filterManualLibrary,
   groupManualsByBrand,
-  MANUAL_LIBRARY_SELECT,
-  MANUAL_LIBRARY_SELECT_LEGACY,
+  fetchManualLibraryRows,
   manualLibraryFiltersActive,
   manualLibrarySearchParams,
   parseManualLibrarySearchParams,
@@ -123,24 +122,11 @@ export default function ManualsLibrary() {
     setLoading(true);
     const supabase = getSupabaseClient();
     try {
-      let manRes = await fetchAllPages<any>(async (from, to) =>
-        supabase
-          .from('manuals')
-          .select(MANUAL_LIBRARY_SELECT)
-          .order('brand')
-          .order('title')
-          .range(from, to)
+      const manRes = await fetchManualLibraryRows((select) =>
+        fetchAllPages<any>(async (from, to) =>
+          supabase.from('manuals').select(select).order('brand').order('title').range(from, to)
+        )
       );
-      if (manRes.error && /equipment_type|schema cache|column|wavelengths|completeness/i.test(manRes.error.message || '')) {
-        manRes = await fetchAllPages<any>(async (from, to) =>
-          supabase
-            .from('manuals')
-            .select(MANUAL_LIBRARY_SELECT_LEGACY)
-            .order('brand')
-            .order('title')
-            .range(from, to)
-        );
-      }
       setManuals(manRes.data || []);
 
       const { data: { user } } = await supabase.auth.getUser();

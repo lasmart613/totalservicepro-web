@@ -8,6 +8,9 @@ import {
   filterManualLibrary,
   groupManualsByBrand,
   MANUAL_LIBRARY_SELECT,
+  MANUAL_LIBRARY_SELECT_LEGACY,
+  fetchManualLibraryRows,
+  isManualsSelectSchemaError,
   manualLibraryFiltersActive,
   manualLibrarySearchParams,
   manualMatchesQuery,
@@ -118,7 +121,7 @@ test('library page wires search UI and keeps open/get-manual-url gating', () => 
   assert.match(page, /get-manual-url/);
   assert.match(page, /openInAppViewer|stashManualView/);
   assert.doesNotMatch(page, /search_text/);
-  assert.match(page, /MANUAL_LIBRARY_SELECT/);
+  assert.match(page, /fetchManualLibraryRows/);
   assert.match(searchApi, /findManualIdsByBodyText|search_manual_catalog/);
   assert.match(searchApi, /canAccessServiceManuals/);
   assert.doesNotMatch(searchApi, /organization_manuals|user_manuals|get-manual-url/);
@@ -126,4 +129,41 @@ test('library page wires search UI and keeps open/get-manual-url gating', () => 
   assert.doesNotMatch(MANUAL_LIBRARY_SELECT, /search_text/);
   const filterLib = readFileSync(join(here, 'manual-library-filter.ts'), 'utf8');
   assert.doesNotMatch(filterLib, /manual-pdf-text|node:zlib|inflateSync/);
+});
+
+test('catalog select matches live manuals columns and retries only on schema errors', async () => {
+  assert.doesNotMatch(MANUAL_LIBRARY_SELECT, /doc_kind|description|completeness_note/);
+  assert.doesNotMatch(MANUAL_LIBRARY_SELECT_LEGACY, /doc_kind/);
+  assert.match(MANUAL_LIBRARY_SELECT, /equipment_type/);
+  assert.match(MANUAL_LIBRARY_SELECT, /wavelengths/);
+  assert.equal(
+    isManualsSelectSchemaError("Could not find the 'doc_kind' column of 'manuals' in the schema cache"),
+    true
+  );
+  assert.equal(isManualsSelectSchemaError('JWT expired'), false);
+
+  const ok = await fetchManualLibraryRows(async (select) => {
+    assert.equal(select, MANUAL_LIBRARY_SELECT);
+    return { data: [{ id: 1 }, { id: 2 }], error: null };
+  });
+  assert.equal(ok.error, null);
+  assert.equal(ok.data.length, 2);
+
+  const calls: string[] = [];
+  const retried = await fetchManualLibraryRows(async (select) => {
+    calls.push(select);
+    if (select.includes('wavelengths')) {
+      return {
+        data: [],
+        error: { message: "Could not find the 'wavelengths' column of 'manuals' in the schema cache" },
+      };
+    }
+    return { data: [{ id: 9 }], error: null };
+  });
+  assert.equal(retried.error, null);
+  assert.deepEqual(
+    retried.data.map((r) => (r as { id: number }).id),
+    [9]
+  );
+  assert.deepEqual(calls, [MANUAL_LIBRARY_SELECT, MANUAL_LIBRARY_SELECT_LEGACY]);
 });

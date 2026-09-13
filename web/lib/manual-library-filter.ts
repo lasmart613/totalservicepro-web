@@ -232,8 +232,46 @@ export function manualLibrarySearchParams(filters: ManualLibraryFilters): string
   return qs.toString();
 }
 
-/** Columns safe to select in the library UI — never pull search_text. */
+/**
+ * Catalog columns that exist on live public.manuals (Total Service Pro).
+ * Do not request doc_kind, description, or completeness_note — those columns
+ * are in repo migrations / types only. PostgREST 400s the whole query if any
+ * listed column is missing, which emptied Browse All while manuals(*) embeds
+ * (My Library) still worked.
+ * Never pull search_text (that lives on manual_search_index).
+ */
 export const MANUAL_LIBRARY_SELECT =
-  'id, brand, title, model, storage_path, doc_kind, is_folder, equipment_type, is_incomplete, wavelengths, description, completeness_note, chapter_metadata';
+  'id, brand, title, model, storage_path, is_folder, equipment_type, is_incomplete, wavelengths, chapter_metadata';
 
-export const MANUAL_LIBRARY_SELECT_LEGACY = 'id, brand, title, model, storage_path, doc_kind, is_folder';
+/** Folder-era catalogs before equipment rooms / wavelengths. */
+export const MANUAL_LIBRARY_SELECT_LEGACY = 'id, brand, title, model, storage_path, is_folder';
+
+/** Original core columns if even is_folder is missing. */
+export const MANUAL_LIBRARY_SELECT_MINIMAL = 'id, brand, title, model, storage_path';
+
+export const MANUAL_LIBRARY_SELECT_CANDIDATES = [
+  MANUAL_LIBRARY_SELECT,
+  MANUAL_LIBRARY_SELECT_LEGACY,
+  MANUAL_LIBRARY_SELECT_MINIMAL,
+] as const;
+
+export function isManualsSelectSchemaError(message?: string | null): boolean {
+  return /schema cache|column|does not exist|PGRST204|doc_kind|description|completeness|equipment_type|wavelengths|chapter_metadata|is_folder|is_incomplete/i.test(
+    String(message || '')
+  );
+}
+
+export async function fetchManualLibraryRows<T>(
+  fetchSelect: (select: string) => Promise<{ data: T[]; error: { message?: string } | null }>
+): Promise<{ data: T[]; error: { message?: string } | null }> {
+  let last: { data: T[]; error: { message?: string } | null } = {
+    data: [],
+    error: { message: 'No catalog select attempted' },
+  };
+  for (const select of MANUAL_LIBRARY_SELECT_CANDIDATES) {
+    last = await fetchSelect(select);
+    if (!last.error) return last;
+    if (!isManualsSelectSchemaError(last.error.message)) return last;
+  }
+  return last;
+}
