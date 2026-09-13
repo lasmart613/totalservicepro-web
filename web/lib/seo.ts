@@ -331,7 +331,12 @@ export const rootMetadata: Metadata = {
     description: DEFAULT_DESCRIPTION,
   },
   icons: {
-    icon: '/favicon.ico',
+    // Stable public URLs (also shipped as app/ file conventions). Google wants 48×48+.
+    icon: [
+      { url: '/icon-48.png', type: 'image/png', sizes: '48x48' },
+      { url: '/favicon.ico', sizes: '48x48' },
+    ],
+    apple: [{ url: '/apple-icon.png', sizes: '180x180', type: 'image/png' }],
   },
 };
 

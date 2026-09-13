@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" role="img" aria-label="RepairPlanet BMET">
+  <!-- Navy field + teal medical cross + gold wrench jaws. Biomedical equipment technician. -->
+  <rect width="32" height="32" rx="7" fill="#111827"/>
+  <rect x="12" y="4" width="8" height="16" fill="#2DD4BF"/>
+  <rect x="4" y="12" width="24" height="8" fill="#2DD4BF"/>
+  <rect x="8" y="20" width="6" height="8" fill="#FBBF24"/>
+  <rect x="18" y="20" width="6" height="8" fill="#FBBF24"/>
+</svg>
