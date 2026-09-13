@@ -9,16 +9,21 @@ import {
   BLAST_RESUME_STORAGE_KEY,
   BLAST_SEND_CHUNK_SIZE,
   BLAST_TEMPLATES,
+  addBlastSkipCounts,
   blastChunkCount,
   blastDraftDiffersFromLocked,
   blastDraftStorageKey,
   clinicInviteAudience,
+  emptyBlastSkipCounts,
   encodeBlastResumeToken,
+  formatBlastSkipToast,
   parseBlastDraft,
   parseBlastResumeToken,
   pickBlastRecipient,
   selectedWithEmails,
+  uniqueBlastOrganizationIds,
   type BlastDraft,
+  type BlastSkipCounts,
   type BlastTemplateKey,
 } from '@/lib/god-email-blast';
 
@@ -178,6 +183,7 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
     queued: number;
     sent: number;
     skipped: number;
+    failed: number;
     remaining: number;
     chunk: number;
     chunks: number;
@@ -346,22 +352,28 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
       queued: organizationIds.length,
       sent: 0,
       skipped: 0,
+      failed: 0,
       remaining: organizationIds.length,
       chunk: 0,
       chunks: Math.max(1, blastChunkCount(organizationIds.length)),
     });
+    let queue = [...organizationIds];
+    let retryableAcc: Array<number | string> = [];
     let remaining = [...organizationIds];
     let sent = 0;
     let skipped = 0;
+    let failed = 0;
+    let skipCounts = emptyBlastSkipCounts();
     let chunk = 0;
     try {
       const headers = await godAuthHeader();
-      while (remaining.length) {
+      while (queue.length) {
         chunk += 1;
         setProgress({
           queued: organizationIds.length,
           sent,
           skipped,
+          failed,
           remaining: remaining.length,
           chunk,
           chunks: Math.max(chunk, blastChunkCount(organizationIds.length)),
@@ -372,7 +384,7 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
           body: JSON.stringify({
             confirm: true,
             template_key: templateKey,
-            organization_ids: remaining,
+            organization_ids: queue,
             blast_id: runId,
             subject,
             html,
@@ -381,6 +393,7 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
         });
         const json = await res.json().catch(() => ({}));
         if (!res.ok) {
+          remaining = uniqueBlastOrganizationIds([...queue, ...retryableAcc]);
           setResumeIds(remaining);
           writeStoredResume({
             blast_id: runId,
@@ -391,6 +404,7 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
             queued: organizationIds.length,
             sent,
             skipped,
+            failed,
             remaining: remaining.length,
             chunk,
             chunks: Math.max(chunk, blastChunkCount(organizationIds.length)),
@@ -400,8 +414,18 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
           return;
         }
         sent += Number(json.sentCount) || 0;
-        skipped += Number(json.skipped) || 0;
-        remaining = Array.isArray(json.remaining_organization_ids) ? json.remaining_organization_ids : [];
+        skipCounts = addBlastSkipCounts(skipCounts, json.skip_counts as Partial<BlastSkipCounts> | undefined);
+        skipped = Object.values(skipCounts).reduce((sum, n) => sum + n, 0);
+        failed = Number(skipCounts.provider_error) || 0;
+        const unprocessed = Array.isArray(json.unprocessed_organization_ids)
+          ? json.unprocessed_organization_ids
+          : null;
+        const retryable = Array.isArray(json.retryable_organization_ids)
+          ? json.retryable_organization_ids
+          : [];
+        retryableAcc = uniqueBlastOrganizationIds([...retryableAcc, ...retryable]);
+        queue = unprocessed ?? (Array.isArray(json.remaining_organization_ids) ? json.remaining_organization_ids : []);
+        remaining = uniqueBlastOrganizationIds([...queue, ...retryableAcc]);
         setResumeIds(remaining);
         writeStoredResume({
           blast_id: json.blast_id || runId,
@@ -412,24 +436,35 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
           queued: organizationIds.length,
           sent,
           skipped,
+          failed,
           remaining: remaining.length,
           chunk,
           chunks: Math.max(chunk, blastChunkCount(organizationIds.length)),
         });
-        if (json.complete || !remaining.length) break;
+        if (!queue.length) break;
       }
       toast.success(`Sent ${sent} ${locked?.template_name || 'blast'}${sent === 1 ? '' : 's'}.`);
-      if (skipped) {
-        toast.message(`${skipped} skipped (already sent, no email, duplicate, unsubscribed, or provider error).`);
+      const skipToast = formatBlastSkipToast(skipCounts);
+      if (skipToast) toast.message(skipToast);
+      if (remaining.length) {
+        setResumeIds(remaining);
+        writeStoredResume({
+          blast_id: runId,
+          template_key: templateKey,
+          organization_ids: remaining,
+        });
+        toast.message(`${remaining.length} failed send${remaining.length === 1 ? '' : 's'} left on Continue remaining.`);
+      } else {
+        setResumeIds([]);
+        clearStoredResume();
       }
       const logRes = await fetch('/api/god/invite/log', { headers, cache: 'no-store' });
       const logJson = await logRes.json().catch(() => ({}));
       setSends(logJson.sends || []);
       setConfirming(false);
       setSelected(new Set());
-      setResumeIds([]);
-      clearStoredResume();
     } catch (e: unknown) {
+      remaining = uniqueBlastOrganizationIds([...queue, ...retryableAcc]);
       setResumeIds(remaining);
       writeStoredResume({
         blast_id: runId,
@@ -440,6 +475,7 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
         queued: organizationIds.length,
         sent,
         skipped,
+        failed,
         remaining: remaining.length,
         chunk,
         chunks: Math.max(chunk, blastChunkCount(organizationIds.length)),
@@ -758,8 +794,8 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
                 {progress.error
                   ? `Stopped after chunk ${progress.chunk}: ${progress.error}. ${progress.remaining} remaining.`
                   : sending
-                    ? `Sending chunk ${progress.chunk} of ${progress.chunks} · ${progress.sent} sent · ${progress.skipped} skipped · ${progress.remaining} remaining`
-                    : `${progress.sent} sent · ${progress.skipped} skipped · ${progress.remaining} remaining`}
+                    ? `Sending chunk ${progress.chunk} of ${progress.chunks} · ${progress.sent} sent · ${progress.skipped} skipped · ${progress.failed} failed · ${progress.remaining} remaining`
+                    : `${progress.sent} sent · ${progress.skipped} skipped · ${progress.failed} failed · ${progress.remaining} remaining`}
               </p>
             ) : null}
             <ul className="text-sm mb-5 max-h-40 overflow-y-auto space-y-1">

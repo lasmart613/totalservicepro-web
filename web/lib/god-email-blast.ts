@@ -436,15 +436,167 @@ export function alreadySentBlastRecipient(opts: {
   });
 }
 
-export function isRetryableBlastError(error?: string | null): boolean {
+export const BLAST_SKIP_REASON_CODES = [
+  'already_sent',
+  'no_email',
+  'duplicate',
+  'unsubscribed',
+  'service_company',
+  'provider_error',
+] as const;
+export type BlastSkipReasonCode = (typeof BLAST_SKIP_REASON_CODES)[number];
+export type BlastSkipCounts = Record<BlastSkipReasonCode, number>;
+
+export const BLAST_SKIP_REASON_LABELS: Record<BlastSkipReasonCode, string> = {
+  already_sent: 'already sent',
+  no_email: 'no email',
+  duplicate: 'duplicate',
+  unsubscribed: 'unsubscribed',
+  service_company: 'shop',
+  provider_error: 'provider error',
+};
+
+export type BlastSendResultLike = {
+  organizationId: number | string;
+  ok: boolean;
+  error?: string;
+  skip_reason?: BlastSkipReasonCode | null;
+};
+
+export function emptyBlastSkipCounts(): BlastSkipCounts {
+  return {
+    already_sent: 0,
+    no_email: 0,
+    duplicate: 0,
+    unsubscribed: 0,
+    service_company: 0,
+    provider_error: 0,
+  };
+}
+
+export function classifyBlastSkip(error?: string | null): BlastSkipReasonCode {
   const text = String(error || '').trim();
-  if (!text) return false;
-  if (text === BLAST_ALREADY_SENT_SKIP) return false;
-  if (/excludes service_company/i.test(text)) return false;
-  if (/no valid organization email/i.test(text)) return false;
-  if (/unsubscribed/i.test(text)) return false;
-  if (/duplicate email/i.test(text)) return false;
-  return true;
+  if (text === BLAST_ALREADY_SENT_SKIP || /already sent this template/i.test(text)) {
+    return 'already_sent';
+  }
+  if (/excludes service_company/i.test(text)) return 'service_company';
+  if (/no valid organization email/i.test(text)) return 'no_email';
+  if (/unsubscribed/i.test(text)) return 'unsubscribed';
+  if (/duplicate email/i.test(text)) return 'duplicate';
+  return 'provider_error';
+}
+
+export function isRetryableBlastSkipCode(code?: BlastSkipReasonCode | null): boolean {
+  return code === 'provider_error';
+}
+
+export function isRetryableBlastError(error?: string | null): boolean {
+  return isRetryableBlastSkipCode(classifyBlastSkip(error));
+}
+
+export function addBlastSkipCounts(
+  left: BlastSkipCounts,
+  right?: Partial<BlastSkipCounts> | null
+): BlastSkipCounts {
+  const out = emptyBlastSkipCounts();
+  for (const key of BLAST_SKIP_REASON_CODES) {
+    out[key] = (Number(left[key]) || 0) + (Number(right?.[key]) || 0);
+  }
+  return out;
+}
+
+export function tallyBlastSkipCounts(results: BlastSendResultLike[]): BlastSkipCounts {
+  const counts = emptyBlastSkipCounts();
+  for (const row of results) {
+    if (row.ok) continue;
+    const code = row.skip_reason || classifyBlastSkip(row.error);
+    counts[code] += 1;
+  }
+  return counts;
+}
+
+export function blastSkipTotal(counts: BlastSkipCounts): number {
+  return BLAST_SKIP_REASON_CODES.reduce((sum, key) => sum + (Number(counts[key]) || 0), 0);
+}
+
+export function formatBlastSkipToast(counts: BlastSkipCounts): string | null {
+  const total = blastSkipTotal(counts);
+  if (!total) return null;
+  const parts = BLAST_SKIP_REASON_CODES.filter((key) => counts[key] > 0).map(
+    (key) => `${counts[key]} ${BLAST_SKIP_REASON_LABELS[key]}`
+  );
+  return `${total} skipped (${parts.join(', ')})`;
+}
+
+export function uniqueBlastOrganizationIds(ids: Array<number | string>): Array<number | string> {
+  const seen = new Set<string>();
+  const out: Array<number | string> = [];
+  for (const id of ids) {
+    const key = String(id);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(id);
+  }
+  return out;
+}
+
+export function retryableBlastOrganizationIds(results: BlastSendResultLike[]): Array<number | string> {
+  return uniqueBlastOrganizationIds(
+    results.filter((row) => !row.ok && isRetryableBlastError(row.error)).map((row) => row.organizationId)
+  );
+}
+
+/** leftover (not yet attempted) plus in-chunk provider/unexpected failures — never drop failures as complete. */
+export function remainingAfterBlastChunk(opts: {
+  leftoverIds: Array<number | string>;
+  results: BlastSendResultLike[];
+}): {
+  remainingIds: Array<number | string>;
+  retryableIds: Array<number | string>;
+  unprocessedIds: Array<number | string>;
+  complete: boolean;
+} {
+  const retryableIds = retryableBlastOrganizationIds(opts.results);
+  const retryableKeys = new Set(retryableIds.map(String));
+  const unprocessedIds = uniqueBlastOrganizationIds(
+    opts.leftoverIds.filter((id) => !retryableKeys.has(String(id)))
+  );
+  const remainingIds = [...unprocessedIds, ...retryableIds];
+  return {
+    remainingIds,
+    retryableIds,
+    unprocessedIds,
+    complete: remainingIds.length === 0,
+  };
+}
+
+export function blastOrgSkipCode(opts: {
+  templateKey: BlastTemplateKey;
+  org: BlastOrgLike;
+  recentSends?: BlastRecentSend[];
+  extraSentEmails?: Iterable<string>;
+  subject?: string | null;
+  now?: Date;
+}): BlastSkipReasonCode | null {
+  const skip = blastSkipReason(opts.templateKey, opts.org);
+  if (skip) return classifyBlastSkip(skip);
+  const email = pickBlastRecipient(opts.org);
+  const extra = new Set(
+    [...(opts.extraSentEmails || [])].map((value) => blastEmailKey(value)).filter(Boolean)
+  );
+  if (extra.has(blastEmailKey(email))) return 'duplicate';
+  if (
+    alreadySentBlastRecipient({
+      templateKey: opts.templateKey,
+      email,
+      recentSends: opts.recentSends || [],
+      subject: opts.subject,
+      now: opts.now,
+    })
+  ) {
+    return 'already_sent';
+  }
+  return null;
 }
 
 export function eligibleBlastOrganizationIds<T extends BlastOrgLike>(opts: {
