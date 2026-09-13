@@ -74,7 +74,11 @@ export default function GodTablesIndexPage() {
         <Link href="/admin/god/crm" className="text-[var(--gold)] hover:underline">
           CRM
         </Link>{' '}
-        is the composed pipeline / accounts / contacts view. Password hashes, recovery tokens,
+        is the composed pipeline / accounts / contacts view.{' '}
+        <Link href="/admin/god/analytics" className="text-[var(--gold)] hover:underline">
+          Analytics
+        </Link>{' '}
+        is GA4 site traffic (separate from these tables). Password hashes, recovery tokens,
         vault secrets, and storage internals are omitted.
       </p>
       <input

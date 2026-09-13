@@ -1,7 +1,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { godAuthHeader } from '@/lib/god-client';
+import { GOD_ANALYTICS_PATH } from '@/lib/god-tables';
 import {
   ANALYTICS_CONNECT_NOTE,
   DEFAULT_KPI_DAYS,
@@ -80,7 +82,11 @@ export function GodKpiBoard() {
           </h2>
           <p className="text-sm text-[var(--text3)] max-w-3xl">
             RepairPlanet / TSP activity from Supabase. Sign-ins are unique users (last sign-in in
-            range), not sessions. Time on site is not invented — it needs Google Analytics.
+            range), not sessions.             Time on site and page views live on{' '}
+            <Link href={GOD_ANALYTICS_PATH} className="text-[var(--gold)] hover:underline">
+              Google Analytics (GA4)
+            </Link>
+            .
           </p>
         </div>
         <div className="flex flex-wrap gap-2" role="group" aria-label="KPI time range">

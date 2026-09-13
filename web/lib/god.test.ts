@@ -70,4 +70,5 @@ test('God chrome is API-gated and the allowlist stays server-side', () => {
   assert.match(home, /GodKpiBoard/);
   assert.match(home, /fetchGodMe/);
   assert.match(home, /\/admin\/god\/crm/);
+  assert.match(home, /GodAnalyticsBoard/);
 });

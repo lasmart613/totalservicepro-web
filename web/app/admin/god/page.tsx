@@ -5,6 +5,8 @@ import Link from 'next/link';
 import { toast } from 'sonner';
 import { fetchGodMe, godAuthHeader } from '@/lib/god-client';
 import { GodKpiBoard } from '@/components/god/GodKpiBoard';
+import { GodAnalyticsBoard } from '@/components/god/GodAnalyticsBoard';
+import { GOD_ANALYTICS_PATH } from '@/lib/god-tables';
 import { orgTypeLabel } from '@/lib/labels';
 import type { GodOrgRow } from '@/lib/god-orgs';
 
@@ -204,6 +206,10 @@ export default function GodDashboardPage() {
       </p>
       <p className="text-sm text-[var(--text3)] mb-6 max-w-3xl">
         Need a row that is not an org invite? Use{' '}
+        <Link href={GOD_ANALYTICS_PATH} className="text-[var(--gold)] hover:underline">
+          Analytics
+        </Link>
+        ,{' '}
         <Link href="/admin/god/crm" className="text-[var(--gold)] hover:underline">
           CRM
         </Link>
@@ -227,6 +233,7 @@ export default function GodDashboardPage() {
       </p>
 
       <GodKpiBoard />
+      <GodAnalyticsBoard variant="teaser" />
 
       <div className="flex flex-wrap gap-3 mb-4">
         <input
