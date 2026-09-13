@@ -6,15 +6,23 @@ import { fileURLToPath } from 'node:url';
 import { assembleGodOrgs, selectedOrgIds } from './god-orgs.ts';
 import {
   BLAST_TEMPLATES,
+  blastDraftStorageKey,
   blastFromAddress,
   blastReplyTo,
   blastSkipReason,
   clinicInviteAudience,
   clinicInviteSkipReason,
   dedupeBlastRecipients,
+  ensureBlastHtmlFooter,
+  ensureBlastTextFooter,
+  htmlHasBlastFooter,
   isValidBlastEmail,
+  lockedBlastPreview,
+  parseBlastDraft,
+  parseBlastSendBody,
   parseBlastTemplateKey,
   pickBlastRecipient,
+  resolveBlastSendContent,
   selectedWithEmails,
 } from './god-email-blast.ts';
 
@@ -97,6 +105,131 @@ test('one send per email in a blast', () => {
   );
 });
 
+test('locked preview still returns subject, html, and text', () => {
+  const clinic = lockedBlastPreview(BLAST_TEMPLATES.clinic_invite, {});
+  assert.equal(clinic.ok, true);
+  assert.equal(clinic.template_key, 'clinic_invite');
+  assert.equal(clinic.subject, BLAST_TEMPLATES.clinic_invite.subject);
+  assert.match(clinic.html, /Post the job/);
+  assert.match(clinic.text, /Post the job/);
+  assert.equal(clinic.from, 'Total Service Pro <noreply@MedicalRepairNetwork.com>');
+  const shop = lockedBlastPreview(BLAST_TEMPLATES.shop_invite, {});
+  assert.equal(shop.template_key, 'shop_invite');
+  assert.match(shop.html, /They post the job/);
+  assert.match(shop.text, /They post the job/);
+});
+
+test('send rejects blank subject or body overrides and keeps clinic skip', () => {
+  const emptySubject = resolveBlastSendContent(BLAST_TEMPLATES.clinic_invite, { subject: '   ' });
+  assert.equal(emptySubject.ok, false);
+  if (!emptySubject.ok) assert.match(emptySubject.error, /Subject cannot be empty/);
+
+  const emptyHtml = resolveBlastSendContent(BLAST_TEMPLATES.clinic_invite, { html: '' });
+  assert.equal(emptyHtml.ok, false);
+  if (!emptyHtml.ok) assert.match(emptyHtml.error, /HTML body cannot be empty/);
+
+  const emptyBody = parseBlastSendBody({
+    confirm: true,
+    template_key: 'clinic_invite',
+    organization_ids: [2],
+    subject: 'Hello clinic',
+    html: '   ',
+  });
+  assert.equal(emptyBody.ok, false);
+  if (!emptyBody.ok) {
+    assert.equal(emptyBody.status, 400);
+    assert.match(emptyBody.error, /empty/);
+  }
+
+  const missingConfirm = parseBlastSendBody({
+    template_key: 'clinic_invite',
+    organization_ids: [2],
+    subject: 'Hello',
+  });
+  assert.equal(missingConfirm.ok, false);
+
+  const noOrgs = parseBlastSendBody({
+    confirm: true,
+    template_key: 'clinic_invite',
+    organization_ids: [],
+  });
+  assert.equal(noOrgs.ok, false);
+
+  const custom = parseBlastSendBody({
+    confirm: true,
+    template_key: 'clinic_invite',
+    organization_ids: [2],
+    subject: 'Closer techs this week',
+    html: '<p>Custom clinic body</p>',
+    text: 'Custom clinic body',
+  });
+  assert.equal(custom.ok, true);
+  if (custom.ok) {
+    assert.equal(custom.content.subject, 'Closer techs this week');
+    assert.equal(custom.content.customized, true);
+    assert.equal(custom.content.bodyCustomized, true);
+    assert.match(custom.content.html, /Custom clinic body/);
+    assert.match(custom.content.html, /3349 Somis Rd/);
+    assert.match(custom.content.html, /Unsubscribe/);
+    assert.match(custom.content.text, /Custom clinic body/);
+    assert.match(custom.content.text, /3349 Somis Rd/);
+  }
+
+  const lockedSend = parseBlastSendBody({
+    confirm: true,
+    template_key: 'clinic_invite',
+    organization_ids: [2],
+  });
+  assert.equal(lockedSend.ok, true);
+  if (lockedSend.ok) {
+    assert.equal(lockedSend.content.customized, false);
+    assert.equal(lockedSend.content.subject, BLAST_TEMPLATES.clinic_invite.subject);
+  }
+
+  const subjectOnly = parseBlastSendBody({
+    confirm: true,
+    template_key: 'shop_invite',
+    organization_ids: [1],
+    subject: 'Jobs near your shop',
+  });
+  assert.equal(subjectOnly.ok, true);
+  if (subjectOnly.ok) {
+    assert.equal(subjectOnly.content.subject, 'Jobs near your shop');
+    assert.equal(subjectOnly.content.bodyCustomized, false);
+    assert.equal(subjectOnly.content.customized, true);
+    assert.match(subjectOnly.content.html, /They post the job/);
+  }
+
+  assert.equal(
+    blastSkipReason('clinic_invite', { type: 'service_company', orgEmail: 'shop@glow.test' }),
+    'clinic_invite excludes service_company'
+  );
+});
+
+test('customized HTML without a footer still gets Somis + unsubscribe', () => {
+  const html = ensureBlastHtmlFooter('<p>Just the pitch</p>');
+  assert.match(html, /Just the pitch/);
+  assert.match(html, /3349 Somis Rd, Somis, CA 93066-9997/);
+  assert.match(html, /unsubscribe/i);
+  assert.equal(htmlHasBlastFooter(BLAST_TEMPLATES.clinic_invite.html()), true);
+  assert.equal(ensureBlastHtmlFooter(BLAST_TEMPLATES.clinic_invite.html()), BLAST_TEMPLATES.clinic_invite.html());
+  const text = ensureBlastTextFooter('Just the pitch');
+  assert.match(text, /Just the pitch/);
+  assert.match(text, /Unsubscribe: https:\/\/repairplanet\.net\/unsubscribe/);
+  assert.match(text, /3349 Somis Rd/);
+});
+
+test('this-send drafts stay keyed by template and do not invent a store', () => {
+  assert.equal(blastDraftStorageKey('clinic_invite'), 'tsp.god-blast-draft.v1.clinic_invite');
+  assert.equal(blastDraftStorageKey('shop_invite'), 'tsp.god-blast-draft.v1.shop_invite');
+  assert.deepEqual(parseBlastDraft({ subject: 'A', html: '<p>B</p>', text: 'B' }), {
+    subject: 'A',
+    html: '<p>B</p>',
+    text: 'B',
+  });
+  assert.equal(parseBlastDraft({ subject: 'A' }), null);
+});
+
 test('blast API, CRM tab, and God UI stay god-only and unselected by default', () => {
   const send = readFileSync(join(here, '../app/api/god/blast/send/route.ts'), 'utf8');
   const preview = readFileSync(join(here, '../app/api/god/blast/preview/route.ts'), 'utf8');
@@ -104,22 +237,35 @@ test('blast API, CRM tab, and God UI stay god-only and unselected by default', (
   const crm = readFileSync(join(here, '../components/god/GodCrmPanel.tsx'), 'utf8');
   const home = readFileSync(join(here, '../app/admin/god/page.tsx'), 'utf8');
   const crmLib = readFileSync(join(here, './god-crm.ts'), 'utf8');
+  const auth = readFileSync(join(here, './god-auth.ts'), 'utf8');
+  const lib = readFileSync(join(here, './god-email-blast.ts'), 'utf8');
   assert.match(send, /requireGodCaller/);
-  assert.match(send, /confirm !== true/);
+  assert.match(send, /parseBlastSendBody/);
+  assert.match(lib, /confirm !== true/);
   assert.match(send, /template_key/);
   assert.match(send, /god_email_sends/);
+  assert.match(send, /content\.subject/);
+  assert.match(send, /content\.html/);
   assert.match(preview, /requireGodCaller/);
-  assert.match(preview, /clinicInviteHtml|BLAST_TEMPLATES/);
+  assert.match(preview, /lockedBlastPreview/);
+  assert.match(auth, /godDenied\(404/);
+  assert.match(auth, /Not found/);
   assert.match(panel, /Email blast/);
   assert.match(panel, /\/api\/god\/blast\/send/);
   assert.match(panel, /confirm:\s*true/);
   assert.match(panel, /Nothing is selected by default|selected by default/);
   assert.match(panel, /useState<Set<string>>\(new Set\(\)\)/);
   assert.match(panel, /Reply-To|replyTo|reply_to/);
+  assert.match(panel, /Reset to locked template/);
+  assert.match(panel, /this send only/);
+  assert.match(panel, /localStorage/);
+  assert.match(panel, /subject/);
+  assert.match(panel, /HTML body/);
   assert.match(crm, /blast/);
   assert.match(crm, /GodEmailBlast/);
   assert.match(home, /GodEmailBlast/);
   assert.match(crmLib, /'blast'/);
   assert.doesNotMatch(send, /stripe/i);
   assert.doesNotMatch(panel, /adsense|google ads/i);
+  assert.doesNotMatch(lib, /from\('god_email_templates'\)|create table god_email/i);
 });
