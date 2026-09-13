@@ -195,6 +195,7 @@ In `lib/supabase/client.ts` there are fallback values, but **set these in Netlif
 2. Add (as "Plain text", available to client via NEXT_PUBLIC_ prefix):
    - `NEXT_PUBLIC_SUPABASE_URL` = your Supabase project URL (e.g. https://yljztfajyvjzqikxdddf.supabase.co)
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY` = the anon/public key
+   - `NEXT_PUBLIC_GA_MEASUREMENT_ID` = `G-GNBJQ2DMQB` (RepairPlanet GA4 web stream). Optional: the app already defaults to this ID when the var is unset. Set it in the Production context so future overrides are explicit.
 3. Redeploy after setting (or use "Deploy" button in dashboard for existing deploys).
 4. (Optional) Add other secrets if server-only code is added later.
 
