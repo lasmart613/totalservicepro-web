@@ -1,15 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { requireGodCaller } from '@/lib/god-auth';
-import { selectedOrgIds } from '@/lib/god-orgs';
 import { loadAssembledGodOrgs } from '@/lib/god-org-load';
 import {
   BLAST_TEMPLATES,
   blastFromAddress,
   blastReplyTo,
   blastSkipReason,
-  parseBlastTemplateKey,
+  parseBlastSendBody,
   pickBlastRecipient,
+  type BlastSendContent,
   type BlastTemplate,
   type BlastTemplateKey,
 } from '@/lib/god-email-blast';
@@ -35,6 +35,7 @@ async function recipientUnsubscribed(email: string): Promise<boolean> {
 async function sendResend(opts: {
   to: string;
   template: BlastTemplate;
+  content: BlastSendContent;
   unsubscribeToken: string;
 }): Promise<{ ok: boolean; id?: string; error?: string }> {
   const key = process.env.RESEND_API_KEY;
@@ -49,9 +50,9 @@ async function sendResend(opts: {
       from: blastFromAddress(opts.template),
       to: [opts.to],
       reply_to: blastReplyTo(opts.template),
-      subject: opts.template.subject,
-      html: opts.template.html(),
-      text: opts.template.text(),
+      subject: opts.content.subject,
+      html: opts.content.html,
+      text: opts.content.text,
       headers: shopInviteResendHeaders(opts.unsubscribeToken),
     }),
   });
@@ -101,8 +102,8 @@ async function logSend(row: {
 
 /**
  * POST /api/god/blast/send
- * Body: { template_key: 'clinic_invite' | 'shop_invite', organization_ids: (string|number)[], confirm: true }
- * Sends a locked template to org.email of each selected org only.
+ * Body: { template_key: 'clinic_invite' | 'shop_invite', organization_ids, confirm: true, subject?, html?, text? }
+ * Optional subject/html/text apply to this send only. Locked source files are not overwritten.
  * Never sends to every org. Never sends without confirm. Dedupes emails in one send.
  */
 export async function POST(req: NextRequest) {
@@ -113,30 +114,13 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Server missing SUPABASE_SERVICE_ROLE_KEY' }, { status: 500 });
   }
 
-  const body = await req.json().catch(() => ({}));
-  if (body?.confirm !== true) {
-    return NextResponse.json(
-      { error: 'Confirm the send on the God dashboard before mail goes out.' },
-      { status: 400 }
-    );
+  const parsed = parseBlastSendBody(await req.json().catch(() => ({})));
+  if (!parsed.ok) {
+    return NextResponse.json({ error: parsed.error }, { status: parsed.status });
   }
 
-  const templateKey = parseBlastTemplateKey(body.template_key ?? body.templateKey);
-  if (!templateKey) {
-    return NextResponse.json(
-      { error: 'Choose a locked template (shop_invite or clinic_invite).' },
-      { status: 400 }
-    );
-  }
+  const { templateKey, organizationIds: ids, content } = parsed;
   const template = BLAST_TEMPLATES[templateKey];
-
-  const ids = selectedOrgIds(body.organization_ids ?? body.organizationIds);
-  if (!ids.length) {
-    return NextResponse.json(
-      { error: 'Select one or more organizations. Nothing is auto-selected.' },
-      { status: 400 }
-    );
-  }
 
   const all = await loadAssembledGodOrgs();
   const wanted = new Set(ids.map(String));
@@ -189,14 +173,14 @@ export async function POST(req: NextRequest) {
       continue;
     }
     const unsubscribeToken = newUnsubscribeToken();
-    const sent = await sendResend({ to: recipient, template, unsubscribeToken });
+    const sent = await sendResend({ to: recipient, template, content, unsubscribeToken });
     if (sent.ok) {
       sentEmails.add(emailKey);
       const logged = await logSend({
         organizationId: org.id,
         organizationName: org.name,
         recipientEmail: recipient,
-        subject: template.subject,
+        subject: content.subject,
         templateKey,
         sentByUserId: gate.caller.userId,
         sentByEmail: gate.caller.email,
@@ -227,7 +211,9 @@ export async function POST(req: NextRequest) {
     skipped: results.length - sentCount,
     template_key: templateKey,
     template_name: template.name,
-    subject: template.subject,
+    subject: content.subject,
+    customized: content.customized,
+    body_customized: content.bodyCustomized,
     from: blastFromAddress(template),
     reply_to: blastReplyTo(template),
     results,

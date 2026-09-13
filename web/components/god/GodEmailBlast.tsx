@@ -7,9 +7,13 @@ import { orgTypeLabel } from '@/lib/labels';
 import type { GodOrgRow } from '@/lib/god-orgs';
 import {
   BLAST_TEMPLATES,
+  blastDraftDiffersFromLocked,
+  blastDraftStorageKey,
   clinicInviteAudience,
+  parseBlastDraft,
   pickBlastRecipient,
   selectedWithEmails,
+  type BlastDraft,
   type BlastTemplateKey,
 } from '@/lib/god-email-blast';
 
@@ -24,14 +28,14 @@ type SendLog = {
   unsubscribed_at?: string | null;
 };
 
-type Preview = {
+type LockedPreview = BlastDraft & {
   template_key: BlastTemplateKey;
   template_name: string;
-  subject: string;
   from: string;
   reply_to: string;
-  html: string;
 };
+
+const DRAFT_SAVE_MS = 300;
 
 const TYPE_FILTERS = [
   { value: 'all', label: 'All types' },
@@ -65,10 +69,45 @@ function formatDate(value?: string | null): string {
   return d.toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' });
 }
 
+function readStoredDraft(templateKey: BlastTemplateKey): BlastDraft | null {
+  try {
+    const raw = localStorage.getItem(blastDraftStorageKey(templateKey));
+    if (!raw) return null;
+    return parseBlastDraft(JSON.parse(raw));
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredDraft(templateKey: BlastTemplateKey, draft: BlastDraft, locked: BlastDraft | null) {
+  try {
+    const key = blastDraftStorageKey(templateKey);
+    if (locked && !blastDraftDiffersFromLocked(draft, locked)) {
+      localStorage.removeItem(key);
+      return;
+    }
+    localStorage.setItem(key, JSON.stringify(draft));
+  } catch {
+    /* private mode / quota */
+  }
+}
+
+function clearStoredDraft(templateKey: BlastTemplateKey) {
+  try {
+    localStorage.removeItem(blastDraftStorageKey(templateKey));
+  } catch {
+    /* ignore */
+  }
+}
+
 export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }) {
   const [orgs, setOrgs] = useState<GodOrgRow[]>([]);
   const [sends, setSends] = useState<SendLog[]>([]);
-  const [preview, setPreview] = useState<Preview | null>(null);
+  const [locked, setLocked] = useState<LockedPreview | null>(null);
+  const [subject, setSubject] = useState('');
+  const [html, setHtml] = useState('');
+  const [text, setText] = useState('');
+  const [previewHtml, setPreviewHtml] = useState('');
   const [templateKey, setTemplateKey] = useState<BlastTemplateKey>('clinic_invite');
   const [type, setType] = useState('all');
   const [plan, setPlan] = useState('all');
@@ -94,14 +133,28 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
         if (cancelled) return;
         setOrgs(orgJson.orgs || []);
         if (previewRes.ok) {
-          setPreview({
+          const nextLocked: LockedPreview = {
             template_key: previewJson.template_key,
             template_name: previewJson.template_name,
-            subject: previewJson.subject,
+            subject: previewJson.subject || '',
             from: previewJson.from,
             reply_to: previewJson.reply_to,
             html: previewJson.html || '',
-          });
+            text: previewJson.text || '',
+          };
+          setLocked(nextLocked);
+          const draft = readStoredDraft(templateKey);
+          if (draft && blastDraftDiffersFromLocked(draft, nextLocked)) {
+            setSubject(draft.subject);
+            setHtml(draft.html);
+            setText(draft.text);
+            setPreviewHtml(draft.html);
+          } else {
+            setSubject(nextLocked.subject);
+            setHtml(nextLocked.html);
+            setText(nextLocked.text);
+            setPreviewHtml(nextLocked.html);
+          }
         }
         setSends(logJson.sends || []);
       } catch (e) {
@@ -113,6 +166,19 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
       cancelled = true;
     };
   }, [templateKey]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => setPreviewHtml(html), DRAFT_SAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [html]);
+
+  useEffect(() => {
+    if (!locked || locked.template_key !== templateKey) return;
+    const timer = window.setTimeout(() => {
+      writeStoredDraft(templateKey, { subject, html, text }, locked);
+    }, DRAFT_SAVE_MS);
+    return () => window.clearTimeout(timer);
+  }, [subject, html, text, locked, templateKey]);
 
   const visible = useMemo(() => {
     const query = q.trim().toLowerCase();
@@ -137,6 +203,19 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
   const selectedRows = visible.filter((org) => selected.has(String(org.id)));
   const selectedEmailRows = selectedWithEmails(selectedRows);
   const clinicAudience = useMemo(() => clinicInviteAudience(orgs), [orgs]);
+  const subjectCustomized = Boolean(locked && subject !== locked.subject);
+  const bodyCustomized = Boolean(locked && (html !== locked.html || text !== locked.text));
+  const canSend = Boolean(selectedEmailRows.length && subject.trim() && html.trim());
+
+  function resetToLocked() {
+    if (!locked) return;
+    setSubject(locked.subject);
+    setHtml(locked.html);
+    setText(locked.text);
+    setPreviewHtml(locked.html);
+    clearStoredDraft(templateKey);
+    toast.message('Restored the locked template. This send only — source files were not changed.');
+  }
 
   function toggle(id: number | string) {
     const key = String(id);
@@ -165,9 +244,25 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
     setSelected(new Set(clinicAudience.map((org) => String(org.id))));
   }
 
+  function openConfirm() {
+    if (!selectedEmailRows.length) {
+      toast.error('Select one or more organizations with an email first.');
+      return;
+    }
+    if (!subject.trim() || !html.trim()) {
+      toast.error('Subject and HTML body cannot be empty.');
+      return;
+    }
+    setConfirming(true);
+  }
+
   async function sendSelected() {
     if (!selectedEmailRows.length) {
       toast.error('Select one or more organizations with an email first.');
+      return;
+    }
+    if (!subject.trim() || !html.trim()) {
+      toast.error('Subject and HTML body cannot be empty.');
       return;
     }
     setSending(true);
@@ -180,6 +275,9 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
           confirm: true,
           template_key: templateKey,
           organization_ids: selectedRows.map((o) => o.id),
+          subject,
+          html,
+          text,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -187,7 +285,7 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
         toast.error(json.error || 'Send failed');
         return;
       }
-      toast.success(`Sent ${json.sentCount || 0} ${preview?.template_name || 'blast'}${json.sentCount === 1 ? '' : 's'}.`);
+      toast.success(`Sent ${json.sentCount || 0} ${locked?.template_name || 'blast'}${json.sentCount === 1 ? '' : 's'}.`);
       if (json.skipped) toast.message(`${json.skipped} skipped (no email, duplicate, unsubscribed, or provider error).`);
       const logRes = await fetch('/api/god/invite/log', { headers, cache: 'no-store' });
       const logJson = await logRes.json().catch(() => ({}));
@@ -364,29 +462,78 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
       </div>
 
       <section className="mb-8">
-        <h3 className="text-xl font-bold mb-2">Preview</h3>
-        <p className="text-[var(--text3)] mb-3">
-          Locked HTML. Template:{' '}
-          <span className="text-[var(--gold)]">{preview?.template_name || templateKey}</span>
-          {' · '}
-          Subject: <span className="text-[var(--gold)]">{preview?.subject || '—'}</span>
+        <div className="flex flex-wrap items-start justify-between gap-3 mb-2">
+          <div>
+            <h3 className="text-xl font-bold">Preview and edit</h3>
+            <p className="text-[var(--text3)] mt-1 max-w-3xl">
+              Prefills from the locked template. Edits apply to this send only — they do not overwrite
+              the source files. A browser draft is kept in localStorage so refresh does not wipe them.
+              Outbound mail still gets List-Unsubscribe and the Somis footer if you remove it.
+            </p>
+          </div>
+          <button
+            type="button"
+            className="btn btn-secondary text-xs"
+            onClick={resetToLocked}
+            disabled={!locked || (!subjectCustomized && !bodyCustomized)}
+          >
+            Reset to locked template
+          </button>
+        </div>
+        <p className="text-sm text-[var(--text3)] mb-3">
+          Template:{' '}
+          <span className="text-[var(--gold)]">{locked?.template_name || templateKey}</span>
+          {subjectCustomized || bodyCustomized ? (
+            <span> · customized for this send only</span>
+          ) : (
+            <span> · locked copy</span>
+          )}
         </p>
-        <div className="rounded-xl overflow-hidden border border-[var(--border)] bg-[#0b0f14]">
-          <iframe
-            title="Email blast preview"
-            srcDoc={preview?.html || ''}
-            className="w-full min-h-[640px] border-0 bg-[#0b0f14]"
-          />
+
+        <div className="grid gap-4 xl:grid-cols-2">
+          <div className="space-y-3">
+            <label className="block text-sm">
+              <span className="text-[var(--text3)]">Subject</span>
+              <input
+                type="text"
+                value={subject}
+                onChange={(e) => setSubject(e.target.value)}
+                className="mt-1 w-full bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 text-[var(--text)]"
+                aria-label="Email subject"
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-[var(--text3)]">HTML body</span>
+              <textarea
+                value={html}
+                onChange={(e) => setHtml(e.target.value)}
+                className="mt-1 w-full bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 min-h-[280px] font-mono text-xs leading-5"
+                aria-label="Email HTML body"
+                spellCheck={false}
+              />
+            </label>
+            <label className="block text-sm">
+              <span className="text-[var(--text3)]">Plain-text body</span>
+              <textarea
+                value={text}
+                onChange={(e) => setText(e.target.value)}
+                className="mt-1 w-full bg-[var(--surface)] border border-[var(--border)] rounded-lg px-3 py-2 min-h-[160px] font-mono text-xs leading-5"
+                aria-label="Email plain text body"
+              />
+            </label>
+          </div>
+          <div className="rounded-xl overflow-hidden border border-[var(--border)] bg-[#0b0f14] min-h-[640px]">
+            <iframe
+              title="Email blast preview"
+              srcDoc={previewHtml || ''}
+              className="w-full min-h-[640px] h-full border-0 bg-[#0b0f14]"
+            />
+          </div>
         </div>
       </section>
 
       <div className="flex flex-wrap gap-3 mb-10">
-        <button
-          type="button"
-          className="btn btn-primary"
-          disabled={!selectedEmailRows.length}
-          onClick={() => setConfirming(true)}
-        >
+        <button type="button" className="btn btn-primary" disabled={!canSend} onClick={openConfirm}>
           Send blast to {selectedEmailRows.length} with email
         </button>
       </div>
@@ -399,20 +546,26 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
               <div>
                 <dt className="inline text-[var(--text3)]">Template: </dt>
                 <dd className="inline">
-                  {preview?.template_name || templateKey} ({templateKey})
+                  {locked?.template_name || templateKey} ({templateKey})
                 </dd>
               </div>
               <div>
                 <dt className="inline text-[var(--text3)]">Subject: </dt>
-                <dd className="inline">{preview?.subject || '—'}</dd>
+                <dd className="inline">{subject.trim() || '—'}</dd>
+              </div>
+              <div>
+                <dt className="inline text-[var(--text3)]">Body: </dt>
+                <dd className="inline">
+                  {bodyCustomized ? 'Customized for this send only' : 'Locked template'}
+                </dd>
               </div>
               <div>
                 <dt className="inline text-[var(--text3)]">From: </dt>
-                <dd className="inline">{preview?.from || '—'}</dd>
+                <dd className="inline">{locked?.from || '—'}</dd>
               </div>
               <div>
                 <dt className="inline text-[var(--text3)]">Reply-To: </dt>
-                <dd className="inline">{preview?.reply_to || '—'}</dd>
+                <dd className="inline">{locked?.reply_to || '—'}</dd>
               </div>
               <div>
                 <dt className="inline text-[var(--text3)]">Recipient count: </dt>
@@ -420,8 +573,9 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
               </div>
             </dl>
             <p className="text-sm text-[var(--text3)] mb-3">
-              This emails the locked template to each selected organization email. Duplicates and
-              missing addresses are skipped. Nothing else is written on those orgs.
+              This emails the edited subject and body to each selected organization email. Edits apply
+              to this send only. Duplicates and missing addresses are skipped. Nothing else is written
+              on those orgs.
             </p>
             <ul className="text-sm mb-5 max-h-40 overflow-y-auto space-y-1">
               {selectedRows.map((org) => (

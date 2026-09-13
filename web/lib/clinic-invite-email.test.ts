@@ -96,16 +96,18 @@ test('hero public path is the locked clinic-blast JPEG, not a landing still', ()
 
 test('blast send route is god-gated and never auto-selects orgs', () => {
   const route = readFileSync(join(here, '../app/api/god/blast/send/route.ts'), 'utf8');
+  const blast = readFileSync(join(here, './god-email-blast.ts'), 'utf8');
   assert.match(route, /requireGodCaller/);
   assert.match(route, /RESEND_API_KEY/);
-  assert.match(route, /confirm !== true/);
-  assert.match(route, /selectedOrgIds/);
-  assert.match(route, /organization_ids/);
+  assert.match(route, /parseBlastSendBody/);
+  assert.match(blast, /confirm !== true/);
+  assert.match(blast, /selectedOrgIds/);
+  assert.match(blast, /Nothing is auto-selected/);
+  assert.match(route, /organization_ids|parseBlastSendBody/);
   assert.match(route, /template_key/);
   assert.match(route, /clinic_invite/);
   assert.match(route, /shop_invite/);
   assert.match(route, /shopInviteResendHeaders/);
   assert.match(route, /List-Unsubscribe|headers: shopInviteResendHeaders/);
-  assert.match(route, /Nothing is auto-selected/);
   assert.doesNotMatch(route, /send to every org|on deploy/i);
 });

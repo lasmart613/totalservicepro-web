@@ -1,17 +1,12 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requireGodCaller } from '@/lib/god-auth';
-import {
-  BLAST_TEMPLATES,
-  blastFromAddress,
-  blastReplyTo,
-  parseBlastTemplateKey,
-} from '@/lib/god-email-blast';
+import { BLAST_TEMPLATES, lockedBlastPreview, parseBlastTemplateKey } from '@/lib/god-email-blast';
 
 export const dynamic = 'force-dynamic';
 
 /**
  * GET /api/god/blast/preview?template_key=clinic_invite
- * Locked blast HTML. Does not send.
+ * Locked blast HTML + text. Does not send. God-only.
  */
 export async function GET(req: NextRequest) {
   const gate = await requireGodCaller(req);
@@ -25,16 +20,5 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const template = BLAST_TEMPLATES[key];
-  return NextResponse.json({
-    ok: true,
-    template_key: template.key,
-    template_name: template.name,
-    subject: template.subject,
-    from: blastFromAddress(template),
-    reply_to: blastReplyTo(template),
-    html: template.html(),
-    text: template.text(),
-    cta: 'https://repairplanet.net/signup',
-  });
+  return NextResponse.json(lockedBlastPreview(BLAST_TEMPLATES[key]));
 }
