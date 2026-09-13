@@ -16,12 +16,12 @@
 # sequential Resend + god_email_sends writes. A 647-clinic send died mid-flight
 # (~155 logged) on the default serverless timeout.
 #
-# The route exports maxDuration = 60 and processes at most 50 recipients per
-# invocation. The God UI auto-loops remaining_organization_ids / resume_token.
-# OpenNext maps App Router API routes through ___netlify-server-handler, so
-# this timeout applies to the shared Next server function.
-[functions."___netlify-server-handler"]
-  timeout = 60
+# Do NOT set [functions."___netlify-server-handler"] timeout here — that key is
+# not a valid Netlify toml setting for the generated OpenNext handler and the
+# deploy-preview for PR #108 failed immediately when it was present.
+# Duration is raised on the route: export const maxDuration = 60
+# (BLAST_SEND_MAX_DURATION_SECONDS). Each invocation still caps at 50 recipients
+# (BLAST_SEND_CHUNK_SIZE). The God UI auto-loops remaining_organization_ids.
 
 # /ads.txt must stay a static text/plain file (Google AdSense crawler).
 # There is no /* SPA rewrite in this toml; Next.js Runtime still 404s unknown
