@@ -111,7 +111,7 @@ async function logSend(row: {
 async function loadRecentBlastSends(
   templateKey: BlastTemplateKey,
   sinceIso: string
-): Promise<BlastRecentSend[]> {
+): Promise<{ ok: true; sends: BlastRecentSend[] } | { ok: false; error: string }> {
   try {
     const admin = getSupabaseAdmin();
     const { data, error } = await fetchAllPages<BlastRecentSend>(async (from, to) => {
@@ -124,10 +124,15 @@ async function loadRecentBlastSends(
         .range(from, to);
       return { data: (res.data as BlastRecentSend[] | null) || [], error: res.error };
     });
-    if (error) return [];
-    return data || [];
-  } catch {
-    return [];
+    if (error) {
+      if (/relation|does not exist|schema cache/i.test(error.message || '')) {
+        return { ok: true, sends: [] };
+      }
+      return { ok: false, error: error.message || 'Could not read recent God email sends' };
+    }
+    return { ok: true, sends: data || [] };
+  } catch (e: unknown) {
+    return { ok: false, error: e instanceof Error ? e.message : 'Could not read recent God email sends' };
   }
 }
 
@@ -163,7 +168,11 @@ export async function POST(req: NextRequest) {
   }
 
   const sinceIso = new Date(Date.now() - BLAST_ALREADY_SENT_WINDOW_MS).toISOString();
-  const recentSends = await loadRecentBlastSends(templateKey, sinceIso);
+  const recent = await loadRecentBlastSends(templateKey, sinceIso);
+  if (!recent.ok) {
+    return NextResponse.json({ error: recent.error }, { status: 500 });
+  }
+  const recentSends = recent.sends;
   const { chunkOrgs, remainingIds: leftoverIds } = nextBlastChunk({
     organizationIds: ids,
     orgs: targets,
