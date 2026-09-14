@@ -25,6 +25,7 @@ import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import { OrgSwitcher } from '@/components/OrgSwitcher';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
 import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
+import { isUnreadPollBackoffError, startDocumentUnreadPoll } from '@/lib/unread-poll';
 
 type NavLink = { href: string; label: string };
 type NavGroup = { id: string; label: string; href?: string; items: NavLink[] };
@@ -119,13 +120,19 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const supabase = getSupabaseClient();
   const pathname = usePathname();
 
-  async function refreshUnread(uid: string) {
+  /** @returns true when the poll should back off (504 / timeout / 5xx). */
+  async function refreshUnread(uid: string): Promise<boolean> {
     try {
-      const { count } = await supabase
+      const { count, error } = await supabase
         .from('notifications')
         .select('id', { count: 'exact', head: true })
         .eq('user_id', uid)
         .eq('is_read', false);
+      if (error) {
+        if (isUnreadPollBackoffError(error)) return true;
+        setUnread(0);
+        return false;
+      }
       setUnread(count || 0);
       if (typeof navigator !== 'undefined' && 'setAppBadge' in navigator) {
         try {
@@ -135,8 +142,11 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
           /* ignore */
         }
       }
-    } catch {
+      return false;
+    } catch (err) {
+      if (isUnreadPollBackoffError(err)) return true;
       setUnread(0);
+      return false;
     }
   }
 
@@ -203,15 +213,17 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       fetchGodMe().then(setIsGod);
     });
 
-    const t = setInterval(() => {
-      supabase.auth.getUser().then(({ data: { user: u } }) => {
-        if (u) refreshUnread(u.id);
-      });
-    }, 45000);
+    const stopUnreadPoll = startDocumentUnreadPoll(async () => {
+      const {
+        data: { user: u },
+      } = await supabase.auth.getUser();
+      if (!u) return false;
+      return refreshUnread(u.id);
+    });
 
     return () => {
       subscription.unsubscribe();
-      clearInterval(t);
+      stopUnreadPoll();
     };
   }, [supabase]);
 
