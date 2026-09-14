@@ -1,5 +1,4 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { loadOrgPlanRow } from '@/lib/org-plan-load';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { getMarketplaceCaller } from '@/lib/marketplace/caller';
 import {
@@ -98,8 +97,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: error.message }, { status: 500 });
     }
     if (data) {
-      const plan = await loadOrgPlanRow(admin, gate.orgId);
-      saved = { ...(data as typeof gate.org), ...(plan || {}) };
+      saved = { ...gate.org, ...(data as typeof gate.org) };
     }
     return NextResponse.json({
       ok: true,
