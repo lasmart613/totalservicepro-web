@@ -107,7 +107,8 @@ test('Owner Hub does not expose Service Manuals or repair AI tiles', () => {
   assert.doesNotMatch(ownerBlock, /href: '\/manuals'/);
   assert.doesNotMatch(ownerBlock, /href: '\/ai-assistant'/);
   assert.match(serviceBlock, /href: '\/manuals'/);
-  assert.match(serviceBlock, /href: '\/manuals\?lib=operators'/);
-  assert.match(serviceBlock, /Operators Manuals/);
+  assert.doesNotMatch(serviceBlock, /href: '\/manuals\?lib=operators'/);
   assert.match(serviceBlock, /href: '\/ai-assistant'/);
+  const header = readFileSync(join(here, '../components/Header.tsx'), 'utf8');
+  assert.doesNotMatch(header, /href: '\/manuals\?lib=operators'/);
 });

@@ -345,7 +345,6 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
             { href: '/hub', label: 'Hub Home' },
             { href: '/service-schedule', label: 'Service Schedule' },
             { href: '/manuals', label: 'Service Manuals' },
-            { href: '/manuals?lib=operators', label: 'Operators Manuals' },
             { href: '/reports', label: 'Service Reports' },
             { href: '/service-requests', label: 'Repair Jobs' },
             { href: '/bids', label: 'My Bids' },
