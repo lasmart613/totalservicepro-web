@@ -24,6 +24,8 @@ import {
   mergeEstimateLiveRow,
 } from '@/lib/billing/estimate-list-live';
 import { isUnreadPollVisible } from '@/lib/unread-poll';
+import { getDashboardPersona, type DashboardPersona } from '@/lib/roles';
+import CustomerEstimatesInbox from './CustomerEstimatesInbox';
 
 type EstFilter = 'active' | 'draft' | 'pending' | 'invoiced' | 'expired' | 'all';
 
@@ -65,7 +67,56 @@ function docNumber(est: EstimateRow): string {
   return est.estimate_number || ed.estimate_number || ed.estNumber || '';
 }
 
-export default function EstimatesListPage() {
+export default function EstimatesPage() {
+  const supabase = getSupabaseClient();
+  const [persona, setPersona] = useState<DashboardPersona | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const {
+        data: { user },
+      } = await supabase.auth.getUser();
+      if (!user) {
+        if (!cancelled) setPersona('service');
+        return;
+      }
+      const { data: profile } = await supabase
+        .from('user_profiles')
+        .select('role, organization_id')
+        .eq('id', user.id)
+        .maybeSingle();
+      let orgType: string | null = null;
+      if (profile?.organization_id != null) {
+        const { data: org } = await supabase
+          .from('organizations')
+          .select('type')
+          .eq('id', profile.organization_id)
+          .maybeSingle();
+        orgType = org?.type || null;
+      }
+      if (!cancelled) setPersona(getDashboardPersona(profile?.role, orgType));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase]);
+
+  if (!persona) {
+    return (
+      <div className="min-h-screen flex flex-col">
+        <Header />
+        <div className="flex-1 flex items-center justify-center">
+          <div className="animate-spin h-6 w-6 border-2 border-[var(--gold)] border-t-transparent rounded-full" />
+        </div>
+      </div>
+    );
+  }
+  if (persona === 'owner') return <CustomerEstimatesInbox />;
+  return <ShopEstimatesList />;
+}
+
+function ShopEstimatesList() {
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [rows, setRows] = useState<EstimateRow[]>([]);

@@ -8,6 +8,7 @@ import {
 } from '@/lib/billing/approve-estimate';
 import {
   applyEstimateCustomerAction,
+  notifyShopOfCustomerAction,
   publicEstimatePayload,
   resolveOrgNotifyEmails,
 } from '@/lib/billing/estimate-action';
@@ -186,6 +187,9 @@ export async function POST(
 
     const note = String(body.note || '').trim() || null;
     const result = await applyEstimateCustomerAction(admin, est, action, note);
+    if (!result.already) {
+      await notifyShopOfCustomerAction(admin, est, result.action, note);
+    }
     const created = result.ticket;
     const existing = approvedTicketRefFromEstimate(est);
     const request = created

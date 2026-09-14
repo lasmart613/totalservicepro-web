@@ -279,6 +279,39 @@ export async function sendResendHtml(opts: {
   return { ok: true };
 }
 
+/** Shop inbox + email when a clinic acts from the dashboard or a token link. */
+export async function notifyShopOfCustomerAction(
+  client: SupabaseClient,
+  estimate: any,
+  action: CustomerActionKind,
+  note: string | null
+): Promise<void> {
+  const { companyName, emails } = await resolveOrgNotifyEmails(client, estimate);
+  const payload = publicEstimatePayload(estimate, companyName);
+  const ed = parseJsonField(estimate.estimate_data);
+  const customerEmail = ed.custEmail || ed.email || null;
+  const mail = buildOrgNotifyEmail({
+    action,
+    companyName,
+    customerName: payload.customerName,
+    estimateNumber: payload.estimateNumber,
+    total: payload.total,
+    note: action === CUSTOMER_ACTION_CHANGES ? note : null,
+    estimateId: estimate.id,
+  });
+  if (!emails.length) {
+    console.warn('org notify: no recipient emails for estimate', estimate.id);
+    return;
+  }
+  const sent = await sendResendHtml({
+    to: emails,
+    subject: mail.subject,
+    html: mail.html,
+    replyTo: customerEmail && String(customerEmail).includes('@') ? String(customerEmail) : undefined,
+  });
+  if (!sent.ok) console.warn('org notify email skipped', sent.error);
+}
+
 export function publicEstimatePayload(estimate: any, companyName: string) {
   const ed = parseJsonField(estimate.estimate_data);
   const action = customerActionFromEstimate(estimate);

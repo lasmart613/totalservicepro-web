@@ -357,3 +357,21 @@ export function customerActionConfirmationTitle(
   if (action === 'changes_requested') return 'Modification requested';
   return '';
 }
+
+/** Sent estimates the clinic can still Approve / Reject / Modify. */
+export function isEstimateAwaitingCustomerAction(est: {
+  status?: string | null;
+  created_at?: string | null;
+  customer_action?: string | null;
+  customer_action_at?: string | null;
+  customer_action_note?: string | null;
+  customer_action_token?: string | null;
+  estimate_data?: unknown;
+}): boolean {
+  const st = String(est.status || '').toLowerCase();
+  if (['draft', 'invoiced', 'cancelled', 'canceled', 'completed', 'expired'].includes(st)) {
+    return false;
+  }
+  if (isEstimateExpired(est)) return false;
+  return !isTerminalCustomerAction(customerActionFromEstimate(est).action);
+}

@@ -261,7 +261,7 @@ export default function EstimateCustomerClient({
                       <strong>{company}</strong> for an updated quote.
                     </div>
                   ) : (
-                    <div className="mt-6 grid gap-3">
+                    <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <button
                         type="button"
                         className="btn btn-primary w-full text-base py-3"
@@ -272,53 +272,49 @@ export default function EstimateCustomerClient({
                       </button>
                       <button
                         type="button"
-                        className="btn w-full"
+                        className="btn w-full text-base py-3"
                         style={{ background: '#7f1d1d', color: '#fecaca', borderColor: '#991b1b' }}
                         disabled={!!submitting}
                         onClick={() => submit('reject')}
                       >
                         {submitting === 'reject' ? 'Rejecting…' : 'Reject'}
                       </button>
+                      <button
+                        type="button"
+                        className="btn btn-secondary w-full text-base py-3"
+                        disabled={!!submitting}
+                        onClick={() => setShowChanges((v) => !v)}
+                      >
+                        Modify
+                      </button>
                     </div>
                   ))}
 
-                {role === 'customer' && !est.expired && (
-                  <div className="mt-6 pt-5 border-t border-[var(--border2)]">
+                {role === 'customer' && !est.expired && showChanges && (
+                  <form
+                    className="mt-4"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      submit('modify');
+                    }}
+                  >
+                    <label className="text-xs text-[var(--text3)] font-semibold">
+                      Optional note for the service company
+                    </label>
+                    <textarea
+                      className="input mt-1 min-h-[110px]"
+                      value={note}
+                      onChange={(e) => setNote(e.target.value)}
+                      placeholder="Short note (optional)…"
+                    />
                     <button
-                      type="button"
-                      className="btn btn-secondary w-full"
+                      type="submit"
+                      className="btn btn-primary w-full mt-3"
                       disabled={!!submitting}
-                      onClick={() => setShowChanges((v) => !v)}
                     >
-                      Modify
+                      {submitting === 'modify' ? 'Sending…' : 'Request modification'}
                     </button>
-                    {showChanges && (
-                      <form
-                        className="mt-4"
-                        onSubmit={(e) => {
-                          e.preventDefault();
-                          submit('modify');
-                        }}
-                      >
-                        <label className="text-xs text-[var(--text3)] font-semibold">
-                          Optional note for the service company
-                        </label>
-                        <textarea
-                          className="input mt-1 min-h-[110px]"
-                          value={note}
-                          onChange={(e) => setNote(e.target.value)}
-                          placeholder="Short note (optional)…"
-                        />
-                        <button
-                          type="submit"
-                          className="btn btn-primary w-full mt-3"
-                          disabled={!!submitting}
-                        >
-                          {submitting === 'modify' ? 'Sending…' : 'Request modification'}
-                        </button>
-                      </form>
-                    )}
-                  </div>
+                  </form>
                 )}
 
                 {error && <p className="text-sm text-red-300 mt-4 text-center">{error}</p>}

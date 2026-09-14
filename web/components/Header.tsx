@@ -320,6 +320,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
           { href: '/company', label: ownerProfileLabel(orgType, facilityType, meta.organization_type) },
           { href: '/manuals', label: 'Operators Manuals' },
           { href: '/service-requests', label: 'Service Requests' },
+          { href: '/estimates', label: 'Estimates' },
           { href: '/accepted-bids', label: 'Accepted Bids' },
           { href: '/reports', label: 'Service History' },
           { href: '/directory', label: 'TSP Directory' },

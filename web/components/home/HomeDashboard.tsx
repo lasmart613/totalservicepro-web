@@ -23,6 +23,7 @@ import {
   toLocalYmd,
   upcomingOpenTickets,
 } from '@/lib/tickets';
+import { isEstimateAwaitingCustomerAction } from '@/lib/billing/save-helpers';
 
 export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
   const router = useRouter();
@@ -45,6 +46,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
     openRequests: 0,
     serviceHistory: 0,
     bidsReceived: 0,
+    pendingEstimates: 0,
   });
   const [supplierStats, setSupplierStats] = useState({
     catalog: 0,
@@ -357,7 +359,19 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
       }
     } catch { /* ignore */ }
 
-    setOwnerStats({ lasers, openRequests, serviceHistory, bidsReceived });
+    let pendingEstimates = 0;
+    try {
+      const { data: ests } = await supabase
+        .from('service_estimates')
+        .select('id, status, created_at, customer_action, estimate_data')
+        .eq('customer_organization_id', orgId)
+        .limit(80);
+      pendingEstimates = (ests || []).filter((row) => isEstimateAwaitingCustomerAction(row)).length;
+    } catch {
+      /* ignore */
+    }
+
+    setOwnerStats({ lasers, openRequests, serviceHistory, bidsReceived, pendingEstimates });
   }
 
   async function loadSupplierStats(orgId: any, userId: string) {
@@ -474,7 +488,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
         {/* ── Owner / facility KPIs ── */}
         {persona === 'owner' && (
           <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
+            <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-8">
               <Link href="/my-lasers" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-[var(--gold)]">{ownerStats.lasers}</div>
                 <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">MY LASERS</div>
@@ -482,6 +496,10 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
               <Link href="/service-requests" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-[var(--blue)]">{ownerStats.openRequests}</div>
                 <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">OPEN REQUESTS</div>
+              </Link>
+              <Link href="/estimates" className="card p-5 text-center hover:border-[var(--gold)]">
+                <div className="text-4xl font-extrabold text-amber-300">{ownerStats.pendingEstimates}</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">ESTIMATES TO REVIEW</div>
               </Link>
               <Link href="/reports" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-green-400">{ownerStats.serviceHistory}</div>
@@ -501,6 +519,11 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
                 <Link href="/my-lasers" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Zap size={32} className="mx-auto mb-3 text-[var(--gold)]" />
                   <div className="font-bold">My Lasers</div>
+                </Link>
+                <Link href="/estimates" className="card p-6 text-center hover:border-[var(--gold)]">
+                  <FileText size={32} className="mx-auto mb-3 text-[var(--gold)]" />
+                  <div className="font-bold">Estimates</div>
+                  <div className="text-xs text-[var(--text3)] mt-1">Approve, reject, or modify</div>
                 </Link>
                 <Link href="/service-requests" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Wrench size={32} className="mx-auto mb-3 text-[var(--gold)]" />
