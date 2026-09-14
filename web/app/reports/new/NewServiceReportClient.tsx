@@ -28,6 +28,7 @@ import {
   itemsToLegacyChecklists,
   keepExtras,
   labelsForSection,
+  laserFallbackForm,
   loadPublishedLibrary,
   loadServiceReportItems,
   loadSrTemplateForEquipmentType,
@@ -357,7 +358,11 @@ export default function NewServiceReport() {
 
   function applyLoadedTemplate(loaded: Awaited<ReturnType<typeof loadSrTemplateForEquipmentType>>, previous: SrDraftItem[]) {
     const extras = keepExtras(previous);
-    const merged = mergeResultsIntoItems(loaded.items, previous);
+    let merged = mergeResultsIntoItems(loaded.items, previous);
+    // Keep PASS/FAIL already tapped on the fallback labels before the template returns.
+    merged = applyChecklistMap(merged, 'electrical', checkElectrical);
+    merged = applyChecklistMap(merged, 'mechanical', checkMechanical);
+    merged = applyChecklistMap(merged, 'aesthetic', checkAesthetic);
     const extraKeep = extras.filter(
       (e) => !merged.some((m) => m.section === e.section && m.label === e.label)
     );
@@ -370,7 +375,15 @@ export default function NewServiceReport() {
   }
 
   function currentItemsWithAnswers(): SrDraftItem[] {
-    let items = applyChecklistMap(srItems, 'electrical', checkElectrical);
+    const base =
+      srItems.length > 0
+        ? srItems
+        : hydrateItemsFromLegacy(laserFallbackForm(equipmentType).items, {
+            electrical: checkElectrical,
+            mechanical: checkMechanical,
+            aesthetic: checkAesthetic,
+          });
+    let items = applyChecklistMap(base, 'electrical', checkElectrical);
     items = applyChecklistMap(items, 'mechanical', checkMechanical);
     items = applyChecklistMap(items, 'aesthetic', checkAesthetic);
     return applySafetyToItems(items, {
