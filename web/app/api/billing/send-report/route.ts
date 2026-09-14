@@ -6,6 +6,7 @@ import {
   resolveFreeAccountUrls,
   wrapCustomerFacingDocumentEmail,
 } from '@/lib/customer-invite';
+import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 
 /**
  * POST /api/billing/send-report
@@ -114,37 +115,18 @@ export async function POST(req: NextRequest) {
 
     if (custOrgId) {
       try {
-        const { data: cOrg } = await crmClient
-          .from('organizations')
-          .select('id, name, email')
-          .eq('id', custOrgId)
-          .maybeSingle();
-        if (cOrg?.email && isValidEmail(String(cOrg.email).trim())) {
-          toEmail = String(cOrg.email).trim();
-          emailSource = 'crm_org';
+        const sources = await fetchDirectoryContactSources(crmClient, custOrgId);
+        const pick = pickCrmReachEmail({
+          directoryContacts: sources.directoryContacts,
+          contactRows: sources.contactRows,
+          officeEmail: sources.officeEmail,
+        });
+        if (pick.email) {
+          toEmail = pick.email;
+          emailSource = pick.source === 'form' ? 'form' : pick.source;
         }
       } catch {
-        /* contacts next */
-      }
-      if (!toEmail) {
-        try {
-          const { data: primary } = await crmClient
-            .from('contacts')
-            .select('email, is_primary')
-            .eq('organization_id', custOrgId)
-            .not('email', 'is', null)
-            .order('is_primary', { ascending: false })
-            .limit(5);
-          const pick = (primary || []).find(
-            (c: { email?: string | null }) => c.email && isValidEmail(String(c.email).trim())
-          );
-          if (pick?.email) {
-            toEmail = String(pick.email).trim();
-            emailSource = 'crm_contact';
-          }
-        } catch {
-          /* ignore */
-        }
+        /* fall through to form / report */
       }
     }
 

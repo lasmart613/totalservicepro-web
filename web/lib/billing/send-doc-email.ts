@@ -2,6 +2,8 @@
  * Client helper: POST invoice/estimate/report HTML to existing billing email APIs.
  */
 
+import { fetchDirectoryContactSources, pickCrmReachEmail } from '../customer-contacts.ts';
+
 export type SendDocResult = {
   ok: boolean;
   emailSent?: boolean;
@@ -17,7 +19,7 @@ export function isValidOnFileEmail(e: string | null | undefined): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(e || '').trim());
 }
 
-/** Same destination order as /api/billing/send-report (and estimate/invoice). */
+/** Primary person email, then main office, then any contact, then the form. */
 export async function resolveCustomerEmailOnFile(opts: {
   supabase: { from: (table: string) => any };
   customerOrganizationId?: string | number | null;
@@ -36,34 +38,16 @@ export async function resolveCustomerEmailOnFile(opts: {
         .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller'])
         .maybeSingle();
       if (data?.id != null) orgId = data.id;
-      if (data?.email && isValidOnFileEmail(data.email)) {
-        return { email: String(data.email).trim(), source: 'crm_org' };
-      }
-    } else if (orgId) {
-      const { data } = await opts.supabase
-        .from('organizations')
-        .select('id, email')
-        .eq('id', orgId)
-        .maybeSingle();
-      if (data?.email && isValidOnFileEmail(data.email)) {
-        return { email: String(data.email).trim(), source: 'crm_org' };
-      }
     }
 
     if (orgId) {
-      const { data: contacts } = await opts.supabase
-        .from('contacts')
-        .select('email, is_primary')
-        .eq('organization_id', orgId)
-        .not('email', 'is', null)
-        .order('is_primary', { ascending: false })
-        .limit(5);
-      const pick = (contacts || []).find((c: { email?: string | null }) =>
-        isValidOnFileEmail(c.email)
-      );
-      if (pick?.email) {
-        return { email: String(pick.email).trim(), source: 'crm_contact' };
-      }
+      const sources = await fetchDirectoryContactSources(opts.supabase, orgId);
+      return pickCrmReachEmail({
+        directoryContacts: sources.directoryContacts,
+        contactRows: sources.contactRows,
+        officeEmail: sources.officeEmail,
+        formEmail,
+      });
     }
   } catch {
     /* fall through to job email */

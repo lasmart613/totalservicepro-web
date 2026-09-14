@@ -121,6 +121,38 @@ test('Add Customer form accepts full state names instead of forcing ISO typing',
   assert.doesNotMatch(src, /maxLength=\{2\}/);
 });
 
+test('directory form replaces the single contact field with office + five roles + primary radio', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, '../components/CustomerInfoForm.tsx'), 'utf8');
+  const roles = readFileSync(join(here, './customer-contacts.ts'), 'utf8');
+  assert.match(src, /Main office email/);
+  assert.match(src, /Main office phone/);
+  assert.match(src, /directory-primary-contact/);
+  assert.match(src, /DIRECTORY_ROLE_LABELS/);
+  assert.match(roles, /Owner/);
+  assert.match(roles, /Medical Director/);
+  assert.match(roles, /Physician/);
+  assert.match(roles, /Laser Technician/);
+  assert.match(roles, /Office Manager/);
+  assert.doesNotMatch(src, /Primary contact person/);
+});
+
+test('customer org payload writes directory JSON and syncs contact_name from the primary role', () => {
+  const form = emptyCustomerForm();
+  form.name = 'Clinic';
+  form.email = 'office@clinic.com';
+  form.phone = '555-0000';
+  form.contact_name = 'Legacy';
+  form.directory.roles.owner = { name: 'Larry Smart', email: 'larry@clinic.com', phone: '555-0100' };
+  form.directory.primaryRole = 'owner';
+  const payload = customerOrgPayload(form, { type: 'customer' });
+  assert.equal(payload.contact_name, 'Larry Smart');
+  assert.equal(payload.email, 'office@clinic.com');
+  const directory = payload.directory_contacts as { primaryRole?: string; roles?: { owner?: { name?: string } } };
+  assert.equal(directory.primaryRole, 'owner');
+  assert.equal(directory.roles?.owner?.name, 'Larry Smart');
+});
+
 test('ticket editor keeps shop organization_id and writes customer_organization_id', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const src = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
@@ -175,11 +207,17 @@ function mockPagedClient(opts: { linkRows: any[]; orgRows: any[]; captured: any[
           captured.range = [from, to];
           return builder;
         },
+        limit(n: number) {
+          captured.limit = n;
+          return builder;
+        },
         then(resolve: (v: any) => void, reject?: (e: any) => void) {
           const payload =
             table === 'organization_customers'
               ? { data: opts.linkRows, error: null }
-              : { data: opts.orgRows, error: null };
+              : table === 'contacts'
+                ? { data: [], error: null }
+                : { data: opts.orgRows, error: null };
           return Promise.resolve(payload).then(resolve, reject);
         },
       };

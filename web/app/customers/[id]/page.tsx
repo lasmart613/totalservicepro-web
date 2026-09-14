@@ -15,10 +15,18 @@ import { ownerOrgTypeLabel } from '@/lib/org-types';
 import { toast } from 'sonner';
 import { CustomerInfoForm } from '@/components/CustomerInfoForm';
 import {
+  directoryFormFromOrg,
   emptyCustomerForm,
   updateCustomerOrg,
   type CustomerInfoFormValues,
 } from '@/lib/customer-form';
+import {
+  DIRECTORY_CONTACT_ROLES,
+  DIRECTORY_ROLE_LABELS,
+  filledDirectoryRoles,
+  resolveDirectoryContact,
+  roleKeyFromTitle,
+} from '@/lib/customer-contacts';
 import { filledSocialLinks, socialFieldsFromOrg } from '@/lib/social-links';
 
 type TabKey = 'overview' | 'equipment' | 'history' | 'contacts';
@@ -265,6 +273,8 @@ export default function CustomerProfilePage() {
         return;
       }
 
+      const contactRows = await fetchContacts(id);
+      setContacts(contactRows);
       setCustomer(org);
       setForm({
         ...emptyCustomerForm(),
@@ -279,6 +289,7 @@ export default function CustomerProfilePage() {
         state: org.state || '',
         zip: org.zip || '',
         contact_name: (org as any).contact_name || '',
+        directory: directoryFormFromOrg(org as Record<string, unknown>, contactRows),
         specialties: Array.isArray(org.specialties) ? org.specialties : [],
         logo_url: org.logo_url || '',
         ...socialFieldsFromOrg(org as Record<string, unknown>),
@@ -289,7 +300,6 @@ export default function CustomerProfilePage() {
       await Promise.all([
         loadEquipment(id),
         loadReports(id, org.name || '', myOrgId),
-        loadContacts(id),
       ]);
     } catch (e: any) {
       console.error(e);
@@ -429,7 +439,7 @@ export default function CustomerProfilePage() {
     }
   }
 
-  async function loadContacts(customerId: string) {
+  async function fetchContacts(customerId: string): Promise<ContactRow[]> {
     try {
       const { data, error } = await supabase
         .from('contacts')
@@ -437,14 +447,10 @@ export default function CustomerProfilePage() {
         .eq('organization_id', customerId)
         .order('first_name', { ascending: true })
         .limit(50);
-      if (error) {
-        // Table missing / RLS — silent empty
-        setContacts([]);
-        return;
-      }
-      setContacts((data as ContactRow[]) || []);
+      if (error) return [];
+      return (data as ContactRow[]) || [];
     } catch {
-      setContacts([]);
+      return [];
     }
   }
 
@@ -465,6 +471,8 @@ export default function CustomerProfilePage() {
       );
       setLogoFile(null);
       setDirty(false);
+      const contactRows = await fetchContacts(String(customer.id));
+      setContacts(contactRows);
       toast.success('Customer profile saved');
     } catch (e: any) {
       console.error(e);
@@ -503,14 +511,23 @@ export default function CustomerProfilePage() {
     return ownerOrgTypeLabel(customer?.type) || 'Customer';
   }, [form.biz_type, customer]);
 
-  const primaryContactLabel = useMemo(() => {
-    if (form.contact_name) return form.contact_name;
-    const primary = contacts.find((c) => c.is_primary) || contacts[0];
-    if (primary) {
-      return [primary.first_name, primary.last_name].filter(Boolean).join(' ');
-    }
-    return '';
-  }, [form.contact_name, contacts]);
+  const resolvedContact = useMemo(
+    () =>
+      resolveDirectoryContact({
+        roles: form.directory,
+        contactRows: contacts,
+        legacyContactName: form.contact_name,
+        officeEmail: form.email,
+        officePhone: form.phone,
+      }),
+    [form.directory, form.contact_name, form.email, form.phone, contacts]
+  );
+
+  const primaryContactLabel = resolvedContact.name;
+  const extraContacts = useMemo(
+    () => contacts.filter((c) => !roleKeyFromTitle(c.title)),
+    [contacts]
+  );
 
   const socialLinks = useMemo(() => filledSocialLinks(form), [form]);
 
@@ -587,7 +604,7 @@ export default function CustomerProfilePage() {
     { key: 'overview', label: 'Overview' },
     { key: 'equipment', label: `Equipment (${equipment.length})` },
     { key: 'history', label: `History (${reports.length})` },
-    { key: 'contacts', label: `Contacts (${contacts.length})` },
+    { key: 'contacts', label: `Contacts (${filledDirectoryRoles(form.directory).length + extraContacts.length})` },
   ];
 
   return (
@@ -652,8 +669,12 @@ export default function CustomerProfilePage() {
                       .join(' · ')}
                   </div>
                 )}
-                {form.phone && <div>📞 {form.phone}</div>}
-                {form.email && <div>✉️ {form.email}</div>}
+                {(resolvedContact.phone || form.phone) && (
+                  <div>📞 {resolvedContact.phone || form.phone}</div>
+                )}
+                {(resolvedContact.email || form.email) && (
+                  <div>✉️ {resolvedContact.email || form.email}</div>
+                )}
                 {form.website && (
                   <div>
                     🌐{' '}
@@ -687,7 +708,13 @@ export default function CustomerProfilePage() {
                   </div>
                 )}
                 {primaryContactLabel && (
-                  <div>👤 {primaryContactLabel}</div>
+                  <div>
+                    👤 {primaryContactLabel}
+                    {resolvedContact.roleLabel ? ` · ${resolvedContact.roleLabel}` : ''}
+                    {resolvedContact.source === 'primary_role' || resolvedContact.source === 'primary_row'
+                      ? ' · Primary'
+                      : ''}
+                  </div>
                 )}
               </div>
               <div className="flex gap-6 mt-4">
@@ -709,7 +736,7 @@ export default function CustomerProfilePage() {
                 </div>
                 <div>
                   <div className="text-lg font-extrabold text-[var(--gold)]">
-                    {contacts.length}
+                    {filledDirectoryRoles(form.directory).length + extraContacts.length}
                   </div>
                   <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">
                     Contacts
@@ -904,85 +931,137 @@ export default function CustomerProfilePage() {
                 Contacts
               </h2>
             </div>
-            {form.contact_name && contacts.length === 0 && (
+            <p className="text-xs text-[var(--text3)] mb-3">
+              Edit roles and the primary radio under Overview. Main office is the switchboard;
+              the starred person is used on estimates, invoices, and invites.
+            </p>
+            <div className="flex items-center gap-3 py-3 border-b border-[var(--border)]">
+              <div className="w-9 h-9 rounded-full bg-[var(--surface3)] flex items-center justify-center text-xs font-bold text-[var(--text3)]">
+                🏢
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="font-semibold text-sm">Main office</div>
+                <div className="text-xs text-[var(--text3)]">
+                  {[form.phone, form.email].filter(Boolean).join(' · ') || 'No office phone or email'}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                {form.phone && (
+                  <a
+                    href={`tel:${form.phone}`}
+                    className="w-8 h-8 rounded-lg border border-[var(--border)] flex items-center justify-center text-sm hover:border-[var(--gold)]"
+                    title="Call"
+                  >
+                    📞
+                  </a>
+                )}
+                {form.email && (
+                  <a
+                    href={`mailto:${form.email}`}
+                    className="w-8 h-8 rounded-lg border border-[var(--border)] flex items-center justify-center text-sm hover:border-[var(--gold)]"
+                    title="Email"
+                  >
+                    ✉️
+                  </a>
+                )}
+              </div>
+            </div>
+            {form.contact_name && filledDirectoryRoles(form.directory).length === 0 && (
               <div className="flex items-center gap-3 py-3 border-b border-[var(--border)]">
                 <div className="w-9 h-9 rounded-full bg-[var(--surface3)] flex items-center justify-center text-xs font-bold text-[var(--text3)]">
                   {initials(form.contact_name)}
                 </div>
                 <div className="flex-1">
                   <div className="font-semibold text-sm">{form.contact_name}</div>
-                  <div className="text-xs text-[var(--text3)]">Primary (from profile)</div>
-                </div>
-                <div className="flex gap-2">
-                  {form.phone && (
-                    <a
-                      href={`tel:${form.phone}`}
-                      className="w-8 h-8 rounded-lg border border-[var(--border)] flex items-center justify-center text-sm hover:border-[var(--gold)]"
-                      title="Call"
-                    >
-                      📞
-                    </a>
-                  )}
-                  {form.email && (
-                    <a
-                      href={`mailto:${form.email}`}
-                      className="w-8 h-8 rounded-lg border border-[var(--border)] flex items-center justify-center text-sm hover:border-[var(--gold)]"
-                      title="Email"
-                    >
-                      ✉️
-                    </a>
-                  )}
+                  <div className="text-xs text-[var(--text3)]">Legacy single contact</div>
                 </div>
               </div>
             )}
-            {contacts.length === 0 && !form.contact_name ? (
-              <p className="text-sm text-[var(--text3)] py-2">
-                No contacts on record. Add a contact name under Overview, or contacts will appear when available in the database.
-              </p>
-            ) : (
-              contacts.map((c) => {
-                const name = [c.first_name, c.last_name].filter(Boolean).join(' ');
-                return (
-                  <div
-                    key={c.id}
-                    className="flex items-center gap-3 py-3 border-b border-[var(--border)] last:border-0"
-                  >
-                    <div className="w-9 h-9 rounded-full bg-[var(--surface3)] flex items-center justify-center text-xs font-bold text-[var(--text3)]">
-                      {initials(name)}
+            {DIRECTORY_CONTACT_ROLES.map((role) => {
+              const fields = form.directory.roles[role];
+              const isPrimary = form.directory.primaryRole === role && Boolean(fields.name || fields.email || fields.phone);
+              return (
+                <div
+                  key={role}
+                  className="flex items-center gap-3 py-3 border-b border-[var(--border)] last:border-0"
+                >
+                  <div className="w-9 h-9 rounded-full bg-[var(--surface3)] flex items-center justify-center text-xs font-bold text-[var(--text3)]">
+                    {initials(fields.name || DIRECTORY_ROLE_LABELS[role])}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm">
+                      {fields.name || '—'}
+                      {isPrimary ? ' ⭐' : ''}
                     </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="font-semibold text-sm">
-                        {name || 'Contact'}
-                        {c.is_primary ? ' ⭐' : ''}
-                      </div>
-                      <div className="text-xs text-[var(--text3)]">
-                        {[c.title, c.phone].filter(Boolean).join(' · ')}
-                      </div>
-                    </div>
-                    <div className="flex gap-2">
-                      {c.phone && (
-                        <a
-                          href={`tel:${c.phone}`}
-                          className="w-8 h-8 rounded-lg border border-[var(--border)] flex items-center justify-center text-sm hover:border-[var(--gold)]"
-                          title="Call"
-                        >
-                          📞
-                        </a>
-                      )}
-                      {c.email && (
-                        <a
-                          href={`mailto:${c.email}`}
-                          className="w-8 h-8 rounded-lg border border-[var(--border)] flex items-center justify-center text-sm hover:border-[var(--gold)]"
-                          title="Email"
-                        >
-                          ✉️
-                        </a>
-                      )}
+                    <div className="text-xs text-[var(--text3)]">
+                      {[DIRECTORY_ROLE_LABELS[role], fields.phone, fields.email].filter(Boolean).join(' · ')}
                     </div>
                   </div>
-                );
-              })
-            )}
+                  <div className="flex gap-2">
+                    {fields.phone && (
+                      <a
+                        href={`tel:${fields.phone}`}
+                        className="w-8 h-8 rounded-lg border border-[var(--border)] flex items-center justify-center text-sm hover:border-[var(--gold)]"
+                        title="Call"
+                      >
+                        📞
+                      </a>
+                    )}
+                    {fields.email && (
+                      <a
+                        href={`mailto:${fields.email}`}
+                        className="w-8 h-8 rounded-lg border border-[var(--border)] flex items-center justify-center text-sm hover:border-[var(--gold)]"
+                        title="Email"
+                      >
+                        ✉️
+                      </a>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+            {extraContacts.map((c) => {
+              const name = [c.first_name, c.last_name].filter(Boolean).join(' ');
+              return (
+                <div
+                  key={c.id}
+                  className="flex items-center gap-3 py-3 border-b border-[var(--border)] last:border-0"
+                >
+                  <div className="w-9 h-9 rounded-full bg-[var(--surface3)] flex items-center justify-center text-xs font-bold text-[var(--text3)]">
+                    {initials(name)}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className="font-semibold text-sm">
+                      {name || 'Contact'}
+                      {c.is_primary ? ' ⭐' : ''}
+                    </div>
+                    <div className="text-xs text-[var(--text3)]">
+                      {[c.title || 'Additional', c.phone].filter(Boolean).join(' · ')}
+                    </div>
+                  </div>
+                  <div className="flex gap-2">
+                    {c.phone && (
+                      <a
+                        href={`tel:${c.phone}`}
+                        className="w-8 h-8 rounded-lg border border-[var(--border)] flex items-center justify-center text-sm hover:border-[var(--gold)]"
+                        title="Call"
+                      >
+                        📞
+                      </a>
+                    )}
+                    {c.email && (
+                      <a
+                        href={`mailto:${c.email}`}
+                        className="w-8 h-8 rounded-lg border border-[var(--border)] flex items-center justify-center text-sm hover:border-[var(--gold)]"
+                        title="Email"
+                      >
+                        ✉️
+                      </a>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
           </div>
         )}
       </div>

@@ -1592,6 +1592,7 @@ export type Database = {
           created_by: string | null
           customer_rating: number | null
           description: string | null
+          directory_contacts: Json | null
           email: string | null
           facebook_url: string | null
           facility_type: string | null
@@ -1636,6 +1637,7 @@ export type Database = {
           created_by?: string | null
           customer_rating?: number | null
           description?: string | null
+          directory_contacts?: Json | null
           email?: string | null
           facebook_url?: string | null
           facility_type?: string | null
@@ -1680,6 +1682,7 @@ export type Database = {
           created_by?: string | null
           customer_rating?: number | null
           description?: string | null
+          directory_contacts?: Json | null
           email?: string | null
           facebook_url?: string | null
           facility_type?: string | null

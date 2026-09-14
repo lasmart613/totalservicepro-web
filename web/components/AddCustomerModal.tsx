@@ -8,6 +8,7 @@ import {
   emptyCustomerForm,
   type CustomerInfoFormValues,
 } from '@/lib/customer-form';
+import { pickCrmReachEmail } from '@/lib/customer-contacts';
 import { sendCustomerInviteEmail } from '@/lib/customer-invite-client';
 import { getSupabaseClient } from '@/lib/supabase/client';
 
@@ -42,7 +43,10 @@ export function AddCustomerModal({ serviceOrgId, onClose, onCreated, initialName
         logoFile,
       });
 
-      const emailOnFile = form.email.trim();
+      const emailOnFile = pickCrmReachEmail({
+        directoryContacts: form.directory,
+        officeEmail: form.email,
+      }).email;
       if (!emailOnFile) {
         toast.success(
           created.logoWarning

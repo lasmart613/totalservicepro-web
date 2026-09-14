@@ -7,6 +7,15 @@ import {
   CUSTOMER_SPECIALTIES,
   type CustomerInfoFormValues,
 } from '@/lib/customer-form';
+import {
+  DIRECTORY_CONTACT_ROLES,
+  DIRECTORY_ROLE_LABELS,
+  ensurePrimaryDirectoryRole,
+  filledDirectoryRoles,
+  isRoleFilled,
+  setDirectoryPrimaryRole,
+  type DirectoryRoleKey,
+} from '@/lib/customer-contacts';
 import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
 import { normalizeSocialUrl, visibleSocialNetworks } from '@/lib/social-links';
 
@@ -34,6 +43,33 @@ export function CustomerInfoForm({
 
   const setField = (key: keyof CustomerInfoFormValues, next: string | string[]) => {
     onChange({ ...value, [key]: next });
+  };
+
+  const directory = ensurePrimaryDirectoryRole(value.directory);
+  const filledRoles = filledDirectoryRoles(directory);
+
+  const setRoleField = (
+    role: DirectoryRoleKey,
+    field: 'name' | 'email' | 'phone',
+    next: string
+  ) => {
+    onChange({
+      ...value,
+      directory: ensurePrimaryDirectoryRole({
+        ...directory,
+        roles: {
+          ...directory.roles,
+          [role]: { ...directory.roles[role], [field]: next },
+        },
+      }),
+    });
+  };
+
+  const setPrimaryRole = (role: DirectoryRoleKey) => {
+    onChange({
+      ...value,
+      directory: setDirectoryPrimaryRole(directory, role),
+    });
   };
 
   function handleLogoPick(e: React.ChangeEvent<HTMLInputElement>) {
@@ -202,7 +238,7 @@ export function CustomerInfoForm({
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                Phone
+                Main office phone
               </label>
               <input
                 className="input w-full"
@@ -214,7 +250,7 @@ export function CustomerInfoForm({
             </div>
             <div>
               <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-                Email
+                Main office email
               </label>
             <input
               className="input w-full"
@@ -225,23 +261,97 @@ export function CustomerInfoForm({
             />
             {inviteHint && (
               <p className="text-[11px] text-[var(--text3)] mt-1">
-                After save, a free-account invite is emailed here (skipped if blank).
+                Invite goes to the primary person email when set, otherwise this main office email
+                (skipped if both are blank).
               </p>
             )}
             </div>
           </div>
-          <div>
-            <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-              Contact Name
-            </label>
-            <input
-              className="input w-full"
-              value={value.contact_name}
-              disabled={disabled}
-              placeholder="Primary contact person"
-              onChange={(e) => setField('contact_name', e.target.value)}
-            />
+          <p className="text-xs text-[var(--text3)]">
+            Main office is the clinic switchboard. Add people below and mark exactly one as the
+            primary contact for estimates, invoices, and invites.
+          </p>
+          {value.contact_name.trim() && filledRoles.length === 0 && (
+            <p className="text-xs rounded-lg border border-[var(--border)] bg-[var(--surface2)] px-3 py-2 text-[var(--text)]">
+              On file: <strong>{value.contact_name.trim()}</strong> (legacy single contact). Assign
+              a role below to replace this as the primary person.
+            </p>
+          )}
+          <div className="space-y-3">
+            {DIRECTORY_CONTACT_ROLES.map((role) => {
+              const fields = directory.roles[role];
+              const filled = isRoleFilled(fields);
+              const selected = directory.primaryRole === role;
+              return (
+                <div
+                  key={role}
+                  className={`rounded-xl border p-3 ${
+                    selected
+                      ? 'border-[var(--gold-border)] bg-[var(--gold-glow)]/20'
+                      : 'border-[var(--border)] bg-[var(--surface2)]'
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-3 mb-2">
+                    <label className="flex items-center gap-2 min-w-0">
+                      <input
+                        type="radio"
+                        name="directory-primary-contact"
+                        className="accent-[var(--gold)]"
+                        checked={selected}
+                        disabled={disabled || !filled}
+                        onChange={() => setPrimaryRole(role)}
+                      />
+                      <span className="text-[11px] font-bold uppercase tracking-wide text-[var(--gold)]">
+                        {DIRECTORY_ROLE_LABELS[role]}
+                      </span>
+                    </label>
+                    {selected && filled && (
+                      <span className="text-[10px] font-bold uppercase tracking-wide text-[var(--gold)]">
+                        Primary
+                      </span>
+                    )}
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                    <input
+                      className="input w-full"
+                      placeholder="Name"
+                      value={fields.name}
+                      disabled={disabled}
+                      onChange={(e) => setRoleField(role, 'name', e.target.value)}
+                    />
+                    <input
+                      className="input w-full"
+                      type="email"
+                      placeholder="Email"
+                      value={fields.email}
+                      disabled={disabled}
+                      onChange={(e) => setRoleField(role, 'email', e.target.value)}
+                    />
+                    <input
+                      className="input w-full"
+                      type="tel"
+                      placeholder="Phone"
+                      value={fields.phone}
+                      disabled={disabled}
+                      onChange={(e) => setRoleField(role, 'phone', e.target.value)}
+                    />
+                  </div>
+                </div>
+              );
+            })}
           </div>
+          {filledRoles.length === 0 ? (
+            <p className="text-[11px] text-[var(--text3)]">
+              No person contacts yet. Radios stay off until a role has a name, email, or phone.
+              Estimates and invites will use the main office email/phone
+              {value.contact_name.trim() ? `, or “${value.contact_name.trim()}”` : ''}.
+            </p>
+          ) : (
+            <p className="text-[11px] text-[var(--text3)]">
+              Primary contact: {DIRECTORY_ROLE_LABELS[directory.primaryRole || filledRoles[0]]}.
+              Empty roles are fine.
+            </p>
+          )}
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
               Address

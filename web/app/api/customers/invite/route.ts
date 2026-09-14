@@ -14,6 +14,7 @@ import {
   signCustomerInvite,
   verifyCustomerInvite,
 } from '@/lib/customer-invite';
+import { fetchDirectoryContactSources, pickCrmReachEmail, resolveDirectoryContact } from '@/lib/customer-contacts';
 
 /**
  * GET /api/customers/invite?token=
@@ -103,11 +104,18 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Customer is not in your directory' }, { status: 403 });
     }
 
-    const { data: customer } = await supabase
+    let { data: customer, error: customerErr } = await supabase
       .from('organizations')
-      .select('id, name, email, contact_name, type')
+      .select('id, name, email, contact_name, type, directory_contacts')
       .eq('id', customerId)
       .maybeSingle();
+    if (customerErr) {
+      ({ data: customer, error: customerErr } = await supabase
+        .from('organizations')
+        .select('id, name, email, contact_name, type')
+        .eq('id', customerId)
+        .maybeSingle());
+    }
 
     if (!customer) {
       return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
@@ -117,7 +125,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Not a customer organization' }, { status: 400 });
     }
 
-    const toEmail = String(customer.email || '').trim();
+    const sources = await fetchDirectoryContactSources(supabase, customer.id);
+    const reach = pickCrmReachEmail({
+      directoryContacts: sources.directoryContacts ?? (customer as { directory_contacts?: unknown }).directory_contacts,
+      contactRows: sources.contactRows,
+      officeEmail: sources.officeEmail ?? customer.email,
+    });
+    const resolved = resolveDirectoryContact({
+      directoryContacts: sources.directoryContacts ?? (customer as { directory_contacts?: unknown }).directory_contacts,
+      contactRows: sources.contactRows,
+      legacyContactName: sources.legacyContactName ?? (customer as { contact_name?: string | null }).contact_name,
+      officeEmail: sources.officeEmail ?? customer.email,
+    });
+    const toEmail = reach.email;
     if (!toEmail) {
       return NextResponse.json({
         ok: true,
@@ -157,14 +177,14 @@ export async function POST(req: NextRequest) {
     const subject = customerInviteSubject(companyName);
     const html = buildCustomerInviteHtml({
       companyName,
-      contactName: (customer as { contact_name?: string | null }).contact_name,
+      contactName: resolved.name || (customer as { contact_name?: string | null }).contact_name,
       serviceCompanyName: callerOrg?.name || null,
       signupUrl,
       loginUrl,
     });
     const text = buildCustomerInviteText({
       companyName,
-      contactName: (customer as { contact_name?: string | null }).contact_name,
+      contactName: resolved.name || (customer as { contact_name?: string | null }).contact_name,
       serviceCompanyName: callerOrg?.name || null,
       signupUrl,
       loginUrl,
