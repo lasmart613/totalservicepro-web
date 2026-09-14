@@ -49,10 +49,41 @@ export function estimateCustomerLoginPath(
   return `/login?next=${encodeURIComponent(estimateCustomerPath(estimateId, opts))}`;
 }
 
-/** Tokenized email CTA. Server redirects /e/{token} → /estimates/{id}. */
-export function estimateActionUrl(token: string, opts?: { changes?: boolean }): string {
+export type EstimateActionQuery = {
+  /** @deprecated use action: 'modify' */
+  changes?: boolean;
+  action?: 'approve' | 'reject' | 'modify';
+};
+
+function estimateActionQuery(opts?: EstimateActionQuery): string {
+  if (opts?.action === 'approve') return '?action=approve';
+  if (opts?.action === 'reject') return '?action=reject';
+  if (opts?.action === 'modify' || opts?.changes) return '?action=modify';
+  return '';
+}
+
+/** Tokenized email CTA. Customer acts on /e/{token} without a clinic login. */
+export function estimateActionUrl(token: string, opts?: EstimateActionQuery): string {
   const base = `${siteOrigin()}/e/${encodeURIComponent(token)}`;
-  return opts?.changes ? `${base}?changes=1` : base;
+  return `${base}${estimateActionQuery(opts)}`;
+}
+
+/** Strip query/hash so Approve / Reject / Modify can be derived from one token URL. */
+export function estimateActionBaseUrl(actionUrl: string): string {
+  const raw = String(actionUrl || '').trim();
+  if (!raw) return '';
+  const cut = raw.split('#')[0];
+  const q = cut.indexOf('?');
+  return q >= 0 ? cut.slice(0, q) : cut;
+}
+
+export function estimateEmailActionUrl(
+  actionUrl: string,
+  action: 'approve' | 'reject' | 'modify'
+): string {
+  const base = estimateActionBaseUrl(actionUrl);
+  if (!base) return '';
+  return `${base}?action=${action}`;
 }
 
 export function serviceRequestShareText(opts: {

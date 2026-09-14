@@ -2,18 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { loadBillingCaller } from '@/lib/billing/billing-caller';
 import {
-  approveEstimateCreatingUnscheduledRequest,
   approvedTicketRefFromEstimate,
   callerRoleOnEstimate,
   customerOrgIdFromEstimate,
 } from '@/lib/billing/approve-estimate';
 import {
-  CUSTOMER_ACTION_CHANGES,
-  persistCustomerAction,
+  applyEstimateCustomerAction,
   publicEstimatePayload,
   resolveOrgNotifyEmails,
 } from '@/lib/billing/estimate-action';
-import { isEstimateExpired } from '@/lib/billing/save-helpers';
+import { isEstimateExpired, parseCustomerActionKind } from '@/lib/billing/save-helpers';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
@@ -123,7 +121,7 @@ export async function GET(
 
 /**
  * POST /api/billing/estimates/:id
- * Body: { action: 'approve' | 'request_changes', note? }
+ * Body: { action: 'approve' | 'reject' | 'modify', note? }
  * Approve is clinic-only and creates one unscheduled shop-owned ticket.
  */
 export async function POST(
@@ -145,13 +143,7 @@ export async function POST(
     }
 
     const body = await req.json().catch(() => ({}));
-    const rawAction = String(body.action || '').toLowerCase();
-    const action =
-      rawAction === 'approve' || rawAction === 'approved'
-        ? 'approve'
-        : rawAction === 'request_changes' || rawAction === 'changes_requested'
-          ? 'request_changes'
-          : null;
+    const action = parseCustomerActionKind(body.action);
     if (!action) {
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
     }
@@ -165,13 +157,13 @@ export async function POST(
       userId: ctxAuth.user.id,
       email: ctxAuth.user.email,
     });
-    if (action === 'approve' && role !== 'customer') {
+    if (action === 'approved' && role !== 'customer') {
       return NextResponse.json(
         { error: 'Sign in as the clinic this estimate was written for to approve it.' },
         { status: 403 }
       );
     }
-    if (action === 'request_changes' && !role) {
+    if (!role) {
       return NextResponse.json(
         { error: 'Sign in as the clinic this estimate was written for.' },
         { status: 403 }
@@ -181,60 +173,40 @@ export async function POST(
     const { companyName } = await resolveOrgNotifyEmails(admin, est);
     const payload = publicEstimatePayload(est, companyName);
 
-    if (action === 'approve') {
-      if (payload.expired || isEstimateExpired(est)) {
-        return NextResponse.json(
-          {
-            error: 'This estimate has expired. Please contact the company to request an updated quote.',
-            estimate: { ...payload, estimateId: est.id },
-            expired: true,
-          },
-          { status: 409 }
-        );
-      }
-
-      const { already, ticket } = await approveEstimateCreatingUnscheduledRequest(admin, est);
-      return NextResponse.json({
-        ok: true,
-        already,
-        action: 'approved',
-        estimate: {
-          ...payload,
-          estimateId: est.id,
-          customerAction: 'approved',
-          customerActionAt: already ? payload.customerActionAt : new Date().toISOString(),
-        },
-        request: {
-          id: ticket.id,
-          number: ticket.ticket_number,
-        },
-        companyName,
-      });
-    }
-
-    const note = String(body.note || '').trim();
-    if (!note) {
+    if (payload.expired || isEstimateExpired(est)) {
       return NextResponse.json(
-        { error: 'Please enter a short note describing the changes you need.' },
-        { status: 400 }
+        {
+          error: 'This estimate has expired. Please contact the company to request an updated quote.',
+          estimate: { ...payload, estimateId: est.id },
+          expired: true,
+        },
+        { status: 409 }
       );
     }
 
-    const { already } = await persistCustomerAction(admin, est, CUSTOMER_ACTION_CHANGES, note);
+    const note = String(body.note || '').trim() || null;
+    const result = await applyEstimateCustomerAction(admin, est, action, note);
+    const created = result.ticket;
+    const existing = approvedTicketRefFromEstimate(est);
+    const request = created
+      ? { id: created.id, number: created.ticket_number }
+      : existing.id || existing.number
+        ? { id: existing.id, number: existing.number }
+        : null;
     return NextResponse.json({
       ok: true,
-      already,
-      action: 'changes_requested',
+      already: result.already,
+      conflict: result.conflict,
+      action: result.action,
       estimate: {
         ...payload,
         estimateId: est.id,
-        customerAction: 'changes_requested',
-        customerActionAt: already ? payload.customerActionAt : new Date().toISOString(),
-        customerActionNote: note,
+        customerAction: result.action,
+        customerActionAt: result.already ? payload.customerActionAt : new Date().toISOString(),
+        customerActionNote:
+          result.action === 'changes_requested' ? note || payload.customerActionNote : payload.customerActionNote,
       },
-      request: approvedTicketRefFromEstimate(est).id
-        ? approvedTicketRefFromEstimate(est)
-        : null,
+      request,
       companyName,
     });
   } catch (e: any) {

@@ -1,71 +1,44 @@
 /**
- * Tokenized public estimate actions (approve / request changes).
+ * Tokenized public estimate actions (approve / reject / modify).
  * Token is created at send time; customer_action is stored beside status
  * so list filters (draft/sent/invoiced/expired) stay unchanged.
  */
 
-import { randomBytes } from 'crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { SITE_ORIGIN, estimateActionUrl } from '@/lib/share';
+import { estimateActionUrl } from '@/lib/share';
+import { approveEstimateCreatingUnscheduledRequest } from '@/lib/billing/approve-estimate';
 import {
   ESTIMATE_VALID_DAYS,
   customerActionFromEstimate,
   customerActionLabel,
   isEstimateExpired,
   parseJsonField,
+  resolveCustomerActionApply,
   type CustomerActionKind,
 } from '@/lib/billing/save-helpers';
+import {
+  CUSTOMER_ACTION_APPROVED,
+  CUSTOMER_ACTION_CHANGES,
+  CUSTOMER_ACTION_REJECTED,
+  buildOrgNotifyEmail,
+  escHtml,
+  generateEstimateActionToken,
+  isValidEstimateActionToken,
+  mergeCustomerActionIntoEstimateData,
+} from '@/lib/billing/estimate-action-helpers';
 
 export { customerActionFromEstimate, customerActionLabel, estimateActionUrl };
-export const CUSTOMER_ACTION_APPROVED = 'approved' as const;
-export const CUSTOMER_ACTION_CHANGES = 'changes_requested' as const;
-
-export type { CustomerActionKind };
-
-export type EstimateCustomerAction = {
-  action: CustomerActionKind | null;
-  at: string | null;
-  note: string | null;
-  token: string | null;
+export {
+  CUSTOMER_ACTION_APPROVED,
+  CUSTOMER_ACTION_CHANGES,
+  CUSTOMER_ACTION_REJECTED,
+  buildOrgNotifyEmail,
+  generateEstimateActionToken,
+  isValidEstimateActionToken,
+  mergeCustomerActionIntoEstimateData,
 };
-
-const TOKEN_RE = /^[A-Za-z0-9_-]{20,128}$/;
-
-export function isValidEstimateActionToken(token: unknown): token is string {
-  return typeof token === 'string' && TOKEN_RE.test(token.trim());
-}
-
-export function generateEstimateActionToken(): string {
-  return randomBytes(32).toString('base64url');
-}
-
-export function mergeCustomerActionIntoEstimateData(
-  estimateData: unknown,
-  fields: Partial<EstimateCustomerAction> & { token?: string | null }
-): Record<string, unknown> {
-  const ed = { ...parseJsonField(estimateData) };
-  if (fields.token != null) ed.customer_action_token = fields.token;
-  if (fields.action !== undefined) ed.customer_action = fields.action;
-  if (fields.at !== undefined) ed.customer_action_at = fields.at;
-  if (fields.note !== undefined) ed.customer_action_note = fields.note;
-  return ed;
-}
-
-function escAttr(s: string) {
-  return String(s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
-
-function escHtml(s: unknown) {
-  return String(s == null ? '' : s)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
+export type { CustomerActionKind };
+export type { EstimateCustomerAction } from '@/lib/billing/estimate-action-helpers';
 
 export function readExistingActionToken(est: any): string | null {
   return customerActionFromEstimate(est || {}).token;
@@ -126,14 +99,17 @@ export async function persistCustomerAction(
   estimate: any,
   action: CustomerActionKind,
   note: string | null
-): Promise<{ already: boolean }> {
+): Promise<{ already: boolean; conflict: boolean; action: CustomerActionKind }> {
   const prev = customerActionFromEstimate(estimate);
-  if (action === CUSTOMER_ACTION_APPROVED && prev.action === CUSTOMER_ACTION_APPROVED) {
-    return { already: true };
+  const resolved = resolveCustomerActionApply(prev.action, action);
+  if (!resolved.apply) {
+    return { already: true, conflict: resolved.conflict, action: prev.action || action };
   }
   const at = new Date().toISOString();
   const nextNote =
-    action === CUSTOMER_ACTION_CHANGES ? (note || '').trim() || null : prev.note;
+    action === CUSTOMER_ACTION_CHANGES
+      ? (note || '').trim() || prev.note
+      : prev.note;
   const ed = mergeCustomerActionIntoEstimateData(estimate.estimate_data, {
     token: prev.token,
     action,
@@ -151,12 +127,48 @@ export async function persistCustomerAction(
   ];
   for (const body of attempts) {
     const { error } = await client.from('service_estimates').update(body).eq('id', estimate.id);
-    if (!error) return { already: false };
+    if (!error) return { already: false, conflict: false, action };
     if (!/column|schema cache|does not exist/i.test(error.message || '')) {
       throw new Error(error.message);
     }
   }
   throw new Error('Could not save customer action');
+}
+
+/**
+ * Apply a tokenized email CTA. Approve still creates the unscheduled shop ticket
+ * when possible; if that write fails the customer_action is still recorded.
+ */
+export async function applyEstimateCustomerAction(
+  client: SupabaseClient,
+  estimate: any,
+  action: CustomerActionKind,
+  note: string | null
+): Promise<{
+  already: boolean;
+  conflict: boolean;
+  action: CustomerActionKind;
+  ticket?: { id: string | number; ticket_number: string | null } | null;
+}> {
+  const prev = customerActionFromEstimate(estimate);
+  const resolved = resolveCustomerActionApply(prev.action, action);
+  if (!resolved.apply) {
+    return { already: true, conflict: resolved.conflict, action: prev.action || action };
+  }
+
+  if (action === CUSTOMER_ACTION_APPROVED) {
+    try {
+      const { already, ticket } = await approveEstimateCreatingUnscheduledRequest(client, estimate);
+      return { already, conflict: false, action, ticket };
+    } catch (e) {
+      console.warn('approve ticket from estimate action failed; recording approval only', e);
+      const saved = await persistCustomerAction(client, estimate, action, note);
+      return { ...saved, ticket: null };
+    }
+  }
+
+  const saved = await persistCustomerAction(client, estimate, action, note);
+  return { ...saved, ticket: null };
 }
 
 function isValidEmail(e: string) {
@@ -218,49 +230,6 @@ export async function resolveOrgNotifyEmails(
   }
 
   return { emails: Array.from(emails), companyName };
-}
-
-export function buildOrgNotifyEmail(opts: {
-  action: CustomerActionKind;
-  companyName: string;
-  customerName: string;
-  estimateNumber: string;
-  total: number;
-  note: string | null;
-  estimateId: string | number;
-}): { subject: string; html: string } {
-  const num = opts.estimateNumber || String(opts.estimateId);
-  const total = `$${(Number(opts.total) || 0).toFixed(2)}`;
-  const approved = opts.action === CUSTOMER_ACTION_APPROVED;
-  const subject = approved
-    ? `Estimate ${num} approved by ${opts.customerName}`
-    : `Changes requested on estimate ${num} by ${opts.customerName}`;
-  const detailUrl = `${(SITE_ORIGIN || 'https://repairplanet.net').replace(/\/$/, '')}/estimates/new?id=${encodeURIComponent(String(opts.estimateId))}`;
-  const noteBlock =
-    opts.note && opts.note.trim()
-      ? `<div style="margin:16px 0;padding:12px;background:#f8f4e8;border:1px solid #e8d9a0;border-radius:6px;">` +
-        `<div style="font-size:11px;font-weight:700;color:#8a6f2e;text-transform:uppercase;margin-bottom:6px;">Customer note</div>` +
-        `<div style="font-size:14px;color:#111;white-space:pre-wrap;">${escHtml(opts.note)}</div></div>`
-      : '';
-
-  const html =
-    `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;font-size:14px;line-height:1.45;max-width:640px;margin:auto;">` +
-    `<div style="border-bottom:3px solid #FBBF24;padding-bottom:8px;margin-bottom:16px;">` +
-    `<div style="font-size:18px;font-weight:800;">${escHtml(opts.companyName)}</div>` +
-    `<div style="font-size:13px;color:#555;">Estimate customer response</div></div>` +
-    `<p style="margin:0 0 12px;"><strong>${escHtml(opts.customerName)}</strong> ` +
-    (approved
-      ? `approved estimate <strong>${escHtml(num)}</strong> (${escHtml(total)}).`
-      : `requested changes on estimate <strong>${escHtml(num)}</strong> (${escHtml(total)}).`) +
-    `</p>` +
-    noteBlock +
-    `<p style="margin:16px 0;"><a href="${escAttr(detailUrl)}" ` +
-    `style="display:inline-block;background:#FBBF24;color:#111827;padding:10px 18px;border-radius:8px;` +
-    `text-decoration:none;font-weight:700;">Open estimate</a></p>` +
-    `<p style="font-size:12px;color:#666;margin-top:20px;">Sent via Total Service Pro · repairplanet.net</p>` +
-    `</div>`;
-
-  return { subject, html };
 }
 
 export async function sendResendHtml(opts: {

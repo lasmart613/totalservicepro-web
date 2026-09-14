@@ -6,6 +6,12 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { loginHref } from '@/lib/login-next';
 import { estimateCustomerPath } from '@/lib/share';
+import {
+  customerActionConfirmationTitle,
+  parseCustomerActionKind,
+  type CustomerActionKind,
+  type EstimateEmailAction,
+} from '@/lib/billing/save-helpers';
 
 type EstimateView = {
   estimateId?: string | number | null;
@@ -17,7 +23,7 @@ type EstimateView = {
   validUntil: string | null;
   createdAt: string | null;
   expired: boolean;
-  customerAction: 'approved' | 'changes_requested' | null;
+  customerAction: CustomerActionKind | null;
   customerActionAt: string | null;
   customerActionNote: string | null;
   customerOrgLinked?: boolean;
@@ -51,8 +57,8 @@ export default function EstimateCustomerClient({
   const [request, setRequest] = useState<RequestRef>(null);
   const [note, setNote] = useState('');
   const [showChanges, setShowChanges] = useState(wantChanges);
-  const [submitting, setSubmitting] = useState<'approve' | 'request_changes' | null>(null);
-  const [done, setDone] = useState<'approved' | 'changes_requested' | null>(null);
+  const [submitting, setSubmitting] = useState<EstimateEmailAction | null>(null);
+  const [done, setDone] = useState<CustomerActionKind | null>(null);
 
   async function authHeader(): Promise<HeadersInit | null> {
     const { data } = await supabase.auth.getSession();
@@ -92,7 +98,9 @@ export default function EstimateCustomerClient({
           setEst(json.estimate);
           setRole(json.role || null);
           setRequest(json.request || null);
-          if (json.estimate.customerAction === 'approved' || json.request?.number) {
+          if (json.estimate.customerAction) {
+            setDone(json.estimate.customerAction);
+          } else if (json.request?.number) {
             setDone('approved');
           }
         }
@@ -107,12 +115,7 @@ export default function EstimateCustomerClient({
     };
   }, [estimateId, wantChanges]);
 
-  async function submit(action: 'approve' | 'request_changes') {
-    if (action === 'request_changes' && !note.trim()) {
-      setError('Please enter a short note describing the changes you need.');
-      setShowChanges(true);
-      return;
-    }
+  async function submit(action: EstimateEmailAction) {
     setSubmitting(action);
     setError('');
     try {
@@ -126,7 +129,7 @@ export default function EstimateCustomerClient({
         headers,
         body: JSON.stringify({
           action,
-          note: action === 'request_changes' ? note.trim() : undefined,
+          note: action === 'modify' ? note.trim() || undefined : undefined,
         }),
       });
       const json = await res.json().catch(() => ({}));
@@ -141,8 +144,8 @@ export default function EstimateCustomerClient({
       }
       if (json.estimate) setEst(json.estimate);
       if (json.request) setRequest(json.request);
-      setDone(action === 'approve' ? 'approved' : 'changes_requested');
-      if (action === 'request_changes') setShowChanges(false);
+      setDone(parseCustomerActionKind(json.action) || parseCustomerActionKind(action));
+      if (action === 'modify') setShowChanges(false);
     } catch {
       setError('Network error. Please try again or call the company.');
     } finally {
@@ -176,12 +179,16 @@ export default function EstimateCustomerClient({
                   Back to dashboard
                 </Link>
               </div>
-            ) : est && done === 'approved' ? (
+            ) : est && done && !showChanges ? (
               <div className="text-center py-4">
-                <div className="text-4xl mb-3">✓</div>
-                <h1 className="text-2xl font-extrabold mb-2">Estimate approved</h1>
+                <div className="text-4xl mb-3">
+                  {done === 'approved' ? '✓' : done === 'rejected' ? '✕' : '✎'}
+                </div>
+                <h1 className="text-2xl font-extrabold mb-2">
+                  {customerActionConfirmationTitle(done)}
+                </h1>
                 <p className="text-[var(--text2)] leading-relaxed">
-                  {requestNumber ? (
+                  {done === 'approved' && requestNumber ? (
                     <>
                       Service request <strong className="text-[var(--text)]">{requestNumber}</strong> is
                       unscheduled with <strong className="text-[var(--text)]">{company}</strong>. Other
@@ -189,8 +196,7 @@ export default function EstimateCustomerClient({
                     </>
                   ) : (
                     <>
-                      We’ve recorded your approval for{' '}
-                      <strong className="text-[var(--text)]">{company}</strong>.
+                      We’ve notified <strong className="text-[var(--text)]">{company}</strong>.
                     </>
                   )}
                 </p>
@@ -199,25 +205,6 @@ export default function EstimateCustomerClient({
                     {est.estimateNumber} · {money(est.total)}
                   </p>
                 )}
-              </div>
-            ) : est && done === 'changes_requested' && !showChanges ? (
-              <div className="text-center py-4">
-                <div className="text-4xl mb-3">✉</div>
-                <h1 className="text-2xl font-extrabold mb-2">Note sent</h1>
-                <p className="text-[var(--text2)] leading-relaxed">
-                  Your request was sent to <strong className="text-[var(--text)]">{company}</strong>.
-                  They’ll follow up with you.
-                </p>
-                <button
-                  type="button"
-                  className="btn btn-secondary mt-6"
-                  onClick={() => {
-                    setDone(null);
-                    setShowChanges(false);
-                  }}
-                >
-                  Back to estimate
-                </button>
               </div>
             ) : est ? (
               <>
@@ -262,7 +249,7 @@ export default function EstimateCustomerClient({
 
                 {est.customerAction === 'changes_requested' && est.customerActionNote && (
                   <div className="mt-4 p-3 rounded-xl border border-amber-700/40 bg-amber-950/20 text-sm">
-                    A change request was already sent
+                    A modification request was already sent
                     {est.customerActionAt ? ` on ${formatDate(est.customerActionAt)}` : ''}.
                   </div>
                 )}
@@ -270,21 +257,32 @@ export default function EstimateCustomerClient({
                 {role === 'customer' &&
                   (est.expired ? (
                     <div className="mt-6 p-4 rounded-xl border border-red-700/50 bg-red-950/30 text-sm leading-relaxed">
-                      This estimate has expired and can no longer be approved online. Please contact{' '}
+                      This estimate has expired and can no longer be updated online. Please contact{' '}
                       <strong>{company}</strong> for an updated quote.
                     </div>
                   ) : (
-                    <button
-                      type="button"
-                      className="btn btn-primary w-full mt-6 text-base py-3"
-                      disabled={!!submitting}
-                      onClick={() => submit('approve')}
-                    >
-                      {submitting === 'approve' ? 'Approving…' : 'Approve'}
-                    </button>
+                    <div className="mt-6 grid gap-3">
+                      <button
+                        type="button"
+                        className="btn btn-primary w-full text-base py-3"
+                        disabled={!!submitting}
+                        onClick={() => submit('approve')}
+                      >
+                        {submitting === 'approve' ? 'Approving…' : 'Approve'}
+                      </button>
+                      <button
+                        type="button"
+                        className="btn w-full"
+                        style={{ background: '#7f1d1d', color: '#fecaca', borderColor: '#991b1b' }}
+                        disabled={!!submitting}
+                        onClick={() => submit('reject')}
+                      >
+                        {submitting === 'reject' ? 'Rejecting…' : 'Reject'}
+                      </button>
+                    </div>
                   ))}
 
-                {role === 'customer' && (
+                {role === 'customer' && !est.expired && (
                   <div className="mt-6 pt-5 border-t border-[var(--border2)]">
                     <button
                       type="button"
@@ -292,32 +290,31 @@ export default function EstimateCustomerClient({
                       disabled={!!submitting}
                       onClick={() => setShowChanges((v) => !v)}
                     >
-                      Request Changes
+                      Modify
                     </button>
                     {showChanges && (
                       <form
                         className="mt-4"
                         onSubmit={(e) => {
                           e.preventDefault();
-                          submit('request_changes');
+                          submit('modify');
                         }}
                       >
                         <label className="text-xs text-[var(--text3)] font-semibold">
-                          What would you like changed?
+                          Optional note for the service company
                         </label>
                         <textarea
                           className="input mt-1 min-h-[110px]"
-                          required
                           value={note}
                           onChange={(e) => setNote(e.target.value)}
-                          placeholder="Short note for the service company…"
+                          placeholder="Short note (optional)…"
                         />
                         <button
                           type="submit"
                           className="btn btn-primary w-full mt-3"
-                          disabled={!!submitting || !note.trim()}
+                          disabled={!!submitting}
                         >
-                          {submitting === 'request_changes' ? 'Sending…' : 'Send note'}
+                          {submitting === 'modify' ? 'Sending…' : 'Request modification'}
                         </button>
                       </form>
                     )}

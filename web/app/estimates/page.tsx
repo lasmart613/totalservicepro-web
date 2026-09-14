@@ -15,8 +15,15 @@ import {
   money,
   parseJsonField,
   validUntilLabel,
+  type CustomerActionKind,
 } from '@/lib/billing/save-helpers';
 import { approvedTicketRefFromEstimate } from '@/lib/billing/approve-estimate';
+import {
+  ESTIMATE_LIST_POLL_MS,
+  estimateRowBelongsToViewer,
+  mergeEstimateLiveRow,
+} from '@/lib/billing/estimate-list-live';
+import { isUnreadPollVisible } from '@/lib/unread-poll';
 
 type EstFilter = 'active' | 'draft' | 'pending' | 'invoiced' | 'expired' | 'all';
 
@@ -66,6 +73,9 @@ export default function EstimatesListPage() {
   const [activeFilter, setActiveFilter] = useState<EstFilter>('active');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [viewer, setViewer] = useState<{ orgId: string | number | null; userId: string } | null>(
+    null
+  );
 
   useEffect(() => {
     init();
@@ -93,6 +103,7 @@ export default function EstimatesListPage() {
         .maybeSingle();
 
       const orgId = coerceOrgId(profile?.organization_id);
+      setViewer({ orgId, userId: user.id });
       await loadEstimates(orgId, user.id);
     } catch (e) {
       console.error(e);
@@ -168,6 +179,68 @@ export default function EstimatesListPage() {
     setRows(list);
   }
 
+  useEffect(() => {
+    if (!viewer) return;
+
+    const channel = supabase
+      .channel(`shop-estimates-${viewer.userId}`)
+      .on(
+        'postgres_changes',
+        { event: '*', schema: 'public', table: 'service_estimates' },
+        (payload) => {
+          const incoming = (payload.new || payload.old) as EstimateRow | undefined;
+          if (!incoming || incoming.id == null) return;
+          if (
+            !estimateRowBelongsToViewer(incoming, viewer) &&
+            payload.eventType !== 'UPDATE'
+          ) {
+            return;
+          }
+          setRows((prev) => {
+            const known = prev.some((row) => String(row.id) === String(incoming.id));
+            if (!known && !estimateRowBelongsToViewer(incoming, viewer)) return prev;
+            if (payload.eventType === 'DELETE') {
+              return prev.filter((row) => String(row.id) !== String(incoming.id));
+            }
+            return mergeEstimateLiveRow(prev, incoming);
+          });
+        }
+      )
+      .subscribe();
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let stopped = false;
+    const arm = () => {
+      if (stopped || !isUnreadPollVisible(document.visibilityState)) return;
+      timer = setTimeout(async () => {
+        timer = null;
+        if (stopped || !isUnreadPollVisible(document.visibilityState)) return;
+        try {
+          await loadEstimates(viewer.orgId, viewer.userId);
+        } catch {
+          /* next tick */
+        }
+        arm();
+      }, ESTIMATE_LIST_POLL_MS);
+    };
+    const onVis = () => {
+      if (timer) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      arm();
+    };
+    document.addEventListener('visibilitychange', onVis);
+    arm();
+
+    return () => {
+      stopped = true;
+      if (timer) clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVis);
+      supabase.removeChannel(channel);
+    };
+  }, [viewer, supabase]);
+
   function applyFilters() {
     let res = [...rows];
     if (activeFilter === 'active') {
@@ -213,11 +286,12 @@ export default function EstimatesListPage() {
     setFiltered(res);
   }
 
-  async function recordCustomerAction(est: EstimateRow, action: 'approved' | 'changes_requested') {
+  async function recordCustomerAction(est: EstimateRow, action: CustomerActionKind) {
     let note = '';
     if (action === 'changes_requested') {
-      note = window.prompt('What changes did the customer request?') || '';
-      if (!note.trim()) return;
+      note = window.prompt('Optional note from the customer about the modification:') || '';
+    } else if (action === 'rejected') {
+      if (!window.confirm('Mark this estimate as rejected by the customer?')) return;
     } else if (!window.confirm('Mark this estimate as approved by the customer?')) {
       return;
     }
@@ -421,7 +495,9 @@ export default function EstimatesListPage() {
                             className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ml-1 ${
                               cust.action === 'approved'
                                 ? 'bg-green-900/40 text-green-200 border-green-700'
-                                : 'bg-amber-900/40 text-amber-200 border-amber-700'
+                                : cust.action === 'rejected'
+                                  ? 'bg-red-900/40 text-red-200 border-red-700'
+                                  : 'bg-amber-900/40 text-amber-200 border-amber-700'
                             }`}
                           >
                             {actionLabel}
@@ -436,6 +512,11 @@ export default function EstimatesListPage() {
                       {est.device_model && (
                         <div className="text-xs text-[var(--text3)] mt-0.5 truncate">
                           {est.device_model}
+                        </div>
+                      )}
+                      {cust.note && (
+                        <div className="text-xs text-[var(--text2)] mt-1">
+                          Customer note: {cust.note}
                         </div>
                       )}
                     </Link>
@@ -467,7 +548,11 @@ export default function EstimatesListPage() {
                           Convert to Invoice
                         </Link>
                       )}
-                      {st !== 'expired' && st !== 'invoiced' && st !== 'cancelled' && cust.action !== 'approved' && (
+                      {st !== 'expired' &&
+                        st !== 'invoiced' &&
+                        st !== 'cancelled' &&
+                        cust.action !== 'approved' &&
+                        cust.action !== 'rejected' && (
                         <>
                           <button
                             type="button"
@@ -479,11 +564,19 @@ export default function EstimatesListPage() {
                           </button>
                           <button
                             type="button"
+                            className="btn text-xs px-3 py-1.5"
+                            style={{ display: 'inline-block', margin: '0 8px 8px 0', background: '#7f1d1d', color: '#fecaca', borderColor: '#991b1b' }}
+                            onClick={() => recordCustomerAction(est, 'rejected')}
+                          >
+                            Reject
+                          </button>
+                          <button
+                            type="button"
                             className="btn btn-secondary text-xs px-3 py-1.5"
                             style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
                             onClick={() => recordCustomerAction(est, 'changes_requested')}
                           >
-                            Request Changes
+                            Modify
                           </button>
                         </>
                       )}
