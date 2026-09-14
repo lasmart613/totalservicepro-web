@@ -10,6 +10,8 @@ export type OrgPlanFields = {
   subscription_tier?: string | null;
   plan?: string | null;
   manual_slots?: number | null;
+  premium_until?: string | null;
+  premium_grant?: string | null;
 };
 
 /** Free default already in /manuals. Premium is 15. Team/Enterprise is unlimited. */
@@ -39,14 +41,33 @@ function isExactPaidName(value: unknown): boolean {
   return isExactName(value, PAID_SUBSCRIPTION_TIERS);
 }
 
+export function orgHasNamedPaidPlan(org: OrgPlanFields | null | undefined): boolean {
+  if (!org) return false;
+  return isExactPaidName(org.subscription_tier) || isExactPaidName(org.plan);
+}
+
+/** True when complimentary premium_until is present and in the past. */
+export function complimentaryPremiumExpired(
+  org: OrgPlanFields | null | undefined,
+  now: Date = new Date()
+): boolean {
+  if (!org?.premium_until) return false;
+  const until = Date.parse(String(org.premium_until));
+  if (!Number.isFinite(until)) return false;
+  return until <= now.getTime();
+}
+
 /**
  * Paid detection from PR #22: is_premium === true OR plan/tier exactly
  * premium | team | enterprise. Do not treat "pro" as paid.
+ * Expired complimentary (premium_until in the past) is Free unless a named
+ * paid plan remains — that protects Stripe / legacy paid orgs.
  */
-export function orgIsPaid(org: OrgPlanFields | null | undefined): boolean {
+export function orgIsPaid(org: OrgPlanFields | null | undefined, now: Date = new Date()): boolean {
   if (!org) return false;
+  if (complimentaryPremiumExpired(org, now)) return orgHasNamedPaidPlan(org);
   if (org.is_premium === true) return true;
-  return isExactPaidName(org.subscription_tier) || isExactPaidName(org.plan);
+  return orgHasNamedPaidPlan(org);
 }
 
 /** Team or Enterprise by exact plan/tier name only. "pro" is not top-tier. */

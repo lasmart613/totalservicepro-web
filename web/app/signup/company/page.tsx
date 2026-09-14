@@ -156,7 +156,7 @@ export default function CompanySignup() {
             <span className="font-extrabold text-2xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </div>
           <h1 className="text-2xl font-bold mt-1">Register as a repair company</h1>
-          <p className="text-sm text-[var(--text3)]">Repair companies and independent techs that service aesthetic and medical lasers. First user is admin. Invite field engineers from Team.</p>
+          <p className="text-sm text-[var(--text3)]">Repair companies and independent techs that service aesthetic and medical lasers. First user is admin. Invite field engineers from Team. Soft beta: two months of Premium on us — no card required.</p>
         </div>
 
         <div className="card p-6">

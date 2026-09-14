@@ -7,6 +7,7 @@ import { fetchAllPages } from '@/lib/supabase/paginate';
 export const dynamic = 'force-dynamic';
 
 const ORG_SELECTS = [
+  'id, name, type, email, created_at, created_by, is_premium, subscription_tier, plan, premium_until, premium_grant',
   'id, name, type, email, created_at, created_by, is_premium, subscription_tier, plan',
   'id, name, type, email, created_at, created_by, is_premium, subscription_tier',
   'id, name, type, email, created_at, created_by, is_premium',

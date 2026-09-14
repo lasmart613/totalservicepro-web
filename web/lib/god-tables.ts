@@ -93,11 +93,23 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Organizations',
     group: 'people',
     description: 'Shops, clinics, vendors, and other companies.',
-    listColumns: ['id', 'name', 'type', 'email', 'is_premium', 'subscription_tier', 'plan', 'created_at'],
+    listColumns: [
+      'id',
+      'name',
+      'type',
+      'email',
+      'is_premium',
+      'premium_until',
+      'premium_grant',
+      'subscription_tier',
+      'plan',
+      'created_at',
+    ],
     searchColumns: ['name', 'email', 'type', 'city', 'state'],
     relatedKeys: ['organization_memberships', 'organization_customers', 'user_profiles'],
     deleteConfirm: 'id',
-    writeNote: 'Deleting an org can cascade memberships and break live shops. Type the org id to confirm.',
+    writeNote:
+      'Do not flip is_premium=true here. Use Grant complimentary Premium (60 days) on the God dashboard. Deleting an org can cascade memberships and break live shops. Type the org id to confirm.',
   }),
   crud({
     key: 'user_profiles',
@@ -779,6 +791,17 @@ export function sanitizeWritePayload(
   }
   if (mode === 'create' && def.key === 'user_profiles' && !String(payload.id || '').trim()) {
     return { ok: false, error: 'user_profiles.id must be an existing Auth user UUID' };
+  }
+  if (def.key === 'organizations' && payload.is_premium === true) {
+    const until = payload.premium_until;
+    const ts = until == null || until === '' ? NaN : Date.parse(String(until));
+    if (!Number.isFinite(ts) || ts <= Date.now()) {
+      return {
+        ok: false,
+        error:
+          'Do not set is_premium=true without a future premium_until. Use Grant complimentary Premium (60 days).',
+      };
+    }
   }
   if (!Object.keys(payload).length) {
     return { ok: false, error: 'No writable fields in payload' };

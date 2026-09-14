@@ -4,10 +4,12 @@ import {
   FREE_MANUAL_SLOTS,
   PREMIUM_MANUAL_SLOTS,
   UNLIMITED_MANUAL_SLOTS,
+  complimentaryPremiumExpired,
   currentOrgPlan,
   currentOrgPlanLabel,
   manualSlotLimit,
   orgCanUpgrade,
+  orgHasNamedPaidPlan,
   orgIsPaid,
   orgIsTopPaid,
   orgMayStartPaidPlan,
@@ -26,6 +28,26 @@ test('is_premium true is paid', () => {
   assert.equal(orgIsPaid({ is_premium: true }), true);
   assert.equal(orgIsPaid({ is_premium: true, subscription_tier: 'pro' }), true);
   assert.equal(orgIsPaid({ is_premium: true, plan: 'free' }), true);
+});
+
+test('expired complimentary is Free unless a named paid plan remains', () => {
+  const now = new Date('2026-09-14T00:00:00.000Z');
+  const expired = { is_premium: true, premium_until: '2020-01-01T00:00:00.000Z' };
+  assert.equal(complimentaryPremiumExpired(expired, now), true);
+  assert.equal(orgIsPaid(expired, now), false);
+  assert.equal(currentOrgPlan(expired), 'free');
+  assert.equal(orgIsPaid({ ...expired, plan: 'premium' }, now), true);
+  assert.equal(orgHasNamedPaidPlan({ plan: 'premium' }), true);
+  assert.equal(
+    orgIsPaid({ is_premium: true, premium_until: '2099-11-01T00:00:00.000Z' }, now),
+    true
+  );
+});
+
+test('is_premium without premium_until stays paid (legacy / live paid)', () => {
+  const now = new Date('2026-09-14T00:00:00.000Z');
+  assert.equal(orgIsPaid({ is_premium: true }, now), true);
+  assert.equal(complimentaryPremiumExpired({ is_premium: true }, now), false);
 });
 
 test('is_premium false or null is not paid by itself', () => {

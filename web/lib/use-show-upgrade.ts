@@ -44,10 +44,10 @@ export function useUpgradeEntry(): UpgradeEntry {
         const orgId = profile.organization_id;
         let { data: org, error } = await supabase
           .from('organizations')
-          .select('is_premium, subscription_tier, plan')
+          .select('is_premium, subscription_tier, plan, premium_until')
           .eq('id', orgId)
           .maybeSingle();
-        if (error && /subscription_tier|plan|column/i.test(error.message || '')) {
+        if (error && /subscription_tier|plan|premium_until|column/i.test(error.message || '')) {
           ({ data: org, error } = await supabase
             .from('organizations')
             .select('is_premium, subscription_tier')

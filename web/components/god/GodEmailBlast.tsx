@@ -594,6 +594,7 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
               <th className="p-3">Organization</th>
               <th className="p-3">Type</th>
               <th className="p-3">Plan</th>
+              <th className="p-3">Premium until</th>
               <th className="p-3">Org email</th>
               <th className="p-3">Created</th>
             </tr>
@@ -625,13 +626,14 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
                     </td>
                     <td className="p-3">{org.typeLabel || orgTypeLabel(org.type)}</td>
                     <td className="p-3">{org.planLabel}</td>
+                    <td className="p-3 whitespace-nowrap">{formatDate(org.premiumUntil)}</td>
                     <td className="p-3">{recipient || '—'}</td>
                     <td className="p-3 whitespace-nowrap">{formatDate(org.createdAt)}</td>
                   </tr>
                   {open && (
                     <tr className="bg-[var(--surface)]">
                       <td></td>
-                      <td colSpan={5} className="p-3 text-[var(--text2)]">
+                      <td colSpan={6} className="p-3 text-[var(--text2)]">
                         <div className="mb-2 text-xs text-[var(--text3)]">
                           org.email: {org.orgEmail || '—'} · admin: {org.adminEmail || '—'}
                         </div>
@@ -654,7 +656,7 @@ export function GodEmailBlast({ variant = 'page' }: { variant?: 'page' | 'crm' }
             })}
             {visible.length === 0 && (
               <tr>
-                <td colSpan={6} className="p-6 text-center text-[var(--text3)]">
+                <td colSpan={7} className="p-6 text-center text-[var(--text3)]">
                   No organizations match these filters.
                 </td>
               </tr>

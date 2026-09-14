@@ -65,7 +65,8 @@ export default function SignupIndex() {
             <div className="font-bold text-xl mb-1">Repair company</div>
             <div className="text-sm text-[var(--text3)] mb-4">
               Independent techs and repair companies that service aesthetic and medical lasers.
-              First user is admin. Invite technicians from Team.
+              First user is admin. Invite technicians from Team. Two months of Premium on us —
+              no card required.
             </div>
             <ul className="text-sm space-y-1.5 mb-5 text-[var(--text2)]">
               <li>• Dispatch and schedule without a whiteboard</li>

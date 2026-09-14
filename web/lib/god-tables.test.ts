@@ -113,6 +113,21 @@ test('Auth create keeps write-only password and still redacts it from rows', () 
   assert.equal(redactRow({ id: 'u1', email: 'a@b.co', password: 'HASH' })?.password, undefined);
 });
 
+test('organizations cannot forever-flip is_premium without a future premium_until', () => {
+  const orgs = getGodTable('organizations')!;
+  const forever = sanitizeWritePayload(orgs, { is_premium: true, name: 'Glow' }, 'update');
+  assert.equal(forever.ok, false);
+  if (!forever.ok) {
+    assert.match(forever.error, /Grant complimentary Premium/i);
+  }
+  const dated = sanitizeWritePayload(
+    orgs,
+    { is_premium: true, premium_until: '2099-01-01T00:00:00.000Z' },
+    'update'
+  );
+  assert.equal(dated.ok, true);
+});
+
 test('user_profiles create requires an Auth user id', () => {
   const missing = sanitizeWritePayload(getGodTable('user_profiles')!, { email: 'x@y.z', role: 'fse' }, 'create');
   assert.equal(missing.ok, false);
@@ -163,6 +178,8 @@ test('God table APIs and pages stay behind requireGodCaller / admin god gate', (
     '../app/api/god/crm/route.ts',
     '../app/api/god/analytics/route.ts',
     '../app/api/god/manuals/reindex/route.ts',
+    '../app/api/god/orgs/complimentary-premium/route.ts',
+    '../app/api/god/premium/expire/route.ts',
     '../app/admin/god/layout.tsx',
     '../app/admin/god/tables/page.tsx',
     '../app/admin/god/equipment/page.tsx',

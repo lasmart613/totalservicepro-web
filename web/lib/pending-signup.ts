@@ -1,5 +1,10 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
+import {
+  applyComplimentarySignupFields,
+  missingComplimentaryColumn,
+  stripUnbackedComplimentaryPremium,
+} from '@/lib/complimentary-premium';
 
 const KEY = 'tsp-pending-signup';
 
@@ -92,9 +97,10 @@ export function organizationInsertFromPending(pending: PendingSignup, userId: st
     phone: pending.phone || null,
     website: pending.website || null,
     created_by: userId,
-    // Free Plan signup — never inherit a paid DB default.
+    // Repair companies get time-boxed complimentary Premium. Others stay Free.
     is_premium: false,
   };
+  applyComplimentarySignupFields(orgInsert, pending.orgType);
 
   if (pending.kind === 'company') {
     orgInsert.services_offered = pending.extra?.services_offered || null;
@@ -119,7 +125,7 @@ export function organizationInsertFromPending(pending: PendingSignup, userId: st
 }
 
 function coreOrganizationInsert(pending: PendingSignup, userId: string): Record<string, unknown> {
-  return {
+  const row: Record<string, unknown> = {
     name: pending.name,
     type: pending.orgType,
     address: pending.address || null,
@@ -130,6 +136,8 @@ function coreOrganizationInsert(pending: PendingSignup, userId: string): Record<
     created_by: userId,
     is_premium: false,
   };
+  applyComplimentarySignupFields(row, pending.orgType);
+  return row;
 }
 
 export function facilityTypeForOwnerOrg(orgType?: string | null): string | null {
@@ -292,14 +300,20 @@ export async function insertOrganizationForPending(
       created_by: userId,
       is_premium: false,
     });
+    // Owner fallback is never a service_company — do not grant complimentary.
   }
 
   let lastError: { message?: string } | null = null;
   for (const row of attempts) {
     delete (row as any).num_lasers;
     let { data, error } = await supabase.from('organizations').insert(row).select('id').maybeSingle();
+    if (!data?.id && error && missingComplimentaryColumn(error.message)) {
+      stripUnbackedComplimentaryPremium(row);
+      ({ data, error } = await supabase.from('organizations').insert(row).select('id').maybeSingle());
+    }
     if (!data?.id && error && /is_premium|column/i.test(error.message || '')) {
       delete row.is_premium;
+      stripUnbackedComplimentaryPremium(row);
       ({ data, error } = await supabase.from('organizations').insert(row).select('id').maybeSingle());
     }
     if (data?.id) return data.id;

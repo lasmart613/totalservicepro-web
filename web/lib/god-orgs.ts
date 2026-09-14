@@ -23,6 +23,8 @@ export type GodOrgSource = OrgPlanFields & {
   email?: string | null;
   created_at?: string | null;
   created_by?: string | null;
+  premium_until?: string | null;
+  premium_grant?: string | null;
 };
 
 export type GodOrgRow = {
@@ -36,6 +38,8 @@ export type GodOrgRow = {
   orgEmail: string;
   adminEmail: string;
   createdAt: string | null;
+  premiumUntil: string | null;
+  premiumGrant: string | null;
   users: Array<{
     id: string;
     name: string;
@@ -130,6 +134,8 @@ export function assembleGodOrgs(input: {
       orgEmail: String(org.email || '').trim(),
       adminEmail: pickAdminEmail({ orgEmail: org.email, members }),
       createdAt: org.created_at || null,
+      premiumUntil: org.premium_until || null,
+      premiumGrant: org.premium_grant || null,
       users,
     };
   });
