@@ -9,6 +9,7 @@ import {
   groupManualsByBrand,
   MANUAL_LIBRARY_SELECT,
   MANUAL_LIBRARY_SELECT_LEGACY,
+  MANUAL_LIBRARY_SELECT_WITH_KIND,
   fetchManualLibraryRows,
   isManualsSelectSchemaError,
   manualLibraryFiltersActive,
@@ -45,6 +46,23 @@ const CATALOG = [
     equipment_type: 'laser',
     is_incomplete: true,
     storage_path: 'shared/dornier/h20.pdf',
+  },
+  {
+    id: '4',
+    brand: 'Lasering',
+    title: 'Lyra 767',
+    model: '767',
+    equipment_type: 'laser',
+    storage_path: 'shared/lasering/lyra-767.pdf',
+    doc_kind: 'operator',
+  },
+  {
+    id: '5',
+    brand: 'Quanta System',
+    title: 'Litho IFU (EN)',
+    model: 'Litho',
+    equipment_type: 'laser',
+    storage_path: 'shared/quanta-system/litho/ifu.pdf',
   },
 ];
 
@@ -84,7 +102,7 @@ test('incomplete + make + all rooms', () => {
   });
   assert.equal(rows.length, 1);
   assert.equal(String(rows[0].id), '3');
-  assert.deepEqual(uniqueManualBrands(CATALOG), ['Candela', 'Dornier', 'GE OEC']);
+  assert.deepEqual(uniqueManualBrands(CATALOG), ['Candela', 'Dornier', 'GE OEC', 'Lasering', 'Quanta System']);
   assert.deepEqual(Object.keys(groupManualsByBrand(rows)), ['Dornier']);
 });
 
@@ -104,8 +122,30 @@ test('url params round-trip q / make / room=all', () => {
   assert.equal(parsed.brand, 'Candela');
   assert.equal(parsed.room, 'all');
   assert.equal(parsed.incompleteOnly, true);
+  assert.equal(parsed.library, 'service');
   assert.equal(manualLibraryFiltersActive({ query: 'x' }), true);
   assert.equal(manualLibraryFiltersActive({ room: 'laser' }), false);
+
+  const opQs = manualLibrarySearchParams({ library: 'operators', room: 'laser' });
+  assert.match(opQs, /lib=operators/);
+  assert.equal(parseManualLibrarySearchParams(`?${opQs}`).library, 'operators');
+});
+
+test('Service and Operators are separate library shelves', () => {
+  const service = filterManualLibrary(CATALOG, { room: ALL_MANUAL_ROOMS, library: 'service' });
+  const operators = filterManualLibrary(CATALOG, { room: ALL_MANUAL_ROOMS, library: 'operators' });
+  assert.deepEqual(
+    service.map((r) => String(r.id)).sort(),
+    ['1', '2', '3']
+  );
+  assert.deepEqual(
+    operators.map((r) => String(r.id)).sort(),
+    ['4', '5']
+  );
+  const lyraOnService = filterManualLibrary(CATALOG, { query: 'lyra', library: 'service', room: ALL_MANUAL_ROOMS });
+  assert.equal(lyraOnService.length, 0);
+  const lyraOnOps = filterManualLibrary(CATALOG, { query: 'lyra', library: 'operators', room: ALL_MANUAL_ROOMS });
+  assert.equal(String(lyraOnOps[0]?.id), '4');
 });
 
 test('library page wires search UI and keeps open/get-manual-url gating', () => {
@@ -114,16 +154,20 @@ test('library page wires search UI and keeps open/get-manual-url gating', () => 
   assert.match(page, /filterManualLibrary/);
   assert.match(page, /\/api\/manuals\/search/);
   assert.match(page, /manuals-search/);
+  assert.match(page, /manuals-rail/);
   assert.match(page, /All manufacturers|All makes/i);
   assert.match(page, /ALL_MANUAL_ROOMS|room === 'all'/);
   assert.match(page, /Clear filters/);
+  assert.match(page, /Operators Manuals/);
+  assert.match(page, /selectLibrary/);
   assert.match(page, /canAccessServiceManuals/);
   assert.match(page, /get-manual-url/);
   assert.match(page, /openInAppViewer|stashManualView/);
   assert.doesNotMatch(page, /search_text/);
   assert.match(page, /fetchManualLibraryRows/);
   assert.match(searchApi, /findManualIdsByBodyText|search_manual_catalog/);
-  assert.match(searchApi, /canAccessServiceManuals/);
+  assert.match(searchApi, /canAccessServiceManuals|manualsAccess/);
+  assert.match(searchApi, /filterManualsForCaller|manualsAccess/);
   assert.doesNotMatch(searchApi, /organization_manuals|user_manuals|get-manual-url/);
   assert.match(MANUAL_LIBRARY_SELECT, /brand, title, model/);
   assert.doesNotMatch(MANUAL_LIBRARY_SELECT, /search_text/);
@@ -132,6 +176,7 @@ test('library page wires search UI and keeps open/get-manual-url gating', () => 
 });
 
 test('catalog select matches live manuals columns and retries only on schema errors', async () => {
+  assert.match(MANUAL_LIBRARY_SELECT_WITH_KIND, /doc_kind/);
   assert.doesNotMatch(MANUAL_LIBRARY_SELECT, /doc_kind|description|completeness_note/);
   assert.doesNotMatch(MANUAL_LIBRARY_SELECT_LEGACY, /doc_kind/);
   assert.match(MANUAL_LIBRARY_SELECT, /equipment_type/);
@@ -143,7 +188,7 @@ test('catalog select matches live manuals columns and retries only on schema err
   assert.equal(isManualsSelectSchemaError('JWT expired'), false);
 
   const ok = await fetchManualLibraryRows(async (select) => {
-    assert.equal(select, MANUAL_LIBRARY_SELECT);
+    assert.equal(select, MANUAL_LIBRARY_SELECT_WITH_KIND);
     return { data: [{ id: 1 }, { id: 2 }], error: null };
   });
   assert.equal(ok.error, null);
@@ -152,10 +197,10 @@ test('catalog select matches live manuals columns and retries only on schema err
   const calls: string[] = [];
   const retried = await fetchManualLibraryRows(async (select) => {
     calls.push(select);
-    if (select.includes('wavelengths')) {
+    if (select.includes('doc_kind')) {
       return {
         data: [],
-        error: { message: "Could not find the 'wavelengths' column of 'manuals' in the schema cache" },
+        error: { message: "Could not find the 'doc_kind' column of 'manuals' in the schema cache" },
       };
     }
     return { data: [{ id: 9 }], error: null };
@@ -165,5 +210,5 @@ test('catalog select matches live manuals columns and retries only on schema err
     retried.data.map((r) => (r as { id: number }).id),
     [9]
   );
-  assert.deepEqual(calls, [MANUAL_LIBRARY_SELECT, MANUAL_LIBRARY_SELECT_LEGACY]);
+  assert.deepEqual(calls, [MANUAL_LIBRARY_SELECT_WITH_KIND, MANUAL_LIBRARY_SELECT]);
 });

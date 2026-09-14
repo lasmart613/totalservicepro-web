@@ -318,6 +318,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         items: [
           { href: '/my-lasers', label: 'My Lasers' },
           { href: '/company', label: ownerProfileLabel(orgType, facilityType, meta.organization_type) },
+          { href: '/manuals', label: 'Operators Manuals' },
           { href: '/service-requests', label: 'Service Requests' },
           { href: '/accepted-bids', label: 'Accepted Bids' },
           { href: '/reports', label: 'Service History' },

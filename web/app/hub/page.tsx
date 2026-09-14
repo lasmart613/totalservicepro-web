@@ -62,6 +62,7 @@ export default function TechHub() {
     ? [
         { href: '/my-lasers', icon: '⚡', label: 'My Lasers', desc: 'Inventory & laser profiles' },
         { href: '/company', icon: '🏢', label: 'Facility Profile', desc: 'Edit your clinic details, logo & contacts' },
+        { href: '/manuals', icon: '📖', label: 'Operators Manuals', desc: 'Operators, IFU & user docs' },
         { href: '/service-requests', icon: '🛠️', label: 'Service Requests', desc: 'Request repair / PM for your systems' },
         { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Parts, used systems & consumables' },
         { href: '/reports', icon: '📋', label: 'Service History', desc: 'Completed work on your systems' },
@@ -81,7 +82,7 @@ export default function TechHub() {
           { href: '/accepted-bids', icon: '✓', label: 'Accepted Bids', desc: 'Jobs you won + customer contacts' },
           { href: '/test-equipment', icon: '🔧', label: 'Test Equipment', desc: 'Meters by org, owner, and assigned FSE' },
           { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Master list of parts, specs & cross-references' },
-          { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Full digital bookshelf' },
+          { href: '/manuals', icon: '📚', label: 'Service Manuals', desc: 'Service and Operators library tabs' },
           { href: '/reports', icon: '📋', label: 'Service Reports', desc: 'Performance & safety documentation' },
           { href: '/ai-assistant', icon: '🤖', label: 'AI Assistant', desc: 'Fault codes & manuals (same engine as mobile)' },
           { href: '/calculators', icon: '🔬', label: 'Photometry Tools', desc: 'Fluence, Irradiance, Duty Cycle, Avg Power, Wavelength' },

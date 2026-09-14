@@ -119,11 +119,26 @@ export function isServiceCompany(role?: RoleLike, orgType?: OrgTypeLike): boolea
 }
 
 /**
- * Service manuals (bookshelf + in-app viewer).
- * Service Company only — Laser Owners and Parts Suppliers do not get this tile/route.
+ * Repair / service-manual bookshelf (service/technical/parts).
+ * Service Company only — Laser Owners and Parts Suppliers never get repair SMs.
  */
 export function canAccessServiceManuals(role?: RoleLike, orgType?: OrgTypeLike): boolean {
   return isServiceCompany(role, orgType);
+}
+
+/**
+ * Operators / IFU / user-manual bookshelf.
+ * Service companies and owner-side orgs (laser_clinic / customer / rental / reseller).
+ * Parts suppliers do not get this library.
+ */
+export function canAccessOperatorsManuals(role?: RoleLike, orgType?: OrgTypeLike): boolean {
+  if (isSupplier(role, orgType)) return false;
+  return isServiceCompany(role, orgType) || isOwnerish(role, orgType);
+}
+
+/** Either manuals tab — owners land on Operators only. */
+export function canAccessManualsPage(role?: RoleLike, orgType?: OrgTypeLike): boolean {
+  return canAccessOperatorsManuals(role, orgType) || canAccessServiceManuals(role, orgType);
 }
 
 /**

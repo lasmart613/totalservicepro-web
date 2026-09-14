@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { pdfInlineHeaders } from '@/lib/manuals';
+import { mayOpenManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
+import { MANUAL_LIBRARY_SELECT_MINIMAL, MANUAL_LIBRARY_SELECT_WITH_KIND } from '@/lib/manual-library-filter';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -27,7 +29,7 @@ async function loadCaller(req: NextRequest) {
   if (userErr || !user) {
     return { error: NextResponse.json({ error: 'Invalid session' }, { status: 401 }) };
   }
-  return { user, token, supabaseUrl: url, anon };
+  return { user, token, supabaseUrl: url, anon, supabase };
 }
 
 async function resolveSignedUrl(opts: {
@@ -79,6 +81,59 @@ export async function POST(req: NextRequest) {
     const storagePath = body.storage_path;
     if (manualId == null && !storagePath) {
       return NextResponse.json({ error: 'Missing manual_id or storage_path' }, { status: 400 });
+    }
+
+    const { data: profile } = await caller.supabase
+      .from('user_profiles')
+      .select('role, organizations(type)')
+      .eq('id', caller.user.id)
+      .maybeSingle();
+    const orgJoin = profile?.organizations as { type?: string } | { type?: string }[] | null;
+    const orgType = Array.isArray(orgJoin) ? orgJoin[0]?.type : orgJoin?.type;
+    const access = manualsAccess(profile?.role, orgType);
+    if (!access.page) {
+      return NextResponse.json({ error: manualsForbiddenMessage(profile?.role, orgType) }, { status: 403 });
+    }
+    if (!access.service) {
+      let catalog: {
+        title?: string | null;
+        brand?: string | null;
+        model?: string | null;
+        storage_path?: string | null;
+        doc_kind?: string | null;
+      } | null = null;
+      if (manualId != null) {
+        const full = await caller.supabase
+          .from('manuals')
+          .select(MANUAL_LIBRARY_SELECT_WITH_KIND)
+          .eq('id', manualId)
+          .maybeSingle();
+        catalog = full.error
+          ? (await caller.supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).eq('id', manualId).maybeSingle())
+              .data
+          : full.data;
+      } else if (storagePath) {
+        const full = await caller.supabase
+          .from('manuals')
+          .select(MANUAL_LIBRARY_SELECT_WITH_KIND)
+          .eq('storage_path', storagePath)
+          .maybeSingle();
+        catalog = full.error
+          ? (
+              await caller.supabase
+                .from('manuals')
+                .select(MANUAL_LIBRARY_SELECT_MINIMAL)
+                .eq('storage_path', storagePath)
+                .maybeSingle()
+            ).data
+          : full.data;
+        if (!catalog) {
+          catalog = { storage_path: storagePath, title: storagePath };
+        }
+      }
+      if (!mayOpenManual(profile?.role, orgType, catalog)) {
+        return NextResponse.json({ error: manualsForbiddenMessage(profile?.role, orgType) }, { status: 403 });
+      }
     }
 
     const resolved = await resolveSignedUrl({

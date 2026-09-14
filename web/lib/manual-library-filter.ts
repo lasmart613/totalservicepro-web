@@ -4,7 +4,14 @@
  * Discovery always runs against the full catalog, not the owned library.
  */
 
-import { catalogManualKind, catalogManualKindLabel, catalogManualTitle, isManualIncomplete } from './manual-catalog.ts';
+import {
+  catalogManualKind,
+  catalogManualKindLabel,
+  catalogManualTitle,
+  isManualIncomplete,
+  manualLibraryShelf,
+  type ManualLibraryShelf,
+} from './manual-catalog.ts';
 import {
   DEFAULT_EQUIPMENT_TYPE,
   equipmentTypeMeta,
@@ -30,12 +37,18 @@ export type ManualLibraryRow = {
 
 export type ManualLibraryRoom = EquipmentType | 'all';
 
+export type { ManualLibraryShelf };
+
+export const DEFAULT_MANUAL_LIBRARY: ManualLibraryShelf = 'service';
+
 export type ManualLibraryFilters = {
   query?: string;
   brand?: string;
   room?: ManualLibraryRoom;
   wavelength?: string;
   incompleteOnly?: boolean;
+  /** Which public library shelf. Default is Service Manuals. */
+  library?: ManualLibraryShelf;
 };
 
 export const ALL_MANUAL_ROOMS: ManualLibraryRoom = 'all';
@@ -186,9 +199,11 @@ export function filterManualLibrary(
   const room = filters.room && filters.room !== ALL_MANUAL_ROOMS ? filters.room : null;
   const wavelength = String(filters.wavelength || '').trim();
   const incompleteOnly = !!filters.incompleteOnly;
+  const library: ManualLibraryShelf = filters.library === 'operators' ? 'operators' : 'service';
   const applyWavelength = room === 'laser' || (!room && !!wavelength);
 
   return rows.filter((m) => {
+    if (manualLibraryShelf(m) !== library) return false;
     const inferred = inferEquipmentType({
       equipment_type: m.equipment_type,
       title: m.title,
@@ -212,11 +227,13 @@ export function parseManualLibrarySearchParams(search: string): ManualLibraryFil
   const roomRaw = String(qs.get('room') || '').trim();
   const room: ManualLibraryRoom | undefined =
     roomRaw === 'all' ? 'all' : roomRaw ? (roomRaw as EquipmentType) : DEFAULT_EQUIPMENT_TYPE;
+  const libRaw = String(qs.get('lib') || '').trim().toLowerCase();
   return {
     query: sanitizeManualSearchQuery(qs.get('q') || ''),
     brand: String(qs.get('make') || '').trim(),
     room,
     incompleteOnly: qs.get('incomplete') === '1',
+    library: libRaw === 'operators' || libRaw === 'operator' ? 'operators' : DEFAULT_MANUAL_LIBRARY,
   };
 }
 
@@ -229,19 +246,23 @@ export function manualLibrarySearchParams(filters: ManualLibraryFilters): string
   if (filters.room === 'all') qs.set('room', 'all');
   else if (filters.room && filters.room !== DEFAULT_EQUIPMENT_TYPE) qs.set('room', filters.room);
   if (filters.incompleteOnly) qs.set('incomplete', '1');
+  if (filters.library === 'operators') qs.set('lib', 'operators');
   return qs.toString();
 }
 
 /**
  * Catalog columns that exist on live public.manuals (Total Service Pro).
- * Do not request doc_kind, description, or completeness_note — those columns
- * are in repo migrations / types only. PostgREST 400s the whole query if any
- * listed column is missing, which emptied Browse All while manuals(*) embeds
- * (My Library) still worked.
- * Never pull search_text (that lives on manual_search_index).
+ * Prefer doc_kind when present so Operators vs Service shelving can use the
+ * stored type. Fall back if the column is missing — PostgREST 400s the whole
+ * query otherwise, which emptied Browse All while manuals(*) embeds still worked.
+ * Never request description, completeness_note, or search_text (search_text
+ * lives on manual_search_index).
  */
 export const MANUAL_LIBRARY_SELECT =
   'id, brand, title, model, storage_path, is_folder, equipment_type, is_incomplete, wavelengths, chapter_metadata';
+
+/** Prefer doc_kind when the live column exists; fall back if PostgREST 400s. */
+export const MANUAL_LIBRARY_SELECT_WITH_KIND = `${MANUAL_LIBRARY_SELECT}, doc_kind`;
 
 /** Folder-era catalogs before equipment rooms / wavelengths. */
 export const MANUAL_LIBRARY_SELECT_LEGACY = 'id, brand, title, model, storage_path, is_folder';
@@ -250,6 +271,7 @@ export const MANUAL_LIBRARY_SELECT_LEGACY = 'id, brand, title, model, storage_pa
 export const MANUAL_LIBRARY_SELECT_MINIMAL = 'id, brand, title, model, storage_path';
 
 export const MANUAL_LIBRARY_SELECT_CANDIDATES = [
+  MANUAL_LIBRARY_SELECT_WITH_KIND,
   MANUAL_LIBRARY_SELECT,
   MANUAL_LIBRARY_SELECT_LEGACY,
   MANUAL_LIBRARY_SELECT_MINIMAL,

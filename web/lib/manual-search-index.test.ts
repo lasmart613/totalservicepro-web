@@ -55,7 +55,7 @@ test('search API is catalog-wide and never returns PDF bodies or signed URLs', (
     join(here, '../supabase/migrations/20260912_000001_manual_search_index_bigint.sql'),
     'utf8'
   );
-  assert.match(api, /canAccessServiceManuals/);
+  assert.match(api, /canAccessServiceManuals|manualsAccess/);
   assert.doesNotMatch(api, /organization_manuals|user_manuals|get-manual-url/);
   assert.doesNotMatch(api, /select\(['"]search_text|json\.search_text/);
   assert.match(reindex, /requireGodCaller/);

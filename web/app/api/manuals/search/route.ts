@@ -2,7 +2,13 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { canAccessServiceManuals } from '@/lib/roles';
-import { manualSearchTokens, sanitizeManualSearchQuery } from '@/lib/manual-library-filter';
+import { filterManualsForCaller, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
+import {
+  MANUAL_LIBRARY_SELECT_MINIMAL,
+  MANUAL_LIBRARY_SELECT_WITH_KIND,
+  manualSearchTokens,
+  sanitizeManualSearchQuery,
+} from '@/lib/manual-library-filter';
 import { findManualIdsByBodyText } from '@/lib/manual-search-index';
 
 export const dynamic = 'force-dynamic';
@@ -50,8 +56,9 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
     const orgJoin = profile?.organizations as { type?: string } | { type?: string }[] | null;
     const orgType = Array.isArray(orgJoin) ? orgJoin[0]?.type : orgJoin?.type;
-    if (!canAccessServiceManuals(profile?.role, orgType)) {
-      return NextResponse.json({ error: 'Service manuals are for service companies.' }, { status: 403 });
+    const access = manualsAccess(profile?.role, orgType);
+    if (!access.page) {
+      return NextResponse.json({ error: manualsForbiddenMessage(profile?.role, orgType) }, { status: 403 });
     }
 
     const body = (await req.json().catch(() => ({}))) as { q?: unknown; query?: unknown };
@@ -61,30 +68,46 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, ids: [], bodySearch: true, q: '' });
     }
 
+    let ids: string[] = [];
+    let bodySearch = true;
+
     if (hasServiceRole()) {
       const found = await findManualIdsByBodyText(getSupabaseAdmin(), tokens);
-      return NextResponse.json({
-        ok: true,
-        ids: found.ids,
-        bodySearch: found.available,
-        q,
-      });
+      ids = found.ids;
+      bodySearch = found.available;
+    } else {
+      const rpc = await supabase.rpc('search_manual_catalog', { q });
+      if (!rpc.error) {
+        ids = (rpc.data || [])
+          .map((row: { manual_id?: unknown }) => String(row.manual_id || '').trim())
+          .filter(Boolean);
+      } else {
+        return NextResponse.json({
+          ok: true,
+          ids: [],
+          bodySearch: false,
+          q,
+          hint: 'PDF body index is not available yet. Metadata search still runs in the library.',
+        });
+      }
     }
 
-    const rpc = await supabase.rpc('search_manual_catalog', { q });
-    if (!rpc.error) {
-      const ids = (rpc.data || [])
-        .map((row: { manual_id?: unknown }) => String(row.manual_id || '').trim())
-        .filter(Boolean);
-      return NextResponse.json({ ok: true, ids: [...new Set(ids)], bodySearch: true, q });
+    if (ids.length && !access.service && !canAccessServiceManuals(profile?.role, orgType)) {
+      let rows: Array<{ id?: unknown; title?: string | null; brand?: string | null; model?: string | null; storage_path?: string | null; doc_kind?: string | null }> = [];
+      const full = await supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_WITH_KIND).in('id', ids);
+      if (!full.error) rows = full.data || [];
+      else {
+        const slim = await supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).in('id', ids);
+        rows = slim.data || [];
+      }
+      ids = filterManualsForCaller(profile?.role, orgType, rows).map((row) => String(row.id ?? '').trim()).filter(Boolean);
     }
 
     return NextResponse.json({
       ok: true,
-      ids: [],
-      bodySearch: false,
+      ids: [...new Set(ids)],
+      bodySearch,
       q,
-      hint: 'PDF body index is not available yet. Metadata search still runs in the library.',
     });
   } catch (e: unknown) {
     const message = e instanceof Error ? e.message : 'Search failed';

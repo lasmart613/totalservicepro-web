@@ -11,6 +11,12 @@ import {
   catalogModelsForManufacturer,
   suggestedManualStoragePath,
 } from '@/lib/equipment-catalog';
+import {
+  catalogManualKind,
+  catalogManualKindLabel,
+  manualLibraryShelf,
+  manualLibraryShelfLabel,
+} from '@/lib/manual-catalog';
 
 export default function GodManualsCatalogPage() {
   const [ready, setReady] = useState(false);
@@ -173,7 +179,10 @@ export default function GodManualsCatalogPage() {
       <h1 className="text-3xl font-extrabold mb-2">Manuals catalog</h1>
       <p className="text-[var(--text3)] mb-6">
         Add a bookshelf row after the PDF is in the <code>manuals</code> Storage bucket. Equipment
-        type is required so the book lands in the right room. Default room is Laser.
+        type is the room (default Laser). Document kind chooses the public library:{' '}
+        <strong className="text-[var(--text)]">Service Manuals</strong> or{' '}
+        <strong className="text-[var(--text)]">Operators Manuals</strong> — not one mixed shelf.
+        Operators / IFU / user docs belong on Operators, including OP-in-SM cases such as Lyra 767.
       </p>
 
       <div className="card p-4 mb-6">
@@ -280,15 +289,22 @@ export default function GodManualsCatalogPage() {
         </label>
 
         <label className="block">
-          <span className="text-xs text-[var(--text3)]">Document kind</span>
+          <span className="text-xs text-[var(--text3)]">Document kind (library shelf)</span>
           <select className="input w-full" value={docKind} onChange={(e) => setDocKind(e.target.value)}>
-            <option value="">Infer from title</option>
-            <option value="service">Service Manual</option>
-            <option value="user">User Manual</option>
-            <option value="operator">Operator&apos;s Manual</option>
-            <option value="technical">Technical Manual</option>
-            <option value="parts">Parts Manual</option>
+            <option value="">Infer from title / IFU wording</option>
+            <option value="service">Service Manual → Service library</option>
+            <option value="user">User Manual → Operators library</option>
+            <option value="operator">Operator&apos;s Manual → Operators library</option>
+            <option value="technical">Technical Manual → Service library</option>
+            <option value="parts">Parts Manual → Service library</option>
           </select>
+          <span className="block text-xs text-[var(--text3)] mt-1">
+            Preview:{' '}
+            {manualLibraryShelfLabel(
+              manualLibraryShelf({ title, brand, model, doc_kind: docKind || undefined })
+            )}{' '}
+            · {catalogManualKindLabel(catalogManualKind({ title, brand, model, doc_kind: docKind || undefined }))}
+          </span>
         </label>
 
         <label className="flex items-center gap-2">

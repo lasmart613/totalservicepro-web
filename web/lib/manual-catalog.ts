@@ -16,6 +16,9 @@
 
 export type ManualDocKind = 'service' | 'operator' | 'user' | 'technical' | 'parts';
 
+/** Which public library a row belongs on. Technical/parts stay with Service. */
+export type ManualLibraryShelf = 'service' | 'operators';
+
 export type ManualCatalogFields = {
   title?: string | null;
   brand?: string | null;
@@ -41,8 +44,11 @@ const EXPLICIT_KINDS = new Set<string>(Object.keys(KIND_LABEL));
 
 const OPERATOR_RE = /operator'?s?\s+manual|\boperator\s+manual\b/i;
 const USER_RE = /\buser\s+manual\b/i;
+const IFU_RE = /\bifu\b|instructions?\s+for\s+use/i;
 const SERVICE_RE = /\bservice\s+manuals?\b|\btechnical\s+manuals?\b|\brepair\s+manuals?\b/i;
 const REPAIR_RE = /\brepair\b/i;
+/** Cited OP-in-SM-shelf row: Operators content filed on the Service Manuals shelf. */
+const LYRA_767_RE = /\blyra\s*[-_/]?\s*767\b/i;
 /** Model suffixes that mean a specific VBeam platform (service docs), not the bare "VBeam" operator row. */
 const VBEAM_MODEL_SUFFIX_RE = /\b(perfecta|platinum|aesthetica|classic|pro|[0-9]+)\b/i;
 
@@ -92,35 +98,59 @@ export function isVbeamModelSpecificTitle(title: string | null | undefined): boo
 /**
  * Type from title / path / PDF cover text. Service+operator in the same
  * string → service (when in doubt, do not apply OP).
+ * IFU / Instructions for Use count as Operators (user-facing), not Service.
  */
 export function inferKindFromDocumentText(text: string | null | undefined): ManualDocKind | null {
   const hay = String(text || '').trim();
   if (!hay) return null;
   const hasOperator = OPERATOR_RE.test(hay);
   const hasUser = USER_RE.test(hay);
+  const hasIfu = IFU_RE.test(hay);
   const hasService = SERVICE_RE.test(hay) || REPAIR_RE.test(hay);
-  if (hasService && !hasOperator && !hasUser) {
+  if (hasService && !hasOperator && !hasUser && !hasIfu) {
     if (/\btechnical\s+manuals?\b/i.test(hay)) return 'technical';
     return 'service';
   }
-  if ((hasOperator || hasUser) && !hasService) return 'operator';
-  if (hasService && (hasOperator || hasUser)) return 'service';
+  if ((hasOperator || hasUser || hasIfu) && !hasService) return 'operator';
+  if (hasService && (hasOperator || hasUser || hasIfu)) return 'service';
+  return null;
+}
+
+/** Operators content that has been sitting on the Service Manuals shelf. */
+export function isKnownMisShelvedOperator(manual: ManualCatalogFields): boolean {
+  const hay = [manual.title, manual.model, manual.storage_path, manual.brand]
+    .map((s) => String(s || ''))
+    .join(' ');
+  return LYRA_767_RE.test(hay);
+}
+
+function explicitCatalogKind(manual: ManualCatalogFields): ManualDocKind | null {
+  const explicit = normalizeManualDocKind(manual.doc_kind);
+  if (explicit === 'service' || explicit === 'technical' || explicit === 'parts') return explicit;
+  if (explicit === 'operator' || explicit === 'user') return 'operator';
   return null;
 }
 
 /**
  * Document type for library UI.
- * 1) Type words on the stored title win (Service Manual vs Operator/User).
- * 2) Bare "VBeam" (no model suffix) is the operator PDF.
- * 3) "VBeam Perfecta" and other model-specific VBeam titles are service.
- * Path / PDF text do not override those two named rows.
+ * 1) Known OP-in-SM-shelf rows (e.g. Lyra 767) go to Operators.
+ * 2) Type words on the stored title win (Service Manual vs Operator/User/IFU).
+ * 3) Bare "VBeam" (no model suffix) is the operator PDF.
+ * 4) "VBeam Perfecta" and other model-specific VBeam titles are service.
+ * 5) Stored doc_kind (including operator) when title/VBeam rules do not decide.
+ * Path / PDF text do not override those named rows.
  */
 export function catalogManualKind(manual: ManualCatalogFields): ManualDocKind {
+  if (isKnownMisShelvedOperator(manual)) return 'operator';
+
   const fromTitle = inferKindFromDocumentText(manual.title);
   if (fromTitle) return fromTitle;
 
   if (isBareVbeamOperatorTitle(manual.title)) return 'operator';
   if (isVbeamModelSpecificTitle(manual.title)) return 'service';
+
+  const explicit = explicitCatalogKind(manual);
+  if (explicit) return explicit;
 
   const fromPath = inferKindFromDocumentText(manual.storage_path);
   if (fromPath) return fromPath;
@@ -128,10 +158,19 @@ export function catalogManualKind(manual: ManualCatalogFields): ManualDocKind {
   const fromPdf = inferKindFromDocumentText(manual.pdfText);
   if (fromPdf) return fromPdf;
 
-  const explicit = normalizeManualDocKind(manual.doc_kind);
-  if (explicit === 'service' || explicit === 'technical' || explicit === 'parts') return explicit;
-  if (explicit === 'user') return 'operator';
   return 'service';
+}
+
+export function isOperatorDocKind(kind: ManualDocKind): boolean {
+  return kind === 'operator' || kind === 'user';
+}
+
+export function manualLibraryShelf(manual: ManualCatalogFields): ManualLibraryShelf {
+  return isOperatorDocKind(catalogManualKind(manual)) ? 'operators' : 'service';
+}
+
+export function manualLibraryShelfLabel(shelf: ManualLibraryShelf): string {
+  return shelf === 'operators' ? 'Operators Manuals' : 'Service Manuals';
 }
 
 export function catalogManualKindLabel(kind: ManualDocKind): string {
