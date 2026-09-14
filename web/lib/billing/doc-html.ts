@@ -43,12 +43,18 @@ function money(n: number | undefined | null) {
   return `$${Number(n || 0).toFixed(2)}`;
 }
 
+function estimateEmailActionHref(actionUrl: string, action: 'approve' | 'reject' | 'modify'): string {
+  const raw = String(actionUrl || '').trim();
+  if (!raw) return '';
+  const base = raw.split('#')[0].split('?')[0];
+  return `${base}?action=${action}`;
+}
+
 /** Table-based CTAs so Gmail does not collapse the buttons. Safe for client + email. */
 export function buildEstimateActionCtasHtml(actionUrl: string): string {
-  const approveHref = esc(actionUrl);
-  const changesHref = esc(
-    actionUrl.includes('?') ? `${actionUrl}&changes=1` : `${actionUrl}?changes=1`
-  );
+  const approveHref = esc(estimateEmailActionHref(actionUrl, 'approve'));
+  const rejectHref = esc(estimateEmailActionHref(actionUrl, 'reject'));
+  const modifyHref = esc(estimateEmailActionHref(actionUrl, 'modify'));
   return (
     `<table class="tsp-est-cta" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
     `style="margin:22px 0 8px;border-collapse:collapse;">` +
@@ -59,26 +65,37 @@ export function buildEstimateActionCtasHtml(actionUrl: string): string {
     `<a href="${approveHref}" ` +
     `style="display:inline-block;background:#FBBF24;color:#111827;padding:14px 28px;border-radius:8px;` +
     `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #FBBF24;">` +
-    `Approve Estimate</a>` +
+    `Approve</a>` +
+    `</td></tr>` +
+    `<tr><td align="center" style="padding:6px 8px;">` +
+    `<a href="${rejectHref}" ` +
+    `style="display:inline-block;background:#ffffff;color:#991B1B;padding:12px 24px;border-radius:8px;` +
+    `text-decoration:none;font-weight:700;font-size:14px;border:2px solid #B91C1C;">` +
+    `Reject</a>` +
     `</td></tr>` +
     `<tr><td align="center" style="padding:6px 8px 4px;">` +
-    `<a href="${changesHref}" ` +
+    `<a href="${modifyHref}" ` +
     `style="display:inline-block;background:#ffffff;color:#111827;padding:12px 24px;border-radius:8px;` +
     `text-decoration:none;font-weight:700;font-size:14px;border:2px solid #FBBF24;">` +
-    `Request Changes</a>` +
+    `Modify</a>` +
     `</td></tr>` +
     `<tr><td align="center" style="padding:8px 8px 0;font-size:10px;color:#666;">` +
-    `Sign in with your clinic account to approve. Opens your estimate on RepairPlanet.` +
+    `These links are unique to this estimate. No login required.` +
     `</td></tr>` +
     `</table>`
   );
 }
 
-/** Inject CTAs when the client HTML was built before a token existed. */
+const ESTIMATE_CTA_TABLE_RE = /<table[^>]*class="tsp-est-cta"[^>]*>[\s\S]*?<\/table>/i;
+
+/** Inject or replace CTAs so emailed HTML always has tokenized Approve / Reject / Modify. */
 export function ensureEstimateActionCtas(html: string, actionUrl: string): string {
   if (!html || !actionUrl) return html;
-  if (html.includes('tsp-est-cta') || html.includes(actionUrl)) return html;
   const cta = buildEstimateActionCtasHtml(actionUrl);
+  if (ESTIMATE_CTA_TABLE_RE.test(html)) {
+    return html.replace(ESTIMATE_CTA_TABLE_RE, cta);
+  }
+  if (html.includes(actionUrl) && html.includes('?action=approve')) return html;
   const thankYou = html.lastIndexOf('Thank you for choosing');
   if (thankYou >= 0) {
     return html.slice(0, thankYou) + cta + html.slice(thankYou);

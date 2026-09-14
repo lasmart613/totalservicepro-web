@@ -1,18 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import {
-  CUSTOMER_ACTION_APPROVED,
-  CUSTOMER_ACTION_CHANGES,
+  applyEstimateCustomerAction,
   buildOrgNotifyEmail,
   findEstimateByActionToken,
   isValidEstimateActionToken,
-  persistCustomerAction,
   publicEstimatePayload,
   resolveOrgNotifyEmails,
   sendResendHtml,
 } from '@/lib/billing/estimate-action';
-import { parseJsonField } from '@/lib/billing/save-helpers';
-import { estimateCustomerLoginPath } from '@/lib/share';
+import {
+  customerActionConfirmationTitle,
+  isEstimateExpired,
+  parseCustomerActionKind,
+  parseJsonField,
+} from '@/lib/billing/save-helpers';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,7 +57,8 @@ export async function GET(req: NextRequest) {
 
 /**
  * POST /api/billing/estimate-action
- * Body: { token, action: 'approve' | 'request_changes', note? }
+ * Body: { token, action: 'approve' | 'reject' | 'modify', note? }
+ * Token is the credential — no clinic login required.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -71,21 +74,12 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const rawAction = String(body.action || '').toLowerCase();
-    const action =
-      rawAction === 'approve' || rawAction === CUSTOMER_ACTION_APPROVED
-        ? CUSTOMER_ACTION_APPROVED
-        : rawAction === 'request_changes' || rawAction === CUSTOMER_ACTION_CHANGES
-          ? CUSTOMER_ACTION_CHANGES
-          : null;
+    const action = parseCustomerActionKind(body.action);
     if (!action) {
       return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
     }
 
-    const note = String(body.note || '').trim();
-    if (action === CUSTOMER_ACTION_CHANGES && !note) {
-      return NextResponse.json({ error: 'Please enter a short note describing the changes you need.' }, { status: 400 });
-    }
+    const note = String(body.note || '').trim() || null;
 
     const admin = getSupabaseAdmin();
     const est = await findEstimateByActionToken(admin, token);
@@ -95,45 +89,38 @@ export async function POST(req: NextRequest) {
 
     const { companyName, emails } = await resolveOrgNotifyEmails(admin, est);
     const payload = publicEstimatePayload(est, companyName);
-    const loginUrl = estimateCustomerLoginPath(est.id);
 
-    if (action === CUSTOMER_ACTION_APPROVED) {
+    if (payload.expired || isEstimateExpired(est)) {
       return NextResponse.json(
         {
-          error: 'Sign in as the clinic this estimate was written for to approve it.',
-          loginUrl,
+          error: 'This estimate has expired and can no longer be updated online.',
           estimate: payload,
-          requiresLogin: true,
+          expired: true,
         },
-        { status: 401 }
+        { status: 409 }
       );
     }
 
-    const { already } = await persistCustomerAction(
-      admin,
-      est,
-      action,
-      action === CUSTOMER_ACTION_CHANGES ? note : null
-    );
-
+    const result = await applyEstimateCustomerAction(admin, est, action, note);
+    const applied = result.action;
     const updated = {
       ...payload,
-      customerAction: action,
-      customerActionAt: already ? payload.customerActionAt : new Date().toISOString(),
+      customerAction: applied,
+      customerActionAt: result.already ? payload.customerActionAt : new Date().toISOString(),
       customerActionNote:
-        action === CUSTOMER_ACTION_CHANGES ? note : payload.customerActionNote,
+        applied === 'changes_requested' ? note || payload.customerActionNote : payload.customerActionNote,
     };
 
-    if (!already) {
+    if (!result.already) {
       const ed = parseJsonField(est.estimate_data);
       const customerEmail = ed.custEmail || ed.email || null;
       const mail = buildOrgNotifyEmail({
-        action,
+        action: applied,
         companyName,
         customerName: payload.customerName,
         estimateNumber: payload.estimateNumber,
         total: payload.total,
-        note: action === CUSTOMER_ACTION_CHANGES ? note : null,
+        note: applied === 'changes_requested' ? note : null,
         estimateId: est.id,
       });
       if (emails.length) {
@@ -151,9 +138,14 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      already,
-      action,
+      already: result.already,
+      conflict: result.conflict,
+      action: applied,
+      title: customerActionConfirmationTitle(applied),
       estimate: updated,
+      request: result.ticket
+        ? { id: result.ticket.id, number: result.ticket.ticket_number }
+        : null,
       companyName,
     });
   } catch (e: any) {

@@ -259,7 +259,62 @@ export function validUntilLabel(createdAt?: string | null): string {
   return d.toLocaleDateString();
 }
 
-export type CustomerActionKind = 'approved' | 'changes_requested';
+export type CustomerActionKind = 'approved' | 'rejected' | 'changes_requested';
+export type EstimateEmailAction = 'approve' | 'reject' | 'modify';
+
+export const CUSTOMER_ACTION_KINDS: readonly CustomerActionKind[] = [
+  'approved',
+  'rejected',
+  'changes_requested',
+];
+
+/** Map email / API aliases onto the stored customer_action value. */
+export function parseCustomerActionKind(raw: unknown): CustomerActionKind | null {
+  const v = String(raw || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, '_');
+  if (v === 'approved' || v === 'approve') return 'approved';
+  if (v === 'rejected' || v === 'reject') return 'rejected';
+  if (
+    v === 'changes_requested' ||
+    v === 'request_changes' ||
+    v === 'modify' ||
+    v === 'modification_requested' ||
+    v === 'modification'
+  ) {
+    return 'changes_requested';
+  }
+  return null;
+}
+
+export function parseEstimateEmailAction(raw: unknown): EstimateEmailAction | null {
+  const kind = parseCustomerActionKind(raw);
+  if (kind === 'approved') return 'approve';
+  if (kind === 'rejected') return 'reject';
+  if (kind === 'changes_requested') return 'modify';
+  return null;
+}
+
+export function isTerminalCustomerAction(action: CustomerActionKind | null | undefined): boolean {
+  return action === 'approved' || action === 'rejected';
+}
+
+/**
+ * Same-action re-clicks are idempotent. Approved / rejected are terminal.
+ * A prior modification request can still be followed by approve or reject.
+ */
+export function resolveCustomerActionApply(
+  previous: CustomerActionKind | null | undefined,
+  next: CustomerActionKind
+): { already: boolean; apply: boolean; conflict: boolean } {
+  if (!previous) return { already: false, apply: true, conflict: false };
+  if (previous === next) return { already: true, apply: false, conflict: false };
+  if (isTerminalCustomerAction(previous)) {
+    return { already: true, apply: false, conflict: true };
+  }
+  return { already: false, apply: true, conflict: false };
+}
 
 /** Read customer CTA response without treating it as the estimate status. */
 export function customerActionFromEstimate(est: {
@@ -275,9 +330,7 @@ export function customerActionFromEstimate(est: {
   token: string | null;
 } {
   const ed = parseJsonField(est.estimate_data);
-  const raw = String(est.customer_action || ed.customer_action || '').toLowerCase();
-  const action: CustomerActionKind | null =
-    raw === 'approved' || raw === 'changes_requested' ? raw : null;
+  const action = parseCustomerActionKind(est.customer_action || ed.customer_action);
   const token = String(est.customer_action_token || ed.customer_action_token || '').trim() || null;
   const at = est.customer_action_at || ed.customer_action_at || null;
   const note = est.customer_action_note || ed.customer_action_note || null;
@@ -291,6 +344,16 @@ export function customerActionFromEstimate(est: {
 
 export function customerActionLabel(action: CustomerActionKind | null | undefined): string {
   if (action === 'approved') return 'Approved';
-  if (action === 'changes_requested') return 'Changes requested';
+  if (action === 'rejected') return 'Rejected';
+  if (action === 'changes_requested') return 'Modification requested';
+  return '';
+}
+
+export function customerActionConfirmationTitle(
+  action: CustomerActionKind | null | undefined
+): string {
+  if (action === 'approved') return 'Estimate approved';
+  if (action === 'rejected') return 'Estimate rejected';
+  if (action === 'changes_requested') return 'Modification requested';
   return '';
 }

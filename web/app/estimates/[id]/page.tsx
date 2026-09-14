@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
 
 export const metadata: Metadata = {
   title: { absolute: 'Review estimate · Total Service Pro' },
-  description: 'Approve this service estimate. Your clinic account is required.',
+  description: 'Approve, reject, or request a modification on this service estimate.',
   robots: { index: false, follow: false },
 };
 

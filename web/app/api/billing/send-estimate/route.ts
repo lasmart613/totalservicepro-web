@@ -7,7 +7,7 @@ import {
   persistEstimateActionToken,
   readExistingActionToken,
 } from '@/lib/billing/estimate-action';
-import { estimateActionUrl, estimateCustomerPath, estimateCustomerUrl } from '@/lib/share';
+import { estimateActionUrl, estimateCustomerPath } from '@/lib/share';
 import {
   publicSiteOrigin,
   resolveFreeAccountUrls,
@@ -235,10 +235,7 @@ export async function POST(req: NextRequest) {
       } catch (e) {
         console.warn('could not persist estimate action token', e);
       }
-      html = ensureEstimateActionCtas(
-        html,
-        estimateCustomerUrl(estimateId) || estimateActionUrl(actionToken)
-      );
+      html = ensureEstimateActionCtas(html, estimateActionUrl(actionToken));
     }
 
     const companyName = String(est?.customer_name || '').trim();
