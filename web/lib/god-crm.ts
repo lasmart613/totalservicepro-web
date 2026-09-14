@@ -724,6 +724,7 @@ export type GodCrmAdminLike = {
 };
 
 const ORG_SELECTS = [
+  'id, name, type, email, phone, city, state, created_at, is_premium, subscription_tier, plan, premium_until, premium_grant',
   'id, name, type, email, phone, city, state, created_at, is_premium, subscription_tier, plan',
   'id, name, type, email, phone, city, state, created_at, is_premium, subscription_tier',
   'id, name, type, email, phone, city, state, created_at, is_premium',

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { fetchGodMe } from '@/lib/god-client';
 import { GodKpiBoard } from '@/components/god/GodKpiBoard';
 import { GodAnalyticsBoard } from '@/components/god/GodAnalyticsBoard';
+import { GodComplimentaryPremium } from '@/components/god/GodComplimentaryPremium';
 import { GodEmailBlast } from '@/components/god/GodEmailBlast';
 import { GOD_ANALYTICS_PATH } from '@/lib/god-tables';
 
@@ -83,6 +84,7 @@ export default function GodDashboardPage() {
       <GodKpiBoard />
       <GodAnalyticsBoard variant="teaser" />
 
+      <GodComplimentaryPremium />
       <GodEmailBlast />
     </div>
   );

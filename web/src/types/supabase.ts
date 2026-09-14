@@ -1607,6 +1607,8 @@ export type Database = {
           num_laser_systems: number | null
           num_techs: number | null
           phone: string | null
+          premium_grant: string | null
+          premium_until: string | null
           preferred_services: string | null
           service_territories: string[] | null
           services_offered: string | null
@@ -1649,6 +1651,8 @@ export type Database = {
           num_laser_systems?: number | null
           num_techs?: number | null
           phone?: string | null
+          premium_grant?: string | null
+          premium_until?: string | null
           preferred_services?: string | null
           service_territories?: string[] | null
           services_offered?: string | null
@@ -1691,6 +1695,8 @@ export type Database = {
           num_laser_systems?: number | null
           num_techs?: number | null
           phone?: string | null
+          premium_grant?: string | null
+          premium_until?: string | null
           preferred_services?: string | null
           service_territories?: string[] | null
           services_offered?: string | null

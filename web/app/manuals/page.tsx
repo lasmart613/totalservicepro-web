@@ -156,7 +156,7 @@ export default function ManualsLibrary() {
         let org: Record<string, unknown> | null = null;
         let orgRes = await supabase
           .from('organizations')
-          .select('manual_slots, subscription_tier, plan, is_premium')
+          .select('manual_slots, subscription_tier, plan, is_premium, premium_until')
           .eq('id', oId)
           .maybeSingle();
         if (orgRes.error && /subscription_tier|plan|manual_slots|column/i.test(orgRes.error.message || '')) {

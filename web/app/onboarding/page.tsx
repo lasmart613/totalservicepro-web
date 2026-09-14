@@ -10,6 +10,11 @@ import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
+import {
+  applyComplimentarySignupFields,
+  missingComplimentaryColumn,
+  stripUnbackedComplimentaryPremium,
+} from '@/lib/complimentary-premium';
 
 type OrgType = 'service' | 'clinic' | 'supplier';
 type TeamMember = {
@@ -537,14 +542,15 @@ export default function Onboarding() {
         }
       } else {
         orgPayload.created_by = currentUser.id;
-        orgPayload.is_premium = false;
+        applyComplimentarySignupFields(orgPayload, oType);
         let { data: newOrg, error: iErr } = await supabase
           .from('organizations')
           .insert(orgPayload)
           .select('id')
           .single();
-        if (iErr && /list_in_directory|is_premium|column/i.test(iErr.message || '')) {
+        if (iErr && /list_in_directory|is_premium|premium_until|premium_grant|column/i.test(iErr.message || '')) {
           if (/list_in_directory/i.test(iErr.message || '')) delete orgPayload.list_in_directory;
+          if (missingComplimentaryColumn(iErr.message)) stripUnbackedComplimentaryPremium(orgPayload);
           if (/is_premium/i.test(iErr.message || '')) delete orgPayload.is_premium;
           ({ data: newOrg, error: iErr } = await supabase
             .from('organizations')

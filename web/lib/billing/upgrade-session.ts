@@ -235,6 +235,9 @@ export function orgUpgradeFields(plan: string): Record<string, unknown> {
     subscription_tier: name,
     plan: name,
     manual_slots: unlimited ? UNLIMITED_MANUAL_SLOTS : PREMIUM_MANUAL_SLOTS,
+    // Paid Stripe replaces complimentary — never leave an expiry that could drop them.
+    premium_until: null,
+    premium_grant: null,
   };
 }
 

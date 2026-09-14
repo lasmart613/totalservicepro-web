@@ -174,6 +174,8 @@ test('org upgrade writes paid flags for the selected plan', () => {
     subscription_tier: 'premium',
     plan: 'premium',
     manual_slots: 15,
+    premium_until: null,
+    premium_grant: null,
   });
   assert.deepEqual(orgUpgradeFields('team').manual_slots, 999);
 });

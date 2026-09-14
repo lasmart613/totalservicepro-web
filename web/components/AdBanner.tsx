@@ -84,10 +84,10 @@ export default function AdBanner() {
 
         let { data: org, error: orgErr } = await supabase
           .from('organizations')
-          .select('is_premium, subscription_tier')
+          .select('is_premium, subscription_tier, premium_until')
           .eq('id', profile.organization_id)
           .maybeSingle();
-        if (orgErr && /subscription_tier|column/i.test(orgErr.message || '')) {
+        if (orgErr && /subscription_tier|premium_until|column/i.test(orgErr.message || '')) {
           ({ data: org } = await supabase
             .from('organizations')
             .select('is_premium')

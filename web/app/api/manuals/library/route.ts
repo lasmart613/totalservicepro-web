@@ -102,7 +102,7 @@ export async function POST(req: NextRequest) {
 
     let orgRes = await writer
       .from('organizations')
-      .select('is_premium, subscription_tier, plan, manual_slots')
+      .select('is_premium, subscription_tier, plan, manual_slots, premium_until')
       .eq('id', orgId)
       .maybeSingle();
     if (orgRes.error && /subscription_tier|plan|manual_slots|column/i.test(orgRes.error.message || '')) {
