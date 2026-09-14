@@ -154,6 +154,7 @@ test('library page wires search UI and keeps open/get-manual-url gating', () => 
   assert.match(page, /filterManualLibrary/);
   assert.match(page, /\/api\/manuals\/search/);
   assert.match(page, /manuals-search/);
+  assert.match(page, /manuals-rail/);
   assert.match(page, /All manufacturers|All makes/i);
   assert.match(page, /ALL_MANUAL_ROOMS|room === 'all'/);
   assert.match(page, /Clear filters/);

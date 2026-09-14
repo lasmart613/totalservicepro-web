@@ -790,50 +790,16 @@ export default function ManualsLibrary() {
           </button>
         </div>
 
-        {/* Header */}
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
-          <div>
-            <h1 className="text-3xl font-extrabold">
-              {library === 'operators' ? '📖 Operators Manuals' : '📚 Service Manuals'}
-            </h1>
-            <p className="text-sm text-[var(--text3)]">
-              {library === 'operators'
-                ? 'Operators, IFU, and user manuals — separate from the service shelf'
-                : 'Service, technical, and parts manuals'}
-              {' • '}
-              {activeRoom.roomLabel} • Bookshelf by manufacturer
-              {room === 'laser' ? ' • Filter by wavelength' : ''}
-            </p>
-          </div>
-
-          {room === 'laser' && (
-            <div className="flex flex-wrap gap-2">
-              {WAVELENGTH_OPTIONS.map((option) => (
-                <button
-                  key={option.value}
-                  onClick={() => setSelectedWavelength(option.value)}
-                  className={`px-3 py-1.5 text-xs rounded-full border transition-all ${
-                    selectedWavelength === option.value
-                      ? 'bg-[var(--gold)] text-black border-[var(--gold)]'
-                      : 'border-[var(--border)] text-[var(--text3)] hover:border-[var(--gold)]'
-                  }`}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
-
-        <div className="card p-4 md:p-5 mb-6 hover:transform-none">
+        <div className="manuals-layout">
+        <aside className="manuals-rail card hover:transform-none" aria-label="Manuals search and filters">
           <label className="label" htmlFor="manuals-search">
             Search manuals
           </label>
           <input
             id="manuals-search"
-            className="input mb-4"
+            className="input"
             type="search"
-            placeholder="Title, make, model, or text inside the PDF"
+            placeholder="Title, make, model, or PDF text"
             value={query}
             onChange={(e) => {
               const next = e.target.value;
@@ -842,109 +808,130 @@ export default function ManualsLibrary() {
             }}
             autoComplete="off"
           />
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <label className="label" htmlFor="manuals-make">
-                Manufacturer
-              </label>
-              <select
-                id="manuals-make"
-                className="input"
-                value={selectedBrand}
-                onChange={(e) => {
-                  const next = e.target.value;
-                  setSelectedBrand(next);
-                  syncFilterUrl({ brand: next });
-                }}
-              >
-                <option value="">All manufacturers</option>
-                {makeOptions.map((brand) => (
-                  <option key={brand} value={brand}>
-                    {brand}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="flex flex-col justify-end gap-2">
-              <label className="flex items-center gap-2 text-sm text-[var(--text2)] min-h-[42px]">
-                <input
-                  type="checkbox"
-                  checked={incompleteOnly}
-                  onChange={(e) => {
-                    const next = e.target.checked;
-                    setIncompleteOnly(next);
-                    syncFilterUrl({ incompleteOnly: next });
-                  }}
-                />
-                Incomplete PDFs only
-              </label>
-            </div>
-          </div>
-          <div className="flex flex-wrap items-center justify-between gap-2 mt-4 text-sm text-[var(--text3)]">
-            <span>
-              {loading
-                ? 'Loading catalog…'
-                : !bodySearchReady && query.trim()
-                  ? 'Searching inside manuals…'
-                  : `Showing ${filteredManuals.length} of ${catalogInLibrary} in ${manualLibraryShelfLabel(library)}`}
-              {discoveryActive && tab === 'library' ? ' • full catalog (not just My Library)' : ''}
-            </span>
-            {filtersOn && (
-              <button type="button" className="btn btn-secondary text-sm py-1 px-3" onClick={clearLibraryFilters}>
-                Clear filters
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="manual-rooms mb-6" role="tablist" aria-label="Equipment rooms">
-          <button
-            type="button"
-            role="tab"
-            aria-selected={room === ALL_MANUAL_ROOMS}
-            onClick={() => selectRoom(ALL_MANUAL_ROOMS)}
-            className={`manual-room ${room === ALL_MANUAL_ROOMS ? 'is-selected' : ''}`}
-            title="Search every equipment room"
+          <label className="label" htmlFor="manuals-make">
+            Manufacturer
+          </label>
+          <select
+            id="manuals-make"
+            className="input"
+            value={selectedBrand}
+            onChange={(e) => {
+              const next = e.target.value;
+              setSelectedBrand(next);
+              syncFilterUrl({ brand: next });
+            }}
           >
-            <span className="manual-room-icon" aria-hidden>
-              📚
-            </span>
-            <span className="manual-room-copy">
-              <span className="manual-room-label">All</span>
-              <span className="manual-room-meta">
-                {loading
-                  ? '…'
-                  : `${Object.values(roomCounts).reduce((n, c) => n + c, 0)} ${
-                      Object.values(roomCounts).reduce((n, c) => n + c, 0) === 1 ? 'manual' : 'manuals'
-                    }`}
+            <option value="">All manufacturers</option>
+            {makeOptions.map((brand) => (
+              <option key={brand} value={brand}>
+                {brand}
+              </option>
+            ))}
+          </select>
+          <label className="flex items-center gap-2 text-sm text-[var(--text2)]">
+            <input
+              type="checkbox"
+              checked={incompleteOnly}
+              onChange={(e) => {
+                const next = e.target.checked;
+                setIncompleteOnly(next);
+                syncFilterUrl({ incompleteOnly: next });
+              }}
+            />
+            Incomplete PDFs only
+          </label>
+          <div className="manuals-rail-label">Room</div>
+          <div className="manual-rooms" role="tablist" aria-label="Equipment rooms">
+            <button
+              type="button"
+              role="tab"
+              aria-selected={room === ALL_MANUAL_ROOMS}
+              onClick={() => selectRoom(ALL_MANUAL_ROOMS)}
+              className={`manual-room ${room === ALL_MANUAL_ROOMS ? 'is-selected' : ''}`}
+              title="Search every equipment room"
+            >
+              <span className="manual-room-icon" aria-hidden>
+                📚
               </span>
-            </span>
-          </button>
-          {EQUIPMENT_TYPES.map((t) => {
-            const selected = room === t.value;
-            const count = roomCounts[t.value];
-            return (
-              <button
-                key={t.value}
-                type="button"
-                role="tab"
-                aria-selected={selected}
-                onClick={() => selectRoom(t.value)}
-                className={`manual-room ${selected ? 'is-selected' : ''}`}
-                title={t.blurb}
-              >
-                <span className="manual-room-icon" aria-hidden>
-                  {t.icon}
+              <span className="manual-room-copy">
+                <span className="manual-room-label">All</span>
+                <span className="manual-room-meta">
+                  {loading
+                    ? '…'
+                    : `${Object.values(roomCounts).reduce((n, c) => n + c, 0)} ${
+                        Object.values(roomCounts).reduce((n, c) => n + c, 0) === 1 ? 'manual' : 'manuals'
+                      }`}
                 </span>
-                <span className="manual-room-copy">
-                  <span className="manual-room-label">{t.label}</span>
-                  <span className="manual-room-meta">
-                    {loading ? '…' : `${count} ${count === 1 ? 'manual' : 'manuals'}`}
+              </span>
+            </button>
+            {EQUIPMENT_TYPES.map((t) => {
+              const selected = room === t.value;
+              const count = roomCounts[t.value];
+              return (
+                <button
+                  key={t.value}
+                  type="button"
+                  role="tab"
+                  aria-selected={selected}
+                  onClick={() => selectRoom(t.value)}
+                  className={`manual-room ${selected ? 'is-selected' : ''}`}
+                  title={t.blurb}
+                >
+                  <span className="manual-room-icon" aria-hidden>
+                    {t.icon}
                   </span>
-                </span>
-              </button>
-            );
-          })}
+                  <span className="manual-room-copy">
+                    <span className="manual-room-label">{t.label}</span>
+                    <span className="manual-room-meta">
+                      {loading ? '…' : `${count} ${count === 1 ? 'manual' : 'manuals'}`}
+                    </span>
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+          {room === 'laser' && (
+            <div className="manuals-rail-wavelengths">
+              <div className="manuals-rail-label">Wavelength</div>
+              {WAVELENGTH_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setSelectedWavelength(option.value)}
+                  className={`manuals-rail-chip ${selectedWavelength === option.value ? 'is-selected' : ''}`}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          )}
+          <p className="manuals-rail-count">
+            {loading
+              ? 'Loading catalog…'
+              : !bodySearchReady && query.trim()
+                ? 'Searching inside manuals…'
+                : `Showing ${filteredManuals.length} of ${catalogInLibrary} in ${manualLibraryShelfLabel(library)}`}
+            {discoveryActive && tab === 'library' ? ' • full catalog' : ''}
+          </p>
+          {filtersOn && (
+            <button type="button" className="btn btn-secondary text-sm py-1 px-3 w-full" onClick={clearLibraryFilters}>
+              Clear filters
+            </button>
+          )}
+        </aside>
+
+        <div className="manuals-shelf-col">
+        <div className="mb-6">
+          <h1 className="text-3xl font-extrabold">
+            {library === 'operators' ? '📖 Operators Manuals' : '📚 Service Manuals'}
+          </h1>
+          <p className="text-sm text-[var(--text3)]">
+            {library === 'operators'
+              ? 'Operators, IFU, and user manuals — separate from the service shelf'
+              : 'Service, technical, and parts manuals'}
+            {' • '}
+            {activeRoom.roomLabel} • Bookshelf by manufacturer
+          </p>
         </div>
 
         {/* Tabs */}
@@ -1129,6 +1116,8 @@ export default function ManualsLibrary() {
             ))}
           </div>
         )}
+        </div>
+        </div>
       </div>
     </div>
   );

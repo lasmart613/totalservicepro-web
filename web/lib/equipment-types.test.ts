@@ -281,10 +281,12 @@ test('library rooms default to Laser and keep access + bookshelf', () => {
   assert.match(page, /showIncompleteBadge/);
   assert.match(page, /Incomplete/);
   assert.match(css, /\.manual-libraries/);
+  assert.match(css, /\.manuals-layout/);
+  assert.match(css, /\.manuals-rail/);
   assert.match(css, /\.manual-rooms/);
+  assert.match(css, /flex-direction:\s*column/);
   assert.match(css, /flex-wrap:\s*nowrap/);
-  assert.match(css, /overflow-x:\s*auto/);
-  assert.match(css, /flex-wrap:\s*wrap/);
+  assert.match(page, /manuals-rail|manuals-layout/);
 });
 
 test('god catalog form requires equipment type and does not commit PDFs', () => {

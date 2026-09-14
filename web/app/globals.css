@@ -378,36 +378,96 @@ html.landing-mode main {
   margin-top: 2px;
 }
 
-/* Manuals rooms — pick a type (hallway), then the existing wood bookshelf.
-   Many rooms: wrap on desktop, horizontal scroll on narrow screens. */
+/* Search + filters sit in a narrow left rail, not a wide top bar. */
+.manuals-layout {
+  display: grid;
+  grid-template-columns: minmax(13.25rem, 15.5rem) minmax(0, 1fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+.manuals-rail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+  padding: 0.85rem 0.8rem 1rem;
+  position: sticky;
+  top: 5.25rem;
+}
+.manuals-rail .label {
+  margin-bottom: 0;
+}
+.manuals-rail-label {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--text3);
+  margin-top: 0.15rem;
+}
+.manuals-rail-count {
+  font-size: 11px;
+  line-height: 1.35;
+  color: var(--text3);
+  margin: 0;
+}
+.manuals-rail-wavelengths {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.manuals-rail-chip {
+  width: 100%;
+  text-align: left;
+  padding: 6px 8px;
+  font-size: 11px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  color: var(--text3);
+  background: transparent;
+  cursor: pointer;
+}
+.manuals-rail-chip.is-selected {
+  background: var(--gold);
+  color: #111;
+  border-color: var(--gold);
+}
+.manuals-shelf-col {
+  min-width: 0;
+}
+@media (max-width: 767px) {
+  .manuals-layout {
+    grid-template-columns: 1fr;
+  }
+  .manuals-rail {
+    position: static;
+  }
+}
+
+/* Manuals rooms — compact vertical list in the search rail. */
 .manual-rooms {
   display: flex;
+  flex-direction: column;
   flex-wrap: nowrap;
-  gap: 10px;
-  overflow-x: auto;
-  -webkit-overflow-scrolling: touch;
+  gap: 6px;
+  overflow-x: visible;
+  overflow-y: auto;
+  max-height: 22rem;
   scrollbar-width: thin;
-  padding-bottom: 4px;
-}
-@media (min-width: 768px) {
-  .manual-rooms {
-    flex-wrap: wrap;
-    overflow-x: visible;
-  }
 }
 .manual-room {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   text-align: left;
-  padding: 12px 12px;
-  border-radius: 14px;
+  padding: 7px 8px;
+  border-radius: 10px;
   border: 1px solid var(--border);
   background: var(--surface);
   color: var(--text);
   cursor: pointer;
-  min-height: 64px;
-  min-width: 10.5rem;
+  min-height: 44px;
+  min-width: 0;
+  width: 100%;
   flex: 0 0 auto;
   transition: border-color 0.15s ease, box-shadow 0.15s ease, transform 0.15s ease;
 }
@@ -420,11 +480,11 @@ html.landing-mode main {
   background: var(--surface2, var(--surface));
 }
 .manual-room-icon {
-  font-size: 22px;
+  font-size: 16px;
   line-height: 1;
-  width: 36px;
-  height: 36px;
-  border-radius: 10px;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
   display: inline-flex;
   align-items: center;
   justify-content: center;
