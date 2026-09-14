@@ -878,6 +878,19 @@ function CompanyProfile() {
             </div>
           </div>
 
+          {supplierMode && (
+            <div className="mt-6 p-4 rounded-xl border border-[var(--border)] bg-[var(--surface3)]">
+              <h3 className="font-semibold mb-1">Marketplace storefront</h3>
+              <p className="text-sm text-[var(--text3)] mb-3">
+                Premium and Team parts sellers can optionally publish a public shop page and upload inventory as CSV
+                or Excel.
+              </p>
+              <a href="/marketplace/storefront" className="btn btn-secondary text-sm">
+                Seller storefront settings
+              </a>
+            </div>
+          )}
+
           <button onClick={saveOrg} disabled={saving} className="btn btn-primary mt-6 w-full md:w-auto">
             {saving
               ? 'Saving...'
@@ -1139,7 +1152,7 @@ function CompanyProfile() {
           <p className="text-sm text-[var(--text3)]">
             {ownerMode
               ? 'You can only edit this facility. Add lasers on My Lasers. Post service needs on the Marketplace.'
-              : 'Manage catalog items from Parts and list inventory on the Marketplace.'}
+              : 'Manage catalog items from Parts and list inventory on the Marketplace. Premium / Team suppliers can enable an optional storefront and bulk-upload CSV or Excel from Seller storefront.'}
           </p>
         )}
       </div>

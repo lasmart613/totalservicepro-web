@@ -21,6 +21,7 @@ import {
   type MarketplaceListingLike,
 } from '@/lib/marketplace/parts';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { resolveListingStorefront } from '@/lib/marketplace/storefront-server';
 
 export const dynamic = 'force-dynamic';
 
@@ -79,6 +80,7 @@ export async function GET(
 
     const availability = listingAvailability(listing);
     const sellerName = await resolveSellerName(listing);
+    const sellerStorefront = await resolveListingStorefront(listing.organization_id);
 
     return NextResponse.json({
       listing: publicListingPayload(listing, sellerName, canManage),
@@ -86,6 +88,7 @@ export async function GET(
       price_label: formatListingPrice(listing),
       path: partsDetailPath(id),
       can_manage: canManage,
+      seller_storefront: sellerStorefront,
     });
   } catch (e: unknown) {
     const status = e instanceof StripeMarketplaceError ? e.status : 500;

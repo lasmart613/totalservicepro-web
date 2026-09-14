@@ -55,6 +55,11 @@ function PartDetail() {
   const [userId, setUserId] = useState<string | null>(null);
   const [userEmail, setUserEmail] = useState<string | null>(null);
   const [canManage, setCanManage] = useState(false);
+  const [sellerStorefront, setSellerStorefront] = useState<{
+    name?: string;
+    href?: string;
+    featured?: boolean;
+  } | null>(null);
   const [removing, setRemoving] = useState(false);
   const [buying, setBuying] = useState(false);
   const [showBidForm, setShowBidForm] = useState(false);
@@ -92,6 +97,7 @@ function PartDetail() {
       if (res.ok && json?.listing) {
         data = json.listing;
         setCanManage(!!json.can_manage);
+        setSellerStorefront(json.seller_storefront || null);
       }
     } catch (e) {
       console.warn('parts detail API', e);
@@ -410,7 +416,20 @@ function PartDetail() {
                 {seller && (
                   <div>
                     <div className="text-[var(--text3)] mb-1">Seller</div>
-                    <div>{seller}</div>
+                    {sellerStorefront?.href ? (
+                      <div>
+                        <Link href={sellerStorefront.href} className="text-[var(--gold)] hover:underline">
+                          {seller}
+                        </Link>
+                        {sellerStorefront.featured && (
+                          <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[var(--gold)] text-black">
+                            Featured seller
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <div>{seller}</div>
+                    )}
                   </div>
                 )}
                 {(listing.city || listing.state) && (
