@@ -50,57 +50,79 @@ function estimateEmailActionHref(actionUrl: string, action: 'approve' | 'reject'
   return `${base}?action=${action}`;
 }
 
-/** Table-based CTAs so Gmail does not collapse the buttons. Safe for client + email. */
-export function buildEstimateActionCtasHtml(actionUrl: string): string {
+function estimateActionButtonsRow(actionUrl: string): string {
   const approveHref = esc(estimateEmailActionHref(actionUrl, 'approve'));
   const rejectHref = esc(estimateEmailActionHref(actionUrl, 'reject'));
   const modifyHref = esc(estimateEmailActionHref(actionUrl, 'modify'));
   return (
-    `<table class="tsp-est-cta" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
-    `style="margin:22px 0 8px;border-collapse:collapse;">` +
-    `<tr><td align="center" style="padding:0 8px 10px;font-size:13px;color:#111;font-weight:700;">` +
-    `Please review this estimate and let us know how to proceed.` +
-    `</td></tr>` +
-    `<tr><td align="center" style="padding:6px 8px;">` +
+    `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">` +
+    `<tr>` +
+    `<td align="center" style="padding:6px 4px;" width="33%">` +
     `<a href="${approveHref}" ` +
-    `style="display:inline-block;background:#FBBF24;color:#111827;padding:14px 28px;border-radius:8px;` +
-    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #FBBF24;">` +
-    `Approve</a>` +
-    `</td></tr>` +
-    `<tr><td align="center" style="padding:6px 8px;">` +
+    `style="display:inline-block;background:#15803D;color:#ffffff;padding:14px 18px;border-radius:8px;` +
+    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #15803D;min-width:110px;">` +
+    `Approve</a></td>` +
+    `<td align="center" style="padding:6px 4px;" width="33%">` +
     `<a href="${rejectHref}" ` +
-    `style="display:inline-block;background:#ffffff;color:#991B1B;padding:12px 24px;border-radius:8px;` +
-    `text-decoration:none;font-weight:700;font-size:14px;border:2px solid #B91C1C;">` +
-    `Reject</a>` +
-    `</td></tr>` +
-    `<tr><td align="center" style="padding:6px 8px 4px;">` +
+    `style="display:inline-block;background:#B91C1C;color:#ffffff;padding:14px 18px;border-radius:8px;` +
+    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #B91C1C;min-width:110px;">` +
+    `Reject</a></td>` +
+    `<td align="center" style="padding:6px 4px;" width="33%">` +
     `<a href="${modifyHref}" ` +
-    `style="display:inline-block;background:#ffffff;color:#111827;padding:12px 24px;border-radius:8px;` +
-    `text-decoration:none;font-weight:700;font-size:14px;border:2px solid #FBBF24;">` +
-    `Modify</a>` +
+    `style="display:inline-block;background:#FBBF24;color:#111827;padding:14px 18px;border-radius:8px;` +
+    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #FBBF24;min-width:110px;">` +
+    `Modify</a></td>` +
+    `</tr></table>`
+  );
+}
+
+/** High-contrast banner + 3 CTAs. Table-based so Gmail does not collapse the buttons. */
+export function buildEstimateActionCtasHtml(actionUrl: string, variant: 'banner' | 'repeat' = 'banner'): string {
+  const cls = variant === 'banner' ? 'tsp-est-cta tsp-est-cta-top' : 'tsp-est-cta tsp-est-cta-bottom';
+  const heading = variant === 'banner' ? 'Respond to this estimate' : 'Need to decide?';
+  return (
+    `<table class="${cls}" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
+    `style="margin:16px 0;border-collapse:collapse;background:#111827;border-radius:10px;">` +
+    `<tr><td align="center" style="padding:16px 12px 8px;font-size:18px;color:#FBBF24;font-weight:800;letter-spacing:0.02em;">` +
+    `${heading}` +
     `</td></tr>` +
-    `<tr><td align="center" style="padding:8px 8px 0;font-size:10px;color:#666;">` +
-    `These links are unique to this estimate. No login required.` +
+    `<tr><td align="center" style="padding:0 12px 10px;font-size:13px;color:#F9FAFB;font-weight:600;">` +
+    `Tap Approve, Reject, or Modify — no login required.` +
+    `</td></tr>` +
+    `<tr><td style="padding:4px 8px 14px;">${estimateActionButtonsRow(actionUrl)}</td></tr>` +
+    `<tr><td align="center" style="padding:0 12px 14px;font-size:10px;color:#D1D5DB;">` +
+    `These links are unique to this estimate.` +
     `</td></tr>` +
     `</table>`
   );
 }
 
-const ESTIMATE_CTA_TABLE_RE = /<table[^>]*class="tsp-est-cta"[^>]*>[\s\S]*?<\/table>/i;
+const ESTIMATE_CTA_TABLE_RE = /<table[^>]*class="tsp-est-cta[^"]*"[^>]*>[\s\S]*?<\/table>/gi;
 
-/** Inject or replace CTAs so emailed HTML always has tokenized Approve / Reject / Modify. */
+/** Inject or replace CTAs at the top and bottom so they are hard to miss. */
 export function ensureEstimateActionCtas(html: string, actionUrl: string): string {
   if (!html || !actionUrl) return html;
-  const cta = buildEstimateActionCtasHtml(actionUrl);
-  if (ESTIMATE_CTA_TABLE_RE.test(html)) {
-    return html.replace(ESTIMATE_CTA_TABLE_RE, cta);
+  const top = buildEstimateActionCtasHtml(actionUrl, 'banner');
+  const bottom = buildEstimateActionCtasHtml(actionUrl, 'repeat');
+  let next = html.replace(ESTIMATE_CTA_TABLE_RE, '');
+  const firstDiv = next.indexOf('<div');
+  if (firstDiv >= 0) {
+    const close = next.indexOf('>', firstDiv);
+    if (close >= 0) {
+      next = next.slice(0, close + 1) + top + next.slice(close + 1);
+    } else {
+      next = top + next;
+    }
+  } else {
+    next = top + next;
   }
-  if (html.includes(actionUrl) && html.includes('?action=approve')) return html;
-  const thankYou = html.lastIndexOf('Thank you for choosing');
+  const thankYou = next.lastIndexOf('Thank you for choosing');
   if (thankYou >= 0) {
-    return html.slice(0, thankYou) + cta + html.slice(thankYou);
+    next = next.slice(0, thankYou) + bottom + next.slice(thankYou);
+  } else {
+    next += bottom;
   }
-  return html + cta;
+  return next;
 }
 
 /** Top header: logo | company block | title/number/date — matches Android buildDocTopHeader */
@@ -565,6 +587,7 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
   return (
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;font-size:12px;line-height:1.35;max-width:800px;margin:auto;">` +
     buildDocTopHeader(input.company, 'Service Estimate', input.estNumber, input.dateStr) +
+    (input.actionUrl ? buildEstimateActionCtasHtml(input.actionUrl, 'banner') : '') +
     customerBillTo(input.customer) +
     `<div style="margin-bottom:10px;padding:6px 8px;background:#f9f9f9;border:1px solid #eee;border-radius:4px;">` +
     `<div style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Estimate Details</div>` +
@@ -606,7 +629,7 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
     (deposit > 0
       ? `<div style="margin-top:8px;font-size:11px;color:#555;">Scheduling is contingent on receipt of the parts/travel deposit described above.</div>`
       : '') +
-    (input.actionUrl ? buildEstimateActionCtasHtml(input.actionUrl) : '') +
+    (input.actionUrl ? buildEstimateActionCtasHtml(input.actionUrl, 'repeat') : '') +
     `<div style="margin-top:12px;">Thank you for choosing ${esc(
       input.company.company_name || 'Total Service Pro'
     )}!</div></div></div>`

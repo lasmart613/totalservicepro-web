@@ -7,6 +7,7 @@ const TOKEN_URL = 'https://repairplanet.net/e/abc-token-123';
 test('estimate email CTAs are Approve / Reject / Modify on tokenized links', () => {
   const html = buildEstimateActionCtasHtml(TOKEN_URL);
   assert.match(html, /tsp-est-cta/);
+  assert.match(html, /Respond to this estimate/);
   assert.match(html, />Approve</);
   assert.match(html, />Reject</);
   assert.match(html, />Modify</);
@@ -17,7 +18,7 @@ test('estimate email CTAs are Approve / Reject / Modify on tokenized links', () 
   assert.doesNotMatch(html, /Request Changes/);
 });
 
-test('ensureEstimateActionCtas replaces a two-button stub with the three CTAs', () => {
+test('ensureEstimateActionCtas puts three CTAs at the top and bottom', () => {
   const stub =
     `<div>Estimate body</div>` +
     `<table class="tsp-est-cta"><tr><td>Approve Estimate</td></tr></table>` +
@@ -26,8 +27,11 @@ test('ensureEstimateActionCtas replaces a two-button stub with the three CTAs', 
   assert.match(html, />Approve</);
   assert.match(html, />Reject</);
   assert.match(html, />Modify</);
-  assert.equal((html.match(/tsp-est-cta/g) || []).length, 1);
+  assert.ok((html.match(/tsp-est-cta/g) || []).length >= 2);
+  assert.match(html, /tsp-est-cta-top/);
+  assert.match(html, /tsp-est-cta-bottom/);
   assert.match(html, /Thank you for choosing Acme/);
+  assert.ok(html.indexOf('Respond to this estimate') < html.indexOf('Estimate body'));
 });
 
 test('ensureEstimateActionCtas injects CTAs when the client HTML has none', () => {
@@ -35,6 +39,6 @@ test('ensureEstimateActionCtas injects CTAs when the client HTML has none', () =
     '<div>Quote</div>Thank you for choosing Acme!',
     TOKEN_URL
   );
-  assert.match(html, /tsp-est-cta/);
+  assert.match(html, /tsp-est-cta-top/);
   assert.match(html, /\?action=approve/);
 });

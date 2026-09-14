@@ -4,6 +4,7 @@ import {
   customerActionConfirmationTitle,
   customerActionFromEstimate,
   customerActionLabel,
+  isEstimateAwaitingCustomerAction,
   parseCustomerActionKind,
   parseEstimateEmailAction,
   resolveCustomerActionApply,
@@ -63,4 +64,22 @@ test('resolveCustomerActionApply is idempotent and treats approve/reject as term
     apply: true,
     conflict: false,
   });
+});
+
+test('isEstimateAwaitingCustomerAction is sent + not terminal + not expired', () => {
+  const fresh = new Date().toISOString();
+  assert.equal(
+    isEstimateAwaitingCustomerAction({ status: 'sent', created_at: fresh }),
+    true
+  );
+  assert.equal(
+    isEstimateAwaitingCustomerAction({ status: 'pending', created_at: fresh, customer_action: 'changes_requested' }),
+    true
+  );
+  assert.equal(
+    isEstimateAwaitingCustomerAction({ status: 'sent', created_at: fresh, customer_action: 'approved' }),
+    false
+  );
+  assert.equal(isEstimateAwaitingCustomerAction({ status: 'draft', created_at: fresh }), false);
+  assert.equal(isEstimateAwaitingCustomerAction({ status: 'invoiced', created_at: fresh }), false);
 });

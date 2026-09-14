@@ -2,18 +2,16 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import {
   applyEstimateCustomerAction,
-  buildOrgNotifyEmail,
   findEstimateByActionToken,
   isValidEstimateActionToken,
+  notifyShopOfCustomerAction,
   publicEstimatePayload,
   resolveOrgNotifyEmails,
-  sendResendHtml,
 } from '@/lib/billing/estimate-action';
 import {
   customerActionConfirmationTitle,
   isEstimateExpired,
   parseCustomerActionKind,
-  parseJsonField,
 } from '@/lib/billing/save-helpers';
 
 export const dynamic = 'force-dynamic';
@@ -87,7 +85,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Estimate not found' }, { status: 404 });
     }
 
-    const { companyName, emails } = await resolveOrgNotifyEmails(admin, est);
+    const { companyName } = await resolveOrgNotifyEmails(admin, est);
     const payload = publicEstimatePayload(est, companyName);
 
     if (payload.expired || isEstimateExpired(est)) {
@@ -112,28 +110,7 @@ export async function POST(req: NextRequest) {
     };
 
     if (!result.already) {
-      const ed = parseJsonField(est.estimate_data);
-      const customerEmail = ed.custEmail || ed.email || null;
-      const mail = buildOrgNotifyEmail({
-        action: applied,
-        companyName,
-        customerName: payload.customerName,
-        estimateNumber: payload.estimateNumber,
-        total: payload.total,
-        note: applied === 'changes_requested' ? note : null,
-        estimateId: est.id,
-      });
-      if (emails.length) {
-        const sent = await sendResendHtml({
-          to: emails,
-          subject: mail.subject,
-          html: mail.html,
-          replyTo: customerEmail && String(customerEmail).includes('@') ? String(customerEmail) : undefined,
-        });
-        if (!sent.ok) console.warn('org notify email skipped', sent.error);
-      } else {
-        console.warn('org notify: no recipient emails for estimate', est.id);
-      }
+      await notifyShopOfCustomerAction(admin, est, applied, note);
     }
 
     return NextResponse.json({

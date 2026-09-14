@@ -19,6 +19,11 @@ test('signed-in header collapses primary nav into a drawer below lg', () => {
   assert.match(header, /fixed inset-0 z-\[80\] bg-black\/40/);
 });
 
+test('clinic / owner hub includes Estimates for dashboard review', () => {
+  const header = headerSource();
+  assert.match(header, /ownerMode[\s\S]*href: '\/estimates', label: 'Estimates'/);
+});
+
 test('phone chrome keeps only brand, menu, and account — no overlapping top-bar links', () => {
   const header = headerSource();
   assert.match(header, /hidden lg:flex items-center gap-2 xl:gap-3/);
