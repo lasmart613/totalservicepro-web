@@ -87,7 +87,7 @@ export type PendingEquipmentItem = {
 };
 
 /** Core org row — never include dropped columns such as organizations.num_lasers.
- *  Do not send ticket_prefix: live trg_org_ticket_prefix uniquifies when it is NULL.
+ *  Do not send ticket_prefix on insert — live trg_org_ticket_prefix uniquifies when it is NULL.
  *  Sending a prefix skips that path. See set_org_ticket_prefix (char(3) only).
  */
 export function organizationInsertFromPending(pending: PendingSignup, userId: string): Record<string, unknown> {

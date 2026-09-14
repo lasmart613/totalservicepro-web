@@ -76,9 +76,13 @@ test('collision path never emits a prefix longer than 3 characters under load', 
   assert.equal(taken[1], 'SH0');
   assert.equal(taken[10], 'SH9');
   assert.equal(taken[11], 'SHA');
-  assert.equal(taken[36], 'SHZ');
-  assert.ok(taken[37] !== 'SH10');
-  assert.equal(taken[37].length, TICKET_PREFIX_LEN);
+  // SHO is already used as the mnemonic, so the A–Z sweep skips it.
+  // 1 mnemonic + 10 digits + 25 remaining letters = 36 stem-space codes; index 35 is SHZ.
+  assert.equal(taken[35], 'SHZ');
+  assert.equal(taken.includes('SHO'), true);
+  assert.ok(taken[36] !== 'SH10');
+  assert.equal(taken[36].length, TICKET_PREFIX_LEN);
+  assert.match(taken[36], /^[0-9A-Z]{3}$/);
 });
 
 test('hash fallback stays unique when stem suffixes are exhausted', () => {
@@ -87,6 +91,8 @@ test('hash fallback stays unique when stem suffixes are exhausted', () => {
   const taken = [mnemonic, ...[...TICKET_PREFIX_ALPHABET].map((ch) => `${stem}${ch}`)];
   const next = allocateTicketPrefix('Service Company', taken, { id: 42 });
   assert.equal(next, hashedTicketPrefix('Service Company', 42, 1));
+  // Locked to live Postgres: md5('Service Company|42|1') bytes 6,122,77 → 6E5
+  assert.equal(next, '6E5');
   assert.equal(next.length, TICKET_PREFIX_LEN);
   assert.equal(taken.includes(next), false);
 });
@@ -127,5 +133,5 @@ test('migration replaces the live function and keeps character(3)', () => {
 
 test('shop signup still omits ticket_prefix so the live trigger can uniquify', () => {
   assert.match(pending, /organizationInsertFromPending/);
-  assert.doesNotMatch(pending, /ticket_prefix:/);
+  assert.doesNotMatch(pending, /ticket_prefix\s*:/);
 });

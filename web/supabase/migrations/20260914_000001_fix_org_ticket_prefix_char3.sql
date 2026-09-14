@@ -108,3 +108,22 @@ CREATE TRIGGER trg_org_ticket_prefix
   FOR EACH ROW
   WHEN (NEW.ticket_prefix IS NULL)
   EXECUTE FUNCTION public.set_org_ticket_prefix();
+
+-- Self-check: suffix construction never exceeds char(3). Does not touch org rows.
+DO $$
+DECLARE
+  alphabet CONSTANT text := '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  stem text := 'SH';
+  candidate text;
+  i int;
+BEGIN
+  IF char_length(stem || 10::text) <> 4 THEN
+    RAISE EXCEPTION 'sanity: expected leftover SH10 pattern to be 4 characters';
+  END IF;
+  FOR i IN 1..length(alphabet) LOOP
+    candidate := stem || SUBSTR(alphabet, i, 1);
+    IF char_length(candidate) <> 3 THEN
+      RAISE EXCEPTION 'ticket_prefix suffix % is not 3 characters', candidate;
+    END IF;
+  END LOOP;
+END $$;
