@@ -6,6 +6,7 @@ import { Header } from '@/components/Header';
 import { AddCustomerModal } from '@/components/AddCustomerModal';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { chunkIds, fetchAllPages, uniqueLinkedIds } from '@/lib/supabase/paginate';
+import { applyDirectoryContactToLinked, type DirectoryContactRow } from '@/lib/customer-contacts';
 import { canAddCustomers, isOwnerish, isServiceCompany, isSupplier } from '@/lib/roles';
 
 export default function CustomersDirectory() {
@@ -101,24 +102,71 @@ export default function CustomersDirectory() {
       return;
     }
 
+    const orgSelectFull =
+      'id, name, address, city, state, phone, email, contact_name, directory_contacts, laser_models, facility_type, biz_type, type, logo_url';
     const orgSelect =
-      'id, name, address, city, state, phone, email, laser_models, facility_type, biz_type, type, logo_url';
+      'id, name, address, city, state, phone, email, contact_name, laser_models, facility_type, biz_type, type, logo_url';
     const custs: any[] = [];
     for (const chunk of chunkIds(customerIds)) {
-      const { data, error: orgErr } = await supabase
+      let { data, error: orgErr } = await supabase
         .from('organizations')
-        .select(orgSelect)
+        .select(orgSelectFull)
         .in('id', chunk)
         .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller']);
+      if (orgErr) {
+        ({ data, error: orgErr } = await supabase
+          .from('organizations')
+          .select(orgSelect)
+          .in('id', chunk)
+          .in('type', ['customer', 'laser_clinic', 'laser_rental', 'laser_reseller']));
+      }
       if (orgErr) {
         console.warn('organizations load failed:', orgErr);
         break;
       }
       custs.push(...(data || []));
     }
-    custs.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
 
-    setCustomers(custs);
+    const contactsByOrg = new Map<string, DirectoryContactRow[]>();
+    for (const chunk of chunkIds(customerIds)) {
+      try {
+        const { data, error } = await supabase
+          .from('contacts')
+          .select('id, first_name, last_name, title, phone, email, is_primary, organization_id')
+          .in('organization_id', chunk)
+          .limit(200);
+        if (error || !data) continue;
+        for (const row of data as Array<DirectoryContactRow & { organization_id?: string | number }>) {
+          const key = String(row.organization_id ?? '');
+          if (!key) continue;
+          const list = contactsByOrg.get(key) || [];
+          list.push(row);
+          contactsByOrg.set(key, list);
+        }
+      } catch {
+        break;
+      }
+    }
+
+    const withContact = custs.map((c) => {
+      const applied = applyDirectoryContactToLinked({
+        contact_name: c.contact_name,
+        email: c.email,
+        phone: c.phone,
+        directory_contacts: c.directory_contacts,
+        contactRows: contactsByOrg.get(String(c.id)) || [],
+      });
+      return {
+        ...c,
+        display_contact: applied.contact,
+        display_contact_role: applied.contactRole,
+        display_phone: applied.phone || c.phone,
+        display_email: applied.email || c.email,
+      };
+    });
+    withContact.sort((a, b) => String(a.name || '').localeCompare(String(b.name || '')));
+
+    setCustomers(withContact);
     setLoading(false);
   }, [supabase]);
 
@@ -240,8 +288,14 @@ export default function CustomersDirectory() {
                   {[c.city, c.state].filter(Boolean).join(', ') || '—'}
                 </div>
                 {c.address && <div className="text-sm mb-1">{c.address}</div>}
-                {c.phone && <div className="text-sm">📞 {c.phone}</div>}
-                {c.email && <div className="text-sm">✉️ {c.email}</div>}
+                {c.display_contact && (
+                  <div className="text-sm">
+                    👤 {c.display_contact}
+                    {c.display_contact_role ? ` · ${c.display_contact_role}` : ''}
+                  </div>
+                )}
+                {c.display_phone && <div className="text-sm">📞 {c.display_phone}</div>}
+                {c.display_email && <div className="text-sm">✉️ {c.display_email}</div>}
 
                 {c.laser_models && (
                   <div className="mt-3 pt-3 border-t border-[var(--border)]">

@@ -14,6 +14,16 @@ import {
   updateOmittingCharOverflow,
 } from './char-overflow.ts';
 import { isBlobLogoUrl, uploadCustomerLogo } from './customer-logo.ts';
+import {
+  applyDirectoryContactToLinked,
+  emptyDirectoryContacts,
+  ensurePrimaryDirectoryRole,
+  hydrateDirectoryContacts,
+  persistDirectoryContacts,
+  serializeDirectoryContacts,
+  type DirectoryContactsState,
+  type DirectoryContactRow,
+} from './customer-contacts.ts';
 import { normalizeRegionInput } from './geo.ts';
 import { emptySocialFields, socialPayloadFromForm, type SocialFormFields } from './social-links.ts';
 import { chunkIds, fetchAllPages, uniqueLinkedIds } from './supabase/paginate.ts';
@@ -59,6 +69,7 @@ export type CustomerInfoFormValues = {
   state: string;
   zip: string;
   contact_name: string;
+  directory: DirectoryContactsState;
   specialties: string[];
   logo_url: string;
 } & SocialFormFields;
@@ -76,6 +87,7 @@ export function emptyCustomerForm(): CustomerInfoFormValues {
     state: '',
     zip: '',
     contact_name: '',
+    directory: emptyDirectoryContacts(),
     specialties: [],
     logo_url: '',
     ...emptySocialFields(),
@@ -109,6 +121,7 @@ const OPTIONAL_ORG_COLUMNS = [
   'linkedin_url',
   'yelp_url',
   'threads_url',
+  'directory_contacts',
 ] as const;
 
 export function customerOrgPayload(
@@ -117,6 +130,8 @@ export function customerOrgPayload(
 ): Record<string, unknown> {
   const biz = form.biz_type.trim() || null;
   const region = normalizeRegionInput(form.state);
+  const directory = ensurePrimaryDirectoryRole(form.directory || emptyDirectoryContacts());
+  const primaryName = directory.primaryRole ? directory.roles[directory.primaryRole].name.trim() : '';
   return {
     name: form.name.trim(),
     address: form.address.trim() || null,
@@ -133,11 +148,22 @@ export function customerOrgPayload(
     facility_type: biz,
     // Empty array can still be written into a leftover CHAR(n) specialties column.
     ...(form.specialties.length ? { specialties: form.specialties } : {}),
-    contact_name: form.contact_name.trim() || null,
+    contact_name: primaryName || form.contact_name.trim() || null,
+    directory_contacts: serializeDirectoryContacts(directory),
     logo_url: form.logo_url.trim() && !isBlobLogoUrl(form.logo_url) ? form.logo_url.trim() : null,
     ...socialPayloadFromForm(form),
     ...extras,
   };
+}
+
+export function directoryFormFromOrg(
+  org: Record<string, unknown>,
+  contactRows?: DirectoryContactRow[] | null
+): DirectoryContactsState {
+  return hydrateDirectoryContacts({
+    directoryContacts: org.directory_contacts,
+    contactRows,
+  });
 }
 
 export async function persistCustomerLogo(
@@ -209,17 +235,28 @@ export async function createLinkedCustomer(
     throw new Error(linkErr.message || 'Customer created but could not be linked to your directory');
   }
 
+  let logoWarning: string | undefined;
   if (opts.logoFile) {
     try {
       await persistCustomerLogo(supabase, created.id, opts.logoFile);
     } catch (e: unknown) {
       const message = e instanceof Error ? e.message : String(e);
       console.warn('customer logo upload', e);
-      return { id: created.id, logoWarning: message || 'Customer saved, but the logo did not upload.' };
+      logoWarning = message || 'Customer saved, but the logo did not upload.';
     }
   }
 
-  return created;
+  try {
+    await persistDirectoryContacts(
+      supabase,
+      created.id,
+      ensurePrimaryDirectoryRole(opts.form.directory || emptyDirectoryContacts())
+    );
+  } catch (e) {
+    console.warn('directory contacts sync', e);
+  }
+
+  return logoWarning ? { id: created.id, logoWarning } : created;
 }
 
 export async function updateCustomerOrg(
@@ -248,6 +285,16 @@ export async function updateCustomerOrg(
     if (url) payload.logo_url = url;
   }
 
+  try {
+    await persistDirectoryContacts(
+      supabase,
+      customerId,
+      ensurePrimaryDirectoryRole(form.directory || emptyDirectoryContacts())
+    );
+  } catch (e) {
+    console.warn('directory contacts sync', e);
+  }
+
   return payload;
 }
 
@@ -273,6 +320,7 @@ export type LinkedCustomerOpt = {
   phone?: string | null;
   email?: string | null;
   contact?: string | null;
+  contactRole?: string | null;
   /** organization_customers.created_at — used only for empty-dropdown recency. */
   linkedAt?: string | null;
 };
@@ -324,14 +372,23 @@ export async function loadLinkedCustomers(
   if (!customerIds.length) return [];
   const linkedAt = latestLinkedAt(links);
 
+  const orgSelectFull =
+    'id, name, address, city, state, zip, phone, email, contact_name, type, directory_contacts';
   const orgSelect = 'id, name, address, city, state, zip, phone, email, contact_name, type';
   const rows: any[] = [];
   for (const chunk of chunkIds(customerIds)) {
     let { data, error } = await supabase
       .from('organizations')
-      .select(orgSelect)
+      .select(orgSelectFull)
       .in('id', chunk)
       .in('type', LINKED_CUSTOMER_TYPES);
+    if (error) {
+      ({ data, error } = await supabase
+        .from('organizations')
+        .select(orgSelect)
+        .in('id', chunk)
+        .in('type', LINKED_CUSTOMER_TYPES));
+    }
     if (error) {
       ({ data, error } = await supabase.from('organizations').select(orgSelect).in('id', chunk));
     }
@@ -342,20 +399,51 @@ export async function loadLinkedCustomers(
     rows.push(...(data || []));
   }
 
+  const contactsByOrg = new Map<string, DirectoryContactRow[]>();
+  for (const chunk of chunkIds(customerIds)) {
+    try {
+      const { data, error } = await supabase
+        .from('contacts')
+        .select('id, first_name, last_name, title, phone, email, is_primary, organization_id')
+        .in('organization_id', chunk)
+        .limit(200);
+      if (error || !data) continue;
+      for (const row of data as Array<DirectoryContactRow & { organization_id?: string | number }>) {
+        const key = String(row.organization_id ?? '');
+        if (!key) continue;
+        const list = contactsByOrg.get(key) || [];
+        list.push(row);
+        contactsByOrg.set(key, list);
+      }
+    } catch {
+      break;
+    }
+  }
+
   return rows
     .filter((c) => c?.id != null && String(c.name || '').trim())
-    .map((c) => ({
-      id: c.id,
-      name: String(c.name || '').trim(),
-      address: c.address,
-      city: c.city,
-      state: c.state,
-      zip: c.zip,
-      phone: c.phone,
-      email: c.email,
-      contact: c.contact_name,
-      linkedAt: linkedAt.get(String(c.id)) || null,
-    }))
+    .map((c) => {
+      const applied = applyDirectoryContactToLinked({
+        contact_name: c.contact_name,
+        email: c.email,
+        phone: c.phone,
+        directory_contacts: c.directory_contacts,
+        contactRows: contactsByOrg.get(String(c.id)) || [],
+      });
+      return {
+        id: c.id,
+        name: String(c.name || '').trim(),
+        address: c.address,
+        city: c.city,
+        state: c.state,
+        zip: c.zip,
+        phone: applied.phone,
+        email: applied.email,
+        contact: applied.contact,
+        contactRole: applied.contactRole,
+        linkedAt: linkedAt.get(String(c.id)) || null,
+      };
+    })
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 }
 
@@ -370,7 +458,7 @@ export function filterLinkedCustomers(
   const q = query.trim().toLowerCase();
   const list = q
     ? customers.filter((c) => {
-        const hay = [c.name, c.city, c.state, c.phone, c.email]
+        const hay = [c.name, c.city, c.state, c.phone, c.email, c.contact]
           .filter(Boolean)
           .join(' ')
           .toLowerCase();
