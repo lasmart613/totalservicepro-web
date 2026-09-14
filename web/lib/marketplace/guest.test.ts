@@ -21,6 +21,7 @@ test('marketplace catalog pages blur guest prices and send clicks to signup', ()
     '../../app/marketplace/parts/page.tsx',
     '../../app/marketplace/consumables/page.tsx',
     '../../app/marketplace/used-systems/page.tsx',
+    '../../app/marketplace/sellers/[slug]/page.tsx',
   ]) {
     const source = readFileSync(join(here, rel), 'utf8');
     assert.match(source, /GuestAwarePrice/);

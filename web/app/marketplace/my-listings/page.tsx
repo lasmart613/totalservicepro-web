@@ -140,9 +140,14 @@ export default function MyListings() {
               Edit or remove listings you posted, plus parts listed under your supplier organization.
             </p>
           </div>
-          <Link href="/marketplace/list" className="btn btn-primary">
-            + Create New Listing
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/marketplace/storefront" className="btn btn-secondary">
+              Storefront &amp; bulk upload
+            </Link>
+            <Link href="/marketplace/list" className="btn btn-primary">
+              + Create New Listing
+            </Link>
+          </div>
         </div>
 
         {listings.length === 0 ? (

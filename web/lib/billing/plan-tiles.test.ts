@@ -128,7 +128,8 @@ test('Parts Supplier photo entitlements are locked by tier', () => {
 
   assert.match(premium, /multiple/i);
   assert.match(premium, /hi-res/i);
-  assert.doesNotMatch(premium, /featured|storefront|premium placement/i);
+  assert.match(premium, /storefront/i);
+  assert.doesNotMatch(premium, /featured|premium placement/i);
   assert.doesNotMatch(premium, /%/);
   assert.doesNotMatch(premium, /\b\d{2,}\s+(sku|listings?)\b/i);
 

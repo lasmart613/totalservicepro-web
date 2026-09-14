@@ -72,6 +72,7 @@ export default function TechHub() {
       ? [
           { href: '/parts', icon: '🔩', label: 'Parts Catalog', desc: 'Master list & listings' },
           { href: '/marketplace', icon: '🛒', label: 'Marketplace', desc: 'Demand & your listings' },
+          { href: '/marketplace/storefront', icon: '🏪', label: 'Seller storefront', desc: 'Public shop page & CSV/Excel inventory' },
           { href: '/company', icon: '🏢', label: 'Supplier Profile', desc: 'Company & brands' },
           { href: '/directory', icon: '📒', label: 'TSP Directory', desc: 'Listed organizations (free)' },
         ]

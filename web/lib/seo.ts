@@ -70,6 +70,7 @@ export const ROBOTS_DISALLOW = [
   '/api',
   '/marketplace/list',
   '/marketplace/my-listings',
+  '/marketplace/storefront',
   '/pdf-viewer-demo',
 ] as const;
 

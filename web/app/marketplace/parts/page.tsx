@@ -30,6 +30,9 @@ import { toast } from 'sonner';
 
 export default function PartsMarketplace() {
   const [listings, setListings] = useState<MarketplaceListingLike[]>([]);
+  const [featuredSellers, setFeaturedSellers] = useState<
+    Array<{ name: string; slug: string; href: string; featured?: boolean; bio?: string }>
+  >([]);
   const [loading, setLoading] = useState(true);
   const [filters, setFilters] = useState<PartsCatalogFilters>(EMPTY_PARTS_FILTERS);
   const [biddingOn, setBiddingOn] = useState<MarketplaceListingLike | null>(null);
@@ -73,6 +76,19 @@ export default function PartsMarketplace() {
         }
       }
       setListings(rows);
+      try {
+        const sellersRes = await fetch('/api/marketplace/sellers', { cache: 'no-store' });
+        const sellersJson = await sellersRes.json().catch(() => ({}));
+        if (sellersRes.ok && Array.isArray(sellersJson?.sellers)) {
+          setFeaturedSellers(
+            (sellersJson.sellers as Array<{ name: string; slug: string; href: string; featured?: boolean; bio?: string }>).filter(
+              (s) => s.featured
+            )
+          );
+        }
+      } catch {
+        /* storefront list is optional */
+      }
       setLoading(false);
     };
     void fetchListings();
@@ -132,10 +148,41 @@ export default function PartsMarketplace() {
             <h1 className="text-3xl font-extrabold">Parts Marketplace</h1>
             <p className="text-[var(--text3)]">Parts currently listed for sale</p>
           </div>
-          <Link href="/marketplace/list?type=part" className="btn btn-primary whitespace-nowrap">
-            + Create New Listing
-          </Link>
+          <div className="flex flex-wrap gap-2">
+            <Link href="/marketplace/storefront" className="btn btn-secondary whitespace-nowrap">
+              Seller storefront
+            </Link>
+            <Link href="/marketplace/list?type=part" className="btn btn-primary whitespace-nowrap">
+              + Create New Listing
+            </Link>
+          </div>
         </div>
+
+        {featuredSellers.length > 0 && (
+          <div className="card p-4 md:p-5 mb-6 text-left">
+            <h2 className="font-bold mb-3">Featured sellers</h2>
+            {signedIn ? (
+              <div className="flex flex-wrap gap-3">
+                {featuredSellers.map((seller) => (
+                  <Link
+                    key={seller.slug}
+                    href={seller.href}
+                    className="px-3 py-2 rounded-lg border border-[var(--gold)]/40 hover:border-[var(--gold)] text-sm"
+                  >
+                    <span className="font-semibold">{seller.name}</span>
+                    <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[var(--gold)] text-black">
+                      Featured
+                    </span>
+                  </Link>
+                ))}
+              </div>
+            ) : (
+              <Link href="/signup" className="text-sm text-[var(--gold)] hover:underline">
+                Sign up to browse featured supplier storefronts
+              </Link>
+            )}
+          </div>
+        )}
 
         <div className="card p-4 md:p-5 mb-6 text-left">
           <label className="label" htmlFor="parts-search">Search</label>

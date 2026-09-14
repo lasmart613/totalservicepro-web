@@ -144,6 +144,7 @@ const SUPPLIER_TILES: Record<PlanTileId, readonly string[]> = {
   ],
   premium: [
     'Multiple hi-res photos on listings',
+    'Optional supplier storefront',
     SHARED_SERVICE_HISTORY_LINE,
     'No advertisements',
     WEEKLY_UPDATES_LINE,
