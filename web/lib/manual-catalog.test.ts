@@ -152,6 +152,8 @@ test('bookshelf gates the OP badge on catalogManualKind / showOperatorBadge', ()
   assert.match(page, /Operators Manuals/);
   assert.match(page, /selectLibrary|library === 'operators'/);
   assert.match(page, /role="tablist" aria-label="Manual libraries"/);
+  assert.match(page, /canService !== false/);
+  assert.match(page, /mayOpenManual/);
   assert.match(catalog, /isBareVbeamOperatorTitle/);
   assert.match(catalog, /isKnownMisShelvedOperator/);
   assert.doesNotMatch(catalog, /isVbeamFamily\(manual\) return 'operator'/);

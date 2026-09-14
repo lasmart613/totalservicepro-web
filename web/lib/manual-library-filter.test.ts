@@ -165,7 +165,8 @@ test('library page wires search UI and keeps open/get-manual-url gating', () => 
   assert.doesNotMatch(page, /search_text/);
   assert.match(page, /fetchManualLibraryRows/);
   assert.match(searchApi, /findManualIdsByBodyText|search_manual_catalog/);
-  assert.match(searchApi, /canAccessServiceManuals/);
+  assert.match(searchApi, /canAccessServiceManuals|manualsAccess/);
+  assert.match(searchApi, /filterManualsForCaller|manualsAccess/);
   assert.doesNotMatch(searchApi, /organization_manuals|user_manuals|get-manual-url/);
   assert.match(MANUAL_LIBRARY_SELECT, /brand, title, model/);
   assert.doesNotMatch(MANUAL_LIBRARY_SELECT, /search_text/);

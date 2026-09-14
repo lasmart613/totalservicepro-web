@@ -20,6 +20,7 @@ import {
 } from '@/lib/manual-catalog';
 import { toast } from 'sonner';
 import { canAccessServiceManuals } from '@/lib/roles';
+import { mayOpenManual, manualsAccess, manualsForbiddenMessage, SERVICE_MANUALS_FORBIDDEN } from '@/lib/manuals-access';
 import {
   DEFAULT_EQUIPMENT_TYPE,
   EQUIPMENT_TYPES,
@@ -71,6 +72,9 @@ export default function ManualsLibrary() {
   const [bodySearchReady, setBodySearchReady] = useState(true);
   const [slotLimit, setSlotLimit] = useState(DEFAULT_SLOT_LIMIT);
   const [orgId, setOrgId] = useState<string | number | null>(null);
+  const [canService, setCanService] = useState<boolean | null>(null);
+  const [callerRole, setCallerRole] = useState<string | null>(null);
+  const [callerOrgType, setCallerOrgType] = useState<string | null>(null);
 
   useEffect(() => {
     const parsed = parseManualLibrarySearchParams(window.location.search);
@@ -108,6 +112,7 @@ export default function ManualsLibrary() {
   }
 
   function selectLibrary(next: ManualLibraryShelf) {
+    if (next === 'service' && !canAccessServiceManuals(callerRole, callerOrgType)) return;
     setLibrary(next);
     syncFilterUrl({ library: next });
   }
@@ -140,10 +145,11 @@ export default function ManualsLibrary() {
           supabase.from('manuals').select(select).order('brand').order('title').range(from, to)
         )
       );
-      setManuals(manRes.data || []);
+      const catalogRows = manRes.data || [];
 
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) {
+        setManuals([]);
         setMyLibrary([]);
         setOwnedIds(new Set());
         return;
@@ -158,11 +164,23 @@ export default function ManualsLibrary() {
         (prof?.organizations as { type?: string } | null)?.type ||
         user.user_metadata?.organization_type ||
         null;
-      if (!canAccessServiceManuals(prof?.role, orgType)) {
-        toast.error('Service manuals are for service companies.');
+      setCallerRole(prof?.role || null);
+      setCallerOrgType(orgType);
+      const access = manualsAccess(prof?.role, orgType);
+      if (!access.page) {
+        toast.error(manualsForbiddenMessage(prof?.role, orgType));
         router.replace('/hub');
         return;
       }
+      setCanService(access.service);
+      if (!access.service) {
+        setLibrary('operators');
+        syncFilterUrl({ library: 'operators' });
+      }
+      const visibleCatalog = access.service
+        ? catalogRows
+        : catalogRows.filter((m) => manualLibraryShelf(m) === 'operators');
+      setManuals(visibleCatalog);
       const oId = prof?.organization_id ?? null;
       setOrgId(oId);
       if (oId != null) {
@@ -217,8 +235,9 @@ export default function ManualsLibrary() {
         }
       });
 
+      const visibleLib = access.service ? lib : lib.filter((m) => manualLibraryShelf(m) === 'operators');
       setOwnedIds(ids);
-      setMyLibrary(lib);
+      setMyLibrary(visibleLib);
     } catch (e) {
       console.error(e);
     } finally {
@@ -262,6 +281,10 @@ export default function ManualsLibrary() {
 
   /** Client-side add when edge action=add unavailable; mirrors Android flow */
   async function addToCompanyLibrary(m: any): Promise<boolean> {
+    if (!mayOpenManual(callerRole, callerOrgType, m)) {
+      toast.error(SERVICE_MANUALS_FORBIDDEN);
+      return false;
+    }
     const supabase = getSupabaseClient();
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
@@ -381,6 +404,10 @@ export default function ManualsLibrary() {
 
   async function openManual(m: any) {
     try {
+      if (!mayOpenManual(callerRole, callerOrgType, m)) {
+        toast.error(SERVICE_MANUALS_FORBIDDEN);
+        return;
+      }
       const payload: Record<string, unknown> = {
         manual_id: m.id,
         storage_path: m.storage_path,
@@ -721,6 +748,7 @@ export default function ManualsLibrary() {
 
       <div className="max-w-7xl mx-auto w-full px-4 py-6">
         <div className="manual-libraries mb-5" role="tablist" aria-label="Manual libraries">
+          {canService !== false && (
           <button
             type="button"
             role="tab"
@@ -740,6 +768,7 @@ export default function ManualsLibrary() {
               </span>
             </span>
           </button>
+          )}
           <button
             type="button"
             role="tab"

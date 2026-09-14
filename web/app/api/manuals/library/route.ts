@@ -4,6 +4,8 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
 import { normalizeOrgId } from '@/lib/billing/upgrade-session';
 import { canAccessServiceManuals } from '@/lib/roles';
+import { mayOpenManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
+import { MANUAL_LIBRARY_SELECT_MINIMAL, MANUAL_LIBRARY_SELECT_WITH_KIND } from '@/lib/manual-library-filter';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,6 +32,23 @@ async function loadCaller(req: NextRequest) {
     return { error: NextResponse.json({ error: 'Invalid session' }, { status: 401 }) };
   }
   return { user, supabase };
+}
+
+async function lookupManual(
+  client: { from: (table: string) => any },
+  manualId: string | number
+): Promise<{
+  id?: unknown;
+  title?: string | null;
+  brand?: string | null;
+  model?: string | null;
+  storage_path?: string | null;
+  doc_kind?: string | null;
+} | null> {
+  const full = await client.from('manuals').select(MANUAL_LIBRARY_SELECT_WITH_KIND).eq('id', manualId).maybeSingle();
+  if (!full.error) return full.data || null;
+  const slim = await client.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).eq('id', manualId).maybeSingle();
+  return slim.data || null;
 }
 
 async function ownedManualIds(
@@ -77,9 +96,17 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
     const orgJoin = profile?.organizations as { type?: string } | { type?: string }[] | null;
     const orgType = Array.isArray(orgJoin) ? orgJoin[0]?.type : orgJoin?.type;
-    if (!canAccessServiceManuals(profile?.role, orgType)) {
+    const access = manualsAccess(profile?.role, orgType);
+    if (!access.page) {
       return NextResponse.json(
-        { error: 'Service manuals are for service companies.' },
+        { error: manualsForbiddenMessage(profile?.role, orgType) },
+        { status: 403 }
+      );
+    }
+    const catalog = await lookupManual(supabase, manualId);
+    if (!mayOpenManual(profile?.role, orgType, catalog) || (!access.service && !canAccessServiceManuals(profile?.role, orgType) && !catalog)) {
+      return NextResponse.json(
+        { error: manualsForbiddenMessage(profile?.role, orgType) },
         { status: 403 }
       );
     }
