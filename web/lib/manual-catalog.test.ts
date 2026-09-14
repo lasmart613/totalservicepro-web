@@ -9,8 +9,10 @@ import {
   catalogManualTitle,
   inferKindFromDocumentText,
   isBareVbeamOperatorTitle,
+  isKnownMisShelvedOperator,
   isVbeamFamily,
   isVbeamModelSpecificTitle,
+  manualLibraryShelf,
   presentManual,
   isManualIncomplete,
   showIncompleteBadge,
@@ -97,6 +99,29 @@ test('blanket doc_kind=operator does not OP VBeam Perfecta', () => {
   assert.equal(showOperatorBadge(row), false);
 });
 
+test('stored doc_kind=operator shelves non-VBeam rows on Operators', () => {
+  const row = { title: 'Lyra', brand: 'Lasering', doc_kind: 'operator' };
+  assert.equal(catalogManualKind(row), 'operator');
+  assert.equal(manualLibraryShelf(row), 'operators');
+  assert.equal(showOperatorBadge(row), true);
+});
+
+test('IFU / Instructions for Use are Operators, not Service', () => {
+  assert.equal(catalogManualKind({ title: 'Litho IFU (EN)' }), 'operator');
+  assert.equal(manualLibraryShelf({ title: 'Litho IFU (EN)' }), 'operators');
+  assert.equal(inferKindFromDocumentText('Instructions for Use'), 'operator');
+  assert.equal(catalogManualKind({ title: 'Quanta Litho IFU' }), 'operator');
+});
+
+test('Lyra 767 OP-in-SM-shelf cases go to the Operators library', () => {
+  const row = { title: 'Lyra 767', brand: 'Lasering', storage_path: 'shared/lasering/lyra-767.pdf' };
+  assert.equal(isKnownMisShelvedOperator(row), true);
+  assert.equal(catalogManualKind(row), 'operator');
+  assert.equal(manualLibraryShelf(row), 'operators');
+  assert.equal(showOperatorBadge(row), true);
+  assert.equal(catalogManualKind({ title: 'Lyra-767 Service Manual' }), 'operator');
+});
+
 test('non-VBeam service manuals are unchanged', () => {
   const row = { brand: 'Lumenis', title: 'AcuPulse Service Manual' };
   assert.equal(isVbeamFamily(row), false);
@@ -124,7 +149,10 @@ test('bookshelf gates the OP badge on catalogManualKind / showOperatorBadge', ()
   const catalog = readFileSync(join(here, 'manual-catalog.ts'), 'utf8');
   assert.match(page, /catalogManualTitle/);
   assert.match(page, /showOperatorBadge/);
+  assert.match(page, /Operators Manuals/);
+  assert.match(page, /selectLibrary|library === 'operators'/);
   assert.match(catalog, /isBareVbeamOperatorTitle/);
+  assert.match(catalog, /isKnownMisShelvedOperator/);
   assert.doesNotMatch(catalog, /isVbeamFamily\(manual\) return 'operator'/);
 });
 

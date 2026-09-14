@@ -276,9 +276,11 @@ test('library rooms default to Laser and keep access + bookshelf', () => {
   assert.doesNotMatch(page, /other:\s*0/);
   assert.match(page, /canAccessServiceManuals/);
   assert.match(page, /ShelfScroller/);
+  assert.match(page, /Operators Manuals/);
   assert.match(page, /empty.*room|No manuals in this room|bookshelf is empty/i);
   assert.match(page, /showIncompleteBadge/);
   assert.match(page, /Incomplete/);
+  assert.match(css, /\.manual-libraries/);
   assert.match(css, /\.manual-rooms/);
   assert.match(css, /flex-wrap:\s*nowrap/);
   assert.match(css, /overflow-x:\s*auto/);
@@ -291,6 +293,8 @@ test('god catalog form requires equipment type and does not commit PDFs', () => 
   assert.match(page, /equipment_type|equipmentType/);
   assert.match(page, /storage_path/);
   assert.match(page, /is_incomplete|isIncomplete/);
+  assert.match(page, /Operators library|Operators Manuals/);
+  assert.match(page, /doc_kind|Document kind/);
   assert.match(api, /requireGodCaller/);
   assert.match(api, /parseManualCatalogInsert/);
   assert.match(api, /equipment_type/);

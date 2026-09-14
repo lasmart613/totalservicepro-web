@@ -12,8 +12,11 @@ import {
   catalogManualKind,
   catalogManualKindLabel,
   catalogManualTitle,
+  manualLibraryShelf,
+  manualLibraryShelfLabel,
   showIncompleteBadge,
   showOperatorBadge,
+  type ManualLibraryShelf,
 } from '@/lib/manual-catalog';
 import { toast } from 'sonner';
 import { canAccessServiceManuals } from '@/lib/roles';
@@ -28,6 +31,7 @@ import {
 } from '@/lib/equipment-types';
 import {
   ALL_MANUAL_ROOMS,
+  DEFAULT_MANUAL_LIBRARY,
   filterManualLibrary,
   groupManualsByBrand,
   fetchManualLibraryRows,
@@ -57,6 +61,7 @@ export default function ManualsLibrary() {
   const [ownedIds, setOwnedIds] = useState<Set<string>>(new Set());
   const [tab, setTab] = useState<'browse' | 'library'>('browse');
   const [loading, setLoading] = useState(true);
+  const [library, setLibrary] = useState<ManualLibraryShelf>(DEFAULT_MANUAL_LIBRARY);
   const [room, setRoom] = useState<ManualLibraryRoom>(DEFAULT_EQUIPMENT_TYPE);
   const [selectedWavelength, setSelectedWavelength] = useState('');
   const [query, setQuery] = useState('');
@@ -69,6 +74,7 @@ export default function ManualsLibrary() {
 
   useEffect(() => {
     const parsed = parseManualLibrarySearchParams(window.location.search);
+    if (parsed.library === 'operators') setLibrary('operators');
     if (parsed.room === 'all') setRoom('all');
     else if (parsed.room) setRoom(equipmentTypeOrDefault(parsed.room));
     if (parsed.query) setQuery(parsed.query);
@@ -82,12 +88,14 @@ export default function ManualsLibrary() {
     query?: string;
     brand?: string;
     incompleteOnly?: boolean;
+    library?: ManualLibraryShelf;
   }) {
     const qs = manualLibrarySearchParams({
       room: next.room ?? room,
       query: next.query ?? query,
       brand: next.brand ?? selectedBrand,
       incompleteOnly: next.incompleteOnly ?? incompleteOnly,
+      library: next.library ?? library,
     });
     const path = `${window.location.pathname}${qs ? `?${qs}` : ''}`;
     window.history.replaceState(null, '', path);
@@ -97,6 +105,11 @@ export default function ManualsLibrary() {
     setRoom(next);
     if (next !== 'laser') setSelectedWavelength('');
     syncFilterUrl({ room: next });
+  }
+
+  function selectLibrary(next: ManualLibraryShelf) {
+    setLibrary(next);
+    syncFilterUrl({ library: next });
   }
 
   function clearLibraryFilters() {
@@ -514,11 +527,41 @@ export default function ManualsLibrary() {
           room,
           wavelength: selectedWavelength,
           incompleteOnly,
+          library,
         },
         bodyMatchIds
       ),
-    [sourceManuals, query, selectedBrand, room, selectedWavelength, incompleteOnly, bodyMatchIds]
+    [sourceManuals, query, selectedBrand, room, selectedWavelength, incompleteOnly, library, bodyMatchIds]
   );
+
+  const otherLibraryHits = useMemo(
+    () =>
+      filterManualLibrary(
+        sourceManuals,
+        {
+          query,
+          brand: selectedBrand,
+          room,
+          wavelength: selectedWavelength,
+          incompleteOnly,
+          library: library === 'operators' ? 'service' : 'operators',
+        },
+        bodyMatchIds
+      ),
+    [sourceManuals, query, selectedBrand, room, selectedWavelength, incompleteOnly, library, bodyMatchIds]
+  );
+
+  const libraryCounts = useMemo(() => {
+    let service = 0;
+    let operators = 0;
+    for (const m of manuals) {
+      if (manualLibraryShelf(m) === 'operators') operators += 1;
+      else service += 1;
+    }
+    return { service, operators };
+  }, [manuals]);
+
+  const catalogInLibrary = library === 'operators' ? libraryCounts.operators : libraryCounts.service;
 
   const roomCounts = useMemo(() => {
     const preRoom = filterManualLibrary(
@@ -528,6 +571,7 @@ export default function ManualsLibrary() {
         brand: selectedBrand,
         room: ALL_MANUAL_ROOMS,
         incompleteOnly,
+        library,
       },
       bodyMatchIds
     );
@@ -539,10 +583,13 @@ export default function ManualsLibrary() {
       counts[manualRoom(m)] += 1;
     });
     return counts;
-  }, [sourceManuals, query, selectedBrand, incompleteOnly, bodyMatchIds]);
+  }, [sourceManuals, query, selectedBrand, incompleteOnly, library, bodyMatchIds]);
 
   const groupedManuals = useMemo(() => groupManualsByBrand(filteredManuals), [filteredManuals]);
-  const makeOptions = useMemo(() => uniqueManualBrands(manuals), [manuals]);
+  const makeOptions = useMemo(
+    () => uniqueManualBrands(manuals.filter((m) => manualLibraryShelf(m) === library)),
+    [manuals, library]
+  );
   const filtersOn = discoveryActive || selectedWavelength !== '';
   const activeRoom =
     room === ALL_MANUAL_ROOMS
@@ -625,6 +672,8 @@ export default function ManualsLibrary() {
       .replace(/\bService\s+Manuals?\b/gi, ' ')
       .replace(/\bOperator'?s?\s+Manuals?\b/gi, ' ')
       .replace(/\bUser\s+Manuals?\b/gi, ' ')
+      .replace(/\bInstructions?\s+for\s+Use\b/gi, ' ')
+      .replace(/\bIFU\b/gi, ' ')
       .replace(/\bTechnical\s+Manuals?\b/gi, ' ')
       .replace(/\bParts\s*(?:and|&)\s*Service\b/gi, ' ')
       .replace(/\s{2,}/g, ' ')
@@ -671,11 +720,58 @@ export default function ManualsLibrary() {
       <Header />
 
       <div className="max-w-7xl mx-auto w-full px-4 py-6">
+        <div className="manual-libraries mb-5" role="tablist" aria-label="Manual libraries">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={library === 'service'}
+            onClick={() => selectLibrary('service')}
+            className={`manual-library ${library === 'service' ? 'is-selected' : ''}`}
+          >
+            <span className="manual-library-icon" aria-hidden>
+              📚
+            </span>
+            <span className="manual-library-copy">
+              <span className="manual-library-label">Service Manuals</span>
+              <span className="manual-library-meta">
+                {loading
+                  ? '…'
+                  : `${libraryCounts.service} ${libraryCounts.service === 1 ? 'manual' : 'manuals'}`}
+              </span>
+            </span>
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={library === 'operators'}
+            onClick={() => selectLibrary('operators')}
+            className={`manual-library ${library === 'operators' ? 'is-selected' : ''}`}
+          >
+            <span className="manual-library-icon" aria-hidden>
+              📖
+            </span>
+            <span className="manual-library-copy">
+              <span className="manual-library-label">Operators Manuals</span>
+              <span className="manual-library-meta">
+                {loading
+                  ? '…'
+                  : `${libraryCounts.operators} ${libraryCounts.operators === 1 ? 'manual' : 'manuals'}`}
+              </span>
+            </span>
+          </button>
+        </div>
+
         {/* Header */}
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-3xl font-extrabold">📚 Service Manuals</h1>
+            <h1 className="text-3xl font-extrabold">
+              {library === 'operators' ? '📖 Operators Manuals' : '📚 Service Manuals'}
+            </h1>
             <p className="text-sm text-[var(--text3)]">
+              {library === 'operators'
+                ? 'Operators, IFU, and user manuals — separate from the service shelf'
+                : 'Service, technical, and parts manuals'}
+              {' • '}
               {activeRoom.roomLabel} • Bookshelf by manufacturer
               {room === 'laser' ? ' • Filter by wavelength' : ''}
             </p>
@@ -761,7 +857,7 @@ export default function ManualsLibrary() {
                 ? 'Loading catalog…'
                 : !bodySearchReady && query.trim()
                   ? 'Searching inside manuals…'
-                  : `Showing ${filteredManuals.length} of ${manuals.length} in the catalog`}
+                  : `Showing ${filteredManuals.length} of ${catalogInLibrary} in ${manualLibraryShelfLabel(library)}`}
               {discoveryActive && tab === 'library' ? ' • full catalog (not just My Library)' : ''}
             </span>
             {filtersOn && (
@@ -865,9 +961,23 @@ export default function ManualsLibrary() {
                   <>
                     <p className="text-lg font-semibold text-[var(--text)] mb-2">No manuals match</p>
                     <p className="mb-4">
-                      Nothing in the catalog matches that search and filter combination. Try a different
-                      string, another manufacturer, or All rooms.
+                      Nothing in {manualLibraryShelfLabel(library)} matches that search and filter
+                      combination. Try a different string, another manufacturer, or All rooms.
                     </p>
+                    {otherLibraryHits.length > 0 && (
+                      <p className="mb-4">
+                        {otherLibraryHits.length}{' '}
+                        {otherLibraryHits.length === 1 ? 'manual' : 'manuals'} in{' '}
+                        {manualLibraryShelfLabel(library === 'operators' ? 'service' : 'operators')}.
+                        <button
+                          type="button"
+                          className="ml-2 text-[var(--gold)] font-semibold underline"
+                          onClick={() => selectLibrary(library === 'operators' ? 'service' : 'operators')}
+                        >
+                          Switch library
+                        </button>
+                      </p>
+                    )}
                     <button type="button" className="btn btn-secondary" onClick={clearLibraryFilters}>
                       Clear filters
                     </button>
@@ -880,9 +990,24 @@ export default function ManualsLibrary() {
                       This room&apos;s bookshelf is empty
                     </p>
                     <p>
-                      No manuals in the {activeRoom.roomLabel.toLowerCase()} yet. They&apos;ll appear on
-                      these shelves by manufacturer after they&apos;re added to the catalog.
+                      No {library === 'operators' ? 'operators' : 'service'} manuals in the{' '}
+                      {activeRoom.roomLabel.toLowerCase()} yet. They&apos;ll appear on these shelves
+                      by manufacturer after they&apos;re added to the catalog.
                     </p>
+                    {otherLibraryHits.length > 0 && (
+                      <p className="mt-3">
+                        {otherLibraryHits.length}{' '}
+                        {otherLibraryHits.length === 1 ? 'manual' : 'manuals'} in{' '}
+                        {manualLibraryShelfLabel(library === 'operators' ? 'service' : 'operators')}.
+                        <button
+                          type="button"
+                          className="ml-2 text-[var(--gold)] font-semibold underline"
+                          onClick={() => selectLibrary(library === 'operators' ? 'service' : 'operators')}
+                        >
+                          Switch library
+                        </button>
+                      </p>
+                    )}
                   </>
                 )}
               </div>

@@ -163,6 +163,15 @@ test('omitted system tables stay out of the picker', () => {
   assert.ok(GOD_OMITTED_TABLES.some((t) => /password hash/i.test(t.reason)));
 });
 
+test('God manuals catalog labels Service vs Operators libraries', () => {
+  const manuals = getGodTable('manuals');
+  assert.ok(manuals);
+  assert.match(manuals?.description || '', /Operators Manuals/);
+  assert.match(manuals?.description || '', /doc_kind/);
+  assert.ok(manuals?.listColumns.includes('doc_kind'));
+  assert.ok(manuals?.searchColumns.includes('doc_kind'));
+});
+
 test('parseRowId keeps UUIDs as strings', () => {
   assert.equal(parseRowId('12'), 12);
   assert.equal(parseRowId('11111111-1111-1111-1111-111111111111'), '11111111-1111-1111-1111-111111111111');
