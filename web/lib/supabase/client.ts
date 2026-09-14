@@ -107,6 +107,8 @@ export type ServiceReport = {
   checklist_electrical?: Record<string, string>;
   checklist_mechanical?: Record<string, string>;
   checklist_aesthetic?: Record<string, string>;
+  equipment_type?: string | null;
+  sr_template_id?: string | null;
   power_measurements?: any[];
   model_parameters?: Record<string, any>;
   test_equipment?: any[];

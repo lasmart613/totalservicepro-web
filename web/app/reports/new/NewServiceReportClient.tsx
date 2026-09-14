@@ -4,14 +4,41 @@ import React, { useEffect, useState, useRef, useMemo } from 'react';
 import Link from 'next/link';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
-import { ArrowLeft, Check, Plus, Save } from 'lucide-react';
+import { ArrowLeft, Check, Save } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
-import { MODELS, resolveModelDef } from '@/lib/models';
+import { CL_AESTHETIC, CL_ELECTRICAL, CL_MECHANICAL, MODELS, resolveModelDef } from '@/lib/models';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
+import {
+  DEFAULT_EQUIPMENT_TYPE,
+  EQUIPMENT_TYPES,
+  equipmentTypeOrDefault,
+  inferEquipmentType,
+  type EquipmentType,
+} from '@/lib/equipment-types';
+import {
+  addCustomElement,
+  addLibraryElement,
+  applyChecklistMap,
+  applySafetyToItems,
+  hydrateItemsFromLegacy,
+  itemsToLegacyChecklists,
+  keepExtras,
+  labelsForSection,
+  loadPublishedLibrary,
+  loadServiceReportItems,
+  loadSrTemplateForEquipmentType,
+  mergeResultsIntoItems,
+  removeExtraItem,
+  replaceServiceReportItems,
+  unusedLibraryElements,
+  type SrChecklistSection,
+  type SrDraftItem,
+  type SrElement,
+} from '@/lib/service-report-elements';
 
 /** Admin / manager roles may edit Service Engineer (Android parity). */
 function canEditServiceEngineer(profile: any): boolean {
@@ -75,6 +102,7 @@ export default function NewServiceReport() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const editReportId = searchParams?.get('id') || null;
+  const equipmentTypeParam = searchParams?.get('equipment_type') || searchParams?.get('type') || '';
   const supabase = getSupabaseClient();
 
   const [currentUser, setCurrentUser] = useState<any>(null);
@@ -116,10 +144,23 @@ export default function NewServiceReport() {
   const [custEmail, setCustEmail] = useState('');
   const [custWebsite, setCustWebsite] = useState('');
 
-  // Checklists state: {item: 'PASS' | 'FAIL' | 'N/A'} — Android parity
+  // Checklists state: {item: 'PASS' | 'FAIL' | 'N/A'} — Android parity + SR element library
   const [checkElectrical, setCheckElectrical] = useState<Record<string, string>>({});
   const [checkMechanical, setCheckMechanical] = useState<Record<string, string>>({});
   const [checkAesthetic, setCheckAesthetic] = useState<Record<string, string>>({});
+  const [equipmentType, setEquipmentType] = useState<EquipmentType>(() =>
+    equipmentTypeOrDefault(equipmentTypeParam)
+  );
+  const [srItems, setSrItems] = useState<SrDraftItem[]>([]);
+  const [srLibrary, setSrLibrary] = useState<SrElement[]>([]);
+  const [srTemplateId, setSrTemplateId] = useState<string | null>(null);
+  const [srTemplateName, setSrTemplateName] = useState('Laser PM');
+  const [srUsedFallback, setSrUsedFallback] = useState(true);
+  const [customLabels, setCustomLabels] = useState<Record<SrChecklistSection, string>>({
+    electrical: '',
+    mechanical: '',
+    aesthetic: '',
+  });
 
   // Performance / params
   const [powerMeasurements, setPowerMeasurements] = useState<any[]>([]);
@@ -245,35 +286,7 @@ export default function NewServiceReport() {
       null
     : null;
 
-  // Shared checklists EXACT from Android service_report.html (source of truth for parity). When updating here also note models.ts guidance for Android sync if MODELS change.
-  const CL_ELECTRICAL = [
-    'Power Cord & Plug integrity',
-    'Foot Pedal & Strain Relief function',
-    'Circuit Breaker function',
-    'Key Switch test',
-    'E-Stop Button operates properly',
-    'Display functioning properly',
-    'High/Low Supplies correct voltage',
-    'Faults/Errors documented & cleared'
-  ];
-  const CL_MECHANICAL = [
-    'Aiming Beam brightness',
-    'Wheels & Castors integrity',
-    'Optics inspected & cleaned',
-    'Full Alignment Check',
-    'Coolant flushed & topped off',
-    'DI & Coolant Filters changed',
-    'Interior dust & pollutant free',
-    'Servos/Gears/Solenoids to spec'
-  ];
-  const CL_AESTHETIC = [
-    'Condition of Skins',
-    'Foot Pedal inspection',
-    'Screen condition',
-    'Control Panel condition',
-    'Accessory Cables',
-    'Accessories of the Unit'
-  ];
+  // Labels come from the device-type SR template (laser seed = Android CL_*). Fallback arrays stay imported from models.ts.
 
   useEffect(() => {
     (async () => {
@@ -329,6 +342,44 @@ export default function NewServiceReport() {
   }, [router, supabase]);
 
   const engineerEditable = useMemo(() => canEditServiceEngineer(currentProfile), [currentProfile]);
+
+  const electricalLabels = srItems.length ? labelsForSection(srItems, 'electrical') : [...CL_ELECTRICAL];
+  const mechanicalLabels = srItems.length ? labelsForSection(srItems, 'mechanical') : [...CL_MECHANICAL];
+  const aestheticLabels = srItems.length ? labelsForSection(srItems, 'aesthetic') : [...CL_AESTHETIC];
+  const unusedLibrary = unusedLibraryElements(srLibrary, srItems);
+
+  function syncMapsFromItems(items: SrDraftItem[]) {
+    const json = itemsToLegacyChecklists(items);
+    setCheckElectrical(json.electrical);
+    setCheckMechanical(json.mechanical);
+    setCheckAesthetic(json.aesthetic);
+  }
+
+  function applyLoadedTemplate(loaded: Awaited<ReturnType<typeof loadSrTemplateForEquipmentType>>, previous: SrDraftItem[]) {
+    const extras = keepExtras(previous);
+    const merged = mergeResultsIntoItems(loaded.items, previous);
+    const extraKeep = extras.filter(
+      (e) => !merged.some((m) => m.section === e.section && m.label === e.label)
+    );
+    const next = [...merged, ...extraKeep];
+    setSrItems(next);
+    setSrTemplateId(loaded.usedFallback ? null : loaded.template?.id || null);
+    setSrTemplateName(loaded.template?.name || 'Laser PM');
+    setSrUsedFallback(loaded.usedFallback);
+    syncMapsFromItems(next);
+  }
+
+  function currentItemsWithAnswers(): SrDraftItem[] {
+    let items = applyChecklistMap(srItems, 'electrical', checkElectrical);
+    items = applyChecklistMap(items, 'mechanical', checkMechanical);
+    items = applyChecklistMap(items, 'aesthetic', checkAesthetic);
+    return applySafetyToItems(items, {
+      ground_resistance: groundResistance,
+      leakage_current: leakageCurrent,
+      ground_resistance_pass: groundPass,
+      leakage_current_pass: leakagePass,
+    });
+  }
 
   // Load existing report when opened via /reports/new?id=… (Android loadReport parity — minimal fields + engineer)
   useEffect(() => {
@@ -434,6 +485,51 @@ export default function NewServiceReport() {
         }
         if (r.tech_signature) setTechSig(r.tech_signature);
         if (r.signed_date) setTechSigDate(String(r.signed_date).slice(0, 10));
+        const reportType = equipmentTypeOrDefault(
+          r.equipment_type ||
+            inferEquipmentType({
+              equipment_type: r.equipment_type,
+              title: r.equipment_name || r.model_type,
+              model: r.model_type || r.equipment_name,
+            })
+        );
+        setEquipmentType(reportType);
+        try {
+          const [loaded, library, savedItems] = await Promise.all([
+            loadSrTemplateForEquipmentType(supabase, reportType),
+            loadPublishedLibrary(supabase),
+            loadServiceReportItems(supabase, r.id),
+          ]);
+          if (cancelled) return;
+          if (library) setSrLibrary(library);
+          else setSrLibrary(loaded.elements);
+          if (savedItems && savedItems.length) {
+            setSrItems(savedItems);
+            setSrTemplateId(r.sr_template_id || (loaded.usedFallback ? null : loaded.template?.id || null));
+            setSrTemplateName(loaded.template?.name || 'Laser PM');
+            setSrUsedFallback(loaded.usedFallback);
+            syncMapsFromItems(savedItems);
+          } else {
+            const hydrated = hydrateItemsFromLegacy(loaded.items, {
+              electrical: normalizeChecklistMap(r.checklist_electrical),
+              mechanical: normalizeChecklistMap(r.checklist_mechanical),
+              aesthetic: normalizeChecklistMap(r.checklist_aesthetic),
+            });
+            const withSafety = applySafetyToItems(hydrated, {
+              ground_resistance: r.ground_resistance ?? null,
+              leakage_current: r.leakage_current ?? null,
+              ground_resistance_pass: r.ground_resistance_pass ?? null,
+              leakage_current_pass: r.leakage_current_pass ?? null,
+            });
+            setSrItems(withSafety);
+            setSrTemplateId(r.sr_template_id || (loaded.usedFallback ? null : loaded.template?.id || null));
+            setSrTemplateName(loaded.template?.name || 'Laser PM');
+            setSrUsedFallback(loaded.usedFallback);
+            syncMapsFromItems(withSafety);
+          }
+        } catch (srErr) {
+          console.warn('sr template hydrate', srErr);
+        }
         toast.success(r.status === 'complete' ? 'Report loaded' : 'Draft loaded');
       } catch (e: any) {
         console.warn('load report', e);
@@ -444,6 +540,47 @@ export default function NewServiceReport() {
       cancelled = true;
     };
   }, [editReportId, currentUser, supabase]);
+
+  // New reports: load device-type template (fallback laser) once the tech is signed in.
+  useEffect(() => {
+    if (!currentUser || editReportId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const [loaded, library] = await Promise.all([
+          loadSrTemplateForEquipmentType(supabase, equipmentType),
+          loadPublishedLibrary(supabase),
+        ]);
+        if (cancelled) return;
+        if (library) setSrLibrary(library);
+        else setSrLibrary(loaded.elements);
+        applyLoadedTemplate(loaded, srItems);
+      } catch (e) {
+        console.warn('sr template load', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // equipmentType changes are handled by onEquipmentTypeChange so extras are preserved.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, editReportId, supabase]);
+
+  async function onEquipmentTypeChange(next: EquipmentType) {
+    const previous = currentItemsWithAnswers();
+    setEquipmentType(next);
+    try {
+      const loaded = await loadSrTemplateForEquipmentType(supabase, next);
+      if (!srLibrary.length) {
+        const library = await loadPublishedLibrary(supabase);
+        if (library) setSrLibrary(library);
+        else setSrLibrary(loaded.elements);
+      }
+      applyLoadedTemplate(loaded, previous);
+    } catch (e) {
+      console.warn('sr template switch', e);
+    }
+  }
 
   // Load manufacturers and laser_models from Supabase for dynamic dropdowns in reports (and tickets)
   useEffect(() => {
@@ -468,7 +605,8 @@ export default function NewServiceReport() {
           id: row.id,
           name: row.name || row.model_name || row.model || '',
           label: row.label || row.name || row.model_name || '',
-          manufacturer_id: row.manufacturer_id || row.manufacturer || row.manufacturer_name || ''
+          manufacturer_id: row.manufacturer_id || row.manufacturer || row.manufacturer_name || '',
+          equipment_type: row.equipment_type || null,
         }));
         setDbLaserModels(normalizedModels);
       } catch (e) {
@@ -605,8 +743,7 @@ export default function NewServiceReport() {
   function selectModel(key: string) {
     setSelectedModelKey(key);
     setSelectedDbModel(key);
-    // reset dynamic
-    setCheckElectrical({}); setCheckMechanical({}); setCheckAesthetic({});
+    // Keep SR template / extras — device type drives the form, not the OEM model.
     setPowerMeasurements([]); setModelParams({});
     const m = (MODELS as any)[key];
     if (m && m.params) {
@@ -632,7 +769,6 @@ export default function NewServiceReport() {
     setSelectedDbMfr(mfr);
     setSelectedDbModel('');
     setSelectedModelKey('');
-    setCheckElectrical({}); setCheckMechanical({}); setCheckAesthetic({});
     setPowerMeasurements([]); setModelParams({});
   }
 
@@ -656,6 +792,21 @@ export default function NewServiceReport() {
       }
     }
     selectModel(found);
+    const dbRow = dbLaserModels.find(
+      (x: any) => (x.name || x.label) === modelVal || x.name === found || x.label === found
+    );
+    const inferred = equipmentTypeOrDefault(
+      dbRow?.equipment_type ||
+        inferEquipmentType({
+          equipment_type: dbRow?.equipment_type,
+          title: modelVal,
+          model: modelVal,
+          brand: currentModel?.mfg || '',
+        })
+    );
+    if (inferred !== equipmentType) {
+      void onEquipmentTypeChange(inferred);
+    }
     // Derive equipment_name from manufacturer + model dropdowns (no free-text field)
     const m = resolveModelDef(found, modelVal) || (MODELS as any)[found];
     if (m) {
@@ -857,6 +1008,9 @@ export default function NewServiceReport() {
         currentUser.email ||
         null;
 
+      const answeredItems = currentItemsWithAnswers();
+      const dualChecklists = itemsToLegacyChecklists(answeredItems);
+
       // collect data mirroring Android
       const reportData: any = {
         organization_id: currentUserOrgId,
@@ -893,9 +1047,11 @@ export default function NewServiceReport() {
         leakage_current: leakageCurrent === '' ? null : leakageCurrent,
         ground_resistance_pass: groundPass,
         leakage_current_pass: leakagePass,
-        checklist_electrical: checkElectrical,
-        checklist_mechanical: checkMechanical,
-        checklist_aesthetic: checkAesthetic,
+        equipment_type: equipmentType,
+        sr_template_id: srTemplateId,
+        checklist_electrical: dualChecklists.electrical,
+        checklist_mechanical: dualChecklists.mechanical,
+        checklist_aesthetic: dualChecklists.aesthetic,
         power_measurements: powerMeasurements,
         model_parameters: modelParams,
         test_equipment: testEquipment
@@ -963,6 +1119,18 @@ export default function NewServiceReport() {
         setCurrentReportId(savedId);
       }
 
+      if (savedId) {
+        const itemsWrite = await replaceServiceReportItems(supabase, {
+          reportId: savedId,
+          organizationId: currentUserOrgId,
+          items: answeredItems,
+        });
+        if (!itemsWrite.ok && !('skipped' in itemsWrite && itemsWrite.skipped)) {
+          throw (itemsWrite as { error: Error }).error;
+        }
+        setSrItems(answeredItems);
+      }
+
       if (status === 'complete') {
         setIsSubmitted(true);
         toast.success('Report submitted!');
@@ -977,7 +1145,43 @@ export default function NewServiceReport() {
     }
   }
 
-  function renderChecklist(items: string[], state: Record<string, string>, setter: any, title: string) {
+  function extraMeta(section: SrChecklistSection, label: string) {
+    return srItems.find((i) => i.section === section && i.label === label && i.is_extra);
+  }
+
+  function handleAddLibrary(section: SrChecklistSection, elementId: string) {
+    const el = unusedLibrary.find((e) => e.id === elementId) || srLibrary.find((e) => e.id === elementId);
+    if (!el || el.section !== section) return;
+    const next = addLibraryElement(currentItemsWithAnswers(), el);
+    setSrItems(next);
+    syncMapsFromItems(next);
+  }
+
+  function handleAddCustom(section: SrChecklistSection) {
+    const label = (customLabels[section] || '').trim();
+    if (!label) return;
+    const next = addCustomElement(currentItemsWithAnswers(), label, section);
+    setSrItems(next);
+    syncMapsFromItems(next);
+    setCustomLabels((prev) => ({ ...prev, [section]: '' }));
+  }
+
+  function handleRemoveExtra(section: SrChecklistSection, label: string) {
+    const extra = extraMeta(section, label);
+    if (!extra) return;
+    const next = removeExtraItem(currentItemsWithAnswers(), extra.key);
+    setSrItems(next);
+    syncMapsFromItems(next);
+  }
+
+  function renderChecklist(
+    items: string[],
+    state: Record<string, string>,
+    setter: any,
+    title: string,
+    section: SrChecklistSection
+  ) {
+    const libraryForSection = unusedLibrary.filter((e) => e.section === section);
     return (
       <div className="section mb-4">
         <div className="section-hdr flex items-center justify-between gap-2 flex-wrap">
@@ -993,9 +1197,17 @@ export default function NewServiceReport() {
         <div className="section-body">
           {items.map((item) => {
             const active = normalizeChecklistVal(state[item]);
+            const extra = extraMeta(section, item);
             return (
               <div key={item} className="checklist-item flex items-center justify-between gap-2 py-2 border-b border-[var(--border)] last:border-0">
-                <div className="checklist-label text-sm text-[var(--text2)] flex-1 pr-2">{item}</div>
+                <div className="checklist-label text-sm text-[var(--text2)] flex-1 pr-2">
+                  {item}
+                  {extra && (
+                    <span className="ml-2 text-[10px] font-bold uppercase tracking-wide text-[var(--gold)]">
+                      extra
+                    </span>
+                  )}
+                </div>
                 <div className="checklist-btns flex gap-1 shrink-0">
                   {CL_BUTTONS.map((v) => {
                     const isActive = active === v;
@@ -1022,10 +1234,64 @@ export default function NewServiceReport() {
                       </button>
                     );
                   })}
+                  {extra && (
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveExtra(section, item)}
+                      className="px-1 text-[10px] text-red-400"
+                      title="Remove extra item"
+                    >
+                      ×
+                    </button>
+                  )}
                 </div>
               </div>
             );
           })}
+          <div className="mt-3 pt-3 border-t border-[var(--border)] space-y-2">
+            {libraryForSection.length > 0 && (
+              <div className="flex gap-2 items-center">
+                <select
+                  className="input text-xs flex-1"
+                  defaultValue=""
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      handleAddLibrary(section, e.target.value);
+                      e.target.value = '';
+                    }
+                  }}
+                >
+                  <option value="">+ Add from library…</option>
+                  {libraryForSection.map((el) => (
+                    <option key={el.id} value={el.id}>
+                      {el.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div className="flex gap-2 items-center">
+              <input
+                className="input text-xs flex-1"
+                placeholder="One-off custom item"
+                value={customLabels[section]}
+                onChange={(e) => setCustomLabels((prev) => ({ ...prev, [section]: e.target.value }))}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    handleAddCustom(section);
+                  }
+                }}
+              />
+              <button
+                type="button"
+                onClick={() => handleAddCustom(section)}
+                className="text-[11px] font-bold text-[var(--gold)] shrink-0"
+              >
+                + Custom
+              </button>
+            </div>
+          </div>
         </div>
       </div>
     );
@@ -1181,6 +1447,26 @@ export default function NewServiceReport() {
         {/* Manufacturer + Model dropdowns (sole equipment name source for draft/save) */}
         <div className="section mb-6 p-6">
           <h3 className="text-xl font-semibold mb-4">⚙️ Equipment Name / Model</h3>
+          <div className="mb-3">
+            <label className="text-xs text-[var(--text3)]">Equipment type</label>
+            <select
+              className="input mb-1 w-full"
+              value={equipmentType}
+              onChange={(e) => void onEquipmentTypeChange(equipmentTypeOrDefault(e.target.value))}
+            >
+              {EQUIPMENT_TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
+            <div className="text-[10px] text-[var(--text3)] mt-1">
+              Form: {srTemplateName}
+              {equipmentType !== DEFAULT_EQUIPMENT_TYPE ? ' (laser fallback until a type-specific template is published)' : ''}
+              {srUsedFallback ? ' · seeded checklist (apply SR migration on live Supabase if library is empty)' : ''}
+              . Soft beta — extras allowed.
+            </div>
+          </div>
 
           {/* Manufacturer from manufacturers table */}
           <div className="mb-2 flex gap-2 items-end">
@@ -1254,10 +1540,10 @@ export default function NewServiceReport() {
           <div className="text-[10px] text-[var(--text3)] mt-1">Data from manufacturers + laser_models tables (fallback to static MODELS if empty). Use +Add for new.</div>
         </div>
 
-        {/* Checklists — always visible & editable (Android always renders once form open) */}
-        {renderChecklist(CL_ELECTRICAL, checkElectrical, setCheckElectrical, '⚡ Electrical Checklist')}
-        {renderChecklist(CL_MECHANICAL, checkMechanical, setCheckMechanical, '🔧 Mechanical & Optical')}
-        {renderChecklist(CL_AESTHETIC, checkAesthetic, setCheckAesthetic, '🎨 Aesthetic Condition')}
+        {/* Checklists — template by equipment_type (laser seed = Android CL_*) + extras */}
+        {renderChecklist(electricalLabels, checkElectrical, setCheckElectrical, '⚡ Electrical Checklist', 'electrical')}
+        {renderChecklist(mechanicalLabels, checkMechanical, setCheckMechanical, '🔧 Mechanical & Optical', 'mechanical')}
+        {renderChecklist(aestheticLabels, checkAesthetic, setCheckAesthetic, '🎨 Aesthetic Condition', 'aesthetic')}
 
         {/* Performance Testing — always available (generic rows if no OEM wavelengths) */}
         <div className="section mb-6">
