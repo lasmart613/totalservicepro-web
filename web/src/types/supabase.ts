@@ -2028,6 +2028,7 @@ export type Database = {
           date_out: string | null
           equipment_id: number | null
           equipment_name: string | null
+          equipment_type: string | null
           finalized_at: string | null
           finalized_by: string | null
           ground_resistance: number | null
@@ -2047,6 +2048,7 @@ export type Database = {
           service_type: string | null
           signed_date: string | null
           sku: string | null
+          sr_template_id: string | null
           status: string
           tech_company_address: string | null
           tech_company_city: string | null
@@ -2081,6 +2083,7 @@ export type Database = {
           date_out?: string | null
           equipment_id?: number | null
           equipment_name?: string | null
+          equipment_type?: string | null
           finalized_at?: string | null
           finalized_by?: string | null
           ground_resistance?: number | null
@@ -2100,6 +2103,7 @@ export type Database = {
           service_type?: string | null
           signed_date?: string | null
           sku?: string | null
+          sr_template_id?: string | null
           status?: string
           tech_company_address?: string | null
           tech_company_city?: string | null
@@ -2134,6 +2138,7 @@ export type Database = {
           date_out?: string | null
           equipment_id?: number | null
           equipment_name?: string | null
+          equipment_type?: string | null
           finalized_at?: string | null
           finalized_by?: string | null
           ground_resistance?: number | null
@@ -2153,6 +2158,7 @@ export type Database = {
           service_type?: string | null
           signed_date?: string | null
           sku?: string | null
+          sr_template_id?: string | null
           status?: string
           tech_company_address?: string | null
           tech_company_city?: string | null
@@ -2182,6 +2188,76 @@ export type Database = {
             columns: ["equipment_id"]
             isOneToOne: false
             referencedRelation: "equipment"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_reports_sr_template_id_fkey"
+            columns: ["sr_template_id"]
+            isOneToOne: false
+            referencedRelation: "sr_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      service_report_items: {
+        Row: {
+          created_at: string
+          element_id: string | null
+          id: string
+          is_extra: boolean
+          label: string
+          organization_id: number | null
+          result: string | null
+          section: string
+          service_report_id: string
+          sort_order: number
+          unit: string | null
+          updated_at: string
+          value_numeric: number | null
+        }
+        Insert: {
+          created_at?: string
+          element_id?: string | null
+          id?: string
+          is_extra?: boolean
+          label: string
+          organization_id?: number | null
+          result?: string | null
+          section: string
+          service_report_id: string
+          sort_order?: number
+          unit?: string | null
+          updated_at?: string
+          value_numeric?: number | null
+        }
+        Update: {
+          created_at?: string
+          element_id?: string | null
+          id?: string
+          is_extra?: boolean
+          label?: string
+          organization_id?: number | null
+          result?: string | null
+          section?: string
+          service_report_id?: string
+          sort_order?: number
+          unit?: string | null
+          updated_at?: string
+          value_numeric?: number | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "service_report_items_service_report_id_fkey"
+            columns: ["service_report_id"]
+            isOneToOne: false
+            referencedRelation: "service_reports"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "service_report_items_element_id_fkey"
+            columns: ["element_id"]
+            isOneToOne: false
+            referencedRelation: "sr_elements"
             referencedColumns: ["id"]
           },
         ]
@@ -2437,6 +2513,123 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      sr_elements: {
+        Row: {
+          created_at: string
+          id: string
+          input_kind: string
+          is_active: boolean
+          label: string
+          section: string
+          slug: string
+          sort_hint: number
+          spec_hint: string | null
+          unit: string | null
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          id?: string
+          input_kind?: string
+          is_active?: boolean
+          label: string
+          section: string
+          slug: string
+          sort_hint?: number
+          spec_hint?: string | null
+          unit?: string | null
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          id?: string
+          input_kind?: string
+          is_active?: boolean
+          label?: string
+          section?: string
+          slug?: string
+          sort_hint?: number
+          spec_hint?: string | null
+          unit?: string | null
+          updated_at?: string
+        }
+        Relationships: []
+      }
+      sr_template_elements: {
+        Row: {
+          element_id: string
+          id: string
+          required: boolean
+          sort_order: number
+          template_id: string
+        }
+        Insert: {
+          element_id: string
+          id?: string
+          required?: boolean
+          sort_order?: number
+          template_id: string
+        }
+        Update: {
+          element_id?: string
+          id?: string
+          required?: boolean
+          sort_order?: number
+          template_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "sr_template_elements_element_id_fkey"
+            columns: ["element_id"]
+            isOneToOne: false
+            referencedRelation: "sr_elements"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "sr_template_elements_template_id_fkey"
+            columns: ["template_id"]
+            isOneToOne: false
+            referencedRelation: "sr_templates"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      sr_templates: {
+        Row: {
+          created_at: string
+          equipment_type: string
+          id: string
+          is_default: boolean
+          name: string
+          notes: string | null
+          slug: string
+          status: string
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          equipment_type?: string
+          id?: string
+          is_default?: boolean
+          name: string
+          notes?: string | null
+          slug: string
+          status?: string
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          equipment_type?: string
+          id?: string
+          is_default?: boolean
+          name?: string
+          notes?: string | null
+          slug?: string
+          status?: string
+          updated_at?: string
+        }
+        Relationships: []
       }
       sites: {
         Row: {
