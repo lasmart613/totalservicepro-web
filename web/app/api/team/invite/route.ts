@@ -7,7 +7,7 @@ import { DEFAULT_STAFF_ROLE } from '@/lib/org-membership';
 import {
   buildTeamInviteHtml,
   buildTeamInviteText,
-  isValidTeamInviteEmail,
+  teamInviteEmailError,
   teamInviteLoginUrl,
   teamInviteRoleLabel,
   teamInviteSubject,
@@ -95,8 +95,9 @@ export async function POST(req: NextRequest) {
 
     const body = (await req.json()) as InviteBody;
     const email = (body.email || '').toLowerCase().trim();
-    if (!isValidTeamInviteEmail(email)) {
-      return NextResponse.json({ error: 'Enter a valid email address' }, { status: 400 });
+    const emailError = teamInviteEmailError(email);
+    if (emailError) {
+      return NextResponse.json({ error: emailError }, { status: 400 });
     }
 
     const inviteRole = (body.role || DEFAULT_STAFF_ROLE).toLowerCase();

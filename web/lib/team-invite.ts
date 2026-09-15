@@ -1,6 +1,7 @@
 /**
  * Team / staff invite — RepairPlanet branded email (FSE default role).
- * Server-only builders. Do not import from client components.
+ * Email helpers (`isValidTeamInviteEmail`, `teamInviteEmailError`) are safe on the client.
+ * HTML/text builders are for the server invite route.
  *
  * New users: CTA is a real generateLink action_link (set-password).
  * Already-registered users: CTA is Sign in (loginUrl). Never a placeholder token.
@@ -17,6 +18,40 @@ export function isValidTeamInviteEmail(value: unknown): boolean {
   if (email.length < 6 || email.length > 254) return false;
   if (email.includes(',') || /\s/.test(email)) return false;
   return TEAM_INVITE_EMAIL_RE.test(email);
+}
+
+/**
+ * Why a team invite email failed the boolean gate — shop-floor English, not jargon.
+ * Returns null when `isValidTeamInviteEmail` would accept the value.
+ */
+export function teamInviteEmailError(value: unknown): string | null {
+  if (isValidTeamInviteEmail(value)) return null;
+
+  const email = String(value ?? '').trim();
+  if (!email) {
+    return "Type the teammate's email so we can send the invite.";
+  }
+  if (email.includes(',')) {
+    return 'That email has a comma in it. Looks like a comma where a period usually goes — check for a typo like name,domain instead of name.domain.';
+  }
+  if (/\s/.test(email)) {
+    return 'That email has a space in it. Take out the spaces and try again.';
+  }
+  if (!email.includes('@')) {
+    return "That doesn't look like an email — add an @, like name@shop.com.";
+  }
+
+  const at = email.indexOf('@');
+  const domain = email.slice(at + 1);
+  if (!domain) {
+    return 'That email is missing the part after the @ (like gmail.com). Add the full address and try again.';
+  }
+  const tld = domain.includes('.') ? domain.slice(domain.lastIndexOf('.') + 1) : '';
+  if (!domain.includes('.') || !tld || tld.length < 2) {
+    return 'The part after @ needs a full domain, like gmail.com.';
+  }
+
+  return "That email doesn't look right. Use something like name@shop.com — no extra symbols.";
 }
 
 const ROLE_LABELS: Record<string, string> = {
