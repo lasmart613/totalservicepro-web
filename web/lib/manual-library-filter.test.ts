@@ -131,6 +131,41 @@ test('url params round-trip q / make / room=all', () => {
   assert.equal(parseManualLibrarySearchParams(`?${opQs}`).library, 'operators');
 });
 
+test('instruction / IFU / operating-instructions rows shelf to Operators; hybrids stay Service', () => {
+  const rows = [
+    { id: '204', title: 'CL-100 Computerized Lensmeter Instruction Manual' },
+    {
+      id: '662',
+      title: 'Siemens SONOLINE Antares Gebruiksaanwijzing (Dutch IFU/Operator; not service manual)',
+    },
+    { id: '712', title: 'Matrix CO2 Surgical Laser System Operating Instructions' },
+    { id: '716', title: 'VRM III Operating Instructions' },
+    { id: '740', title: 'Penlon Sigma Elite Vaporizer User Instruction Manual' },
+    {
+      id: '769',
+      title: 'Ellman Surgitron 4.0 Dual RF 120 Instruction Manual (incomplete; OP/instruction — not full SM)',
+    },
+    { id: '4', brand: 'Lasering', title: 'Lyra 767' },
+    { id: '131', title: 'StarWalker Operator / Service' },
+    { id: '545', title: 'Zimmer A.T.S. Operator & Service Manuals' },
+    { id: '504', title: 'MRL Portable Defibrillator Service Instruction Manual' },
+  ];
+  const service = filterManualLibrary(rows, { room: ALL_MANUAL_ROOMS, library: 'service' });
+  const operators = filterManualLibrary(rows, { room: ALL_MANUAL_ROOMS, library: 'operators' });
+  assert.deepEqual(
+    service.map((r) => String(r.id)).sort(),
+    ['131', '504', '545']
+  );
+  assert.deepEqual(
+    operators.map((r) => String(r.id)).sort(),
+    ['204', '4', '662', '712', '716', '740', '769']
+  );
+  const lyraOnService = filterManualLibrary(rows, { query: 'lyra', library: 'service', room: ALL_MANUAL_ROOMS });
+  assert.equal(lyraOnService.length, 0);
+  const lyraOnOps = filterManualLibrary(rows, { query: 'lyra', library: 'operators', room: ALL_MANUAL_ROOMS });
+  assert.equal(String(lyraOnOps[0]?.id), '4');
+});
+
 test('Service and Operators are separate library shelves', () => {
   const service = filterManualLibrary(CATALOG, { room: ALL_MANUAL_ROOMS, library: 'service' });
   const operators = filterManualLibrary(CATALOG, { room: ALL_MANUAL_ROOMS, library: 'operators' });

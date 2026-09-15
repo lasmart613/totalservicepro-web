@@ -113,6 +113,52 @@ test('IFU / Instructions for Use are Operators, not Service', () => {
   assert.equal(catalogManualKind({ title: 'Quanta Litho IFU' }), 'operator');
 });
 
+test('Operating Instructions and Instruction Manual are Operators', () => {
+  assert.equal(inferKindFromDocumentText('Operating Instructions'), 'operator');
+  assert.equal(inferKindFromDocumentText('User Instruction Manual'), 'operator');
+  assert.equal(catalogManualKind({ title: 'CL-100 Computerized Lensmeter Instruction Manual' }), 'operator');
+  assert.equal(manualLibraryShelf({ title: 'CL-100 Computerized Lensmeter Instruction Manual' }), 'operators');
+  assert.equal(showOperatorBadge({ title: 'CL-100 Computerized Lensmeter Instruction Manual' }), true);
+  assert.equal(catalogManualTitle({ title: 'CL-100 Computerized Lensmeter Instruction Manual' }), 'CL-100 Computerized Lensmeter Instruction Manual');
+  assert.equal(catalogManualKind({ title: 'Matrix CO2 Surgical Laser System Operating Instructions' }), 'operator');
+  assert.equal(manualLibraryShelf({ title: 'VRM III Operating Instructions' }), 'operators');
+  assert.equal(catalogManualKind({ title: 'Penlon Sigma Elite Vaporizer User Instruction Manual' }), 'operator');
+  assert.equal(catalogManualKind({ title: 'Ellman Surgitron 4.0 Dual RF 120 Instruction Manual' }), 'operator');
+});
+
+test('negated service phrases do not count as service', () => {
+  const sonoline = {
+    title: 'Siemens SONOLINE Antares Gebruiksaanwijzing (Dutch IFU/Operator; not service manual)',
+  };
+  assert.equal(inferKindFromDocumentText(sonoline.title), 'operator');
+  assert.equal(catalogManualKind(sonoline), 'operator');
+  assert.equal(manualLibraryShelf(sonoline), 'operators');
+  assert.equal(showOperatorBadge(sonoline), true);
+  const ellman = {
+    title: 'Ellman Surgitron 4.0 Dual RF 120 Instruction Manual (incomplete; OP/instruction — not full SM)',
+  };
+  assert.equal(inferKindFromDocumentText(ellman.title), 'operator');
+  assert.equal(manualLibraryShelf(ellman), 'operators');
+  assert.equal(showOperatorBadge(ellman), true);
+});
+
+test('hybrid Operator & Service stays on the Service shelf with no OP badge', () => {
+  const starwalker = { title: 'StarWalker Operator / Service' };
+  assert.equal(inferKindFromDocumentText(starwalker.title), 'service');
+  assert.equal(catalogManualKind(starwalker), 'service');
+  assert.equal(manualLibraryShelf(starwalker), 'service');
+  assert.equal(showOperatorBadge(starwalker), false);
+  const zimmer = { title: 'Zimmer A.T.S. Operator & Service Manuals' };
+  assert.equal(catalogManualKind(zimmer), 'service');
+  assert.equal(manualLibraryShelf(zimmer), 'service');
+  assert.equal(showOperatorBadge(zimmer), false);
+  const mrl = { title: 'MRL Portable Defibrillator Service Instruction Manual' };
+  assert.equal(inferKindFromDocumentText(mrl.title), 'service');
+  assert.equal(catalogManualKind(mrl), 'service');
+  assert.equal(manualLibraryShelf(mrl), 'service');
+  assert.equal(showOperatorBadge(mrl), false);
+});
+
 test('Lyra 767 OP-in-SM-shelf cases go to the Operators library', () => {
   const row = { title: 'Lyra 767', brand: 'Lasering', storage_path: 'shared/lasering/lyra-767.pdf' };
   assert.equal(isKnownMisShelvedOperator(row), true);
@@ -142,6 +188,21 @@ test('presentManual keeps a service title and remaps bare VBeam for display', ()
   const op = presentManual({ id: 10, title: 'VBeam' });
   assert.equal(op.displayTitle, "VBeam Operator's Manual");
   assert.equal(op.docKind, 'operator');
+});
+
+test('operator-shelf migration adds doc_kind and backfills the verified instruction/IFU rows', () => {
+  const sql = readFileSync(
+    join(here, '../supabase/migrations/20260915_000000_manuals_doc_kind_operator_shelf.sql'),
+    'utf8'
+  );
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS doc_kind/);
+  assert.match(sql, /doc_kind = 'operator'/);
+  assert.match(sql, /204,\s*662,\s*712,\s*716,\s*740,\s*769/);
+  assert.match(sql, /operating\\s\+instructions/);
+  assert.match(sql, /instruction\\s\+manuals/);
+  assert.match(sql, /gebruiksaanwijzing/);
+  assert.match(sql, /not\\s\+\(a\(n\)\?\\s\+\|the\\s\+\|full\\s\+\)\*\(service\\s\+manuals\?\|sm\)/);
+  assert.match(sql, /131,\s*504,\s*545,\s*546,\s*547/);
 });
 
 test('bookshelf gates the OP badge on catalogManualKind / showOperatorBadge', () => {
