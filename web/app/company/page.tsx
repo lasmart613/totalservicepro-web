@@ -367,25 +367,28 @@ function CompanyProfile() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ email, role: role || 'fse' }),
+        body: JSON.stringify({ email, role: role || 'fse', resend: true }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Resend failed');
       if (json.inviteUrl && navigator.clipboard?.writeText) {
         try {
           await navigator.clipboard.writeText(json.inviteUrl);
-          toast.message('Invite link copied to clipboard');
+          toast.message('Invite link copied to clipboard', { duration: 10000 });
         } catch {
           /* ignore */
         }
       }
-      if (json.emailed) toast.success(`Invite email sent to ${email}`);
-      else if (json.rateLimited) {
-        toast.error(json.message || 'Invite email could not be sent. Use the copied link.', { duration: 12000 });
-      } else toast.message(json.message || 'Invite processed', { duration: 10000 });
+      if (json.emailed) {
+        toast.success(json.message || `Invite email sent to ${email}`, { duration: 15000 });
+      } else if (json.rateLimited) {
+        toast.error(json.message || 'Invite email could not be sent. Use the copied link.', { duration: 15000 });
+      } else {
+        toast.message(json.message || 'Invite processed — email may not have been sent', { duration: 15000 });
+      }
       await loadTeamMembers(org.id);
     } catch (e: any) {
-      toast.error(e?.message || 'Resend failed');
+      toast.error(e?.message || 'Resend failed', { duration: 15000 });
     }
   }
 
@@ -549,9 +552,7 @@ function CompanyProfile() {
       }
 
       if (json.emailed) {
-        toast.success(json.message || `Invite email sent to ${em}`);
-      } else if (json.linked) {
-        toast.success(json.message || 'Existing user linked to your org');
+        toast.success(json.message || `Invite email sent to ${em}`, { duration: 15000 });
       } else if (json.rateLimited) {
         toast.error(
           json.message ||
@@ -561,12 +562,12 @@ function CompanyProfile() {
       } else {
         toast.message(json.message || 'Invitation saved (email may not have been sent)', {
           description: json.inviteUrl || json.signupUrl || undefined,
-          duration: 12000,
+          duration: 15000,
         });
       }
       await loadTeamMembers(org.id);
     } catch (e: any) {
-      toast.error('Add failed: ' + (e.message || e));
+      toast.error('Add failed: ' + (e.message || e), { duration: 15000 });
     }
     setNewTeam({ email: '', fullName: '', role: 'fse', additional: [], title: '', contact: '', timeZone: 'America/New_York', yearsExp: '', territories: '', competencies: '' });
     setAddMessage('');
@@ -971,17 +972,31 @@ function CompanyProfile() {
                 {members.length === 0 ? <p className="text-xs text-[var(--text3)]">No team members yet.</p> : (
                   <ul className="text-sm">
                     {members.map((m: any, i: number) => (
-                      <li key={m.id || i} className="py-2 border-b border-[var(--border)] last:border-0">
-                        <div className="font-medium">
-                          {[m.first_name, m.last_name].filter(Boolean).join(' ') || '—'}
-                          <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-[var(--surface3)] capitalize">
-                            {roleLabel(m.role)}
-                          </span>
+                      <li key={m.id || i} className="py-2 border-b border-[var(--border)] last:border-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
+                        <div>
+                          <div className="font-medium">
+                            {[m.first_name, m.last_name].filter(Boolean).join(' ') || '—'}
+                            <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-[var(--surface3)] capitalize">
+                              {roleLabel(m.role)}
+                            </span>
+                          </div>
+                          <div className="text-xs text-[var(--text3)]">{m.email || 'no email'}</div>
+                          {m.job_title && (
+                            <div className="text-xs text-[var(--text3)]">{m.job_title}</div>
+                          )}
+                          {m.onboarding_completed !== true && (
+                            <div className="text-[10px] text-[var(--text3)]">Setup not finished</div>
+                          )}
                         </div>
-                        <div className="text-xs text-[var(--text3)]">{m.email || 'no email'}</div>
-                        {m.job_title && (
-                          <div className="text-xs text-[var(--text3)]">{m.job_title}</div>
-                        )}
+                        {m.onboarding_completed !== true && m.email ? (
+                          <button
+                            type="button"
+                            className="btn btn-secondary text-xs self-start"
+                            onClick={() => resendInviteEmail(m.email, m.role)}
+                          >
+                            Resend invite email
+                          </button>
+                        ) : null}
                       </li>
                     ))}
                   </ul>

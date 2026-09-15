@@ -9,6 +9,7 @@ import {
   buildTeamInviteText,
   teamInviteEmailError,
   teamInviteLoginUrl,
+  teamInviteNeedsPasswordSetup,
   teamInviteRoleLabel,
   teamInviteSubject,
 } from '@/lib/team-invite';
@@ -26,6 +27,8 @@ type InviteBody = {
   firstName?: string;
   lastName?: string;
   jobTitle?: string;
+  /** UI Resend — same send path as a fresh invite. */
+  resend?: boolean;
 };
 
 function siteUrl(req: NextRequest): string {
@@ -45,9 +48,12 @@ function isRateLimitError(msg: string): boolean {
  * Invite a team member:
  * 1) Verify caller is authenticated admin of an org
  * 2) Existing RepairPlanet user → add membership (moonlight / first-org attach),
- *    never reject just because they already have another company. Branded Sign-in email.
+ *    never reject just because they already have another company.
+ *    Always send branded email, including already_on_team. Prefer set-password
+ *    when they never signed in / onboarding is incomplete; otherwise Sign in.
  * 3) New user → generateLink (no Supabase Auth mail) + branded set-password email
  * 4) If Resend is not configured or send fails, still return a copyable link
+ * 5) Do not mark the invite accepted until they actually finish setup
  *
  * Does not send the generic Auth invite mail (avoids double send with Resend).
  */
@@ -167,6 +173,7 @@ export async function POST(req: NextRequest) {
       acceptUrl?: string | null;
       greetName?: string | null;
       moonlight?: boolean;
+      needsSetup?: boolean;
     }) => {
       const html = buildTeamInviteHtml({
         organizationName,
@@ -223,15 +230,17 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({
             ok: true,
             emailed: true,
-            linked: opts.alreadyRegistered,
+            linked: opts.alreadyRegistered || !!opts.needsSetup,
             alreadyRegistered: opts.alreadyRegistered,
             moonlight: !!opts.moonlight,
             inviteUrl: copyUrl,
-            message: opts.moonlight
-              ? `Invite email sent to ${email}. They already have a company — added as ${inviteRole} here without changing their home shop. Ask them to sign in and switch companies.`
-              : opts.alreadyRegistered
-                ? `Invite email sent to ${email}. They already have a RepairPlanet account — ask them to sign in with this email.`
-                : `Invite email sent to ${email}. If they don't see it within a few minutes, check spam — or copy the invite link from the toast / pending list.`,
+            message: opts.needsSetup
+              ? `Invite email sent to ${email}. They have not finished setup — ask them to set a password from the email. If they don't see it, check spam or copy the link.`
+              : opts.moonlight
+                ? `Invite email sent to ${email}. They already have a company — added as ${inviteRole} here without changing their home shop. Ask them to sign in and switch companies.`
+                : opts.alreadyRegistered
+                  ? `Invite email sent to ${email}. They already have a RepairPlanet account — ask them to sign in with this email.`
+                  : `Invite email sent to ${email}. If they don't see it within a few minutes, check spam — or copy the invite link from the toast / pending list.`,
           });
         }
         const sendMsg = result?.message || `Email provider error (${rr.status})`;
@@ -276,77 +285,41 @@ export async function POST(req: NextRequest) {
     const recordInvitation = async (accepted: boolean) => {
       const { data: existingInv } = await admin
         .from('engineer_invitations')
-        .select('id')
+        .select('id, first_name, last_name')
         .eq('email', email)
         .eq('organization_id', orgId)
         .maybeSingle();
+      const names = {
+        first_name: firstName || (existingInv as { first_name?: string | null } | null)?.first_name || null,
+        last_name: lastName || (existingInv as { last_name?: string | null } | null)?.last_name || null,
+      };
       if (!existingInv) {
         await admin.from('engineer_invitations').insert({
           organization_id: orgId,
           email,
           role: inviteRole,
-          first_name: firstName,
-          last_name: lastName,
+          first_name: names.first_name,
+          last_name: names.last_name,
           invited_by: user.id,
           accepted,
           accepted_at: accepted ? new Date().toISOString() : null,
         });
-      } else if (accepted) {
-        await admin
-          .from('engineer_invitations')
-          .update({ accepted: true, accepted_at: new Date().toISOString(), role: inviteRole })
-          .eq('id', existingInv.id);
+        return;
       }
+      const patch: Record<string, unknown> = {
+        role: inviteRole,
+        ...names,
+      };
+      if (accepted) {
+        patch.accepted = true;
+        patch.accepted_at = new Date().toISOString();
+      } else {
+        // Re-invite / resend: keep unanswered so Pending + Resend stay visible.
+        patch.accepted = false;
+        patch.accepted_at = null;
+      }
+      await admin.from('engineer_invitations').update(patch).eq('id', existingInv.id);
     };
-
-    // Existing profile → add a membership (moonlight) instead of a conflict / steal.
-    // One branded Sign-in email only — do not send a second Auth invite mail.
-    const { data: existingProfile } = await admin
-      .from('user_profiles')
-      .select('id, email, organization_id, role, first_name, last_name')
-      .ilike('email', email)
-      .maybeSingle();
-
-    if (existingProfile?.id) {
-      const applied = await applyInviteToExistingUser(admin, {
-        userId: existingProfile.id,
-        email,
-        inviteOrgId: orgId,
-        inviteRole,
-        profileOrgId: existingProfile.organization_id,
-        profileRole: existingProfile.role,
-        firstName,
-        lastName,
-        jobTitle,
-      });
-      if (!applied.ok) {
-        return NextResponse.json({ error: applied.error || 'Could not add membership' }, { status: 400 });
-      }
-
-      await recordInvitation(true);
-
-      if (!applied.moonlight && applied.message && /already/i.test(applied.message || '')) {
-        return NextResponse.json({
-          ok: true,
-          linked: true,
-          emailed: false,
-          moonlight: false,
-          alreadyRegistered: true,
-          inviteUrl: loginUrl,
-          message: applied.message,
-        });
-      }
-
-      const greetName = firstName || (existingProfile as { first_name?: string | null }).first_name || null;
-      return deliverBrandedInvite({
-        alreadyRegistered: true,
-        greetName,
-        moonlight: !!applied.moonlight,
-      });
-    }
-
-    // Pending invitation row for a new email
-    await recordInvitation(false);
 
     const ensureProfileForUserId = async (userId: string) => {
       const r = await ensureTeamMemberProfile(admin, {
@@ -404,11 +377,81 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    // Auth exists but no profile yet — treat as already registered (Sign in, no set-password).
+    const deliverForExistingAccount = async (opts: {
+      greetName?: string | null;
+      moonlight?: boolean;
+      onboardingCompleted?: boolean | null;
+      lastSignInAt?: string | null;
+    }) => {
+      const needsSetup = teamInviteNeedsPasswordSetup({
+        onboardingCompleted: opts.onboardingCompleted,
+        lastSignInAt: opts.lastSignInAt,
+      });
+      let acceptUrl: string | null = null;
+      if (needsSetup) {
+        const generated = await buildActionLink(false);
+        acceptUrl = generated.url;
+        if (generated.userId) {
+          await ensureProfileForUserId(generated.userId);
+        }
+      }
+      return deliverBrandedInvite({
+        alreadyRegistered: !needsSetup || !acceptUrl,
+        acceptUrl,
+        greetName: opts.greetName,
+        moonlight: !!opts.moonlight,
+        needsSetup,
+      });
+    };
+
+    // Existing profile → add a membership (moonlight) instead of a conflict / steal.
+    // Always send branded email when the caller is inviting — including already_on_team.
+    const { data: existingProfile } = await admin
+      .from('user_profiles')
+      .select('id, email, organization_id, role, first_name, last_name, onboarding_completed')
+      .ilike('email', email)
+      .maybeSingle();
+
+    if (existingProfile?.id) {
+      const applied = await applyInviteToExistingUser(admin, {
+        userId: existingProfile.id,
+        email,
+        inviteOrgId: orgId,
+        inviteRole,
+        profileOrgId: existingProfile.organization_id,
+        profileRole: existingProfile.role,
+        firstName,
+        lastName,
+        jobTitle,
+      });
+      if (!applied.ok) {
+        return NextResponse.json({ error: applied.error || 'Could not add membership' }, { status: 400 });
+      }
+
+      const onboarded = (existingProfile as { onboarding_completed?: boolean | null }).onboarding_completed === true;
+      await recordInvitation(onboarded);
+
+      const existingAuth = await findAuthUserByEmail(admin, email);
+      const greetName = firstName || (existingProfile as { first_name?: string | null }).first_name || null;
+      return deliverForExistingAccount({
+        greetName,
+        moonlight: !!applied.moonlight,
+        onboardingCompleted: (existingProfile as { onboarding_completed?: boolean | null }).onboarding_completed,
+        lastSignInAt: existingAuth?.last_sign_in_at || null,
+      });
+    }
+
+    // Pending invitation row for a new email
+    await recordInvitation(false);
+
+    // Auth exists but no profile yet — still email; prefer set-password if they never signed in.
     const existingAuth = await findAuthUserByEmail(admin, email);
     if (existingAuth?.id) {
       await ensureProfileForUserId(existingAuth.id);
-      return deliverBrandedInvite({ alreadyRegistered: true });
+      return deliverForExistingAccount({
+        onboardingCompleted: false,
+        lastSignInAt: existingAuth.last_sign_in_at || null,
+      });
     }
 
     const generated = await buildActionLink(true);

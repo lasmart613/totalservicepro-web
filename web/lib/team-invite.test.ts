@@ -12,6 +12,7 @@ import {
   isValidTeamInviteEmail,
   teamInviteEmailError,
   teamInviteLoginUrl,
+  teamInviteNeedsPasswordSetup,
   teamInviteRoleLabel,
   teamInviteSubject,
 } from './team-invite.ts';
@@ -218,6 +219,56 @@ test('teamInviteEmailError explains common typos in everyday English', () => {
   assert.doesNotMatch(other, /RFC|local-part|400/i);
 });
 
+test('already-on-team still takes the branded email path (no silent emailed:false)', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const source = readFileSync(join(here, '../app/api/team/invite/route.ts'), 'utf8');
+  assert.match(source, /deliverForExistingAccount/);
+  assert.match(source, /teamInviteNeedsPasswordSetup/);
+  assert.match(source, /deliverBrandedInvite/);
+  assert.match(source, /RESEND_API_KEY/);
+  assert.doesNotMatch(source, /\/already\/i\.test/);
+  assert.doesNotMatch(source, /emailed:\s*false,\s*\n\s*moonlight:\s*false/);
+  assert.doesNotMatch(source, /await recordInvitation\(true\)/);
+  assert.match(source, /recordInvitation\(onboarded\)/);
+});
+
+test('resend preserves the invite or member role instead of hardcoding fse', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const page = readFileSync(join(here, '../app/admin/team/page.tsx'), 'utf8');
+  assert.match(page, /resendInvite\s*=\s*async\s*\(email:\s*string,\s*role\?/);
+  assert.match(page, /role:\s*role\s*\|\|\s*'fse'/);
+  assert.match(page, /resend:\s*true/);
+  assert.match(page, /resendInvite\(inv\.email,\s*inv\.role\)/);
+  assert.match(page, /resendInvite\(member\.email,\s*member\.role\)/);
+  assert.match(page, /Resend invite email/);
+  assert.match(page, /duration:\s*15000/);
+  assert.doesNotMatch(page, /JSON\.stringify\(\{\s*email,\s*role:\s*'fse'\s*\}\)/);
+
+  const company = readFileSync(join(here, '../app/company/page.tsx'), 'utf8');
+  assert.match(company, /resendInviteEmail\(inv\.email,\s*inv\.role\)/);
+  assert.match(company, /resendInviteEmail\(m\.email,\s*m\.role\)/);
+  assert.match(company, /resend:\s*true/);
+  assert.match(company, /duration:\s*15000/);
+});
+
+test('teamInviteNeedsPasswordSetup prefers set-password until they finish setup', () => {
+  assert.equal(
+    teamInviteNeedsPasswordSetup({ onboardingCompleted: false, lastSignInAt: null }),
+    true
+  );
+  assert.equal(
+    teamInviteNeedsPasswordSetup({
+      onboardingCompleted: true,
+      lastSignInAt: '2026-09-01T00:00:00.000Z',
+    }),
+    false
+  );
+  assert.equal(
+    teamInviteNeedsPasswordSetup({ onboardingCompleted: true, lastSignInAt: null }),
+    true
+  );
+});
+
 test('team invite API uses the builders and does not send the generic Supabase invite mail', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/api/team/invite/route.ts'), 'utf8');
@@ -228,7 +279,7 @@ test('team invite API uses the builders and does not send the generic Supabase i
   assert.doesNotMatch(source, /Enter a valid email address/);
   assert.match(source, /generateLink/);
   assert.match(source, /RESEND_API_KEY/);
-  assert.match(source, /alreadyRegistered: true/);
+  assert.match(source, /alreadyRegistered:/);
   assert.match(source, /applyInviteToExistingUser/);
   assert.match(source, /moonlight/);
   assert.doesNotMatch(source, /already belongs to another organization/);

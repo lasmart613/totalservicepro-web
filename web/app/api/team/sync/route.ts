@@ -77,9 +77,17 @@ export async function POST(req: NextRequest) {
 
       let { data: member } = await admin
         .from('user_profiles')
-        .select('id, organization_id, email, role')
+        .select('id, organization_id, email, role, onboarding_completed')
         .ilike('email', email)
         .maybeSingle();
+
+      const markAcceptedIfOnboarded = async (onboarded: boolean) => {
+        if (inv.accepted || !onboarded) return;
+        await admin
+          .from('engineer_invitations')
+          .update({ accepted: true, accepted_at: new Date().toISOString() })
+          .eq('id', inv.id);
+      };
 
       if (!member) {
         const authUser = await findAuthUserByEmail(admin, email);
@@ -107,20 +115,11 @@ export async function POST(req: NextRequest) {
         created++;
         linked++;
         details.push(`${email}: created user_profiles + linked to org`);
-        await admin
-          .from('engineer_invitations')
-          .update({ accepted: true, accepted_at: new Date().toISOString() })
-          .eq('id', inv.id);
         continue;
       }
 
       if (String(member.organization_id) === String(orgId)) {
-        if (!inv.accepted) {
-          await admin
-            .from('engineer_invitations')
-            .update({ accepted: true, accepted_at: new Date().toISOString() })
-            .eq('id', inv.id);
-        }
+        await markAcceptedIfOnboarded(member.onboarding_completed === true);
         details.push(`${email}: already on team`);
         continue;
       }
@@ -136,10 +135,7 @@ export async function POST(req: NextRequest) {
           details.push(`${email}: ${added.error || 'could not add membership'}`);
           continue;
         }
-        await admin
-          .from('engineer_invitations')
-          .update({ accepted: true, accepted_at: new Date().toISOString() })
-          .eq('id', inv.id);
+        await markAcceptedIfOnboarded(member.onboarding_completed === true);
         linked++;
         details.push(`${email}: added membership (home org kept)`);
         continue;
@@ -160,10 +156,7 @@ export async function POST(req: NextRequest) {
         continue;
       }
 
-      await admin
-        .from('engineer_invitations')
-        .update({ accepted: true, accepted_at: new Date().toISOString() })
-        .eq('id', inv.id);
+      await markAcceptedIfOnboarded(member.onboarding_completed === true);
 
       linked++;
       details.push(`${email}: linked existing profile to org`);
