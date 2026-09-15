@@ -126,15 +126,17 @@ export async function GET(req: NextRequest) {
       .limit(50);
 
     const invites = allInvites || [];
-    const memberEmails = new Set(
-      (members || []).map((m: any) => (m.email || '').toLowerCase().trim()).filter(Boolean)
-    );
 
-    // Pending = invite not accepted AND that email is not already on the roster
+    // Pending = unanswered, or on the roster but they never finished setup.
+    // Do not hide a row just because a profile/membership exists.
     const pendingInvites = invites.filter((inv: any) => {
       const em = (inv.email || '').toLowerCase().trim();
-      if (em && memberEmails.has(em)) return false;
-      return !inv.accepted;
+      const member = (members || []).find(
+        (m: any) => (m.email || '').toLowerCase().trim() === em
+      );
+      if (member?.onboarding_completed === true) return false;
+      if (inv.accepted !== true) return true;
+      return !!(member && member.onboarding_completed !== true);
     });
 
     return NextResponse.json({

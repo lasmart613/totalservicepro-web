@@ -119,7 +119,7 @@ export default function TeamManagement() {
     } else {
       const { data: members } = await supabase
         .from('user_profiles')
-        .select('id, first_name, last_name, email, role, job_title, created_at')
+        .select('id, first_name, last_name, email, role, job_title, created_at, onboarding_completed')
         .eq('organization_id', profile.organization_id)
         .order('created_at', { ascending: false });
       setTeamMembers(members || []);
@@ -144,7 +144,7 @@ export default function TeamManagement() {
     e.preventDefault();
     const emailError = teamInviteEmailError(newMember.email);
     if (emailError) {
-      toast.error(emailError);
+      toast.error(emailError, { duration: 15000 });
       return;
     }
 
@@ -190,10 +190,8 @@ export default function TeamManagement() {
           description: json.inviteUrl
             ? 'Also copy the invite link below if email is delayed/spam-filtered.'
             : undefined,
-          duration: 10000,
+          duration: 15000,
         });
-      } else if (json.linked) {
-        toast.success(json.message || 'User linked to your organization');
       } else if (json.rateLimited) {
         toast.error(
           json.message ||
@@ -202,8 +200,8 @@ export default function TeamManagement() {
         );
       } else {
         toast.message(json.message || 'Invitation saved (email may not have been sent)', {
-          description: json.warning || undefined,
-          duration: 12000,
+          description: json.warning || json.inviteUrl || undefined,
+          duration: 15000,
         });
       }
 
@@ -225,13 +223,13 @@ export default function TeamManagement() {
       });
       await fetchTeam();
     } catch (err: any) {
-      toast.error(err.message || 'Failed to add team member');
+      toast.error(err.message || 'Failed to add team member', { duration: 15000 });
     } finally {
       setAdding(false);
     }
   };
 
-  const resendInvite = async (email: string) => {
+  const resendInvite = async (email: string, role?: string) => {
     try {
       const {
         data: { session },
@@ -244,7 +242,7 @@ export default function TeamManagement() {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ email, role: 'fse' }),
+        body: JSON.stringify({ email, role: role || 'fse', resend: true }),
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Resend failed');
@@ -253,22 +251,25 @@ export default function TeamManagement() {
         setLastInviteEmail(email);
         try {
           await navigator.clipboard.writeText(json.inviteUrl);
-          toast.message('Invite link copied to clipboard');
+          toast.message('Invite link copied to clipboard', { duration: 10000 });
         } catch {
           /* ignore */
         }
       }
-      if (json.emailed) toast.success(`Invite re-sent to ${email}`);
-      else if (json.rateLimited) {
+      if (json.emailed) {
+        toast.success(json.message || `Invite re-sent to ${email}`, { duration: 15000 });
+      } else if (json.rateLimited) {
         toast.error(
           json.message ||
             'Invite email could not be sent. Use the copied invite link instead.',
-          { duration: 12000 }
+          { duration: 15000 }
         );
-      } else toast.message(json.message || 'Could not send email', { duration: 8000 });
+      } else {
+        toast.message(json.message || 'Could not send email', { duration: 15000 });
+      }
       await fetchTeam();
     } catch (e: any) {
-      toast.error(e.message || 'Resend failed');
+      toast.error(e.message || 'Resend failed', { duration: 15000 });
     }
   };
 
@@ -412,7 +413,7 @@ export default function TeamManagement() {
                       <button
                         type="button"
                         className="btn btn-secondary text-xs"
-                        onClick={() => resendInvite(inv.email)}
+                        onClick={() => resendInvite(inv.email, inv.role)}
                       >
                         Resend email
                       </button>
@@ -442,6 +443,7 @@ export default function TeamManagement() {
                   <th className="py-3 px-4">Role</th>
                   <th className="py-3 px-4">Job Title</th>
                   <th className="py-3 px-4">Joined</th>
+                  <th className="py-3 px-4"></th>
                 </tr>
               </thead>
               <tbody>
@@ -452,6 +454,11 @@ export default function TeamManagement() {
                   >
                     <td className="py-3 px-4 font-medium">
                       {member.first_name} {member.last_name}
+                      {member.onboarding_completed !== true && (
+                        <div className="text-[10px] font-normal text-[var(--text3)] mt-0.5">
+                          Setup not finished
+                        </div>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-sm">{member.email}</td>
                     <td className="py-3 px-4">
@@ -466,6 +473,17 @@ export default function TeamManagement() {
                       {member.created_at
                         ? new Date(member.created_at).toLocaleDateString()
                         : '—'}
+                    </td>
+                    <td className="py-3 px-4 text-right">
+                      {member.onboarding_completed !== true && member.email ? (
+                        <button
+                          type="button"
+                          className="btn btn-secondary text-xs"
+                          onClick={() => resendInvite(member.email, member.role)}
+                        >
+                          Resend invite email
+                        </button>
+                      ) : null}
                     </td>
                   </tr>
                 ))}

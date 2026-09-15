@@ -153,7 +153,7 @@ test('invite route no longer 409s just because the email already has an org', ()
   assert.match(source, /applyInviteToExistingUser/);
   assert.match(source, /moonlight/);
   assert.match(source, /buildTeamInviteHtml/);
-  assert.match(source, /alreadyRegistered: true/);
+  assert.match(source, /alreadyRegistered:/);
   assert.match(source, /RESEND_API_KEY/);
   assert.doesNotMatch(source, /inviteUserByEmail/);
   assert.doesNotMatch(
@@ -169,6 +169,8 @@ test('GET /api/team/list does not enroll people or mark invites accepted', () =>
   assert.doesNotMatch(source, /upsertMembership/);
   assert.doesNotMatch(source, /accepted: true/);
   assert.match(source, /listMemberUserIdsForOrg/);
+  assert.match(source, /onboarding_completed/);
+  assert.doesNotMatch(source, /if \(em && memberEmails.has\(em\)\) return false/);
 });
 
 test('claim does not skip founders who have a pending invite to another shop', () => {

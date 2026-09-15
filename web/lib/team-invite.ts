@@ -54,6 +54,20 @@ export function teamInviteEmailError(value: unknown): string | null {
   return "That email doesn't look right. Use something like name@shop.com — no extra symbols.";
 }
 
+/**
+ * Prefer a set-password / recovery action link when they never finished
+ * setup or never signed in. Otherwise the branded email uses Sign in.
+ */
+export function teamInviteNeedsPasswordSetup(input: {
+  onboardingCompleted?: boolean | null;
+  lastSignInAt?: string | null;
+}): boolean {
+  if (input.onboardingCompleted === true && input.lastSignInAt) return false;
+  if (input.onboardingCompleted === false) return true;
+  if (!input.lastSignInAt) return true;
+  return input.onboardingCompleted !== true;
+}
+
 const ROLE_LABELS: Record<string, string> = {
   fse: DEFAULT_TEAM_ROLE_LABEL,
   engineer: 'Field Service Engineer',
