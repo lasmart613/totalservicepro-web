@@ -9,6 +9,7 @@ import {
   buildTeamInviteHtml,
   buildTeamInviteText,
   isFounderLockedRole,
+  isValidTeamInviteEmail,
   teamInviteLoginUrl,
   teamInviteRoleLabel,
   teamInviteSubject,
@@ -173,12 +174,23 @@ test('plain-text body includes the real accept URL and FSE default', () => {
   assert.match(text, /Sent by Total Service Pro/);
 });
 
+test('team invite email rejects commas, spaces, and other invalid local-part chars', () => {
+  assert.equal(isValidTeamInviteEmail('kayleigh.cornell@gmail.com'), true);
+  assert.equal(isValidTeamInviteEmail('  User+tag@shop.co.uk  '), true);
+  assert.equal(isValidTeamInviteEmail('kayle,cornell@gmail.com'), false);
+  assert.equal(isValidTeamInviteEmail('kayle cornell@gmail.com'), false);
+  assert.equal(isValidTeamInviteEmail('not-an-email'), false);
+  assert.equal(isValidTeamInviteEmail(''), false);
+  assert.equal(isValidTeamInviteEmail(null), false);
+});
+
 test('team invite API uses the builders and does not send the generic Supabase invite mail', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/api/team/invite/route.ts'), 'utf8');
   assert.match(source, /teamInviteSubject/);
   assert.match(source, /buildTeamInviteHtml/);
   assert.match(source, /buildTeamInviteText/);
+  assert.match(source, /isValidTeamInviteEmail/);
   assert.match(source, /generateLink/);
   assert.match(source, /RESEND_API_KEY/);
   assert.match(source, /alreadyRegistered: true/);
@@ -188,5 +200,6 @@ test('team invite API uses the builders and does not send the generic Supabase i
   assert.doesNotMatch(source, /status: 409/);
   assert.doesNotMatch(source, /TODO\(multi-org\)/);
   assert.doesNotMatch(source, /inviteUserByEmail/);
+  assert.doesNotMatch(source, /email\.includes\(['"]@['"]\)/);
   assert.match(source, /DEFAULT_STAFF_ROLE/);
 });
