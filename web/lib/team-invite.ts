@@ -9,6 +9,16 @@
 export const DEFAULT_TEAM_ROLE = 'fse';
 export const DEFAULT_TEAM_ROLE_LABEL = 'Field Service Engineer (FSE)';
 
+/** local@domain.tld — rejects commas, spaces, and other invalid local-part chars. */
+const TEAM_INVITE_EMAIL_RE = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+
+export function isValidTeamInviteEmail(value: unknown): boolean {
+  const email = String(value ?? '').trim();
+  if (email.length < 6 || email.length > 254) return false;
+  if (email.includes(',') || /\s/.test(email)) return false;
+  return TEAM_INVITE_EMAIL_RE.test(email);
+}
+
 const ROLE_LABELS: Record<string, string> = {
   fse: DEFAULT_TEAM_ROLE_LABEL,
   engineer: 'Field Service Engineer',
