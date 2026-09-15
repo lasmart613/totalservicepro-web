@@ -10,7 +10,9 @@
  * to already contain the words “Operator’s Manual”.
  *
  * If the stored title already says Service Manual, leave it service.
- * If it already says Operator / User Manual, keep OP.
+ * If it already says Operator / User Manual / IFU / Instruction Manual /
+ * Operating Instructions, keep OP.
+ * Hybrid Operator & Service / Operator / Service stays Service (no OP).
  * Do not scrape or replace PDFs.
  */
 
@@ -45,12 +47,42 @@ const EXPLICIT_KINDS = new Set<string>(Object.keys(KIND_LABEL));
 const OPERATOR_RE = /operator'?s?\s+manual|\boperator\s+manual\b/i;
 const USER_RE = /\buser\s+manual\b/i;
 const IFU_RE = /\bifu\b|instructions?\s+for\s+use/i;
-const SERVICE_RE = /\bservice\s+manuals?\b|\btechnical\s+manuals?\b|\brepair\s+manuals?\b/i;
+/** User-facing instruction titles (not “Service Instruction Manual”). */
+const OPERATING_INSTRUCTIONS_RE = /\boperating\s+instructions?\b/i;
+const INSTRUCTION_MANUAL_RE = /\b(?:user\s+)?instruction\s+manuals?\b/i;
+/** Dutch IFU / user instructions (e.g. Siemens SONOLINE Antares). */
+const GEBRUIK_RE = /\bgebruiksaanwijzing\b/i;
+/** Service/technical/repair manuals, including “Service Instruction Manual”. */
+const SERVICE_RE = /\b(?:service|technical|repair)\s+(?:instruction\s+)?manuals?\b/i;
 const REPAIR_RE = /\brepair\b/i;
+/** Combined Operator & Service / Operator / Service docs stay on the Service shelf. */
+const HYBRID_RE =
+  /\boperator(?:'?s|s)?\b\s*(?:\/|&|and)\s*service\b|\bservice\b\s*(?:\/|&|and)\s*operator(?:'?s|s)?\b/i;
+/** “not service manual” / “not full SM” must not count as a service signal. */
+const SERVICE_NEGATION_RE = /\bnot\s+(?:a(?:n)?\s+|the\s+|full\s+)*(?:service\s+manuals?|sm)\b/gi;
 /** Cited OP-in-SM-shelf row: Operators content filed on the Service Manuals shelf. */
 const LYRA_767_RE = /\blyra\s*[-_/]?\s*767\b/i;
 /** Model suffixes that mean a specific VBeam platform (service docs), not the bare "VBeam" operator row. */
 const VBEAM_MODEL_SUFFIX_RE = /\b(perfecta|platinum|aesthetica|classic|pro|[0-9]+)\b/i;
+
+function stripNegatedServicePhrases(text: string): string {
+  return text.replace(SERVICE_NEGATION_RE, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function hasOperatorFacingSignal(hay: string): boolean {
+  return (
+    OPERATOR_RE.test(hay) ||
+    USER_RE.test(hay) ||
+    IFU_RE.test(hay) ||
+    OPERATING_INSTRUCTIONS_RE.test(hay) ||
+    INSTRUCTION_MANUAL_RE.test(hay) ||
+    GEBRUIK_RE.test(hay)
+  );
+}
+
+function hasServicePrimarySignal(hay: string): boolean {
+  return SERVICE_RE.test(hay) || REPAIR_RE.test(hay);
+}
 
 export function normalizeManualDocKind(raw: string | null | undefined): ManualDocKind | null {
   const k = String(raw || '')
@@ -98,21 +130,24 @@ export function isVbeamModelSpecificTitle(title: string | null | undefined): boo
 /**
  * Type from title / path / PDF cover text. Service+operator in the same
  * string → service (when in doubt, do not apply OP).
- * IFU / Instructions for Use count as Operators (user-facing), not Service.
+ * IFU / Instructions for Use / Operating Instructions / Instruction Manual
+ * count as Operators (user-facing), not Service — unless Service/Repair/
+ * Technical is the primary type (e.g. “Service Instruction Manual”).
+ * Negations such as “not service manual” / “not full SM” are ignored.
  */
 export function inferKindFromDocumentText(text: string | null | undefined): ManualDocKind | null {
-  const hay = String(text || '').trim();
+  const raw = String(text || '').trim();
+  if (!raw) return null;
+  const hay = stripNegatedServicePhrases(raw);
   if (!hay) return null;
-  const hasOperator = OPERATOR_RE.test(hay);
-  const hasUser = USER_RE.test(hay);
-  const hasIfu = IFU_RE.test(hay);
-  const hasService = SERVICE_RE.test(hay) || REPAIR_RE.test(hay);
-  if (hasService && !hasOperator && !hasUser && !hasIfu) {
+  const hasOperator = hasOperatorFacingSignal(hay);
+  const hasService = hasServicePrimarySignal(hay);
+  if (HYBRID_RE.test(hay) || (hasService && hasOperator)) return 'service';
+  if (hasService) {
     if (/\btechnical\s+manuals?\b/i.test(hay)) return 'technical';
     return 'service';
   }
-  if ((hasOperator || hasUser || hasIfu) && !hasService) return 'operator';
-  if (hasService && (hasOperator || hasUser || hasIfu)) return 'service';
+  if (hasOperator) return 'operator';
   return null;
 }
 
@@ -134,7 +169,8 @@ function explicitCatalogKind(manual: ManualCatalogFields): ManualDocKind | null 
 /**
  * Document type for library UI.
  * 1) Known OP-in-SM-shelf rows (e.g. Lyra 767) go to Operators.
- * 2) Type words on the stored title win (Service Manual vs Operator/User/IFU).
+ * 2) Type words on the stored title win (Service Manual vs Operator/User/IFU/
+ *    Instruction Manual / Operating Instructions). Hybrids stay service.
  * 3) Bare "VBeam" (no model suffix) is the operator PDF.
  * 4) "VBeam Perfecta" and other model-specific VBeam titles are service.
  * 5) Stored doc_kind (including operator) when title/VBeam rules do not decide.
@@ -182,7 +218,7 @@ export function catalogManualTitle(manual: ManualCatalogFields): string {
   const raw = String(manual.title || '').trim() || 'Manual';
   const kind = catalogManualKind(manual);
   if (kind !== 'operator') return raw;
-  if (OPERATOR_RE.test(raw) || USER_RE.test(raw)) return raw;
+  if (hasOperatorFacingSignal(raw)) return raw;
   return `${raw} Operator's Manual`;
 }
 
