@@ -10,6 +10,7 @@ import {
   buildTeamInviteText,
   isFounderLockedRole,
   isValidTeamInviteEmail,
+  teamInviteEmailError,
   teamInviteLoginUrl,
   teamInviteRoleLabel,
   teamInviteSubject,
@@ -184,13 +185,47 @@ test('team invite email rejects commas, spaces, and other invalid local-part cha
   assert.equal(isValidTeamInviteEmail(null), false);
 });
 
+test('teamInviteEmailError explains common typos in everyday English', () => {
+  assert.equal(teamInviteEmailError('kayleigh.cornell@gmail.com'), null);
+  assert.equal(teamInviteEmailError('  User+tag@shop.co.uk  '), null);
+
+  const comma = teamInviteEmailError('kayle,cornell@gmail.com') || '';
+  assert.match(comma, /comma/i);
+  assert.match(comma, /period/i);
+  assert.doesNotMatch(comma, /RFC|local-part|400/i);
+
+  const space = teamInviteEmailError('kayle cornell@gmail.com') || '';
+  assert.match(space, /space/i);
+  assert.doesNotMatch(space, /RFC|local-part|400/i);
+
+  const empty = teamInviteEmailError('') || '';
+  assert.match(empty, /email/i);
+  assert.doesNotMatch(empty, /RFC|local-part|400/i);
+  assert.match(teamInviteEmailError(null) || '', /email/i);
+
+  const missingAt = teamInviteEmailError('not-an-email') || '';
+  assert.match(missingAt, /@/);
+  assert.doesNotMatch(missingAt, /RFC|local-part|400/i);
+
+  const missingDomain = teamInviteEmailError('name@') || '';
+  assert.match(missingDomain, /after the @|gmail\.com/i);
+
+  const missingTld = teamInviteEmailError('name@gmail') || '';
+  assert.match(missingTld, /domain|gmail\.com/i);
+
+  const other = teamInviteEmailError('bad!name@gmail.com') || '';
+  assert.ok(other.length > 0);
+  assert.doesNotMatch(other, /RFC|local-part|400/i);
+});
+
 test('team invite API uses the builders and does not send the generic Supabase invite mail', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/api/team/invite/route.ts'), 'utf8');
   assert.match(source, /teamInviteSubject/);
   assert.match(source, /buildTeamInviteHtml/);
   assert.match(source, /buildTeamInviteText/);
-  assert.match(source, /isValidTeamInviteEmail/);
+  assert.match(source, /teamInviteEmailError/);
+  assert.doesNotMatch(source, /Enter a valid email address/);
   assert.match(source, /generateLink/);
   assert.match(source, /RESEND_API_KEY/);
   assert.match(source, /alreadyRegistered: true/);
@@ -202,4 +237,8 @@ test('team invite API uses the builders and does not send the generic Supabase i
   assert.doesNotMatch(source, /inviteUserByEmail/);
   assert.doesNotMatch(source, /email\.includes\(['"]@['"]\)/);
   assert.match(source, /DEFAULT_STAFF_ROLE/);
+
+  const page = readFileSync(join(here, '../app/admin/team/page.tsx'), 'utf8');
+  assert.match(page, /teamInviteEmailError/);
+  assert.match(page, /noValidate/);
 });

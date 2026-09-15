@@ -6,6 +6,7 @@ import { toast } from 'sonner';
 import { TestEquipmentRoster } from '@/components/TestEquipmentRoster';
 import { canAssignShopTestEquipment } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
+import { teamInviteEmailError } from '@/lib/team-invite';
 
 const ROLES = [
   'fse',
@@ -141,8 +142,9 @@ export default function TeamManagement() {
 
   const handleAddMember = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newMember.email) {
-      toast.error('Email is required');
+    const emailError = teamInviteEmailError(newMember.email);
+    if (emailError) {
+      toast.error(emailError);
       return;
     }
 
@@ -307,7 +309,11 @@ export default function TeamManagement() {
           </div>
         )}
 
-        <form onSubmit={handleAddMember} className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <form
+          onSubmit={handleAddMember}
+          noValidate
+          className="grid grid-cols-1 md:grid-cols-2 gap-4"
+        >
           <div>
             <label className="label">Email Address *</label>
             <input
