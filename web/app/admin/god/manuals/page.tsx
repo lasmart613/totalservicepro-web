@@ -31,6 +31,7 @@ export default function GodManualsCatalogPage() {
   const [saving, setSaving] = useState(false);
   const [reindexing, setReindexing] = useState(false);
   const [reindexNote, setReindexNote] = useState('');
+  const [reindexManualId, setReindexManualId] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -83,17 +84,23 @@ export default function GodManualsCatalogPage() {
     }
   }
 
-  async function reindexBatch(force = false) {
+  async function reindexBatch(force = false, manualId?: string) {
     setReindexing(true);
     try {
       const headers = await godAuthHeader();
+      const target = String(manualId || '').trim();
       let indexed = 0;
       let processed = 0;
-      for (let i = 0; i < 80; i++) {
+      const maxLoops = target ? 1 : 80;
+      for (let i = 0; i < maxLoops; i++) {
         const res = await fetch('/api/god/manuals/reindex', {
           method: 'POST',
           headers,
-          body: JSON.stringify({ limit: 4, force: force && i === 0 }),
+          body: JSON.stringify({
+            limit: target ? 1 : 4,
+            force: force && i === 0,
+            manualId: target || undefined,
+          }),
         });
         const json = (await res.json().catch(() => ({}))) as {
           ok?: boolean;
@@ -101,6 +108,7 @@ export default function GodManualsCatalogPage() {
           processed?: number;
           indexed?: number;
           remaining?: number;
+          results?: Array<{ manualId?: string; ok?: boolean; skipped?: string; chars?: number }>;
         };
         if (!res.ok || !json.ok) {
           toast.error(json.error || 'Reindex failed');
@@ -110,9 +118,11 @@ export default function GodManualsCatalogPage() {
         indexed += json.indexed || 0;
         if (!json.processed || !json.remaining) break;
       }
-      const note = `Indexed ${indexed} PDF(s) this run (${processed} attempted). Repeat if the catalog is large.`;
-      setReindexNote(note);
-      toast.success(note);
+      const detail = target
+        ? `Catalog id ${target}: indexed ${indexed} (${processed} attempted). Incomplete PDFs are included when storage_path is a real file.`
+        : `Indexed ${indexed} PDF(s) this run (${processed} attempted). Repeat if the catalog is large.`;
+      setReindexNote(detail);
+      toast.success(detail);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Reindex failed');
     } finally {
@@ -188,18 +198,41 @@ export default function GodManualsCatalogPage() {
       <div className="card p-4 mb-6">
         <div className="text-sm font-semibold mb-2">PDF text index (library search)</div>
         <p className="text-sm text-[var(--text3)] mb-3">
-          The library search box looks inside extracted PDF text. Apply the{' '}
-          <code>manual_search_index</code> migration, then backfill existing files. New catalog rows
-          try to index automatically when the PDF is already in the bucket.
+          The library search box and the AI assistant fallback read extracted PDF text. Apply the{' '}
+          <code>manual_search_index</code> migration, then backfill existing files.{' '}
+          <strong className="text-[var(--text)]">is_incomplete does not skip indexing</strong> — a
+          known-incomplete PDF with a valid <code>storage_path</code> still gets a search body (e.g.
+          Elite MPX Op Man, catalog id 721). New catalog rows try to index automatically when the
+          PDF is already in the bucket.
         </p>
-        <button
-          type="button"
-          className="btn btn-secondary text-sm"
-          disabled={reindexing}
-          onClick={() => reindexBatch(false)}
-        >
-          {reindexing ? 'Indexing…' : 'Index missing PDF text'}
-        </button>
+        <div className="flex flex-wrap items-end gap-2 mb-2">
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            disabled={reindexing}
+            onClick={() => reindexBatch(false)}
+          >
+            {reindexing ? 'Indexing…' : 'Index missing PDF text'}
+          </button>
+          <label className="text-sm">
+            <span className="block text-xs text-[var(--text3)]">Catalog id</span>
+            <input
+              className="input w-28 font-mono text-sm"
+              inputMode="numeric"
+              placeholder="721"
+              value={reindexManualId}
+              onChange={(e) => setReindexManualId(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            disabled={reindexing || !reindexManualId.trim()}
+            onClick={() => reindexBatch(true, reindexManualId)}
+          >
+            Index this manual
+          </button>
+        </div>
         {reindexNote ? <p className="text-xs text-[var(--text3)] mt-2">{reindexNote}</p> : null}
       </div>
 

@@ -303,6 +303,7 @@ test('god catalog form requires equipment type and does not commit PDFs', () => 
   assert.match(api, /doc_kind: _kind/);
   assert.match(api, /withoutKind/);
   assert.match(page, /reindex|Index missing PDF text/);
+  assert.match(page, /Index this manual/);
   assert.match(api, /indexManualSearchText/);
   assert.doesNotMatch(page, /sample-service-manual|\.pdf'/);
 });

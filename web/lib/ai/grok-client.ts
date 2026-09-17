@@ -83,13 +83,16 @@ export async function fetchAiUsage(accessToken: string): Promise<AiUsage | null>
 }
 
 /**
- * Chat completion with optional manual path (storage_path) for RAG scoping.
- * Mirrors Android ai_assistant.html payload.
+ * Chat completion with optional manual path + catalog id for RAG scoping.
+ * Mirrors Android ai_assistant.html payload. Always send the current
+ * dropdown id/path — grok-assistant must not infer the previous book.
  */
 export async function grokChat(opts: {
   accessToken: string;
   messages: ChatMessage[];
   manualPath?: string | null;
+  manualId?: number | null;
+  scopeChanged?: boolean;
 }): Promise<GrokChatResult | GrokErrorResult> {
   const nonSys = opts.messages
     .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -101,6 +104,8 @@ export async function grokChat(opts: {
       action: 'chat',
       voiceMode: false,
       manualPath: opts.manualPath || null,
+      manualId: opts.manualId ?? null,
+      scopeChanged: opts.scopeChanged === true,
       messages: nonSys,
     });
 

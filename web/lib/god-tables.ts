@@ -477,8 +477,18 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Manuals',
     group: 'catalog',
     description:
-      'Two libraries: Service Manuals (service / technical / parts) and Operators Manuals (operator / user / IFU). Set doc_kind so the book lands on the right shelf — Operators content must not sit on the Service shelf (e.g. Lyra 767). equipment_type is the room (laser, lithotriptor, c_arm, plus BMET rooms — no Other). Quanta Litho / Cyber Ho / Litho EVO and Dornier H20 / H30 (Medilas) are laser (holmium), not lithotriptor. is_incomplete marks a known-incomplete PDF. PDF body text lives in manual_search_index, not this table.',
-    listColumns: ['id', 'brand', 'title', 'doc_kind', 'equipment_type', 'is_incomplete', 'storage_path', 'created_at'],
+      'Two libraries: Service Manuals (service / technical / parts) and Operators Manuals (operator / user / IFU). Set doc_kind so the book lands on the right shelf — Operators content must not sit on the Service shelf (e.g. Lyra 767). equipment_type is the room (laser, lithotriptor, c_arm, plus BMET rooms — no Other). Quanta Litho / Cyber Ho / Litho EVO and Dornier H20 / H30 (Medilas) are laser (holmium), not lithotriptor. is_incomplete marks a known-incomplete PDF (still indexable). PDF body text lives in manual_search_index; xai_collection_id marks rows already in the shared Grok collection.',
+    listColumns: [
+      'id',
+      'brand',
+      'title',
+      'doc_kind',
+      'equipment_type',
+      'is_incomplete',
+      'xai_collection_id',
+      'storage_path',
+      'created_at',
+    ],
     searchColumns: ['brand', 'title', 'equipment_type', 'doc_kind'],
   }),
   crud({
