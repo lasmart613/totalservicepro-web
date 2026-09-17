@@ -138,5 +138,6 @@ test('AI assistant and grok-assistant send current id/path and do not skip incom
   assert.match(reindex, /is_incomplete/);
   assert.doesNotMatch(reindex, /is_incomplete\s*===|skip.*incomplete/i);
   assert.match(godPage, /Index this manual|catalog id/i);
+  assert.match(godPage, /Attach to Grok collection/);
   assert.match(android, /manualId/);
 });

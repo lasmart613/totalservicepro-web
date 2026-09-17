@@ -6,13 +6,14 @@ import {
   pdfPathsForAiAttach,
   resolveManualFromCatalog,
 } from './manual-scope.ts'
+import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-const TSP_COLLECTION_ID = 'collection_4d71cef6-a546-4b8c-9e08-f9c4e77a0c5e'
+const TSP_COLLECTION_ID = TSP_XAI_COLLECTION_ID
 
 const LIMITS: Record<string, { text: number; voice: number }> = {
   free: { text: 5, voice: 1 },
@@ -781,6 +782,76 @@ serve(async (req) => {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },
       })
+    }
+
+    if (body.action === 'attach-collection') {
+      const email = String(user.email || '').trim().toLowerCase()
+      const allow = String(Deno.env.get('GOD_ADMIN_EMAILS') || 'larrysmart@gmail.com')
+        .split(/[,;\s]+/)
+        .map((e) => e.trim().toLowerCase())
+        .filter(Boolean)
+      if (!allow.includes(email)) {
+        return new Response(JSON.stringify({ error: 'Not found' }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      const targetId = asManualId(body.manualId ?? body.manual_id)
+      if (targetId == null) {
+        return new Response(JSON.stringify({ error: 'manualId required' }), {
+          status: 400,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      const { data: manual } = await db
+        .from('manuals')
+        .select('id,title,storage_path,entry_file_path,chapter_metadata')
+        .eq('id', targetId)
+        .maybeSingle()
+      if (!manual) {
+        return new Response(JSON.stringify({ error: `Manual ${targetId} not found` }), {
+          status: 404,
+          headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+        })
+      }
+      const paths = pdfPathsForAiAttach(manual)
+      if (!paths.length) {
+        return new Response(
+          JSON.stringify({ ok: false, skipped: 'no_pdf_path', manualId: targetId }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
+      }
+      const manageKey = Deno.env.get('XAI_MANAGEMENT_API_KEY') || Deno.env.get('XAI_MANAGEMENT_KEY') || XAI_KEY
+      const uploads = []
+      for (const path of paths.slice(0, 8)) {
+        const { data: blob, error } = await db.storage.from('manuals').download(path)
+        if (error || !blob) {
+          uploads.push({ path, ok: false, skipped: error?.message || 'download_failed' })
+          continue
+        }
+        const bytes = new Uint8Array(await blob.arrayBuffer())
+        const uploaded = await uploadPdfToTspCollection({
+          apiKey: XAI_KEY,
+          managementKey: manageKey,
+          filename: path.split('/').pop() || `manual-${targetId}.pdf`,
+          bytes,
+        })
+        uploads.push({ path, ...uploaded })
+      }
+      const ok = uploads.some((u: { ok?: boolean }) => u.ok)
+      if (ok) {
+        await db.from('manuals').update({ xai_collection_id: TSP_XAI_COLLECTION_ID }).eq('id', targetId)
+      }
+      return new Response(
+        JSON.stringify({
+          ok,
+          action: 'attach-collection',
+          manualId: targetId,
+          collectionId: TSP_XAI_COLLECTION_ID,
+          uploads,
+        }),
+        { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+      )
     }
 
     if (body.action === 'tts') {
