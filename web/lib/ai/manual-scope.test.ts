@@ -141,6 +141,8 @@ test('AI assistant and grok-assistant send current id/path and do not skip incom
   assert.match(fn, /manual_search_index/);
   assert.match(fn, /pdfPathsForAiAttach\(manualMeta\)/);
   assert.match(fn, /collection_ids:\s*\[TSP_COLLECTION_ID\]/);
+  assert.match(fn, /list\.length === 1/);
+  assert.match(fn, /!picks\.length && chapterList\.length/);
   assert.doesNotMatch(fn, /ns\.includes\(normPath\)|normPath\.includes\(ns\)/);
   assert.match(reindex, /manualId|manual_id/);
   assert.match(reindex, /is_incomplete/);
