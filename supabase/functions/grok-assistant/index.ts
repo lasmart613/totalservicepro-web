@@ -263,6 +263,8 @@ function isSchematicQuery(text: string): boolean {
 function pickRelevantChapters(chapters: any[], userText: string, schematic: boolean, entryPath: string): any[] {
   const list = Array.isArray(chapters) ? chapters : []
   if (!list.length) return []
+  // Single-file Op Mans (Elite MPX 721) have no chapter_metadata. Always attach that PDF.
+  if (list.length === 1) return list
   const q = (userText || '').toLowerCase()
   const terms = q
     .split(/[^a-z0-9]+/)
@@ -692,16 +694,18 @@ serve(async (req) => {
       const wantPdfs = !!manualLabel && (!voiceMode || schematicQ || !hasManualPassages)
       let attachedNames: string[] = []
       if (wantPdfs && manualMeta) {
+        // Live v33 only attached chapter_metadata. Single-file rows (721) must use storage_path.
         const chapterList =
           Array.isArray(manualMeta.chapter_metadata) && manualMeta.chapter_metadata.length
             ? manualMeta.chapter_metadata
             : pdfPathsForAiAttach(manualMeta).map((p) => ({ storage_path: p, title: manualMeta.title }))
-        const picks = pickRelevantChapters(
+        let picks = pickRelevantChapters(
           chapterList,
           userText,
           schematicQ,
           manualMeta.entry_file_path || pdfPathsForAiAttach(manualMeta)[0] || ''
         )
+        if (!picks.length && chapterList.length) picks = chapterList.slice(0, 1)
         const signed: { name: string; url: string }[] = []
         for (const ch of picks) {
           const url = await signStoragePdf(ch.storage_path)

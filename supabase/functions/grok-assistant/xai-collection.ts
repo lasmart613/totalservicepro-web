@@ -25,6 +25,48 @@ export function xaiKeysFromEnv(env: Record<string, string | undefined> = {}): {
   return { apiKey, managementKey };
 }
 
+export function sanitizeCollectionFilename(filename: string): string {
+  return String(filename || 'manual.pdf').replace(/[^\w.\-]+/g, '_') || 'manual.pdf';
+}
+
+export function collectionDocumentNamesMatch(existing: unknown, candidate: unknown): boolean {
+  const a = sanitizeCollectionFilename(String(existing ?? '')).toLowerCase();
+  const b = sanitizeCollectionFilename(String(candidate ?? '')).toLowerCase();
+  if (!a || !b) return false;
+  if (a === b) return true;
+  return String(existing ?? '').trim().toLowerCase() === String(candidate ?? '').trim().toLowerCase();
+}
+
+export async function collectionHasDocumentName(opts: {
+  managementKey: string;
+  filename: string;
+  collectionId?: string;
+}): Promise<boolean> {
+  const collectionId = opts.collectionId || TSP_XAI_COLLECTION_ID;
+  const raw = String(opts.filename || '').trim();
+  const name = sanitizeCollectionFilename(raw);
+  const candidates = [...new Set([name, raw].filter(Boolean))];
+  for (const candidate of candidates) {
+    const url = new URL(`https://management-api.x.ai/v1/collections/${collectionId}/documents`);
+    url.searchParams.set('limit', '20');
+    url.searchParams.set('filter', `name:"${candidate.replace(/"/g, '')}"`);
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Bearer ${opts.managementKey}` },
+    });
+    if (!res.ok) continue;
+    const json = (await res.json().catch(() => ({}))) as {
+      documents?: Array<{ file_metadata?: { name?: string }; name?: string }>;
+    };
+    const docs = json.documents || [];
+    if (
+      docs.some((d) => collectionDocumentNamesMatch(d.file_metadata?.name || d.name || '', candidate))
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
 export async function uploadPdfToTspCollection(opts: {
   apiKey: string;
   managementKey?: string | null;
@@ -33,7 +75,15 @@ export async function uploadPdfToTspCollection(opts: {
   collectionId?: string;
 }): Promise<{ ok: boolean; fileId?: string; collectionId: string; skipped?: string; detail?: string }> {
   const collectionId = opts.collectionId || TSP_XAI_COLLECTION_ID;
-  const name = String(opts.filename || 'manual.pdf').replace(/[^\w.\-]+/g, '_') || 'manual.pdf';
+  const name = sanitizeCollectionFilename(opts.filename);
+  const manageKeyEarly = opts.managementKey || opts.apiKey;
+  try {
+    if (await collectionHasDocumentName({ managementKey: manageKeyEarly, filename: name, collectionId })) {
+      return { ok: true, collectionId, skipped: 'already_present' };
+    }
+  } catch {
+    /* list failed — still try upload */
+  }
   const fileRes = await fetch('https://api.x.ai/v1/files', {
     method: 'POST',
     headers: { Authorization: `Bearer ${opts.apiKey}` },

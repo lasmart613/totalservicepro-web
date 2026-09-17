@@ -4,10 +4,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'url';
 import {
+  collectionDocumentNamesMatch,
   grokAssistantUrl,
   manualsNeedingXaiAttach,
   MANUAL_XAI_ATTACH_BATCH,
   needsXaiCollectionStamp,
+  sanitizeCollectionFilename,
   TSP_XAI_COLLECTION_ID,
   xaiKeysFromEnv,
 } from './xai-collection.ts';
@@ -26,6 +28,7 @@ test('shared TSP collection id matches live grok-assistant', () => {
 
 test('xai_collection_id is only stamped by the God attach path (single + bulk)', () => {
   const fn = readFileSync(join(here, '../../../supabase/functions/grok-assistant/index.ts'), 'utf8');
+  const upload = readFileSync(join(here, '../../../supabase/functions/grok-assistant/xai-collection.ts'), 'utf8');
   const reindex = readFileSync(join(here, '../../app/api/god/manuals/reindex/route.ts'), 'utf8');
   const godPage = readFileSync(join(here, '../../app/admin/god/manuals/page.tsx'), 'utf8');
   const insert = readFileSync(join(here, '../../app/api/god/manuals/route.ts'), 'utf8');
@@ -36,6 +39,9 @@ test('xai_collection_id is only stamped by the God attach path (single + bulk)',
   assert.match(fn, /listFolderPdfs|folderPrefixForAiAttach/);
   assert.match(fn, /collection_ids:\s*\[TSP_COLLECTION_ID\]/);
   assert.match(fn, /pdfPathsForAiAttach\(manualMeta\)/);
+  assert.match(fn, /list\.length === 1/);
+  assert.match(fn, /!picks\.length && chapterList\.length/);
+  assert.match(upload, /already_present|collectionHasDocumentName/);
   assert.match(reindex, /attachCollection/);
   assert.match(reindex, /manualsNeedingXaiAttach/);
   assert.match(reindex, /afterId/);
@@ -83,4 +89,13 @@ test('bulk attach queue is every unstamped file/folder with a PDF hint, not only
     manualsNeedingXaiAttach([eliteSm, eliteMpx, folderUnstamped], { targetId: 721 }).map((m) => m.id),
     [721]
   );
+});
+
+test('collection ingest skips already-present document names', () => {
+  assert.equal(sanitizeCollectionFilename('cynosure elite mpx opman.pdf'), 'cynosure_elite_mpx_opman.pdf');
+  assert.equal(
+    collectionDocumentNamesMatch('cynosure_elite_mpx_opman.pdf', 'cynosure elite mpx opman.pdf'),
+    true
+  );
+  assert.equal(collectionDocumentNamesMatch('elite_sm.pdf', 'elite_mpx_opman.pdf'), false);
 });
