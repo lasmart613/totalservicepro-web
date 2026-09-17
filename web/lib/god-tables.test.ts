@@ -169,6 +169,7 @@ test('God manuals catalog labels Service vs Operators libraries', () => {
   assert.match(manuals?.description || '', /Operators Manuals/);
   assert.match(manuals?.description || '', /doc_kind/);
   assert.ok(manuals?.listColumns.includes('doc_kind'));
+  assert.ok(manuals?.listColumns.includes('xai_collection_id'));
   assert.ok(manuals?.searchColumns.includes('doc_kind'));
 });
 

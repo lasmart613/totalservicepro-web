@@ -406,7 +406,7 @@
         return { zappPersona: true, zappVoice: 'sage' };
     }
 
-    let messages = [], selectedManualPath = '', isTyping = false;
+    let messages = [], selectedManualPath = '', selectedManualId = null, lastSentManualId = null, lastSentManualPath = '', isTyping = false;
     let currentUserId = null, isListening = false;
     let voiceMode = false;
     let currentAudio = null;
@@ -424,6 +424,7 @@
             const state = {
                 msgs: messages.slice(-40),
                 manual: selectedManualPath,
+                manualId: selectedManualId,
                 mfr: document.getElementById('mfrSelect')?.value || '',
                 mode: voiceMode ? 'voice' : 'text',
                 ts: Date.now()
@@ -444,6 +445,9 @@
             const state = JSON.parse(raw);
             if (state.msgs)   messages = state.msgs;
             if (state.manual) selectedManualPath = state.manual;
+            if (state.manualId != null && Number(state.manualId) > 0) selectedManualId = Number(state.manualId);
+            lastSentManualId = selectedManualId;
+            lastSentManualPath = selectedManualPath || '';
         } catch(e) {}
     }
 
@@ -688,9 +692,16 @@
     }
 
     async function loadManuals() {
-        const { data } = await supabaseClient.from('manuals').select('title,storage_path,brand').order('brand').order('title');
+        const { data } = await supabaseClient.from('manuals').select('id,title,storage_path,brand').order('brand').order('title');
         if (!data) return;
         allManuals = data;
+        if (selectedManualId && !selectedManualPath) {
+            const byId = allManuals.find(m => Number(m.id) === Number(selectedManualId));
+            if (byId) selectedManualPath = byId.storage_path || '';
+        } else if (selectedManualPath && !selectedManualId) {
+            const byPath = allManuals.find(m => m.storage_path === selectedManualPath);
+            if (byPath) selectedManualId = byPath.id;
+        }
         const brands = [...new Set(data.map(m => m.brand))].sort();
         const mfrSel = document.getElementById('mfrSelect');
         if (!mfrSel) return;
@@ -721,11 +732,24 @@
         if (!modelSel || !modelRow) return;
         modelSel.innerHTML = '<option value="">Select model...</option>';
         allManuals.filter(m => m.brand === brand).forEach(m => {
-            const o = document.createElement('option'); o.value = m.storage_path; o.textContent = m.title;
+            const o = document.createElement('option');
+            o.value = String(m.id);
+            o.dataset.path = m.storage_path || '';
+            o.textContent = m.title;
             modelSel.appendChild(o);
         });
         modelRow.classList.add('enabled');
-        if (selectPath) { modelSel.value = selectPath; modelSel.classList.add('has-value'); }
+        if (selectedManualId) {
+            modelSel.value = String(selectedManualId);
+            if (modelSel.value === String(selectedManualId)) modelSel.classList.add('has-value');
+        } else if (selectPath) {
+            const hit = allManuals.find(m => m.storage_path === selectPath);
+            if (hit) {
+                selectedManualId = hit.id;
+                modelSel.value = String(hit.id);
+                modelSel.classList.add('has-value');
+            }
+        }
     }
 
     function onMfrChange() {
@@ -735,6 +759,7 @@
         const brand = mfrSel.value;
         mfrSel.classList.toggle('has-value', !!brand);
         selectedManualPath = '';
+        selectedManualId = null;
         if (modelSel) { modelSel.innerHTML = '<option value="">Select model...</option>'; modelSel.classList.remove('has-value'); }
         if (!brand) { modelRow.classList.remove('enabled'); return; }
         populateModels(brand); saveState();
@@ -742,8 +767,11 @@
 
     function onManualChange() {
         const sel = document.getElementById('manualSelect');
-        selectedManualPath = sel.value;
-        sel.classList.toggle('has-value', !!selectedManualPath);
+        const id = Number(sel.value);
+        const row = allManuals.find(m => Number(m.id) === id);
+        selectedManualId = row ? row.id : null;
+        selectedManualPath = row ? (row.storage_path || '') : '';
+        sel.classList.toggle('has-value', !!selectedManualId);
         updateVoiceManualTag();
         saveState();
     }
@@ -832,13 +860,21 @@
         try {
             const { data: { session } } = await supabaseClient.auth.getSession();
             const token = session?.access_token || '';
+            const scopeChanged = lastSentManualId != null && Number(lastSentManualId) !== Number(selectedManualId);
+            const outbound = scopeChanged
+                ? messages.filter(m => m.role === 'user').slice(-1)
+                : messages.slice(-12);
+            lastSentManualId = selectedManualId;
+            lastSentManualPath = selectedManualPath || '';
             const resp = await fetch(GROK_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
                 body: JSON.stringify({
                     action: 'chat',
                     manualPath: selectedManualPath || null,
-                    messages: messages.slice(-12)
+                    manualId: selectedManualId || null,
+                    scopeChanged,
+                    messages: outbound
                 })
             });
             const data = await resp.json();
@@ -1026,15 +1062,23 @@
             const token = session?.access_token || '';
             messages.push({ role: 'user', content: text });
 
+            const scopeChanged = lastSentManualId != null && Number(lastSentManualId) !== Number(selectedManualId);
+            const outbound = scopeChanged
+                ? messages.filter(m => m.role === 'user').slice(-1)
+                : messages.slice(-10);
+            lastSentManualId = selectedManualId;
+            lastSentManualPath = selectedManualPath || '';
             const resp = await fetch(GROK_URL, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
                 body: JSON.stringify({
                     action: 'chat',
                     manualPath: selectedManualPath || null,
+                    manualId: selectedManualId || null,
+                    scopeChanged,
                     voiceMode: true,
                     zappPersona: getAIPrefs().zappPersona,
-                    messages: messages.slice(-10)
+                    messages: outbound
                 })
             });
             const data = await resp.json();

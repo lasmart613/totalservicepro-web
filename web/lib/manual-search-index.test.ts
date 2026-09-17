@@ -60,6 +60,8 @@ test('search API is catalog-wide and never returns PDF bodies or signed URLs', (
   assert.doesNotMatch(api, /select\(['"]search_text|json\.search_text/);
   assert.match(reindex, /requireGodCaller/);
   assert.match(reindex, /indexManualSearchText/);
+  assert.match(reindex, /attachCollection/);
+  assert.match(reindex, /afterId/);
   assert.match(migration, /manual_search_index/);
   assert.match(migration, /search_tsv/);
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/);

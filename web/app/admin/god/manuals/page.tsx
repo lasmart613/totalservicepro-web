@@ -31,6 +31,7 @@ export default function GodManualsCatalogPage() {
   const [saving, setSaving] = useState(false);
   const [reindexing, setReindexing] = useState(false);
   const [reindexNote, setReindexNote] = useState('');
+  const [reindexManualId, setReindexManualId] = useState('');
 
   useEffect(() => {
     let cancelled = false;
@@ -83,17 +84,30 @@ export default function GodManualsCatalogPage() {
     }
   }
 
-  async function reindexBatch(force = false) {
+  async function reindexBatch(force = false, manualId?: string, attachCollection = false) {
     setReindexing(true);
     try {
       const headers = await godAuthHeader();
+      const target = String(manualId || '').trim();
+      const attachAll = attachCollection && !target;
       let indexed = 0;
       let processed = 0;
-      for (let i = 0; i < 80; i++) {
+      let attached = 0;
+      let afterId: number | undefined;
+      let lastRemaining = 0;
+      let lastCollection: { ok?: boolean; skipped?: string; collectionId?: string } | undefined;
+      const maxLoops = target ? 1 : attachAll ? 250 : 80;
+      for (let i = 0; i < maxLoops; i++) {
         const res = await fetch('/api/god/manuals/reindex', {
           method: 'POST',
           headers,
-          body: JSON.stringify({ limit: 4, force: force && i === 0 }),
+          body: JSON.stringify({
+            limit: target || attachAll ? 1 : 4,
+            force: force && i === 0,
+            manualId: target || undefined,
+            attachCollection: attachCollection || undefined,
+            afterId: attachAll ? afterId : undefined,
+          }),
         });
         const json = (await res.json().catch(() => ({}))) as {
           ok?: boolean;
@@ -101,6 +115,11 @@ export default function GodManualsCatalogPage() {
           processed?: number;
           indexed?: number;
           remaining?: number;
+          afterId?: number | null;
+          attachableMissing?: number;
+          results?: Array<{ manualId?: string; ok?: boolean; skipped?: string; chars?: number }>;
+          collection?: { ok?: boolean; skipped?: string; collectionId?: string };
+          collections?: Array<{ ok?: boolean; skipped?: string; collectionId?: string }>;
         };
         if (!res.ok || !json.ok) {
           toast.error(json.error || 'Reindex failed');
@@ -108,11 +127,27 @@ export default function GodManualsCatalogPage() {
         }
         processed += json.processed || 0;
         indexed += json.indexed || 0;
+        lastRemaining = json.remaining || 0;
+        lastCollection = json.collection;
+        const batchCollections = json.collections?.length ? json.collections : json.collection ? [json.collection] : [];
+        attached += batchCollections.filter((c) => c.ok).length;
+        if (json.afterId != null) afterId = json.afterId;
         if (!json.processed || !json.remaining) break;
       }
-      const note = `Indexed ${indexed} PDF(s) this run (${processed} attempted). Repeat if the catalog is large.`;
-      setReindexNote(note);
-      toast.success(note);
+      const collectionNote = attachCollection
+        ? attachAll
+          ? ` Attached ${attached} Grok collection(s). Remaining unstamped after cursor: ${lastRemaining}. Repeat until remaining is 0, then start over once to retry failures.`
+          : lastCollection?.ok
+            ? ` Grok collection ${lastCollection.collectionId || ''} stamped.`
+            : ` Grok collection attach failed (${lastCollection?.skipped || 'see logs'}). Search index still wrote.`
+        : '';
+      const detail = target
+        ? `Catalog id ${target}: indexed ${indexed} (${processed} attempted). Incomplete PDFs are included when storage_path is a real file.${collectionNote}`
+        : attachAll
+          ? `Catch-up: indexed ${indexed} PDF text row(s), attached ${attached} to Grok (${processed} attempted).${collectionNote}`
+          : `Indexed ${indexed} PDF(s) this run (${processed} attempted). Repeat if the catalog is large.`;
+      setReindexNote(detail);
+      toast.success(detail);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Reindex failed');
     } finally {
@@ -188,18 +223,61 @@ export default function GodManualsCatalogPage() {
       <div className="card p-4 mb-6">
         <div className="text-sm font-semibold mb-2">PDF text index (library search)</div>
         <p className="text-sm text-[var(--text3)] mb-3">
-          The library search box looks inside extracted PDF text. Apply the{' '}
-          <code>manual_search_index</code> migration, then backfill existing files. New catalog rows
-          try to index automatically when the PDF is already in the bucket.
+          Two indexes: <strong className="text-[var(--text)]">Index missing PDF text</strong> fills{' '}
+          <code>manual_search_index</code> (library search + AI fallback).{' '}
+          <strong className="text-[var(--text)]">Attach missing Grok collections</strong> uploads
+          every unstamped file/folder PDF into the shared xAI collection and stamps{' '}
+          <code>xai_collection_id</code> (Larry only; one PDF per request — repeat until remaining
+          is 0). Use a catalog id + <strong className="text-[var(--text)]">Attach to Grok
+          collection</strong> for a single row. Live grok-assistant still searches the shared
+          collection; the stamp marks that this PDF was uploaded. <code>is_incomplete</code> does
+          not skip either action. Clear the Incomplete badge separately in God → Tables → manuals
+          if the PDF is actually complete.
         </p>
-        <button
-          type="button"
-          className="btn btn-secondary text-sm"
-          disabled={reindexing}
-          onClick={() => reindexBatch(false)}
-        >
-          {reindexing ? 'Indexing…' : 'Index missing PDF text'}
-        </button>
+        <div className="flex flex-wrap items-end gap-2 mb-2">
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            disabled={reindexing}
+            onClick={() => reindexBatch(false)}
+          >
+            {reindexing ? 'Indexing…' : 'Index missing PDF text'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            disabled={reindexing}
+            onClick={() => reindexBatch(false, undefined, true)}
+          >
+            {reindexing ? 'Indexing…' : 'Attach missing Grok collections'}
+          </button>
+          <label className="text-sm">
+            <span className="block text-xs text-[var(--text3)]">Catalog id</span>
+            <input
+              className="input w-28 font-mono text-sm"
+              inputMode="numeric"
+              placeholder="721"
+              value={reindexManualId}
+              onChange={(e) => setReindexManualId(e.target.value)}
+            />
+          </label>
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            disabled={reindexing || !reindexManualId.trim()}
+            onClick={() => reindexBatch(true, reindexManualId)}
+          >
+            Index this manual
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            disabled={reindexing || !reindexManualId.trim()}
+            onClick={() => reindexBatch(true, reindexManualId, true)}
+          >
+            Attach to Grok collection
+          </button>
+        </div>
         {reindexNote ? <p className="text-xs text-[var(--text3)] mt-2">{reindexNote}</p> : null}
       </div>
 

@@ -11,11 +11,13 @@ import {
   fetchAiUsage,
   grokChat,
 } from '@/lib/ai/grok-client';
+import { asManualId, buildGrokChatPayload } from '@/lib/ai/manual-scope';
 import { toast } from 'sonner';
 import { catalogManualTitle } from '@/lib/manual-catalog';
 import { canAccessRepairAi } from '@/lib/roles';
 
 type ManualRow = {
+  id: number;
   title: string;
   storage_path: string;
   brand: string | null;
@@ -65,6 +67,8 @@ export default function AIAssistantClient() {
   const [manuals, setManuals] = useState<ManualRow[]>([]);
   const [brand, setBrand] = useState('');
   const [manualPath, setManualPath] = useState('');
+  const [manualId, setManualId] = useState<number | null>(null);
+  const lastSentRef = useRef<{ id: number | null; path: string }>({ id: null, path: '' });
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState('');
   const [sending, setSending] = useState(false);
@@ -86,10 +90,19 @@ export default function AIAssistantClient() {
       .sort((a, b) => catalogManualTitle(a).localeCompare(catalogManualTitle(b)));
   }, [manuals, brand]);
 
+  const selectedManual = useMemo(() => {
+    if (manualId != null) {
+      const byId = manuals.find((x) => x.id === manualId);
+      if (byId) return byId;
+    }
+    return manuals.find((x) => x.storage_path === manualPath) || null;
+  }, [manuals, manualId, manualPath]);
+
   const selectedManualLabel = useMemo(() => {
-    const m = manuals.find((x) => x.storage_path === manualPath);
-    return m ? `${m.brand || ''} · ${catalogManualTitle(m)}`.trim() : '';
-  }, [manuals, manualPath]);
+    return selectedManual
+      ? `${selectedManual.brand || ''} · ${catalogManualTitle(selectedManual)}`.trim()
+      : '';
+  }, [selectedManual]);
 
   const activeStorageKey = useMemo(() => {
     if (!userId) return null;
@@ -97,7 +110,7 @@ export default function AIAssistantClient() {
   }, [userId, orgId]);
 
   const saveState = useCallback(
-    (msgs: ChatMessage[], path: string, mfr: string) => {
+    (msgs: ChatMessage[], path: string, mfr: string, id: number | null = null) => {
       if (!userId) return;
       const key = storageKeyFor(userId, orgId);
       try {
@@ -106,6 +119,7 @@ export default function AIAssistantClient() {
           JSON.stringify({
             msgs: msgs.slice(-40),
             manual: path,
+            manualId: id,
             mfr,
             userId,
             orgId: orgId != null ? String(orgId) : null,
@@ -185,15 +199,23 @@ export default function AIAssistantClient() {
           if (okUser && okOrg) {
             if (Array.isArray(s.msgs)) setMessages(s.msgs);
             if (s.manual) setManualPath(String(s.manual));
+            const restoredId = asManualId(s.manualId);
+            if (restoredId != null) setManualId(restoredId);
+            lastSentRef.current = {
+              id: restoredId,
+              path: s.manual ? String(s.manual) : '',
+            };
             if (s.mfr) setBrand(String(s.mfr));
           } else {
             setMessages([]);
             setManualPath('');
+            setManualId(null);
             setBrand('');
           }
         } else {
           setMessages([]);
           setManualPath('');
+          setManualId(null);
           setBrand('');
         }
       } catch {
@@ -203,23 +225,41 @@ export default function AIAssistantClient() {
       // Manuals catalog
       const { data: man, error: manErr } = await supabase
         .from('manuals')
-        .select('title,storage_path,brand')
+        .select('id,title,storage_path,brand')
         .order('brand')
         .order('title');
       if (manErr) {
         console.warn('manuals load', manErr);
         toast.error('Could not load manuals list');
       } else if (!cancelled) {
-        const rows = (man || []).filter((m: any) => m.storage_path && m.title) as ManualRow[];
+        const rows = (man || []).filter((m: any) => m.storage_path && m.title && m.id != null) as ManualRow[];
         setManuals(rows);
+        setManualId((prev) => {
+          if (prev != null && rows.some((r) => r.id === prev)) return prev;
+          try {
+            const saved = JSON.parse(localStorage.getItem(key) || '{}');
+            const savedId = asManualId(saved.manualId);
+            if (savedId != null && rows.some((r) => r.id === savedId)) return savedId;
+            const path = saved.manual;
+            if (path) {
+              const hit = rows.find((r) => r.storage_path === path);
+              if (hit) return hit.id;
+            }
+          } catch {
+            /* ignore */
+          }
+          return prev;
+        });
         setBrand((prev) => {
           if (prev) return prev;
           try {
-            const path = JSON.parse(localStorage.getItem(key) || '{}').manual;
-            if (path) {
-              const hit = rows.find((r) => r.storage_path === path);
-              if (hit?.brand) return hit.brand;
-            }
+            const saved = JSON.parse(localStorage.getItem(key) || '{}');
+            const savedId = asManualId(saved.manualId);
+            const path = saved.manual;
+            const hit =
+              (savedId != null && rows.find((r) => r.id === savedId)) ||
+              (path ? rows.find((r) => r.storage_path === path) : null);
+            if (hit?.brand) return hit.brand;
           } catch {
             /* ignore */
           }
@@ -244,12 +284,17 @@ export default function AIAssistantClient() {
   function onBrandChange(v: string) {
     setBrand(v);
     setManualPath('');
-    saveState(messages, '', v);
+    setManualId(null);
+    saveState(messages, '', v, null);
   }
 
   function onManualChange(v: string) {
-    setManualPath(v);
-    saveState(messages, v, brand);
+    const id = asManualId(v);
+    const row = id != null ? manuals.find((m) => m.id === id) : null;
+    const path = row?.storage_path || '';
+    setManualId(id);
+    setManualPath(path);
+    saveState(messages, path, brand, id);
   }
 
   async function sendPrompt(text: string) {
@@ -268,12 +313,25 @@ export default function AIAssistantClient() {
     setInput('');
     setSending(true);
     setLimitBanner('');
-    saveState(nextMsgs, manualPath, brand);
+    const currentId = selectedManual?.id ?? manualId;
+    const currentPath = selectedManual?.storage_path || manualPath || '';
+    saveState(nextMsgs, currentPath, brand, currentId);
+
+    const payload = buildGrokChatPayload({
+      messages: nextMsgs,
+      manualId: currentId,
+      manualPath: currentPath,
+      lastSentManualId: lastSentRef.current.id,
+      lastSentManualPath: lastSentRef.current.path,
+    });
+    lastSentRef.current = { id: payload.manualId, path: payload.manualPath || '' };
 
     const result = await grokChat({
       accessToken: token,
-      messages: nextMsgs,
-      manualPath: manualPath || null,
+      messages: payload.messages,
+      manualPath: payload.manualPath,
+      manualId: payload.manualId,
+      scopeChanged: payload.scopeChanged,
     });
 
     if (!result.ok) {
@@ -290,7 +348,7 @@ export default function AIAssistantClient() {
           { role: 'assistant', content: `⚠️ ${result.error}${result.message ? `: ${result.message}` : ''}` },
         ];
         setMessages(fail);
-        saveState(fail, manualPath, brand);
+        saveState(fail, currentPath, brand, currentId);
         toast.error(result.error);
       }
       setSending(false);
@@ -302,7 +360,7 @@ export default function AIAssistantClient() {
       { role: 'assistant', content: result.content },
     ];
     setMessages(withReply);
-    saveState(withReply, manualPath, brand);
+    saveState(withReply, currentPath, brand, currentId);
     if (result.usage) {
       setUsage((u) => ({
         text: result.usage!.text || u.text,
@@ -319,7 +377,7 @@ export default function AIAssistantClient() {
   function clearHistory() {
     if (!confirm('Clear conversation history?')) return;
     setMessages([]);
-    saveState([], manualPath, brand);
+    saveState([], manualPath, brand, manualId);
   }
 
   if (!ready) {
@@ -399,13 +457,13 @@ export default function AIAssistantClient() {
             </label>
             <select
               className="input w-full mt-1 text-sm"
-              value={manualPath}
+              value={manualId != null ? String(manualId) : ''}
               onChange={(e) => onManualChange(e.target.value)}
               disabled={!brand}
             >
               <option value="">{brand ? 'Select model / manual…' : 'Pick a brand first'}</option>
               {manualsForBrand.map((m) => (
-                <option key={m.storage_path} value={m.storage_path}>
+                <option key={m.id} value={String(m.id)}>
                   {catalogManualTitle(m)}
                 </option>
               ))}
