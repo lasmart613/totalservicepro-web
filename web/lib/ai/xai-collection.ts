@@ -10,16 +10,59 @@
  *   filters hits by the selected manual’s filename tokens.
  * - The first ~40 catalog rows (Elite SM id 16 included) share this id as a
  *   stamp that their PDFs were uploaded in an out-of-repo / console ingest.
- *   Incomplete rows (including Elite MPX id 721) were never stamped.
+ *   Incomplete rows (including Elite MPX id 721) were never stamped. Live
+ *   catalog (~2026-09) had ~749 unstamped rows and ~782 missing search-index.
  *
- * After this change, Larry can attach a catalog PDF via God → Manuals
- * (“Attach to Grok collection”) which uploads into this collection and
- * stamps `xai_collection_id`. Chat can still work without the stamp once
- * grok-assistant is deployed: it attaches the storage_path PDF and can
- * fall back to manual_search_index.
+ * After this change, Larry (God only) can:
+ * - Attach one catalog PDF via “Attach to Grok collection” (catalog id).
+ * - Catch up every unstamped file/folder with a PDF via
+ *   “Attach missing Grok collections” → POST attachCollection without
+ *   manualId (cursor afterId, one PDF upload per request).
+ * Chat can still work without the stamp once grok-assistant is deployed:
+ * it attaches the storage_path PDF and can fall back to manual_search_index.
  */
 
+import { asManualId, hasAttachablePdfHint } from './manual-scope.ts';
+
 export const TSP_XAI_COLLECTION_ID = 'collection_4d71cef6-a546-4b8c-9e08-f9c4e77a0c5e';
+
+/** One PDF upload per God request — xAI + 60s function budget. */
+export const MANUAL_XAI_ATTACH_BATCH = 1;
+
+export function needsXaiCollectionStamp(manual: { xai_collection_id?: unknown }): boolean {
+  return !String(manual.xai_collection_id ?? '').trim();
+}
+
+export type AttachableManual = {
+  id?: unknown;
+  xai_collection_id?: unknown;
+  storage_path?: string | null;
+  entry_file_path?: string | null;
+  chapter_metadata?: unknown;
+  is_folder?: unknown;
+};
+
+/**
+ * Unstamped catalog rows that look like they have a PDF (file, chapters,
+ * entry file, or folder prefix). Ordered by id. afterId skips already
+ * attempted rows in this catch-up pass so empty folders cannot block the queue.
+ */
+export function manualsNeedingXaiAttach<T extends AttachableManual>(
+  manuals: T[],
+  opts: { targetId?: unknown; afterId?: unknown } = {}
+): T[] {
+  const targetId = asManualId(opts.targetId);
+  const afterId = asManualId(opts.afterId) ?? 0;
+  return manuals
+    .filter((m) => {
+      const id = asManualId(m.id);
+      if (id == null) return false;
+      if (targetId != null) return id === targetId;
+      if (id <= afterId) return false;
+      return needsXaiCollectionStamp(m) && hasAttachablePdfHint(m);
+    })
+    .sort((a, b) => (asManualId(a.id) || 0) - (asManualId(b.id) || 0));
+}
 
 export function grokAssistantUrl(base?: string | null): string {
   const url = String(base || '').replace(/\/$/, '');

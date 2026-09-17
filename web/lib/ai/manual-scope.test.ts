@@ -9,6 +9,8 @@ import {
   excerptManualSearchText,
   manualPathsAlign,
   normalizeManualPath,
+  folderPrefixForAiAttach,
+  hasAttachablePdfHint,
   pdfPathsForAiAttach,
   resolveManualFromCatalog,
 } from './manual-scope.ts';
@@ -102,7 +104,7 @@ test('changing the dropdown sends the new id/path and drops the previous manualâ
   assert.equal(same.messages.length, 3);
 });
 
-test('single-file manuals attach the storage_path PDF; folders use chapters', () => {
+test('single-file manuals attach the storage_path PDF; folders use chapters or a prefix', () => {
   assert.deepEqual(pdfPathsForAiAttach(ELITE_MPX), [ELITE_MPX.storage_path]);
   assert.deepEqual(
     pdfPathsForAiAttach({
@@ -115,6 +117,11 @@ test('single-file manuals attach the storage_path PDF; folders use chapters', ()
     }),
     ['shared/cynosure/elite/a.pdf', 'shared/cynosure/elite/b.pdf']
   );
+  assert.equal(folderPrefixForAiAttach(ELITE_SM), 'shared/cynosure/elite');
+  assert.equal(folderPrefixForAiAttach(ELITE_MPX), null);
+  assert.equal(hasAttachablePdfHint(ELITE_MPX), true);
+  assert.equal(hasAttachablePdfHint(ELITE_SM), true);
+  assert.equal(hasAttachablePdfHint({ storage_path: '' }), false);
   assert.match(excerptManualSearchText('Alex 755 nm and YAG 1064 nm wavelengths.', 'wavelengths'), /1064/);
 });
 
@@ -139,5 +146,7 @@ test('AI assistant and grok-assistant send current id/path and do not skip incom
   assert.doesNotMatch(reindex, /is_incomplete\s*===|skip.*incomplete/i);
   assert.match(godPage, /Index this manual|catalog id/i);
   assert.match(godPage, /Attach to Grok collection/);
+  assert.match(godPage, /Attach missing Grok collections/);
+  assert.match(reindex, /manualsNeedingXaiAttach|attachCollection/);
   assert.match(android, /manualId/);
 });

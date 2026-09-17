@@ -3,6 +3,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   asManualId,
   excerptManualSearchText,
+  folderPrefixForAiAttach,
   pdfPathsForAiAttach,
   resolveManualFromCatalog,
 } from './manual-scope.ts'
@@ -145,6 +146,24 @@ function basenamePath(p: string): string {
   const s = String(p || '').replace(/\\/g, '/')
   const i = s.lastIndexOf('/')
   return (i >= 0 ? s.slice(i + 1) : s).toLowerCase()
+}
+
+async function listFolderPdfs(db: any, prefix: string, depth = 0): Promise<string[]> {
+  const { data, error } = await db.storage.from('manuals').list(prefix, { limit: 80, offset: 0 })
+  if (error || !data) return []
+  const out: string[] = []
+  for (const obj of data) {
+    const name = String(obj.name || '').trim()
+    if (!name || name === '.emptyFolderPlaceholder') continue
+    const full = `${prefix}/${name}`.replace(/\/{2,}/g, '/')
+    if (/\.pdf$/i.test(name)) out.push(full)
+    else if (depth < 1 && !obj.id) {
+      const nested = await listFolderPdfs(db, full, depth + 1)
+      out.push(...nested)
+    }
+    if (out.length >= 8) break
+  }
+  return out.slice(0, 8)
 }
 
 function chapterFileKeys(chapters: any[] | null | undefined): string[] {
@@ -805,7 +824,7 @@ serve(async (req) => {
       }
       const { data: manual } = await db
         .from('manuals')
-        .select('id,title,storage_path,entry_file_path,chapter_metadata')
+        .select('id,title,storage_path,entry_file_path,chapter_metadata,is_folder')
         .eq('id', targetId)
         .maybeSingle()
       if (!manual) {
@@ -814,7 +833,11 @@ serve(async (req) => {
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
       }
-      const paths = pdfPathsForAiAttach(manual)
+      let paths = pdfPathsForAiAttach(manual)
+      if (!paths.length) {
+        const prefix = folderPrefixForAiAttach(manual)
+        if (prefix) paths = await listFolderPdfs(db, prefix)
+      }
       if (!paths.length) {
         return new Response(
           JSON.stringify({ ok: false, skipped: 'no_pdf_path', manualId: targetId }),

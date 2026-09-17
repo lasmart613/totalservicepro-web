@@ -171,3 +171,31 @@ export function pdfPathsForAiAttach(manual: {
   if (path && /\.pdf$/i.test(path)) return [path];
   return [];
 }
+
+/** Folder prefix so attach-collection can list Storage PDFs (Elite SM style). */
+export function folderPrefixForAiAttach(manual: {
+  storage_path?: string | null;
+  is_folder?: unknown;
+}): string | null {
+  const path = normalizeManualPath(manual.storage_path);
+  if (!path || /\.pdf$/i.test(path)) return null;
+  const folder =
+    manual.is_folder === true ||
+    manual.is_folder === 1 ||
+    manual.is_folder === '1' ||
+    manual.is_folder === 'true' ||
+    manual.is_folder === 't';
+  if (folder || !/\.[a-z0-9]+$/i.test(path)) return path;
+  return null;
+}
+
+/** True when catalog hints a PDF file or a folder that may contain PDFs. */
+export function hasAttachablePdfHint(manual: {
+  storage_path?: string | null;
+  entry_file_path?: string | null;
+  chapter_metadata?: unknown;
+  is_folder?: unknown;
+}): boolean {
+  if (pdfPathsForAiAttach(manual).length) return true;
+  return folderPrefixForAiAttach(manual) != null;
+}

@@ -1,22 +1,10 @@
 /**
  * Shared Grok RAG collection (AI chat), not library search.
  *
- * QA + live function (v33) confirmed:
- * - `manual_search_index` is written by God POST /api/god/manuals/reindex
- *   and on catalog insert. That is library search only.
- * - `manuals.xai_collection_id` is NOT written anywhere else in this repo
- *   (types + God table list only). Live grok-assistant never reads or writes
- *   the column. It always searches this one hardcoded collection, then
- *   filters hits by the selected manual’s filename tokens.
- * - The first ~40 catalog rows (Elite SM id 16 included) share this id as a
- *   stamp that their PDFs were uploaded in an out-of-repo / console ingest.
- *   Incomplete rows (including Elite MPX id 721) were never stamped.
- *
- * After this change, Larry can attach a catalog PDF via God → Manuals
- * (“Attach to Grok collection”) which uploads into this collection and
- * stamps `xai_collection_id`. Chat can still work without the stamp once
- * grok-assistant is deployed: it attaches the storage_path PDF and can
- * fall back to manual_search_index.
+ * The only writer of `manuals.xai_collection_id` is grok-assistant
+ * `action: 'attach-collection'` (Larry / GOD_ADMIN_EMAILS). God
+ * POST /api/god/manuals/reindex?attachCollection proxies that action
+ * for one id or, without manualId, every unstamped attachable row.
  */
 
 export const TSP_XAI_COLLECTION_ID = 'collection_4d71cef6-a546-4b8c-9e08-f9c4e77a0c5e';
