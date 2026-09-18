@@ -58,7 +58,7 @@ function defaultUsage(): AiUsage {
 export default function AIAssistantClient() {
   const router = useRouter();
   const supabase = getSupabaseClient();
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   const [ready, setReady] = useState(false);
   const [token, setToken] = useState<string | null>(null);
@@ -278,7 +278,9 @@ export default function AIAssistantClient() {
   }, [router, supabase]);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = el.scrollHeight;
   }, [messages, sending]);
 
   function onBrandChange(v: string) {
@@ -382,9 +384,9 @@ export default function AIAssistantClient() {
 
   if (!ready) {
     return (
-      <div className="min-h-screen flex flex-col">
+      <div className="fixed inset-0 z-30 flex flex-col bg-[var(--bg)]">
         <Header />
-        <div className="flex-1 flex items-center justify-center text-[var(--text3)] text-sm">
+        <div className="flex-1 min-h-0 flex items-center justify-center text-[var(--text3)] text-sm">
           Loading AI Assistant…
         </div>
       </div>
@@ -394,11 +396,11 @@ export default function AIAssistantClient() {
   const textLimitHit = usage.text.used >= usage.text.limit;
 
   return (
-    <div className="min-h-screen flex flex-col bg-[var(--bg)]">
+    <div className="fixed inset-0 z-30 flex flex-col bg-[var(--bg)]">
       <Header />
 
-      <div className="max-w-3xl mx-auto w-full px-4 py-4 flex flex-col flex-1 min-h-0">
-        <div className="flex items-start justify-between gap-3 mb-3">
+      <div className="max-w-3xl mx-auto w-full px-4 py-3 flex flex-col flex-1 min-h-0">
+        <div className="shrink-0 flex items-start justify-between gap-3 mb-3">
           <div>
             <h1 className="text-2xl font-extrabold text-[var(--text)]">🤖 AI Assistant</h1>
             <p className="text-sm text-[var(--text3)] mt-0.5">
@@ -416,7 +418,7 @@ export default function AIAssistantClient() {
         </div>
 
         {/* Usage */}
-        <div className="flex flex-wrap items-center gap-3 mb-3 text-xs text-[var(--text3)]">
+        <div className="shrink-0 flex flex-wrap items-center gap-3 mb-3 text-xs text-[var(--text3)]">
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface2)]">
             <span>⌨️ Text</span>
             <strong className={textLimitHit ? 'text-red-400' : 'text-[var(--gold)]'}>
@@ -433,7 +435,7 @@ export default function AIAssistantClient() {
         </div>
 
         {/* Manual context */}
-        <div className="card p-3 mb-3 grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div className="card p-3 mb-3 grid grid-cols-1 sm:grid-cols-2 gap-3 shrink-0">
           <div>
             <label className="text-[10px] font-bold uppercase tracking-wide text-[var(--text3)]">
               Brand
@@ -482,13 +484,13 @@ export default function AIAssistantClient() {
         </div>
 
         {limitBanner && (
-          <div className="mb-3 px-3 py-2 rounded-lg text-xs border border-red-500/40 bg-red-500/10 text-red-300">
+          <div className="shrink-0 mb-3 px-3 py-2 rounded-lg text-xs border border-red-500/40 bg-red-500/10 text-red-300">
             {limitBanner}
           </div>
         )}
 
         {/* Quick chips */}
-        <div className="flex flex-wrap gap-2 mb-3">
+        <div className="shrink-0 flex flex-wrap gap-2 mb-3">
           {QUICK_CHIPS.map((c) => (
             <button
               key={c.label}
@@ -502,8 +504,14 @@ export default function AIAssistantClient() {
           ))}
         </div>
 
-        {/* Messages */}
-        <div className="card flex-1 min-h-[280px] max-h-[min(52vh,520px)] overflow-y-auto p-4 mb-3 space-y-3">
+        {/* Messages — flex child fills leftover viewport and scrolls; do not use .card (overflow:hidden). */}
+        <div
+          ref={listRef}
+          className="ai-chat-thread flex-1 min-h-0 overflow-y-auto p-4 mb-3 space-y-3 rounded-xl border border-[var(--border)] bg-[var(--surface2)]"
+          tabIndex={0}
+          role="log"
+          aria-label="AI Assistant conversation"
+        >
           {messages.length === 0 && (
             <div className="text-center text-sm text-[var(--text3)] py-10 leading-relaxed">
               👋 Select brand + manual above, then ask about that system.
@@ -519,7 +527,7 @@ export default function AIAssistantClient() {
               className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}
             >
               <div
-                className={`max-w-[92%] rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
+                className={`ai-chat-bubble max-w-[92%] min-w-0 rounded-2xl px-3.5 py-2.5 text-sm leading-relaxed ${
                   m.role === 'user'
                     ? 'bg-[var(--gold)] text-black font-medium'
                     : 'bg-[var(--surface3)] border border-[var(--border)] text-[var(--text2)]'
@@ -535,11 +543,10 @@ export default function AIAssistantClient() {
               </div>
             </div>
           )}
-          <div ref={bottomRef} />
         </div>
 
         {/* Input */}
-        <div className="flex gap-2 items-end pb-4">
+        <div className="shrink-0 flex gap-2 items-end pb-3">
           <textarea
             className="input flex-1 min-h-[44px] max-h-[120px] text-sm resize-y"
             placeholder={
@@ -568,7 +575,7 @@ export default function AIAssistantClient() {
           </button>
         </div>
 
-        <div className="pb-6 flex flex-wrap gap-4 text-xs">
+        <div className="shrink-0 pb-3 flex flex-wrap gap-4 text-xs">
           <Link href="/hub" className="text-[var(--gold)] hover:underline">
             ← Tech Hub
           </Link>
