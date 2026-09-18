@@ -683,6 +683,79 @@ export const MODELS: Record<string, ModelDef> = {
     ]
   },
 
+  /* ── Cutera (estimate / My Lasers static fallback; live rows live in laser_models) ── */
+  'Cutera Xeo': {
+    mfg: 'Cutera',
+    label: 'Xeo',
+    wavelengths: [
+      { name: '1064 nm Nd:YAG', mode: 'SP', sets: [10, 20, 40, 60, 80, 100, 120], unit: 'J/cm²', spotMm: 10, tolLabel: 'Tol ±10%' },
+      { name: '532 nm', mode: 'SP', sets: [2, 4, 6, 8, 10, 12], unit: 'J/cm²', spotMm: 5, tolLabel: 'Tol ±10%' },
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'Coolant Level / Status', 'Firmware Version']
+  },
+  'Cutera Excel V': {
+    mfg: 'Cutera',
+    label: 'Excel V',
+    wavelengths: [
+      { name: '532 nm', mode: 'SP', sets: [2, 4, 6, 8, 10, 12, 15], unit: 'J/cm²', spotMm: 5, tolLabel: 'Tol ±10%' },
+      { name: '1064 nm Nd:YAG', mode: 'SP', sets: [10, 20, 40, 60, 80, 100], unit: 'J/cm²', spotMm: 7, tolLabel: 'Tol ±10%' },
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'Coolant Level / Status']
+  },
+  'Cutera Excel V+': {
+    mfg: 'Cutera',
+    label: 'Excel V+',
+    wavelengths: [
+      { name: '532 nm', mode: 'SP', sets: [2, 4, 6, 8, 10, 12, 15], unit: 'J/cm²', spotMm: 5, tolLabel: 'Tol ±10%' },
+      { name: '1064 nm Nd:YAG', mode: 'SP', sets: [10, 20, 40, 60, 80, 100, 120], unit: 'J/cm²', spotMm: 7, tolLabel: 'Tol ±10%' },
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'Coolant Level / Status']
+  },
+  'Cutera Enlighten': {
+    mfg: 'Cutera',
+    label: 'Enlighten',
+    wavelengths: [
+      { name: '532 nm Picosecond', mode: 'SP', sets: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2], unit: 'J/cm²', spotMm: 4, tolLabel: 'Tol ±10%' },
+      { name: '1064 nm Picosecond', mode: 'SP', sets: [0.5, 1, 1.5, 2, 2.5, 3], unit: 'J/cm²', spotMm: 6, tolLabel: 'Tol ±10%' },
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'HV @ Reference Fluence (VDC)', 'Coolant Level / Status']
+  },
+  'Cutera Enlighten III': {
+    mfg: 'Cutera',
+    label: 'Enlighten III',
+    wavelengths: [
+      { name: '532 nm Picosecond', mode: 'SP', sets: [0.2, 0.4, 0.6, 0.8, 1.0, 1.2], unit: 'J/cm²', spotMm: 4, tolLabel: 'Tol ±10%' },
+      { name: '1064 nm Picosecond', mode: 'SP', sets: [0.5, 1, 1.5, 2, 2.5, 3], unit: 'J/cm²', spotMm: 6, tolLabel: 'Tol ±10%' },
+      { name: '670 nm Picosecond', mode: 'SP', sets: [0.3, 0.5, 0.8, 1.0, 1.2], unit: 'J/cm²', spotMm: 4, tolLabel: 'Tol ±10%', optional: true, optionalLabel: '670 nm handpiece installed' },
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'HV @ Reference Fluence (VDC)', 'Coolant Level / Status']
+  },
+  'Cutera Excel HR': {
+    mfg: 'Cutera',
+    label: 'Excel HR',
+    wavelengths: [
+      { name: '755 nm Alexandrite', mode: 'SP', sets: [6, 8, 10, 12, 15, 18, 20, 25], unit: 'J/cm²', spotMm: 12, tolLabel: 'Tol ±10%' },
+      { name: '1064 nm Nd:YAG', mode: 'SP', sets: [10, 20, 40, 60, 80], unit: 'J/cm²', spotMm: 10, tolLabel: 'Tol ±10%' },
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'Coolant Level / Status']
+  },
+  'Cutera truSculpt': {
+    mfg: 'Cutera',
+    label: 'truSculpt',
+    wavelengths: [
+      { name: 'RF Output', mode: 'CW', sets: [10, 20, 30, 40, 50], unit: 'W', tolLabel: 'Tol ±15%' },
+    ],
+    params: ['Total Treatment Cycles', 'Applicators Connected', 'Firmware Version']
+  },
+  'Cutera CoolGlide': {
+    mfg: 'Cutera',
+    label: 'CoolGlide',
+    wavelengths: [
+      { name: '1064 nm Nd:YAG', mode: 'SP', sets: [10, 20, 40, 60, 80, 100, 120], unit: 'J/cm²', spotMm: 10, tolLabel: 'Tol ±10%' },
+    ],
+    params: ['Total System Shots', 'Handpiece Shots', 'Coolant Level / Status']
+  },
+
   /* ── Cynosure (estimate / My Lasers dropdown catalog) ── */
   'Cynosure Apogee': {
     mfg: 'Cynosure',
@@ -951,6 +1024,18 @@ export function resolveModelDef(
     if (/pro/i.test(hay) && MODELS['Candela GentleMAX_PRO']) return MODELS['Candela GentleMAX_PRO'];
     if (MODELS['Candela GentleMAX']) return MODELS['Candela GentleMAX'];
     if (MODELS['Candela GentleMAX_PRO']) return MODELS['Candela GentleMAX_PRO'];
+  }
+
+  // Cutera family (Larry: Xeo empty on estimate form when only static MODELS were used)
+  if (/cutera|xeo|excel\s*v|enlighten|excel\s*hr|trusculpt|cool\s*glide/i.test(hay)) {
+    if (/enlighten/i.test(hay) && /iii|3/i.test(hay) && MODELS['Cutera Enlighten III']) return MODELS['Cutera Enlighten III'];
+    if (/enlighten/i.test(hay) && MODELS['Cutera Enlighten']) return MODELS['Cutera Enlighten'];
+    if (/excel/i.test(hay) && /v\s*\+|v\s*plus/i.test(hay) && MODELS['Cutera Excel V+']) return MODELS['Cutera Excel V+'];
+    if (/excel/i.test(hay) && /\bv\b/i.test(hay) && MODELS['Cutera Excel V']) return MODELS['Cutera Excel V'];
+    if (/excel/i.test(hay) && /\bhr\b/i.test(hay) && MODELS['Cutera Excel HR']) return MODELS['Cutera Excel HR'];
+    if (/tru\s*sculpt/i.test(hay) && MODELS['Cutera truSculpt']) return MODELS['Cutera truSculpt'];
+    if (/cool\s*glide/i.test(hay) && MODELS['Cutera CoolGlide']) return MODELS['Cutera CoolGlide'];
+    if (/xeo/i.test(hay) && MODELS['Cutera Xeo']) return MODELS['Cutera Xeo'];
   }
 
   // Cynosure Apogee / Elite family (Larry: Apogee Elite MPX on estimate form)

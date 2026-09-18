@@ -12,6 +12,7 @@ test('Cynosure is a manufacturer and yields models including Apogee Elite MPX', 
   const mfrs = listManufacturers();
   assert.ok(mfrs.includes('Cynosure'));
   assert.ok(mfrs.includes('Candela'));
+  assert.ok(mfrs.includes('Cutera'));
 
   const cynosure = listModelsForManufacturer('Cynosure');
   assert.ok(cynosure.length > 0, 'Cynosure model dropdown must not be empty');
@@ -24,6 +25,10 @@ test('Cynosure is a manufacturer and yields models including Apogee Elite MPX', 
   const candela = listModelsForManufacturer('Candela');
   assert.ok(candela.length > 0);
   assert.ok(candela.some((name) => /gentle/i.test(name) || /vbeam|v-beam|perfecta/i.test(name)));
+
+  const cutera = listModelsForManufacturer('Cutera');
+  assert.ok(cutera.length > 0, 'Cutera model dropdown must not be empty');
+  assert.ok(cutera.includes('Xeo'));
 });
 
 test('Cynosure model lookup is case-insensitive', () => {
@@ -31,6 +36,13 @@ test('Cynosure model lookup is case-insensitive', () => {
   const lower = listModelsForManufacturer('cynosure');
   assert.deepEqual(upper, lower);
   assert.ok(upper.includes('Apogee Elite MPX'));
+});
+
+test('resolveModelDef maps Cutera Xeo free text', () => {
+  const def = resolveModelDef('Xeo', 'Cutera');
+  assert.ok(def);
+  assert.equal(def?.mfg, 'Cutera');
+  assert.equal(def?.label, 'Xeo');
 });
 
 test('resolveModelDef maps Apogee Elite MPX free text', () => {

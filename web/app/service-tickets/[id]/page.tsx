@@ -11,6 +11,12 @@ import { filterLinkedCustomers, loadLinkedCustomers, type LinkedCustomerOpt } fr
 import { updateOmittingCharOverflow } from '@/lib/char-overflow';
 import { AssignFseSelect } from '@/components/AssignFseSelect';
 import {
+  modelBelongsToManufacturer,
+  modelMatchesEquipmentType,
+  normalizeManufacturerRow,
+  normalizeModelRow,
+} from '@/lib/equipment-dropdown';
+import {
   applyTicketAssignee,
   assigneeName,
   loadTicketAssignees,
@@ -72,16 +78,11 @@ export default function ServiceTicketDetail() {
     (async () => {
       try {
         const { data: m } = await supabase.from('manufacturers').select('*').order('name');
-        const norm = (m||[]).map((r:any) => ({id: r.id, name: r.name || r.manufacturer_name || r.manufacturer || ''})).filter(r=>r.name);
+        const norm = (m||[]).map(normalizeManufacturerRow).filter((r) => r.name);
         setDbMfrs(norm);
 
         const { data: lm } = await supabase.from('laser_models').select('*').order('name');
-        const normLm = (lm||[]).map((r:any) => ({
-          id: r.id, 
-          name: r.name || r.model_name || r.model || '', 
-          label: r.label || r.name || r.model_name || '',
-          manufacturer_id: r.manufacturer_id || r.manufacturer || ''
-        }));
+        const normLm = (lm||[]).map(normalizeModelRow);
         setDbLaserModels(normLm);
       } catch(e){ console.warn('db mfr/models load warn', e); }
     })();
@@ -414,7 +415,13 @@ export default function ServiceTicketDetail() {
                   <select className="input" value={formData.equipment_model || ''} onChange={(e) => handleInputChange('equipment_model', e.target.value)}>
                     <option value="">-- Select --</option>
                     {dbLaserModels
-                      .filter((m:any) => !formData.equipment_make || String(m.manufacturer_id) === String(formData.equipment_make) || m.manufacturer === formData.equipment_make)
+                      .filter((m:any) =>
+                        !formData.equipment_make ||
+                        modelBelongsToManufacturer(m, formData.equipment_make, dbMfrs)
+                      )
+                      .filter((m:any) =>
+                        modelMatchesEquipmentType(m.equipment_type, formData.equipment_type)
+                      )
                       .map((m:any) => <option key={m.id} value={m.name || m.label}>{m.label || m.name}</option>)}
                   </select>
                 ) : <input className="input" value={formData.equipment_model || ''} onChange={(e) => handleInputChange('equipment_model', e.target.value)} />

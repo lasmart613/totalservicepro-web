@@ -8,6 +8,12 @@ import { ArrowLeft, Check, Save } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { CL_AESTHETIC, CL_ELECTRICAL, CL_MECHANICAL, MODELS, resolveModelDef } from '@/lib/models';
+import {
+  modelBelongsToManufacturer,
+  modelMatchesEquipmentType,
+  normalizeManufacturerRow,
+  normalizeModelRow,
+} from '@/lib/equipment-dropdown';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
@@ -268,9 +274,10 @@ export default function NewServiceReport() {
   const [isSubmitted, setIsSubmitted] = useState(false);
 
   const modelKeys = Object.keys(MODELS);
-  const filteredDbModels = selectedDbMfr 
-    ? dbLaserModels.filter((m: any) => String(m.manufacturer_id) === String(selectedDbMfr) || m.manufacturer === selectedDbMfr)
-    : dbLaserModels;
+  const filteredDbModels = dbLaserModels.filter((m: any) => {
+    const mfrOk = !selectedDbMfr || modelBelongsToManufacturer(m, selectedDbMfr, dbManufacturers);
+    return mfrOk && modelMatchesEquipmentType(m.equipment_type, equipmentType);
+  });
 
   // Resolve DB names (e.g. "VBeam Perfecta") → static MODELS (Perfecta) for params + perf
   const resolvedModelKey = selectedDbModel || selectedModelKey;
@@ -604,23 +611,14 @@ export default function NewServiceReport() {
           .from('manufacturers')
           .select('*')
           .order('name');
-        const normalizedMfrs = (mfrsRaw || []).map((row: any) => ({
-          id: row.id || row.manufacturer_id,
-          name: row.name || row.manufacturer_name || row.manufacturer || String(row.id || '')
-        })).filter(r => r.name);
+        const normalizedMfrs = (mfrsRaw || []).map(normalizeManufacturerRow).filter((r) => r.name);
         setDbManufacturers(normalizedMfrs);
 
         const { data: lmsRaw } = await supabase
           .from('laser_models')
           .select('*')
           .order('name');
-        const normalizedModels = (lmsRaw || []).map((row: any) => ({
-          id: row.id,
-          name: row.name || row.model_name || row.model || '',
-          label: row.label || row.name || row.model_name || '',
-          manufacturer_id: row.manufacturer_id || row.manufacturer || row.manufacturer_name || '',
-          equipment_type: row.equipment_type || null,
-        }));
+        const normalizedModels = (lmsRaw || []).map(normalizeModelRow);
         setDbLaserModels(normalizedModels);
       } catch (e) {
         console.warn('Failed to load manufacturers/laser_models tables (will fallback to static MODELS):', e);

@@ -3,7 +3,6 @@
 import React, { useEffect, useState, useRef, Suspense } from 'react';
 import { Header } from '@/components/Header';
 import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
-import { MODELS } from '@/lib/models';
 import { toast } from 'sonner';
 import { useSearchParams } from 'next/navigation';
 import {
@@ -14,7 +13,12 @@ import {
   canAccessCompanyProfile,
 } from '@/lib/roles';
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
-import { listManufacturers } from '@/lib/laser-catalog';
+import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
+import {
+  modelBelongsToManufacturer,
+  normalizeManufacturerRow,
+  normalizeModelRow,
+} from '@/lib/equipment-dropdown';
 import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
 import { persistCustomerLogo, loadLinkedCustomers } from '@/lib/customer-form';
 import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
@@ -138,11 +142,21 @@ function CompanyProfile() {
     })();
   }, [supabase]);
 
-  const mfrList = dbMfrs.length > 0 ? dbMfrs.map((m:any)=> m.name || m.id) : [...new Set(Object.values(MODELS).map((m: any) => m.manufacturer).filter(Boolean))].sort();
-  const filteredModels = selectedManufacturer 
-    ? (dbModels.length > 0 
-        ? dbModels.filter((m:any) => String(m.manufacturer_id) === String(selectedManufacturer) || m.manufacturer === selectedManufacturer).map((m:any) => ({key: m.name, label: m.label || m.name, manufacturer: selectedManufacturer }))
-        : Object.entries(MODELS).filter(([_, model]: any) => model.manufacturer === selectedManufacturer).map(([key, model]: any) => ({ key, ...model })))
+  const mfrList = dbMfrs.length > 0
+    ? dbMfrs.map((m: any) => m.name || m.id)
+    : listManufacturers();
+  const filteredModels = selectedManufacturer
+    ? (dbModels.length > 0
+        ? dbModels
+            .filter((m: any) =>
+              modelBelongsToManufacturer(normalizeModelRow(m), selectedManufacturer, dbMfrs.map(normalizeManufacturerRow))
+            )
+            .map((m: any) => ({ key: m.name, label: m.label || m.name, manufacturer: selectedManufacturer }))
+        : listModelsForManufacturer(selectedManufacturer).map((label) => ({
+            key: label,
+            label,
+            manufacturer: selectedManufacturer,
+          })))
     : [];
 
   const currentModelData = filteredModels.find(m => m.key === selectedModel);

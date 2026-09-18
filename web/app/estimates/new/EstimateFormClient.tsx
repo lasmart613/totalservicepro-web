@@ -23,6 +23,13 @@ import {
   type LineItem,
 } from '@/lib/billing/save-helpers';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
+import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
+import {
+  DEFAULT_EQUIPMENT_TYPE,
+  EQUIPMENT_TYPES,
+  equipmentTypeOrDefault,
+  type EquipmentType,
+} from '@/lib/equipment-types';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 
 type CustomerOpt = LinkedCustomerOpt;
@@ -58,16 +65,24 @@ export default function EstimateFormClient() {
   const [custEmail, setCustEmail] = useState('');
   const [custContact, setCustContact] = useState('');
 
-  // Equipment
-  const manufacturers = useMemo(() => listManufacturers(), []);
+  // Equipment — live manufacturers + laser_models, static MODELS as fallback
+  const catalog = useEquipmentCatalog(supabase);
+  const [equipmentType, setEquipmentType] = useState<EquipmentType>(DEFAULT_EQUIPMENT_TYPE);
+  const manufacturers = useMemo(
+    () => listManufacturers(catalog),
+    [catalog.manufacturers, catalog.models]
+  );
   const [manufacturer, setManufacturer] = useState('');
   const [model, setModel] = useState('');
   const [customModel, setCustomModel] = useState('');
   const [serial, setSerial] = useState('');
   const [pulseCount, setPulseCount] = useState('');
   const models = useMemo(
-    () => (manufacturer ? listModelsForManufacturer(manufacturer) : []),
-    [manufacturer]
+    () =>
+      manufacturer
+        ? listModelsForManufacturer(manufacturer, { ...catalog, equipmentType })
+        : [],
+    [manufacturer, catalog.manufacturers, catalog.models, equipmentType]
   );
 
   // Services / notes
@@ -237,6 +252,7 @@ export default function EstimateFormClient() {
       allocatedNumberRef.current = loadedEst;
       setManufacturer(ed.manufacturer || '');
       setModel(ed.model || '');
+      setEquipmentType(equipmentTypeOrDefault(ed.equipment_type || ed.equipmentType));
       setSerial(ed.serial || '');
       setPulseCount(ed.pulse_count != null ? String(ed.pulse_count) : '');
       setCustAddress(ed.custAddress || ed.address || '');
@@ -464,6 +480,7 @@ export default function EstimateFormClient() {
         estimate_data: {
           manufacturer: mfr,
           model: modelName,
+          equipment_type: equipmentType,
           serial,
           pulse_count: pulseCount,
           subtotal: totals.subtotal,
@@ -852,6 +869,32 @@ export default function EstimateFormClient() {
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Equipment</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-[var(--text3)]">Equipment type</label>
+              <select
+                className="input select mt-1"
+                value={equipmentType}
+                onChange={(e) => {
+                  const next = equipmentTypeOrDefault(e.target.value);
+                  setEquipmentType(next);
+                  if (model && model !== '__other__') {
+                    const nextModels = manufacturer
+                      ? listModelsForManufacturer(manufacturer, { ...catalog, equipmentType: next })
+                      : [];
+                    if (!nextModels.includes(model)) {
+                      setModel('');
+                      setCustomModel('');
+                    }
+                  }
+                }}
+              >
+                {EQUIPMENT_TYPES.map((t) => (
+                  <option key={t.value} value={t.value}>
+                    {t.label}
+                  </option>
+                ))}
+              </select>
+            </div>
             <div>
               <label className="text-xs text-[var(--text3)]">Manufacturer</label>
               <select

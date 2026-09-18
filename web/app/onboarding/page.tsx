@@ -8,6 +8,7 @@ import { useRouter } from 'next/navigation';
 import { isOwnerish, isSupplier } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
 import {
@@ -35,7 +36,6 @@ type LaserDraft = {
   notes: string;
 };
 
-const BRANDS = listManufacturers();
 const SUPPLIER_CATEGORIES = [
   'Consumables (tips, fibers, dyes)',
   'Handpieces & Rebuild Kits',
@@ -82,7 +82,12 @@ export default function Onboarding() {
   const [laserModelOther, setLaserModelOther] = useState('');
   const [laserSerial, setLaserSerial] = useState('');
   const [laserNotes, setLaserNotes] = useState('');
-  const laserModelsForMfr = useMemo(() => listModelsForManufacturer(laserMfr), [laserMfr]);
+  const catalog = useEquipmentCatalog(supabase);
+  const BRANDS = useMemo(() => listManufacturers(catalog), [catalog.manufacturers, catalog.models]);
+  const laserModelsForMfr = useMemo(
+    () => listModelsForManufacturer(laserMfr, catalog),
+    [laserMfr, catalog.manufacturers, catalog.models]
+  );
 
   // Supplier categories
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);

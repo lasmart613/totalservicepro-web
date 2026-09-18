@@ -117,14 +117,34 @@
             </div>
             <div class="grid-2" style="margin-top:16px;">
                 <div>
+                    <label>Equipment type</label>
+                    <select id="equipmentType" onchange="refreshEstimateModels()">
+                        <option value="laser">Laser</option>
+                        <option value="lithotriptor">Lithotriptor</option>
+                        <option value="c_arm">C-arm</option>
+                        <option value="anesthesia">Anesthesia</option>
+                        <option value="beds">Beds</option>
+                        <option value="defibrillator">Defibrillator</option>
+                        <option value="endoscope">Endoscope</option>
+                        <option value="infusion_pump">Infusion pump</option>
+                        <option value="patient_monitor">Patient monitor</option>
+                        <option value="sterile_processing">Sterile processing</option>
+                        <option value="ultrasound">Ultrasound</option>
+                        <option value="ventilator">Ventilator</option>
+                    </select>
+                </div>
+                <div>
+                    <label>Manufacturer</label>
+                    <select id="manufacturer" onchange="refreshEstimateModels()">
+                        <option value="">Select...</option>
+                    </select>
+                </div>
+            </div>
+            <div class="grid-2" style="margin-top:8px;">
+                <div>
                     <label>Device Model</label>
                     <select id="model">
-                        <option value="">Select...</option>
-                        <option>GentleLASE</option>
-                        <option>GentleLASE PLUS</option>
-                        <option>GentleLASE Limited Edition</option>
-                        <option>GentleMax Pro</option>
-                        <option>Other</option>
+                        <option value="">Select manufacturer first…</option>
                     </select>
                 </div>
                 <div>
@@ -217,6 +237,101 @@
 <script>
     const supabase = supabaseClient;
 
+    // Live manufacturers + laser_models (same join as web estimate form)
+    let catalogMfrs = [];
+    let catalogModels = [];
+
+    function normName(s) {
+        return String(s || '').trim().toLowerCase();
+    }
+    function manufacturerMatches(selected, mfr) {
+        const sel = String(selected || '').trim();
+        if (!sel || !mfr) return false;
+        if (mfr.id != null && String(mfr.id) === sel) return true;
+        return normName(sel) === normName(mfr.name);
+    }
+    function modelBelongsToManufacturer(model, selected) {
+        const sel = String(selected || '').trim();
+        if (!sel || !model) return false;
+        if (model.manufacturer_id != null && String(model.manufacturer_id) === sel) return true;
+        const matched = catalogMfrs.filter((m) => manufacturerMatches(sel, m));
+        if (matched.some((m) => m.id != null && model.manufacturer_id != null && String(m.id) === String(model.manufacturer_id))) {
+            return true;
+        }
+        return model.manufacturer && normName(model.manufacturer) === normName(sel);
+    }
+    function modelMatchesEquipmentType(modelType, selected) {
+        if (!selected) return true;
+        const want = String(selected).trim().toLowerCase();
+        const have = String(modelType || '').trim().toLowerCase();
+        if (want === 'laser') return !have || have === 'laser';
+        return have === want;
+    }
+
+    function populateManufacturerSelect() {
+        const sel = document.getElementById('manufacturer');
+        if (!sel) return;
+        const current = sel.value;
+        const names = [...new Set(catalogMfrs.map((m) => m.name).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+        sel.innerHTML = '<option value="">Select...</option>' + names.map((n) => `<option value="${n.replace(/"/g, '&quot;')}">${n}</option>`).join('');
+        if (current && names.includes(current)) sel.value = current;
+    }
+
+    function refreshEstimateModels() {
+        const mfr = document.getElementById('manufacturer')?.value || '';
+        const type = document.getElementById('equipmentType')?.value || 'laser';
+        const modelSel = document.getElementById('model');
+        if (!modelSel) return;
+        const current = modelSel.value;
+        if (!mfr) {
+            modelSel.innerHTML = '<option value="">Select manufacturer first…</option>';
+            return;
+        }
+        const names = [...new Set(
+            catalogModels
+                .filter((m) => modelBelongsToManufacturer(m, mfr) && modelMatchesEquipmentType(m.equipment_type, type))
+                .map((m) => m.label || m.name)
+                .filter(Boolean)
+        )].sort((a, b) => a.localeCompare(b));
+        modelSel.innerHTML = '<option value="">Select...</option>' +
+            names.map((n) => `<option value="${n.replace(/"/g, '&quot;')}">${n}</option>`).join('') +
+            '<option value="Other">Other</option>';
+        if (current && (names.includes(current) || current === 'Other')) modelSel.value = current;
+    }
+
+    async function loadEquipmentCatalog() {
+        try {
+            const { data: mfrs } = await supabase.from('manufacturers').select('*').order('name');
+            catalogMfrs = (mfrs || []).map((row) => ({
+                id: row.id,
+                name: row.name || row.manufacturer_name || row.manufacturer || '',
+            })).filter((r) => r.name);
+            const { data: models } = await supabase.from('laser_models').select('*').order('name');
+            catalogModels = (models || []).map((row) => ({
+                id: row.id,
+                name: row.name || row.model_name || row.model || '',
+                label: row.label || row.name || row.model_name || '',
+                manufacturer_id: row.manufacturer_id,
+                manufacturer: row.manufacturer || null,
+                equipment_type: row.equipment_type || null,
+            }));
+        } catch (e) {
+            console.warn('estimate catalog', e);
+        }
+        if (!catalogMfrs.length) {
+            catalogMfrs = ['Candela', 'Cutera', 'Cynosure', 'Lumenis', 'Sciton'].map((name) => ({ id: null, name }));
+        }
+        if (!catalogModels.length) {
+            catalogModels = [
+                { name: 'Xeo', label: 'Xeo', manufacturer: 'Cutera', equipment_type: 'laser' },
+                { name: 'Excel V', label: 'Excel V', manufacturer: 'Cutera', equipment_type: 'laser' },
+                { name: 'GentleMax Pro', label: 'GentleMax Pro', manufacturer: 'Candela', equipment_type: 'laser' },
+            ];
+        }
+        populateManufacturerSelect();
+        refreshEstimateModels();
+    }
+
     // Load saved pricing + customers for autocomplete
     window.addEventListener('load', () => {
         const saved = JSON.parse(localStorage.getItem('tsp_estimate_pricing') || '{}');
@@ -226,6 +341,7 @@
         if (saved.taxRate) document.getElementById('taxRate').value = saved.taxRate;
 
         loadCustomers();
+        loadEquipmentCatalog();
     });
 
     function calculateAndPreview() {
@@ -240,7 +356,9 @@
 
         // Gather data
         const customer = document.getElementById('customer').value || '—';
-        const model = document.getElementById('model').value || '—';
+        const manufacturer = document.getElementById('manufacturer')?.value || '';
+        const modelOnly = document.getElementById('model').value || '—';
+        const model = [manufacturer, modelOnly].filter(Boolean).join(' ') || '—';
         const serial = document.getElementById('serial').value || '—';
         const issues = document.getElementById('issues').value || 'No issues noted';
         const miles = parseFloat(document.getElementById('miles').value) || 0;
@@ -400,7 +518,7 @@
         const data = {
             customer_name: customerName,
             organization_id: userOrgId,
-            device_model: document.getElementById('model').value || null,
+            device_model: [document.getElementById('manufacturer')?.value, document.getElementById('model').value].filter(Boolean).join(' ') || null,
             serial_pulses: document.getElementById('serial').value || null,
             services: Array.from(document.querySelectorAll('.service-type:checked')).map(cb => cb.value),
             issues: document.getElementById('issues').value || null,

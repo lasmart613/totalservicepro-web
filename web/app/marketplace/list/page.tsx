@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { toast } from 'sonner';
 import { canPostMarketplaceNeed, isPro, isSupplier, isOwnerish, isServiceCompany } from '@/lib/roles';
 
@@ -18,6 +19,8 @@ type QtyBreak = { min_qty: string; unit_price: string };
 function MarketplaceListContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
+  const supabase = getSupabaseClient();
+  const catalog = useEquipmentCatalog(supabase);
   const [listingType, setListingType] = useState<ListingType>('part');
   const [loading, setLoading] = useState(false);
   const [images, setImages] = useState<File[]>([]);
@@ -145,14 +148,14 @@ function MarketplaceListContent() {
   }, [listingType, userRole, orgType]);
 
   const mfrOptions = useMemo(() => {
-    const list = listManufacturers();
+    const list = listManufacturers(catalog);
     return list.includes('Other') ? list : [...list, 'Other'];
-  }, []);
+  }, [catalog.manufacturers, catalog.models]);
 
   const modelOptions = useMemo(() => {
     if (!form.manufacturer || form.manufacturer === 'Other') return [];
-    return listModelsForManufacturer(form.manufacturer);
-  }, [form.manufacturer]);
+    return listModelsForManufacturer(form.manufacturer, catalog);
+  }, [form.manufacturer, catalog.manufacturers, catalog.models]);
 
   const showCustomMfr = form.manufacturer === 'Other';
   const showCustomModel = form.model === OTHER_MODEL || form.manufacturer === 'Other' || !modelOptions.length;
