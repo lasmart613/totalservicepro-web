@@ -8,6 +8,7 @@ import {
   resolveManualFromCatalog,
 } from './manual-scope.ts'
 import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
+import { extractFaultCodes } from './fault-codes.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -27,9 +28,10 @@ const FSE_SYSTEM_PROMPT = `You are Zapp, an AI assistant for Total Service Pro (
 
 ## RULES
 - NEVER add generic "contact the manufacturer" or patient-safety disclaimer fluff.
-- When FAULT CODE LOOKUP RESULT is provided: treat it as the authoritative fault definition (title, cause, remedy). You MAY add procedure detail from RETRIEVED MANUAL CONTENT that clearly matches the same device and code, but never invent causes or codes.
-- When RETRIEVED MANUAL CONTENT is provided (and no conflicting fault table): answer ONLY from those passages. Quote specs, steps, values, and section/page references when present.
+- Search the selected SERVICE MANUAL first — not a separate error-code document.
+- When RETRIEVED MANUAL CONTENT is provided: that is AUTHORITATIVE for fault meaning, cause, remedy, and procedures. Answer from those passages. Quote specs, steps, values, and section/page references when present.
 - When ATTACHED MANUAL PDFs are provided: those files ARE the selected manual. Read them, quote exact wording, and interpret schematic/wiring/exploded drawings (component IDs, connector pins, nets, voltages, callouts). If a drawing is unreadable, say so and name the PDF.
+- When FAULT CODE LOOKUP RESULT is provided: it is FALLBACK ONLY (thin manuals / no usable passages). You MAY mention it as a short cross-check if it agrees with the manual, but never override the selected service manual.
 - If the passages/PDFs do not contain enough information: say what is missing and what section to open in the selected manual — do NOT invent PM steps, calibrations, parts lists, or specs.
 - When a SELECTED MANUAL is set, answers must be about that device unless the user clearly names a different one.
 - Prefer depth for service work: numbered steps, torque/spec values, prerequisites, expected readings, common pitfalls — but only when supported by sources.
@@ -38,8 +40,9 @@ const FSE_SYSTEM_PROMPT = `You are Zapp, an AI assistant for Total Service Pro (
 const ZAPP_VOICE_PROMPT = `You are Zapp, the AI inside Total Service Pro — with brief Zapp Brannigan flair, still technically accurate.
 
 ## RULES
-- FAULT CODE LOOKUP RESULT = authoritative for code meaning/remedy. Optional MANUAL excerpts may add steps only if they match.
-- RETRIEVED MANUAL CONTENT = answer only from those passages. Never fabricate.
+- Search the selected service manual first, not a separate error-code document.
+- RETRIEVED MANUAL CONTENT / ATTACHED MANUAL PDFs = AUTHORITATIVE for fault meaning, cause, remedy, and procedures. Never fabricate.
+- FAULT CODE LOOKUP RESULT = fallback only when the selected manual had no usable passages. Never override the manual; optional short cross-check if it agrees.
 - If sources are empty or off-topic: admit it briefly and ask a clarifying question. Do not invent.
 - Spoken: 4-7 sentences. No markdown.
 - End with: — Source: [source name]
@@ -47,7 +50,7 @@ const ZAPP_VOICE_PROMPT = `You are Zapp, the AI inside Total Service Pro — wit
 ## STYLE
 One short Zapp-ism, then the technical answer.`
 
-const VOICE_PROMPT_PLAIN = `You are Zapp, an AI for Total Service Pro. Spoken: 4-7 sentences, no markdown. Use only FAULT CODE LOOKUP RESULT and/or RETRIEVED MANUAL CONTENT. Never fabricate. If sources insufficient, say so. End with: — Source: [source name].`
+const VOICE_PROMPT_PLAIN = `You are Zapp, an AI for Total Service Pro. Spoken: 4-7 sentences, no markdown. RETRIEVED MANUAL CONTENT / attached PDFs are authoritative. FAULT CODE LOOKUP RESULT is fallback only. Never fabricate. If sources insufficient, say so. End with: — Source: [source name].`
 
 async function logUsage(s: any, uid: string, t: string, n: number) {
   try {
@@ -109,21 +112,6 @@ function aliasToModel(s: string): string | null {
   const l = s.toLowerCase()
   for (const [terms, model] of ALIASES) {
     if (terms.some((t) => l.includes(t))) return model
-  }
-  return null
-}
-
-function extractFaultCode(msg: string): string | null {
-  const patterns = [
-    /(?:fault|error|alarm|code|f-)\s*([\d]+(?:\.[\d]+)?)/i,
-    /\bf([\d]+(?:\.[\d]+)?)\b/i,
-    /\b([\d]+(?:\.[\d]+)?)\s*(?:fault|error|alarm)/i,
-    /\b(w-[\d]+|a-[\d]+|pos-[\d]+)\b/i,
-    /\b(er\s*[\d]+)\b/i,
-  ]
-  for (const p of patterns) {
-    const m = msg.match(p)
-    if (m) return m[1].replace(/\s+/g, '')
   }
   return null
 }
@@ -395,7 +383,10 @@ function formatFaultContext(rows: any[], source: string, model: string | null, m
     const lines = rows.map(
       (r) => `Device: ${r.brand} ${r.model}\nFault ${r.fault_code}: ${r.fault_title}\n${r.description || ''}\n${r.remedy || ''}`
     )
-    return `\n\n## FAULT CODE LOOKUP RESULT (multiple devices match)\n${hint}\n\n${lines.join('\n---\n')}`
+    return (
+      `\n\n## FAULT CODE LOOKUP RESULT (fallback — multiple devices match)\n${hint}\n\n${lines.join('\n---\n')}` +
+      `\n\nIMPORTANT: This table is an offline fallback, not a substitute for the selected service manual. If RETRIEVED MANUAL CONTENT or ATTACHED MANUAL PDFs are present, those win. Do not invent codes or causes.`
+    )
   }
 
   const qualifier =
@@ -416,15 +407,18 @@ function formatFaultContext(rows: any[], source: string, model: string | null, m
     return s
   })
   return (
-    `\n\n## FAULT CODE LOOKUP RESULT ${qualifier}\n` +
+    `\n\n## FAULT CODE LOOKUP RESULT ${qualifier} (fallback — selected service manual had no usable passages)\n` +
     lines.join('\n---\n') +
-    `\n\nIMPORTANT: Code meaning/cause/remedy must come from the table above. You may add matching procedure detail from RETRIEVED MANUAL CONTENT if provided.`
+    `\n\nIMPORTANT: This table is an offline fallback, not a substitute for the selected service manual. If RETRIEVED MANUAL CONTENT or ATTACHED MANUAL PDFs are present, those win. Do not invent codes or causes.`
   )
 }
 
-function buildSearchQuery(userText: string, manualLabel: string, faultCode: string | null): string {
+function buildSearchQuery(userText: string, manualLabel: string, faultCodes: string[] | string | null): string {
   let q = (manualLabel ? manualLabel + ' ' : '') + userText.trim()
-  if (faultCode) q += ` fault code ${faultCode} error ${faultCode}`
+  const codes = Array.isArray(faultCodes) ? faultCodes : faultCodes ? [faultCodes] : []
+  for (const code of codes) {
+    q += ` fault code ${code} error ${code}`
+  }
   if (/\b(pm|preventive|maintenance|calibrat|align|fluence|energy|water|coolant|dye|flashlamp)\b/i.test(q)) {
     q += ' procedure specification steps'
   }
@@ -612,54 +606,63 @@ serve(async (req) => {
       let hasFaultDBHit = false
       let hasManualPassages = false
 
-      const faultCode = extractFaultCode(userText)
-      if (faultCode) {
-        const lookup = await lookupFaultCode(db, faultCode, resolvedModel, resolvedBrand)
-        if (lookup) {
-          hasFaultDBHit = true
-          contextBlock = formatFaultContext(lookup.rows, lookup.source, resolvedModel, manualLabel)
-          citationLine =
-            lookup.source !== 'ambiguous'
-              ? `\n\n— Source: TSP Fault Code Database (${lookup.rows[0]?.manual_ref || 'verified lookup table'})`
-              : ''
-        }
-      }
+      // Tokens only — used to bias manual search. Meanings come from the selected service manual first.
+      const faultCodes = extractFaultCodes(userText)
+      let emptyManualHint = ''
 
       if (userText) {
         try {
-          const sq = buildSearchQuery(userText, manualLabel, faultCode)
+          const sq = buildSearchQuery(userText, manualLabel, faultCodes)
           const searched = await searchManualCollection(XAI_KEY, sq, matchTokens, !!manualLabel, chapterKeys)
           let parts = searched.parts
           let filteredOut = searched.filteredOut
 
           if (!parts.length && manualMeta) {
-            const indexed = await searchIndexedManualText(db, manualMeta.id, userText, manualLabel)
+            const indexed = await searchIndexedManualText(db, manualMeta.id, sq, manualLabel)
             if (indexed) parts = [indexed]
           }
 
           if (parts.length > 0) {
             hasManualPassages = true
-            const manualBlock = formatManualContext(parts, manualLabel, '')
-            contextBlock = (contextBlock || '') + manualBlock
+            contextBlock = formatManualContext(parts, manualLabel, '')
             const srcs = [...new Set(parts.map((p) => p.source))]
             const manCite = srcs.map((c) => c.split('/').filter((p) => p && p !== 'shared').join(' › ')).join('; ')
-            if (citationLine) {
-              citationLine = citationLine + `; Manual: ${manCite}`
-            } else {
-              citationLine = `\n\n— Source: ${manCite}`
-            }
-          } else if (!hasFaultDBHit) {
-            contextBlock = formatManualContext(
-              [],
-              manualLabel,
+            citationLine = `\n\n— Source: ${manCite}`
+          } else {
+            emptyManualHint =
               filteredOut > 0
                 ? `${filteredOut} passages were retrieved from other manuals and discarded because they did not match the selected device.`
                 : 'Collection search returned no usable passages. Index this catalog id via God → Manuals → Index this manual if the PDF exists.'
-            )
           }
         } catch (e) {
           console.error('manual search error', e)
         }
+      }
+
+      // Offline fault_codes table is fallback only when the selected manual had no usable passages.
+      if (!hasManualPassages && faultCodes.length) {
+        const faultBlocks: string[] = []
+        const refs: string[] = []
+        for (const code of faultCodes) {
+          const lookup = await lookupFaultCode(db, code, resolvedModel, resolvedBrand)
+          if (!lookup) continue
+          hasFaultDBHit = true
+          faultBlocks.push(formatFaultContext(lookup.rows, lookup.source, resolvedModel, manualLabel))
+          if (lookup.source !== 'ambiguous') {
+            refs.push(lookup.rows[0]?.manual_ref || 'verified lookup table')
+          }
+        }
+        if (faultBlocks.length) {
+          contextBlock = faultBlocks.join('')
+          const uniqueRefs = [...new Set(refs)]
+          if (uniqueRefs.length) {
+            citationLine = `\n\n— Source: TSP Fault Code Database (${uniqueRefs.join('; ')})`
+          }
+        }
+      }
+
+      if (userText && !hasManualPassages && !hasFaultDBHit && emptyManualHint) {
+        contextBlock = formatManualContext([], manualLabel, emptyManualHint)
       }
 
       let basePrompt: string
