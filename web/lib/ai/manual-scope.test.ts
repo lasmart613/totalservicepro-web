@@ -203,8 +203,13 @@ test('AI assistant and grok-assistant send current id/path and do not skip incom
   assert.match(grok, /manualId/);
   assert.match(fn, /resolveManualFromCatalog/);
   assert.match(fn, /manual_search_index/);
-  assert.match(fn, /pdfPathsForAiAttach\(manualMeta\)/);
-  assert.match(fn, /collection_ids:\s*\[TSP_COLLECTION_ID\]/);
+  assert.match(fn, /pdfPathsForAiAttach\(manual/);
+  assert.match(fn, /collectionSearchBody/);
+  const collectionSearch = readFileSync(
+    join(here, '../../../supabase/functions/grok-assistant/collection-search.ts'),
+    'utf8'
+  );
+  assert.match(collectionSearch, /collection_ids:\s*\[collectionId\]/);
   const scopeSrc = readFileSync(join(here, '../../../supabase/functions/grok-assistant/manual-scope.ts'), 'utf8');
   assert.match(scopeSrc, /Never pass this to Storage I\/O/);
   assert.match(scopeSrc, /export function manualPathKey/);

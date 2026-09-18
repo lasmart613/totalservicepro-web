@@ -18,8 +18,9 @@
  * - Catch up every unstamped file/folder with a PDF via
  *   “Attach missing Grok collections” → POST attachCollection without
  *   manualId (cursor afterId, one PDF upload per request).
- * Chat can still work without the stamp once grok-assistant is deployed:
- * it attaches the storage_path PDF and can fall back to manual_search_index.
+ * Chat searches the shared collection (xAI `matches` / `chunk_content`) and
+ * resolves Attached filenames via the management documents list so folder
+ * manuals like Xeo 105 work even when `manual_search_index` is empty.
  */
 
 import { asManualId, hasAttachablePdfHint } from './manual-scope.ts';
