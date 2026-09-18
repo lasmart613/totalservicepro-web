@@ -136,7 +136,11 @@ test('collection attach prefers the service manual unless the question is schema
 
 test('grok-assistant chat uses collection file_ids and does not require manual_search_index', () => {
   const fn = readFileSync(join(here, '../../../supabase/functions/grok-assistant/index.ts'), 'utf8');
-  assert.match(fn, /from '\.\/collection-search\.ts'/);
+  assert.doesNotMatch(
+    fn,
+    /from ['"]\.\/collection-search\.ts['"]/,
+    'index.ts must inline cite-scope so a single-file GitHub bootstrap does not boot-crash on #129 siblings'
+  );
   assert.match(fn, /pdfPathsForChat/);
   assert.match(fn, /resolveCollectionManualDocs/);
   assert.match(fn, /collectionSearchBody/);
@@ -148,6 +152,11 @@ test('grok-assistant chat uses collection file_ids and does not require manual_s
   assert.match(fn, /collectionDocsCache/);
   assert.match(fn, /Promise\.all\(\[searchP, resolveP\]\)/);
   assert.match(fn, /withBudget/);
+  assert.match(fn, /function hasEnoughScopedIds/);
+  assert.match(fn, /NAME_ALIGN_MIN/);
+  assert.match(fn, /COLLECTION_NAME_FILTER_MAX/);
+  assert.match(fn, /from '\.\/manual-scope\.ts'/);
+  assert.match(fn, /from '\.\/fault-codes\.ts'/);
 });
 
 test('Xeo 105 file_id resolve does not pick CoolGlide 15 from the shared collection', () => {
@@ -214,6 +223,16 @@ test('Xeo 105 file_id resolve does not pick CoolGlide 15 from the shared collect
   const cgIds = pickFileIdsForManual(nameById, cgExpected, ['cutera', 'coolglide'], []);
   assert.equal(cgIds.has('file_cg_15'), true);
   assert.equal(cgIds.has('file_xeo_sm'), false);
+});
+
+test('index.ts inlines the same cite-scope helpers as collection-search.ts', () => {
+  const fn = readFileSync(join(here, '../../../supabase/functions/grok-assistant/index.ts'), 'utf8');
+  const lib = readFileSync(join(here, '../../../supabase/functions/grok-assistant/collection-search.ts'), 'utf8');
+  assert.match(fn, /export function hasEnoughScopedIds/);
+  assert.match(lib, /export function hasEnoughScopedIds/);
+  assert.equal(fn.includes('COLLECTION_NAME_FILTER_MAX = 3'), true);
+  assert.equal(lib.includes('COLLECTION_NAME_FILTER_MAX = 3'), true);
+  assert.match(fn, /never \"cutera\" ⊆ \"cuteracoolglide/);
 });
 
 test('name filters stay few and compact-deduped so chat does not issue N serial GETs', () => {

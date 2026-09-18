@@ -11,6 +11,9 @@
  * up unnamed search hits one-by-one — that stacked with documents/search and
  * PDF attach and dropped the first Xeo 322 ask. Cap filters, compact-dedupe,
  * and treat one scoped file_id as enough.
+ *
+ * grok-assistant/index.ts INLINES this module for single-file GitHub bootstrap.
+ * Keep the two copies in sync — do not add named imports of new symbols from here.
  */
 
 export type CollectionHit = {
