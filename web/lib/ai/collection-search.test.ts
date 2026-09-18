@@ -8,6 +8,7 @@ import {
   chapterFileKeys,
   collectionFilenameForPath,
   collectionHitsFromResponse,
+  COLLECTION_NAME_FILTER_MAX,
   collectionNameFilters,
   collectionSearchBody,
   displayAttachedName,
@@ -16,6 +17,7 @@ import {
   expectedFilenamesForPaths,
   fileIdNameMapFromDocuments,
   filterHitsForManual,
+  hasEnoughScopedIds,
   namesAlign,
   pickCollectionAttachments,
   pickFileIdsForManual,
@@ -141,6 +143,11 @@ test('grok-assistant chat uses collection file_ids and does not require manual_s
   assert.match(fn, /hasCollectionPdfs/);
   assert.match(fn, /expectedFilenamesForPaths/);
   assert.match(fn, /already_in_collection/);
+  assert.match(fn, /fetchWithTimeout/);
+  assert.match(fn, /listCollectionDocumentsAll/);
+  assert.match(fn, /collectionDocsCache/);
+  assert.match(fn, /Promise\.all\(\[searchP, resolveP\]\)/);
+  assert.match(fn, /withBudget/);
 });
 
 test('Xeo 105 file_id resolve does not pick CoolGlide 15 from the shared collection', () => {
@@ -207,6 +214,30 @@ test('Xeo 105 file_id resolve does not pick CoolGlide 15 from the shared collect
   const cgIds = pickFileIdsForManual(nameById, cgExpected, ['cutera', 'coolglide'], []);
   assert.equal(cgIds.has('file_cg_15'), true);
   assert.equal(cgIds.has('file_xeo_sm'), false);
+});
+
+test('name filters stay few and compact-deduped so chat does not issue N serial GETs', () => {
+  const expected = expectedFilenamesForPaths(XEO_PATHS);
+  const filters = collectionNameFilters(expected, ['cutera', 'xeo']);
+  assert.ok(filters.length <= COLLECTION_NAME_FILTER_MAX);
+  assert.equal(filters.length, 2, 'Xeo service + schematics only — not 4 storage/sanitized variants');
+  assert.equal(new Set(filters.map((f) => f.toLowerCase().replace(/[^a-z0-9]+/g, ''))).size, filters.length);
+  assert.ok(filters.some((f) => /xeo service manual/i.test(f)));
+  assert.equal(filters.some((f) => compactIsBrand(f)), false);
+
+  const many = expectedFilenamesForPaths([
+    ...XEO_PATHS,
+    'shared/cutera/xeo/Xeo Extra 1.pdf',
+    'shared/cutera/xeo/Xeo Extra 2.pdf',
+    'shared/cutera/xeo/Xeo Extra 3.pdf',
+    'shared/cutera/xeo/Xeo Extra 4.pdf',
+    'shared/cutera/xeo/Xeo Extra 5.pdf',
+    'shared/cutera/xeo/Xeo Extra 6.pdf',
+  ]);
+  assert.ok(many.length >= 8);
+  assert.equal(collectionNameFilters(many, ['cutera']).length <= COLLECTION_NAME_FILTER_MAX, true);
+  assert.equal(hasEnoughScopedIds(new Set(['file_xeo_sm'])), true);
+  assert.equal(hasEnoughScopedIds(new Set()), false);
 });
 
 function compactIsBrand(value: string): boolean {

@@ -7,6 +7,10 @@
  * `pickFileIdsForManual` accepted any `docMatchesManual` hit. That pulled
  * CoolGlide 15 (`Cutera CoolGlide Service Manual Complete.pdf`) into Xeo 105.
  * Scope to each folder’s Attached PDF names / file_ids only.
+ * PR #130 listed every Attached filename serially (up to 8 GETs) then looked
+ * up unnamed search hits one-by-one — that stacked with documents/search and
+ * PDF attach and dropped the first Xeo 322 ask. Cap filters, compact-dedupe,
+ * and treat one scoped file_id as enough.
  */
 
 export type CollectionHit = {
@@ -331,30 +335,49 @@ export function retrievedFromHits(hits: CollectionHit[], expectedFilenames: stri
   })
 }
 
+export function preferServiceManualName(name: string): boolean {
+  const n = String(name || '').toLowerCase()
+  if (/schem|wiring|electrical|exploded/.test(n)) return false
+  return /service|manual|rev/.test(n)
+}
+
+/** One scoped file_id is enough to keep Xeo hits and drop CoolGlide. */
+export function hasEnoughScopedIds(fileIds: Set<string> | undefined | null): boolean {
+  return !!fileIds && fileIds.size > 0
+}
+
+/** Max name-filter GETs — serial listing of every Attached filename times out the edge. */
+export const COLLECTION_NAME_FILTER_MAX = 3
+
 /** Distinctive name filters for GET /collections/{id}/documents?filter=name:"…" */
 export function collectionNameFilters(expectedFilenames: string[], tokens: string[] = []): string[] {
   const out: string[] = []
+  const seen = new Set<string>()
   const push = (raw: string) => {
     const s = String(raw || '')
       .replace(/\.pdf$/i, '')
       .replace(/_/g, ' ')
       .trim()
     if (s.length < 3) return
-    if (BRAND_TOKENS.has(compactDocKey(s))) return
-    if (!out.includes(s)) out.push(s)
+    const key = compactDocKey(s)
+    if (!key || BRAND_TOKENS.has(key) || seen.has(key)) return
+    seen.add(key)
+    out.push(s)
   }
-  for (const name of expectedFilenames) {
-    push(name)
-    const sanitized = collectionFilenameForPath(name)
-    if (sanitized !== name) push(sanitized)
-  }
+  // Storage + sanitized stems collapse after '_' → space; prefer the service book.
+  const names = [...expectedFilenames].sort((a, b) => {
+    const as = preferServiceManualName(a) ? 1 : 0
+    const bs = preferServiceManualName(b) ? 1 : 0
+    return bs - as || String(b).length - String(a).length
+  })
+  for (const name of names) push(name)
   // Never add brand tokens (name:"cutera" lists CoolGlide 15 into a Xeo 105 resolve).
   if (!expectedFilenames.length) {
     for (const t of tokens) {
       if (!isWeakToken(t) && t.length <= 24) push(t)
     }
   }
-  return out.slice(0, 8)
+  return out.slice(0, COLLECTION_NAME_FILTER_MAX)
 }
 
 export function collectionSearchBody(query: string, collectionId: string, mode: 'hybrid' | 'keyword' = 'hybrid') {
@@ -365,12 +388,6 @@ export function collectionSearchBody(query: string, collectionId: string, mode: 
     limit: 20,
     max_num_results: 20,
   }
-}
-
-export function preferServiceManualName(name: string): boolean {
-  const n = String(name || '').toLowerCase()
-  if (/schem|wiring|electrical|exploded/.test(n)) return false
-  return /service|manual|rev/.test(n)
 }
 
 /** Pick collection file_ids to attach (service book first; schematics when asked). */
