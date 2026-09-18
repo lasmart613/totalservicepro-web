@@ -155,6 +155,18 @@ test('Quanta / GE aliases still resolve biomed catalog models', () => {
   assert.ok(listModelsForManufacturer('GE OEC', { equipmentType: 'c_arm' }).includes('OEC 9900'));
 });
 
+test('normalizeModelRow works when live laser_models has no label column', () => {
+  const row = normalizeModelRow({
+    id: 154,
+    name: 'Xeo',
+    manufacturer_id: 10,
+    equipment_type: 'laser',
+  });
+  assert.equal(row.label, 'Xeo');
+  assert.equal(row.name, 'Xeo');
+  assert.equal(row.manufacturer_id, 10);
+});
+
 test('modelMatchesEquipmentType treats blank as laser', () => {
   assert.equal(modelMatchesEquipmentType('laser', 'laser'), true);
   assert.equal(modelMatchesEquipmentType(null, 'laser'), true);
