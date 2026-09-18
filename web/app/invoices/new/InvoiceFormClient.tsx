@@ -21,6 +21,7 @@ import {
   type LineItem,
 } from '@/lib/billing/save-helpers';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
+import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 
 type CustomerOpt = LinkedCustomerOpt;
@@ -63,14 +64,18 @@ export default function InvoiceFormClient() {
   const [custEmail, setCustEmail] = useState('');
   const [custContact, setCustContact] = useState('');
 
-  const manufacturers = useMemo(() => listManufacturers(), []);
+  const catalog = useEquipmentCatalog(supabase);
+  const manufacturers = useMemo(
+    () => listManufacturers(catalog),
+    [catalog.manufacturers, catalog.models]
+  );
   const [manufacturer, setManufacturer] = useState('');
   const [model, setModel] = useState('');
   const [serial, setSerial] = useState('');
   const [pulseCount, setPulseCount] = useState('');
   const models = useMemo(
-    () => (manufacturer ? listModelsForManufacturer(manufacturer) : []),
-    [manufacturer]
+    () => (manufacturer ? listModelsForManufacturer(manufacturer, catalog) : []),
+    [manufacturer, catalog.manufacturers, catalog.models]
   );
 
   const [invoiceDate, setInvoiceDate] = useState(todayYmd());

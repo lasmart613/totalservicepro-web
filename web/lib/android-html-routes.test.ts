@@ -23,6 +23,18 @@ test('legacy Android HTML notification links map to live Next routes', () => {
   assert.equal(mapAndroidHtmlPath('/not-an-asset'), null);
 });
 
+test('Android estimate generator loads manufacturers + laser_models', () => {
+  const html = readFileSync(
+    join(here, '../../app/src/main/assets/estimate_generator.html'),
+    'utf8'
+  );
+  assert.match(html, /from\('manufacturers'\)/);
+  assert.match(html, /from\('laser_models'\)/);
+  assert.match(html, /manufacturer_id/);
+  assert.match(html, /equipmentType|equipment_type/);
+  assert.match(html, /refreshEstimateModels/);
+});
+
 test('Android MainActivity asset map stays aligned with web remaps', () => {
   const main = readFileSync(
     join(here, '../../app/src/main/java/com/photometrytools/MainActivity.java'),

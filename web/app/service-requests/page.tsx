@@ -8,6 +8,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { canBidMarketplace, isOwnerish, isPro, isServiceCompany } from '@/lib/roles';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL, OTHER_LASER } from '@/lib/laser-catalog';
+import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { ShareButton } from '@/components/ShareButton';
 import { serviceRequestShareText } from '@/lib/share';
 
@@ -68,8 +69,12 @@ function ServiceRequestsInner() {
   const [customerSite, setCustomerSite] = useState('');
   const [budget, setBudget] = useState('');
 
-  const mfrOptions = useMemo(() => listManufacturers(), []);
-  const modelOptions = useMemo(() => (mfr && mfr !== 'Other' ? listModelsForManufacturer(mfr) : []), [mfr]);
+  const catalog = useEquipmentCatalog(supabase);
+  const mfrOptions = useMemo(() => listManufacturers(catalog), [catalog.manufacturers, catalog.models]);
+  const modelOptions = useMemo(
+    () => (mfr && mfr !== 'Other' ? listModelsForManufacturer(mfr, catalog) : []),
+    [mfr, catalog.manufacturers, catalog.models]
+  );
   const ownerView = isOwnerish(userRole, orgType);
   const proView =
     canBidMarketplace(userRole) || isPro(userRole) || isServiceCompany(userRole, orgType);

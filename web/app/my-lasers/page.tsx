@@ -8,6 +8,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { toast } from 'sonner';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 
 type LaserRow = {
   id: number;
@@ -37,8 +38,9 @@ export default function MyLasersPage() {
   const [room, setRoom] = useState('');
   const [saving, setSaving] = useState(false);
 
-  const mfrOptions = useMemo(() => listManufacturers(), []);
-  const modelOptions = useMemo(() => listModelsForManufacturer(mfr), [mfr]);
+  const catalog = useEquipmentCatalog(supabase);
+  const mfrOptions = useMemo(() => listManufacturers(catalog), [catalog.manufacturers, catalog.models]);
+  const modelOptions = useMemo(() => listModelsForManufacturer(mfr, catalog), [mfr, catalog.manufacturers, catalog.models]);
 
   useEffect(() => {
     (async () => {

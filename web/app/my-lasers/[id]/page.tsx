@@ -7,6 +7,7 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { loadServiceHistoryForLaser } from '@/lib/equipment-ensure';
 
 type Laser = {
@@ -54,8 +55,9 @@ export default function LaserProfilePage() {
   const [notes, setNotes] = useState('');
   const [photoFile, setPhotoFile] = useState<File | null>(null);
 
-  const mfrOptions = useMemo(() => listManufacturers(), []);
-  const modelOptions = useMemo(() => listModelsForManufacturer(mfr), [mfr]);
+  const catalog = useEquipmentCatalog(supabase);
+  const mfrOptions = useMemo(() => listManufacturers(catalog), [catalog.manufacturers, catalog.models]);
+  const modelOptions = useMemo(() => listModelsForManufacturer(mfr, catalog), [mfr, catalog.manufacturers, catalog.models]);
 
   useEffect(() => {
     if (id) loadAll();
@@ -139,7 +141,7 @@ export default function LaserProfilePage() {
   function openEdit() {
     if (!laser) return;
     setMfr(laser.manufacturer || '');
-    const models = listModelsForManufacturer(laser.manufacturer || '');
+    const models = listModelsForManufacturer(laser.manufacturer || '', catalog);
     if (laser.model && models.includes(laser.model)) {
       setModel(laser.model);
       setModelOther('');
