@@ -12,15 +12,16 @@ import { extractFaultCodes } from './fault-codes.ts'
 import {
   applyFileNameMap,
   chapterFileKeys,
-  collectionFilenameForPath,
   collectionHitsFromResponse,
   collectionNameFilters,
   collectionSearchBody,
+  expectedFilenamesForPaths,
   fileIdNameMapFromDocuments,
   filterHitsForManual,
   pickCollectionAttachments,
   pickFileIdsForManual,
   retrievedFromHits,
+  storageBasename,
   type CollectionHit,
 } from './collection-search.ts'
 
@@ -493,7 +494,8 @@ async function searchManualCollection(
   requireManualMatch: boolean,
   chapterKeys: string[] = [],
   selectedFileIds?: Set<string>,
-  mode: 'hybrid' | 'keyword' = 'hybrid'
+  mode: 'hybrid' | 'keyword' = 'hybrid',
+  expectedNames: string[] = []
 ): Promise<{ parts: Retrieved[]; filteredOut: number; hits: CollectionHit[] }> {
   const sr = await fetch('https://api.x.ai/v1/documents/search', {
     method: 'POST',
@@ -509,9 +511,14 @@ async function searchManualCollection(
     tokens,
     chapterKeys,
     fileIds: selectedFileIds,
+    expectedFilenames: expectedNames,
     requireMatch: requireManualMatch,
   })
-  return { parts: retrievedFromHits(filtered.parts), filteredOut: filtered.filteredOut, hits }
+  return {
+    parts: retrievedFromHits(filtered.parts, expectedNames),
+    filteredOut: filtered.filteredOut,
+    hits,
+  }
 }
 
 async function pdfPathsForChat(db: any, manual: any): Promise<string[]> {
@@ -653,7 +660,7 @@ serve(async (req) => {
         model: manualMeta?.model,
       })
       const attachPaths = manualMeta ? await pdfPathsForChat(db, manualMeta) : []
-      const expectedFilenames = attachPaths.map(collectionFilenameForPath)
+      const expectedFilenames = expectedFilenamesForPaths(attachPaths)
       const chapterKeys = chapterFileKeys([
         ...(Array.isArray(manualMeta?.chapter_metadata) ? manualMeta.chapter_metadata : []),
         ...attachPaths.map((p) => ({ storage_path: p, title: manualMeta?.title })),
@@ -702,7 +709,16 @@ serve(async (req) => {
       if (userText) {
         try {
           const sq = buildSearchQuery(userText, manualLabel, faultCodes)
-          let searched = await searchManualCollection(XAI_KEY, sq, matchTokens, !!manualLabel, chapterKeys)
+          let searched = await searchManualCollection(
+            XAI_KEY,
+            sq,
+            matchTokens,
+            !!manualLabel,
+            chapterKeys,
+            undefined,
+            'hybrid',
+            expectedFilenames
+          )
 
           if (manageKey && (manualLabel || expectedFilenames.length || searched.hits.some((h) => h.fileId))) {
             const resolved = await resolveCollectionManualDocs({
@@ -720,10 +736,11 @@ serve(async (req) => {
               tokens: matchTokens,
               chapterKeys,
               fileIds: selectedCollectionFileIds,
+              expectedFilenames,
               requireMatch: !!manualLabel,
             })
             searched = {
-              parts: retrievedFromHits(filtered.parts),
+              parts: retrievedFromHits(filtered.parts, expectedFilenames),
               filteredOut: filtered.filteredOut,
               hits: namedHits,
             }
@@ -740,7 +757,8 @@ serve(async (req) => {
               !!manualLabel,
               chapterKeys,
               selectedCollectionFileIds,
-              'keyword'
+              'keyword',
+              expectedFilenames
             )
             if (kw.parts.length) {
               parts = kw.parts
@@ -1044,6 +1062,23 @@ serve(async (req) => {
       const manageKey = Deno.env.get('XAI_MANAGEMENT_API_KEY') || Deno.env.get('XAI_MANAGEMENT_KEY') || XAI_KEY
       const uploads = []
       for (const path of paths.slice(0, 8)) {
+        const expected = expectedFilenamesForPaths([path])
+        const listed: Record<string, string> = {}
+        for (const q of collectionNameFilters(expected)) {
+          Object.assign(listed, await listCollectionDocumentsByName(manageKey, q))
+        }
+        const existingIds = pickFileIdsForManual(listed, expected, [], [])
+        const existingId = [...existingIds][0]
+        if (existingId) {
+          uploads.push({
+            path,
+            ok: true,
+            fileId: existingId,
+            filename: listed[existingId] || storageBasename(path),
+            skipped: 'already_in_collection',
+          })
+          continue
+        }
         const { data: blob, error } = await db.storage.from('manuals').download(path)
         if (error || !blob) {
           uploads.push({ path, ok: false, skipped: error?.message || 'download_failed' })
@@ -1053,7 +1088,7 @@ serve(async (req) => {
         const uploaded = await uploadPdfToTspCollection({
           apiKey: XAI_KEY,
           managementKey: manageKey,
-          filename: path.split('/').pop() || `manual-${targetId}.pdf`,
+          filename: storageBasename(path) || `manual-${targetId}.pdf`,
           bytes,
         })
         uploads.push({ path, ...uploaded })
