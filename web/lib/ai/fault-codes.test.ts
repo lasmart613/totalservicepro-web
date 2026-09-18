@@ -47,7 +47,8 @@ test('grok-assistant searches the selected service manual before fault_codes', (
     /When FAULT CODE LOOKUP RESULT is provided: treat it as the authoritative/
   );
   const chat = fn.slice(fn.indexOf("body.action === 'chat'"));
-  const searchCall = chat.indexOf('await searchManualCollection');
+  assert.match(chat, /Promise\.all\(\[searchP, resolveP\]\)/);
+  const searchCall = chat.indexOf('searchManualCollection');
   const lookupCall = chat.indexOf('await applyFaultLookup()');
   assert.ok(searchCall >= 0 && lookupCall > searchCall, 'manual search must run before fault DB lookup');
   assert.match(fn, /await lookupFaultCode/);

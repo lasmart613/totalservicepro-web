@@ -18,6 +18,7 @@ import {
   expectedFilenamesForPaths,
   fileIdNameMapFromDocuments,
   filterHitsForManual,
+  hasEnoughScopedIds,
   pickCollectionAttachments,
   pickFileIdsForManual,
   retrievedFromHits,
@@ -31,6 +32,71 @@ const corsHeaders = {
 }
 
 const TSP_COLLECTION_ID = TSP_XAI_COLLECTION_ID
+
+/** Keep xAI listing/search inside the edge/client window (PR #130 serial GETs hung). */
+const FETCH_MS = {
+  list: 4000,
+  lookup: 3000,
+  search: 12000,
+  resolve: 6500,
+  model: 22000,
+}
+
+const COLLECTION_DOCS_TTL_MS = 5 * 60 * 1000
+let collectionDocsCache: { at: number; map: Record<string, string>; complete: boolean } | null = null
+
+function cachedCollectionDocs(): Record<string, string> {
+  if (collectionDocsCache && Date.now() - collectionDocsCache.at < COLLECTION_DOCS_TTL_MS) {
+    return { ...collectionDocsCache.map }
+  }
+  return {}
+}
+
+function rememberCollectionDocs(map: Record<string, string>, complete = false) {
+  if (!map || !Object.keys(map).length) return
+  const fresh = !!(collectionDocsCache && Date.now() - collectionDocsCache.at < COLLECTION_DOCS_TTL_MS)
+  const prev = fresh ? collectionDocsCache!.map : {}
+  collectionDocsCache = {
+    at: Date.now(),
+    map: { ...prev, ...map },
+    complete: complete || (fresh && collectionDocsCache!.complete),
+  }
+}
+
+function abortAfter(ms: number): { signal: AbortSignal; cancel: () => void } {
+  const ac = new AbortController()
+  const t = setTimeout(() => ac.abort(), ms)
+  return {
+    signal: ac.signal,
+    cancel: () => clearTimeout(t),
+  }
+}
+
+async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: number): Promise<Response | null> {
+  const { signal, cancel } = abortAfter(timeoutMs)
+  try {
+    return await fetch(url, { ...init, signal })
+  } catch (e) {
+    console.warn('fetch timeout/error', url, e)
+    return null
+  } finally {
+    cancel()
+  }
+}
+
+async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise<T> {
+  let t: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      work,
+      new Promise<T>((resolve) => {
+        t = setTimeout(() => resolve(fallback), ms)
+      }),
+    ])
+  } finally {
+    if (t) clearTimeout(t)
+  }
+}
 
 const LIMITS: Record<string, { text: number; voice: number }> = {
   free: { text: 5, voice: 1 },
@@ -417,14 +483,40 @@ async function listCollectionDocumentsByName(
     `https://management-api.x.ai/v1/collections/${TSP_COLLECTION_ID}/documents` +
     `?limit=50&filter=${encodeURIComponent(filter)}`
   try {
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${managementKey}` } })
-    if (!res.ok) {
-      console.warn('list collection documents failed', res.status, nameQuery)
+    const res = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${managementKey}` } }, FETCH_MS.list)
+    if (!res?.ok) {
+      console.warn('list collection documents failed', res?.status ?? 'timeout', nameQuery)
       return {}
     }
-    return fileIdNameMapFromDocuments(await res.json())
+    const map = fileIdNameMapFromDocuments(await res.json())
+    rememberCollectionDocs(map)
+    return map
   } catch (e) {
     console.warn('list collection documents error', nameQuery, e)
+    return {}
+  }
+}
+
+/** One unfiltered page — local pickFileIds keeps Xeo vs CoolGlide without N name GETs. */
+async function listCollectionDocumentsAll(managementKey: string): Promise<Record<string, string>> {
+  if (
+    collectionDocsCache?.complete &&
+    Date.now() - collectionDocsCache.at < COLLECTION_DOCS_TTL_MS
+  ) {
+    return { ...collectionDocsCache.map }
+  }
+  const url = `https://management-api.x.ai/v1/collections/${TSP_COLLECTION_ID}/documents?limit=100`
+  try {
+    const res = await fetchWithTimeout(url, { headers: { Authorization: `Bearer ${managementKey}` } }, FETCH_MS.list)
+    if (!res?.ok) {
+      console.warn('list collection documents (all) failed', res?.status ?? 'timeout')
+      return {}
+    }
+    const map = fileIdNameMapFromDocuments(await res.json())
+    rememberCollectionDocs(map, true)
+    return map
+  } catch (e) {
+    console.warn('list collection documents (all) error', e)
     return {}
   }
 }
@@ -436,28 +528,45 @@ async function lookupCollectionFileName(
 ): Promise<string> {
   if (!fileId) return ''
   try {
-    const res = await fetch(
+    const res = await fetchWithTimeout(
       `https://management-api.x.ai/v1/collections/${TSP_COLLECTION_ID}/documents/${fileId}`,
-      { headers: { Authorization: `Bearer ${managementKey}` } }
+      { headers: { Authorization: `Bearer ${managementKey}` } },
+      FETCH_MS.lookup
     )
-    if (res.ok) {
+    if (res?.ok) {
       const map = fileIdNameMapFromDocuments([await res.json()])
-      if (map[fileId]) return map[fileId]
+      if (map[fileId]) {
+        rememberCollectionDocs(map)
+        return map[fileId]
+      }
     }
   } catch {
     /* try files API */
   }
   if (!apiKey) return ''
   try {
-    const fr = await fetch(`https://api.x.ai/v1/files/${fileId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` },
-    })
-    if (!fr.ok) return ''
+    const fr = await fetchWithTimeout(
+      `https://api.x.ai/v1/files/${fileId}`,
+      { headers: { Authorization: `Bearer ${apiKey}` } },
+      FETCH_MS.lookup
+    )
+    if (!fr?.ok) return ''
     const j = (await fr.json()) as { filename?: string; name?: string }
-    return String(j.filename || j.name || '').trim()
+    const name = String(j.filename || j.name || '').trim()
+    if (name) rememberCollectionDocs({ [fileId]: name })
+    return name
   } catch {
     return ''
   }
+}
+
+function scopedIdsFor(
+  nameById: Record<string, string>,
+  expectedFilenames: string[],
+  tokens: string[],
+  chapterKeys: string[]
+): Set<string> {
+  return pickFileIdsForManual(nameById, expectedFilenames, tokens, chapterKeys)
 }
 
 async function resolveCollectionManualDocs(opts: {
@@ -468,23 +577,37 @@ async function resolveCollectionManualDocs(opts: {
   chapterKeys: string[]
   hits: CollectionHit[]
 }): Promise<{ nameById: Record<string, string>; fileIds: Set<string> }> {
-  const nameById: Record<string, string> = {}
-  for (const q of collectionNameFilters(opts.expectedFilenames, opts.tokens)) {
-    Object.assign(nameById, await listCollectionDocumentsByName(opts.managementKey, q))
-    const scoped = pickFileIdsForManual(nameById, opts.expectedFilenames, opts.tokens, opts.chapterKeys)
-    if (opts.expectedFilenames.length && scoped.size >= Math.min(2, opts.expectedFilenames.length)) break
+  const nameById: Record<string, string> = cachedCollectionDocs()
+  let fileIds = scopedIdsFor(nameById, opts.expectedFilenames, opts.tokens, opts.chapterKeys)
+  if (hasEnoughScopedIds(fileIds)) {
+    return { nameById, fileIds }
   }
 
-  const unnamedIds = [...new Set(opts.hits.map((h) => h.fileId).filter((id) => id && !nameById[id]))]
-  for (const id of unnamedIds.slice(0, 8)) {
-    const name = await lookupCollectionFileName(opts.managementKey, id, opts.apiKey)
-    if (name) nameById[id] = name
+  const filters = collectionNameFilters(opts.expectedFilenames, opts.tokens).slice(0, 2)
+  const listed = await Promise.all([
+    listCollectionDocumentsAll(opts.managementKey),
+    ...filters.map((q) => listCollectionDocumentsByName(opts.managementKey, q)),
+  ])
+  for (const map of listed) Object.assign(nameById, map)
+  rememberCollectionDocs(nameById)
+  fileIds = scopedIdsFor(nameById, opts.expectedFilenames, opts.tokens, opts.chapterKeys)
+
+  // Per-hit lookups only when listing missed the selected book — never 8 serial GETs.
+  if (!hasEnoughScopedIds(fileIds)) {
+    const unnamedIds = [...new Set(opts.hits.map((h) => h.fileId).filter((id) => id && !nameById[id]))]
+    const looked = await Promise.all(
+      unnamedIds.slice(0, 3).map(async (id) => {
+        const name = await lookupCollectionFileName(opts.managementKey, id, opts.apiKey)
+        return { id, name }
+      })
+    )
+    for (const row of looked) {
+      if (row.name) nameById[row.id] = row.name
+    }
+    fileIds = scopedIdsFor(nameById, opts.expectedFilenames, opts.tokens, opts.chapterKeys)
   }
 
-  return {
-    nameById,
-    fileIds: pickFileIdsForManual(nameById, opts.expectedFilenames, opts.tokens, opts.chapterKeys),
-  }
+  return { nameById, fileIds }
 }
 
 async function searchManualCollection(
@@ -497,13 +620,17 @@ async function searchManualCollection(
   mode: 'hybrid' | 'keyword' = 'hybrid',
   expectedNames: string[] = []
 ): Promise<{ parts: Retrieved[]; filteredOut: number; hits: CollectionHit[] }> {
-  const sr = await fetch('https://api.x.ai/v1/documents/search', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${XAI_KEY}` },
-    body: JSON.stringify(collectionSearchBody(query, TSP_COLLECTION_ID, mode)),
-  })
-  if (!sr.ok) {
-    console.error('documents/search failed', sr.status, await sr.text())
+  const sr = await fetchWithTimeout(
+    'https://api.x.ai/v1/documents/search',
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${XAI_KEY}` },
+      body: JSON.stringify(collectionSearchBody(query, TSP_COLLECTION_ID, mode)),
+    },
+    FETCH_MS.search
+  )
+  if (!sr?.ok) {
+    console.error('documents/search failed', sr?.status ?? 'timeout', sr ? await sr.text() : '')
     return { parts: [], filteredOut: 0, hits: [] }
   }
   const hits = collectionHitsFromResponse(await sr.json())
@@ -611,6 +738,7 @@ serve(async (req) => {
     }
 
     if (body.action === 'chat') {
+      const chatStarted = Date.now()
       const { messages, manualPath, manualId, voiceMode, zappPersona } = body
       if (!messages?.length)
         return new Response(JSON.stringify({ error: 'Missing messages' }), {
@@ -709,7 +837,8 @@ serve(async (req) => {
       if (userText) {
         try {
           const sq = buildSearchQuery(userText, manualLabel, faultCodes)
-          let searched = await searchManualCollection(
+          const wantResolve = !!(manageKey && (manualLabel || expectedFilenames.length))
+          const searchP = searchManualCollection(
             XAI_KEY,
             sq,
             matchTokens,
@@ -719,18 +848,47 @@ serve(async (req) => {
             'hybrid',
             expectedFilenames
           )
+          const resolveP = wantResolve
+            ? withBudget(
+                resolveCollectionManualDocs({
+                  managementKey: manageKey,
+                  apiKey: XAI_KEY,
+                  expectedFilenames,
+                  tokens: matchTokens,
+                  chapterKeys,
+                  hits: [],
+                }),
+                FETCH_MS.resolve,
+                { nameById: cachedCollectionDocs(), fileIds: new Set<string>() }
+              )
+            : Promise.resolve({ nameById: {} as Record<string, string>, fileIds: new Set<string>() })
 
-          if (manageKey && (manualLabel || expectedFilenames.length || searched.hits.some((h) => h.fileId))) {
-            const resolved = await resolveCollectionManualDocs({
-              managementKey: manageKey,
-              apiKey: XAI_KEY,
-              expectedFilenames,
-              tokens: matchTokens,
-              chapterKeys,
-              hits: searched.hits,
-            })
-            collectionNameById = resolved.nameById
-            selectedCollectionFileIds = resolved.fileIds
+          let [searched, resolved] = await Promise.all([searchP, resolveP])
+          collectionNameById = resolved.nameById
+          selectedCollectionFileIds = resolved.fileIds
+
+          if (wantResolve && !hasEnoughScopedIds(selectedCollectionFileIds) && searched.hits.some((h) => h.fileId)) {
+            try {
+              resolved = await withBudget(
+                resolveCollectionManualDocs({
+                  managementKey: manageKey,
+                  apiKey: XAI_KEY,
+                  expectedFilenames,
+                  tokens: matchTokens,
+                  chapterKeys,
+                  hits: searched.hits,
+                }),
+                FETCH_MS.lookup + 500,
+                resolved
+              )
+              collectionNameById = resolved.nameById
+              selectedCollectionFileIds = resolved.fileIds
+            } catch (e) {
+              console.warn('collection resolve (hits) failed soft', e)
+            }
+          }
+
+          if (wantResolve || Object.keys(collectionNameById).length) {
             const namedHits = applyFileNameMap(searched.hits, collectionNameById)
             const filtered = filterHitsForManual(namedHits, {
               tokens: matchTokens,
@@ -749,7 +907,7 @@ serve(async (req) => {
           let parts = searched.parts
           let filteredOut = searched.filteredOut
 
-          if (!parts.length && faultCodes.length) {
+          if (!parts.length && faultCodes.length && Date.now() - chatStarted < 18_000) {
             const kw = await searchManualCollection(
               XAI_KEY,
               sq,
@@ -833,7 +991,11 @@ serve(async (req) => {
 
       // Collection file_ids are already on xAI — prefer those over signed Storage URLs
       // (private/signed URLs often look "unreadable" to the model and can 504 dual-code chats).
-      const wantPdfs = !!manualLabel && !voiceMode && (schematicQ || !hasManualPassages)
+      const wantPdfs =
+        !!manualLabel &&
+        !voiceMode &&
+        (schematicQ || !hasManualPassages) &&
+        Date.now() - chatStarted < 18_000
       let attachedNames: string[] = []
       if (wantPdfs) {
         const collectionFiles = pickCollectionAttachments(
@@ -850,24 +1012,28 @@ serve(async (req) => {
               systemContent +
               `\n\n## ATTACHED MANUAL PDFs\nThese files are already in the Grok collection for "${manualLabel}". They ARE readable. Quote exact wording. Do not say the service manual is unavailable.\n` +
               collectionFiles.map((s, i) => `[PDF ${i + 1}] ${s.name}`).join('\n')
-            const rr = await fetch('https://api.x.ai/v1/responses', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${XAI_KEY}` },
-              body: JSON.stringify({
-                model: 'grok-4.6',
-                instructions: attachPrompt,
-                input: [
-                  {
-                    role: 'user',
-                    content: [
-                      { type: 'input_text', text: userText },
-                      ...collectionFiles.map((s) => ({ type: 'input_file', file_id: s.fileId })),
-                    ],
-                  },
-                ],
-              }),
-            })
-            if (rr.ok) {
+            const rr = await fetchWithTimeout(
+              'https://api.x.ai/v1/responses',
+              {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${XAI_KEY}` },
+                body: JSON.stringify({
+                  model: 'grok-4.6',
+                  instructions: attachPrompt,
+                  input: [
+                    {
+                      role: 'user',
+                      content: [
+                        { type: 'input_text', text: userText },
+                        ...collectionFiles.map((s) => ({ type: 'input_file', file_id: s.fileId })),
+                      ],
+                    },
+                  ],
+                }),
+              },
+              FETCH_MS.model
+            )
+            if (rr?.ok) {
               const rd = await rr.json()
               const txt = textFromResponses(rd)
               if (txt) {
@@ -895,7 +1061,7 @@ serve(async (req) => {
                 )
               }
             } else {
-              console.warn('responses+collection files failed', rr.status, await rr.text())
+              console.warn('responses+collection files failed', rr?.status ?? 'timeout', rr ? await rr.text() : '')
             }
           } else if (manualMeta && attachPaths.length && !hasCollectionPdfs) {
             const chapterList = attachPaths.map((p) => ({ storage_path: p, title: manualMeta.title }))
@@ -917,24 +1083,28 @@ serve(async (req) => {
                 systemContent +
                 `\n\n## ATTACHED MANUAL PDFs\nThe following PDFs from "${manualLabel}" are attached. Read them, quote them, and interpret drawings/schematics.\n` +
                 signed.map((s, i) => `[PDF ${i + 1}] ${s.name}`).join('\n')
-              const rr = await fetch('https://api.x.ai/v1/responses', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${XAI_KEY}` },
-                body: JSON.stringify({
-                  model: 'grok-4.6',
-                  instructions: attachPrompt,
-                  input: [
-                    {
-                      role: 'user',
-                      content: [
-                        { type: 'input_text', text: userText },
-                        ...signed.map((s) => ({ type: 'input_file', file_url: s.url })),
-                      ],
-                    },
-                  ],
-                }),
-              })
-              if (rr.ok) {
+              const rr = await fetchWithTimeout(
+                'https://api.x.ai/v1/responses',
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${XAI_KEY}` },
+                  body: JSON.stringify({
+                    model: 'grok-4.6',
+                    instructions: attachPrompt,
+                    input: [
+                      {
+                        role: 'user',
+                        content: [
+                          { type: 'input_text', text: userText },
+                          ...signed.map((s) => ({ type: 'input_file', file_url: s.url })),
+                        ],
+                      },
+                    ],
+                  }),
+                },
+                FETCH_MS.model
+              )
+              if (rr?.ok) {
                 const rd = await rr.json()
                 const txt = textFromResponses(rd)
                 if (txt) {
@@ -962,7 +1132,7 @@ serve(async (req) => {
                   )
                 }
               } else {
-                console.warn('responses+files failed', rr.status, await rr.text())
+                console.warn('responses+files failed', rr?.status ?? 'timeout', rr ? await rr.text() : '')
               }
             }
           }
@@ -976,19 +1146,23 @@ serve(async (req) => {
         if (hasFaultDBHit) systemContent = composeSystem()
       }
 
-      const xr = await fetch('https://api.x.ai/v1/chat/completions', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${XAI_KEY}` },
-        body: JSON.stringify({
-          model: 'grok-3-fast',
-          messages: [{ role: 'system', content: systemContent }, ...chatMessages],
-          temperature,
-          stream: false,
-        }),
-      })
-      if (!xr.ok) {
-        const e = await xr.text()
-        return new Response(JSON.stringify({ error: `AI error (${xr.status})`, details: e }), {
+      const xr = await fetchWithTimeout(
+        'https://api.x.ai/v1/chat/completions',
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${XAI_KEY}` },
+          body: JSON.stringify({
+            model: 'grok-3-fast',
+            messages: [{ role: 'system', content: systemContent }, ...chatMessages],
+            temperature,
+            stream: false,
+          }),
+        },
+        FETCH_MS.model
+      )
+      if (!xr?.ok) {
+        const e = xr ? await xr.text() : 'timeout'
+        return new Response(JSON.stringify({ error: `AI error (${xr?.status ?? 'timeout'})`, details: e }), {
           status: 500,
           headers: { ...corsHeaders, 'Content-Type': 'application/json' },
         })
@@ -1060,21 +1234,18 @@ serve(async (req) => {
         )
       }
       const manageKey = Deno.env.get('XAI_MANAGEMENT_API_KEY') || Deno.env.get('XAI_MANAGEMENT_KEY') || XAI_KEY
+      const listedAll = await listCollectionDocumentsAll(manageKey)
       const uploads = []
       for (const path of paths.slice(0, 8)) {
         const expected = expectedFilenamesForPaths([path])
-        const listed: Record<string, string> = {}
-        for (const q of collectionNameFilters(expected)) {
-          Object.assign(listed, await listCollectionDocumentsByName(manageKey, q))
-        }
-        const existingIds = pickFileIdsForManual(listed, expected, [], [])
+        const existingIds = pickFileIdsForManual(listedAll, expected, [], [])
         const existingId = [...existingIds][0]
         if (existingId) {
           uploads.push({
             path,
             ok: true,
             fileId: existingId,
-            filename: listed[existingId] || storageBasename(path),
+            filename: listedAll[existingId] || storageBasename(path),
             skipped: 'already_in_collection',
           })
           continue
