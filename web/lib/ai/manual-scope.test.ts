@@ -151,3 +151,23 @@ test('AI assistant and grok-assistant send current id/path and do not skip incom
   assert.match(reindex, /manualsNeedingXaiAttach|attachCollection/);
   assert.match(android, /manualId/);
 });
+
+test('AI assistant thread scrolls long replies instead of clipping them', () => {
+  const client = readFileSync(join(here, '../../app/ai-assistant/AIAssistantClient.tsx'), 'utf8');
+  const css = readFileSync(join(here, '../../app/globals.css'), 'utf8');
+  const android = readFileSync(join(here, '../../../app/src/main/assets/ai_assistant.html'), 'utf8');
+
+  assert.match(client, /ai-chat-thread/);
+  assert.match(client, /flex-1 min-h-0 overflow-y-auto/);
+  assert.match(client, /listRef\.current/);
+  assert.doesNotMatch(client, /className="card flex-1/);
+  assert.doesNotMatch(client, /max-h-\[min\(52vh/);
+
+  assert.match(css, /\.ai-chat-thread\s*\{[^}]*overflow-y:\s*auto/s);
+  assert.match(css, /\.card\s*\{[^}]*overflow:\s*hidden/s);
+
+  assert.match(android, /\.chat-messages\s*\{[^}]*min-height:\s*0/s);
+  assert.match(android, /\.chat-messages\s*\{[^}]*overflow-y:\s*auto/s);
+  assert.match(android, /\.chat-panel\s*\{[^}]*min-height:\s*0/s);
+  assert.match(android, /\.chat-outer\s*\{[^}]*overflow:\s*hidden/s);
+});

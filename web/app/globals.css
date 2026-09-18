@@ -100,6 +100,40 @@ html.landing-mode main {
   transition: border-color 0.15s, transform 0.15s, box-shadow 0.15s;
 }
 
+/*
+ * AI Assistant thread. Do not put .card on this pane: .card { overflow: hidden }
+ * wins over Tailwind overflow-y-auto (same specificity, later in this file) and
+ * clips long replies with no scrollbar.
+ */
+.ai-chat-thread {
+  min-height: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: var(--border2) var(--surface3);
+}
+.ai-chat-thread::-webkit-scrollbar {
+  width: 10px;
+}
+.ai-chat-thread::-webkit-scrollbar-track {
+  background: var(--surface3);
+  border-radius: 8px;
+}
+.ai-chat-thread::-webkit-scrollbar-thumb {
+  background: var(--border2);
+  border-radius: 8px;
+}
+.ai-chat-thread::-webkit-scrollbar-thumb:hover {
+  background: var(--text3);
+}
+.ai-chat-bubble {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+
 .card:hover {
   border-color: var(--gold-border);
   transform: translateY(-1px);
