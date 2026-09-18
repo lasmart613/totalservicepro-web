@@ -48,7 +48,10 @@ test('grok-assistant searches the selected service manual before fault_codes', (
   );
   const chat = fn.slice(fn.indexOf("body.action === 'chat'"));
   const searchCall = chat.indexOf('await searchManualCollection');
-  const lookupCall = chat.indexOf('await lookupFaultCode');
+  const lookupCall = chat.indexOf('await applyFaultLookup()');
   assert.ok(searchCall >= 0 && lookupCall > searchCall, 'manual search must run before fault DB lookup');
-  assert.match(fn, /!hasManualPassages && faultCodes\.length/);
+  assert.match(fn, /await lookupFaultCode/);
+  assert.match(fn, /!hasManualPassages && !hasCollectionPdfs && faultCodes\.length/);
+  assert.match(fn, /collectionHitsFromResponse/);
+  assert.match(fn, /file_id: s\.fileId/);
 });

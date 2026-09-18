@@ -23,6 +23,8 @@ export type GrokChatResult = {
     manualLabel?: string;
     hasFaultDBHit?: boolean;
     hasManualPassages?: boolean;
+    hasCollectionPdfs?: boolean;
+    attachedPdfs?: string[];
   };
 };
 

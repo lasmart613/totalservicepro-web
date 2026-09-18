@@ -34,8 +34,8 @@ test('xai_collection_id is only stamped by the God attach path (single + bulk)',
   assert.match(fn, /action === 'attach-collection'/);
   assert.match(fn, /xai_collection_id/);
   assert.match(fn, /listFolderPdfs|folderPrefixForAiAttach/);
-  assert.match(fn, /collection_ids:\s*\[TSP_COLLECTION_ID\]/);
-  assert.match(fn, /pdfPathsForAiAttach\(manualMeta\)/);
+  assert.match(fn, /collectionSearchBody|collection_ids/);
+  assert.match(fn, /pdfPathsForAiAttach\(manual/);
   assert.match(reindex, /attachCollection/);
   assert.match(reindex, /manualsNeedingXaiAttach/);
   assert.match(reindex, /afterId/);

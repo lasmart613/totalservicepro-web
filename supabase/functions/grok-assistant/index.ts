@@ -9,6 +9,20 @@ import {
 } from './manual-scope.ts'
 import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
 import { extractFaultCodes } from './fault-codes.ts'
+import {
+  applyFileNameMap,
+  chapterFileKeys,
+  collectionFilenameForPath,
+  collectionHitsFromResponse,
+  collectionNameFilters,
+  collectionSearchBody,
+  fileIdNameMapFromDocuments,
+  filterHitsForManual,
+  pickCollectionAttachments,
+  pickFileIdsForManual,
+  retrievedFromHits,
+  type CollectionHit,
+} from './collection-search.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -30,7 +44,7 @@ const FSE_SYSTEM_PROMPT = `You are Zapp, an AI assistant for Total Service Pro (
 - NEVER add generic "contact the manufacturer" or patient-safety disclaimer fluff.
 - Search the selected SERVICE MANUAL first — not a separate error-code document.
 - When RETRIEVED MANUAL CONTENT is provided: that is AUTHORITATIVE for fault meaning, cause, remedy, and procedures. Answer from those passages. Quote specs, steps, values, and section/page references when present.
-- When ATTACHED MANUAL PDFs are provided: those files ARE the selected manual. Read them, quote exact wording, and interpret schematic/wiring/exploded drawings (component IDs, connector pins, nets, voltages, callouts). If a drawing is unreadable, say so and name the PDF.
+- When ATTACHED MANUAL PDFs are provided: those files ARE the selected manual and they are readable. Read them, quote exact wording, and interpret schematic/wiring/exploded drawings (component IDs, connector pins, nets, voltages, callouts). Only if a specific page or drawing is blank after you open it, say that page is unreadable and name the PDF — never claim the attached service manual is unavailable.
 - When FAULT CODE LOOKUP RESULT is provided: it is FALLBACK ONLY (thin manuals / no usable passages). You MAY mention it as a short cross-check if it agrees with the manual, but never override the selected service manual.
 - If the passages/PDFs do not contain enough information: say what is missing and what section to open in the selected manual — do NOT invent PM steps, calibrations, parts lists, or specs.
 - When a SELECTED MANUAL is set, answers must be about that device unless the user clearly names a different one.
@@ -154,23 +168,6 @@ async function listFolderPdfs(db: any, prefix: string, depth = 0): Promise<strin
   return out.slice(0, 8)
 }
 
-function chapterFileKeys(chapters: any[] | null | undefined): string[] {
-  const out: string[] = []
-  for (const c of chapters || []) {
-    const sp = String(c?.storage_path || '')
-    const title = String(c?.title || '')
-    const base = basenamePath(sp).replace(/\.pdf$/i, '')
-    if (base.length >= 6) out.push(base)
-    const stem = base.replace(/_[a-z0-9]+$/i, '')
-    if (stem.length >= 8 && !out.includes(stem)) out.push(stem)
-    for (const t of `${sp} ${title}`.toLowerCase().split(/[\s_/.\-]+/)) {
-      const x = t.replace(/[^a-z0-9+]/g, '')
-      if (x.length >= 5 && !out.includes(x)) out.push(x)
-    }
-  }
-  return out
-}
-
 function extraManualAliases(manual: {
   title?: string
   model?: string
@@ -224,24 +221,6 @@ function manualMatchTokens(manual: {
   return out
 }
 
-function docMatchesManual(docName: string, tokens: string[], chapterKeys: string[] = []): boolean {
-  if (!docName) return false
-  const n = docName.toLowerCase().replace(/[^a-z0-9]+/g, ' ')
-  const compact = n.replace(/\s+/g, '')
-  const base = basenamePath(docName).replace(/\.pdf$/i, '').replace(/[^a-z0-9]+/g, '')
-  for (const k of chapterKeys) {
-    const ck = k.toLowerCase().replace(/[^a-z0-9]+/g, '')
-    if (ck.length >= 6 && (base.includes(ck) || compact.includes(ck) || ck.includes(base))) return true
-  }
-  let hits = 0
-  for (const t of tokens) {
-    if (n.includes(t) || compact.includes(t)) hits++
-  }
-  if (hits >= 2) return true
-  if (hits === 1 && tokens.some((t) => t.length >= 5 && (n.includes(t) || compact.includes(t)))) return true
-  return false
-}
-
 function isSchematicQuery(text: string): boolean {
   return /\b(schematic|schematics|wiring|diagram|drawing|exploded|pcb|board\s*layout|electrical\s*drawing|block\s*diagram|interconnect)\b/i.test(
     text || ''
@@ -263,6 +242,7 @@ function pickRelevantChapters(chapters: any[], userText: string, schematic: bool
     if (schematic && /8501-02-1769/.test(hay)) s += 12
     if (/8501-01-1769/.test(hay)) s += 8
     if (/8501-00-1770/.test(hay)) s += 3
+    if (/\b(fault|error|alarm|code)\b/.test(q) && /service/.test(hay) && !/schem|wiring/.test(hay)) s += 6
     if (
       /engl|english/.test(hay) &&
       /operator/.test(hay) &&
@@ -427,45 +407,119 @@ function buildSearchQuery(userText: string, manualLabel: string, faultCodes: str
 
 type Retrieved = { text: string; source: string }
 
+async function listCollectionDocumentsByName(
+  managementKey: string,
+  nameQuery: string
+): Promise<Record<string, string>> {
+  const filter = `name:"${String(nameQuery).replace(/"/g, '')}"`
+  const url =
+    `https://management-api.x.ai/v1/collections/${TSP_COLLECTION_ID}/documents` +
+    `?limit=50&filter=${encodeURIComponent(filter)}`
+  try {
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${managementKey}` } })
+    if (!res.ok) {
+      console.warn('list collection documents failed', res.status, nameQuery)
+      return {}
+    }
+    return fileIdNameMapFromDocuments(await res.json())
+  } catch (e) {
+    console.warn('list collection documents error', nameQuery, e)
+    return {}
+  }
+}
+
+async function lookupCollectionFileName(
+  managementKey: string,
+  fileId: string,
+  apiKey?: string
+): Promise<string> {
+  if (!fileId) return ''
+  try {
+    const res = await fetch(
+      `https://management-api.x.ai/v1/collections/${TSP_COLLECTION_ID}/documents/${fileId}`,
+      { headers: { Authorization: `Bearer ${managementKey}` } }
+    )
+    if (res.ok) {
+      const map = fileIdNameMapFromDocuments([await res.json()])
+      if (map[fileId]) return map[fileId]
+    }
+  } catch {
+    /* try files API */
+  }
+  if (!apiKey) return ''
+  try {
+    const fr = await fetch(`https://api.x.ai/v1/files/${fileId}`, {
+      headers: { Authorization: `Bearer ${apiKey}` },
+    })
+    if (!fr.ok) return ''
+    const j = (await fr.json()) as { filename?: string; name?: string }
+    return String(j.filename || j.name || '').trim()
+  } catch {
+    return ''
+  }
+}
+
+async function resolveCollectionManualDocs(opts: {
+  managementKey: string
+  apiKey?: string
+  expectedFilenames: string[]
+  tokens: string[]
+  chapterKeys: string[]
+  hits: CollectionHit[]
+}): Promise<{ nameById: Record<string, string>; fileIds: Set<string> }> {
+  const nameById: Record<string, string> = {}
+  for (const q of collectionNameFilters(opts.expectedFilenames, opts.tokens)) {
+    Object.assign(nameById, await listCollectionDocumentsByName(opts.managementKey, q))
+    const scoped = pickFileIdsForManual(nameById, opts.expectedFilenames, opts.tokens, opts.chapterKeys)
+    if (opts.expectedFilenames.length && scoped.size >= Math.min(2, opts.expectedFilenames.length)) break
+  }
+
+  const unnamedIds = [...new Set(opts.hits.map((h) => h.fileId).filter((id) => id && !nameById[id]))]
+  for (const id of unnamedIds.slice(0, 8)) {
+    const name = await lookupCollectionFileName(opts.managementKey, id, opts.apiKey)
+    if (name) nameById[id] = name
+  }
+
+  return {
+    nameById,
+    fileIds: pickFileIdsForManual(nameById, opts.expectedFilenames, opts.tokens, opts.chapterKeys),
+  }
+}
+
 async function searchManualCollection(
   XAI_KEY: string,
   query: string,
   tokens: string[],
   requireManualMatch: boolean,
-  chapterKeys: string[] = []
-): Promise<{ parts: Retrieved[]; filteredOut: number }> {
+  chapterKeys: string[] = [],
+  selectedFileIds?: Set<string>,
+  mode: 'hybrid' | 'keyword' = 'hybrid'
+): Promise<{ parts: Retrieved[]; filteredOut: number; hits: CollectionHit[] }> {
   const sr = await fetch('https://api.x.ai/v1/documents/search', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${XAI_KEY}` },
-    body: JSON.stringify({
-      query,
-      source: { collection_ids: [TSP_COLLECTION_ID] },
-      retrieval_mode: { type: 'hybrid' },
-      max_num_results: 20,
-    }),
+    body: JSON.stringify(collectionSearchBody(query, TSP_COLLECTION_ID, mode)),
   })
   if (!sr.ok) {
     console.error('documents/search failed', sr.status, await sr.text())
-    return { parts: [], filteredOut: 0 }
+    return { parts: [], filteredOut: 0, hits: [] }
   }
-  const sd = await sr.json()
-  const results = sd.results || sd.documents || sd.chunks || sd.data || []
-  const all: Retrieved[] = []
-  for (const r of results) {
-    const t = r.text || r.content || r.chunk || r.passage || ''
-    const s = r.document_name || r.filename || r.name || r.source || r.document?.name || r.file_name || ''
-    if (t && String(t).length > 20) all.push({ text: String(t), source: String(s || 'manual') })
-  }
+  const hits = collectionHitsFromResponse(await sr.json())
+  const filtered = filterHitsForManual(hits, {
+    tokens,
+    chapterKeys,
+    fileIds: selectedFileIds,
+    requireMatch: requireManualMatch,
+  })
+  return { parts: retrievedFromHits(filtered.parts), filteredOut: filtered.filteredOut, hits }
+}
 
-  if (!requireManualMatch || tokens.length === 0) {
-    return { parts: all.slice(0, 12), filteredOut: 0 }
-  }
-
-  const matched = all.filter((p) => docMatchesManual(p.source, tokens, chapterKeys))
-  if (matched.length > 0) {
-    return { parts: matched.slice(0, 12), filteredOut: all.length - matched.length }
-  }
-  return { parts: [], filteredOut: all.length }
+async function pdfPathsForChat(db: any, manual: any): Promise<string[]> {
+  const fromMeta = pdfPathsForAiAttach(manual)
+  if (fromMeta.length) return fromMeta
+  const prefix = folderPrefixForAiAttach(manual)
+  if (prefix) return listFolderPdfs(db, prefix)
+  return []
 }
 
 async function searchIndexedManualText(
@@ -598,24 +652,101 @@ serve(async (req) => {
         label: manualLabel,
         model: manualMeta?.model,
       })
-      const chapterKeys = chapterFileKeys(manualMeta?.chapter_metadata)
+      const attachPaths = manualMeta ? await pdfPathsForChat(db, manualMeta) : []
+      const expectedFilenames = attachPaths.map(collectionFilenameForPath)
+      const chapterKeys = chapterFileKeys([
+        ...(Array.isArray(manualMeta?.chapter_metadata) ? manualMeta.chapter_metadata : []),
+        ...attachPaths.map((p) => ({ storage_path: p, title: manualMeta?.title })),
+      ])
       const schematicQ = isSchematicQuery(userText)
+      const manageKey =
+        Deno.env.get('XAI_MANAGEMENT_API_KEY') || Deno.env.get('XAI_MANAGEMENT_KEY') || XAI_KEY
 
       let contextBlock = ''
       let citationLine = ''
       let hasFaultDBHit = false
       let hasManualPassages = false
+      let collectionNameById: Record<string, string> = {}
+      let selectedCollectionFileIds = new Set<string>()
 
       // Tokens only — used to bias manual search. Meanings come from the selected service manual first.
       const faultCodes = extractFaultCodes(userText)
       let emptyManualHint = ''
 
+      async function applyFaultLookup() {
+        if (!faultCodes.length || hasFaultDBHit || hasManualPassages) return
+        const faultBlocks: string[] = []
+        const refs: string[] = []
+        for (const code of faultCodes) {
+          try {
+            const lookup = await lookupFaultCode(db, code, resolvedModel, resolvedBrand)
+            if (!lookup) continue
+            hasFaultDBHit = true
+            faultBlocks.push(formatFaultContext(lookup.rows, lookup.source, resolvedModel, manualLabel))
+            if (lookup.source !== 'ambiguous') {
+              refs.push(lookup.rows[0]?.manual_ref || 'verified lookup table')
+            }
+          } catch (e) {
+            console.warn('fault lookup failed', code, e)
+          }
+        }
+        if (faultBlocks.length) {
+          contextBlock = faultBlocks.join('')
+          const uniqueRefs = [...new Set(refs)]
+          if (uniqueRefs.length) {
+            citationLine = `\n\n— Source: TSP Fault Code Database (${uniqueRefs.join('; ')})`
+          }
+        }
+      }
+
       if (userText) {
         try {
           const sq = buildSearchQuery(userText, manualLabel, faultCodes)
-          const searched = await searchManualCollection(XAI_KEY, sq, matchTokens, !!manualLabel, chapterKeys)
+          let searched = await searchManualCollection(XAI_KEY, sq, matchTokens, !!manualLabel, chapterKeys)
+
+          if (manageKey && (manualLabel || expectedFilenames.length || searched.hits.some((h) => h.fileId))) {
+            const resolved = await resolveCollectionManualDocs({
+              managementKey: manageKey,
+              apiKey: XAI_KEY,
+              expectedFilenames,
+              tokens: matchTokens,
+              chapterKeys,
+              hits: searched.hits,
+            })
+            collectionNameById = resolved.nameById
+            selectedCollectionFileIds = resolved.fileIds
+            const namedHits = applyFileNameMap(searched.hits, collectionNameById)
+            const filtered = filterHitsForManual(namedHits, {
+              tokens: matchTokens,
+              chapterKeys,
+              fileIds: selectedCollectionFileIds,
+              requireMatch: !!manualLabel,
+            })
+            searched = {
+              parts: retrievedFromHits(filtered.parts),
+              filteredOut: filtered.filteredOut,
+              hits: namedHits,
+            }
+          }
+
           let parts = searched.parts
           let filteredOut = searched.filteredOut
+
+          if (!parts.length && faultCodes.length) {
+            const kw = await searchManualCollection(
+              XAI_KEY,
+              sq,
+              matchTokens,
+              !!manualLabel,
+              chapterKeys,
+              selectedCollectionFileIds,
+              'keyword'
+            )
+            if (kw.parts.length) {
+              parts = kw.parts
+              filteredOut = kw.filteredOut
+            }
+          }
 
           if (!parts.length && manualMeta) {
             const indexed = await searchIndexedManualText(db, manualMeta.id, sq, manualLabel)
@@ -629,8 +760,9 @@ serve(async (req) => {
             const manCite = srcs.map((c) => c.split('/').filter((p) => p && p !== 'shared').join(' › ')).join('; ')
             citationLine = `\n\n— Source: ${manCite}`
           } else {
-            emptyManualHint =
-              filteredOut > 0
+            emptyManualHint = selectedCollectionFileIds.size
+              ? 'Attached Grok collection PDFs for this manual are available. Read those files — do not claim they are unreadable or unavailable unless you actually opened them and the pages are blank.'
+              : filteredOut > 0
                 ? `${filteredOut} passages were retrieved from other manuals and discarded because they did not match the selected device.`
                 : 'Collection search returned no usable passages. Index this catalog id via God → Manuals → Index this manual if the PDF exists.'
           }
@@ -639,26 +771,12 @@ serve(async (req) => {
         }
       }
 
-      // Offline fault_codes table is fallback only when the selected manual had no usable passages.
-      if (!hasManualPassages && faultCodes.length) {
-        const faultBlocks: string[] = []
-        const refs: string[] = []
-        for (const code of faultCodes) {
-          const lookup = await lookupFaultCode(db, code, resolvedModel, resolvedBrand)
-          if (!lookup) continue
-          hasFaultDBHit = true
-          faultBlocks.push(formatFaultContext(lookup.rows, lookup.source, resolvedModel, manualLabel))
-          if (lookup.source !== 'ambiguous') {
-            refs.push(lookup.rows[0]?.manual_ref || 'verified lookup table')
-          }
-        }
-        if (faultBlocks.length) {
-          contextBlock = faultBlocks.join('')
-          const uniqueRefs = [...new Set(refs)]
-          if (uniqueRefs.length) {
-            citationLine = `\n\n— Source: TSP Fault Code Database (${uniqueRefs.join('; ')})`
-          }
-        }
+      const hasCollectionPdfs = selectedCollectionFileIds.size > 0
+
+      // Offline fault_codes table is fallback only when the selected manual had
+      // no usable passages and no Attached collection PDFs to read.
+      if (!hasManualPassages && !hasCollectionPdfs && faultCodes.length) {
+        await applyFaultLookup()
       }
 
       if (userText && !hasManualPassages && !hasFaultDBHit && emptyManualHint) {
@@ -669,7 +787,7 @@ serve(async (req) => {
       let temperature: number
       if (!voiceMode) {
         basePrompt = FSE_SYSTEM_PROMPT
-        temperature = hasFaultDBHit || hasManualPassages ? 0.15 : 0.2
+        temperature = hasFaultDBHit || hasManualPassages || hasCollectionPdfs ? 0.15 : 0.2
       } else if (zappPersona !== false) {
         basePrompt = ZAPP_VOICE_PROMPT
         temperature = hasFaultDBHit ? 0.3 : 0.5
@@ -684,86 +802,160 @@ serve(async (req) => {
           }). Unless the question clearly references a different device, answer only for this device.`
         : `\n\n## SELECTED MANUAL\nNone selected. Prefer asking which system if the question is device-specific.`
       const voiceCtx = voiceMode ? '\n\n## VOICE FORMAT\n4-7 sentences. No markdown.' : ''
-      const depthCtx =
-        !voiceMode && (hasManualPassages || hasFaultDBHit)
-          ? '\n\n## DEPTH\nBe thorough for field service: ordered steps, expected values, cautions found in the source. Do not pad with invented content.'
-          : ''
-      const systemContent = basePrompt + manualCtx + voiceCtx + depthCtx + contextBlock
+      const composeSystem = () => {
+        const depthCtx =
+          !voiceMode && (hasManualPassages || hasFaultDBHit || hasCollectionPdfs)
+            ? '\n\n## DEPTH\nBe thorough for field service: ordered steps, expected values, cautions found in the source. Do not pad with invented content.'
+            : ''
+        return basePrompt + manualCtx + voiceCtx + depthCtx + contextBlock
+      }
+      let systemContent = composeSystem()
 
       const chatMessages = hasFaultDBHit ? [{ role: 'user', content: userText }] : nonSys.slice(-10)
 
-      const wantPdfs = !!manualLabel && (!voiceMode || schematicQ || !hasManualPassages)
+      // Collection file_ids are already on xAI — prefer those over signed Storage URLs
+      // (private/signed URLs often look "unreadable" to the model and can 504 dual-code chats).
+      const wantPdfs = !!manualLabel && !voiceMode && (schematicQ || !hasManualPassages)
       let attachedNames: string[] = []
-      if (wantPdfs && manualMeta) {
-        const chapterList =
-          Array.isArray(manualMeta.chapter_metadata) && manualMeta.chapter_metadata.length
-            ? manualMeta.chapter_metadata
-            : pdfPathsForAiAttach(manualMeta).map((p) => ({ storage_path: p, title: manualMeta.title }))
-        const picks = pickRelevantChapters(
-          chapterList,
-          userText,
+      if (wantPdfs) {
+        const collectionFiles = pickCollectionAttachments(
+          collectionNameById,
+          selectedCollectionFileIds,
           schematicQ,
-          manualMeta.entry_file_path || pdfPathsForAiAttach(manualMeta)[0] || ''
+          2
         )
-        const signed: { name: string; url: string }[] = []
-        for (const ch of picks) {
-          const url = await signStoragePdf(ch.storage_path)
-          if (url) signed.push({ name: basenamePath(ch.storage_path) || ch.title, url })
-        }
-        if (signed.length) {
-          attachedNames = signed.map((s) => s.name)
-          const fileCite = `\n\n— Source: ${manualLabel} PDFs: ${attachedNames.join('; ')}`
-          const attachPrompt =
-            systemContent +
-            `\n\n## ATTACHED MANUAL PDFs\nThe following PDFs from "${manualLabel}" are attached. Read them, quote them, and interpret drawings/schematics.\n` +
-            signed.map((s, i) => `[PDF ${i + 1}] ${s.name}`).join('\n')
-          const rr = await fetch('https://api.x.ai/v1/responses', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${XAI_KEY}` },
-            body: JSON.stringify({
-              model: 'grok-4.6',
-              instructions: attachPrompt,
-              input: [
-                {
-                  role: 'user',
-                  content: [
-                    { type: 'input_text', text: userText },
-                    ...signed.map((s) => ({ type: 'input_file', file_url: s.url })),
-                  ],
-                },
-              ],
-            }),
-          })
-          if (rr.ok) {
-            const rd = await rr.json()
-            const txt = textFromResponses(rd)
-            if (txt) {
-              await logUsage(db, uid, 'grok_chat', rd.usage?.total_tokens || 0)
-              const content = (txt.trim() + (citationLine || fileCite)).trim()
-              return new Response(
-                JSON.stringify({
-                  choices: [{ message: { role: 'assistant', content } }],
-                  usage: rd.usage || {},
-                  _usage: {
-                    text: { used: usage.text + 1, limit: limits.text },
-                    voice: { used: usage.voice, limit: limits.voice },
+        try {
+          if (collectionFiles.length) {
+            attachedNames = collectionFiles.map((s) => s.name)
+            const fileCite = `\n\n— Source: ${manualLabel} collection PDFs: ${attachedNames.join('; ')}`
+            const attachPrompt =
+              systemContent +
+              `\n\n## ATTACHED MANUAL PDFs\nThese files are already in the Grok collection for "${manualLabel}". They ARE readable. Quote exact wording. Do not say the service manual is unavailable.\n` +
+              collectionFiles.map((s, i) => `[PDF ${i + 1}] ${s.name}`).join('\n')
+            const rr = await fetch('https://api.x.ai/v1/responses', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${XAI_KEY}` },
+              body: JSON.stringify({
+                model: 'grok-4.6',
+                instructions: attachPrompt,
+                input: [
+                  {
+                    role: 'user',
+                    content: [
+                      { type: 'input_text', text: userText },
+                      ...collectionFiles.map((s) => ({ type: 'input_file', file_id: s.fileId })),
+                    ],
                   },
-                  _meta: {
-                    manualLabel,
-                    manualId: manualMeta?.id ?? null,
-                    hasFaultDBHit,
-                    hasManualPassages,
-                    attachedPdfs: attachedNames,
-                    matchTokens,
-                  },
-                }),
-                { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-              )
+                ],
+              }),
+            })
+            if (rr.ok) {
+              const rd = await rr.json()
+              const txt = textFromResponses(rd)
+              if (txt) {
+                await logUsage(db, uid, 'grok_chat', rd.usage?.total_tokens || 0)
+                const content = (txt.trim() + (citationLine || fileCite)).trim()
+                return new Response(
+                  JSON.stringify({
+                    choices: [{ message: { role: 'assistant', content } }],
+                    usage: rd.usage || {},
+                    _usage: {
+                      text: { used: usage.text + 1, limit: limits.text },
+                      voice: { used: usage.voice, limit: limits.voice },
+                    },
+                    _meta: {
+                      manualLabel,
+                      manualId: manualMeta?.id ?? null,
+                      hasFaultDBHit,
+                      hasManualPassages,
+                      hasCollectionPdfs,
+                      attachedPdfs: attachedNames,
+                      matchTokens,
+                    },
+                  }),
+                  { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                )
+              }
+            } else {
+              console.warn('responses+collection files failed', rr.status, await rr.text())
             }
-          } else {
-            console.warn('responses+files failed', rr.status, await rr.text())
+          } else if (manualMeta && attachPaths.length && !hasCollectionPdfs) {
+            const chapterList = attachPaths.map((p) => ({ storage_path: p, title: manualMeta.title }))
+            const picks = pickRelevantChapters(
+              chapterList,
+              userText,
+              schematicQ,
+              manualMeta.entry_file_path || attachPaths[0] || ''
+            )
+            const signed: { name: string; url: string }[] = []
+            for (const ch of picks) {
+              const url = await signStoragePdf(ch.storage_path)
+              if (url) signed.push({ name: basenamePath(ch.storage_path) || ch.title, url })
+            }
+            if (signed.length) {
+              attachedNames = signed.map((s) => s.name)
+              const fileCite = `\n\n— Source: ${manualLabel} PDFs: ${attachedNames.join('; ')}`
+              const attachPrompt =
+                systemContent +
+                `\n\n## ATTACHED MANUAL PDFs\nThe following PDFs from "${manualLabel}" are attached. Read them, quote them, and interpret drawings/schematics.\n` +
+                signed.map((s, i) => `[PDF ${i + 1}] ${s.name}`).join('\n')
+              const rr = await fetch('https://api.x.ai/v1/responses', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${XAI_KEY}` },
+                body: JSON.stringify({
+                  model: 'grok-4.6',
+                  instructions: attachPrompt,
+                  input: [
+                    {
+                      role: 'user',
+                      content: [
+                        { type: 'input_text', text: userText },
+                        ...signed.map((s) => ({ type: 'input_file', file_url: s.url })),
+                      ],
+                    },
+                  ],
+                }),
+              })
+              if (rr.ok) {
+                const rd = await rr.json()
+                const txt = textFromResponses(rd)
+                if (txt) {
+                  await logUsage(db, uid, 'grok_chat', rd.usage?.total_tokens || 0)
+                  const content = (txt.trim() + (citationLine || fileCite)).trim()
+                  return new Response(
+                    JSON.stringify({
+                      choices: [{ message: { role: 'assistant', content } }],
+                      usage: rd.usage || {},
+                      _usage: {
+                        text: { used: usage.text + 1, limit: limits.text },
+                        voice: { used: usage.voice, limit: limits.voice },
+                      },
+                      _meta: {
+                        manualLabel,
+                        manualId: manualMeta?.id ?? null,
+                        hasFaultDBHit,
+                        hasManualPassages,
+                        hasCollectionPdfs,
+                        attachedPdfs: attachedNames,
+                        matchTokens,
+                      },
+                    }),
+                    { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+                  )
+                }
+              } else {
+                console.warn('responses+files failed', rr.status, await rr.text())
+              }
+            }
           }
+        } catch (e) {
+          console.warn('pdf attach path failed (continuing to text chat)', e)
         }
+      }
+
+      if (!hasManualPassages && !hasFaultDBHit && faultCodes.length) {
+        await applyFaultLookup()
+        if (hasFaultDBHit) systemContent = composeSystem()
       }
 
       const xr = await fetch('https://api.x.ai/v1/chat/completions', {
@@ -798,6 +990,8 @@ serve(async (req) => {
         manualId: manualMeta?.id ?? null,
         hasFaultDBHit,
         hasManualPassages,
+        hasCollectionPdfs,
+        attachedPdfs: attachedNames,
         matchTokens,
       }
       return new Response(JSON.stringify(xd), {
