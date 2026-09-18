@@ -34,6 +34,27 @@ test('pdf paths prefer chapter_metadata, then a single PDF, then a folder prefix
   assert.equal(escapeIlike('50%_off'), '50\\%\\_off');
 });
 
+test('God Index preserves mixed-case PDF paths for Storage download (Xeo 105)', () => {
+  const xeo = {
+    id: 105,
+    storage_path: 'shared/cutera/xeo',
+    is_folder: true,
+    chapter_metadata: [
+      { storage_path: 'shared/cutera/xeo/Xeo Service Manual RevB.pdf' },
+      { storage_path: 'shared/cutera/xeo/Xeo System Schematics RevB.pdf' },
+    ],
+  };
+  assert.deepEqual(pdfPathsForManual(xeo), [
+    'shared/cutera/xeo/Xeo Service Manual RevB.pdf',
+    'shared/cutera/xeo/Xeo System Schematics RevB.pdf',
+  ]);
+  assert.equal(folderPrefixForManual(xeo), 'shared/cutera/xeo');
+  assert.deepEqual(
+    chapterPathsFromMetadata([{ storage_path: '/shared/cutera/xeo/Xeo Service Manual RevB.pdf' }]),
+    ['shared/cutera/xeo/Xeo Service Manual RevB.pdf']
+  );
+});
+
 test('asManualCatalogId accepts bigint catalog ids and rejects uuid', () => {
   assert.equal(asManualCatalogId(42), 42);
   assert.equal(asManualCatalogId('108'), 108);

@@ -55,10 +55,13 @@ function truthyFlag(value: unknown): boolean {
   return value === true || value === 1 || value === '1' || value === 'true' || value === 't';
 }
 
+/** Storage object keys are case-sensitive. Do not fold case — mixed-case PDFs (Xeo 105) 404. */
 function clipPath(value: unknown): string {
   return String(value ?? '')
     .trim()
+    .replace(/\\/g, '/')
     .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
     .replace(/[?#].*$/, '');
 }
 

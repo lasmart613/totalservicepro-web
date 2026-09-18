@@ -18,14 +18,35 @@ export type CatalogManual = {
 
 export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
 
+/**
+ * Sanitize a manuals-bucket path without changing case.
+ * Storage download/list/upload are case-sensitive — mixed-case keys
+ * (e.g. Cutera Xeo id 105: `Xeo Service Manual RevB.pdf`) 404 if lowercased.
+ */
 export function normalizeManualPath(value: unknown): string {
   return String(value ?? '')
     .trim()
     .replace(/\\/g, '/')
     .replace(/^\/+/, '')
     .replace(/\/+$/, '')
-    .replace(/[?#].*$/, '')
-    .toLowerCase();
+    .replace(/[?#].*$/, '');
+}
+
+/** Case-folded key for comparing paths only. Never pass this to Storage I/O. */
+export function manualPathKey(value: unknown): string {
+  return normalizeManualPath(value).toLowerCase();
+}
+
+function uniqueStoragePaths(paths: string[]): string[] {
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const p of paths) {
+    const key = manualPathKey(p);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+  }
+  return out;
 }
 
 export function asManualId(value: unknown): number | null {
@@ -38,8 +59,8 @@ export function asManualId(value: unknown): number | null {
 
 /** True when selected and catalog paths are the same file or one is a folder prefix of the other. */
 export function manualPathsAlign(selected: unknown, catalog: unknown): boolean {
-  const a = normalizeManualPath(selected);
-  const b = normalizeManualPath(catalog);
+  const a = manualPathKey(selected);
+  const b = manualPathKey(catalog);
   if (!a || !b) return false;
   if (a === b) return true;
   return a.startsWith(`${b}/`) || b.startsWith(`${a}/`);
@@ -55,13 +76,13 @@ export function resolveManualFromCatalog<T extends CatalogManual>(
     if (byId) return byId;
   }
 
-  const path = normalizeManualPath(opts.manualPath);
+  const path = manualPathKey(opts.manualPath);
   if (!path) return null;
 
   const matches = catalog.filter((m) => manualPathsAlign(path, m.storage_path));
   matches.sort((a, b) => {
-    const ap = normalizeManualPath(a.storage_path);
-    const bp = normalizeManualPath(b.storage_path);
+    const ap = manualPathKey(a.storage_path);
+    const bp = manualPathKey(b.storage_path);
     const aExact = ap === path ? 1 : 0;
     const bExact = bp === path ? 1 : 0;
     if (bExact !== aExact) return bExact - aExact;
@@ -100,7 +121,8 @@ export function buildGrokChatPayload(opts: {
   const hadPriorScope = lastId != null || lastPath != null;
   const scopeChanged =
     hadPriorScope &&
-    (manualId !== lastId || (manualId == null && lastId == null && manualPath !== lastPath));
+    (manualId !== lastId ||
+      (manualId == null && lastId == null && manualPathKey(manualPath) !== manualPathKey(lastPath)));
 
   const nonSys = opts.messages.filter((m) => m.role === 'user' || m.role === 'assistant');
   const messages = scopeChanged
@@ -160,11 +182,13 @@ export function pdfPathsForAiAttach(manual: {
   chapter_metadata?: unknown;
 }): string[] {
   const chapters = Array.isArray(manual.chapter_metadata)
-    ? manual.chapter_metadata
-        .map((c) => normalizeManualPath((c as { storage_path?: unknown })?.storage_path))
-        .filter((p) => /\.pdf$/i.test(p))
+    ? uniqueStoragePaths(
+        manual.chapter_metadata
+          .map((c) => normalizeManualPath((c as { storage_path?: unknown })?.storage_path))
+          .filter((p) => /\.pdf$/i.test(p))
+      )
     : [];
-  if (chapters.length) return [...new Set(chapters)];
+  if (chapters.length) return chapters;
   const entry = normalizeManualPath(manual.entry_file_path);
   if (entry && /\.pdf$/i.test(entry)) return [entry];
   const path = normalizeManualPath(manual.storage_path);

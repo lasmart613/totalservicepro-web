@@ -9,11 +9,18 @@ import {
   excerptManualSearchText,
   manualPathsAlign,
   normalizeManualPath,
+  manualPathKey,
   folderPrefixForAiAttach,
   hasAttachablePdfHint,
   pdfPathsForAiAttach,
   resolveManualFromCatalog,
 } from './manual-scope.ts';
+import {
+  folderPrefixForAiAttach as edgeFolderPrefixForAiAttach,
+  manualPathKey as edgeManualPathKey,
+  normalizeManualPath as edgeNormalizeManualPath,
+  pdfPathsForAiAttach as edgePdfPathsForAiAttach,
+} from '../../../supabase/functions/grok-assistant/manual-scope.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -51,7 +58,15 @@ test('elite SM folder does not collide with elite_mpx file', () => {
     ),
     true
   );
-  assert.equal(normalizeManualPath('/Shared/Cynosure/Elite/'), 'shared/cynosure/elite');
+  assert.equal(normalizeManualPath('/Shared/Cynosure/Elite/'), 'Shared/Cynosure/Elite');
+  assert.equal(manualPathKey('/Shared/Cynosure/Elite/'), 'shared/cynosure/elite');
+  assert.equal(
+    manualPathsAlign(
+      'shared/cutera/xeo/Xeo Service Manual RevB.pdf',
+      'shared/cutera/xeo/xeo service manual revb.pdf'
+    ),
+    true
+  );
 });
 
 test('resolveManualFromCatalog prefers id, then exact path, and never picks MPX for Elite SM', () => {
@@ -125,6 +140,55 @@ test('single-file manuals attach the storage_path PDF; folders use chapters or a
   assert.match(excerptManualSearchText('Alex 755 nm and YAG 1064 nm wavelengths.', 'wavelengths'), /1064/);
 });
 
+const XEO_105 = {
+  id: 105,
+  title: 'Cutera Xeo Service Manual',
+  storage_path: 'shared/cutera/xeo',
+  is_folder: true,
+  chapter_metadata: [
+    { storage_path: 'shared/cutera/xeo/Xeo Service Manual RevB.pdf' },
+    { storage_path: 'shared/cutera/xeo/Xeo System Schematics RevB.pdf' },
+    { storage_path: 'shared/cutera/xeo/Xeo Service Manual RevB.pdf' },
+  ],
+};
+
+test('pdfPathsForAiAttach / normalizeManualPath keep Xeo 105 mixed-case Storage keys', () => {
+  const expected = [
+    'shared/cutera/xeo/Xeo Service Manual RevB.pdf',
+    'shared/cutera/xeo/Xeo System Schematics RevB.pdf',
+  ];
+  assert.deepEqual(pdfPathsForAiAttach(XEO_105), expected);
+  assert.equal(
+    normalizeManualPath('/shared/cutera/xeo/Xeo Service Manual RevB.pdf'),
+    'shared/cutera/xeo/Xeo Service Manual RevB.pdf'
+  );
+  assert.equal(
+    manualPathKey('/shared/cutera/xeo/Xeo Service Manual RevB.pdf'),
+    'shared/cutera/xeo/xeo service manual revb.pdf'
+  );
+  assert.equal(folderPrefixForAiAttach(XEO_105), 'shared/cutera/xeo');
+  assert.deepEqual(edgePdfPathsForAiAttach(XEO_105), expected);
+  assert.equal(
+    edgeNormalizeManualPath('/shared/cutera/xeo/Xeo Service Manual RevB.pdf'),
+    'shared/cutera/xeo/Xeo Service Manual RevB.pdf'
+  );
+  assert.equal(
+    edgeManualPathKey('/shared/cutera/xeo/Xeo Service Manual RevB.pdf'),
+    'shared/cutera/xeo/xeo service manual revb.pdf'
+  );
+  assert.equal(edgeFolderPrefixForAiAttach(XEO_105), 'shared/cutera/xeo');
+});
+
+test('scope change compares paths case-insensitively but sends original casing', () => {
+  const same = buildGrokChatPayload({
+    messages: [{ role: 'user', content: 'schematics?' }],
+    manualPath: 'shared/cutera/xeo/Xeo Service Manual RevB.pdf',
+    lastSentManualPath: 'shared/cutera/xeo/xeo service manual revb.pdf',
+  });
+  assert.equal(same.scopeChanged, false);
+  assert.equal(same.manualPath, 'shared/cutera/xeo/Xeo Service Manual RevB.pdf');
+});
+
 test('AI assistant and grok-assistant send current id/path and do not skip incomplete PDFs', () => {
   const client = readFileSync(join(here, '../../app/ai-assistant/AIAssistantClient.tsx'), 'utf8');
   const grok = readFileSync(join(here, 'grok-client.ts'), 'utf8');
@@ -141,6 +205,9 @@ test('AI assistant and grok-assistant send current id/path and do not skip incom
   assert.match(fn, /manual_search_index/);
   assert.match(fn, /pdfPathsForAiAttach\(manualMeta\)/);
   assert.match(fn, /collection_ids:\s*\[TSP_COLLECTION_ID\]/);
+  const scopeSrc = readFileSync(join(here, '../../../supabase/functions/grok-assistant/manual-scope.ts'), 'utf8');
+  assert.match(scopeSrc, /Never pass this to Storage I\/O/);
+  assert.match(scopeSrc, /export function manualPathKey/);
   assert.doesNotMatch(fn, /ns\.includes\(normPath\)|normPath\.includes\(ns\)/);
   assert.match(reindex, /manualId|manual_id/);
   assert.match(reindex, /is_incomplete/);
