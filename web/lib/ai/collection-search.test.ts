@@ -10,9 +10,13 @@ import {
   collectionHitsFromResponse,
   collectionNameFilters,
   collectionSearchBody,
+  displayAttachedName,
+  docHasForeignModel,
   docMatchesManual,
+  expectedFilenamesForPaths,
   fileIdNameMapFromDocuments,
   filterHitsForManual,
+  namesAlign,
   pickCollectionAttachments,
   pickFileIdsForManual,
   retrievedFromHits,
@@ -43,6 +47,9 @@ const XEO_CHAPTERS = [
   { storage_path: 'shared/cutera/xeo/Xeo Service Manual RevB.pdf' },
   { storage_path: 'shared/cutera/xeo/Xeo System Schematics RevB.pdf' },
 ];
+const XEO_PATHS = XEO_CHAPTERS.map((c) => c.storage_path);
+const COOLGLIDE_15 = 'Cutera CoolGlide Service Manual Complete.pdf';
+const COOLGLIDE_PATH = 'shared/cutera/coolglide/Cutera CoolGlide Service Manual Complete.pdf';
 
 test('parses live xAI matches/chunk_content (old results/text parser would miss these)', () => {
   const hits = collectionHitsFromResponse(XEO_HITS);
@@ -132,4 +139,76 @@ test('grok-assistant chat uses collection file_ids and does not require manual_s
   assert.match(fn, /resolveCollectionManualDocs/);
   assert.match(fn, /collectionSearchBody/);
   assert.match(fn, /hasCollectionPdfs/);
+  assert.match(fn, /expectedFilenamesForPaths/);
+  assert.match(fn, /already_in_collection/);
 });
+
+test('Xeo 105 file_id resolve does not pick CoolGlide 15 from the shared collection', () => {
+  const expected = expectedFilenamesForPaths(XEO_PATHS);
+  assert.ok(expected.includes('Xeo Service Manual RevB.pdf'));
+  assert.ok(expected.includes('Xeo_Service_Manual_RevB.pdf'));
+
+  const filters = collectionNameFilters(expected, ['cutera', 'xeo']);
+  assert.ok(filters.some((f) => /xeo service manual/i.test(f)));
+  assert.equal(
+    filters.some((f) => compactIsBrand(f)),
+    false,
+    'name:"cutera" must not be used — it lists CoolGlide 15'
+  );
+  assert.equal(filters.includes('cutera'), false);
+  assert.equal(filters.includes('xeo'), false);
+
+  assert.equal(namesAlign('Xeo Service Manual RevB.pdf', 'Xeo_Service_Manual_RevB.pdf'), true);
+  assert.equal(namesAlign('cutera', COOLGLIDE_15), false);
+  assert.equal(namesAlign('Xeo Service Manual RevB.pdf', COOLGLIDE_15), false);
+
+  const nameById = {
+    file_xeo_sm: 'Xeo_Service_Manual_RevB.pdf',
+    file_xeo_sch: 'Xeo_System_Schematics_RevB.pdf',
+    file_cg_15: COOLGLIDE_15,
+  };
+  const keys = chapterFileKeys(XEO_CHAPTERS);
+  const fileIds = pickFileIdsForManual(nameById, expected, ['cutera', 'xeo'], keys);
+  assert.equal(fileIds.has('file_xeo_sm'), true);
+  assert.equal(fileIds.has('file_xeo_sch'), true);
+  assert.equal(fileIds.has('file_cg_15'), false, 'CoolGlide 15 file_id must stay out of Xeo 105 scope');
+
+  assert.equal(docMatchesManual(COOLGLIDE_15, ['cutera', 'xeo'], keys), false);
+  assert.equal(docHasForeignModel(COOLGLIDE_15, ['cutera', 'xeo']), true);
+  assert.equal(docHasForeignModel('Xeo_Service_Manual_RevB.pdf', ['cutera', 'xeo']), false);
+
+  const mixedHits = [
+    {
+      text: 'Fault 322 — Flow Switch: Check the cooling-system flow switch and harness.',
+      source: '',
+      fileId: 'file_xeo_sm',
+    },
+    {
+      text: 'Fault 322 CoolGlide Ch.12 error-code table that is long enough to keep.',
+      source: COOLGLIDE_15,
+      fileId: 'file_cg_15',
+    },
+  ];
+  const named = applyFileNameMap(mixedHits, nameById);
+  const filtered = filterHitsForManual(named, {
+    tokens: ['cutera', 'xeo'],
+    chapterKeys: keys,
+    fileIds,
+    expectedFilenames: expected,
+    requireMatch: true,
+  });
+  assert.equal(filtered.parts.length, 1);
+  assert.equal(filtered.parts[0].fileId, 'file_xeo_sm');
+  assert.match(retrievedFromHits(filtered.parts, expected)[0].source, /Xeo Service Manual RevB\.pdf/);
+  assert.doesNotMatch(retrievedFromHits(filtered.parts, expected)[0].source, /CoolGlide/i);
+  assert.equal(displayAttachedName('Xeo_Service_Manual_RevB.pdf', expected), 'Xeo Service Manual RevB.pdf');
+
+  const cgExpected = expectedFilenamesForPaths([COOLGLIDE_PATH]);
+  const cgIds = pickFileIdsForManual(nameById, cgExpected, ['cutera', 'coolglide'], []);
+  assert.equal(cgIds.has('file_cg_15'), true);
+  assert.equal(cgIds.has('file_xeo_sm'), false);
+});
+
+function compactIsBrand(value: string): boolean {
+  return ['cutera', 'candela', 'cynosure'].includes(value.toLowerCase().replace(/[^a-z0-9]+/g, ''));
+}
