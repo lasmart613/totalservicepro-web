@@ -10,7 +10,19 @@ function ManualViewInner() {
   const id = params.get('id');
   const title = params.get('title');
   const storagePath = params.get('storage_path');
-  return <ManualPdfViewer manualId={id} title={title} storagePath={storagePath} />;
+  const page = params.get('page') || params.get('p');
+  const section = params.get('section') || params.get('s');
+  const find = params.get('q') || params.get('find');
+  return (
+    <ManualPdfViewer
+      manualId={id}
+      title={title}
+      storagePath={storagePath}
+      initialPage={page}
+      initialSection={section}
+      initialFind={find}
+    />
+  );
 }
 
 export default function ManualViewPage() {

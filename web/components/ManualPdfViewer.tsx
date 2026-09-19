@@ -12,6 +12,8 @@ import {
   type ManualChapter,
   type ManualViewPayload,
 } from '@/lib/manuals';
+import { asPositivePage } from '@/lib/ai/citations';
+import { ViewerAiPanel } from '@/components/ViewerAiPanel';
 
 type PdfPageProxy = {
   getViewport: (opts: { scale: number }) => { width: number; height: number };
@@ -219,19 +221,28 @@ export function ManualPdfViewer({
   title: titleFromQuery,
   storagePath: storagePathFromQuery,
   sourceUrl,
+  initialPage,
+  initialSection,
+  initialFind,
 }: {
   manualId?: string | null;
   title?: string | null;
   storagePath?: string | null;
   /** Same-origin or already-authorized URL (fixture demo). Skips library entitlements. */
   sourceUrl?: string | null;
+  initialPage?: string | number | null;
+  initialSection?: string | null;
+  initialFind?: string | null;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pdfRef = useRef<PdfDoc | null>(null);
   const searchGen = useRef(0);
 
   const [title, setTitle] = useState(titleFromQuery || 'Service Manual');
+  const [catalogPath, setCatalogPath] = useState(storagePathFromQuery || '');
+  const [catalogBrand, setCatalogBrand] = useState<string | null>(null);
   const [isIncomplete, setIsIncomplete] = useState(false);
+  const [showRail, setShowRail] = useState(true);
   const [chapters, setChapters] = useState<ManualChapter[]>([]);
   const [showChapters, setShowChapters] = useState(false);
   const [page, setPage] = useState(1);
@@ -367,16 +378,25 @@ export function ManualPdfViewer({
             const supabase = getSupabaseClient();
             let row = await supabase
               .from('manuals')
-              .select('is_incomplete')
+              .select('is_incomplete,storage_path,brand,title')
               .eq('id', payload.manualId)
               .maybeSingle();
             if (row.error && /is_incomplete|schema cache|column/i.test(row.error.message || '')) {
               incomplete = payload.isIncomplete === true;
+              row = await supabase
+                .from('manuals')
+                .select('storage_path,brand,title')
+                .eq('id', payload.manualId)
+                .maybeSingle();
             } else if (row.data && (row.data as { is_incomplete?: unknown }).is_incomplete === true) {
               incomplete = true;
             } else if (row.data) {
               incomplete = false;
             }
+            const data = row.data as { storage_path?: string; brand?: string | null; title?: string | null } | null;
+            if (data?.storage_path && !cancelled) setCatalogPath(data.storage_path);
+            if (data?.brand && !cancelled) setCatalogBrand(data.brand);
+            if (data?.title && !cancelled && !titleFromQuery) setTitle(data.title);
           } catch {
             /* keep stashed flag */
           }
@@ -450,8 +470,8 @@ export function ManualPdfViewer({
     return () => io.disconnect();
   }, [pageCount, loading, docEpoch]);
 
-  async function runSearch(direction: 1 | 0 | -1 = 0) {
-    const q = query.trim();
+  async function runSearch(direction: 1 | 0 | -1 = 0, override?: string) {
+    const q = (override ?? query).trim();
     if (!q || !pdfRef.current) return;
     if (direction !== 0 && hits.length) {
       const next = (hitIndex + direction + hits.length) % hits.length;
@@ -487,6 +507,21 @@ export function ManualPdfViewer({
       if (searchGen.current === gen) setSearching(false);
     }
   }
+
+  useEffect(() => {
+    if (loading || !pageCount) return;
+    const target = asPositivePage(initialPage);
+    if (target) {
+      const t = window.setTimeout(() => goToPage(Math.min(target, pageCount)), 60);
+      return () => clearTimeout(t);
+    }
+    const find = String(initialSection || initialFind || '').trim();
+    if (!find) return;
+    setQuery(find);
+    void runSearch(0, find);
+    // Deep-link jump after the PDF pages mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docEpoch, loading, pageCount]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -595,47 +630,15 @@ export function ManualPdfViewer({
           >
             ＋
           </button>
-          <form
-            className="flex items-center gap-1"
-            onSubmit={(e) => {
-              e.preventDefault();
-              runSearch(0);
-            }}
+          <button
+            type="button"
+            className="rounded-md border border-[#374151] bg-[rgba(251,191,36,0.1)] px-2.5 py-1.5 text-[13px] text-[#fbbf24]"
+            onClick={() => setShowRail((v) => !v)}
+            aria-expanded={showRail}
+            aria-controls="viewer-rail"
           >
-            <input
-              type="search"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Find in manual"
-              className="w-36 sm:w-44 rounded border border-[#374151] bg-[#111827] px-2 py-1.5 text-[13px] text-[#E5E7EB]"
-              disabled={loading || !pageCount}
-            />
-            <button
-              type="submit"
-              className="rounded-md border border-[#374151] bg-[rgba(251,191,36,0.1)] px-2.5 py-1.5 text-[13px] text-[#fbbf24] disabled:opacity-40"
-              disabled={loading || !pageCount || searching || !query.trim()}
-            >
-              Find
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-[#374151] bg-[rgba(251,191,36,0.1)] px-2 py-1.5 text-[13px] text-[#fbbf24] disabled:opacity-40"
-              onClick={() => runSearch(-1)}
-              disabled={hits.length < 2}
-              aria-label="Previous match"
-            >
-              ↑
-            </button>
-            <button
-              type="button"
-              className="rounded-md border border-[#374151] bg-[rgba(251,191,36,0.1)] px-2 py-1.5 text-[13px] text-[#fbbf24] disabled:opacity-40"
-              onClick={() => runSearch(1)}
-              disabled={hits.length < 2}
-              aria-label="Next match"
-            >
-              ↓
-            </button>
-          </form>
+            {showRail ? 'Hide tools' : 'Search / AI'}
+          </button>
           {chapters.length > 1 && (
             <button
               type="button"
@@ -647,57 +650,109 @@ export function ManualPdfViewer({
           )}
         </div>
       </div>
-      {searchNote && (
-        <div className="px-3 py-1 text-xs text-[#9CA3AF] bg-[#111827] border-b border-[#374151] shrink-0">
-          {searchNote}
-        </div>
-      )}
 
-      <div ref={scrollRef} className="flex-1 min-h-0 overflow-auto relative">
-        {loading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[#9CA3AF] z-10">
-            <div>Loading manual in the app…</div>
-            <div className="w-64 h-2 rounded-full bg-[#374151] overflow-hidden">
-              <div className="h-full bg-[var(--gold,#FBBF24)]" style={{ width: `${progress}%` }} />
+      <div className={`viewer-layout ${showRail ? 'is-rail-open' : ''}`}>
+        <aside id="viewer-rail" className="viewer-rail" aria-label="Manual search and AI tools">
+          <div className="viewer-rail-label">Search tools</div>
+          <form
+            className="viewer-find"
+            onSubmit={(e) => {
+              e.preventDefault();
+              void runSearch(0);
+            }}
+          >
+            <input
+              type="search"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Find in manual"
+              className="viewer-find-input"
+              disabled={loading || !pageCount}
+            />
+            <div className="viewer-find-row">
+              <button
+                type="submit"
+                className="viewer-tool-btn"
+                disabled={loading || !pageCount || searching || !query.trim()}
+              >
+                Find
+              </button>
+              <button
+                type="button"
+                className="viewer-tool-btn"
+                onClick={() => void runSearch(-1)}
+                disabled={hits.length < 2}
+                aria-label="Previous match"
+              >
+                ↑
+              </button>
+              <button
+                type="button"
+                className="viewer-tool-btn"
+                onClick={() => void runSearch(1)}
+                disabled={hits.length < 2}
+                aria-label="Next match"
+              >
+                ↓
+              </button>
             </div>
-          </div>
-        )}
-        {error && !loading && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center z-10">
-            <div className="text-lg font-bold text-red-400">Could not open manual</div>
-            <div className="text-sm text-[#9CA3AF] max-w-md">{error}</div>
-            <Link href={sourceUrl ? '/' : '/manuals'} className="btn btn-primary text-sm px-4 py-2">
-              {sourceUrl ? 'Back home' : 'Back to library'}
-            </Link>
-          </div>
-        )}
-        {showChapters && chapters.length > 0 && (
-          <div className="absolute inset-0 z-10 bg-[#0f172a] p-6 overflow-auto">
-            <div className="max-w-4xl mx-auto">
-              <h2 className="text-xl font-bold text-[var(--gold,#FBBF24)] mb-4">📚 Chapters</h2>
-              <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(168px,1fr))' }}>
-                {chapters.map((ch, i) => (
-                  <button
-                    key={`${ch.storage_path || i}`}
-                    type="button"
-                    onClick={() => openChapter(ch)}
-                    className="text-left rounded-lg border border-[#374151] bg-[#1F2937] px-3 py-3 hover:border-[var(--gold,#FBBF24)]"
-                  >
-                    <div className="text-[10px] font-bold text-[var(--gold,#FBBF24)] mb-1">Chapter {i + 1}</div>
-                    <div className="text-sm">{ch.title || ch.label || ch.storage_path || `Chapter ${i + 1}`}</div>
-                  </button>
-                ))}
+          </form>
+          {searchNote && <div className="viewer-search-note">{searchNote}</div>}
+
+          <ViewerAiPanel
+            manualId={manualId}
+            title={title}
+            storagePath={catalogPath || storagePathFromQuery}
+            brand={catalogBrand}
+          />
+        </aside>
+
+        <div ref={scrollRef} className="viewer-pages flex-1 min-h-0 overflow-auto relative">
+          {loading && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-[#9CA3AF] z-10">
+              <div>Loading manual in the app…</div>
+              <div className="w-64 h-2 rounded-full bg-[#374151] overflow-hidden">
+                <div className="h-full bg-[var(--gold,#FBBF24)]" style={{ width: `${progress}%` }} />
               </div>
             </div>
-          </div>
-        )}
-        {!loading && !error && pages.length > 0 && pdf && (
-          <div key={docEpoch} className="pb-8">
-            {pages.map((n) => (
-              <PdfPageCanvas key={`${docEpoch}-${n}`} pdf={pdf} pageNumber={n} zoom={zoom} eager={n <= 2} />
-            ))}
-          </div>
-        )}
+          )}
+          {error && !loading && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center z-10">
+              <div className="text-lg font-bold text-red-400">Could not open manual</div>
+              <div className="text-sm text-[#9CA3AF] max-w-md">{error}</div>
+              <Link href={sourceUrl ? '/' : '/manuals'} className="btn btn-primary text-sm px-4 py-2">
+                {sourceUrl ? 'Back home' : 'Back to library'}
+              </Link>
+            </div>
+          )}
+          {showChapters && chapters.length > 0 && (
+            <div className="absolute inset-0 z-10 bg-[#0f172a] p-6 overflow-auto">
+              <div className="max-w-4xl mx-auto">
+                <h2 className="text-xl font-bold text-[var(--gold,#FBBF24)] mb-4">📚 Chapters</h2>
+                <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(168px,1fr))' }}>
+                  {chapters.map((ch, i) => (
+                    <button
+                      key={`${ch.storage_path || i}`}
+                      type="button"
+                      onClick={() => openChapter(ch)}
+                      className="text-left rounded-lg border border-[#374151] bg-[#1F2937] px-3 py-3 hover:border-[var(--gold,#FBBF24)]"
+                    >
+                      <div className="text-[10px] font-bold text-[var(--gold,#FBBF24)] mb-1">Chapter {i + 1}</div>
+                      <div className="text-sm">{ch.title || ch.label || ch.storage_path || `Chapter ${i + 1}`}</div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
+          {!loading && !error && pages.length > 0 && pdf && (
+            <div key={docEpoch} className="pb-8">
+              {pages.map((n) => (
+                <PdfPageCanvas key={`${docEpoch}-${n}`} pdf={pdf} pageNumber={n} zoom={zoom} eager={n <= 2} />
+              ))}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );

@@ -17,6 +17,10 @@ test('legacy Android HTML notification links map to live Next routes', () => {
   assert.equal(mapAndroidHtmlPath('/find_a_rep.html'), '/find-a-rep');
   assert.equal(mapAndroidHtmlPath('/manual_library.html'), '/manuals');
   assert.equal(mapAndroidHtmlPath('/pdf_viewer.html'), '/manuals/view');
+  assert.equal(
+    mapAndroidHtmlPath('/pdf_viewer.html', '?id=105&page=42'),
+    '/manuals/view?id=105&page=42'
+  );
   assert.equal(mapAndroidHtmlPath('/ai_assistant.html'), '/ai-assistant');
   assert.equal(mapAndroidHtmlPath('/service_requests.html', '?id=9'), '/accepted-bids?id=9');
   assert.equal(mapAndroidHtmlPath('/service_requests.html?id=9'), '/accepted-bids?id=9');

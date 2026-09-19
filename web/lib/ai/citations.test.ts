@@ -1,0 +1,97 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'url';
+import {
+  citationLabel,
+  citationViewerHref,
+  citationsFromMeta,
+  embedCitationMarker,
+  extractSectionRef,
+  formatAssistantHtml,
+  mergeCitations,
+  parseCitationMarkers,
+  stripCitationMarkers,
+} from './citations.ts';
+
+const here = dirname(fileURLToPath(import.meta.url));
+
+test('citation viewer href stays on the auth-gated in-app route', () => {
+  assert.equal(
+    citationViewerHref({ manualId: 105, title: 'Xeo Service Manual Rev B', page: 42 }),
+    '/manuals/view?id=105&title=Xeo+Service+Manual+Rev+B&page=42'
+  );
+  assert.equal(citationViewerHref({ manualId: 16 }), '/manuals/view?id=16');
+  assert.equal(
+    citationViewerHref({ manualId: 105, section: '4.2' }),
+    '/manuals/view?id=105&section=4.2'
+  );
+  assert.doesNotMatch(citationViewerHref({ manualId: 105, page: 3 }), /https?:|storage\/v1|sign=/);
+});
+
+test('structured cite markers round-trip without scraping prose', () => {
+  const marker = embedCitationMarker({
+    manualId: 105,
+    page: 42,
+    section: '4.2',
+    title: 'Xeo Service Manual Rev B',
+  });
+  assert.match(marker, /\[\[cite:id=105&p=42&s=4\.2/);
+  const parsed = parseCitationMarkers(`See the flow switch.\n${marker}`);
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].manualId, 105);
+  assert.equal(parsed[0].page, 42);
+  assert.equal(parsed[0].section, '4.2');
+  assert.equal(stripCitationMarkers(`Hello ${marker}\n`), 'Hello');
+});
+
+test('assistant HTML links page/section phrases to the viewer, not a PDF', () => {
+  const html = formatAssistantHtml(
+    'Open page 42 and Section 4.2 of the Xeo book.\n\n— Source: Xeo Service Manual Rev B, p.42\n[[cite:id=105&p=42&s=4.2&t=Xeo+Service+Manual+Rev+B]]',
+    []
+  );
+  assert.match(html, /href="\/manuals\/view\?id=105/);
+  assert.match(html, /page=42/);
+  assert.match(html, /ai-cite-link/);
+  assert.doesNotMatch(html, /\[\[cite:/);
+  assert.doesNotMatch(html, /\.pdf\?|get-manual-url|window\.open/i);
+  assert.doesNotMatch(html, /<script/i);
+});
+
+test('document-only citation still opens that manual', () => {
+  const html = formatAssistantHtml('Calibrate the flow switch.', [
+    { manualId: 105, title: 'Xeo Service Manual Rev B' },
+  ]);
+  assert.match(html, /href="\/manuals\/view\?id=105/);
+  assert.doesNotMatch(html, /page=/);
+});
+
+test('meta citations and section extraction', () => {
+  assert.equal(extractSectionRef('See Section 4.2 Flow Switch harness.'), '4.2');
+  assert.equal(extractSectionRef('Chapter 12 error tables.'), 'Ch.12');
+  assert.equal(extractSectionRef('no heading here'), undefined);
+  const fromMeta = citationsFromMeta(
+    {
+      manualId: 105,
+      manualLabel: 'Cutera Xeo',
+      citations: [{ manualId: 105, page: 12, section: '3.1', title: 'Xeo SM' }],
+    },
+    16
+  );
+  assert.equal(fromMeta[0].page, 12);
+  assert.equal(citationLabel(fromMeta[0]), 'Xeo SM, p.12, §3.1');
+  assert.equal(mergeCitations(fromMeta, fromMeta).length, 1);
+});
+
+test('AI assistant and viewer use structured cites, not public PDF URLs', () => {
+  const client = readFileSync(join(here, '../../app/ai-assistant/AIAssistantClient.tsx'), 'utf8');
+  const viewer = readFileSync(join(here, '../../components/ManualPdfViewer.tsx'), 'utf8');
+  const rail = readFileSync(join(here, '../../components/ViewerAiPanel.tsx'), 'utf8');
+  const grok = readFileSync(join(here, 'grok-client.ts'), 'utf8');
+  assert.match(client, /formatAssistantHtml/);
+  assert.match(client, /citationViewerHref|ai-cite-link/);
+  assert.match(viewer, /initialPage|viewer-rail/);
+  assert.match(rail, /Ask about this manual|byManual|messagesForManual/);
+  assert.match(grok, /citations/);
+});

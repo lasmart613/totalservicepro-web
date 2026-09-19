@@ -53,6 +53,26 @@ const XEO_PATHS = XEO_CHAPTERS.map((c) => c.storage_path);
 const COOLGLIDE_15 = 'Cutera CoolGlide Service Manual Complete.pdf';
 const COOLGLIDE_PATH = 'shared/cutera/coolglide/Cutera CoolGlide Service Manual Complete.pdf';
 
+test('collection hits keep page/section for in-app viewer cites', () => {
+  const hits = collectionHitsFromResponse({
+    matches: [
+      {
+        file_id: 'file_xeo_sm',
+        chunk_content:
+          'Section 4.2 Flow Switch: Check the cooling-system flow switch and harness. If open, the IPL will not fire.',
+        page_number: 42,
+        fields: { filename: 'Xeo Service Manual RevB.pdf' },
+      },
+    ],
+  });
+  assert.equal(hits[0].page, 42);
+  assert.equal(hits[0].section, '4.2');
+  const retrieved = retrievedFromHits(hits, ['Xeo Service Manual RevB.pdf']);
+  assert.equal(retrieved[0].page, 42);
+  assert.equal(retrieved[0].section, '4.2');
+  assert.match(retrieved[0].source, /p\.42/);
+});
+
 test('parses live xAI matches/chunk_content (old results/text parser would miss these)', () => {
   const hits = collectionHitsFromResponse(XEO_HITS);
   assert.equal(hits.length, 2);
@@ -233,6 +253,8 @@ test('index.ts inlines the same cite-scope helpers as collection-search.ts', () 
   assert.equal(fn.includes('COLLECTION_NAME_FILTER_MAX = 3'), true);
   assert.equal(lib.includes('COLLECTION_NAME_FILTER_MAX = 3'), true);
   assert.match(fn, /never \"cutera\" ⊆ \"cuteracoolglide/);
+  assert.match(fn, /embedCitationMarker|\[\[cite:/);
+  assert.match(lib, /extractSectionRef/);
 });
 
 test('name filters stay few and compact-deduped so chat does not issue N serial GETs', () => {

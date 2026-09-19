@@ -208,6 +208,7 @@
     const params = new URLSearchParams(window.location.search);
     const storagePath = params.get('storage_path') || '';
     const title = params.get('title') || 'Service Manual';
+    const deepLinkPage = parseInt(params.get('page') || params.get('p') || '', 10);
 
     let pdfDoc = null;
     let currentPage = 1;
@@ -335,6 +336,9 @@
             if (findInfo) findInfo.textContent = '';
 
             hideLoading();
+            if (Number.isFinite(deepLinkPage) && deepLinkPage > 1) {
+                currentPage = Math.min(deepLinkPage, totalPages);
+            }
             await renderPage(currentPage);
             updateToolbar();
             updateZoomInfo();
@@ -673,7 +677,7 @@
 
     async function checkForFolderAndShowChapters() {
         const params = new URLSearchParams(window.location.search);
-        const manualId = params.get('manual_id');
+        const manualId = params.get('manual_id') || params.get('id');
         const sp = params.get('storage_path') || '';
         currentManualId = manualId ? parseInt(manualId, 10) : null;
 
@@ -712,6 +716,13 @@
 
                     // No chapter list yet (pre-backfill or not marked is_folder).
                     // Be helpful: if the row has an entry_file_path, load that PDF automatically.
+                    if (manual.storage_path && /\.pdf$/i.test(manual.storage_path)) {
+                        const canvasWrap = document.querySelector('.canvas-wrapper');
+                        if (canvasWrap) canvasWrap.style.display = '';
+                        await loadPDF(manual.storage_path);
+                        return true;
+                    }
+
                     if (manual.entry_file_path) {
                         const base = (manual.storage_path || sp || '').replace(/\/$/, '');
                         const entry = manual.entry_file_path.replace(/^\//, '');

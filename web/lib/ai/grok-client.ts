@@ -4,8 +4,15 @@
  */
 
 import { getSupabaseUrl } from '@/lib/supabase/client';
+import type { ManualCitation } from './citations';
+import { citationsFromMeta } from './citations';
 
-export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string };
+export type ChatMessage = {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  citations?: ManualCitation[];
+  ts?: number;
+};
 
 export type UsageBucket = { used: number; limit: number };
 
@@ -19,12 +26,15 @@ export type GrokChatResult = {
   ok: true;
   content: string;
   usage?: AiUsage;
+  citations?: ManualCitation[];
   meta?: {
     manualLabel?: string;
+    manualId?: number | null;
     hasFaultDBHit?: boolean;
     hasManualPassages?: boolean;
     hasCollectionPdfs?: boolean;
     attachedPdfs?: string[];
+    citations?: ManualCitation[];
   };
 };
 
@@ -156,9 +166,13 @@ export async function grokChat(opts: {
       };
     }
 
+    const meta = json?._meta;
+    const citations = citationsFromMeta(meta, opts.manualId ?? null);
+
     return {
       ok: true,
       content: String(content).trim(),
+      citations,
       usage: json?._usage
         ? {
             text: json._usage.text,
@@ -166,7 +180,14 @@ export async function grokChat(opts: {
             tier: json.tier,
           }
         : undefined,
-      meta: json?._meta,
+      meta: meta
+        ? {
+            ...meta,
+            citations,
+          }
+        : citations.length
+          ? { citations, manualId: opts.manualId ?? null }
+          : undefined,
     };
   } catch (e: any) {
     return {
