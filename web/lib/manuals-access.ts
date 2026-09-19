@@ -6,6 +6,7 @@ import { manualLibraryShelf, type ManualCatalogFields, type ManualLibraryShelf }
 import {
   canAccessManualsPage,
   canAccessOperatorsManuals,
+  canAccessRepairAi,
   canAccessServiceManuals,
   type OrgTypeLike,
   type RoleLike,
@@ -41,6 +42,31 @@ export function mayOpenManual(
 ): boolean {
   if (!manual) return canAccessServiceManuals(role, orgType);
   return canAccessManualLibraryShelf(role, orgType, manualLibraryShelf(manual));
+}
+
+/** Shared catalog books (AI Assistant dropdown), not private org uploads. */
+export function isSharedCatalogPath(path: unknown): boolean {
+  const p = String(path || '')
+    .trim()
+    .replace(/^\/+/, '')
+    .toLowerCase();
+  return p.startsWith('shared/');
+}
+
+/**
+ * Signed-in Repair-AI (service-company) members may open a shared/catalog
+ * manual in the in-app viewer without a company-library slot — same books
+ * they can already scope in AI Assistant. Still never a public PDF.
+ */
+export function mayViewAiScopedManual(opts: {
+  role?: RoleLike;
+  orgType?: OrgTypeLike;
+  storagePath?: string | null;
+  inLibrary?: boolean;
+}): boolean {
+  if (opts.inLibrary) return true;
+  if (!canAccessRepairAi(opts.role, opts.orgType)) return false;
+  return isSharedCatalogPath(opts.storagePath);
 }
 
 export function manualsForbiddenMessage(role?: RoleLike, orgType?: OrgTypeLike): string {

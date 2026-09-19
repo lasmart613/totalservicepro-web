@@ -10,7 +10,13 @@ import {
   isAdmin,
   isFieldEngineer,
 } from './roles.ts';
-import { filterManualsForCaller, mayOpenManual, manualsAccess } from './manuals-access.ts';
+import {
+  filterManualsForCaller,
+  isSharedCatalogPath,
+  mayOpenManual,
+  mayViewAiScopedManual,
+  manualsAccess,
+} from './manuals-access.ts';
 
 test('Larry Admin / Owner map to existing admin and owner roles', () => {
   assert.equal(isAdmin('admin'), true);
@@ -80,6 +86,53 @@ test('owners get Operators Manuals only — never repair Service Manuals', () =>
   assert.deepEqual(
     mixed.map((m) => m.title),
     ['Litho IFU (EN)']
+  );
+});
+
+test('service-company AI users may view shared catalog manuals without a library slot', () => {
+  assert.equal(isSharedCatalogPath('shared/cutera/xeo/Xeo Service Manual RevB.pdf'), true);
+  assert.equal(isSharedCatalogPath('orgs/acme/private.pdf'), false);
+  assert.equal(
+    mayViewAiScopedManual({
+      role: 'fse',
+      orgType: 'service_company',
+      storagePath: 'shared/cutera/xeo',
+    }),
+    true
+  );
+  assert.equal(
+    mayViewAiScopedManual({
+      role: 'admin',
+      orgType: 'service_company',
+      storagePath: 'shared/cutera/xeo/Xeo Service Manual RevB.pdf',
+      inLibrary: false,
+    }),
+    true
+  );
+  assert.equal(
+    mayViewAiScopedManual({
+      role: 'owner',
+      orgType: 'laser_clinic',
+      storagePath: 'shared/cutera/xeo',
+    }),
+    false
+  );
+  assert.equal(
+    mayViewAiScopedManual({
+      role: 'fse',
+      orgType: 'service_company',
+      storagePath: 'uploads/private/xeo.pdf',
+    }),
+    false
+  );
+  assert.equal(
+    mayViewAiScopedManual({
+      role: 'fse',
+      orgType: 'service_company',
+      storagePath: 'uploads/private/xeo.pdf',
+      inLibrary: true,
+    }),
+    true
   );
 });
 
