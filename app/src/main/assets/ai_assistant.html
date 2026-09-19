@@ -839,6 +839,30 @@
         return t;
     }
 
+    function formatAssistantHtml(content) {
+        let t = String(content || '')
+            .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        t = t.replace(/\[\[cite:([^\]]+)\]\]/g, function(_, raw) {
+            try {
+                const qs = new URLSearchParams(raw);
+                const id = qs.get('id');
+                if (!id) return '';
+                const dest = new URLSearchParams();
+                dest.set('id', id);
+                dest.set('manual_id', id);
+                if (qs.get('p')) dest.set('page', qs.get('p'));
+                if (qs.get('s')) dest.set('section', qs.get('s'));
+                if (qs.get('t')) dest.set('title', qs.get('t'));
+                const label = qs.get('t') || 'Open manual';
+                const extra = [qs.get('p') ? ('p.' + qs.get('p')) : '', qs.get('s') ? ('§' + qs.get('s')) : '']
+                    .filter(Boolean).join(', ');
+                return '<a href="pdf_viewer.html?' + dest.toString() + '" style="color:#FBBF24;font-weight:700">' +
+                    label + (extra ? ', ' + extra : '') + '</a>';
+            } catch (e) { return ''; }
+        });
+        return t.replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>').replace(/\n/g,'<br>');
+    }
+
     function renderSavedMessages() {
         if (!messages.length) return;
         const c = document.getElementById('chatMessages');
@@ -854,10 +878,7 @@
         const d = document.createElement('div');
         d.className = 'msg ' + role;
         const time = new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' });
-        const html = content
-            .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-            .replace(/\*\*(.*?)\*\*/g,'<strong>$1</strong>')
-            .replace(/\n/g,'<br>');
+        const html = formatAssistantHtml(content);
         d.innerHTML = `<div class="msg-bubble">${html}</div><div class="msg-time">${time}</div>`;
         c.appendChild(d);
         if (scroll) c.scrollTop = c.scrollHeight;

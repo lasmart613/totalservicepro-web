@@ -50,10 +50,20 @@ export function pdfInlineHeaders(filename = 'service-manual.pdf'): Record<string
   };
 }
 
-export function manualViewHref(opts: { id?: string | number | null; title?: string | null }): string {
+export function manualViewHref(opts: {
+  id?: string | number | null;
+  title?: string | null;
+  page?: string | number | null;
+  section?: string | null;
+  find?: string | null;
+}): string {
   const qs = new URLSearchParams();
   if (opts.id != null && String(opts.id).trim() !== '') qs.set('id', String(opts.id));
   if (opts.title) qs.set('title', String(opts.title).slice(0, 160));
+  const page = Number(opts.page);
+  if (Number.isFinite(page) && page >= 1) qs.set('page', String(Math.floor(page)));
+  if (opts.section) qs.set('section', String(opts.section).slice(0, 80));
+  if (opts.find) qs.set('q', String(opts.find).slice(0, 80));
   const q = qs.toString();
   return q ? `${MANUAL_VIEW_PATH}?${q}` : MANUAL_VIEW_PATH;
 }

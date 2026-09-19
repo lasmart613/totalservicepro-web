@@ -52,9 +52,38 @@ export type CollectionHit = {
   source: string
   fileId: string
   page?: number
+  section?: string
 }
 
-export type Retrieved = { text: string; source: string }
+export type Retrieved = { text: string; source: string; page?: number; section?: string }
+
+/** Heading-style section/chapter from a retrieved passage. */
+export function extractSectionRef(text: string): string | undefined {
+  const raw = String(text || '')
+  const sect = raw.match(/\b(?:section|sect\.?|§)\s*([0-9]+(?:\.[0-9]+){0,3})\b/i)
+  if (sect?.[1]) return sect[1]
+  const ch = raw.match(/\b(?:ch(?:apter)?\.?)\s*([0-9]+(?:\.[0-9]+)?)\b/i)
+  if (ch?.[1]) return `Ch.${ch[1]}`
+  return undefined
+}
+
+function hitPage(row: Record<string, unknown>): number | undefined {
+  const fields = row.fields && typeof row.fields === 'object' ? (row.fields as Record<string, unknown>) : {}
+  for (const v of [row.page_number, row.page, fields.page_number, fields.page]) {
+    const n = Number(v)
+    if (Number.isFinite(n) && n > 0 && n < 10000) return Math.floor(n)
+  }
+  return undefined
+}
+
+function hitSection(row: Record<string, unknown>, text: string): string | undefined {
+  const fields = row.fields && typeof row.fields === 'object' ? (row.fields as Record<string, unknown>) : {}
+  for (const key of ['section', 'section_title', 'heading']) {
+    const v = String(fields[key] ?? row[key] ?? '').trim()
+    if (v) return v.slice(0, 80)
+  }
+  return extractSectionRef(text)
+}
 
 /** Storage basename with original case (Xeo Service Manual RevB.pdf). */
 export function storageBasename(path: string): string {
@@ -229,12 +258,14 @@ export function collectionHitsFromResponse(sd: unknown): CollectionHit[] {
     const row = raw as Record<string, unknown>
     const text = rowText(row)
     if (text.length <= 20) continue
-    const page = Number(row.page_number)
+    const page = hitPage(row)
+    const section = hitSection(row, text)
     out.push({
       text,
       source: rowFileName(row),
       fileId: rowFileId(row),
-      page: Number.isFinite(page) && page > 0 ? page : undefined,
+      ...(page ? { page } : {}),
+      ...(section ? { section } : {}),
     })
   }
   return out
@@ -363,10 +394,70 @@ export function filterHitsForManual(
 
 export function retrievedFromHits(hits: CollectionHit[], expectedFilenames: string[] = []): Retrieved[] {
   return hits.map((h) => {
-    const page = h.page ? ` p.${h.page}` : ''
     const name = displayAttachedName(h.source || 'manual', expectedFilenames)
-    return { text: h.text, source: `${name}${page}` }
+    const page = h.page && h.page > 0 ? h.page : undefined
+    const section = h.section || extractSectionRef(h.text)
+    const loc = [page ? `p.${page}` : '', section ? `§${section}` : ''].filter(Boolean).join(' ')
+    return {
+      text: h.text,
+      source: loc ? `${name} ${loc}` : name,
+      ...(page ? { page } : {}),
+      ...(section ? { section } : {}),
+    }
   })
+}
+
+export type ManualCitation = {
+  manualId: number
+  title?: string
+  page?: number
+  section?: string
+}
+
+export function embedCitationMarker(c: ManualCitation): string {
+  const qs = new URLSearchParams()
+  qs.set('id', String(c.manualId))
+  if (c.page) qs.set('p', String(c.page))
+  if (c.section) qs.set('s', String(c.section).slice(0, 80))
+  if (c.title) qs.set('t', String(c.title).slice(0, 80))
+  return `[[cite:${qs.toString()}]]`
+}
+
+export function citationsFromParts(
+  parts: Retrieved[],
+  manualId: number | null,
+  fallbackTitle: string
+): ManualCitation[] {
+  if (manualId == null || manualId < 1) return []
+  const out: ManualCitation[] = []
+  const seen = new Set<string>()
+  for (const p of parts) {
+    const page = p.page && p.page > 0 ? p.page : undefined
+    const section = p.section || extractSectionRef(p.text)
+    const key = `${page || ''}|${section || ''}|${p.source}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      manualId,
+      title: fallbackTitle || p.source,
+      ...(page ? { page } : {}),
+      ...(section ? { section } : {}),
+    })
+  }
+  if (!out.length) out.push({ manualId, title: fallbackTitle })
+  return out.slice(0, 8)
+}
+
+export function formatCitationLine(citations: ManualCitation[], fallback = ''): string {
+  if (!citations.length) return fallback ? `\n\n— Source: ${fallback}` : ''
+  const labels = [...new Set(citations.map((c) => {
+    let s = c.title || 'Selected manual'
+    if (c.page) s += `, p.${c.page}`
+    if (c.section) s += `, §${c.section}`
+    return s
+  }))]
+  const markers = citations.map((c) => embedCitationMarker(c)).join(' ')
+  return `\n\n— Source: ${labels.join('; ')}\n${markers}`
 }
 
 export function preferServiceManualName(name: string): boolean {
@@ -534,6 +625,7 @@ const FSE_SYSTEM_PROMPT = `You are Zapp, an AI assistant for Total Service Pro (
 - If the passages/PDFs do not contain enough information: say what is missing and what section to open in the selected manual — do NOT invent PM steps, calibrations, parts lists, or specs.
 - When a SELECTED MANUAL is set, answers must be about that device unless the user clearly names a different one.
 - Prefer depth for service work: numbered steps, torque/spec values, prerequisites, expected readings, common pitfalls — but only when supported by sources.
+- When you name a page or section of the selected manual, write it as "page N" or "section X.Y" (the app deep-links those into the in-app viewer).
 - End every answer with: — Source: [source name]`
 
 const ZAPP_VOICE_PROMPT = `You are Zapp, the AI inside Total Service Pro — with brief Zapp Brannigan flair, still technically accurate.
@@ -1099,8 +1191,16 @@ function formatManualContext(parts: Retrieved[], selectedLabel: string, emptyHin
   const srcs = [...new Set(parts.map((p) => p.source).filter(Boolean))]
   return (
     `\n\n## RETRIEVED MANUAL CONTENT\n` +
-    `Selected device/manual: ${selectedLabel || '(none)'}. Answer only from these passages about this device.\n\n` +
-    parts.map((p, i) => `[${i + 1}] (${p.source})\n${p.text}`).join('\n---\n') +
+    `Selected device/manual: ${selectedLabel || '(none)'}. Answer only from these passages about this device.\n` +
+    `Cite page/section when the passage includes them so the in-app viewer can jump there.\n\n` +
+    parts
+      .map((p, i) => {
+        const loc = [p.page ? `page ${p.page}` : '', p.section ? `section ${p.section}` : '']
+          .filter(Boolean)
+          .join(', ')
+        return `[${i + 1}] (${p.source}${loc ? `; ${loc}` : ''})\n${p.text}`
+      })
+      .join('\n---\n') +
     (srcs.length ? `\n\nDocument sources in retrieval: ${srcs.join('; ')}` : '')
   )
 }
@@ -1215,6 +1315,7 @@ serve(async (req) => {
 
       let contextBlock = ''
       let citationLine = ''
+      let manualCitations: ManualCitation[] = []
       let hasFaultDBHit = false
       let hasManualPassages = false
       let collectionNameById: Record<string, string> = {}
@@ -1350,7 +1451,13 @@ serve(async (req) => {
             contextBlock = formatManualContext(parts, manualLabel, '')
             const srcs = [...new Set(parts.map((p) => p.source))]
             const manCite = srcs.map((c) => c.split('/').filter((p) => p && p !== 'shared').join(' › ')).join('; ')
-            citationLine = `\n\n— Source: ${manCite}`
+            const scopedId = asManualId(manualMeta?.id)
+            if (scopedId != null) {
+              manualCitations = citationsFromParts(parts, scopedId, manualLabel || manCite)
+              citationLine = formatCitationLine(manualCitations, manCite)
+            } else {
+              citationLine = `\n\n— Source: ${manCite}`
+            }
           } else {
             emptyManualHint = selectedCollectionFileIds.size
               ? 'Attached Grok collection PDFs for this manual are available. Read those files — do not claim they are unreadable or unavailable unless you actually opened them and the pages are blank.'
@@ -1413,6 +1520,24 @@ serve(async (req) => {
         (schematicQ || !hasManualPassages) &&
         Date.now() - chatStarted < 18_000
       let attachedNames: string[] = []
+      const ensureDocCite = () => {
+        const scopedId = asManualId(manualMeta?.id)
+        if (scopedId == null || hasFaultDBHit) return
+        if (!manualCitations.length) {
+          manualCitations = citationsFromParts([], scopedId, manualLabel)
+        }
+        if (!citationLine) citationLine = formatCitationLine(manualCitations, manualLabel)
+      }
+      const replyMeta = () => ({
+        manualLabel,
+        manualId: manualMeta?.id ?? null,
+        hasFaultDBHit,
+        hasManualPassages,
+        hasCollectionPdfs,
+        attachedPdfs: attachedNames,
+        matchTokens,
+        citations: manualCitations,
+      })
       if (wantPdfs) {
         const collectionFiles = pickCollectionAttachments(
           collectionNameById,
@@ -1423,7 +1548,8 @@ serve(async (req) => {
         try {
           if (collectionFiles.length) {
             attachedNames = collectionFiles.map((s) => s.name)
-            const fileCite = `\n\n— Source: ${manualLabel} collection PDFs: ${attachedNames.join('; ')}`
+            ensureDocCite()
+            const fileCite = citationLine || `\n\n— Source: ${manualLabel} collection PDFs: ${attachedNames.join('; ')}`
             const attachPrompt =
               systemContent +
               `\n\n## ATTACHED MANUAL PDFs\nThese files are already in the Grok collection for "${manualLabel}". They ARE readable. Quote exact wording. Do not say the service manual is unavailable.\n` +
@@ -1463,15 +1589,7 @@ serve(async (req) => {
                       text: { used: usage.text + 1, limit: limits.text },
                       voice: { used: usage.voice, limit: limits.voice },
                     },
-                    _meta: {
-                      manualLabel,
-                      manualId: manualMeta?.id ?? null,
-                      hasFaultDBHit,
-                      hasManualPassages,
-                      hasCollectionPdfs,
-                      attachedPdfs: attachedNames,
-                      matchTokens,
-                    },
+                    _meta: replyMeta(),
                   }),
                   { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
                 )
@@ -1494,7 +1612,8 @@ serve(async (req) => {
             }
             if (signed.length) {
               attachedNames = signed.map((s) => s.name)
-              const fileCite = `\n\n— Source: ${manualLabel} PDFs: ${attachedNames.join('; ')}`
+              ensureDocCite()
+              const fileCite = citationLine || `\n\n— Source: ${manualLabel} PDFs: ${attachedNames.join('; ')}`
               const attachPrompt =
                 systemContent +
                 `\n\n## ATTACHED MANUAL PDFs\nThe following PDFs from "${manualLabel}" are attached. Read them, quote them, and interpret drawings/schematics.\n` +
@@ -1534,15 +1653,7 @@ serve(async (req) => {
                         text: { used: usage.text + 1, limit: limits.text },
                         voice: { used: usage.voice, limit: limits.voice },
                       },
-                      _meta: {
-                        manualLabel,
-                        manualId: manualMeta?.id ?? null,
-                        hasFaultDBHit,
-                        hasManualPassages,
-                        hasCollectionPdfs,
-                        attachedPdfs: attachedNames,
-                        matchTokens,
-                      },
+                      _meta: replyMeta(),
                     }),
                     { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
                   )
@@ -1584,6 +1695,7 @@ serve(async (req) => {
         })
       }
       const xd = await xr.json()
+      if (!citationLine && !hasFaultDBHit) ensureDocCite()
       if (citationLine) {
         const ch = xd.choices?.[0]
         if (ch?.message?.content) ch.message.content = ch.message.content.trim() + citationLine
@@ -1593,15 +1705,7 @@ serve(async (req) => {
         text: { used: usage.text + 1, limit: limits.text },
         voice: { used: usage.voice, limit: limits.voice },
       }
-      xd._meta = {
-        manualLabel,
-        manualId: manualMeta?.id ?? null,
-        hasFaultDBHit,
-        hasManualPassages,
-        hasCollectionPdfs,
-        attachedPdfs: attachedNames,
-        matchTokens,
-      }
+      xd._meta = replyMeta()
       return new Response(JSON.stringify(xd), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

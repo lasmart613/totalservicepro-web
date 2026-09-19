@@ -21,9 +21,38 @@ export type CollectionHit = {
   source: string
   fileId: string
   page?: number
+  section?: string
 }
 
-export type Retrieved = { text: string; source: string }
+export type Retrieved = { text: string; source: string; page?: number; section?: string }
+
+/** Heading-style section/chapter from a retrieved passage. */
+export function extractSectionRef(text: string): string | undefined {
+  const raw = String(text || '')
+  const sect = raw.match(/\b(?:section|sect\.?|§)\s*([0-9]+(?:\.[0-9]+){0,3})\b/i)
+  if (sect?.[1]) return sect[1]
+  const ch = raw.match(/\b(?:ch(?:apter)?\.?)\s*([0-9]+(?:\.[0-9]+)?)\b/i)
+  if (ch?.[1]) return `Ch.${ch[1]}`
+  return undefined
+}
+
+function hitPage(row: Record<string, unknown>): number | undefined {
+  const fields = row.fields && typeof row.fields === 'object' ? (row.fields as Record<string, unknown>) : {}
+  for (const v of [row.page_number, row.page, fields.page_number, fields.page]) {
+    const n = Number(v)
+    if (Number.isFinite(n) && n > 0 && n < 10000) return Math.floor(n)
+  }
+  return undefined
+}
+
+function hitSection(row: Record<string, unknown>, text: string): string | undefined {
+  const fields = row.fields && typeof row.fields === 'object' ? (row.fields as Record<string, unknown>) : {}
+  for (const key of ['section', 'section_title', 'heading']) {
+    const v = String(fields[key] ?? row[key] ?? '').trim()
+    if (v) return v.slice(0, 80)
+  }
+  return extractSectionRef(text)
+}
 
 /** Storage basename with original case (Xeo Service Manual RevB.pdf). */
 export function storageBasename(path: string): string {
@@ -198,12 +227,14 @@ export function collectionHitsFromResponse(sd: unknown): CollectionHit[] {
     const row = raw as Record<string, unknown>
     const text = rowText(row)
     if (text.length <= 20) continue
-    const page = Number(row.page_number)
+    const page = hitPage(row)
+    const section = hitSection(row, text)
     out.push({
       text,
       source: rowFileName(row),
       fileId: rowFileId(row),
-      page: Number.isFinite(page) && page > 0 ? page : undefined,
+      ...(page ? { page } : {}),
+      ...(section ? { section } : {}),
     })
   }
   return out
@@ -332,9 +363,16 @@ export function filterHitsForManual(
 
 export function retrievedFromHits(hits: CollectionHit[], expectedFilenames: string[] = []): Retrieved[] {
   return hits.map((h) => {
-    const page = h.page ? ` p.${h.page}` : ''
     const name = displayAttachedName(h.source || 'manual', expectedFilenames)
-    return { text: h.text, source: `${name}${page}` }
+    const page = h.page && h.page > 0 ? h.page : undefined
+    const section = h.section || extractSectionRef(h.text)
+    const loc = [page ? `p.${page}` : '', section ? `§${section}` : ''].filter(Boolean).join(' ')
+    return {
+      text: h.text,
+      source: loc ? `${name} ${loc}` : name,
+      ...(page ? { page } : {}),
+      ...(section ? { section } : {}),
+    }
   })
 }
 

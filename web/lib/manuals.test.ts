@@ -26,6 +26,7 @@ test('manual PDFs are served inline, not as attachments', () => {
 
 test('manual view href stays on the in-app route', () => {
   assert.equal(manualViewHref({ id: 9, title: 'Vbeam' }), '/manuals/view?id=9&title=Vbeam');
+  assert.equal(manualViewHref({ id: 105, page: 42, section: '4.2' }), '/manuals/view?id=105&page=42&section=4.2');
   assert.equal(manualViewHref({}), '/manuals/view');
 });
 
@@ -69,6 +70,9 @@ test('viewer loads same-origin pdf.js, not a CDN, and can turn pages', () => {
   assert.match(viewer, /openSrc\(\{ url:/);
   assert.match(viewer, /data-pdf-page/);
   assert.match(viewer, /Find in manual/);
+  assert.match(viewer, /viewer-rail|Ask about this manual|ViewerAiPanel/);
+  assert.match(viewer, /initialPage/);
+  assert.match(viewPage, /initialPage|params\.get\('page'\)/);
   assert.match(viewer, /Incomplete/);
   assert.match(viewer, /isIncomplete|is_incomplete/);
   assert.match(viewer, /Next ►/);
@@ -98,6 +102,7 @@ test('fixture demo page uses the in-repo PDF and the same viewer', () => {
   const demo = readFileSync(join(here, '../app/pdf-viewer-demo/page.tsx'), 'utf8');
   assert.match(demo, /ManualPdfViewer/);
   assert.match(demo, /MANUAL_FIXTURE_PATH|sample-service-manual\.pdf/);
+  assert.match(demo, /initialPage|params\.get\('page'\)/);
   assert.doesNotMatch(demo, /get-manual-url|repairplanet|window\.open/i);
 });
 

@@ -12,6 +12,20 @@ import {
   grokChat,
 } from '@/lib/ai/grok-client';
 import { asManualId, buildGrokChatPayload } from '@/lib/ai/manual-scope';
+import {
+  LEGACY_STORAGE_KEY,
+  messagesForManual,
+  readAiState,
+  upsertManualThread,
+  writeAiState,
+} from '@/lib/ai/chat-history';
+import {
+  citationViewerHref,
+  formatAssistantHtml,
+  formatUserHtml,
+  mergeCitations,
+  parseCitationMarkers,
+} from '@/lib/ai/citations';
 import { toast } from 'sonner';
 import { catalogManualTitle } from '@/lib/manual-catalog';
 import { canAccessRepairAi } from '@/lib/roles';
@@ -23,13 +37,6 @@ type ManualRow = {
   brand: string | null;
 };
 
-/** Legacy unscoped key — do not restore across accounts/orgs */
-const LEGACY_STORAGE_KEY = 'tsp_ai_web_v1';
-
-function storageKeyFor(userId: string, orgId: string | number | null | undefined): string {
-  return `tsp_ai_web_v1:u:${userId}:o:${orgId != null && orgId !== '' ? String(orgId) : 'none'}`;
-}
-
 const QUICK_CHIPS: { label: string; prompt: string }[] = [
   { label: '⚡ Fault codes', prompt: 'What are the most common fault codes for this system?' },
   { label: '🔧 Calibration', prompt: 'Walk me through the calibration procedure' },
@@ -37,15 +44,6 @@ const QUICK_CHIPS: { label: string; prompt: string }[] = [
   { label: '🔩 Spare parts', prompt: 'What spare parts should I carry for this system?' },
   { label: '⚠️ Safety', prompt: 'What are the laser safety precautions?' },
 ];
-
-function formatMsgHtml(content: string): string {
-  return content
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-    .replace(/\n/g, '<br/>');
-}
 
 function defaultUsage(): AiUsage {
   return {
@@ -104,37 +102,18 @@ export default function AIAssistantClient() {
       : '';
   }, [selectedManual]);
 
-  const activeStorageKey = useMemo(() => {
-    if (!userId) return null;
-    return storageKeyFor(userId, orgId);
-  }, [userId, orgId]);
-
   const saveState = useCallback(
     (msgs: ChatMessage[], path: string, mfr: string, id: number | null = null) => {
       if (!userId) return;
-      const key = storageKeyFor(userId, orgId);
-      try {
-        localStorage.setItem(
-          key,
-          JSON.stringify({
-            msgs: msgs.slice(-40),
-            manual: path,
-            manualId: id,
-            mfr,
-            userId,
-            orgId: orgId != null ? String(orgId) : null,
-            ts: Date.now(),
-          })
-        );
-        // Remove legacy unscoped blob so it never leaks into another account
-        try {
-          localStorage.removeItem(LEGACY_STORAGE_KEY);
-        } catch {
-          /* ignore */
-        }
-      } catch {
-        /* ignore quota */
-      }
+      const prev = readAiState(userId, orgId);
+      const next = upsertManualThread(prev, {
+        manualId: id,
+        manualPath: path,
+        brand: mfr,
+        msgs,
+        touchMain: true,
+      });
+      writeAiState(userId, orgId, next);
     },
     [userId, orgId]
   );
@@ -177,7 +156,15 @@ export default function AIAssistantClient() {
       if (cancelled) return;
       setOrgId(resolvedOrg);
 
-      const key = storageKeyFor(session.user.id, resolvedOrg);
+      let urlManualId: number | null = null;
+      let urlPrompt = '';
+      try {
+        const qs = new URLSearchParams(window.location.search);
+        urlManualId = asManualId(qs.get('manualId') || qs.get('id'));
+        urlPrompt = String(qs.get('q') || qs.get('prompt') || '').trim();
+      } catch {
+        /* ignore */
+      }
 
       // Restore ONLY this user+org chat; never the legacy global key
       try {
@@ -185,42 +172,27 @@ export default function AIAssistantClient() {
       } catch {
         /* ignore */
       }
-      try {
-        const raw = localStorage.getItem(key);
-        if (raw) {
-          const s = JSON.parse(raw);
-          // Defense in depth: reject blobs that claim a different user/org
-          const blobUser = s.userId != null ? String(s.userId) : null;
-          const blobOrg = s.orgId != null ? String(s.orgId) : null;
-          const wantUser = String(session.user.id);
-          const wantOrg = resolvedOrg != null ? String(resolvedOrg) : null;
-          const okUser = !blobUser || blobUser === wantUser;
-          const okOrg = !blobOrg || blobOrg === wantOrg;
-          if (okUser && okOrg) {
-            if (Array.isArray(s.msgs)) setMessages(s.msgs);
-            if (s.manual) setManualPath(String(s.manual));
-            const restoredId = asManualId(s.manualId);
-            if (restoredId != null) setManualId(restoredId);
-            lastSentRef.current = {
-              id: restoredId,
-              path: s.manual ? String(s.manual) : '',
-            };
-            if (s.mfr) setBrand(String(s.mfr));
-          } else {
-            setMessages([]);
-            setManualPath('');
-            setManualId(null);
-            setBrand('');
-          }
-        } else {
-          setMessages([]);
-          setManualPath('');
-          setManualId(null);
-          setBrand('');
-        }
-      } catch {
+      const s = readAiState(session.user.id, resolvedOrg);
+      const restoredId = urlManualId ?? asManualId(s.manualId);
+      if (restoredId != null) {
+        setMessages(messagesForManual(s, restoredId).length ? messagesForManual(s, restoredId) : s.msgs);
+        setManualId(restoredId);
+        const pathFromState = restoredId === asManualId(s.manualId) ? s.manual || '' : '';
+        if (pathFromState) setManualPath(pathFromState);
+        lastSentRef.current = { id: restoredId, path: pathFromState };
+        if (s.mfr && !urlManualId) setBrand(String(s.mfr));
+      } else if (s.msgs.length) {
+        setMessages(s.msgs);
+        if (s.manual) setManualPath(String(s.manual));
+        if (s.mfr) setBrand(String(s.mfr));
+        lastSentRef.current = { id: null, path: s.manual ? String(s.manual) : '' };
+      } else {
         setMessages([]);
+        setManualPath('');
+        setManualId(null);
+        setBrand('');
       }
+      if (urlPrompt) setInput(urlPrompt);
 
       // Manuals catalog
       const { data: man, error: manErr } = await supabase
@@ -236,35 +208,44 @@ export default function AIAssistantClient() {
         setManuals(rows);
         setManualId((prev) => {
           if (prev != null && rows.some((r) => r.id === prev)) return prev;
-          try {
-            const saved = JSON.parse(localStorage.getItem(key) || '{}');
-            const savedId = asManualId(saved.manualId);
-            if (savedId != null && rows.some((r) => r.id === savedId)) return savedId;
-            const path = saved.manual;
-            if (path) {
-              const hit = rows.find((r) => r.storage_path === path);
-              if (hit) return hit.id;
-            }
-          } catch {
-            /* ignore */
+          const saved = readAiState(session.user.id, resolvedOrg);
+          const savedId = asManualId(saved.manualId);
+          if (savedId != null && rows.some((r) => r.id === savedId)) return savedId;
+          const path = saved.manual;
+          if (path) {
+            const hit = rows.find((r) => r.storage_path === path);
+            if (hit) return hit.id;
           }
           return prev;
         });
         setBrand((prev) => {
           if (prev) return prev;
-          try {
-            const saved = JSON.parse(localStorage.getItem(key) || '{}');
-            const savedId = asManualId(saved.manualId);
-            const path = saved.manual;
-            const hit =
-              (savedId != null && rows.find((r) => r.id === savedId)) ||
-              (path ? rows.find((r) => r.storage_path === path) : null);
-            if (hit?.brand) return hit.brand;
-          } catch {
-            /* ignore */
-          }
+          const saved = readAiState(session.user.id, resolvedOrg);
+          const savedId = asManualId(saved.manualId);
+          const path = saved.manual;
+          const hit =
+            (savedId != null && rows.find((r) => r.id === savedId)) ||
+            (path ? rows.find((r) => r.storage_path === path) : null);
+          if (hit?.brand) return hit.brand;
           return prev;
         });
+        setManualPath((prev) => {
+          if (prev) return prev;
+          const saved = readAiState(session.user.id, resolvedOrg);
+          const savedId = asManualId(saved.manualId);
+          const hit = savedId != null ? rows.find((r) => r.id === savedId) : null;
+          return hit?.storage_path || saved.manual || prev;
+        });
+        if (urlManualId != null) {
+          const hit = rows.find((r) => r.id === urlManualId);
+          if (hit) {
+            setManualId(hit.id);
+            setManualPath(hit.storage_path);
+            if (hit.brand) setBrand(hit.brand);
+            const scoped = messagesForManual(readAiState(session.user.id, resolvedOrg), hit.id);
+            if (scoped.length) setMessages(scoped);
+          }
+        }
       }
 
       const u = await fetchAiUsage(session.access_token);
@@ -357,9 +338,10 @@ export default function AIAssistantClient() {
       return;
     }
 
+    const citations = mergeCitations(result.citations, parseCitationMarkers(result.content));
     const withReply: ChatMessage[] = [
       ...nextMsgs,
-      { role: 'assistant', content: result.content },
+      { role: 'assistant', content: result.content, citations, ts: Date.now() },
     ];
     setMessages(withReply);
     saveState(withReply, currentPath, brand, currentId);
@@ -474,6 +456,20 @@ export default function AIAssistantClient() {
           {selectedManualLabel ? (
             <div className="sm:col-span-2 text-xs text-[var(--gold)]">
               📖 Scoped to: <strong>{selectedManualLabel}</strong>
+              {selectedManual?.id != null && (
+                <>
+                  {' · '}
+                  <Link
+                    href={citationViewerHref({
+                      manualId: selectedManual.id,
+                      title: catalogManualTitle(selectedManual),
+                    })}
+                    className="ai-cite-link underline-offset-2 hover:underline"
+                  >
+                    Open in viewer
+                  </Link>
+                </>
+              )}
             </div>
           ) : (
             <div className="sm:col-span-2 text-xs text-[var(--text3)]">
@@ -532,7 +528,12 @@ export default function AIAssistantClient() {
                     ? 'bg-[var(--gold)] text-black font-medium'
                     : 'bg-[var(--surface3)] border border-[var(--border)] text-[var(--text2)]'
                 }`}
-                dangerouslySetInnerHTML={{ __html: formatMsgHtml(m.content) }}
+                dangerouslySetInnerHTML={{
+                  __html:
+                    m.role === 'assistant'
+                      ? formatAssistantHtml(m.content, m.citations)
+                      : formatUserHtml(m.content),
+                }}
               />
             </div>
           ))}
