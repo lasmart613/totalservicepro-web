@@ -13,6 +13,10 @@ import {
   parseJsonField,
 } from '@/lib/billing/save-helpers';
 import { buildInvoicePaymentPatch, existingPaidAmount } from '@/lib/billing/apply-invoice-payment';
+import {
+  releaseDeferredBalance,
+  resolveInvoiceCollectable,
+} from '@/lib/billing/invoice-collectable';
 import { toast } from 'sonner';
 
 type InvFilter = 'all' | 'draft' | 'sent' | 'paid' | 'partially_paid';
@@ -214,6 +218,37 @@ export default function InvoicesListPage() {
     }
   }
 
+  async function collectRemaining(inv: InvoiceRow) {
+    const split = resolveInvoiceCollectable({
+      total: inv.total,
+      amountPaid: existingPaidAmount(inv),
+      invoice_data: parseJsonField(inv.invoice_data),
+    });
+    if (!split.hasDeferredSplit || split.deferredReleased) {
+      toast.message('No deferred remainder to collect.');
+      return;
+    }
+    if (
+      !confirm(
+        `Release the remaining ${money(split.deferredUnpaid)} so the Stripe pay link can charge it? Open the invoice and email/resend to send the new link.`
+      )
+    ) {
+      return;
+    }
+    try {
+      const idata = releaseDeferredBalance(parseJsonField(inv.invoice_data));
+      const { error } = await supabase
+        .from('service_invoices')
+        .update({ invoice_data: idata, updated_at: new Date().toISOString() })
+        .eq('id', inv.id);
+      if (error) throw new Error(error.message);
+      toast.success('Remaining balance is now collectable. Email the invoice to send a Stripe pay link.');
+      await init();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Could not release remaining balance');
+    }
+  }
+
   const drafts = rows.filter((r) => (r.status || '').toLowerCase() === 'draft').length;
   const sent = rows.filter((r) => (r.status || '').toLowerCase() === 'sent').length;
   const partial = rows.filter((r) => (r.status || '').toLowerCase() === 'partially_paid').length;
@@ -337,8 +372,30 @@ export default function InvoicesListPage() {
                       </span>
                     </div>
                   </Link>
-                  <div className="font-bold text-[var(--gold)] text-lg flex-shrink-0">
-                    {money(Number(inv.total) || 0)}
+                  <div className="font-bold text-[var(--gold)] text-lg flex-shrink-0 text-right">
+                    <div>{money(Number(inv.total) || 0)}</div>
+                    {(() => {
+                      const split = resolveInvoiceCollectable({
+                        total: inv.total,
+                        amountPaid: existingPaidAmount(inv),
+                        invoice_data: parseJsonField(inv.invoice_data),
+                      });
+                      if (!split.hasDeferredSplit) return null;
+                      if (split.deferredReleased) {
+                        return (
+                          <div className="text-[10px] font-semibold text-[var(--text3)]">
+                            Balance due {money(split.stripeAmount)}
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="text-[10px] font-semibold text-amber-200">
+                          {split.amountPaid > 0
+                            ? `Deposit paid · ${money(split.deferredUnpaid)} due on completion`
+                            : `Due now ${money(split.stripeAmount)} · ${money(split.deferredUnpaid)} deferred`}
+                        </div>
+                      );
+                    })()}
                   </div>
                   {!alreadyPaid && (
                     <div className="flex gap-2 w-full sm:w-auto">
@@ -347,10 +404,12 @@ export default function InvoicesListPage() {
                         className="btn btn-secondary text-xs"
                         onClick={() => {
                           setPayRow(inv);
-                          const remain = Math.max(
-                            0,
-                            Number(inv.total || 0) - existingPaidAmount(inv)
-                          );
+                          const split = resolveInvoiceCollectable({
+                            total: inv.total,
+                            amountPaid: existingPaidAmount(inv),
+                            invoice_data: parseJsonField(inv.invoice_data),
+                          });
+                          const remain = split.stripeAmount || split.remainingOwed;
                           setPayAmt(remain ? String(remain) : '');
                           setPayMethod('Check');
                         }}
@@ -370,6 +429,23 @@ export default function InvoicesListPage() {
                       >
                         Mark paid
                       </button>
+                      {(() => {
+                        const split = resolveInvoiceCollectable({
+                          total: inv.total,
+                          amountPaid: existingPaidAmount(inv),
+                          invoice_data: parseJsonField(inv.invoice_data),
+                        });
+                        if (!split.hasDeferredSplit || split.deferredReleased) return null;
+                        return (
+                          <button
+                            type="button"
+                            className="btn btn-secondary text-xs"
+                            onClick={() => collectRemaining(inv)}
+                          >
+                            Collect remaining
+                          </button>
+                        );
+                      })()}
                     </div>
                   )}
                 </div>

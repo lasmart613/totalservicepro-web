@@ -52,7 +52,7 @@ function InvoicePaidInner() {
             <h1 className="text-2xl font-extrabold text-[var(--gold)] mb-2">Thank you</h1>
             <p className="text-[var(--text3)]">
               {status === 'partially_paid'
-                ? 'Your partial payment was received. The shop has been notified.'
+                ? 'Your deposit was received. Any remaining balance is due when the job is complete. The shop has been notified.'
                 : 'Your payment was received. The shop has been notified.'}
             </p>
           </>

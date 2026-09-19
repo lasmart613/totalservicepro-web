@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createInvoiceCheckoutSession, stripeSecretProblem } from '@/lib/billing/stripe-pay';
+import {
+  invoiceCheckoutDescription,
+  resolveInvoiceCollectable,
+} from '@/lib/billing/invoice-collectable';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import {
   publicSiteOrigin,
@@ -10,10 +14,10 @@ import {
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 
 const INV_SELECT_FULL =
-  'id, created_by, organization_id, customer_name, customer_organization_id, total, invoice_data, invoice_number, status';
+  'id, created_by, organization_id, customer_name, customer_organization_id, total, amount_paid, invoice_data, invoice_number, status';
 const INV_SELECT_CORE =
-  'id, created_by, organization_id, customer_name, customer_organization_id, total, status';
-const INV_SELECT_MIN = 'id, created_by, organization_id, customer_name, total, status';
+  'id, created_by, organization_id, customer_name, customer_organization_id, total, amount_paid, status';
+const INV_SELECT_MIN = 'id, created_by, organization_id, customer_name, total, amount_paid, status';
 
 async function loadInvoiceRow(
   client: SupabaseClient,
@@ -38,11 +42,11 @@ async function loadInvoiceRow(
  * POST /api/billing/send-invoice
  * Body: {
  *   invoice_id?, to_email?, subject?, html?, invoice_number?,
- *   balance_due?, total?, customer_organization_id?, reply_to?,
+ *   due_now?, balance_due?, total?, customer_organization_id?, reply_to?,
  *   include_payment_link?: boolean (default true)
  * }
  * Resolves customer email from CRM org profile when possible.
- * Optionally embeds a Stripe Checkout pay link for the balance due.
+ * Stripe pay link uses due-now (parts/travel deposit) only — never the deferred remainder.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -231,56 +235,50 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invoice HTML body is required' }, { status: 400 });
     }
 
-    // Balance for Stripe
-    let balanceDue =
-      body.balance_due != null
-        ? Number(body.balance_due)
-        : body.total != null
-          ? Number(body.total)
-          : inv?.total != null
-            ? Number(inv.total)
-            : 0;
-    if (inv?.invoice_data) {
-      let idata = inv.invoice_data;
-      if (typeof idata === 'string') {
-        try {
-          idata = JSON.parse(idata);
-        } catch {
-          idata = {};
-        }
-      }
-      if (idata?.balanceDue != null) balanceDue = Number(idata.balanceDue);
-      else if (idata?.deposit != null && inv.total != null) {
-        balanceDue = Math.max(0, Number(inv.total) - Number(idata.deposit));
-      }
-    }
+    // Stripe charges due-now only (parts/travel deposit). Deferred remainder
+    // stays on the invoice until the shop releases it.
+    const collectable = resolveInvoiceCollectable({
+      total: inv?.total ?? body.total,
+      amountPaid: inv?.amount_paid,
+      invoice_data: inv?.invoice_data,
+      fallbackDueNow: body.due_now ?? body.amount_due_now,
+    });
+    const payAmount = collectable.stripeAmount;
 
     let paymentUrl: string | null = null;
     let stripeSessionId: string | null = null;
     let stripeSkippedReason: string | null = null;
     const stripeProblem = stripeSecretProblem();
-    if (includePay && balanceDue >= 0.5) {
+    if (includePay && payAmount >= 0.5) {
       if (stripeProblem) {
         stripeSkippedReason = stripeProblem;
       } else {
         const pay = await createInvoiceCheckoutSession({
-          amountCents: Math.round(balanceDue * 100),
-          description: invoiceNumber || inv?.invoice_number || `Invoice #${invoiceId || ''}`,
+          amountCents: Math.round(payAmount * 100),
+          description: invoiceCheckoutDescription(
+            collectable,
+            invoiceNumber || inv?.invoice_number || `Invoice #${invoiceId || ''}`
+          ),
           invoiceId: invoiceId || inv?.id,
           invoiceNumber: invoiceNumber || inv?.invoice_number,
           customerEmail: toEmail,
           companyName: body.company_name || null,
+          paymentKind: collectable.paymentKind,
         });
         if (pay) {
           paymentUrl = pay.url;
           stripeSessionId = pay.sessionId;
           // Inject pay button into email HTML if not already present
           if (!html.includes(pay.url) && !html.includes('635BFF')) {
+            const payLabel =
+              collectable.paymentKind === 'deposit'
+                ? `Pay deposit $${payAmount.toFixed(2)} securely with Stripe`
+                : `Pay $${payAmount.toFixed(2)} securely with Stripe`;
             const payBlock =
               `<div style="margin:22px 0;text-align:center;">` +
               `<a href="${pay.url}" style="display:inline-block;background:#635BFF;color:#fff;padding:14px 28px;` +
               `border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;">` +
-              `Pay $${balanceDue.toFixed(2)} securely with Stripe</a>` +
+              `${payLabel}</a>` +
               `<div style="font-size:10px;color:#666;margin-top:8px;">Secure card payment · Powered by Stripe</div></div>`;
             if (html.includes('Thank you for choosing')) {
               html = html.replace('Thank you for choosing', payBlock + 'Thank you for choosing');
@@ -303,7 +301,8 @@ export async function POST(req: NextRequest) {
                 ...idata,
                 payment_url: paymentUrl,
                 stripe_checkout_session_id: stripeSessionId,
-                payment_amount: balanceDue,
+                payment_amount: payAmount,
+                payment_kind: collectable.paymentKind,
               };
               const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
               const { error: upErr } = await writer
@@ -323,8 +322,12 @@ export async function POST(req: NextRequest) {
             'Stripe Checkout session could not be created — check STRIPE_SECRET_KEY and amount.';
         }
       }
-    } else if (includePay && balanceDue < 0.5) {
-      stripeSkippedReason = 'Balance due is under $0.50 — no Stripe pay link added.';
+    } else if (includePay && payAmount < 0.5) {
+      stripeSkippedReason = collectable.hasDeferredSplit && !collectable.deferredReleased
+        ? collectable.amountPaid > 0
+          ? 'Deposit is paid. Remaining balance is due on completion — use Collect remaining balance to enable Stripe.'
+          : 'Amount due now is under $0.50 — no Stripe pay link added.'
+        : 'Balance due is under $0.50 — no Stripe pay link added.';
     }
 
     const subject =

@@ -222,7 +222,14 @@ export type InvoiceHtmlInput = {
   depositDate?: string;
   depositMethod?: string;
   balanceDue?: number;
-  /** Stripe Checkout / Payment Link URL for remaining balance */
+  /** Parts/travel deposit due now (unpaid). Shown separately from amount received. */
+  dueNow?: number;
+  /** Remainder due on completion — not charged by Stripe until released. */
+  deferred?: number;
+  deferredReleased?: boolean;
+  /** Amount Stripe should charge (due now only). */
+  collectableAmount?: number;
+  /** Stripe Checkout / Payment Link URL for the collectable amount */
   paymentUrl?: string | null;
 };
 
@@ -280,7 +287,18 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
 
   const deposit = Number(input.deposit) || 0;
   const total = Number(input.total) || 0;
+  const dueNow = Number(input.dueNow) || 0;
+  const deferred = Number(input.deferred) || 0;
+  const hasSplit = deferred > 0.004 && dueNow > 0;
   const balance = input.balanceDue != null ? Number(input.balanceDue) : Math.max(0, total - deposit);
+  const collectable =
+    input.collectableAmount != null
+      ? Number(input.collectableAmount)
+      : input.deferredReleased
+        ? balance
+        : hasSplit
+          ? Math.max(0, dueNow - deposit)
+          : balance;
 
   return (
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;font-size:12px;line-height:1.35;max-width:800px;margin:auto;">` +
@@ -320,39 +338,80 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
     `<div class="totals" style="margin-top:10px;padding-top:10px;border-top:2px solid #ccc;font-size:1.25rem;">Invoice Total: ${money(
       total
     )}</div>` +
-    (deposit > 0
+    (hasSplit
       ? `<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid #FBBF24;border-radius:6px;font-size:12px;">` +
-        `<div>Deposit received: <strong>${money(deposit)}</strong>` +
-        (input.depositDate
-          ? ` on ${esc(
-              (() => {
-                try {
-                  return new Date(
-                    input.depositDate + (input.depositDate.length === 10 ? 'T12:00:00' : '')
-                  ).toLocaleDateString();
-                } catch {
-                  return input.depositDate;
-                }
-              })()
-            )}`
+        `<div style="font-weight:800;font-size:12px;color:#92400e;margin-bottom:6px;">Payment split</div>` +
+        `<div>Due now (parts/travel deposit): <strong>${money(dueNow)}</strong></div>` +
+        `<div>Remaining (due on completion): <strong>${money(deferred)}</strong></div>` +
+        (deposit > 0
+          ? `<div style="margin-top:8px;">Deposit received: <strong>${money(deposit)}</strong>` +
+            (input.depositDate
+              ? ` on ${esc(
+                  (() => {
+                    try {
+                      return new Date(
+                        input.depositDate + (input.depositDate.length === 10 ? 'T12:00:00' : '')
+                      ).toLocaleDateString();
+                    } catch {
+                      return input.depositDate;
+                    }
+                  })()
+                )}`
+              : '') +
+            (input.depositMethod ? ` via ${esc(input.depositMethod)}` : '') +
+            `</div>` +
+            `<div style="font-size:1.1rem;margin-top:4px;">Still owed: <strong>${money(
+              balance
+            )}</strong></div>`
           : '') +
-        (input.depositMethod ? ` via ${esc(input.depositMethod)}` : '') +
-        `</div>` +
-        `<div style="font-size:1.1rem;margin-top:4px;">Balance remaining: <strong>${money(
-          balance
-        )}</strong></div></div>`
-      : '') +
+        `</div>`
+      : deposit > 0
+        ? `<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid #FBBF24;border-radius:6px;font-size:12px;">` +
+          `<div>Deposit received: <strong>${money(deposit)}</strong>` +
+          (input.depositDate
+            ? ` on ${esc(
+                (() => {
+                  try {
+                    return new Date(
+                      input.depositDate + (input.depositDate.length === 10 ? 'T12:00:00' : '')
+                    ).toLocaleDateString();
+                  } catch {
+                    return input.depositDate;
+                  }
+                })()
+              )}`
+            : '') +
+          (input.depositMethod ? ` via ${esc(input.depositMethod)}` : '') +
+          `</div>` +
+          `<div style="font-size:1.1rem;margin-top:4px;">Balance remaining: <strong>${money(
+            balance
+          )}</strong></div></div>`
+        : '') +
     `</div>` +
     `<div style="margin-top:28px;font-size:11px;color:#555;text-align:center;border-top:1px solid #eee;padding-top:12px;">` +
-    (deposit > 0
+    (hasSplit && deposit <= 0
+      ? `A parts/travel deposit of ${money(dueNow)} is due now. The remaining ${money(
+          deferred
+        )} is due upon completion of the service call.<br>`
+      : '') +
+    (hasSplit && deposit > 0 && !input.deferredReleased
+      ? `Deposit has been applied. Remaining balance of ${money(
+          balance
+        )} is payable upon completion of the service call.<br>`
+      : '') +
+    (!hasSplit && deposit > 0
       ? `Deposit has been applied. Remaining balance is payable upon completion of the service call.<br>`
       : '') +
-    (input.paymentUrl && balance > 0
+    (input.paymentUrl && collectable > 0
       ? `<div style="margin:18px 0 8px;text-align:center;">` +
         `<a href="${esc(input.paymentUrl)}" ` +
         `style="display:inline-block;background:#635BFF;color:#fff;padding:14px 28px;border-radius:8px;` +
         `text-decoration:none;font-weight:700;font-size:14px;letter-spacing:0.02em;">` +
-        `Pay ${money(balance)} securely with Stripe</a>` +
+        `${
+          hasSplit && !input.deferredReleased && deposit <= 0
+            ? `Pay deposit ${money(collectable)} securely with Stripe`
+            : `Pay ${money(collectable)} securely with Stripe`
+        }</a>` +
         `<div style="font-size:10px;color:#666;margin-top:8px;">Secure card payment · Powered by Stripe</div>` +
         `</div>`
       : '') +

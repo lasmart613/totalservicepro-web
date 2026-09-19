@@ -105,6 +105,7 @@ export type InvoicePayLinkInput = {
   invoiceNumber?: string | null;
   customerEmail?: string | null;
   companyName?: string | null;
+  paymentKind?: 'deposit' | 'balance' | 'full';
 };
 
 export type InvoicePayLinkResult = {
@@ -144,6 +145,10 @@ export async function createInvoiceCheckoutSession(
   params.set('success_url', `${site}/invoice-paid?session_id={CHECKOUT_SESSION_ID}`);
   params.set('cancel_url', `${site}/invoice-paid?canceled=1`);
   params.set('metadata[kind]', 'invoice_pay');
+  if (input.paymentKind) {
+    params.set('metadata[payment_kind]', input.paymentKind);
+    params.set('payment_intent_data[metadata][payment_kind]', input.paymentKind);
+  }
   params.set('line_items[0][quantity]', '1');
   params.set('line_items[0][price_data][currency]', currency);
   params.set('line_items[0][price_data][unit_amount]', String(amount));
