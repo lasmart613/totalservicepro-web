@@ -42,11 +42,57 @@ export function extractSectionRef(text: string): string | undefined {
   return undefined;
 }
 
+/** First explicit page mention in a retrieved passage or model reply. */
+export function extractPageRef(text: string): number | undefined {
+  const raw = String(text || '');
+  const page = raw.match(/\b(?:pages?|pp?\.?)\s*(\d{1,4})\b/i);
+  return page?.[1] ? asPositivePage(page[1]) : undefined;
+}
+
+export function extractPageRefs(text: string): number[] {
+  const raw = String(text || '');
+  const out: number[] = [];
+  const seen = new Set<number>();
+  const re = /\b(?:pages?|pp?\.?)\s*(\d{1,4})\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(raw))) {
+    const page = asPositivePage(m[1]);
+    if (!page || seen.has(page)) continue;
+    seen.add(page);
+    out.push(page);
+  }
+  return out.slice(0, 8);
+}
+
+/**
+ * xAI chunks often omit page_number. If the passage or reply names "page N",
+ * attach that to document-level cites so Source chips get `page=`.
+ */
+export function attachProsePages(citations: ManualCitation[], text: string): ManualCitation[] {
+  if (!citations.length) return [];
+  const pages = extractPageRefs(text);
+  if (!pages.length) return mergeCitations(citations);
+  const scoped = citations[0];
+  const upgraded = citations.map((c, i) => {
+    if (c.page) return c;
+    const page = pages[i] || pages[0];
+    return page ? { ...c, page } : c;
+  });
+  const have = new Set(upgraded.map((c) => c.page).filter((p): p is number => !!p));
+  for (const page of pages) {
+    if (have.has(page)) continue;
+    upgraded.push({ manualId: scoped.manualId, title: scoped.title, page });
+    have.add(page);
+  }
+  return mergeCitations(upgraded);
+}
+
 export function citationViewerHref(c: ManualCitation): string {
   const qs = new URLSearchParams();
   qs.set('id', String(c.manualId));
   if (c.title) qs.set('title', String(c.title).slice(0, 160));
   if (c.page) qs.set('page', String(c.page));
+  else if (!c.section) qs.set('page', '1');
   if (c.section) qs.set('section', String(c.section).slice(0, 80));
   return `${VIEWER_PATH}?${qs.toString()}`;
 }
@@ -147,7 +193,7 @@ function viewerAnchor(c: ManualCitation, label: string): string {
  */
 export function formatAssistantHtml(content: string, extra?: ManualCitation[]): string {
   const fromMarkers = parseCitationMarkers(content);
-  const citations = mergeCitations(extra, fromMarkers);
+  const citations = attachProsePages(mergeCitations(extra, fromMarkers), stripCitationMarkers(content));
   const scopedId = citations[0]?.manualId;
   let body = stripCitationMarkers(content);
   body = escapeHtml(body);

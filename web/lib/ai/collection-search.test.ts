@@ -73,6 +73,22 @@ test('collection hits keep page/section for in-app viewer cites', () => {
   assert.match(retrieved[0].source, /p\.42/);
 });
 
+test('passage prose supplies page when xAI omits page_number', () => {
+  const hits = collectionHitsFromResponse({
+    matches: [
+      {
+        file_id: 'file_xeo_sm',
+        chunk_content:
+          'Page 18 — Flow Switch harness pinout. Check continuity from the IPL interlock to the reservoir switch.',
+        fields: { filename: 'Xeo Service Manual RevB.pdf' },
+      },
+    ],
+  });
+  assert.equal(hits[0].page, 18);
+  const retrieved = retrievedFromHits(hits, ['Xeo Service Manual RevB.pdf']);
+  assert.equal(retrieved[0].page, 18);
+});
+
 test('parses live xAI matches/chunk_content (old results/text parser would miss these)', () => {
   const hits = collectionHitsFromResponse(XEO_HITS);
   assert.equal(hits.length, 2);
@@ -255,6 +271,9 @@ test('index.ts inlines the same cite-scope helpers as collection-search.ts', () 
   assert.match(fn, /never \"cutera\" ⊆ \"cuteracoolglide/);
   assert.match(fn, /embedCitationMarker|\[\[cite:/);
   assert.match(lib, /extractSectionRef/);
+  assert.match(fn, /export function extractPageRef/);
+  assert.match(lib, /export function extractPageRef/);
+  assert.match(fn, /attachProsePages/);
 });
 
 test('name filters stay few and compact-deduped so chat does not issue N serial GETs', () => {

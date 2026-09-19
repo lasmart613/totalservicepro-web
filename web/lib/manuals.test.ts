@@ -57,6 +57,15 @@ test('bookshelf opens the in-app viewer and does not window.open the PDF', () =>
   assert.doesNotMatch(viewer, /Download|Save as|Open in (Acrobat|Adobe)|window\.open/i);
   assert.match(fileRoute, /pdfInlineHeaders/);
   assert.match(fileRoute, /Content-Disposition/);
+  assert.match(fileRoute, /mayViewAiScopedManual|streamAiCatalogPdf/);
+});
+
+test('get-manual-url allows Repair-AI catalog view without a library slot', () => {
+  const edge = readFileSync(join(here, '../../supabase/functions/get-manual-url/index.ts'), 'utf8');
+  assert.match(edge, /mayViewAiCatalog|isRepairAiCaller|isSharedCatalogPath/);
+  assert.match(edge, /Access denied — manual not in company library/);
+  assert.match(edge, /shared\//);
+  assert.doesNotMatch(edge, /storage_path is required/);
 });
 
 test('viewer loads same-origin pdf.js, not a CDN, and can turn pages', () => {

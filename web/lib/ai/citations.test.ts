@@ -4,10 +4,12 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'url';
 import {
+  attachProsePages,
   citationLabel,
   citationViewerHref,
   citationsFromMeta,
   embedCitationMarker,
+  extractPageRef,
   extractSectionRef,
   formatAssistantHtml,
   mergeCitations,
@@ -22,7 +24,7 @@ test('citation viewer href stays on the auth-gated in-app route', () => {
     citationViewerHref({ manualId: 105, title: 'Xeo Service Manual Rev B', page: 42 }),
     '/manuals/view?id=105&title=Xeo+Service+Manual+Rev+B&page=42'
   );
-  assert.equal(citationViewerHref({ manualId: 16 }), '/manuals/view?id=16');
+  assert.equal(citationViewerHref({ manualId: 16 }), '/manuals/view?id=16&page=1');
   assert.equal(
     citationViewerHref({ manualId: 105, section: '4.2' }),
     '/manuals/view?id=105&section=4.2'
@@ -64,7 +66,47 @@ test('document-only citation still opens that manual', () => {
     { manualId: 105, title: 'Xeo Service Manual Rev B' },
   ]);
   assert.match(html, /href="\/manuals\/view\?id=105/);
-  assert.doesNotMatch(html, /page=/);
+  assert.match(html, /page=1/);
+});
+
+test('cite URL includes page= when marker has p= and omits it only when unknown', () => {
+  const withPage = embedCitationMarker({
+    manualId: 105,
+    page: 42,
+    title: 'Cutera Xeo System',
+  });
+  assert.match(withPage, /\[\[cite:id=105&p=42/);
+  assert.equal(
+    citationViewerHref(parseCitationMarkers(withPage)[0]),
+    '/manuals/view?id=105&title=Cutera+Xeo+System&page=42'
+  );
+
+  const noPage = embedCitationMarker({ manualId: 105, title: 'Cutera Xeo System' });
+  assert.match(noPage, /\[\[cite:id=105&t=/);
+  assert.doesNotMatch(noPage, /[?&]p=/);
+  const parsed = parseCitationMarkers(noPage)[0];
+  assert.equal(parsed.page, undefined);
+  assert.equal(
+    citationViewerHref(parsed),
+    '/manuals/view?id=105&title=Cutera+Xeo+System&page=1'
+  );
+});
+
+test('prose page mentions upgrade document-level Source chips', () => {
+  assert.equal(extractPageRef('See page 42 of the flow-switch procedure.'), 42);
+  assert.equal(extractPageRef('p.18 harness pinout'), 18);
+  assert.equal(extractPageRef('no page mentioned'), undefined);
+  const attached = attachProsePages(
+    [{ manualId: 105, title: 'Cutera Xeo System' }],
+    'Open page 42 and page 18 of the Xeo book.'
+  );
+  assert.equal(attached[0].page, 42);
+  assert.ok(attached.some((c) => c.page === 18));
+  const html = formatAssistantHtml(
+    'See page 42 of the flow switch procedure.\n\n— Source: Cutera Xeo System\n[[cite:id=105&t=Cutera+Xeo+System]]',
+    []
+  );
+  assert.match(html, /href="\/manuals\/view\?id=105[^"]*page=42/);
 });
 
 test('meta citations and section extraction', () => {

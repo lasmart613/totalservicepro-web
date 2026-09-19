@@ -36,13 +36,23 @@ export function extractSectionRef(text: string): string | undefined {
   return undefined
 }
 
-function hitPage(row: Record<string, unknown>): number | undefined {
+/** First explicit page mention when xAI omits page_number. */
+export function extractPageRef(text: string): number | undefined {
+  const raw = String(text || '')
+  const page = raw.match(/\b(?:pages?|pp?\.?)\s*(\d{1,4})\b/i)
+  if (!page?.[1]) return undefined
+  const n = Number(page[1])
+  if (!Number.isFinite(n) || n < 1 || n > 9999) return undefined
+  return Math.floor(n)
+}
+
+function hitPage(row: Record<string, unknown>, text = ''): number | undefined {
   const fields = row.fields && typeof row.fields === 'object' ? (row.fields as Record<string, unknown>) : {}
   for (const v of [row.page_number, row.page, fields.page_number, fields.page]) {
     const n = Number(v)
     if (Number.isFinite(n) && n > 0 && n < 10000) return Math.floor(n)
   }
-  return undefined
+  return extractPageRef(text)
 }
 
 function hitSection(row: Record<string, unknown>, text: string): string | undefined {
@@ -227,7 +237,7 @@ export function collectionHitsFromResponse(sd: unknown): CollectionHit[] {
     const row = raw as Record<string, unknown>
     const text = rowText(row)
     if (text.length <= 20) continue
-    const page = hitPage(row)
+    const page = hitPage(row, text)
     const section = hitSection(row, text)
     out.push({
       text,

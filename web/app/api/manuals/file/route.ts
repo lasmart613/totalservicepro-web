@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { pdfInlineHeaders } from '@/lib/manuals';
-import { mayOpenManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
+import { mayOpenManual, mayViewAiScopedManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
 import { MANUAL_LIBRARY_SELECT_MINIMAL, MANUAL_LIBRARY_SELECT_WITH_KIND } from '@/lib/manual-library-filter';
+import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { pdfPathsForManual } from '@/lib/manual-search-index';
 
 export const dynamic = 'force-dynamic';
 export const maxDuration = 60;
@@ -61,6 +63,114 @@ async function resolveSignedUrl(opts: {
     };
   }
   return { url: String(json.url), status: 200, json };
+}
+
+function isPdfPath(path: string): boolean {
+  return !!path && path.toLowerCase().endsWith('.pdf');
+}
+
+function cleanStoragePath(input: unknown): string {
+  return String(input || '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/\/+$/, '')
+    .replace(/[?#].*$/, '');
+}
+
+async function loadCatalogRow(
+  client: ReturnType<typeof createClient>,
+  manualId?: string | number | null,
+  storagePath?: string | null
+) {
+  const select = `${MANUAL_LIBRARY_SELECT_WITH_KIND}, is_folder, entry_file_path, chapter_metadata`;
+  if (manualId != null) {
+    const full = await client.from('manuals').select(select).eq('id', manualId).maybeSingle();
+    if (!full.error) return full.data;
+    const min = await client.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).eq('id', manualId).maybeSingle();
+    return min.data;
+  }
+  if (storagePath) {
+    const full = await client.from('manuals').select(select).eq('storage_path', storagePath).maybeSingle();
+    if (!full.error) return full.data;
+    const min = await client
+      .from('manuals')
+      .select(MANUAL_LIBRARY_SELECT_MINIMAL)
+      .eq('storage_path', storagePath)
+      .maybeSingle();
+    return min.data;
+  }
+  return null;
+}
+
+function resolveCatalogPdfPath(
+  catalog: {
+    storage_path?: string | null;
+    entry_file_path?: string | null;
+    chapter_metadata?: unknown;
+    is_folder?: unknown;
+  } | null,
+  requested?: string | null
+): string | null {
+  const asked = cleanStoragePath(requested);
+  if (isPdfPath(asked)) return asked;
+  const fromMeta = pdfPathsForManual({
+    storage_path: catalog?.storage_path,
+    chapter_metadata: catalog?.chapter_metadata,
+    is_folder: catalog?.is_folder,
+  });
+  if (fromMeta[0] && isPdfPath(fromMeta[0])) return fromMeta[0];
+  const entry = cleanStoragePath(catalog?.entry_file_path);
+  if (isPdfPath(entry)) return entry;
+  const parent = cleanStoragePath(catalog?.storage_path);
+  if (isPdfPath(parent)) return parent;
+  if (parent && isPdfPath(entry)) return entry;
+  if (parent && entry && !entry.toLowerCase().startsWith('shared/')) {
+    const joined = cleanStoragePath(`${parent}/${entry}`);
+    if (isPdfPath(joined)) return joined;
+  }
+  return null;
+}
+
+/**
+ * When live get-manual-url still gates on company-library ownership, stream a
+ * shared catalog PDF for signed-in Repair-AI members via service role. Bytes
+ * stay inline — never return a Storage URL to the browser.
+ */
+async function streamAiCatalogPdf(opts: {
+  role?: string | null;
+  orgType?: string | null;
+  manualId?: string | number | null;
+  storagePath?: string | null;
+  userClient: ReturnType<typeof createClient>;
+}): Promise<NextResponse | null> {
+  if (!hasServiceRole()) return null;
+  const admin = getSupabaseAdmin();
+  const catalog =
+    (await loadCatalogRow(admin, opts.manualId, opts.storagePath)) ||
+    (await loadCatalogRow(opts.userClient, opts.manualId, opts.storagePath));
+  const storagePath = cleanStoragePath(catalog?.storage_path || opts.storagePath);
+  if (
+    !mayViewAiScopedManual({
+      role: opts.role,
+      orgType: opts.orgType,
+      storagePath,
+      inLibrary: false,
+    })
+  ) {
+    return null;
+  }
+  const pdfPath = resolveCatalogPdfPath(catalog, opts.storagePath || storagePath);
+  if (!pdfPath) return null;
+  const { data: signed, error } = await admin.storage.from('manuals').createSignedUrl(pdfPath, 60 * 10);
+  if (error || !signed?.signedUrl) return null;
+  const pdfRes = await fetch(signed.signedUrl);
+  if (!pdfRes.ok || !pdfRes.body) return null;
+  const nameFromPath = pdfPath.split('/').pop()?.replace(/[?#].*$/, '') || 'service-manual.pdf';
+  return new NextResponse(pdfRes.body, {
+    status: 200,
+    headers: pdfInlineHeaders(nameFromPath),
+  });
 }
 
 /**
@@ -144,6 +254,14 @@ export async function POST(req: NextRequest) {
       storagePath,
     });
     if (!resolved.url) {
+      const catalogStream = await streamAiCatalogPdf({
+        role: profile?.role,
+        orgType,
+        manualId,
+        storagePath,
+        userClient: caller.supabase,
+      });
+      if (catalogStream) return catalogStream;
       return NextResponse.json(
         { error: resolved.error || 'Could not open manual', ...resolved.json },
         { status: resolved.status >= 400 ? resolved.status : 403 }
