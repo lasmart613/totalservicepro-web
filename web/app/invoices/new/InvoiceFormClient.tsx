@@ -23,6 +23,11 @@ import {
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
+import {
+  collectableInvoiceDataFields,
+  estimatePartsDeposit,
+  resolveInvoiceCollectable,
+} from '@/lib/billing/invoice-collectable';
 
 type CustomerOpt = LinkedCustomerOpt;
 
@@ -87,6 +92,10 @@ export default function InvoiceFormClient() {
   const [deposit, setDeposit] = useState(0);
   const [depositDate, setDepositDate] = useState('');
   const [depositMethod, setDepositMethod] = useState('');
+  /** Unpaid parts/travel deposit due now. Null = charge the full remaining total. */
+  const [dueNowAmount, setDueNowAmount] = useState<number | null>(null);
+  const [deferredReleased, setDeferredReleased] = useState(false);
+  const [chargeDepositOnly, setChargeDepositOnly] = useState(true);
   const [partsCatalog, setPartsCatalog] = useState<any[]>([]);
 
   const subtotal = useMemo(() => lineItemsSubtotal(lineItems), [lineItems]);
@@ -95,7 +104,35 @@ export default function InvoiceFormClient() {
     [subtotal, tax]
   );
   const total = totalOverride != null ? totalOverride : computedTotal;
-  const balanceDue = Math.max(0, Math.round((total - (Number(deposit) || 0)) * 100) / 100);
+  const received = Number(deposit) || 0;
+  const balanceDue = Math.max(0, Math.round((total - received) * 100) / 100);
+  const collectable = useMemo(() => {
+    const due =
+      chargeDepositOnly && dueNowAmount != null && dueNowAmount > 0 && dueNowAmount < total - 0.004
+        ? dueNowAmount
+        : total;
+    return resolveInvoiceCollectable({
+      total,
+      amountPaid: received,
+      invoice_data: {
+        partsDeposit: due < total - 0.004 ? due : 0,
+        dueNow: due,
+        deferred: Math.max(0, Math.round((total - due) * 100) / 100),
+        deferredReleased,
+        deposit: received,
+        depositDate: depositDate || null,
+        depositMethod: depositMethod || null,
+      },
+    });
+  }, [
+    total,
+    received,
+    dueNowAmount,
+    chargeDepositOnly,
+    deferredReleased,
+    depositDate,
+    depositMethod,
+  ]);
 
   const filteredCustomers = useMemo(
     () => filterLinkedCustomers(customers, custSearch, 12),
@@ -183,9 +220,22 @@ export default function InvoiceFormClient() {
       setModel(idata.model || '');
       setSerial(idata.serial || '');
       setPulseCount(idata.pulse_count != null ? String(idata.pulse_count) : '');
-      setDeposit(Number(idata.deposit ?? idata.travelDeposit) || 0);
+      const split = resolveInvoiceCollectable({
+        total: data.total,
+        amountPaid: data.amount_paid,
+        invoice_data: idata,
+      });
+      setDeposit(split.amountPaid);
       setDepositDate(idata.depositDate || '');
       setDepositMethod(idata.depositMethod || '');
+      if (split.hasDeferredSplit) {
+        setDueNowAmount(split.dueNowOriginal);
+        setChargeDepositOnly(!split.deferredReleased);
+      } else {
+        setDueNowAmount(null);
+        setChargeDepositOnly(true);
+      }
+      setDeferredReleased(split.deferredReleased);
       if (idata.custAddress) setCustAddress(idata.custAddress);
       if (idata.custCity) setCustCity(idata.custCity);
       if (idata.custState) setCustState(idata.custState);
@@ -239,9 +289,20 @@ export default function InvoiceFormClient() {
       setCustPhone(ed.custPhone || '');
       setCustEmail(ed.custEmail || '');
       setCustContact(ed.custContact || '');
-      setDeposit(Number(ed.deposit ?? ed.travelDeposit) || 0);
       setTax(Number(ed.tax) || 0);
       if (data.total != null) setTotalOverride(Number(data.total));
+      const estDeposit = estimatePartsDeposit({
+        ...ed,
+        deposit_required: ed.deposit_required,
+        deposit: ed.deposit ?? ed.travelDeposit ?? ed.parts_deposit,
+      });
+      // Estimate deposit is due now — not already received.
+      setDeposit(0);
+      setDepositDate('');
+      setDepositMethod('');
+      setDueNowAmount(estDeposit > 0 ? estDeposit : null);
+      setChargeDepositOnly(true);
+      setDeferredReleased(false);
 
       let lines: any[] = ed.line_items || ed.part_lines || [];
       if (!Array.isArray(lines) || !lines.length) {
@@ -299,7 +360,11 @@ export default function InvoiceFormClient() {
       if (data.issues) parts.push(`Notes: ${data.issues}`);
       parts.push(`Converted from estimate #${data.id}`);
       setDescription(ed.description || parts.join('\n'));
-      toast.message('Prefilling invoice from estimate — review and save.');
+      toast.message(
+        estDeposit > 0
+          ? `Prefilling from estimate — Stripe will charge the $${estDeposit.toFixed(2)} parts/travel deposit only. Remainder stays due on completion.`
+          : 'Prefilling invoice from estimate — review and save.'
+      );
     },
     [supabase]
   );
@@ -385,7 +450,7 @@ export default function InvoiceFormClient() {
 
   async function saveInvoice(
     nextStatus: string,
-    opts?: { quiet?: boolean }
+    opts?: { quiet?: boolean; deferredReleased?: boolean }
   ): Promise<string | number | null> {
     const name = customerName.trim() || custSearch.trim();
     if (!name) {
@@ -426,23 +491,36 @@ export default function InvoiceFormClient() {
         amount_paid:
           nextStatus === 'paid'
             ? Math.round(Number(total) * 100) / 100
-            : Math.round((Number(deposit) || 0) * 100) / 100,
+            : Math.round(received * 100) / 100,
         paid_at: nextStatus === 'paid' ? new Date().toISOString() : null,
         payment_method: depositMethod || null,
         invoice_number: invNum,
         invoice_data: {
           line_items: items,
+          ...collectableInvoiceDataFields(
+            resolveInvoiceCollectable({
+              total,
+              amountPaid: nextStatus === 'paid' ? total : received,
+              invoice_data: {
+                partsDeposit: collectable.partsDeposit,
+                dueNow: collectable.dueNowOriginal,
+                deferred: collectable.deferredOriginal,
+                deferredReleased: opts?.deferredReleased ?? deferredReleased,
+                deposit: nextStatus === 'paid' ? total : received,
+              },
+            })
+          ),
           deposit:
             nextStatus === 'paid'
               ? Math.round(Number(total) * 100) / 100
-              : Number(deposit) || 0,
+              : received,
           travelDeposit:
             nextStatus === 'paid'
               ? Math.round(Number(total) * 100) / 100
-              : Number(deposit) || 0,
+              : received,
           depositDate: depositDate || null,
           depositMethod: depositMethod || null,
-          balanceDue,
+          balanceDue: nextStatus === 'paid' ? 0 : collectable.remainingOwed,
           manufacturer,
           model,
           serial,
@@ -543,10 +621,14 @@ export default function InvoiceFormClient() {
       subtotal,
       tax: Number(tax) || 0,
       total,
-      deposit: Number(deposit) || 0,
+      deposit: received,
       depositDate: depositDate || undefined,
       depositMethod: depositMethod || undefined,
-      balanceDue,
+      balanceDue: collectable.remainingOwed,
+      dueNow: collectable.hasDeferredSplit ? collectable.dueNowOriginal : undefined,
+      deferred: collectable.hasDeferredSplit ? collectable.deferredOriginal : undefined,
+      deferredReleased: collectable.deferredReleased,
+      collectableAmount: collectable.stripeAmount,
     });
   }
 
@@ -577,7 +659,8 @@ export default function InvoiceFormClient() {
           invoice_id: id,
           to_email: custEmail.trim() || undefined,
           invoice_number: docNumber,
-          balance_due: balanceDue,
+          balance_due: collectable.remainingOwed,
+          due_now: collectable.stripeAmount,
           total,
           customer_organization_id: customerOrgId,
           company_name: company.company_name,
@@ -634,7 +717,8 @@ export default function InvoiceFormClient() {
           invoice_id: savedId,
           to_email: custEmail.trim() || undefined,
           invoice_number: docNumber,
-          balance_due: balanceDue,
+          balance_due: collectable.remainingOwed,
+          due_now: collectable.stripeAmount,
           total,
           customer_organization_id: customerOrgId,
           company_name: company.company_name,
@@ -650,6 +734,29 @@ export default function InvoiceFormClient() {
       toast.success(`Invoice re-sent to ${result.to}`);
     } finally {
       setEmailing(false);
+    }
+  }
+
+  async function collectRemainingBalance() {
+    if (!collectable.hasDeferredSplit || collectable.deferredReleased) {
+      toast.message('There is no deferred remainder to collect.');
+      return;
+    }
+    const remain = collectable.deferredUnpaid || collectable.deferredOriginal;
+    if (
+      !confirm(
+        `Release the remaining ${money(remain)} so Stripe can charge it?\n\nEmail or resend the invoice after this to send a new pay link.`
+      )
+    ) {
+      return;
+    }
+    setDeferredReleased(true);
+    setChargeDepositOnly(false);
+    const id = await saveInvoice(status || 'draft', { quiet: true, deferredReleased: true });
+    if (id) {
+      toast.success(
+        `Remaining ${money(remain)} is now collectable. Email or resend to send a Stripe pay link.`
+      );
     }
   }
 
@@ -696,6 +803,11 @@ export default function InvoiceFormClient() {
               </span>
               {sourceEstimateId && (
                 <span className="text-xs">from estimate #{sourceEstimateId}</span>
+              )}
+              {collectable.hasDeferredSplit && !collectable.deferredReleased && (
+                <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-amber-700 bg-amber-900/40 text-amber-200">
+                  Due now {money(collectable.stripeAmount || collectable.dueNowOriginal)}
+                </span>
               )}
             </div>
           </div>
@@ -991,10 +1103,71 @@ export default function InvoiceFormClient() {
             </div>
           </div>
 
-          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Deposit Received</h3>
+          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Payment split</h3>
+          {(sourceEstimateId || dueNowAmount != null) && (
+            <label className="flex items-start gap-2 text-sm mb-3">
+              <input
+                type="checkbox"
+                className="mt-1"
+                checked={chargeDepositOnly && dueNowAmount != null && dueNowAmount > 0}
+                disabled={deferredReleased}
+                onChange={(e) => {
+                  setChargeDepositOnly(e.target.checked);
+                  if (!e.target.checked) setDeferredReleased(false);
+                }}
+              />
+              <span>
+                Charge parts/travel deposit now. Remainder stays on this invoice as due on completion
+                and is not included in the Stripe pay button until you collect it.
+              </span>
+            </label>
+          )}
+          {collectable.hasDeferredSplit && (
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="text-xs text-[var(--text3)]">Due now (parts/travel deposit)</label>
+                <input
+                  className="input mt-1"
+                  type="number"
+                  step="0.01"
+                  min={0}
+                  value={dueNowAmount ?? collectable.dueNowOriginal}
+                  disabled={deferredReleased}
+                  onChange={(e) => setDueNowAmount(parseFloat(e.target.value) || 0)}
+                />
+              </div>
+              <div>
+                <label className="text-xs text-[var(--text3)]">Remaining (due on completion)</label>
+                <input
+                  className="input mt-1 opacity-90"
+                  readOnly
+                  value={collectable.deferredOriginal.toFixed(2)}
+                />
+              </div>
+            </div>
+          )}
+          <div className="rounded-lg border border-[var(--border2)] bg-[var(--surface2)] p-3 mb-3 text-sm">
+            <div className="flex justify-between gap-3">
+              <span className="text-[var(--text3)]">Stripe pay button</span>
+              <strong className="text-[var(--gold)]">{money(collectable.stripeAmount)}</strong>
+            </div>
+            {collectable.hasDeferredSplit && !collectable.deferredReleased && (
+              <p className="text-xs text-[var(--text3)] mt-2">
+                Customer pay link charges the deposit only. The {money(collectable.deferredUnpaid)}{' '}
+                remainder is deferred until you collect it.
+              </p>
+            )}
+            {collectable.deferredReleased && collectable.remainingOwed > 0 && (
+              <p className="text-xs text-[var(--text3)] mt-2">
+                Remaining balance is released — Stripe will charge {money(collectable.stripeAmount)}.
+              </p>
+            )}
+          </div>
+
+          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Amount received</h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="text-xs text-[var(--text3)]">Deposit amount ($)</label>
+              <label className="text-xs text-[var(--text3)]">Amount received ($)</label>
               <input
                 className="input mt-1"
                 type="number"
@@ -1005,7 +1178,7 @@ export default function InvoiceFormClient() {
               />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Deposit date</label>
+              <label className="text-xs text-[var(--text3)]">Received date</label>
               <input
                 className="input mt-1"
                 type="date"
@@ -1025,14 +1198,14 @@ export default function InvoiceFormClient() {
                 <option value="Check">Check</option>
                 <option value="Credit Card">Credit Card</option>
                 <option value="ACH / Wire">ACH / Wire</option>
+                <option value="Stripe">Stripe</option>
                 <option value="Other">Other</option>
               </select>
             </div>
           </div>
           <p className="text-xs text-[var(--text3)] mt-2">
-            Balance remaining = Total Due − amount received. Stripe Link payments mark the invoice
-            paid (or partial) automatically. For cash, check, or card in person, record the amount
-            here or use Mark paid / Mark partial.
+            Amount received is cash/check/card already in hand — not the unpaid deposit. Stripe
+            Checkout records this automatically when the customer pays the due-now amount.
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
@@ -1047,7 +1220,11 @@ export default function InvoiceFormClient() {
               />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)] font-bold">Balance remaining</label>
+              <label className="text-xs text-[var(--text3)] font-bold">
+                {collectable.hasDeferredSplit && !collectable.deferredReleased
+                  ? 'Still owed (incl. due on completion)'
+                  : 'Balance remaining'}
+              </label>
               <input
                 className="input mt-1 font-bold text-lg opacity-90"
                 readOnly
@@ -1100,12 +1277,22 @@ export default function InvoiceFormClient() {
           >
             Mark sent (no email)
           </button>
+          {collectable.hasDeferredSplit && !collectable.deferredReleased && (
+            <button
+              type="button"
+              className="btn btn-secondary min-w-[150px] text-xs"
+              disabled={saving || emailing}
+              onClick={() => collectRemainingBalance()}
+            >
+              Collect remaining balance
+            </button>
+          )}
           <button
             type="button"
             className="btn btn-secondary min-w-[100px]"
             disabled={saving || emailing}
             onClick={() => {
-              const rec = Number(deposit) || 0;
+              const rec = received;
               const tot = Number(total) || 0;
               if (rec <= 0) {
                 toast.error('Enter amount received first, or use Mark paid for the full total.');

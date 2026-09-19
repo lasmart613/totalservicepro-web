@@ -595,6 +595,7 @@ function ShopEstimatesList() {
                           href={`/invoices/new?fromEstimate=${est.id}`}
                           className="btn btn-primary text-xs px-3 py-1.5"
                           style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
+                          title="Parts/travel deposit is due now; remainder stays on the invoice until you collect it."
                         >
                           Convert to Invoice
                         </Link>

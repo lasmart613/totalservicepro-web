@@ -788,7 +788,12 @@ export default function EstimateFormClient() {
             </div>
           </div>
           {savedId && status !== 'invoiced' && status !== 'expired' && (
-            <button type="button" className="btn btn-primary text-sm" onClick={convertToInvoice}>
+            <button
+              type="button"
+              className="btn btn-primary text-sm"
+              onClick={convertToInvoice}
+              title="Converts to one invoice. Parts/travel deposit is due now; remainder stays due on completion until you collect it."
+            >
               Convert to Invoice
             </button>
           )}
