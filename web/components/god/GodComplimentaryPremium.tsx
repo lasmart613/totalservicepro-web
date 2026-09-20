@@ -93,8 +93,13 @@ export function GodComplimentaryPremium() {
       if (!res.ok) throw new Error(json?.error || 'Grant failed');
       const granted = Number(json.grantedCount || 0);
       const skipped = Number(json.skippedCount || 0);
+      const emailed = Number(json.emailedCount || 0);
+      const emailSkipped = Number(json.emailSkippedCount || 0);
       toast.success(
-        `Granted ${granted} complimentary Premium` + (skipped ? ` · skipped ${skipped}` : '')
+        `Granted ${granted} complimentary Premium` +
+          (emailed ? ` · emailed ${emailed}` : '') +
+          (skipped ? ` · skipped ${skipped}` : '') +
+          (emailSkipped ? ` · ${emailSkipped} trial email skipped` : '')
       );
       if (Array.isArray(json.skipped) && json.skipped.length) {
         const first = json.skipped[0];
@@ -140,8 +145,10 @@ export function GodComplimentaryPremium() {
       <h2 className="text-xl font-bold mb-1">Complimentary Premium</h2>
       <p className="text-[var(--text3)] mb-4 max-w-3xl">
         Soft beta: grant {COMPLIMENTARY_PREMIUM_DAYS} days of Premium to a repair company without
-        Stripe or a card. New shop signups get this automatically. Paid Stripe orgs and
-        Premium rows without an expiry are never flipped or expired.
+        Stripe or a card. A trial email goes to the shop admin on a successful grant. Repeat
+        grants in the same window do not mail again. New shop signups get Premium automatically
+        (no extra email). Paid Stripe orgs and Premium rows without an expiry are never flipped
+        or expired.
       </p>
 
       <div className="flex flex-wrap items-center gap-3 mb-3">
@@ -248,7 +255,9 @@ export function GodComplimentaryPremium() {
             <p className="text-[var(--text2)] mb-4">
               {selectedShops.length} repair compan
               {selectedShops.length === 1 ? 'y' : 'ies'} get {COMPLIMENTARY_PREMIUM_DAYS} days.
-              No Stripe. No card. Paid Stripe orgs and Premium-without-expiry rows are skipped.
+              No Stripe. No card. The shop admin gets a trial email (same Resend From as
+              estimates and invites). Paid Stripe orgs and Premium-without-expiry rows are
+              skipped.
             </p>
             <div className="flex flex-wrap gap-3">
               <button type="button" className="btn btn-primary" disabled={granting} onClick={grant}>
