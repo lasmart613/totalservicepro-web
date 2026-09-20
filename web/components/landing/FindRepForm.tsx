@@ -120,8 +120,8 @@ export function FindRepForm({
       <TitleTag className="lp-modal-title">Find a Service/Repair Company Near Me</TitleTag>
       <p className="lp-modal-lede">
         {compact
-          ? 'Lasers, lithotriptors, and C-arms first. No Total Service Pro account required — this creates a real service request for a nearby biomedical shop.'
-          : 'Tell us the equipment and what is going on. No Total Service Pro account required — RepairPlanet posts a service request for a nearby biomedical shop. Lasers, lithotriptors, and C-arms first.'}
+          ? 'Medical devices — lasers, lithotriptors, and C-arms first. No Total Service Pro account required — this creates a real service request for a nearby biomedical shop.'
+          : 'Tell us the equipment and what is going on. No Total Service Pro account required — RepairPlanet posts a service request for a nearby biomedical shop. Medical devices — lasers, lithotriptors, and C-arms first.'}
       </p>
       <form onSubmit={submit} className="lp-lead-form">
         <label className="lp-field lp-hp" aria-hidden="true">

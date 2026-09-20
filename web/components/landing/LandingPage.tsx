@@ -25,7 +25,7 @@ export function LandingSplash() {
         <div className="lp-brand-name" style={{ fontSize: 28 }}>
           RepairPlanet
         </div>
-        <div className="lp-brand-sub">Total Service Pro · Medical Equipment Service</div>
+        <div className="lp-brand-sub">Total Service Pro · Medical Device Service</div>
       </div>
     </div>
   );
@@ -89,9 +89,10 @@ const AUDIENCES: {
     label: 'Repair companies',
     signup: '/signup/company',
     lines: [
-      'Jobs near you when clinics need a technician',
-      'Color-coded shop calendar — assign calls by field engineer',
-      'View service history on every job',
+      'Built for BMETs and laser service engineers — not lasers-only shops',
+      'Jobs near you when hospitals and clinics need a technician',
+      'Color-coded shop calendar — assign calls by BMET or laser FSE',
+      'View service history on every medical device',
       'Keep service manuals in one place',
       'Bid on open service requests',
     ],
@@ -103,11 +104,11 @@ const AUDIENCES: {
   },
   {
     id: 'clinic',
-    label: 'Clinics',
+    label: 'Clinics & owners',
     signup: '/signup/owner',
     lines: [
       'Find a service rep near you — no account required',
-      'Lasers, lithotriptors, and C-arms first',
+      'Medical devices — lasers, lithotriptors, C-arms, and more',
       'View service history and track maintenance costs',
     ],
     shot: {
@@ -142,7 +143,7 @@ const HERO_SLIDES: {
   {
     audience: 'Repair companies',
     title: 'See Open Tickets and Upcoming Calls',
-    sub: 'Color-coded jobs for the whole shop.',
+    sub: 'Dispatch BMETs and laser service engineers from one shop calendar.',
     shot: {
       src: '/landing/dashboard.webp',
       alt: 'Shop dashboard for Alex Lee with 7 open tickets, 3 today’s calls, upcoming service calls, and Quick Access to Photometry, Tech Hub, Schedule, and Reports',
@@ -150,9 +151,9 @@ const HERO_SLIDES: {
     },
   },
   {
-    audience: 'Clinics',
+    audience: 'Clinics & owners',
     title: 'Find a Repair Company',
-    sub: 'Match lasers, lithotriptors, and C-arms with shops that can work on them.',
+    sub: 'Match medical devices — lasers, lithotriptors, C-arms, and more — with shops that work on them.',
     shot: {
       src: '/landing/directory.webp',
       alt: 'Directory search to find a repair company among service companies, clinics, resellers, and suppliers',
@@ -172,7 +173,7 @@ const HERO_SLIDES: {
   {
     audience: 'Repair companies',
     title: 'Schedule and Assign Service Calls',
-    sub: 'Assign each call to a field engineer.',
+    sub: 'Assign each call to a BMET or laser service engineer.',
     shot: {
       src: '/landing/schedule.webp',
       alt: 'Color-coded August shop schedule with assigned field engineer legend',
@@ -180,7 +181,7 @@ const HERO_SLIDES: {
     },
   },
   {
-    audience: 'Clinics',
+    audience: 'Clinics & owners',
     title: 'View Service History',
     sub: 'Track work and maintenance costs on every system.',
     shot: {
@@ -191,7 +192,7 @@ const HERO_SLIDES: {
   },
   {
     audience: 'Repair companies',
-    title: 'Assign a Field Engineer and Email Them the Ticket',
+    title: 'Assign a BMET or Laser Engineer and Email the Ticket',
     sub: 'They get the job details when you assign it.',
     shot: {
       src: '/landing/ticket-assign.webp',
@@ -201,7 +202,7 @@ const HERO_SLIDES: {
   },
   {
     audience: 'Repair companies',
-    title: 'Assign Shop Test Equipment to a Field Engineer',
+    title: 'Assign Shop Test Equipment to a BMET or Laser Engineer',
     sub: 'Keep meters and tools with the tech who needs them.',
     shot: {
       src: '/landing/team-equipment.webp',
@@ -212,7 +213,7 @@ const HERO_SLIDES: {
   {
     audience: 'Repair companies',
     title: 'Photometry Tools on the Job',
-    sub: 'Fluence, irradiance, and power in the field.',
+    sub: 'Fluence, irradiance, and power for laser service engineers in the field.',
     shot: {
       src: '/landing/app-calcs.webp',
       alt: 'Android Photometry Tools grid with Fluence, Irradiance, Duty Cycle, Wavelength, and Avg Power',
@@ -236,19 +237,19 @@ const HERO_AUTO_MS = 7000;
 
 const HERO_COVER: Record<string, string> = {
   'Repair companies': '/landing/hero-bg-shop.webp',
-  Clinics: '/landing/hero-bg-clinic.webp',
+  'Clinics & owners': '/landing/hero-bg-clinic.webp',
   'Parts sellers': '/landing/hero-bg-parts.webp',
 };
 
 const HERO_COVER_SM: Record<string, string> = {
   'Repair companies': '/landing/hero-bg-shop-640.webp',
-  Clinics: '/landing/hero-bg-clinic-640.webp',
+  'Clinics & owners': '/landing/hero-bg-clinic-640.webp',
   'Parts sellers': '/landing/hero-bg-parts-640.webp',
 };
 
 const HERO_COVER_ID: Record<string, string> = {
   'Repair companies': 'shop',
-  Clinics: 'clinic',
+  'Clinics & owners': 'clinic',
   'Parts sellers': 'parts',
 };
 
@@ -335,7 +336,7 @@ function HeroCarousel() {
       }}
     >
       <p className="lp-hero-tagline">
-        Connecting Medical Equipment Owners to Top Service Professionals
+        For BMETs, laser service engineers, and medical-device owners
       </p>
       <aside className="lp-hero-find" id="find-a-rep" aria-label="Find a service or repair company">
         <FindRepForm variant="hero" />
@@ -457,9 +458,10 @@ function HeroCarousel() {
           <p className="lp-hero-note">
             Service company?{' '}
             <Link href="/signup/company">Jobs near you — register your shop</Link>
-            . Field engineers join through their shop.{' '}
+            . BMETs and laser service engineers join through their shop.{' '}
             <Link href="/signup">Register for Total Service Pro</Link>
           </p>
+          <p className="lp-hero-note">Soft beta — no paid ads.</p>
         </div>
       </div>
     </section>
@@ -525,8 +527,10 @@ export function LandingPage() {
       <section className="lp-section" id="features">
         <h2 className="lp-h2">What you get</h2>
         <p className="lp-lede">
-          RepairPlanet is the biomedical service network. Total Service Pro is the
-          shop, clinic, and parts operating system behind it.
+          RepairPlanet is the medical-device service network. Total Service Pro is
+          built for BMETs, laser service engineers, clinics, and parts sellers —
+          lasers stay core, alongside lithotriptors, C-arms, and other biomedical
+          equipment.
         </p>
         <div className="lp-role-cols">
           {AUDIENCES.map((r) => (
@@ -572,8 +576,8 @@ export function LandingPage() {
 
       <section className="lp-section lp-phones" id="app">
         <div className="lp-phones-copy">
-          <h2 className="lp-h2">Same account in the field</h2>
-          <p className="lp-lede">View or edit Schedule, find parts, search service manuals, and create service reports on Android or iOS.</p>
+          <h2 className="lp-h2">Same account for BMETs and laser engineers</h2>
+          <p className="lp-lede">BMETs and laser service engineers can view or edit Schedule, find parts, search service manuals, and create service reports on Android or iOS.</p>
           <p className="lp-kicker">Coming soon</p>
           <div className="lp-store-badges" role="group" aria-label="Mobile apps coming soon">
             <span className="lp-store-badge lp-store-badge-play">

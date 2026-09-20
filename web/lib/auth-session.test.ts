@@ -54,19 +54,20 @@ test('logged-out hero has a unique subtitle on every slide and no trial phrasing
   assert.equal(subs.length, 9);
   assert.equal(new Set(subs).size, 9, 'each hero slide needs its own subtitle');
   assert.deepEqual(subs, [
-    'Color-coded jobs for the whole shop.',
-    'Match lasers, lithotriptors, and C-arms with shops that can work on them.',
+    'Dispatch BMETs and laser service engineers from one shop calendar.',
+    'Match medical devices — lasers, lithotriptors, C-arms, and more — with shops that work on them.',
     'Get found when a shop needs a part that’s on your shelf.',
-    'Assign each call to a field engineer.',
+    'Assign each call to a BMET or laser service engineer.',
     'Track work and maintenance costs on every system.',
     'They get the job details when you assign it.',
     'Keep meters and tools with the tech who needs them.',
-    'Fluence, irradiance, and power in the field.',
+    'Fluence, irradiance, and power for laser service engineers in the field.',
     'Bid jobs and find parts from one shop account.',
   ]);
   assert.match(page, /See Open Tickets and Upcoming Calls/);
-  assert.match(page, /Connecting Medical Equipment Owners to Top Service Professionals/);
+  assert.match(page, /For BMETs, laser service engineers, and medical-device owners/);
   assert.doesNotMatch(page, /RepairPlanet is a biomedical equipment service network/);
+  assert.doesNotMatch(page, /Connecting Medical Equipment Owners to Top Service Professionals/);
   assert.match(page, /Start on the free plan/);
   assert.match(page, /A free plan is included\./);
   assert.match(page, /lp-hero-subhead/);
@@ -78,7 +79,7 @@ test('logged-out hero has a unique subtitle on every slide and no trial phrasing
   assert.doesNotMatch(page, /Free to start/);
   assert.doesNotMatch(page, /Tickets, parts, and the marketplace in one shop/);
   assert.doesNotMatch(page, /lp-hero-benefits|lp-mini-carousel|hero-cards/);
-  const clinicChunks = heroBlock.split(/\{/).filter((chunk) => chunk.includes("audience: 'Clinics'"));
+  const clinicChunks = heroBlock.split(/\{/).filter((chunk) => chunk.includes("audience: 'Clinics & owners'"));
   assert.equal(clinicChunks.length, 2);
   for (const chunk of clinicChunks) {
     assert.doesNotMatch(chunk, /marketplace/i);
@@ -122,16 +123,16 @@ test('logged-out landing pairs each hero title with a unique matching still', ()
       'Connect with Repair Companies and Clinics',
       'Schedule and Assign Service Calls',
       'View Service History',
-      'Assign a Field Engineer and Email Them the Ticket',
-      'Assign Shop Test Equipment to a Field Engineer',
+      'Assign a BMET or Laser Engineer and Email the Ticket',
+      'Assign Shop Test Equipment to a BMET or Laser Engineer',
       'Photometry Tools on the Job',
       'Marketplace — Parts, Used Systems, and Service Needs',
     ],
   );
   assert.equal(byTitle['See Open Tickets and Upcoming Calls'], '/landing/dashboard.webp');
   assert.equal(byTitle['Schedule and Assign Service Calls'], '/landing/schedule.webp');
-  assert.equal(byTitle['Assign a Field Engineer and Email Them the Ticket'], '/landing/ticket-assign.webp');
-  assert.equal(byTitle['Assign Shop Test Equipment to a Field Engineer'], '/landing/team-equipment.webp');
+  assert.equal(byTitle['Assign a BMET or Laser Engineer and Email the Ticket'], '/landing/ticket-assign.webp');
+  assert.equal(byTitle['Assign Shop Test Equipment to a BMET or Laser Engineer'], '/landing/team-equipment.webp');
   assert.equal(byTitle['Photometry Tools on the Job'], '/landing/app-calcs.webp');
   assert.equal(byTitle['Marketplace — Parts, Used Systems, and Service Needs'], '/landing/marketplace.webp');
   assert.equal(byTitle['Find a Repair Company'], '/landing/directory.webp');
@@ -146,18 +147,20 @@ test('logged-out landing pairs each hero title with a unique matching still', ()
   assert.match(galleryBlock, /\/landing\/dashboard\.webp/);
   assert.doesNotMatch(galleryBlock, /\/landing\/app-calcs\.webp/);
   assert.match(source, /What you get/);
-  assert.match(source, /Color-coded shop calendar — assign calls by field engineer/);
+  assert.match(source, /Color-coded shop calendar — assign calls by BMET or laser FSE/);
+  assert.match(source, /Built for BMETs and laser service engineers/);
+  assert.match(source, /Medical devices — lasers, lithotriptors, C-arms, and more/);
   assert.match(source, /id: 'clinic'[\s\S]*?src: '\/landing\/directory\.webp'/);
   assert.match(source, /\/landing\/directory\.webp/);
-  assert.match(source, /Same account in the field/);
+  assert.match(source, /Same account for BMETs and laser engineers/);
+  assert.match(source, /Soft beta — no paid ads/);
   assert.doesNotMatch(source, /id="join"|lp-paths/);
   assert.doesNotMatch(source, /Email the report on the jobsite/);
   assert.doesNotMatch(source, /Cut the next call/);
   assert.doesNotMatch(source, /Maximize uptime on every box/);
   assert.doesNotMatch(source, /List what is on the shelf/);
-  assert.doesNotMatch(source, /\bFSE\b/);
   const shell = readFileSync(join(here, '../components/landing/LandingShell.tsx'), 'utf8');
-  assert.doesNotMatch(shell, /\bFSE\b/);
+  assert.match(shell, /Soft beta — no paid ads/);
 });
 
 test('logged-out hero paints a darkened role cover behind left copy', () => {
@@ -165,7 +168,7 @@ test('logged-out hero paints a darkened role cover behind left copy', () => {
   const page = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');
   const css = readFileSync(join(here, '../components/landing/landing.css'), 'utf8');
   assert.match(page, /'Repair companies': '\/landing\/hero-bg-shop\.webp'/);
-  assert.match(page, /Clinics: '\/landing\/hero-bg-clinic\.webp'/);
+  assert.match(page, /'Clinics & owners': '\/landing\/hero-bg-clinic\.webp'/);
   assert.match(page, /'Parts sellers': '\/landing\/hero-bg-parts\.webp'/);
   assert.match(page, /--lp-hero-cover/);
   assert.match(page, /data-cover=\{HERO_COVER_ID\[s\.audience\]\}/);
@@ -198,8 +201,8 @@ test('logged-out field section shows coming-soon store badges, not live listings
   const page = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');
   const css = readFileSync(join(here, '../components/landing/landing.css'), 'utf8');
   const field = page.split('id="app"')[1];
-  assert.match(field, /Same account in the field/);
-  assert.match(field, /View or edit Schedule, find parts, search service manuals, and create service reports on Android or iOS\./);
+  assert.match(field, /Same account for BMETs and laser engineers/);
+  assert.match(field, /BMETs and laser service engineers can view or edit Schedule, find parts, search service manuals, and create service reports on Android or iOS\./);
   assert.match(field, /Coming soon/);
   assert.match(field, /lp-kicker/);
   assert.match(field, /Google Play — coming soon/);

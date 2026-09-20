@@ -343,7 +343,7 @@ html.landing-mode body {
 
 .lp-hero-tagline {
   margin: 0 0 18px;
-  max-width: 22em;
+  max-width: 28em;
   font-size: clamp(20px, 2.8vw, 28px);
   font-weight: 700;
   line-height: 1.28;

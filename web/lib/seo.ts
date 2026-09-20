@@ -6,7 +6,7 @@ export const SEO_ORIGIN = 'https://repairplanet.net';
 export const DEFAULT_TITLE = 'RepairPlanet · Total Service Pro';
 
 export const DEFAULT_DESCRIPTION =
-  'RepairPlanet is a biomedical equipment service network for clinics — lasers, lithotriptors, and C-arms first. Total Service Pro from Medical Repair Network is the operating system behind the network.';
+  'RepairPlanet is a medical-device service network for BMETs, laser service engineers, and the clinics that own the equipment — lasers, lithotriptors, C-arms, and more. Total Service Pro from Medical Repair Network is the operating system behind the network.';
 
 export const TITLE_TEMPLATE = '%s · RepairPlanet';
 
@@ -158,19 +158,19 @@ export const PUBLIC_PAGE_SEO: Record<PublicPageKey, PageSeo> = {
     path: '/signup',
     title: 'Register',
     description:
-      'Register for Total Service Pro. Repair companies, clinics, and parts sellers each get their own door. Technicians are invited by their repair company.',
+      'Register for Total Service Pro. Repair companies for BMETs and laser service engineers, clinics and medical-device owners, and parts sellers each get their own door. Technicians are invited by their repair company.',
   },
   signupCompany: {
     path: '/signup/company',
     title: 'Register a repair company',
     description:
-      'Register a repair company on Total Service Pro. Dispatch, estimates, invoices, and bids on clinic repair work — lasers, lithotriptors, and C-arms first.',
+      'Register a repair company on Total Service Pro. Built for BMETs and laser service engineers — dispatch, estimates, invoices, and bids on clinic repair work. Lasers, lithotriptors, C-arms, and more.',
   },
   signupOwner: {
     path: '/signup/owner',
     title: 'Register a clinic',
     description:
-      'Register a clinic, rental company, or reseller on Total Service Pro. Track systems and find biomedical service — lasers, lithotriptors, and C-arms first.',
+      'Register a clinic, hospital, rental company, or reseller on Total Service Pro. Track medical devices and find biomedical service — lasers, lithotriptors, C-arms, and more.',
   },
   signupSupplier: {
     path: '/signup/supplier',
@@ -182,13 +182,13 @@ export const PUBLIC_PAGE_SEO: Record<PublicPageKey, PageSeo> = {
     path: '/login',
     title: 'Sign in',
     description:
-      'Sign in to Total Service Pro on RepairPlanet — shop schedule, directory, and marketplace for biomedical equipment service.',
+      'Sign in to Total Service Pro on RepairPlanet — shop schedule, directory, and marketplace for BMETs, laser service engineers, and medical-device owners.',
   },
   findARep: {
     path: '/find-a-rep',
     title: 'Find a service rep',
     description:
-      'Find a service or repair company near you. No Total Service Pro account required — RepairPlanet posts a request for a nearby biomedical shop. Lasers, lithotriptors, and C-arms first.',
+      'Find a service or repair company near you. No Total Service Pro account required — RepairPlanet posts a request for a nearby biomedical shop. Medical devices — lasers, lithotriptors, and C-arms first.',
   },
   forgotPassword: {
     path: '/forgot-password',
@@ -268,7 +268,7 @@ export function siteJsonLd(): Record<string, unknown> {
         operatingSystem: 'Web',
         url: `${SEO_ORIGIN}/`,
         description:
-          'Shop, clinic, and parts operating system behind the RepairPlanet biomedical service network.',
+          'Shop, clinic, and parts operating system behind the RepairPlanet medical-device service network — for BMETs, laser service engineers, and equipment owners.',
         offers: {
           '@type': 'Offer',
           price: '0',
