@@ -147,6 +147,7 @@ test('God grant / expire APIs stay behind requireGodCaller and do not call Strip
   assert.match(grant, /requireGodCaller/);
   assert.match(expire, /requireGodCaller/);
   assert.match(grant, /complimentaryPremiumGrantFields/);
+  assert.match(grant, /notifyComplimentaryPremiumGrants/);
   assert.match(expire, /shouldExpireComplimentaryPremium/);
   assert.match(expire, /\.not\('premium_until', 'is', null\)/);
   assert.doesNotMatch(grant, /checkout\/sessions|trial_period|coupons/);

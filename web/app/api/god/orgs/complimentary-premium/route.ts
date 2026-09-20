@@ -12,12 +12,14 @@ import {
   type ComplimentaryGrantSkip,
   type PaidStripeSubRow,
 } from '@/lib/complimentary-premium';
+import { notifyComplimentaryPremiumGrants } from '@/lib/complimentary-premium-notify';
 
 export const dynamic = 'force-dynamic';
 
 const ORG_SELECTS = [
-  'id, name, type, is_premium, subscription_tier, plan, premium_until, premium_grant',
-  'id, name, type, is_premium, subscription_tier, plan',
+  'id, name, type, email, is_premium, subscription_tier, plan, premium_until, premium_grant',
+  'id, name, type, email, is_premium, subscription_tier, plan',
+  'id, name, type, email, is_premium',
   'id, name, type, is_premium',
 ] as const;
 
@@ -25,6 +27,7 @@ const ORG_SELECTS = [
  * POST /api/god/orgs/complimentary-premium
  * God-only. Grant ~60 days complimentary Premium to selected service_company orgs.
  * No Stripe. No card. Skips paid Stripe and legacy is_premium without expiry.
+ * Emails the shop admin on a successful grant (idempotent in the same window).
  */
 export async function POST(req: NextRequest) {
   const gate = await requireGodCaller(req);
@@ -136,6 +139,17 @@ export async function POST(req: NextRequest) {
     });
   }
 
+  const mail = granted.length
+    ? await notifyComplimentaryPremiumGrants({
+        grants: granted,
+        priorOrgs: orgs,
+        days,
+        sentByUserId: gate.caller.userId,
+        sentByEmail: gate.caller.email,
+        now,
+      })
+    : { emailed: [], skipped: [], emailedCount: 0, skippedCount: 0 };
+
   return NextResponse.json({
     ok: true,
     god: true,
@@ -144,5 +158,9 @@ export async function POST(req: NextRequest) {
     skipped,
     grantedCount: granted.length,
     skippedCount: skipped.length,
+    emailed: mail.emailed,
+    emailSkipped: mail.skipped,
+    emailedCount: mail.emailedCount,
+    emailSkippedCount: mail.skippedCount,
   });
 }
