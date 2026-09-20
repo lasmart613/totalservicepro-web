@@ -53,6 +53,8 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
           Medical Repair Network
           {' · '}
           Total Service Pro
+          {' · '}
+          Soft beta — no paid ads
         </div>
         <div className="lp-footer-links">
           <Link href="/">Home</Link>

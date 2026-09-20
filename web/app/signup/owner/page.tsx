@@ -298,12 +298,12 @@ function OwnerSignupInner() {
             <span className="font-extrabold text-2xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </div>
           <h1 className="text-2xl font-bold mt-1">
-            {claimLocked ? 'Claim your clinic profile' : 'Sign Up as Laser Owner'}
+            {claimLocked ? 'Claim your clinic profile' : 'Sign up as a clinic or equipment owner'}
           </h1>
           <p className="text-sm text-[var(--text3)]">
             {claimLocked
               ? `Create a free account for ${facilityName || 'this clinic'} to view service history, upcoming service, and your equipment list.`
-              : 'Clinics, rental companies, and resellers — My Lasers, service needs, and marketplace awards'}
+              : 'Hospitals, clinics, rental companies, and resellers — equipment list, service needs, and marketplace awards'}
           </p>
         </div>
 
@@ -517,7 +517,7 @@ function OwnerSignupInner() {
                   </div>
                 )}
               </div>
-              <p className="text-[10px] text-[var(--text3)] mt-1">Add each laser system you own with its serial number.</p>
+              <p className="text-[10px] text-[var(--text3)] mt-1">Add each medical device you own with its serial number.</p>
             </div>
 
             <div>

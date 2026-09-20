@@ -577,7 +577,7 @@ function LoginInner() {
             Join as a Repair company, Clinic, or Parts seller
           </div>
           <p className="text-center text-xs text-[var(--text3)] mb-4">
-            Field engineers and service techs are added by their repair company through Team.
+            BMETs, laser service engineers, and field techs are added by their repair company through Team.
             There is no individual technician signup.
           </p>
           <div className="grid grid-cols-1 gap-2">
@@ -585,7 +585,7 @@ function LoginInner() {
               Sign up as Repair company
             </Link>
             <Link href="/signup/owner" className="btn btn-secondary w-full justify-center text-sm py-2">
-              Sign up as Clinic / laser owner
+              Sign up as Clinic / equipment owner
             </Link>
             <Link href="/signup/supplier" className="btn btn-secondary w-full justify-center text-sm py-2">
               Sign up as Parts seller
