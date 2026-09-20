@@ -16,6 +16,28 @@ import AuthOtpBox from '@/components/AuthOtpBox';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 
+/** Visitor-facing signup labels — stored org values stay laser_* / customer. */
+const SIGNUP_ORG_COPY: Record<
+  Exclude<OwnerOrgType, 'laser_clinic'>,
+  { label: string; description: string }
+> = {
+  customer: {
+    label: 'Clinic / medical practice',
+    description:
+      'Hospital, clinic, med spa, or practice that owns medical devices for patient care.',
+  },
+  laser_rental: {
+    label: 'Equipment rental company',
+    description:
+      'Owns a fleet rented to clinics or events. Tracks systems, posts service needs, awards bids.',
+  },
+  laser_reseller: {
+    label: 'Equipment reseller',
+    description:
+      'Buys/sells medical devices (new or used). Tracks inventory and can list systems on the Marketplace.',
+  },
+};
+
 const FACILITY_TYPES = [
   'Hospital',
   'Med Spa',
@@ -373,8 +395,12 @@ function OwnerSignupInner() {
                       }}
                     />
                     <span>
-                      <span className="font-semibold text-sm block">{opt.label}</span>
-                      <span className="text-xs text-[var(--text3)]">{opt.description}</span>
+                      <span className="font-semibold text-sm block">
+                        {SIGNUP_ORG_COPY[opt.value]?.label ?? opt.label}
+                      </span>
+                      <span className="text-xs text-[var(--text3)]">
+                        {SIGNUP_ORG_COPY[opt.value]?.description ?? opt.description}
+                      </span>
                     </span>
                   </label>
                 ))}
