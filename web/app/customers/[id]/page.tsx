@@ -24,7 +24,9 @@ import {
   DIRECTORY_CONTACT_ROLES,
   DIRECTORY_ROLE_LABELS,
   filledDirectoryRoles,
+  isRoleFilled,
   resolveDirectoryContact,
+  roleDisplayName,
   roleKeyFromTitle,
 } from '@/lib/customer-contacts';
 import { filledSocialLinks, socialFieldsFromOrg } from '@/lib/social-links';
@@ -979,18 +981,19 @@ export default function CustomerProfilePage() {
             )}
             {DIRECTORY_CONTACT_ROLES.map((role) => {
               const fields = form.directory.roles[role];
-              const isPrimary = form.directory.primaryRole === role && Boolean(fields.name || fields.email || fields.phone);
+              const displayName = roleDisplayName(fields);
+              const isPrimary = form.directory.primaryRole === role && isRoleFilled(fields);
               return (
                 <div
                   key={role}
                   className="flex items-center gap-3 py-3 border-b border-[var(--border)] last:border-0"
                 >
                   <div className="w-9 h-9 rounded-full bg-[var(--surface3)] flex items-center justify-center text-xs font-bold text-[var(--text3)]">
-                    {initials(fields.name || DIRECTORY_ROLE_LABELS[role])}
+                    {initials(displayName || DIRECTORY_ROLE_LABELS[role])}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="font-semibold text-sm">
-                      {fields.name || '—'}
+                      {displayName || '—'}
                       {isPrimary ? ' ⭐' : ''}
                     </div>
                     <div className="text-xs text-[var(--text3)]">

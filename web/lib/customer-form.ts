@@ -20,6 +20,7 @@ import {
   ensurePrimaryDirectoryRole,
   hydrateDirectoryContacts,
   persistDirectoryContacts,
+  roleDisplayName,
   serializeDirectoryContacts,
   type DirectoryContactsState,
   type DirectoryContactRow,
@@ -131,7 +132,9 @@ export function customerOrgPayload(
   const biz = form.biz_type.trim() || null;
   const region = normalizeRegionInput(form.state);
   const directory = ensurePrimaryDirectoryRole(form.directory || emptyDirectoryContacts());
-  const primaryName = directory.primaryRole ? directory.roles[directory.primaryRole].name.trim() : '';
+  const primaryName = directory.primaryRole
+    ? roleDisplayName(directory.roles[directory.primaryRole])
+    : '';
   return {
     name: form.name.trim(),
     address: form.address.trim() || null,
