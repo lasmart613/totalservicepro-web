@@ -13,8 +13,11 @@ import {
   ensurePrimaryDirectoryRole,
   hydrateDirectoryContacts,
   parseDirectoryContactsJson,
+  patchDirectoryRoleField,
   pickCrmReachEmail,
   resolveDirectoryContact,
+  roleDisplayName,
+  roleFieldsFromInput,
   roleKeyFromTitle,
   setDirectoryPrimaryRole,
   serializeDirectoryContacts,
@@ -22,15 +25,11 @@ import {
 
 function withRole(
   key: keyof typeof DIRECTORY_ROLE_LABELS,
-  fields: { name?: string; email?: string; phone?: string },
+  fields: { first_name?: string; last_name?: string; name?: string; email?: string; phone?: string },
   primary?: keyof typeof DIRECTORY_ROLE_LABELS | null
 ) {
   const state = emptyDirectoryContacts();
-  state.roles[key] = {
-    name: fields.name || '',
-    email: fields.email || '',
-    phone: fields.phone || '',
-  };
+  state.roles[key] = roleFieldsFromInput(fields, { trim: false });
   state.primaryRole = primary === undefined ? key : primary;
   return ensurePrimaryDirectoryRole(state);
 }
@@ -62,12 +61,12 @@ test('primary radio is empty until a person-role is filled, then exactly one', (
   assert.equal(switched.primaryRole, 'physician');
 
   const both = emptyDirectoryContacts();
-  both.roles.owner = { name: 'Pat', email: '', phone: '' };
-  both.roles.office_manager = { name: 'Sam', email: 'sam@clinic.com', phone: '' };
+  both.roles.owner = roleFieldsFromInput({ name: 'Pat' });
+  both.roles.office_manager = roleFieldsFromInput({ name: 'Sam', email: 'sam@clinic.com' });
   both.primaryRole = 'office_manager';
   assert.equal(ensurePrimaryDirectoryRole(both).primaryRole, 'office_manager');
 
-  both.roles.office_manager = { name: '', email: '', phone: '' };
+  both.roles.office_manager = roleFieldsFromInput({});
   assert.equal(ensurePrimaryDirectoryRole(both).primaryRole, 'owner');
 });
 
@@ -163,7 +162,8 @@ test('JSON parse and contact-row hydrate keep empty roles valid', () => {
     },
   });
   assert.equal(parsed?.primaryRole, 'laser_technician');
-  assert.equal(parsed?.roles.owner.name, '');
+  assert.equal(roleDisplayName(parsed?.roles.owner), '');
+  assert.equal(parsed?.roles.laser_technician.first_name, 'Alex');
   assert.equal(parsed?.roles.laser_technician.phone, '555-0199');
 
   const fromRows = directoryContactsFromContactRows([
@@ -171,8 +171,10 @@ test('JSON parse and contact-row hydrate keep empty roles valid', () => {
     { first_name: 'Kai', last_name: 'Ng', title: 'Office Manager', phone: '555-0111' },
   ]);
   assert.equal(fromRows.roles.owner.email, 'o@clinic.com');
-  assert.equal(fromRows.roles.owner.name, '');
-  assert.equal(fromRows.roles.office_manager.name, 'Kai Ng');
+  assert.equal(roleDisplayName(fromRows.roles.owner), '');
+  assert.equal(fromRows.roles.office_manager.first_name, 'Kai');
+  assert.equal(fromRows.roles.office_manager.last_name, 'Ng');
+  assert.equal(roleDisplayName(fromRows.roles.office_manager), 'Kai Ng');
   assert.equal(fromRows.primaryRole, 'owner');
 
   const hydrated = hydrateDirectoryContacts({
@@ -213,8 +215,8 @@ test('contact sync writes filled roles only and marks the primary', () => {
       ...emptyDirectoryContacts(),
       roles: {
         ...emptyDirectoryContacts().roles,
-        owner: { name: 'Larry Smart', email: 'larry@clinic.com', phone: '' },
-        office_manager: { name: '', email: '', phone: '' },
+        owner: roleFieldsFromInput({ name: 'Larry Smart', email: 'larry@clinic.com' }),
+        office_manager: roleFieldsFromInput({}),
       },
       primaryRole: 'owner',
     })
@@ -236,9 +238,58 @@ test('directory, invite, and billing surfaces use primary then office fallback',
   assert.match(customers, /applyDirectoryContactToLinked/);
   assert.match(customers, /display_contact/);
   assert.match(profile, /resolveDirectoryContact/);
+  assert.match(profile, /roleDisplayName/);
   assert.match(profile, /directory-primary-contact|Main office/);
   assert.match(invite, /pickCrmReachEmail/);
   assert.match(invite, /resolveDirectoryContact/);
   assert.match(sendDoc, /pickCrmReachEmail/);
   assert.match(invoice, /fetchDirectoryContactSources/);
+});
+
+test('role name edits keep spaces while typing and persist First + Last', () => {
+  let state = emptyDirectoryContacts();
+  state = patchDirectoryRoleField(state, 'medical_director', 'first_name', 'Mary ');
+  assert.equal(state.roles.medical_director.first_name, 'Mary ');
+  assert.equal(state.primaryRole, 'medical_director');
+
+  state = patchDirectoryRoleField(state, 'medical_director', 'last_name', 'Ann Chen');
+  assert.equal(state.roles.medical_director.last_name, 'Ann Chen');
+  assert.equal(roleDisplayName(state.roles.medical_director), 'Mary Ann Chen');
+
+  const json = serializeDirectoryContacts(state);
+  assert.equal(json.version, 2);
+  assert.equal(json.roles.medical_director.first_name, 'Mary');
+  assert.equal(json.roles.medical_director.last_name, 'Ann Chen');
+  assert.equal(json.roles.medical_director.name, 'Mary Ann Chen');
+
+  const rows = contactWriteRows(12, state);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].title, 'Medical Director');
+  assert.equal(rows[0].first_name, 'Mary');
+  assert.equal(rows[0].last_name, 'Ann Chen');
+
+  const parsed = parseDirectoryContactsJson(json);
+  assert.equal(parsed?.roles.medical_director.first_name, 'Mary');
+  assert.equal(parsed?.roles.medical_director.last_name, 'Ann Chen');
+  assert.equal(roleDisplayName(parsed?.roles.medical_director), 'Mary Ann Chen');
+});
+
+test('legacy single name JSON and contact rows backfill into first + last', () => {
+  const fromV1 = parseDirectoryContactsJson({
+    version: 1,
+    primaryRole: 'laser_technician',
+    roles: {
+      laser_technician: { name: 'Alex Rivera', email: 'alex@clinic.com', phone: '' },
+    },
+  });
+  assert.equal(fromV1?.roles.laser_technician.first_name, 'Alex');
+  assert.equal(fromV1?.roles.laser_technician.last_name, 'Rivera');
+  assert.equal(roleDisplayName(fromV1?.roles.laser_technician), 'Alex Rivera');
+
+  const fromRow = directoryContactsFromContactRows([
+    { first_name: 'Pat Rivera', title: 'Office Manager', email: 'pat@clinic.com', is_primary: true },
+  ]);
+  assert.equal(fromRow.roles.office_manager.first_name, 'Pat');
+  assert.equal(fromRow.roles.office_manager.last_name, 'Rivera');
+  assert.equal(roleDisplayName(fromRow.roles.office_manager), 'Pat Rivera');
 });

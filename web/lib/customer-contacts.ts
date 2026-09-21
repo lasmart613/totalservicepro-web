@@ -6,6 +6,10 @@
  * `organizations.directory_contacts` (JSONB) and are synced into `contacts`
  * (title = role label, is_primary) so CRM / God / billing keep working.
  *
+ * Role people use first_name + last_name (display as "First Last"). Live form
+ * state must not trim on each keystroke — that used to strip the space in
+ * "First Last" and made legal names impossible to type.
+ *
  * Legacy orgs with only `contact_name` stay valid until a role is saved.
  */
 
@@ -20,9 +24,15 @@ export const DIRECTORY_CONTACT_ROLES = [
 export type DirectoryRoleKey = (typeof DIRECTORY_CONTACT_ROLES)[number];
 
 export type DirectoryRoleFields = {
-  name: string;
+  first_name: string;
+  last_name: string;
   email: string;
   phone: string;
+};
+
+/** Stored JSON and older callers may still send a single `name`. */
+export type DirectoryRoleFieldsInput = Partial<DirectoryRoleFields> & {
+  name?: string | null;
 };
 
 export type DirectoryContactsState = {
@@ -63,7 +73,7 @@ const ROLE_BY_LABEL = new Map<string, DirectoryRoleKey>(
 );
 
 export function emptyRoleFields(): DirectoryRoleFields {
-  return { name: '', email: '', phone: '' };
+  return { first_name: '', last_name: '', email: '', phone: '' };
 }
 
 export function emptyDirectoryContacts(): DirectoryContactsState {
@@ -94,9 +104,20 @@ export function roleKeyFromTitle(title?: string | null): DirectoryRoleKey | null
   return ROLE_BY_LABEL.get(String(title || '').trim().toLowerCase()) || null;
 }
 
-export function isRoleFilled(role?: DirectoryRoleFields | null): boolean {
+export function isRoleFilled(role?: DirectoryRoleFieldsInput | null): boolean {
   if (!role) return false;
-  return Boolean(role.name.trim() || role.email.trim() || role.phone.trim());
+  const fields = roleFieldsFromInput(role, { trim: false });
+  return Boolean(
+    fields.first_name.trim() ||
+      fields.last_name.trim() ||
+      fields.email.trim() ||
+      fields.phone.trim()
+  );
+}
+
+export function roleDisplayName(role?: DirectoryRoleFieldsInput | null): string {
+  const fields = roleFieldsFromInput(role, { trim: false });
+  return formatPersonName(fields.first_name, fields.last_name);
 }
 
 export function filledDirectoryRoles(state: DirectoryContactsState): DirectoryRoleKey[] {
@@ -124,33 +145,62 @@ export function isValidContactEmail(value?: string | null): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || '').trim());
 }
 
-function trimRole(role?: Partial<DirectoryRoleFields> | null): DirectoryRoleFields {
+export function roleFieldsFromInput(
+  role?: DirectoryRoleFieldsInput | null,
+  opts?: { trim?: boolean }
+): DirectoryRoleFields {
+  const apply = opts?.trim === false ? (value: string) => value : (value: string) => value.trim();
+  const firstRaw = String(role?.first_name ?? '');
+  const lastRaw = String(role?.last_name ?? '');
+  const nameRaw = String(role?.name ?? '');
+  const hasStructured = Boolean(firstRaw.trim() || lastRaw.trim());
+  const split = hasStructured ? null : splitPersonName(nameRaw);
   return {
-    name: String(role?.name || '').trim(),
-    email: String(role?.email || '').trim(),
-    phone: String(role?.phone || '').trim(),
+    first_name: apply(hasStructured ? firstRaw : split?.first_name || ''),
+    last_name: apply(hasStructured ? lastRaw : split?.last_name || ''),
+    email: apply(String(role?.email || '')),
+    phone: apply(String(role?.phone || '')),
   };
 }
 
-function mergeDirectoryRoles(raw?: Partial<DirectoryContactsState> | null): DirectoryContactsState {
+function mergeDirectoryRoles(
+  raw?: Partial<DirectoryContactsState> | null,
+  opts?: { trim?: boolean }
+): DirectoryContactsState {
   const empty = emptyDirectoryContacts();
   const roles = { ...empty.roles };
   for (const key of DIRECTORY_CONTACT_ROLES) {
-    roles[key] = trimRole(raw?.roles?.[key]);
+    roles[key] = roleFieldsFromInput(raw?.roles?.[key], opts);
   }
   const primary = isDirectoryRoleKey(raw?.primaryRole) ? raw.primaryRole : null;
   return { roles, primaryRole: primary };
 }
 
+/** Keep typed spaces while editing. Persist/serialize still trims. */
+export function patchDirectoryRoleField(
+  state: DirectoryContactsState,
+  role: DirectoryRoleKey,
+  field: keyof DirectoryRoleFields,
+  next: string
+): DirectoryContactsState {
+  return ensurePrimaryDirectoryRole({
+    ...state,
+    roles: {
+      ...state.roles,
+      [role]: { ...state.roles[role], [field]: next },
+    },
+  });
+}
+
 export function normalizeDirectoryContacts(raw?: Partial<DirectoryContactsState> | null): DirectoryContactsState {
-  return ensurePrimaryDirectoryRole(mergeDirectoryRoles(raw));
+  return ensurePrimaryDirectoryRole(mergeDirectoryRoles(raw, { trim: true }));
 }
 
 /** Exactly one primary when any person-role is filled; none when all roles are empty. */
 export function ensurePrimaryDirectoryRole(
   state?: Partial<DirectoryContactsState> | null
 ): DirectoryContactsState {
-  const next = mergeDirectoryRoles(state);
+  const next = mergeDirectoryRoles(state, { trim: false });
   const filled = filledDirectoryRoles(next);
   if (filled.length === 0) {
     return { roles: next.roles, primaryRole: null };
@@ -192,7 +242,7 @@ export function parseDirectoryContactsJson(raw: unknown): DirectoryContactsState
   for (const key of DIRECTORY_CONTACT_ROLES) {
     const role = rolesRaw[key];
     if (role && typeof role === 'object' && !Array.isArray(role)) {
-      state.roles[key] = trimRole(role as DirectoryRoleFields);
+      state.roles[key] = roleFieldsFromInput(role as DirectoryRoleFieldsInput, { trim: true });
       if (isRoleFilled(state.roles[key])) found = true;
     }
   }
@@ -202,16 +252,29 @@ export function parseDirectoryContactsJson(raw: unknown): DirectoryContactsState
   return ensurePrimaryDirectoryRole(state);
 }
 
+export type SerializedDirectoryRole = DirectoryRoleFields & { name: string };
+
 export function serializeDirectoryContacts(state: DirectoryContactsState): {
-  version: 1;
+  version: 2;
   primaryRole: DirectoryRoleKey | null;
-  roles: Record<DirectoryRoleKey, DirectoryRoleFields>;
+  roles: Record<DirectoryRoleKey, SerializedDirectoryRole>;
 } {
-  const normalized = ensurePrimaryDirectoryRole(state);
+  const normalized = normalizeDirectoryContacts(state);
+  const roles = {} as Record<DirectoryRoleKey, SerializedDirectoryRole>;
+  for (const key of DIRECTORY_CONTACT_ROLES) {
+    const role = normalized.roles[key];
+    roles[key] = {
+      first_name: role.first_name,
+      last_name: role.last_name,
+      name: roleDisplayName(role),
+      email: role.email,
+      phone: role.phone,
+    };
+  }
   return {
-    version: 1,
+    version: 2,
     primaryRole: normalized.primaryRole,
-    roles: normalized.roles,
+    roles,
   };
 }
 
@@ -225,9 +288,23 @@ export function directoryContactsFromContactRows(
     if (!key) continue;
     if (isRoleFilled(state.roles[key])) continue;
     const label = DIRECTORY_ROLE_LABELS[key];
-    const name = formatPersonName(row.first_name, row.last_name, row.name);
+    let first = String(row.first_name || '').trim();
+    let last = String(row.last_name || '').trim();
+    if (first.toLowerCase() === label.toLowerCase() && !last) {
+      first = '';
+    } else if (!last && /\s/.test(first)) {
+      const split = splitPersonName(first);
+      first = split.first_name;
+      last = split.last_name || '';
+    } else if (!first && !last && row.name) {
+      const split = splitPersonName(String(row.name));
+      first = split.first_name;
+      last = split.last_name || '';
+      if (first.toLowerCase() === label.toLowerCase() && !last) first = '';
+    }
     state.roles[key] = {
-      name: name.toLowerCase() === label.toLowerCase() ? '' : name,
+      first_name: first,
+      last_name: last,
       email: String(row.email || '').trim(),
       phone: String(row.phone || '').trim(),
     };
@@ -284,7 +361,7 @@ export function resolveDirectoryContact(input: {
   const primaryRole = primaryKey ? state.roles[primaryKey] : null;
   if (primaryKey && primaryRole && isRoleFilled(primaryRole)) {
     return {
-      name: primaryRole.name.trim(),
+      name: roleDisplayName(primaryRole),
       email: firstValidEmail(primaryRole.email, officeEmail),
       phone: firstPhone(primaryRole.phone, officePhone),
       role: primaryKey,
@@ -428,15 +505,16 @@ export function contactWriteRows(
   phone: string | null;
   is_primary: boolean;
 }> {
-  const normalized = ensurePrimaryDirectoryRole(state);
+  const normalized = normalizeDirectoryContacts(state);
   return filledDirectoryRoles(normalized).map((key) => {
     const role = normalized.roles[key];
     const label = DIRECTORY_ROLE_LABELS[key];
-    const split = splitPersonName(role.name);
+    const first = role.first_name || role.last_name || label;
+    const last = role.first_name ? role.last_name || null : null;
     return {
       organization_id: orgId,
-      first_name: split.first_name || label,
-      last_name: split.last_name,
+      first_name: first,
+      last_name: last,
       title: label,
       email: role.email || null,
       phone: role.phone || null,
@@ -450,7 +528,7 @@ export async function persistDirectoryContacts(
   orgId: string | number,
   state: DirectoryContactsState
 ): Promise<void> {
-  const normalized = ensurePrimaryDirectoryRole(state);
+  const normalized = normalizeDirectoryContacts(state);
   const writes = contactWriteRows(orgId, normalized);
   const writeByTitle = new Map(writes.map((row) => [row.title.toLowerCase(), row]));
 

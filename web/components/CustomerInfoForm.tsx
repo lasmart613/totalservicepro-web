@@ -13,7 +13,9 @@ import {
   ensurePrimaryDirectoryRole,
   filledDirectoryRoles,
   isRoleFilled,
+  patchDirectoryRoleField,
   setDirectoryPrimaryRole,
+  type DirectoryRoleFields,
   type DirectoryRoleKey,
 } from '@/lib/customer-contacts';
 import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
@@ -50,18 +52,12 @@ export function CustomerInfoForm({
 
   const setRoleField = (
     role: DirectoryRoleKey,
-    field: 'name' | 'email' | 'phone',
+    field: keyof DirectoryRoleFields,
     next: string
   ) => {
     onChange({
       ...value,
-      directory: ensurePrimaryDirectoryRole({
-        ...directory,
-        roles: {
-          ...directory.roles,
-          [role]: { ...directory.roles[role], [field]: next },
-        },
-      }),
+      directory: patchDirectoryRoleField(directory, role, field, next),
     });
   };
 
@@ -311,18 +307,31 @@ export function CustomerInfoForm({
                       </span>
                     )}
                   </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <input
                       className="input w-full"
-                      placeholder="Name"
-                      value={fields.name}
+                      placeholder="First name"
+                      autoComplete="given-name"
+                      aria-label={`${DIRECTORY_ROLE_LABELS[role]} first name`}
+                      value={fields.first_name}
                       disabled={disabled}
-                      onChange={(e) => setRoleField(role, 'name', e.target.value)}
+                      onChange={(e) => setRoleField(role, 'first_name', e.target.value)}
+                    />
+                    <input
+                      className="input w-full"
+                      placeholder="Last name"
+                      autoComplete="family-name"
+                      aria-label={`${DIRECTORY_ROLE_LABELS[role]} last name`}
+                      value={fields.last_name}
+                      disabled={disabled}
+                      onChange={(e) => setRoleField(role, 'last_name', e.target.value)}
                     />
                     <input
                       className="input w-full"
                       type="email"
                       placeholder="Email"
+                      autoComplete="email"
+                      aria-label={`${DIRECTORY_ROLE_LABELS[role]} email`}
                       value={fields.email}
                       disabled={disabled}
                       onChange={(e) => setRoleField(role, 'email', e.target.value)}
@@ -331,6 +340,8 @@ export function CustomerInfoForm({
                       className="input w-full"
                       type="tel"
                       placeholder="Phone"
+                      autoComplete="tel"
+                      aria-label={`${DIRECTORY_ROLE_LABELS[role]} phone`}
                       value={fields.phone}
                       disabled={disabled}
                       onChange={(e) => setRoleField(role, 'phone', e.target.value)}

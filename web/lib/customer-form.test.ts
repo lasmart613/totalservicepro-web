@@ -134,6 +134,10 @@ test('directory form replaces the single contact field with office + five roles 
   assert.match(roles, /Physician/);
   assert.match(roles, /Laser Technician/);
   assert.match(roles, /Office Manager/);
+  assert.match(src, /First name/);
+  assert.match(src, /Last name/);
+  assert.doesNotMatch(src, /placeholder="Name"/);
+  assert.match(src, /patchDirectoryRoleField/);
   assert.doesNotMatch(src, /Primary contact person/);
 });
 
@@ -143,14 +147,39 @@ test('customer org payload writes directory JSON and syncs contact_name from the
   form.email = 'office@clinic.com';
   form.phone = '555-0000';
   form.contact_name = 'Legacy';
-  form.directory.roles.owner = { name: 'Larry Smart', email: 'larry@clinic.com', phone: '555-0100' };
+  form.directory.roles.owner = {
+    first_name: 'Larry',
+    last_name: 'Smart',
+    email: 'larry@clinic.com',
+    phone: '555-0100',
+  };
   form.directory.primaryRole = 'owner';
   const payload = customerOrgPayload(form, { type: 'customer' });
   assert.equal(payload.contact_name, 'Larry Smart');
   assert.equal(payload.email, 'office@clinic.com');
-  const directory = payload.directory_contacts as { primaryRole?: string; roles?: { owner?: { name?: string } } };
+  const directory = payload.directory_contacts as {
+    primaryRole?: string;
+    roles?: { owner?: { name?: string; first_name?: string; last_name?: string } };
+  };
   assert.equal(directory.primaryRole, 'owner');
+  assert.equal(directory.roles?.owner?.first_name, 'Larry');
+  assert.equal(directory.roles?.owner?.last_name, 'Smart');
   assert.equal(directory.roles?.owner?.name, 'Larry Smart');
+
+  form.directory.roles.owner = {
+    first_name: 'Larry ',
+    last_name: 'Van Der Berg',
+    email: 'larry@clinic.com',
+    phone: '555-0100',
+  };
+  const spaced = customerOrgPayload(form, { type: 'customer' });
+  assert.equal(spaced.contact_name, 'Larry Van Der Berg');
+  const spacedDir = spaced.directory_contacts as {
+    roles?: { owner?: { first_name?: string; last_name?: string; name?: string } };
+  };
+  assert.equal(spacedDir.roles?.owner?.first_name, 'Larry');
+  assert.equal(spacedDir.roles?.owner?.last_name, 'Van Der Berg');
+  assert.equal(spacedDir.roles?.owner?.name, 'Larry Van Der Berg');
 });
 
 test('ticket editor keeps shop organization_id and writes customer_organization_id', () => {
