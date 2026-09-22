@@ -390,11 +390,14 @@ export default function ManualsLibrary() {
     if (json?.url || json?.data_base64) {
       return openInAppViewer(json, manual, titleHint);
     }
-    // Folder response without auto-resolved URL: open first chapter PDF
+    // Folder response without auto-resolved URL: prefer entry_file_path, else first chapter
     if (Array.isArray(json?.chapters) && json.chapters.length) {
-      const first = json.chapters.find((c: any) => c?.storage_path) || json.chapters[0];
+      const entry = String(json?.entry_file_path || manual?.entry_file_path || '').trim();
+      const byEntry = entry
+        ? json.chapters.find((c: any) => String(c?.storage_path || '') === entry)
+        : null;
+      const first = byEntry || json.chapters.find((c: any) => c?.storage_path) || json.chapters[0];
       if (first?.storage_path) {
-        // Caller will re-request with chapter path when this returns 'chapter'
         (openPayloadUrl as any)._pendingChapter = first.storage_path;
         return 'chapter' as const;
       }

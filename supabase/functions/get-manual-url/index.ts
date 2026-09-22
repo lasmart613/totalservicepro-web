@@ -254,13 +254,8 @@ async function loadOwned(
   const map = new Map<string, Owned>();
 
   async function pull(table: string, col: string, val: string | number) {
-    let sel =
-      "manual_id, manuals(id, storage_path, xai_file_id, xai_public_url)";
+    let sel = "manual_id, manuals(id, storage_path)";
     let { data, error } = await admin.from(table).select(sel).eq(col, val);
-    if (error && /xai_file_id|column/i.test(error.message || "")) {
-      sel = "manual_id, manuals(id, storage_path)";
-      ({ data, error } = await admin.from(table).select(sel).eq(col, val));
-    }
     if (error) {
       console.warn(table, error.message);
       return;
@@ -272,8 +267,8 @@ async function loadOwned(
       map.set(id, {
         id,
         storage_path: cleanPath(m.storage_path),
-        xai_file_id: m.xai_file_id ? String(m.xai_file_id) : "",
-        xai_public_url: m.xai_public_url ? String(m.xai_public_url) : "",
+        xai_file_id: "",
+        xai_public_url: "",
       });
     }
   }
@@ -452,34 +447,36 @@ async function streamPdfFromStorage(
   supabaseUrl: string,
   serviceKey: string,
   sp: string,
+  reqHeaders?: Headers,
 ): Promise<Response | null> {
   const path = cleanPath(sp);
   if (!path || !isPdfPath(path)) return null;
   const encoded = path.split("/").map(encodeURIComponent).join("/");
   const endpoint =
     `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/manuals/${encoded}`;
-  const res = await fetch(endpoint, {
-    headers: {
-      Authorization: `Bearer ${serviceKey}`,
-      apikey: serviceKey,
-    },
-  });
+  const fetchHeaders: Record<string, string> = {
+    Authorization: `Bearer ${serviceKey}`,
+    apikey: serviceKey,
+  };
+  const range = reqHeaders?.get("Range") || reqHeaders?.get("range");
+  if (range) fetchHeaders["Range"] = range;
+  const res = await fetch(endpoint, { headers: fetchHeaders });
   if (!res.ok || !res.body) {
     console.warn("stream storage fail", res.status, path, await res.text().catch(() => ""));
     return null;
   }
-  const headers = new Headers(cors);
-  headers.set("Content-Type", "application/pdf");
-  headers.set("Cache-Control", "private, max-age=300");
+  const outHeaders = new Headers(cors);
+  outHeaders.set("Content-Type", "application/pdf");
+  outHeaders.set("Cache-Control", "private, max-age=300");
   const fname = path.split("/").pop() || "manual.pdf";
-  headers.set("Content-Disposition", `inline; filename="${fname.replace(/"/g, "")}"`);
+  outHeaders.set("Content-Disposition", `inline; filename="${fname.replace(/"/g, "")}"`);
   const cr = res.headers.get("Content-Range");
   const ar = res.headers.get("Accept-Ranges");
   const cl = res.headers.get("Content-Length");
-  if (cr) headers.set("Content-Range", cr);
-  if (ar) headers.set("Accept-Ranges", ar);
-  if (cl) headers.set("Content-Length", cl);
-  return new Response(res.body, { status: res.status, headers });
+  if (cr) outHeaders.set("Content-Range", cr);
+  if (ar) outHeaders.set("Accept-Ranges", ar);
+  if (cl) outHeaders.set("Content-Length", cl);
+  return new Response(res.body, { status: res.status, headers: outHeaders });
 }
 
 Deno.serve(async (req) => {
@@ -538,15 +535,22 @@ Deno.serve(async (req) => {
       if (manualId) {
         let q = await admin
           .from("manuals")
-          .select("id, storage_path, xai_file_id, xai_public_url")
+          .select("id, storage_path, title, is_folder, entry_file_path, chapter_metadata")
           .eq("id", manualId)
           .maybeSingle();
-        if (q.error && /xai_file_id|column/i.test(q.error.message || "")) {
+        if (q.error && /is_folder|entry_file_path|chapter_metadata|column/i.test(q.error.message || "")) {
           q = await admin
             .from("manuals")
-            .select("id, storage_path")
+            .select("id, storage_path, title, entry_file_path")
             .eq("id", manualId)
             .maybeSingle();
+          if (q.error && /entry_file_path|column/i.test(q.error.message || "")) {
+            q = await admin
+              .from("manuals")
+              .select("id, storage_path, title")
+              .eq("id", manualId)
+              .maybeSingle();
+          }
         }
         man = q.data;
       }
@@ -599,7 +603,7 @@ Deno.serve(async (req) => {
       }
 
       if (sp) {
-        const streamed = await streamPdfFromStorage(supabaseUrl, serviceKey, sp);
+        const streamed = await streamPdfFromStorage(supabaseUrl, serviceKey, sp, req.headers);
         if (streamed) return streamed;
       }
 
@@ -707,16 +711,23 @@ Deno.serve(async (req) => {
       let q = await admin
         .from("manuals")
         .select(
-          "id, storage_path, xai_file_id, xai_public_url, title, is_folder, entry_file_path, chapter_metadata",
+          "id, storage_path, title, is_folder, entry_file_path, chapter_metadata",
         )
         .eq("id", manualId)
         .maybeSingle();
-      if (q.error && /xai_file_id|is_folder|chapter_metadata|column/i.test(q.error.message || "")) {
+      if (q.error && /is_folder|entry_file_path|chapter_metadata|column/i.test(q.error.message || "")) {
         q = await admin
           .from("manuals")
-          .select("id, storage_path, title")
+          .select("id, storage_path, title, entry_file_path")
           .eq("id", manualId)
           .maybeSingle();
+        if (q.error && /entry_file_path|column/i.test(q.error.message || "")) {
+          q = await admin
+            .from("manuals")
+            .select("id, storage_path, title")
+            .eq("id", manualId)
+            .maybeSingle();
+        }
       }
       man = q.data;
       if (man?.storage_path && !storagePath) storagePath = cleanPath(man.storage_path);
@@ -725,16 +736,23 @@ Deno.serve(async (req) => {
       let q = await admin
         .from("manuals")
         .select(
-          "id, storage_path, xai_file_id, xai_public_url, title, is_folder, entry_file_path, chapter_metadata",
+          "id, storage_path, title, is_folder, entry_file_path, chapter_metadata",
         )
         .eq("storage_path", storagePath)
         .maybeSingle();
-      if (q.error && /xai_file_id|is_folder|chapter_metadata|column/i.test(q.error.message || "")) {
+      if (q.error && /is_folder|entry_file_path|chapter_metadata|column/i.test(q.error.message || "")) {
         q = await admin
           .from("manuals")
-          .select("id, storage_path, title")
+          .select("id, storage_path, title, entry_file_path")
           .eq("storage_path", storagePath)
           .maybeSingle();
+        if (q.error && /entry_file_path|column/i.test(q.error.message || "")) {
+          q = await admin
+            .from("manuals")
+            .select("id, storage_path, title")
+            .eq("storage_path", storagePath)
+            .maybeSingle();
+        }
       }
       man = q.data;
       if (!man) {
@@ -943,6 +961,23 @@ Deno.serve(async (req) => {
     }
 
     // ----- Resolve object path to stream -----
+    // Prefer DB entry_file_path even if an earlier select degraded; re-read lightly if missing.
+    if (manualId && !(man?.entry_file_path) && man) {
+      try {
+        const { data: entryRow } = await admin
+          .from("manuals")
+          .select("entry_file_path, chapter_metadata, is_folder")
+          .eq("id", manualId)
+          .maybeSingle();
+        if (entryRow) {
+          man.entry_file_path = entryRow.entry_file_path ?? man.entry_file_path;
+          man.chapter_metadata = entryRow.chapter_metadata ?? man.chapter_metadata;
+          man.is_folder = entryRow.is_folder ?? man.is_folder;
+        }
+      } catch {
+        /* keep */
+      }
+    }
     // CRITICAL: prefer requested chapter PDF over parent folder storage_path
     let sp = "";
     let chaptersForFolder: Array<{ order: number; title: string; storage_path: string }> = [];
@@ -1036,8 +1071,35 @@ Deno.serve(async (req) => {
       return json(200, { url: publicUrl, source: "public_url", manual_id: manualId });
     }
 
-    // Stream ticket with EXACT pdf path
+    // Prefer Storage signed URL (Range-capable) for reliable multi-page PDF.js loads.
+    // Edge stream proxy is kept as fallback — it historically advertised Accept-Ranges
+    // without honoring client Range requests, which broke large manuals into "1 page".
     if (!preferBase64 && manualId && sp && isPdfPath(sp)) {
+      const chaptersOut = chaptersForFolder.length ? chaptersForFolder : undefined;
+      const prefixOut = parentPath && !isPdfPath(parentPath) ? parentPath : undefined;
+      try {
+        const { data: signed, error: signErr } = await admin.storage
+          .from("manuals")
+          .createSignedUrl(sp, 60 * 60);
+        if (!signErr && signed?.signedUrl) {
+          return json(200, {
+            url: signed.signedUrl,
+            source: "storage_signed",
+            manual_id: manualId,
+            storage_path: sp,
+            entry_file_path: man?.entry_file_path || null,
+            note: "Signed storage URL (Range requests enabled)",
+            chapters: chaptersOut,
+            count: chaptersForFolder.length || undefined,
+            prefix: prefixOut,
+            title: man?.title || null,
+          });
+        }
+        console.warn("createSignedUrl failed", signErr?.message || signErr);
+      } catch (e) {
+        console.warn("createSignedUrl threw", e);
+      }
+
       const ticket = await mintStreamTicket(
         ticketSecret,
         manualId,
@@ -1055,11 +1117,11 @@ Deno.serve(async (req) => {
         source: "edge_stream",
         manual_id: manualId,
         storage_path: sp,
+        entry_file_path: man?.entry_file_path || null,
         note: "Streaming chapter via short ticket",
-        // Multi-chapter manuals: clients can show a chapter picker
-        chapters: chaptersForFolder.length ? chaptersForFolder : undefined,
+        chapters: chaptersOut,
         count: chaptersForFolder.length || undefined,
-        prefix: parentPath && !isPdfPath(parentPath) ? parentPath : undefined,
+        prefix: prefixOut,
         title: man?.title || null,
       });
     }

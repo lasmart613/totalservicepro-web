@@ -114,14 +114,15 @@ function resolveCatalogPdfPath(
 ): string | null {
   const asked = cleanStoragePath(requested);
   if (isPdfPath(asked)) return asked;
+  // Prefer explicit entry_file_path over chapter_metadata[0] (alphabetical / order quirks).
+  const entry = cleanStoragePath(catalog?.entry_file_path);
+  if (isPdfPath(entry)) return entry;
   const fromMeta = pdfPathsForManual({
     storage_path: catalog?.storage_path,
     chapter_metadata: catalog?.chapter_metadata,
     is_folder: catalog?.is_folder,
   });
   if (fromMeta[0] && isPdfPath(fromMeta[0])) return fromMeta[0];
-  const entry = cleanStoragePath(catalog?.entry_file_path);
-  if (isPdfPath(entry)) return entry;
   const parent = cleanStoragePath(catalog?.storage_path);
   if (isPdfPath(parent)) return parent;
   if (parent && isPdfPath(entry)) return entry;
