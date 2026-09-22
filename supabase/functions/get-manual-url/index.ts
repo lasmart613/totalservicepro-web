@@ -454,29 +454,29 @@ async function streamPdfFromStorage(
   const encoded = path.split("/").map(encodeURIComponent).join("/");
   const endpoint =
     `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/manuals/${encoded}`;
-  const headers: Record<string, string> = {
+  const fetchHeaders: Record<string, string> = {
     Authorization: `Bearer ${serviceKey}`,
     apikey: serviceKey,
   };
   const range = reqHeaders?.get("Range") || reqHeaders?.get("range");
-  if (range) headers["Range"] = range;
-  const res = await fetch(endpoint, { headers });
+  if (range) fetchHeaders["Range"] = range;
+  const res = await fetch(endpoint, { headers: fetchHeaders });
   if (!res.ok || !res.body) {
     console.warn("stream storage fail", res.status, path, await res.text().catch(() => ""));
     return null;
   }
-  const headers = new Headers(cors);
-  headers.set("Content-Type", "application/pdf");
-  headers.set("Cache-Control", "private, max-age=300");
+  const outHeaders = new Headers(cors);
+  outHeaders.set("Content-Type", "application/pdf");
+  outHeaders.set("Cache-Control", "private, max-age=300");
   const fname = path.split("/").pop() || "manual.pdf";
-  headers.set("Content-Disposition", `inline; filename="${fname.replace(/"/g, "")}"`);
+  outHeaders.set("Content-Disposition", `inline; filename="${fname.replace(/"/g, "")}"`);
   const cr = res.headers.get("Content-Range");
   const ar = res.headers.get("Accept-Ranges");
   const cl = res.headers.get("Content-Length");
-  if (cr) headers.set("Content-Range", cr);
-  if (ar) headers.set("Accept-Ranges", ar);
-  if (cl) headers.set("Content-Length", cl);
-  return new Response(res.body, { status: res.status, headers });
+  if (cr) outHeaders.set("Content-Range", cr);
+  if (ar) outHeaders.set("Accept-Ranges", ar);
+  if (cl) outHeaders.set("Content-Length", cl);
+  return new Response(res.body, { status: res.status, headers: outHeaders });
 }
 
 Deno.serve(async (req) => {
