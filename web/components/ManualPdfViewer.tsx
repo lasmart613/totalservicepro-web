@@ -118,6 +118,9 @@ async function fetchManualUrl(payload: Record<string, unknown>) {
     },
     body: JSON.stringify({
       ...payload,
+      // Cite / deep-link reader. Library shelf opens never set this, so an
+      // unowned shared catalog manual stays requires_add there.
+      ai_context: true,
       access_token: session.access_token,
     }),
   });
@@ -139,6 +142,7 @@ async function fetchPdfBytes(opts: {
     body: JSON.stringify({
       manual_id: opts.manualId,
       storage_path: opts.storagePath,
+      ai_context: true,
     }),
   });
   if (res.ok) return await res.arrayBuffer();

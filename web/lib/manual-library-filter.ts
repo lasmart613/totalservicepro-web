@@ -163,13 +163,43 @@ export function uniqueManualBrands(rows: ManualLibraryRow[]): string[] {
   return out.sort((a, b) => a.localeCompare(b));
 }
 
-export function groupManualsByBrand(rows: ManualLibraryRow[]): Record<string, ManualLibraryRow[]> {
-  const groups: Record<string, ManualLibraryRow[]> = {};
+export type ManualBrandShelf = {
+  brand: string;
+  manuals: ManualLibraryRow[];
+};
+
+/** Case-insensitive A–Z. Case-only differences compare equal; the shelf list breaks those ties in first-seen order. */
+export function compareManufacturerShelves(a: string, b: string): number {
+  return a.localeCompare(b, 'en', { sensitivity: 'accent' });
+}
+
+/**
+ * Manufacturer shelves for My Library / Browse. Headers sort A–Z
+ * (case-insensitive). Manuals inside a shelf stay in input order.
+ * Returned as an array so numeric-looking names keep this order
+ * (plain object keys would re-sort integer indexes).
+ */
+export function manufacturerShelves(rows: ManualLibraryRow[]): ManualBrandShelf[] {
+  const groups = new Map<string, ManualLibraryRow[]>();
   for (const m of rows) {
     const brand = String(m.brand || '').trim() || 'Other';
-    if (!groups[brand]) groups[brand] = [];
-    groups[brand].push(m);
+    const list = groups.get(brand);
+    if (list) list.push(m);
+    else groups.set(brand, [m]);
   }
+  const brands = [...groups.keys()];
+  const seen = new Map(brands.map((brand, index) => [brand, index]));
+  brands.sort((a, b) => {
+    const cmp = compareManufacturerShelves(a, b);
+    if (cmp !== 0) return cmp;
+    return (seen.get(a) ?? 0) - (seen.get(b) ?? 0);
+  });
+  return brands.map((brand) => ({ brand, manuals: groups.get(brand) || [] }));
+}
+
+export function groupManualsByBrand(rows: ManualLibraryRow[]): Record<string, ManualLibraryRow[]> {
+  const groups: Record<string, ManualLibraryRow[]> = {};
+  for (const shelf of manufacturerShelves(rows)) groups[shelf.brand] = shelf.manuals;
   return groups;
 }
 

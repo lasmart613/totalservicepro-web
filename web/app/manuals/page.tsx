@@ -20,7 +20,13 @@ import {
 } from '@/lib/manual-catalog';
 import { toast } from 'sonner';
 import { canAccessServiceManuals } from '@/lib/roles';
-import { mayOpenManual, manualsAccess, manualsForbiddenMessage, SERVICE_MANUALS_FORBIDDEN } from '@/lib/manuals-access';
+import {
+  companyLibraryOpenNeedsAdd,
+  mayOpenManual,
+  manualsAccess,
+  manualsForbiddenMessage,
+  SERVICE_MANUALS_FORBIDDEN,
+} from '@/lib/manuals-access';
 import {
   DEFAULT_EQUIPMENT_TYPE,
   EQUIPMENT_TYPES,
@@ -34,8 +40,8 @@ import {
   ALL_MANUAL_ROOMS,
   DEFAULT_MANUAL_LIBRARY,
   filterManualLibrary,
-  groupManualsByBrand,
   fetchManualLibraryRows,
+  manufacturerShelves,
   manualLibraryFiltersActive,
   manualLibrarySearchParams,
   parseManualLibrarySearchParams,
@@ -405,19 +411,74 @@ export default function ManualsLibrary() {
     return false;
   }
 
+  async function confirmAddManual(m: any, shownTitle: string): Promise<boolean> {
+    const used = ownedIds.size;
+    const limit = slotLimit;
+    const remaining = isUnlimitedManualSlots(limit) ? Number.POSITIVE_INFINITY : Math.max(0, limit - used);
+    if (!isUnlimitedManualSlots(limit) && remaining <= 0) {
+      toast.error(`Company library is full (${used}/${limit}). Upgrade for more slots.`);
+      return false;
+    }
+    const confirmAdd = window.confirm(
+      `Add "${shownTitle}" to your company library?\n\n` +
+        `Slots used: ${used} of ${isUnlimitedManualSlots(limit) ? 'unlimited' : limit}` +
+        `${isUnlimitedManualSlots(limit) ? '' : ` (${remaining} left)`}.\n` +
+        `Everyone in your service company can open it after you add it.`
+    );
+    if (!confirmAdd) return false;
+    return addToCompanyLibrary(m);
+  }
+
+  async function openAddedManual(m: any, shownTitle: string, payload: Record<string, unknown>) {
+    await loadData();
+    const openRes = await callGetManualUrl(payload);
+    if (openPayloadUrl(openRes.json, m, shownTitle) === true) {
+      toast.success('Added to company library');
+      return;
+    }
+    toast.error(openRes.json.error || 'Added, but could not open PDF yet. Try again from My Library.');
+  }
+
   async function openManual(m: any) {
     try {
       if (!mayOpenManual(callerRole, callerOrgType, m)) {
         toast.error(SERVICE_MANUALS_FORBIDDEN);
         return;
       }
+      const shownTitle = catalogManualTitle(m);
       const payload: Record<string, unknown> = {
         manual_id: m.id,
         storage_path: m.storage_path,
       };
-      const { json, status } = await callGetManualUrl(payload);
 
-      const shownTitle = catalogManualTitle(m);
+      // Shelf / Browse clicks are not AI cite reads. Do not stream a shared
+      // catalog PDF until this company owns the manual — even if get-manual-url
+      // would return a URL for an ai_context reader.
+      if (companyLibraryOpenNeedsAdd({ owned: isOwned(m) })) {
+        const added = await confirmAddManual(m, shownTitle);
+        if (!added) return;
+        await openAddedManual(m, shownTitle, payload);
+        return;
+      }
+
+      const { json, status } = await callGetManualUrl(payload);
+      if (
+        companyLibraryOpenNeedsAdd({
+          owned: true,
+          requiresAdd: json.requires_add,
+          suggestAdd: json.suggest_add,
+          inLibrary: json.in_library,
+          error: json.error,
+        })
+      ) {
+        toast.message('Refreshing library…');
+        await loadData();
+        const added = await confirmAddManual(m, shownTitle);
+        if (!added) return;
+        await openAddedManual(m, shownTitle, payload);
+        return;
+      }
+
       const opened = openPayloadUrl(json, m, shownTitle);
       if (opened === true) return;
       if (opened === 'chapter') {
@@ -428,44 +489,6 @@ export default function ManualsLibrary() {
         });
         if (openPayloadUrl({ ...chRes.json, chapters: json.chapters }, m, shownTitle) === true) return;
         toast.error(chRes.json.error || 'Could not open first chapter');
-        return;
-      }
-
-      // Not in library → offer to add (Browse All)
-      const needsAdd =
-        json.requires_add === true ||
-        /not in company library|access denied/i.test(String(json.error || ''));
-
-      if (needsAdd) {
-        if (isOwned(m)) {
-          // Ownership out of sync — try force-open after client add
-          toast.message('Refreshing library…');
-          await loadData();
-        }
-        const used = ownedIds.size;
-        const limit = slotLimit;
-        const remaining = isUnlimitedManualSlots(limit) ? Number.POSITIVE_INFINITY : Math.max(0, limit - used);
-        if (!isUnlimitedManualSlots(limit) && remaining <= 0) {
-          toast.error(`Company library is full (${used}/${limit}). Upgrade for more slots.`);
-          return;
-        }
-        const confirmAdd = window.confirm(
-          `Add "${shownTitle}" to your company library?\n\n` +
-            `Slots used: ${used} of ${isUnlimitedManualSlots(limit) ? 'unlimited' : limit}` +
-            `${isUnlimitedManualSlots(limit) ? '' : ` (${remaining} left)`}.\n` +
-            `Everyone in your service company can open it after you add it.`
-        );
-        if (!confirmAdd) return;
-
-        const added = await addToCompanyLibrary(m);
-        if (!added) return;
-        await loadData();
-        const openRes = await callGetManualUrl(payload);
-        if (openPayloadUrl(openRes.json, m, shownTitle) === true) {
-          toast.success('Added to company library');
-        } else {
-          toast.error(openRes.json.error || 'Added, but could not open PDF yet. Try again from My Library.');
-        }
         return;
       }
 
@@ -615,7 +638,7 @@ export default function ManualsLibrary() {
     return counts;
   }, [sourceManuals, query, selectedBrand, incompleteOnly, library, bodyMatchIds]);
 
-  const groupedManuals = useMemo(() => groupManualsByBrand(filteredManuals), [filteredManuals]);
+  const brandShelves = useMemo(() => manufacturerShelves(filteredManuals), [filteredManuals]);
   const makeOptions = useMemo(
     () => uniqueManualBrands(manuals.filter((m) => manualLibraryShelf(m) === library)),
     [manuals, library]
@@ -974,7 +997,7 @@ export default function ManualsLibrary() {
           <div className="p-12 text-center text-[var(--text3)]">Loading bookshelf...</div>
         ) : (
           <div className="space-y-12">
-            {Object.keys(groupedManuals).length === 0 && (
+            {brandShelves.length === 0 && (
               <div className="text-center py-12 px-4 text-[var(--text3)]">
                 {filtersOn || query.trim() ? (
                   <>
@@ -1032,7 +1055,7 @@ export default function ManualsLibrary() {
               </div>
             )}
 
-            {Object.entries(groupedManuals).map(([brand, brandManuals]) => (
+            {brandShelves.map(({ brand, manuals: brandManuals }) => (
               <div key={brand} className="space-y-2">
                 <div className="text-xs font-bold uppercase tracking-wider text-[var(--gold)] px-1">
                   {brand}

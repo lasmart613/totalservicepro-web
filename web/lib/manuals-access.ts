@@ -44,6 +44,23 @@ export function mayOpenManual(
   return canAccessManualLibraryShelf(role, orgType, manualLibraryShelf(manual));
 }
 
+/**
+ * Interactive library / Browse All opens must claim a company-library slot
+ * before streaming. A URL from get-manual-url is not enough: an AI cite reader
+ * can receive one with in_library false. Unowned shelf clicks always prompt.
+ */
+export function companyLibraryOpenNeedsAdd(opts: {
+  owned: boolean;
+  requiresAdd?: unknown;
+  suggestAdd?: unknown;
+  inLibrary?: unknown;
+  error?: unknown;
+}): boolean {
+  if (!opts.owned) return true;
+  if (opts.requiresAdd === true || opts.suggestAdd === true || opts.inLibrary === false) return true;
+  return /not in company library|access denied/i.test(String(opts.error || ''));
+}
+
 /** Shared catalog books (AI Assistant dropdown), not private org uploads. */
 export function isSharedCatalogPath(path: unknown): boolean {
   const p = String(path || '')

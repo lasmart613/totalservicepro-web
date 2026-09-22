@@ -7,6 +7,7 @@ import {
   ALL_MANUAL_ROOMS,
   filterManualLibrary,
   groupManualsByBrand,
+  manufacturerShelves,
   MANUAL_LIBRARY_SELECT,
   MANUAL_LIBRARY_SELECT_LEGACY,
   MANUAL_LIBRARY_SELECT_WITH_KIND,
@@ -106,6 +107,31 @@ test('incomplete + make + all rooms', () => {
   assert.deepEqual(Object.keys(groupManualsByBrand(rows)), ['Dornier']);
 });
 
+test('manufacturer shelves sort A–Z case-insensitively and keep tie and spine order', () => {
+  const rows = [
+    { id: 'z', brand: 'Zebra', title: 'last' },
+    { id: 'c1', brand: 'Candela', title: 'first-in-shelf' },
+    { id: 'a', brand: 'alma' },
+    { id: 'c2', brand: 'candela', title: 'other-shelf' },
+    { id: 'c1b', brand: 'Candela', title: 'still-after-first' },
+    { id: 'n', brand: '10 Medical' },
+    { id: 'o', brand: '  ' },
+  ];
+  const shelves = manufacturerShelves(rows);
+  assert.deepEqual(
+    shelves.map((shelf) => shelf.brand),
+    ['10 Medical', 'alma', 'Candela', 'candela', 'Other', 'Zebra']
+  );
+  assert.deepEqual(
+    shelves.find((shelf) => shelf.brand === 'Candela')?.manuals.map((m) => m.id),
+    ['c1', 'c1b']
+  );
+  assert.deepEqual(
+    shelves.find((shelf) => shelf.brand === 'candela')?.manuals.map((m) => m.title),
+    ['other-shelf']
+  );
+});
+
 test('url params round-trip q / make / room=all', () => {
   const qs = manualLibrarySearchParams({
     query: 'collimator',
@@ -186,6 +212,8 @@ test('Service and Operators are separate library shelves', () => {
 test('library page wires search UI and keeps open/get-manual-url gating', () => {
   const page = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
   const searchApi = readFileSync(join(here, '../app/api/manuals/search/route.ts'), 'utf8');
+  assert.match(page, /manufacturerShelves/);
+  assert.match(page, /companyLibraryOpenNeedsAdd/);
   assert.match(page, /filterManualLibrary/);
   assert.match(page, /\/api\/manuals\/search/);
   assert.match(page, /manuals-search/);
