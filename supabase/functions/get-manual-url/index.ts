@@ -2,8 +2,16 @@
 //
 // Org ownership → streamable PDF URL (no base64 by default).
 // Multi-chapter (Candela MGL etc.): own the folder row → stream any PDF under that prefix.
-// Repair-AI (service-company) members may also view shared/ catalog books they can
-// already chat about in AI Assistant — without consuming a company-library slot.
+// Repair-AI (service-company) members may view shared/ catalog books they can
+// already chat about in AI Assistant — without consuming a company-library slot —
+// only when the caller explicitly signals a cite/reader context:
+//   ai_context: true | from_cite: true | cite: true | source: "ai_cite"|"ai"|"cite"|"ai_assistant"
+// Interactive library / Browse All opens omit that flag. If the org does not own
+// the manual (organization_manuals / user_manuals), the response is
+// 403 { requires_add: true } so the shelf shows Add to library.
+// The web in-app viewer (AI citation deep-links to /manuals/view) and the Android
+// pdf viewer send ai_context. Catalog-only successes also include
+// in_library: false and suggest_add: true.
 //
 // Auth: Authorization = anon key (short). body.access_token = user JWT (may be huge).
 // Stream: compact HMAC ticket carries user + manual_id + exact storage_path.
@@ -113,6 +121,25 @@ function isRepairAiCaller(role: unknown, orgType: unknown): boolean {
 function mayViewAiCatalog(role: unknown, orgType: unknown, ...paths: unknown[]): boolean {
   if (!isRepairAiCaller(role, orgType)) return false;
   return paths.some((p) => isSharedCatalogPath(p));
+}
+
+/**
+ * Library shelf clicks must not set this. Only AI cite / in-app readers do.
+ * Without it, shared catalog paths stay ownership-gated (requires_add).
+ */
+function wantsAiCatalogRead(body: Record<string, unknown>): boolean {
+  if (body.ai_context === true || body.aiContext === true) return true;
+  if (body.from_cite === true || body.fromCite === true || body.cite === true) return true;
+  const source = String(body.source || body.context || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s-]+/g, "_");
+  return source === "ai" || source === "ai_cite" || source === "ai_assistant" || source === "cite";
+}
+
+function catalogReadMeta(inLibrary: boolean): Record<string, unknown> {
+  if (inLibrary) return { in_library: true };
+  return { in_library: false, suggest_add: true };
 }
 
 function b64urlEncode(bytes: Uint8Array): string {
@@ -556,16 +583,10 @@ Deno.serve(async (req) => {
       }
 
       const row = owned.get(manualId);
-      const catalogAllow = mayViewAiCatalog(
-        access.role,
-        access.orgType,
-        ticketPath,
-        man?.storage_path,
-        row?.storage_path,
-      );
       const libraryOk = owned.has(manualId) || !!(ticketPath && pathIsOwned(owned, ticketPath));
-      // Verified HMAC ticket was minted only after POST allow (library or AI catalog).
-      if (!libraryOk && !catalogAllow && !ticketTrusted) {
+      // Ticket is minted only after POST authorization (library ownership or an
+      // explicit ai_context catalog read). GET does not reopen the catalog.
+      if (!libraryOk && !ticketTrusted) {
         return json(403, { error: "Access denied", manual_id: manualId });
       }
 
@@ -581,14 +602,14 @@ Deno.serve(async (req) => {
           hint: "Open a chapter PDF path, or call list_chapters first",
         });
       }
-      const ticketCovers = ticketTrusted && (!ticketPath || pathAllowed(ticketPath, sp) || cleanPath(ticketPath) === cleanPath(sp));
-      const catalogCovers = catalogAllow && isSharedCatalogPath(sp);
+      const ticketCovers =
+        ticketTrusted &&
+        (!ticketPath || pathAllowed(ticketPath, sp) || cleanPath(ticketPath) === cleanPath(sp));
       if (
         sp &&
         !pathIsOwned(owned, sp) &&
         !(manualId && owned.has(manualId) && pathAllowed(row?.storage_path || man?.storage_path || "", sp)) &&
-        !ticketCovers &&
-        !catalogCovers
+        !ticketCovers
       ) {
         // Allow if they own parent folder and path is under it
         const parent = cleanPath(row?.storage_path || man?.storage_path || "");
@@ -862,10 +883,15 @@ Deno.serve(async (req) => {
       }
     }
 
-    // AI-scoped shared catalog: same books the SC user can chat about.
-    if (!allowed) {
+    // True only when organization_manuals / user_manuals covers this open.
+    // Computed before the cite bypass so catalog reads stay in_library: false.
+    const inLibrary = allowed;
+    const aiContext = wantsAiCatalogRead(body);
+    // Shared catalog without a library slot — AI cite / in-app reader only.
+    if (!allowed && aiContext) {
       allowed = mayViewAiCatalog(access.role, access.orgType, storagePath, man?.storage_path);
     }
+    const readMeta = catalogReadMeta(inLibrary);
 
     console.log(JSON.stringify({
       uid: user.id,
@@ -874,7 +900,9 @@ Deno.serve(async (req) => {
       manualId,
       storagePath,
       allowed,
-      catalogView: mayViewAiCatalog(access.role, access.orgType, storagePath, man?.storage_path),
+      inLibrary,
+      aiContext,
+      catalogView: !inLibrary && allowed,
       wantList,
       wantAdd,
       preferBase64,
@@ -950,6 +978,7 @@ Deno.serve(async (req) => {
       }
 
       return json(200, {
+        ...readMeta,
         source: "list_chapters",
         manual_id: manualId,
         prefix: parentPath,
@@ -1068,7 +1097,7 @@ Deno.serve(async (req) => {
     const publicUrl = (man?.xai_public_url || ownedRow?.xai_public_url || "").trim();
 
     if (publicUrl && /^https?:\/\//i.test(publicUrl) && !storagePath) {
-      return json(200, { url: publicUrl, source: "public_url", manual_id: manualId });
+      return json(200, { ...readMeta, url: publicUrl, source: "public_url", manual_id: manualId });
     }
 
     // Prefer Storage signed URL (Range-capable) for reliable multi-page PDF.js loads.
@@ -1083,6 +1112,7 @@ Deno.serve(async (req) => {
           .createSignedUrl(sp, 60 * 60);
         if (!signErr && signed?.signedUrl) {
           return json(200, {
+            ...readMeta,
             url: signed.signedUrl,
             source: "storage_signed",
             manual_id: manualId,
@@ -1113,6 +1143,7 @@ Deno.serve(async (req) => {
       proxy.searchParams.set("stream", "1");
       proxy.searchParams.set("t", ticket);
       return json(200, {
+        ...readMeta,
         url: proxy.toString(),
         source: "edge_stream",
         manual_id: manualId,
@@ -1132,6 +1163,7 @@ Deno.serve(async (req) => {
       if (dl.bytes && dl.bytes.length) {
         if (dl.bytes.length <= 8 * 1024 * 1024) {
           return json(200, {
+            ...readMeta,
             data_base64: bytesToBase64(dl.bytes),
             content_type: "application/pdf",
             source: "supabase_base64_fallback",
@@ -1157,6 +1189,7 @@ Deno.serve(async (req) => {
         const bytes = new Uint8Array(await res.arrayBuffer());
         if (bytes.length <= 8 * 1024 * 1024) {
           return json(200, {
+            ...readMeta,
             data_base64: bytesToBase64(bytes),
             content_type: "application/pdf",
             source: "xai_base64_fallback",

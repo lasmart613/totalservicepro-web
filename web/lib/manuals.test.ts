@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { companyLibraryOpenNeedsAdd } from './manuals-access.ts';
 import {
   MANUAL_FIXTURE_PAGE_COUNT,
   MANUAL_FIXTURE_PATH,
@@ -60,12 +61,45 @@ test('bookshelf opens the in-app viewer and does not window.open the PDF', () =>
   assert.match(fileRoute, /mayViewAiScopedManual|streamAiCatalogPdf/);
 });
 
-test('get-manual-url allows Repair-AI catalog view without a library slot', () => {
+test('library shelf prompts add when the company does not own the manual', () => {
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: false }), true);
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: false, inLibrary: true }), true);
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: true }), false);
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, suggestAdd: true }), true);
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, inLibrary: false }), true);
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, requiresAdd: true }), true);
+  assert.equal(
+    companyLibraryOpenNeedsAdd({ owned: true, error: 'Access denied — manual not in company library' }),
+    true
+  );
+  assert.equal(companyLibraryOpenNeedsAdd({ owned: true, error: 'No PDF files found' }), false);
+});
+
+test('get-manual-url catalog bypass is only an explicit AI cite read', () => {
   const edge = readFileSync(join(here, '../../supabase/functions/get-manual-url/index.ts'), 'utf8');
-  assert.match(edge, /mayViewAiCatalog|isRepairAiCaller|isSharedCatalogPath/);
+  const viewer = readFileSync(join(here, '../components/ManualPdfViewer.tsx'), 'utf8');
+  const page = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
+  const fileRoute = readFileSync(join(here, '../app/api/manuals/file/route.ts'), 'utf8');
+  assert.match(edge, /function wantsAiCatalogRead/);
+  assert.match(edge, /function mayViewAiCatalog/);
+  assert.match(edge, /if \(!allowed && aiContext\)/);
+  assert.match(edge, /wantsAiCatalogRead\(body\)/);
+  assert.match(edge, /in_library: false/);
+  assert.match(edge, /suggest_add: true/);
   assert.match(edge, /Access denied — manual not in company library/);
+  assert.match(edge, /requires_add: true/);
   assert.match(edge, /shared\//);
   assert.doesNotMatch(edge, /storage_path is required/);
+  // Unconditional catalog grant (no cite signal) must not remain.
+  assert.doesNotMatch(edge, /if \(!allowed\) \{\s*allowed = mayViewAiCatalog/);
+  assert.match(viewer, /ai_context:\s*true/);
+  assert.match(fileRoute, /ai_context:\s*true/);
+  const openFn = page.slice(page.indexOf('async function openManual'), page.indexOf('const discoveryActive'));
+  assert.match(openFn, /companyLibraryOpenNeedsAdd/);
+  assert.doesNotMatch(openFn, /ai_context:\s*true/);
+  const gate = openFn.indexOf('companyLibraryOpenNeedsAdd');
+  const stream = openFn.indexOf('openPayloadUrl');
+  assert.ok(gate !== -1 && stream !== -1 && gate < stream);
 });
 
 test('viewer loads same-origin pdf.js, not a CDN, and can turn pages', () => {

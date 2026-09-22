@@ -284,7 +284,12 @@
                 'Authorization': 'Bearer ' + (session?.access_token || ''),
                 'apikey': SUPABASE_KEY
             },
-            body: JSON.stringify({ storage_path: path })
+            body: JSON.stringify({
+                storage_path: path,
+                // Reader / cite context. The manuals shelf prompts Add to library
+                // and does not send this, so unowned books stay requires_add there.
+                ai_context: true
+            })
         });
 
         const data = await res.json();

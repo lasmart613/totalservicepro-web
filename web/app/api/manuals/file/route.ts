@@ -52,6 +52,9 @@ async function resolveSignedUrl(opts: {
       manual_id: opts.manualId,
       storage_path: opts.storagePath,
       access_token: opts.token,
+      // Viewer byte proxy, not the library shelf. Keeps shared-catalog
+      // cite reads working when the direct signed URL has to be re-fetched.
+      ai_context: true,
     }),
   });
   const json = (await resp.json().catch(() => ({}))) as Record<string, any>;
