@@ -42,6 +42,13 @@ import {
   type LinkedCustomerOpt,
 } from '@/lib/customer-form';
 import { normalizeStateCode } from '@/lib/geo';
+import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
+import {
+  OTHER_MANUFACTURER,
+  resolveTicketEquipment,
+  selectionAfterManufacturerChange,
+} from '@/lib/ticket-equipment';
 
 function parseYmd(ymd: string | null | undefined): { y: number; m: number; d: number } | null {
   const part = ticketDateYmd(ymd);
@@ -75,7 +82,9 @@ type TicketForm = {
   priority: string;
   status: string;
   equipment_make: string;
+  equipment_make_other: string;
   equipment_model: string;
+  equipment_model_other: string;
   serial_number: string;
   notes: string;
   customer_address: string;
@@ -94,7 +103,9 @@ const EMPTY_FORM = (presetDate?: string): TicketForm => ({
   priority: 'Medium',
   status: 'Scheduled',
   equipment_make: '',
+  equipment_make_other: '',
   equipment_model: '',
+  equipment_model_other: '',
   serial_number: '',
   notes: '',
   customer_address: '',
@@ -132,6 +143,16 @@ export default function ServiceSchedule() {
 
   const supabase = getSupabaseClient();
   const router = useRouter();
+  const catalog = useEquipmentCatalog(supabase);
+  const manufacturers = useMemo(
+    () => listManufacturers(catalog),
+    [catalog.manufacturers, catalog.models]
+  );
+  const modelOptions = useMemo(
+    () =>
+      form.equipment_make ? listModelsForManufacturer(form.equipment_make, catalog) : [],
+    [form.equipment_make, catalog.manufacturers, catalog.models]
+  );
 
   const year = cursor.getFullYear();
   const month0 = cursor.getMonth();
@@ -544,6 +565,13 @@ export default function ServiceSchedule() {
         await refreshCustomers(orgId);
       }
 
+      const equipment = resolveTicketEquipment({
+        manufacturer: form.equipment_make,
+        customManufacturer: form.equipment_make_other,
+        model: form.equipment_model,
+        customModel: form.equipment_model_other,
+      });
+
       const payload: Record<string, any> = {
         ticket_number: ticketNumber,
         organization_id: orgId,
@@ -554,8 +582,8 @@ export default function ServiceSchedule() {
         customer_state: customerState,
         customer_phone: form.customer_phone.trim() || null,
         customer_email: form.customer_email.trim() || null,
-        equipment_make: form.equipment_make.trim() || null,
-        equipment_model: form.equipment_model.trim() || null,
+        equipment_make: equipment.equipment_make,
+        equipment_model: equipment.equipment_model,
         serial_number: form.serial_number.trim() || null,
         service_date: form.service_date || null,
         scheduled_time: form.scheduled_time || null,
@@ -1300,22 +1328,73 @@ export default function ServiceSchedule() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Equipment make</label>
-                  <input
-                    className="input"
+                  <label className="label">Manufacturer</label>
+                  <select
+                    className="select"
                     value={form.equipment_make}
-                    onChange={(e) => setForm({ ...form, equipment_make: e.target.value })}
-                    placeholder="e.g. Candela"
-                  />
+                    onChange={(e) => {
+                      setForm({
+                        ...form,
+                        ...selectionAfterManufacturerChange(
+                          e.target.value,
+                          form.equipment_make_other
+                        ),
+                      });
+                    }}
+                  >
+                    <option value="">— Select —</option>
+                    {manufacturers.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                    <option value={OTHER_MANUFACTURER}>Other / custom…</option>
+                  </select>
+                  {form.equipment_make === OTHER_MANUFACTURER && (
+                    <input
+                      className="input mt-2"
+                      value={form.equipment_make_other}
+                      onChange={(e) => setForm({ ...form, equipment_make_other: e.target.value })}
+                      placeholder="Type manufacturer name"
+                      autoComplete="off"
+                    />
+                  )}
                 </div>
                 <div>
                   <label className="label">Model</label>
-                  <input
-                    className="input"
+                  <select
+                    className="select"
                     value={form.equipment_model}
-                    onChange={(e) => setForm({ ...form, equipment_model: e.target.value })}
-                    placeholder="e.g. GentleMAX Pro"
-                  />
+                    disabled={!form.equipment_make}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setForm({
+                        ...form,
+                        equipment_model: next,
+                        equipment_model_other: next === OTHER_MODEL ? form.equipment_model_other : '',
+                      });
+                    }}
+                  >
+                    <option value="">
+                      {form.equipment_make ? '— Select —' : 'Select manufacturer first'}
+                    </option>
+                    {modelOptions.map((name) => (
+                      <option key={name} value={name}>
+                        {name}
+                      </option>
+                    ))}
+                    <option value={OTHER_MODEL}>Other / custom…</option>
+                  </select>
+                  {(form.equipment_model === OTHER_MODEL ||
+                    form.equipment_make === OTHER_MANUFACTURER) && (
+                    <input
+                      className="input mt-2"
+                      value={form.equipment_model_other}
+                      onChange={(e) => setForm({ ...form, equipment_model_other: e.target.value })}
+                      placeholder="Type model name"
+                      autoComplete="off"
+                    />
+                  )}
                 </div>
               </div>
               <div>
