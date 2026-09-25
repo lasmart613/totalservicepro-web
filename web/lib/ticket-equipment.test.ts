@@ -6,7 +6,9 @@ import { fileURLToPath } from 'node:url';
 import { listModelsForManufacturer, OTHER_MODEL } from './laser-catalog.ts';
 import {
   OTHER_MANUFACTURER,
+  isEquipmentSentinel,
   resolveTicketEquipment,
+  withStoredPickerChoice,
   selectionAfterManufacturerChange,
 } from './ticket-equipment.ts';
 
@@ -107,4 +109,24 @@ test('calendar add-ticket form uses the shared catalog dropdowns and persists re
   assert.doesNotMatch(src, /equipment_make: form\.equipment_make\.trim\(\)/);
   assert.doesNotMatch(src, /placeholder="e\.g\. Candela"/);
   assert.doesNotMatch(src, /placeholder="e\.g\. GentleMAX Pro"/);
+});
+
+test('Other / custom… never shows up as a raw "__other__" picker option', () => {
+  assert.equal(isEquipmentSentinel(OTHER_MANUFACTURER), true);
+  assert.equal(isEquipmentSentinel(OTHER_MODEL), true);
+  assert.equal(isEquipmentSentinel('Candela'), false);
+  const models = [{ value: 'Non-Laser Equipment', label: 'Non-Laser Equipment' }];
+  // QA #148: manufacturer "Other / custom…" made Model display "__other__".
+  const withSentinel = withStoredPickerChoice(models, OTHER_MODEL);
+  assert.deepEqual(withSentinel, models);
+  assert.equal(withSentinel.some((o) => o.label === '__other__' || o.value === '__other__'), false);
+  // A real off-list stored model is still kept visible.
+  assert.deepEqual(withStoredPickerChoice(models, 'Legacy X', (v) => `${v}!`).at(-1), { value: 'Legacy X', label: 'Legacy X!' });
+  assert.deepEqual(withStoredPickerChoice(models, ''), models);
+
+  const src = readFileSync(join(here, '../app/service-schedule/page.tsx'), 'utf8');
+  assert.match(src, /isEquipmentSentinel\(form\.equipment_make\)/);
+  assert.match(src, /isEquipmentSentinel\(form\.equipment_model\)/);
+  assert.match(src, /withStoredPickerChoice\(modelOptions, modelValue/);
+  assert.doesNotMatch(src, /\[\.\.\.modelOptions, \{ value: modelValue/);
 });
