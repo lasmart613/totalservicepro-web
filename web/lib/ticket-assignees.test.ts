@@ -26,10 +26,10 @@ test('looksLikeUuid accepts user ids and rejects leftover CHAR(3)', () => {
   assert.equal(looksLikeUuid(null), false);
 });
 
-test('ticketAssigneeId prefers UUID assigned_to then assigned_fse', () => {
-  assert.equal(ticketAssigneeId({ assigned_to: TONY, assigned_fse: LARRY }), TONY);
-  assert.equal(ticketAssigneeId({ assigned_to: 'Lar', assigned_fse: TONY }), TONY);
-  assert.equal(ticketAssigneeId({ assigned_to: '', assigned_fse: null }), '');
+test('ticketAssigneeId reads uuid assigned_to and ignores a missing assigned_fse', () => {
+  assert.equal(ticketAssigneeId({ assigned_to: TONY }), TONY);
+  assert.equal(ticketAssigneeId({ assigned_to: 'Lar' }), '');
+  assert.equal(ticketAssigneeId({ assigned_to: '' }), '');
   assert.equal(ticketAssigneeId(null), '');
 });
 
@@ -41,27 +41,27 @@ test('shouldNotifyAssignee emails only a new FSE, not re-save or unassign', () =
   assert.equal(shouldNotifyAssignee({ previousId: TONY, nextId: LARRY, actorId: 'other' }), true);
 });
 
-test('applyTicketAssignee writes both columns and allows clear', () => {
-  const assigned: Record<string, unknown> = { customer_name: 'Clinic' };
+test('applyTicketAssignee writes assigned_to only and allows clear', () => {
+  const assigned: Record<string, unknown> = { customer_name: 'Clinic', assigned_fse: 'stale' };
   applyTicketAssignee(assigned, TONY);
   assert.equal(assigned.assigned_to, TONY);
-  assert.equal(assigned.assigned_fse, TONY);
+  assert.equal('assigned_fse' in assigned, false);
 
   const cleared: Record<string, unknown> = { assigned_to: TONY, assigned_fse: TONY };
   applyTicketAssignee(cleared, '');
   assert.equal(cleared.assigned_to, null);
-  assert.equal(cleared.assigned_fse, null);
+  assert.equal('assigned_fse' in cleared, false);
 });
 
-test('CHAR(3) retry drops assigned_to but keeps assigned_fse on the first omit', () => {
+test('CHAR(3) retry keeps uuid assigned_to', () => {
   const payload: Record<string, unknown> = {
     customer_name: 'Clinic',
     assigned_to: TONY,
-    assigned_fse: TONY,
+    customer_phone: '714-555-0100',
   };
-  assert.equal(stripOverflowingAddressFields(payload, 3), 'assigned_to');
-  assert.equal(payload.assigned_to, undefined);
-  assert.equal(payload.assigned_fse, TONY);
+  assert.equal(stripOverflowingAddressFields(payload, 3), 'customer_phone');
+  assert.equal(payload.assigned_to, TONY);
+  assert.equal(payload.customer_phone, undefined);
 });
 
 test('loadTicketAssignees keeps shop FSEs and drops customer accounts', async () => {
@@ -115,13 +115,14 @@ test('Edit Ticket has Assign to FSE and persist/reload', () => {
   assert.match(edit, /loadTicketAssignees/);
   assert.match(edit, /applyTicketAssignee/);
   assert.match(edit, /updateOmittingCharOverflow/);
-  assert.match(edit, /assigned_fse/);
+  assert.match(edit, /assigned_to/);
+  assert.doesNotMatch(edit, /assigned_fse/);
   assert.match(edit, /\/api\/team\/list|loadTicketAssignees/);
   assert.match(edit, /Unassigned/);
   assert.doesNotMatch(edit, /facebook|instagram|linkedin|twitter/i);
 });
 
-test('New Service Call writes assigned_fse and uses the shared FSE picker', () => {
+test('New Service Call uses the shared FSE picker', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const schedule = readFileSync(join(here, '../app/service-schedule/page.tsx'), 'utf8');
   assert.match(schedule, /Assign to FSE|AssignFseSelect/);
@@ -130,11 +131,11 @@ test('New Service Call writes assigned_fse and uses the shared FSE picker', () =
   assert.match(schedule, /insertOmittingCharOverflow/);
 });
 
-test('assigned_fse migration is uuid and does not reopen CHAR(3) toast work', () => {
+test('assignee writer does not send assigned_fse or treat assigned_to as CHAR(3)', () => {
   const here = dirname(fileURLToPath(import.meta.url));
-  const sql = readFileSync(join(here, '../supabase/migrations/20260827_000004_ticket_assigned_fse.sql'), 'utf8');
-  assert.match(sql, /ADD COLUMN IF NOT EXISTS assigned_fse uuid/);
-  assert.match(sql, /assigned_to/);
-  const edit = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
-  assert.match(edit, /updateOmittingCharOverflow/);
+  const src = readFileSync(join(here, './ticket-assignees.ts'), 'utf8');
+  assert.match(src, /payload\.assigned_to = id \|\| null/);
+  assert.match(src, /delete payload\.assigned_fse/);
+  assert.doesNotMatch(src, /CHAR\(3\)/);
+  assert.doesNotMatch(src, /payload\.assigned_fse =/);
 });

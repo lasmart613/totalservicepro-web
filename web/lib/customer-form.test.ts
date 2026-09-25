@@ -8,6 +8,7 @@ import {
   charLimitFromError,
   customerOrgPayload,
   emptyCustomerForm,
+  finalizeOrganizationPayload,
   filterLinkedCustomers,
   loadLinkedCustomerOrgs,
   matchLinkedCustomer,
@@ -100,15 +101,51 @@ test('empty specialties are omitted from the org insert payload', () => {
   assert.equal('specialties' in payload, false);
 });
 
-test('customer org payload normalizes social handles and lists social columns as optional', () => {
-  const payload = customerOrgPayload(
-    { ...emptyCustomerForm(), name: 'Clinic', x_url: '@northshore', instagram_url: 'instagram.com/clinic' },
-    { type: 'customer' }
-  );
-  assert.equal(payload.x_url, 'https://x.com/northshore');
-  assert.equal(payload.instagram_url, 'https://instagram.com/clinic');
-  assert.equal(payload.website, null);
-  assert.equal(payload.facebook_url, null);
+test('customer org payload matches live organizations columns on the first insert', () => {
+  const form = {
+    ...emptyCustomerForm(),
+    name: 'Northshore Clinic',
+    state: 'Texas',
+    zip: '60601',
+    phone: '312-555-0100',
+    email: 'office@clinic.test',
+    notes: 'Front desk',
+    contact_name: 'Pat Rivera',
+    specialties: ['Hair Removal'],
+    x_url: '@northshore',
+    instagram_url: 'instagram.com/clinic',
+  };
+  const payload = customerOrgPayload(form, {
+    type: 'customer',
+    ticket_prefix: 'NORTHSHORE CLINIC',
+    created_by: '11111111-1111-4111-8111-111111111111',
+    list_in_directory: null,
+    storefront_enabled: null,
+    contact: 'Pat Rivera',
+    organization_type: 'customer',
+    country: 'USA',
+    supported_brands: 'Candela, Cutera',
+    service_territories: ['TX'],
+  });
+  assert.equal(payload.type, 'customer');
+  assert.equal(payload.ticket_prefix, 'NOR');
+  assert.equal(payload.state, 'TX');
+  assert.equal(payload.zip, '60601');
+  assert.equal(payload.contact_name, 'Pat Rivera');
+  assert.equal(payload.created_by, '11111111-1111-4111-8111-111111111111');
+  assert.equal(payload.phone, '312-555-0100');
+  assert.equal(payload.email, 'office@clinic.test');
+  assert.equal(payload.notes, 'Front desk');
+  assert.deepEqual(payload.specialties, ['Hair Removal']);
+  assert.deepEqual(payload.supported_brands, ['Candela', 'Cutera']);
+  assert.deepEqual(payload.service_territories, ['TX']);
+  assert.equal(typeof payload.directory_contacts, 'object');
+  assert.equal(Array.isArray(payload.directory_contacts), false);
+  assert.equal('country' in payload, false);
+  assert.equal('contact' in payload, false);
+  assert.equal('organization_type' in payload, false);
+  assert.equal('list_in_directory' in payload, false);
+  assert.equal('storefront_enabled' in payload, false);
   for (const col of [
     'x_url',
     'instagram_url',
@@ -119,8 +156,20 @@ test('customer org payload normalizes social handles and lists social columns as
     'yelp_url',
     'threads_url',
   ]) {
+    assert.equal(col in payload, false, col);
     assert.ok((OPTIONAL_ORG_COLUMNS as readonly string[]).includes(col), col);
   }
+
+  const flagged = finalizeOrganizationPayload({
+    name: 'Clinic',
+    type: 'laser_clinic',
+    list_in_directory: false,
+    storefront_enabled: true,
+  });
+  assert.equal(flagged.type, 'laser_clinic');
+  assert.equal(flagged.list_in_directory, false);
+  assert.equal(flagged.storefront_enabled, true);
+  assert.equal(finalizeOrganizationPayload({ name: 'Clinic', type: 'Clinic' }).type, 'customer');
 });
 
 test('Add Customer form accepts full state names instead of forcing ISO typing', () => {

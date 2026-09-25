@@ -141,6 +141,44 @@ test('meta citations and section extraction', () => {
   assert.deepEqual(general, []);
 });
 
+test('general-guidance humanizing touches only the device name on the first line', () => {
+  const parts = 'Replace PN-4402-01 when E-12 or ERR_LAMP_OVERTEMP appears.';
+  const words = 'Nd-YAG alignment is step-by-step.';
+  const url = 'https://example.com/manuals/visulas_yag_iii/PN-4402-01';
+  const normal = formatAssistantHtml([parts, words, url].join('\n'), []);
+  for (const token of ['PN-4402-01', 'E-12', 'ERR_LAMP_OVERTEMP', 'Nd-YAG', 'step-by-step', url]) {
+    assert.match(normal, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.doesNotMatch(normal, /Pn 4402 01|Err Lamp|Step By Step|Visulas YAG III/);
+
+  const guidance = formatAssistantHtml(
+    [
+      "I couldn't search this manual's text yet, so this is general guidance for the Zeiss visulas_yag_iii:",
+      parts,
+      words,
+      url,
+    ].join('\n'),
+    []
+  );
+  assert.match(guidance, /Zeiss Visulas YAG III:/);
+  assert.doesNotMatch(guidance, /visulas_yag_iii:/);
+  for (const token of ['PN-4402-01', 'E-12', 'ERR_LAMP_OVERTEMP', 'Nd-YAG', 'step-by-step', url]) {
+    assert.match(guidance, new RegExp(token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.doesNotMatch(guidance, /Pn 4402 01|Err Lamp Overtemp|Step By Step/);
+
+  const quotedLater = formatAssistantHtml(
+    [
+      `${parts} ${words}`,
+      "I couldn't search this manual's text yet, so this is general guidance for the Zeiss visulas_yag_iii:",
+    ].join('\n'),
+    []
+  );
+  assert.match(quotedLater, /Zeiss visulas_yag_iii:/);
+  assert.match(quotedLater, /PN-4402-01/);
+  assert.match(quotedLater, /Nd-YAG/);
+});
+
 test('AI assistant and viewer use structured cites, not public PDF URLs', () => {
   const client = readFileSync(join(here, '../../app/ai-assistant/AIAssistantClient.tsx'), 'utf8');
   const viewer = readFileSync(join(here, '../../components/ManualPdfViewer.tsx'), 'utf8');

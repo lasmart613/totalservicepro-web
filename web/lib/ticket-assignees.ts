@@ -21,33 +21,22 @@ export function looksLikeUuid(val: unknown): boolean {
   return UUID_RE.test(String(val || '').trim());
 }
 
-/** Prefer assigned_to when it is a real user id; else assigned_fse (CHAR(3) leftover). */
+/** Live service_tickets.assigned_to is a user uuid. There is no assigned_fse column. */
 export function ticketAssigneeId(
-  row: { assigned_to?: unknown; assigned_fse?: unknown } | null | undefined
+  row: { assigned_to?: unknown } | null | undefined
 ): string {
   const primary = String(row?.assigned_to ?? '').trim();
-  if (looksLikeUuid(primary)) return primary;
-  const fallback = String(row?.assigned_fse ?? '').trim();
-  if (looksLikeUuid(fallback)) return fallback;
-  return '';
+  return looksLikeUuid(primary) ? primary : '';
 }
 
-/**
- * Write both columns. insert/updateOmittingCharOverflow drops assigned_to if it is
- * still CHAR(3), and drops assigned_fse if the migration has not been applied.
- */
+/** Write assigned_to only. A missing assigned_fse column makes the first insert 400. */
 export function applyTicketAssignee(
   payload: Record<string, unknown>,
   assigneeId: string | null | undefined
 ): void {
+  delete payload.assigned_fse;
   const id = String(assigneeId || '').trim();
-  if (!id) {
-    payload.assigned_to = null;
-    payload.assigned_fse = null;
-    return;
-  }
-  payload.assigned_to = id;
-  payload.assigned_fse = id;
+  payload.assigned_to = id || null;
 }
 
 export function memberDisplayName(m: {

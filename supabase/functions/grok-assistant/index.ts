@@ -1299,14 +1299,51 @@ async function searchIndexedManualText(
  * Inlined from manual-scope.ts so a single-file raw.githubusercontent
  * bootstrap of index.ts still prefixes general guidance when the isolate
  * has an older manual-scope.ts. Keep the two copies in sync.
+ * humanizeDeviceCode stays in this file — do not add a new module.
  */
+const DEVICE_CODE_TOKENS: Record<string, string> = {
+  yag: 'YAG',
+  co2: 'CO2',
+  co2re: 'CO2RE',
+  nd: 'Nd',
+  er: 'Er',
+  ktp: 'KTP',
+  ipl: 'IPL',
+  rf: 'RF',
+  mpx: 'MPX',
+  iii: 'III',
+  ii: 'II',
+  iv: 'IV',
+  vi: 'VI',
+  vii: 'VII',
+  viii: 'VIII',
+}
+
+function humanizeDeviceToken(token: string): string {
+  const key = token.toLowerCase()
+  if (DEVICE_CODE_TOKENS[key]) return DEVICE_CODE_TOKENS[key]
+  if (/^[ivx]+$/i.test(token) && token.length <= 4) return token.toUpperCase()
+  if (/\d/.test(token)) return token.toUpperCase()
+  return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase()
+}
+
+function humanizeDeviceCode(value: string): string {
+  const raw = String(value || '').trim()
+  if (!raw) return ''
+  if (/[A-Z]/.test(raw) && !/[_-]/.test(raw)) return raw
+  if (!/[_-]/.test(raw) && /\s/.test(raw)) return raw
+  const parts = raw.split(/[_\-\s]+/).filter(Boolean)
+  if (!parts.length) return raw
+  return parts.map(humanizeDeviceToken).join(' ')
+}
+
 function generalGuidanceDeviceName(opts?: {
   brand?: string | null
   model?: string | null
   title?: string | null
 } | null): string {
-  const brand = String(opts?.brand ?? '').trim()
-  let device = String(opts?.model ?? '').trim() || String(opts?.title ?? '').trim()
+  const brand = humanizeDeviceCode(String(opts?.brand ?? '').trim())
+  let device = humanizeDeviceCode(String(opts?.model ?? '').trim() || String(opts?.title ?? '').trim())
   if (brand && device.toLowerCase().startsWith(brand.toLowerCase())) {
     device = device.slice(brand.length).trim().replace(/^[-–:—\s]+/, '').trim()
   }

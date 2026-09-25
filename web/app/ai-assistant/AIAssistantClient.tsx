@@ -11,7 +11,8 @@ import {
   fetchAiUsage,
   grokChat,
 } from '@/lib/ai/grok-client';
-import { asManualId, buildGrokChatPayload } from '@/lib/ai/manual-scope';
+import { asManualId, assistantManualPicker, buildGrokChatPayload } from '@/lib/ai/manual-scope';
+import { fetchAllPages } from '@/lib/supabase/paginate';
 import {
   LEGACY_STORAGE_KEY,
   messagesForManual,
@@ -90,7 +91,7 @@ export default function AIAssistantClient() {
 
   const selectedManual = useMemo(() => {
     if (manualId != null) {
-      const byId = manuals.find((x) => x.id === manualId);
+      const byId = manuals.find((x) => asManualId(x.id) === manualId);
       if (byId) return byId;
     }
     return manuals.find((x) => x.storage_path === manualPath) || null;
@@ -174,13 +175,18 @@ export default function AIAssistantClient() {
       }
       const s = readAiState(session.user.id, resolvedOrg);
       const restoredId = urlManualId ?? asManualId(s.manualId);
-      if (restoredId != null) {
+      if (urlManualId != null) {
+        const scoped = messagesForManual(s, urlManualId);
+        setMessages(scoped);
+        setManualId(urlManualId);
+        lastSentRef.current = { id: urlManualId, path: '' };
+      } else if (restoredId != null) {
         setMessages(messagesForManual(s, restoredId).length ? messagesForManual(s, restoredId) : s.msgs);
         setManualId(restoredId);
         const pathFromState = restoredId === asManualId(s.manualId) ? s.manual || '' : '';
         if (pathFromState) setManualPath(pathFromState);
         lastSentRef.current = { id: restoredId, path: pathFromState };
-        if (s.mfr && !urlManualId) setBrand(String(s.mfr));
+        if (s.mfr) setBrand(String(s.mfr));
       } else if (s.msgs.length) {
         setMessages(s.msgs);
         if (s.manual) setManualPath(String(s.manual));
@@ -194,57 +200,63 @@ export default function AIAssistantClient() {
       }
       if (urlPrompt) setInput(urlPrompt);
 
-      // Manuals catalog
-      const { data: man, error: manErr } = await supabase
-        .from('manuals')
-        .select('id,title,storage_path,brand')
-        .order('brand')
-        .order('title');
-      if (manErr) {
-        console.warn('manuals load', manErr);
+      // Manuals catalog. Default PostgREST page is 1000 rows; Zeiss (manual 76)
+      // sorts after that, so page through and still fetch the URL id directly.
+      const loaded = await fetchAllPages<ManualRow>((from, to) =>
+        supabase.from('manuals').select('id,title,storage_path,brand').order('brand').order('title').range(from, to)
+      );
+      if (loaded.error) {
+        console.warn('manuals load', loaded.error);
         toast.error('Could not load manuals list');
-      } else if (!cancelled) {
-        const rows = (man || []).filter((m: any) => m.storage_path && m.title && m.id != null) as ManualRow[];
+      }
+      let rows = (loaded.data || []).filter((m) => m.storage_path && m.title && m.id != null);
+      if (urlManualId != null && !rows.some((r) => asManualId(r.id) === urlManualId)) {
+        const { data: one, error: oneErr } = await supabase
+          .from('manuals')
+          .select('id,title,storage_path,brand')
+          .eq('id', urlManualId)
+          .maybeSingle();
+        if (oneErr) console.warn('manual by id', oneErr);
+        if (one?.storage_path && one?.title && one?.id != null) rows = [...rows, one as ManualRow];
+      }
+      if (!cancelled) {
         setManuals(rows);
-        setManualId((prev) => {
-          if (prev != null && rows.some((r) => r.id === prev)) return prev;
-          const saved = readAiState(session.user.id, resolvedOrg);
-          const savedId = asManualId(saved.manualId);
-          if (savedId != null && rows.some((r) => r.id === savedId)) return savedId;
-          const path = saved.manual;
-          if (path) {
-            const hit = rows.find((r) => r.storage_path === path);
-            if (hit) return hit.id;
-          }
-          return prev;
-        });
-        setBrand((prev) => {
-          if (prev) return prev;
-          const saved = readAiState(session.user.id, resolvedOrg);
-          const savedId = asManualId(saved.manualId);
-          const path = saved.manual;
-          const hit =
-            (savedId != null && rows.find((r) => r.id === savedId)) ||
-            (path ? rows.find((r) => r.storage_path === path) : null);
-          if (hit?.brand) return hit.brand;
-          return prev;
-        });
-        setManualPath((prev) => {
-          if (prev) return prev;
-          const saved = readAiState(session.user.id, resolvedOrg);
-          const savedId = asManualId(saved.manualId);
-          const hit = savedId != null ? rows.find((r) => r.id === savedId) : null;
-          return hit?.storage_path || saved.manual || prev;
-        });
-        if (urlManualId != null) {
-          const hit = rows.find((r) => r.id === urlManualId);
-          if (hit) {
-            setManualId(hit.id);
-            setManualPath(hit.storage_path);
-            if (hit.brand) setBrand(hit.brand);
-            const scoped = messagesForManual(readAiState(session.user.id, resolvedOrg), hit.id);
-            if (scoped.length) setMessages(scoped);
-          }
+        const urlPick = assistantManualPicker(rows, urlManualId);
+        if (urlPick) {
+          setManualId(urlPick.id);
+          setManualPath(urlPick.storagePath);
+          setBrand(urlPick.brand);
+          lastSentRef.current = { id: urlPick.id, path: urlPick.storagePath };
+          const scoped = messagesForManual(s, urlPick.id);
+          if (scoped.length) setMessages(scoped);
+        } else {
+          setManualId((prev) => {
+            if (prev != null && rows.some((r) => asManualId(r.id) === prev)) return prev;
+            const savedId = asManualId(s.manualId);
+            if (savedId != null && rows.some((r) => asManualId(r.id) === savedId)) return savedId;
+            const path = s.manual;
+            if (path) {
+              const hit = rows.find((r) => r.storage_path === path);
+              if (hit) return asManualId(hit.id) ?? prev;
+            }
+            return prev;
+          });
+          setBrand((prev) => {
+            if (prev) return prev;
+            const savedId = asManualId(s.manualId);
+            const path = s.manual;
+            const hit =
+              (savedId != null && rows.find((r) => asManualId(r.id) === savedId)) ||
+              (path ? rows.find((r) => r.storage_path === path) : null);
+            if (hit?.brand) return hit.brand;
+            return prev;
+          });
+          setManualPath((prev) => {
+            if (prev) return prev;
+            const savedId = asManualId(s.manualId);
+            const hit = savedId != null ? rows.find((r) => asManualId(r.id) === savedId) : null;
+            return hit?.storage_path || s.manual || prev;
+          });
         }
       }
 
@@ -273,7 +285,7 @@ export default function AIAssistantClient() {
 
   function onManualChange(v: string) {
     const id = asManualId(v);
-    const row = id != null ? manuals.find((m) => m.id === id) : null;
+    const row = id != null ? manuals.find((m) => asManualId(m.id) === id) : null;
     const path = row?.storage_path || '';
     setManualId(id);
     setManualPath(path);
