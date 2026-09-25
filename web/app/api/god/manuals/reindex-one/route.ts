@@ -11,8 +11,13 @@ export const maxDuration = 60;
  * God-only. Rebuild manual_search_index for one manuals.id from physical PDF
  * pages. Reads the private `manuals` bucket with the service role. Each chunk
  * is stored as staging JSON. The search row is written once, after every page
- * is extracted. An empty, shorter, or letter-spaced result is refused and the
- * existing row stays. Chunked so a 161-page book cannot sit in one long extraction.
+ * is extracted. An empty, lower-quality, or letter-spaced result is refused
+ * and the existing row stays. A shorter replacement is refused unless the new
+ * text is cleaner (higher dictionary-word ratio or lower garbage ratio).
+ * A database read error fails closed.
+ * Folder manuals concatenate every PDF and page stamps continue across files.
+ * Chunked so a 161-page book cannot sit in one long extraction. PDFs over
+ * 200 MB are rejected with a clear error instead of being truncated.
  *
  * Does not upload or stamp a collection attachment. Only manual_search_index
  * changes, and only when done is true.
