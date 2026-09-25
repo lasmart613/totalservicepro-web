@@ -14,12 +14,18 @@ import {
 import { ownerOrgTypeLabel } from '@/lib/org-types';
 import { toast } from 'sonner';
 import { CustomerInfoForm } from '@/components/CustomerInfoForm';
+import { CustomerLocationsPanel } from '@/components/CustomerLocationsPanel';
 import {
   directoryFormFromOrg,
   emptyCustomerForm,
   updateCustomerOrg,
   type CustomerInfoFormValues,
 } from '@/lib/customer-form';
+import {
+  pickPrimaryLocation,
+  type CustomerLocation,
+  type LocationAddressFields,
+} from '@/lib/customer-locations';
 import {
   DIRECTORY_CONTACT_ROLES,
   DIRECTORY_ROLE_LABELS,
@@ -156,9 +162,27 @@ export default function CustomerProfilePage() {
   // Editable form (same fields as Directory Add Customer)
   const [form, setForm] = useState<CustomerInfoFormValues>(emptyCustomerForm());
   const [logoFile, setLogoFile] = useState<File | null>(null);
+  const [customerLocations, setCustomerLocations] = useState<CustomerLocation[]>([]);
+  const [locationRefresh, setLocationRefresh] = useState(0);
 
   const handleFormChange = useCallback((next: CustomerInfoFormValues) => {
     setForm(next);
+    setDirty(true);
+  }, []);
+
+  const handleLocations = useCallback((next: CustomerLocation[]) => {
+    setCustomerLocations(next);
+  }, []);
+
+  const handlePrimaryAddress = useCallback((fields: LocationAddressFields) => {
+    setForm((prev) => ({
+      ...prev,
+      address: fields.address || '',
+      city: fields.city || '',
+      state: fields.state || '',
+      zip: fields.zip || '',
+      phone: fields.phone || prev.phone,
+    }));
     setDirty(true);
   }, []);
 
@@ -473,6 +497,7 @@ export default function CustomerProfilePage() {
       );
       setLogoFile(null);
       setDirty(false);
+      setLocationRefresh((n) => n + 1);
       const contactRows = await fetchContacts(String(customer.id));
       setContacts(contactRows);
       toast.success('Customer profile saved');
@@ -671,6 +696,14 @@ export default function CustomerProfilePage() {
                       .join(' · ')}
                   </div>
                 )}
+                {customerLocations.length > 1 && (
+                  <div>
+                    {customerLocations.length} locations
+                    {pickPrimaryLocation(customerLocations)?.name
+                      ? ` · ${pickPrimaryLocation(customerLocations)?.name} is primary`
+                      : ''}
+                  </div>
+                )}
                 {(resolvedContact.phone || form.phone) && (
                   <div>📞 {resolvedContact.phone || form.phone}</div>
                 )}
@@ -779,6 +812,22 @@ export default function CustomerProfilePage() {
                 setLogoFile(file);
                 setDirty(true);
               }}
+              afterAddress={
+                <CustomerLocationsPanel
+                  customerId={customer.id}
+                  canEdit={canEdit}
+                  refreshKey={locationRefresh}
+                  orgAddress={{
+                    address: form.address,
+                    city: form.city,
+                    state: form.state,
+                    zip: form.zip,
+                    phone: form.phone,
+                  }}
+                  onLocations={handleLocations}
+                  onPrimaryAddress={canEdit ? handlePrimaryAddress : undefined}
+                />
+              }
             />
 
             {canEdit && (

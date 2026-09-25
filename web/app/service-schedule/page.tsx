@@ -24,6 +24,7 @@ import {
 } from '@/lib/schedule-view';
 import { AddCustomerModal } from '@/components/AddCustomerModal';
 import { AssignFseSelect } from '@/components/AssignFseSelect';
+import { CustomerLocationSelect } from '@/components/CustomerLocationSelect';
 import { insertOmittingCharOverflow } from '@/lib/char-overflow';
 import {
   applyTicketAssignee,
@@ -42,6 +43,13 @@ import {
   type LinkedCustomerOpt,
 } from '@/lib/customer-form';
 import { normalizeStateCode } from '@/lib/geo';
+import {
+  applyLocationToTicketFields,
+  loadCustomerLocations,
+  persistedLocationId,
+  serviceCallFromLocations,
+  type CustomerLocation,
+} from '@/lib/customer-locations';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import {
@@ -90,6 +98,7 @@ type TicketForm = {
   customer_address: string;
   customer_city: string;
   customer_state: string;
+  customer_zip: string;
   customer_phone: string;
   customer_email: string;
 };
@@ -111,6 +120,7 @@ const EMPTY_FORM = (presetDate?: string): TicketForm => ({
   customer_address: '',
   customer_city: '',
   customer_state: '',
+  customer_zip: '',
   customer_phone: '',
   customer_email: '',
 });
@@ -138,6 +148,8 @@ export default function ServiceSchedule() {
   const [customers, setCustomers] = useState<LinkedCustomerOpt[]>([]);
   const [showCustDrop, setShowCustDrop] = useState(false);
   const [customerOrgId, setCustomerOrgId] = useState<string | number | null>(null);
+  const [customerLocations, setCustomerLocations] = useState<CustomerLocation[]>([]);
+  const [selectedLocationId, setSelectedLocationId] = useState('');
   const [showAddCustomer, setShowAddCustomer] = useState(false);
   const [legendFilter, setLegendFilter] = useState<string | null>(null);
 
@@ -390,18 +402,69 @@ export default function ServiceSchedule() {
     [customers, form.customer_name]
   );
 
-  function applyCustomer(c: LinkedCustomerOpt) {
+  function applyLocation(loc: CustomerLocation, officePhone?: string | null) {
+    setSelectedLocationId(String(loc.id));
+    setForm((prev) => {
+      const fields = applyLocationToTicketFields(prev, loc, { officePhone });
+      return {
+        ...prev,
+        customer_address: fields.customer_address,
+        customer_city: fields.customer_city,
+        customer_state: fields.customer_state,
+        customer_zip: fields.customer_zip,
+        customer_phone: fields.customer_phone,
+      };
+    });
+  }
+
+  async function applyCustomer(c: LinkedCustomerOpt) {
     setCustomerOrgId(c.id);
-    setForm((prev) => ({
-      ...prev,
+    setShowCustDrop(false);
+    const base = {
       customer_name: c.name,
       customer_address: c.address || '',
       customer_city: c.city || '',
       customer_state: c.state || '',
+      customer_zip: c.zip || '',
       customer_phone: c.phone || '',
       customer_email: c.email || '',
+    };
+    let rows: CustomerLocation[] = [];
+    try {
+      const loaded = await loadCustomerLocations(supabase, c.id);
+      rows = loaded.unavailable ? [] : loaded.locations;
+    } catch (err) {
+      console.warn('customer locations', err);
+      rows = [];
+    }
+    const resolved = serviceCallFromLocations(
+      rows,
+      {
+        address: base.customer_address,
+        city: base.customer_city,
+        state: base.customer_state,
+        zip: base.customer_zip,
+        phone: base.customer_phone,
+      },
+      c.officePhone
+    );
+    setCustomerLocations(resolved.locations);
+    if (!resolved.fields) {
+      setSelectedLocationId('');
+      setForm((prev) => ({ ...prev, ...base }));
+      return;
+    }
+    const fields = resolved.fields;
+    setSelectedLocationId(resolved.selectedId);
+    setForm((prev) => ({
+      ...prev,
+      ...base,
+      customer_address: fields.customer_address,
+      customer_city: fields.customer_city,
+      customer_state: fields.customer_state,
+      customer_zip: fields.customer_zip,
+      customer_phone: fields.customer_phone,
     }));
-    setShowCustDrop(false);
   }
 
   useEffect(() => {
@@ -499,6 +562,8 @@ export default function ServiceSchedule() {
     setForm(EMPTY_FORM(presetDate));
     setFormError(null);
     setCustomerOrgId(null);
+    setCustomerLocations([]);
+    setSelectedLocationId('');
     setShowCustDrop(false);
     setShowAddCustomer(false);
     setAssignedTo(userId || '');
@@ -556,6 +621,7 @@ export default function ServiceSchedule() {
             address: form.customer_address,
             city: form.customer_city,
             state: customerState || form.customer_state,
+            zip: form.customer_zip,
             phone: form.customer_phone,
             email: form.customer_email,
           },
@@ -582,6 +648,10 @@ export default function ServiceSchedule() {
         customer_state: customerState,
         customer_phone: form.customer_phone.trim() || null,
         customer_email: form.customer_email.trim() || null,
+        ...(form.customer_zip.trim() ? { zip: form.customer_zip.trim() } : {}),
+        ...(persistedLocationId(selectedLocationId) != null
+          ? { customer_location_id: persistedLocationId(selectedLocationId) }
+          : {}),
         equipment_make: equipment.equipment_make,
         equipment_model: equipment.equipment_model,
         serial_number: form.serial_number.trim() || null,
@@ -1185,9 +1255,11 @@ export default function ServiceSchedule() {
                   value={form.customer_name}
                   onChange={(e) => {
                     const value = e.target.value;
-                    setForm({ ...form, customer_name: value });
+                    setForm({ ...form, customer_name: value, customer_zip: '' });
                     const match = matchLinkedCustomer(customers, value);
                     setCustomerOrgId(match?.id || null);
+                    setCustomerLocations([]);
+                    setSelectedLocationId('');
                     setShowCustDrop(true);
                   }}
                   onFocus={() => setShowCustDrop(true)}
@@ -1241,6 +1313,19 @@ export default function ServiceSchedule() {
                   Autofill is limited to customers assigned to your active company. Add a new company to put it on that list.
                 </p>
               </div>
+              <CustomerLocationSelect
+                locations={customerLocations}
+                value={selectedLocationId}
+                onChange={(id) => {
+                  const loc = customerLocations.find((row) => String(row.id) === id);
+                  if (!loc) {
+                    setSelectedLocationId('');
+                    return;
+                  }
+                  const office = customers.find((row) => String(row.id) === String(customerOrgId))?.officePhone;
+                  applyLocation(loc, office);
+                }}
+              />
               <div>
                 <label className="label">Assign to FSE</label>
                 <AssignFseSelect
@@ -1413,7 +1498,7 @@ export default function ServiceSchedule() {
                   onChange={(e) => setForm({ ...form, customer_address: e.target.value })}
                 />
               </div>
-              <div className="grid grid-cols-3 gap-2">
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div>
                   <label className="label">City</label>
                   <input
@@ -1430,6 +1515,15 @@ export default function ServiceSchedule() {
                     placeholder="TX or Texas"
                     autoComplete="address-level1"
                     onChange={(e) => setForm({ ...form, customer_state: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">ZIP</label>
+                  <input
+                    className="input"
+                    value={form.customer_zip}
+                    maxLength={10}
+                    onChange={(e) => setForm({ ...form, customer_zip: e.target.value })}
                   />
                 </div>
                 <div>

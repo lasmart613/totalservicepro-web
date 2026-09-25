@@ -26,6 +26,7 @@ import {
   type DirectoryContactRow,
 } from './customer-contacts.ts';
 import { normalizeRegionInput } from './geo.ts';
+import { syncPrimaryLocationFromForm } from './customer-locations.ts';
 import { emptySocialFields, socialPayloadFromForm, type SocialFormFields } from './social-links.ts';
 import { chunkIds, fetchAllPages, uniqueLinkedIds } from './supabase/paginate.ts';
 
@@ -259,6 +260,12 @@ export async function createLinkedCustomer(
     console.warn('directory contacts sync', e);
   }
 
+  try {
+    await syncPrimaryLocationFromForm(supabase, created.id, opts.form);
+  } catch (e) {
+    console.warn('primary location sync', e);
+  }
+
   return logoWarning ? { id: created.id, logoWarning } : created;
 }
 
@@ -298,6 +305,12 @@ export async function updateCustomerOrg(
     console.warn('directory contacts sync', e);
   }
 
+  try {
+    await syncPrimaryLocationFromForm(supabase, customerId, form);
+  } catch (e) {
+    console.warn('primary location sync', e);
+  }
+
   return payload;
 }
 
@@ -324,6 +337,8 @@ export type LinkedCustomerOpt = {
   email?: string | null;
   contact?: string | null;
   contactRole?: string | null;
+  /** organizations.phone before directory-contact override. */
+  officePhone?: string | null;
   /** organization_customers.created_at — used only for empty-dropdown recency. */
   linkedAt?: string | null;
 };
@@ -444,6 +459,7 @@ export async function loadLinkedCustomers(
         email: applied.email,
         contact: applied.contact,
         contactRole: applied.contactRole,
+        officePhone: c.phone,
         linkedAt: linkedAt.get(String(c.id)) || null,
       };
     })
