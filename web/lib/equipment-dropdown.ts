@@ -124,11 +124,38 @@ const MANUFACTURER_ALIAS_GROUPS: string[][] = [
     'HOYA / ConBio',
   ],
   ['Quanta System', 'Quanta', 'QuantaSystem'],
-  ['American Medical Systems', 'AMS', 'A.M.S.', 'A.M.S'],
+  [
+    'AMS / Laserscope',
+    'AMS',
+    'American Medical Systems',
+    'A.M.S.',
+    'A.M.S',
+    'Laserscope',
+    'LaserScope',
+    'Laserscope/LaserScope',
+    'LaserScope/Laserscope',
+    'AMS / LaserScope',
+    'AMS/Laserscope',
+  ],
+  [
+    'Lumenis (Coherent)',
+    'Lumenis',
+    'Coherent',
+    'Coherent / Lumenis',
+    'Lumenis / Coherent',
+    'Coherent/Lumenis',
+    'Lumenis/Coherent',
+  ],
 ];
 
-/** Compact model codes with no underscore or hyphen. Display only — values stay raw. */
-const COMPACT_MODEL_LABELS: Record<string, string> = {
+/** Always show this label once any alias in the group is present. */
+const FORCE_MANUFACTURER_LABEL = new Set(['AMS / Laserscope', 'Lumenis (Coherent)']);
+
+/**
+ * Display labels keyed by modelDedupeKey. Option values stay a stored spelling.
+ * Unknown alphanumeric codes stay uppercase (see formatModelToken).
+ */
+const MODEL_DISPLAY: Record<string, string> = {
   co2re: 'CO2RE',
   gentlemax: 'GentleMax',
   vbeam2: 'Vbeam 2',
@@ -138,7 +165,56 @@ const COMPACT_MODEL_LABELS: Record<string, string> = {
   p30h: 'P30H',
   yc1600: 'YC-1600',
   pl003: 'PL003',
+  alexlazr: 'AlexLAZR',
+  cbeam: 'C-beam',
+  sclero: 'ScleroPLUS',
+  smoothbeam: 'SmoothBeam',
+  bmbq810: 'BMBQ-810',
+  fels25a: 'FELS-25A',
+  visulasyagiii: 'Visulas YAG III',
+  harmonyxl: 'Harmony XL',
+  optimisii: 'Optimis II',
+  sm079: 'SM079',
+  '9900': '9900',
+  auraxp15wktp: 'Aura XP (15W KTP)',
 };
+
+const MODEL_WORD_CASE: Record<string, string> = {
+  gentlemax: 'GentleMax',
+  coolglide: 'CoolGlide',
+  lightsheer: 'LightSheer',
+  greenlight: 'GreenLight',
+  versapulse: 'VersaPulse',
+  powersuite: 'PowerSuite',
+  oculight: 'OcuLight',
+  medlite: 'MedLite',
+  smoothbeam: 'SmoothBeam',
+  alexlazr: 'AlexLAZR',
+};
+
+const UPPER_MODEL_TOKENS = new Set([
+  'ii',
+  'iii',
+  'iv',
+  'vi',
+  'vii',
+  'viii',
+  'ix',
+  'xl',
+  'xp',
+  'yag',
+  'ktp',
+  'sl',
+  'slx',
+  'duet',
+  'xps',
+  'co2',
+  'rf',
+  'ipl',
+  'nd',
+  'er',
+  'mpx',
+]);
 
 function looseBrandKey(value: string): string {
   return tokens(value)
@@ -169,10 +245,45 @@ export function isCompactModelCode(value: string): boolean {
 }
 
 function humanizeModelToken(token: string): string {
+  return formatModelToken(token);
+}
+
+/**
+ * Lowercase, strip punctuation, and drop trailing rev / slash-roman noise.
+ * A trailing "+" stays in the key so Excel V+ and Elite+ do not collapse
+ * into Excel V and Elite.
+ */
+export function modelDedupeKey(value: string): string {
+  let s = String(value || '').toLowerCase();
+  s = s.replace(/\b(?:rev(?:ision)?|ver(?:sion)?)\.?\s*[a-z0-9]+\b/g, ' ');
+  s = s.replace(/\/\s*(?:[ivx]{1,4}|[a-z])\b/g, ' ');
+  return s.replace(/[^a-z0-9+]+/g, '');
+}
+
+function isSpecSuffix(extra: string): boolean {
+  return /^\d+w(?:ktp|yag|nd|nm|diode)?$/.test(extra);
+}
+
+function formatModelToken(token: string): string {
   const key = token.toLowerCase();
-  if (COMPACT_MODEL_LABELS[key]) return COMPACT_MODEL_LABELS[key];
-  if (/\d/.test(token)) return token.toUpperCase();
+  if (MODEL_WORD_CASE[key]) return MODEL_WORD_CASE[key];
+  if (UPPER_MODEL_TOKENS.has(key)) return key.toUpperCase();
+  if (/^[ivx]+$/i.test(token) && token.length <= 4) return token.toUpperCase();
+  if (/\d/.test(token) && /[a-z]/i.test(token) && token.replace(/\d/g, '').length <= 6) {
+    return token.toUpperCase();
+  }
+  if (/\d/.test(token) && !/[a-z]/i.test(token)) return token;
+  if (/[a-z]/.test(token) && /[A-Z]/.test(token.slice(1))) return token;
+  if (!token) return token;
   return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+}
+
+function formatModelLabel(raw: string): string {
+  const parts = String(raw || '')
+    .split(/[^A-Za-z0-9]+/)
+    .filter(Boolean);
+  if (!parts.length) return String(raw || '').trim();
+  return parts.map(formatModelToken).join(' ');
 }
 
 function humanizeCompactFallback(raw: string): string {
@@ -191,13 +302,14 @@ function humanizeCompactFallback(raw: string): string {
 export function humanizeModelCode(value: string): string {
   const raw = String(value || '').trim();
   if (!raw) return '';
-  const mapped = COMPACT_MODEL_LABELS[compactModelKey(raw)];
-  if (mapped && !/\s/.test(raw)) return mapped;
+  const mapped = MODEL_DISPLAY[modelDedupeKey(raw)];
+  if (mapped) return mapped;
   if (looksLikeInternalCode(raw) || /[_-]/.test(raw)) {
-    return raw.split(/[_-]+/).filter(Boolean).map(humanizeModelToken).join(' ');
+    return raw.split(/[_-]+/).filter(Boolean).map(formatModelToken).join(' ');
   }
+  if (/[A-Z]/.test(raw) && !/[_-]/.test(raw) && humanCasingScore(raw) > 1 && !/\s/.test(raw)) return raw;
   if (raw === raw.toLowerCase() && /^[a-z0-9]+$/.test(raw)) return humanizeCompactFallback(raw);
-  return raw;
+  return formatModelLabel(raw);
 }
 
 export function titleCaseInternalCode(value: string): string {
@@ -210,12 +322,14 @@ export function titleCaseInternalCode(value: string): string {
  */
 export function catalogChoiceLabel(value: string, explicit?: string | null): string {
   const display = String(explicit || '').trim();
-  if (display && !isCompactModelCode(display)) return display;
   const raw = String(value || '').trim();
-  const source = (display && isCompactModelCode(display) ? display : raw) || display;
-  if (!source) return '';
-  if (isCompactModelCode(source) || looksLikeInternalCode(source)) return humanizeModelCode(source);
-  return source;
+  const mapped = MODEL_DISPLAY[modelDedupeKey(raw)] || (display ? MODEL_DISPLAY[modelDedupeKey(display)] : undefined);
+  if (mapped) return mapped;
+  if (display && !isCompactModelCode(display) && !looksLikeInternalCode(display)) {
+    if (/[()/]/.test(display)) return display;
+    return humanizeModelCode(display);
+  }
+  return humanizeModelCode(raw || display);
 }
 
 function catalogAliasSet(name: string): Set<string> {
@@ -408,10 +522,14 @@ export function staticModelRows(): CatalogModel[] {
 
 function preferCanonicalManufacturer(names: string[]): string {
   for (const group of MANUFACTURER_ALIAS_GROUPS) {
+    const present = names.filter((n) => group.some((entry) => norm(entry) === norm(n)));
+    if (!present.length) continue;
+    if (FORCE_MANUFACTURER_LABEL.has(group[0])) return group[0];
     for (const canonical of group) {
-      const hit = names.find((n) => norm(n) === norm(canonical));
+      const hit = present.find((n) => norm(n) === norm(canonical));
       if (hit) return hit;
     }
+    return present[0];
   }
   const human = names.filter((n) => !looksLikeInternalCode(n));
   const pool = human.length ? human : names;
@@ -429,7 +547,15 @@ function spellingVariant(a: string, b: string): boolean {
 }
 
 function modelChoiceKey(value: string): string {
-  return norm(value).replace(/\s+/g, ' ');
+  return modelDedupeKey(value);
+}
+
+function hasRevisionNoise(value: string): boolean {
+  return /\brev(?:ision)?\b|\s\/\s*[ivx]+\b/i.test(value);
+}
+
+function hasWattageSpec(value: string): boolean {
+  return /\d+\s*w\b/i.test(value);
 }
 
 /** GentleMax beats Gentlemax: count capitals that are not the start of a word. */
@@ -446,33 +572,60 @@ function preferModelValue(current: string, next: string): string {
   const currentCode = isCompactModelCode(current);
   const nextCode = isCompactModelCode(next);
   if (currentCode !== nextCode) return currentCode ? current : next;
+  if (hasWattageSpec(current) !== hasWattageSpec(next)) return hasWattageSpec(next) ? next : current;
   return humanCasingScore(next) > humanCasingScore(current) ? next : current;
+}
+
+function prettyModelLabel(value: string): string {
+  if (/[()/]/.test(value)) return value;
+  return humanizeModelCode(value);
 }
 
 function preferDisplayLabel(current: string, next: string): string {
-  const currentCode = isCompactModelCode(current) || looksLikeInternalCode(current);
-  const nextCode = isCompactModelCode(next) || looksLikeInternalCode(next);
-  if (currentCode !== nextCode) return currentCode ? next : current;
-  return humanCasingScore(next) > humanCasingScore(current) ? next : current;
+  if (hasRevisionNoise(current) !== hasRevisionNoise(next)) return hasRevisionNoise(current) ? next : current;
+  const currentPretty = prettyModelLabel(current);
+  const nextPretty = prettyModelLabel(next);
+  const currentCode = isCompactModelCode(currentPretty) || looksLikeInternalCode(currentPretty);
+  const nextCode = isCompactModelCode(nextPretty) || looksLikeInternalCode(nextPretty);
+  if (currentCode !== nextCode) return currentCode ? nextPretty : currentPretty;
+  return humanCasingScore(nextPretty) > humanCasingScore(currentPretty) ? nextPretty : currentPretty;
 }
 
-/** Case-insensitive model collapse. Option values stay a saved code or name. */
+function mergeModelChoice(prev: CatalogChoice, next: CatalogChoice): CatalogChoice {
+  const value = preferModelValue(prev.value, next.value);
+  const label = preferDisplayLabel(prev.label || prev.value, next.label || next.value);
+  const mapped =
+    MODEL_DISPLAY[modelDedupeKey(next.value)] ||
+    MODEL_DISPLAY[modelDedupeKey(prev.value)] ||
+    MODEL_DISPLAY[modelDedupeKey(label)];
+  return { value, label: mapped || label };
+}
+
+/**
+ * Shared model option builder. Values stay a stored spelling; labels are display-only.
+ * Used by New Service Call and ticket edit.
+ */
 export function dedupeModelChoices(choices: CatalogChoice[]): CatalogChoice[] {
   const byKey = new Map<string, CatalogChoice>();
   for (const choice of choices) {
     const value = String(choice.value || '').trim();
     if (!value) continue;
     const key = modelChoiceKey(value);
-    const label = String(choice.label || '').trim() || catalogChoiceLabel(value);
+    const label = catalogChoiceLabel(value, choice.label);
     const prev = byKey.get(key);
-    if (!prev) {
-      byKey.set(key, { value, label });
-      continue;
+    byKey.set(key, prev ? mergeModelChoice(prev, { value, label }) : { value, label });
+  }
+  const keys = Array.from(byKey.keys()).sort((a, b) => a.length - b.length);
+  for (const key of keys) {
+    if (!byKey.has(key)) continue;
+    for (const other of Array.from(byKey.keys())) {
+      if (other === key || other.length <= key.length || !byKey.has(other)) continue;
+      if (!other.startsWith(key) || !isSpecSuffix(other.slice(key.length))) continue;
+      const base = byKey.get(key)!;
+      const extra = byKey.get(other)!;
+      byKey.set(key, mergeModelChoice(base, extra));
+      byKey.delete(other);
     }
-    byKey.set(key, {
-      value: preferModelValue(prev.value, value),
-      label: preferDisplayLabel(prev.label, label),
-    });
   }
   return Array.from(byKey.values()).sort(
     (a, b) => a.label.localeCompare(b.label) || a.value.localeCompare(b.value)
@@ -494,6 +647,21 @@ export function mergedManufacturerOption(stored: string, options: string[]): str
   if (!raw) return '';
   if (options.some((name) => name === raw)) return raw;
   return options.find((name) => spellingVariant(name, raw)) || raw;
+}
+
+/** Select value for a stored model spelling that dedupe collapsed into another option. */
+export function mergedModelOption(stored: string, options: CatalogChoice[]): string {
+  const raw = String(stored || '').trim();
+  if (!raw) return '';
+  if (options.some((option) => option.value === raw)) return raw;
+  const key = modelDedupeKey(raw);
+  const hit = options.find((option) => {
+    const optionKey = modelDedupeKey(option.value);
+    if (optionKey === key) return true;
+    const [short, long] = key.length <= optionKey.length ? [key, optionKey] : [optionKey, key];
+    return long.startsWith(short) && isSpecSuffix(long.slice(short.length));
+  });
+  return hit?.value || raw;
 }
 
 function collapseManufacturerNames(names: string[]): string[] {
@@ -536,20 +704,7 @@ export function listCatalogModels(
   manufacturer: string,
   live?: LiveCatalog & { equipmentType?: string | null | EquipmentType }
 ): string[] {
-  if (!manufacturer || manufacturer === '__other__') return [];
-  const manufacturers = [...staticManufacturerRows(), ...(live?.manufacturers || [])];
-  const models = [...staticModelRows(), ...(live?.models || [])];
-  const byKey = new Map<string, string>();
-  for (const model of models) {
-    if (!modelBelongsToManufacturer(model, manufacturer, manufacturers)) continue;
-    if (!modelMatchesEquipmentType(model.equipment_type, live?.equipmentType)) continue;
-    const label = model.label || model.name;
-    if (!label) continue;
-    const key = modelChoiceKey(label);
-    const prev = byKey.get(key);
-    byKey.set(key, prev ? preferModelValue(prev, label) : label);
-  }
-  return Array.from(byKey.values()).sort((a, b) => a.localeCompare(b));
+  return listCatalogModelChoices(manufacturer, live).map((choice) => choice.value);
 }
 
 export function listCatalogModelChoices(

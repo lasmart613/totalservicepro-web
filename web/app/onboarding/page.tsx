@@ -9,7 +9,7 @@ import { isOwnerish, isSupplier } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
-import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
+import { applyPendingSignup, ensureOrganizationMembership, resolvePendingSignup } from '@/lib/pending-signup';
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim, shouldSendToMemberOnboarding } from '@/lib/invite-claim';
 import {
   applyComplimentarySignupFields,
@@ -589,13 +589,12 @@ export default function Onboarding() {
       // Membership first so the switcher lists this shop even if the profile
       // pointer stays on an FSE invite org (guard used to block that write).
       if (createdNewOrg && orgId) {
-        const { error: memErr } = await supabase.from('organization_memberships').insert({
+        await ensureOrganizationMembership(supabase, {
           user_id: currentUser.id,
           organization_id: orgId,
           role: creatorRole || 'company_admin',
           is_home: true,
         });
-        if (memErr) console.warn('home membership insert', memErr.message);
       }
       const creator = teamMembers.find(m => m.isCreator) || teamMembers[0];
       const creatorAddl = orgType === 'service' ? (creator?.additionalRoles || []) : [];

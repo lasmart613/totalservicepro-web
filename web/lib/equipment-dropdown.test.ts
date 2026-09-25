@@ -7,7 +7,9 @@ import {
   fetchEquipmentCatalog,
   catalogChoiceLabel,
   dedupeManufacturerNames,
+  dedupeModelChoices,
   mergedManufacturerOption,
+  mergedModelOption,
   listCatalogManufacturerChoices,
   listCatalogManufacturers,
   listCatalogModelChoices,
@@ -226,9 +228,13 @@ test('estimate form and invoice form load the live catalog join', () => {
 
 test('service tickets join models by manufacturer id or name without a label column', () => {
   const tickets = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
-  assert.match(tickets, /modelBelongsToManufacturer/);
+  const schedule = readFileSync(join(here, '../app/service-schedule/page.tsx'), 'utf8');
+  assert.match(tickets, /listManufacturerChoices/);
+  assert.match(tickets, /listModelChoices/);
   assert.match(tickets, /select\('id, name, manufacturer_id'\)/);
   assert.doesNotMatch(tickets, /select\('id, name, label/);
+  assert.match(schedule, /listManufacturerChoices/);
+  assert.match(schedule, /listModelChoices/);
 });
 
 test('internal codes display a human label and duplicate spellings collapse', () => {
@@ -341,8 +347,8 @@ test('HOYA Con-Bio aliases collapse and compact model codes humanize without cha
   assert.ok(mfrs.includes('HOYA ConBio'));
   assert.equal(mfrs.filter((name) => /quanta/i.test(name)).length, 1);
   assert.ok(mfrs.includes('Quanta System'));
-  assert.equal(mfrs.filter((name) => /^(ams|american medical systems)$/i.test(name)).length, 1);
-  assert.ok(mfrs.includes('American Medical Systems'));
+  assert.equal(mfrs.filter((name) => /ams|laserscope|american medical systems/i.test(name)).length, 1);
+  assert.ok(mfrs.includes('AMS / Laserscope'));
 
   const candela = listCatalogModelChoices('Candela', live);
   const gentle = candela.filter((choice) => choice.value.trim().toLowerCase() === 'gentlemax pro');
@@ -391,14 +397,75 @@ test('stored manufacturer alias selects the merged dropdown option', () => {
   assert.equal(mergedManufacturerOption('alma', options), 'Alma');
   assert.equal(mergedManufacturerOption('Alma', options), 'Alma');
   assert.equal(mergedManufacturerOption('Quanta', options), 'Quanta System');
-  assert.equal(mergedManufacturerOption('AMS', options), 'American Medical Systems');
+  assert.equal(mergedManufacturerOption('AMS', options), 'AMS / Laserscope');
   assert.equal(mergedManufacturerOption('Con-Bio', options), 'HOYA ConBio');
   assert.equal(mergedManufacturerOption('Acme Lasers', options), 'Acme Lasers');
   assert.equal(mergedManufacturerOption('Alma Lasers', ['Alma Lasers']), 'Alma Lasers');
 
+  assert.equal(dedupeManufacturerNames(['AMS', 'Laserscope', 'LaserScope']).join('|'), 'AMS / Laserscope');
+  assert.equal(dedupeManufacturerNames(['Coherent', 'Lumenis', 'Coherent / Lumenis']).join('|'), 'Lumenis (Coherent)');
+
   const edit = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
-  assert.match(edit, /mergedManufacturerOption\(storedMake, makeOptions\)/);
+  assert.match(edit, /mergedManufacturerOption/);
+  assert.match(edit, /mergedModelOption/);
   assert.match(edit, /value=\{makeValue\}/);
+  assert.match(edit, /value=\{modelValue\}/);
+});
+
+test('near-duplicate models share one display label and keep the stored code', () => {
+  const options = dedupeModelChoices([
+    { value: 'GentleMax Pro', label: 'GentleMax Pro' },
+    { value: 'Gentlemax Pro', label: 'Gentlemax Pro' },
+    { value: 'GentleMax Pro Plus', label: 'GentleMax Pro Plus' },
+    { value: 'gentlemax pro plus', label: 'gentlemax pro plus' },
+    { value: 'Stellar M22', label: 'Stellar M22' },
+    { value: 'stellar m22', label: 'stellar m22' },
+    { value: 'Soprano Titanium', label: 'Soprano Titanium' },
+    { value: 'soprano titanium', label: 'soprano titanium' },
+    { value: 'MedLite C6', label: 'MedLite C6' },
+    { value: 'MedLite C6 / IV', label: 'MedLite C6 / IV' },
+    { value: 'LightSheer Duet', label: 'LightSheer Duet' },
+    { value: 'LightSheer DUET', label: 'LightSheer DUET' },
+    { value: 'GreenLight XPS', label: 'GreenLight XPS' },
+    { value: 'Greenlight XPS', label: 'Greenlight XPS' },
+    { value: 'VersaPulse PowerSuite', label: 'VersaPulse PowerSuite' },
+    { value: 'VersaPulse PowerSuite Rev C', label: 'VersaPulse PowerSuite Rev C' },
+    { value: 'OcuLight SL/SLx', label: 'OcuLight SL/SLx' },
+    { value: 'Oculight SL / SLx', label: 'Oculight SL / SLx' },
+    { value: 'Aura XP', label: 'Aura XP' },
+    { value: 'AURA XP 15W KTP', label: 'AURA XP 15W KTP' },
+    { value: 'co2re', label: 'co2re' },
+  ]);
+  const count = (re: RegExp) => options.filter((option) => re.test(option.label)).length;
+  assert.equal(count(/^GentleMax Pro$/), 1);
+  assert.equal(count(/GentleMax Pro Plus/i), 1);
+  assert.equal(count(/Stellar M22/i), 1);
+  assert.equal(count(/Soprano Titanium/i), 1);
+  assert.equal(count(/MedLite C6/i), 1);
+  assert.equal(count(/LightSheer DUET/i), 1);
+  assert.equal(count(/GreenLight XPS/i), 1);
+  assert.equal(count(/VersaPulse PowerSuite/i), 1);
+  assert.equal(count(/OcuLight SL\/SLx/i), 1);
+  assert.equal(count(/Aura XP/i), 1);
+  assert.ok(options.some((option) => option.label === 'Aura XP (15W KTP)'));
+  const co2 = options.find((option) => option.label === 'CO2RE');
+  assert.equal(co2?.value, 'co2re');
+  assert.equal(mergedModelOption('Gentlemax Pro', options), 'GentleMax Pro');
+  assert.equal(mergedModelOption('Aura XP', options), options.find((option) => option.label === 'Aura XP (15W KTP)')?.value);
+  assert.equal(mergedModelOption('co2re', options), 'co2re');
+  assert.equal(catalogChoiceLabel('alexlazr'), 'AlexLAZR');
+  assert.equal(catalogChoiceLabel('cbeam'), 'C-beam');
+  assert.equal(catalogChoiceLabel('sclero'), 'ScleroPLUS');
+  assert.equal(catalogChoiceLabel('smoothbeam'), 'SmoothBeam');
+  assert.equal(catalogChoiceLabel('bmbq 810'), 'BMBQ-810');
+  assert.equal(catalogChoiceLabel('fels 25 a'), 'FELS-25A');
+  assert.equal(catalogChoiceLabel('visulas yag iii'), 'Visulas YAG III');
+  assert.equal(catalogChoiceLabel('harmony xl'), 'Harmony XL');
+  assert.equal(catalogChoiceLabel('optimis ii'), 'Optimis II');
+  assert.equal(catalogChoiceLabel('sm079'), 'SM079');
+  assert.equal(catalogChoiceLabel('PL003'), 'PL003');
+  assert.equal(catalogChoiceLabel('9900'), '9900');
+  assert.equal(catalogChoiceLabel('zz9'), 'ZZ9');
 });
 
 test('Android estimate generator loads manufacturers + laser_models', () => {

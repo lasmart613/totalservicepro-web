@@ -11,15 +11,13 @@ import { filterLinkedCustomers, loadLinkedCustomers, type LinkedCustomerOpt } fr
 import { updateOmittingCharOverflow } from '@/lib/char-overflow';
 import { AssignFseSelect } from '@/components/AssignFseSelect';
 import {
-  modelBelongsToManufacturer,
-  modelMatchesEquipmentType,
   catalogChoiceLabel,
-  dedupeManufacturerNames,
-  dedupeModelChoices,
   mergedManufacturerOption,
+  mergedModelOption,
   normalizeManufacturerRow,
   normalizeModelRow,
 } from '@/lib/equipment-dropdown';
+import { listManufacturerChoices, listModelChoices } from '@/lib/laser-catalog';
 import {
   applyTicketAssignee,
   assigneeName,
@@ -288,13 +286,30 @@ export default function ServiceTicketDetail() {
     );
   }
 
-  const makeOptions = dedupeManufacturerNames(
-    dbMfrs.map((m: any) => String(m.name || '')).filter(Boolean)
-  );
+  const liveCatalog = {
+    manufacturers: dbMfrs.map(normalizeManufacturerRow),
+    models: dbLaserModels.map(normalizeModelRow),
+  };
+  const makeOptions = listManufacturerChoices(liveCatalog);
   const storedMake = String(formData.equipment_make || '');
-  const makeValue = mergedManufacturerOption(storedMake, makeOptions);
+  const makeValue = mergedManufacturerOption(
+    storedMake,
+    makeOptions.map((option) => option.value)
+  );
   const makeChoices =
-    makeValue && !makeOptions.includes(makeValue) ? [...makeOptions, makeValue] : makeOptions;
+    makeValue && !makeOptions.some((option) => option.value === makeValue)
+      ? [...makeOptions, { value: makeValue, label: makeValue }]
+      : makeOptions;
+  const modelOptions = listModelChoices(makeValue || storedMake, {
+    ...liveCatalog,
+    equipmentType: formData.equipment_type,
+  });
+  const storedModel = String(formData.equipment_model || '');
+  const modelValue = mergedModelOption(storedModel, modelOptions);
+  const modelChoices =
+    modelValue && !modelOptions.some((option) => option.value === modelValue)
+      ? [...modelOptions, { value: modelValue, label: catalogChoiceLabel(modelValue) }]
+      : modelOptions;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -416,8 +431,8 @@ export default function ServiceTicketDetail() {
                 dbMfrs.length > 0 ? (
                   <select className="input" value={makeValue} onChange={(e) => handleInputChange('equipment_make', e.target.value)}>
                     <option value="">-- Select --</option>
-                    {makeChoices.map((name) => (
-                      <option key={name} value={name}>{catalogChoiceLabel(name)}</option>
+                    {makeChoices.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
                 ) : <input className="input" value={formData.equipment_make || ''} onChange={(e) => handleInputChange('equipment_make', e.target.value)} />
@@ -425,33 +440,16 @@ export default function ServiceTicketDetail() {
 
               <Field label="Model" value={isEditing ? (
                 dbLaserModels.length > 0 ? (
-                  <select className="input" value={formData.equipment_model || ''} onChange={(e) => handleInputChange('equipment_model', e.target.value)}>
+                  <select className="input" value={modelValue} onChange={(e) => handleInputChange('equipment_model', e.target.value)}>
                     <option value="">-- Select --</option>
-                    {dedupeModelChoices(
-                      dbLaserModels
-                        .filter((m: any) =>
-                          !formData.equipment_make ||
-                          modelBelongsToManufacturer(m, formData.equipment_make, dbMfrs)
-                        )
-                        .filter((m: any) =>
-                          modelMatchesEquipmentType(m.equipment_type, formData.equipment_type)
-                        )
-                        .map((m: any) => {
-                          const value = String(m.name || '');
-                          return {
-                            value,
-                            label: catalogChoiceLabel(value, m.display_name || m.display || m.title || m.label),
-                          };
-                        })
-                        .filter((choice) => choice.value)
-                    ).map((choice) => (
+                    {modelChoices.map((choice) => (
                       <option key={choice.value} value={choice.value}>
                         {choice.label}
                       </option>
                     ))}
                   </select>
                 ) : <input className="input" value={formData.equipment_model || ''} onChange={(e) => handleInputChange('equipment_model', e.target.value)} />
-              ) : ticket.equipment_model} />
+              ) : catalogChoiceLabel(ticket.equipment_model)} />
               <Field label="Equipment Type" value={isEditing ? <input className="input" value={formData.equipment_type || ''} onChange={(e) => handleInputChange('equipment_type', e.target.value)} /> : ticket.equipment_type} />
               <Field label="Serial Number" value={isEditing ? <input className="input" value={formData.serial_number || ''} onChange={(e) => handleInputChange('serial_number', e.target.value)} /> : ticket.serial_number} />
               <Field label="PM Due Date" value={isEditing ? <input type="date" className="input" value={formData.service_date || ''} onChange={(e) => handleInputChange('service_date', e.target.value)} /> : ticket.service_date} />

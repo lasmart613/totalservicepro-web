@@ -139,6 +139,60 @@ export function buildGrokChatPayload(opts: {
   };
 }
 
+function excerptAnchor(raw: string, query: string): number {
+  const lower = String(raw || '').toLowerCase();
+  const tokens = String(query || '')
+    .toLowerCase()
+    .split(/[^a-z0-9+]+/)
+    .filter((token) => token.length >= 3)
+    .slice(0, 8);
+  let at = -1;
+  for (const token of tokens) {
+    const i = lower.indexOf(token);
+    if (i >= 0 && (at < 0 || i < at)) at = i;
+  }
+  return at < 0 ? 0 : at;
+}
+
+function lastIndexedPageMarker(text: string): number | undefined {
+  const paren = [...String(text || '').matchAll(/\(\s*p\.?\s*(\d{1,4})\s*\)/gi)];
+  if (paren.length) {
+    const n = Number(paren[paren.length - 1][1]);
+    if (n >= 1 && n <= 9999) return Math.floor(n);
+  }
+  const pages = [...String(text || '').matchAll(/\b(?:pages?|pg|pp)\.?\s*(\d{1,4})\b/gi)];
+  if (!pages.length) return undefined;
+  const n = Number(pages[pages.length - 1][1]);
+  if (n > 1 && n <= 9999) return Math.floor(n);
+  return undefined;
+}
+
+/**
+ * Page for an indexed-PDF excerpt. Prefers a nearby "(p. N)" marker, then the
+ * last "page N", then a form-feed page count. Page 1 is not invented.
+ */
+export function indexedExcerptPage(raw: string, query: string): number | undefined {
+  const text = String(raw || '');
+  if (!text) return undefined;
+  const at = excerptAnchor(text, query);
+  const marked = lastIndexedPageMarker(text.slice(Math.max(0, at - 5000), at + 400));
+  if (marked) return marked;
+  if (at <= 0) return undefined;
+  const feeds = text.slice(0, at).match(/\f/g);
+  if (feeds && feeds.length) return Math.min(9999, feeds.length + 1);
+  return undefined;
+}
+
+/** Section marker nearest the indexed excerpt, when the chunk has no section field. */
+export function indexedExcerptSection(raw: string, query: string): string | undefined {
+  const text = String(raw || '');
+  if (!text) return undefined;
+  const at = excerptAnchor(text, query);
+  const window = text.slice(Math.max(0, at - 1500), at + 400);
+  const sect = window.match(/\b(?:section|sect\.?|§)\s*([0-9]+(?:\.[0-9]+){0,3})\b/i);
+  return sect?.[1] || undefined;
+}
+
 /** Pull query-relevant windows from indexed PDF text (AI fallback). */
 export function excerptManualSearchText(text: string, query: string, maxChars = 8000): string {
   const body = String(text || '').replace(/\s+/g, ' ').trim();

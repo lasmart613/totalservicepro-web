@@ -96,7 +96,7 @@ test('calendar add-ticket form uses the shared catalog dropdowns and persists re
   const src = readFileSync(join(here, '../app/service-schedule/page.tsx'), 'utf8');
   assert.match(src, /useEquipmentCatalog/);
   assert.match(src, /listManufacturerChoices\(catalog\)/);
-  assert.match(src, /listModelChoices\(form\.equipment_make, catalog\)/);
+  assert.match(src, /listModelChoices\(makeValue \|\| form\.equipment_make, catalog\)/);
   assert.match(src, /OTHER_MANUFACTURER/);
   assert.match(src, /OTHER_MODEL/);
   assert.match(src, /selectionAfterManufacturerChange/);

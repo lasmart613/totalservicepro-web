@@ -50,6 +50,7 @@ import {
   serviceCallFromLocations,
   type CustomerLocation,
 } from '@/lib/customer-locations';
+import { catalogChoiceLabel, mergedManufacturerOption, mergedModelOption } from '@/lib/equipment-dropdown';
 import { listManufacturerChoices, listModelChoices, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import {
@@ -162,10 +163,23 @@ export default function ServiceSchedule() {
     () => listManufacturerChoices(catalog),
     [catalog.manufacturers, catalog.models]
   );
-  const modelOptions = useMemo(
-    () => (form.equipment_make ? listModelChoices(form.equipment_make, catalog) : []),
-    [form.equipment_make, catalog.manufacturers, catalog.models]
+  const makeValue = mergedManufacturerOption(
+    form.equipment_make,
+    manufacturers.map((option) => option.value)
   );
+  const makeChoices =
+    makeValue && !manufacturers.some((option) => option.value === makeValue)
+      ? [...manufacturers, { value: makeValue, label: makeValue }]
+      : manufacturers;
+  const modelOptions = useMemo(
+    () => ((makeValue || form.equipment_make) ? listModelChoices(makeValue || form.equipment_make, catalog) : []),
+    [form.equipment_make, makeValue, catalog.manufacturers, catalog.models]
+  );
+  const modelValue = mergedModelOption(form.equipment_model, modelOptions);
+  const modelChoices =
+    modelValue && !modelOptions.some((option) => option.value === modelValue)
+      ? [...modelOptions, { value: modelValue, label: catalogChoiceLabel(modelValue) }]
+      : modelOptions;
 
   const year = cursor.getFullYear();
   const month0 = cursor.getMonth();
@@ -192,7 +206,7 @@ export default function ServiceSchedule() {
       duration: duration > 0 ? duration : 60,
       title: `${ticket.service_type || 'Service'} - ${ticket.customer_name || 'Customer'}`,
       equipment_model:
-        [ticket.equipment_make, ticket.equipment_model].filter(Boolean).join(' ') || '',
+        [ticket.equipment_make, catalogChoiceLabel(ticket.equipment_model)].filter(Boolean).join(' ') || '',
       status: ticket.status,
       assigned_to: ticketAssigneeId(ticket),
       organization_id: ticket.organization_id,
@@ -1387,7 +1401,7 @@ export default function ServiceSchedule() {
                   <label className="label">Manufacturer</label>
                   <select
                     className="select"
-                    value={form.equipment_make}
+                    value={makeValue}
                     onChange={(e) => {
                       setForm({
                         ...form,
@@ -1399,7 +1413,7 @@ export default function ServiceSchedule() {
                     }}
                   >
                     <option value="">— Select —</option>
-                    {manufacturers.map((mfr) => (
+                    {makeChoices.map((mfr) => (
                       <option key={mfr.value} value={mfr.value}>
                         {mfr.label}
                       </option>
@@ -1420,7 +1434,7 @@ export default function ServiceSchedule() {
                   <label className="label">Model</label>
                   <select
                     className="select"
-                    value={form.equipment_model}
+                    value={modelValue}
                     disabled={!form.equipment_make}
                     onChange={(e) => {
                       const next = e.target.value;
@@ -1434,7 +1448,7 @@ export default function ServiceSchedule() {
                     <option value="">
                       {form.equipment_make ? '— Select —' : 'Select manufacturer first'}
                     </option>
-                    {modelOptions.map((modelChoice) => (
+                    {modelChoices.map((modelChoice) => (
                       <option key={modelChoice.value} value={modelChoice.value}>
                         {modelChoice.label}
                       </option>

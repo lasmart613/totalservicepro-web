@@ -10,6 +10,7 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { postTeamClaim, type InviteClaimResult } from '@/lib/invite-claim';
+import { ensureOrganizationMembership } from '@/lib/pending-signup';
 
 const FALLBACK_SUPABASE_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
 const FALLBACK_SUPABASE_ANON_KEY =
@@ -210,12 +211,14 @@ export async function claimPendingInvitations(
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token && typeof fetch !== 'undefined') {
         const res = await postTeamClaim(session.access_token);
+        const noInvite = res.ok && res.claimed === false && !res.pendingInvite;
+        if (noInvite || res.status === 404) return res;
         if (res.ok) {
-          console.log('[TSP] Claimed invitation via API for', clean);
+          if (res.claimed || res.pendingInvite) {
+            console.log('[TSP] Claimed invitation via API for', clean);
+          }
           return res;
         }
-        // 404 = no invite for this email. Do not invent a client-side join.
-        if (res.status === 404) return res;
       }
     } catch (apiErr) {
       console.warn('claim API fallback to client', apiErr);
@@ -247,12 +250,12 @@ export async function claimPendingInvitations(
     const { data: { user } } = await supabase.auth.getUser();
     const meta = user?.user_metadata || {};
 
-    await supabase.from('organization_memberships').upsert({
+    await ensureOrganizationMembership(supabase, {
       user_id: userId,
       organization_id: orgId,
       role: inv?.role || 'fse',
       is_home: false,
-    }, { onConflict: 'user_id,organization_id' });
+    });
 
     if (!existingProf?.organization_id) {
       const update: any = {

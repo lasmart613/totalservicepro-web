@@ -397,13 +397,47 @@ async function linkFounderProfile(
     }
   }
 
+  await ensureOrganizationMembership(supabase, {
+    user_id: userId,
+    organization_id: orgId,
+    role: pending.role || 'company_admin',
+    is_home: true,
+  });
+}
+
+/** Insert a home membership only when one is not already there. Never upsert over RLS. */
+export async function ensureOrganizationMembership(
+  supabase: SupabaseClient,
+  row: {
+    user_id: string;
+    organization_id: string | number;
+    role: string;
+    is_home: boolean;
+  }
+): Promise<void> {
   try {
-    await supabase.from('organization_memberships').upsert({
-      user_id: userId,
-      organization_id: orgId,
-      role: pending.role || 'company_admin',
-      is_home: true,
-    }, { onConflict: 'user_id,organization_id' });
+    const { data: existing, error: selErr } = await supabase
+      .from('organization_memberships')
+      .select('user_id')
+      .eq('user_id', row.user_id)
+      .eq('organization_id', row.organization_id)
+      .maybeSingle();
+    if (existing?.user_id) return;
+    if (selErr && /schema cache|does not exist|relation/i.test(selErr.message || '')) return;
+
+    const { error } = await supabase.from('organization_memberships').insert(row);
+    if (!error) return;
+    if (/duplicate|23505/i.test(error.message || '')) return;
+    if (/42501|row-level security/i.test(error.message || '')) {
+      const { data: again } = await supabase
+        .from('organization_memberships')
+        .select('user_id')
+        .eq('user_id', row.user_id)
+        .eq('organization_id', row.organization_id)
+        .maybeSingle();
+      if (again?.user_id) return;
+    }
+    console.warn('organization_memberships insert', error.message);
   } catch {
     /* migration may not be applied yet — profile pointer still works */
   }
@@ -428,6 +462,7 @@ export async function applyPendingSignup(
 
   try {
     const { data: { session } } = await supabase.auth.getSession();
+    // Email claim always runs. A clinic claimToken on the pending payload is not a gate.
     if (session?.access_token) {
       const claim = await postTeamClaim(session.access_token);
       if (inviteInPlay(claim)) {

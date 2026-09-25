@@ -82,6 +82,21 @@ export function destAfterInviteClaim(
   return fallback;
 }
 
+/**
+ * Where login/signup goes after an email-based team claim.
+ * No invite token is required. `{ ok:true, claimed:false, pendingInvite:false }`
+ * stays on the requested page (founder `/onboarding`). A claimed invite goes to
+ * member setup.
+ */
+export function routeAfterTeamClaim(
+  claim: InviteClaimResult | null | undefined,
+  requestedDest: string
+): string {
+  if (!inviteInPlay(claim)) return requestedDest;
+  const fallback = requestedDest.startsWith('/onboarding') ? '/onboarding/member' : requestedDest;
+  return destAfterInviteClaim(claim, fallback);
+}
+
 export async function postTeamClaim(
   accessToken: string,
   body?: Record<string, unknown>

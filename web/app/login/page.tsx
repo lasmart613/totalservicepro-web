@@ -8,7 +8,7 @@ import { nextPathFromSearchParams } from '@/lib/login-next';
 import { claimCustomerInvite } from '@/lib/customer-invite-client';
 import { clearPendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session';
-import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
+import { postTeamClaim, routeAfterTeamClaim } from '@/lib/invite-claim';
 import { publicAuthMessage } from '@/lib/auth-errors';
 
 function LoginInner() {
@@ -44,10 +44,8 @@ function LoginInner() {
     const { data: sessionData } = await supabase.auth.getSession();
     if (sessionData.session?.access_token) {
       const claim = await postTeamClaim(sessionData.session.access_token);
-      if (inviteInPlay(claim)) {
-        router.push(destAfterInviteClaim(claim, dest.startsWith('/onboarding') ? '/onboarding/member' : dest));
-        return;
-      }
+      router.push(routeAfterTeamClaim(claim, dest));
+      return;
     }
     router.push(dest);
   }

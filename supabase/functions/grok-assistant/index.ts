@@ -1280,6 +1280,56 @@ async function pdfPathsForChat(db: any, manual: any): Promise<string[]> {
   return []
 }
 
+function excerptAnchor(raw: string, query: string): number {
+  const lower = String(raw || '').toLowerCase()
+  const tokens = String(query || '')
+    .toLowerCase()
+    .split(/[^a-z0-9+]+/)
+    .filter((token) => token.length >= 3)
+    .slice(0, 8)
+  let at = -1
+  for (const token of tokens) {
+    const i = lower.indexOf(token)
+    if (i >= 0 && (at < 0 || i < at)) at = i
+  }
+  return at < 0 ? 0 : at
+}
+
+function lastIndexedPageMarker(text: string): number | undefined {
+  const paren = [...String(text || '').matchAll(/\(\s*p\.?\s*(\d{1,4})\s*\)/gi)]
+  if (paren.length) {
+    const n = Number(paren[paren.length - 1][1])
+    if (n >= 1 && n <= 9999) return Math.floor(n)
+  }
+  const pages = [...String(text || '').matchAll(/\b(?:pages?|pg|pp)\.?\s*(\d{1,4})\b/gi)]
+  if (!pages.length) return undefined
+  const n = Number(pages[pages.length - 1][1])
+  if (n > 1 && n <= 9999) return Math.floor(n)
+  return undefined
+}
+
+/** Inlined so a raw-GitHub bootstrap still pages index excerpts. Keep in sync with web manual-scope.ts. */
+function indexedExcerptPage(raw: string, query: string): number | undefined {
+  const text = String(raw || '')
+  if (!text) return undefined
+  const at = excerptAnchor(text, query)
+  const marked = lastIndexedPageMarker(text.slice(Math.max(0, at - 5000), at + 400))
+  if (marked) return marked
+  if (at <= 0) return undefined
+  const feeds = text.slice(0, at).match(/\f/g)
+  if (feeds && feeds.length) return Math.min(9999, feeds.length + 1)
+  return undefined
+}
+
+function indexedExcerptSection(raw: string, query: string): string | undefined {
+  const text = String(raw || '')
+  if (!text) return undefined
+  const at = excerptAnchor(text, query)
+  const window = text.slice(Math.max(0, at - 1500), at + 400)
+  const sect = window.match(/\b(?:section|sect\.?|§)\s*([0-9]+(?:\.[0-9]+){0,3})\b/i)
+  return sect?.[1] || undefined
+}
+
 async function searchIndexedManualText(
   db: any,
   manualId: number | null,
@@ -1290,9 +1340,17 @@ async function searchIndexedManualText(
   if (id == null) return null
   const { data, error } = await db.from('manual_search_index').select('search_text').eq('manual_id', id).maybeSingle()
   if (error || !data?.search_text) return null
-  const excerpt = excerptManualSearchText(String(data.search_text), query)
+  const full = String(data.search_text)
+  const excerpt = excerptManualSearchText(full, query)
   if (!excerpt || excerpt.length < 40) return null
-  return { text: excerpt, source: `${label || 'Selected manual'} (indexed PDF text)` }
+  const page = indexedExcerptPage(full, query)
+  const section = indexedExcerptSection(full, query) || extractSectionRef(excerpt)
+  return {
+    text: excerpt,
+    source: `${label || 'Selected manual'} (indexed PDF text)`,
+    ...(page ? { page } : {}),
+    ...(section ? { section } : {}),
+  }
 }
 
 /**

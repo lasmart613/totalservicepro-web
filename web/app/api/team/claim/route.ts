@@ -113,15 +113,19 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           ok: true,
           skipped: true,
+          claimed: false,
+          pendingInvite: false,
           organization_id: existingProf.organization_id,
           role: existingProf.role,
           needsMemberOnboarding: existingProf.onboarding_completed !== true,
         });
       }
+      // No invite is a normal signup, not an error. 404 shows up as console noise.
       return NextResponse.json({
-        ok: false,
-        error: 'No pending invitation found for this email.',
-      }, { status: 404 });
+        ok: true,
+        claimed: false,
+        pendingInvite: false,
+      });
     }
 
     const leaveGuard = inviteMustNotLeaveHome({
