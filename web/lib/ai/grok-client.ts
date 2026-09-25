@@ -5,7 +5,7 @@
 
 import { getSupabaseUrl } from '@/lib/supabase/client';
 import type { ManualCitation } from './citations';
-import { attachProsePages, citationsFromMeta } from './citations';
+import { citationsForAssistantReply } from './citations';
 
 export type ChatMessage = {
   role: 'user' | 'assistant' | 'system';
@@ -167,15 +167,7 @@ export async function grokChat(opts: {
     }
 
     const meta = json?._meta;
-    const fromMeta = citationsFromMeta(meta, opts.manualId ?? null);
-    const fallbackId = Number(opts.manualId);
-    const seed =
-      fromMeta.length
-        ? fromMeta
-        : Number.isSafeInteger(fallbackId) && fallbackId > 0
-          ? [{ manualId: fallbackId }]
-          : [];
-    const citations = attachProsePages(seed, String(content));
+    const citations = citationsForAssistantReply(meta, opts.manualId ?? null, String(content));
 
     return {
       ok: true,

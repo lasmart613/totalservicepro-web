@@ -261,15 +261,50 @@ export function pdfPageCountFromBytes(bytes: Uint8Array | string): number | null
   return max > 0 ? max : null;
 }
 
-/** Shown when chat has neither indexed excerpts nor a collection file to read. */
-export function manualCorpusFallbackMessage(label: string, opts?: { tooLarge?: boolean }): string {
-  const name = String(label || '').trim() || 'this manual';
-  const large = opts?.tooLarge
-    ? ' The PDF is too large to send in one step (over about 3 MB or 60 pages), and that request times out before an answer comes back.'
-    : '';
+export type GeneralGuidanceDevice = {
+  brand?: string | null;
+  model?: string | null;
+  title?: string | null;
+};
+
+/** Manufacturer + model label for a general-knowledge answer. */
+export function generalGuidanceDeviceName(opts?: GeneralGuidanceDevice | null): string {
+  const brand = String(opts?.brand ?? '').trim();
+  let device = String(opts?.model ?? '').trim() || String(opts?.title ?? '').trim();
+  if (brand && device.toLowerCase().startsWith(brand.toLowerCase())) {
+    device = device.slice(brand.length).trim().replace(/^[-–:—\s]+/, '').trim();
+  }
+  return [brand, device].filter(Boolean).join(' ') || 'this device';
+}
+
+/** Visible disclaimer when the reply is not drawn from this manual's text. */
+export function generalGuidancePrefix(opts?: GeneralGuidanceDevice | null): string {
+  return `I couldn't search this manual's text yet, so this is general guidance for the ${generalGuidanceDeviceName(opts)}:`;
+}
+
+/**
+ * System-prompt block for the no-index / no-collection / no-fault case.
+ * Overrides the empty-source "do not invent" rule for this turn only.
+ */
+export function generalGuidanceSystemHint(opts?: GeneralGuidanceDevice | null): string {
+  const who = generalGuidanceDeviceName(opts);
   return (
-    `I couldn't answer from "${name}" yet.${large} ` +
-    `There's no matching Grok collection file and no indexed excerpts to quote. ` +
-    `Use Find in the manual viewer for a word or fault code, or ask an admin to index this catalog id so I can answer from the text.`
+    `\n\n## GENERAL GUIDANCE (no manual text)\n` +
+    `Override the empty-source rule for this turn. Indexed excerpts and a matching collection file are unavailable, so you cannot quote the ${who} manual. ` +
+    `Still answer helpfully from general field-service knowledge for the ${who}. ` +
+    `Give typical steps, values, and cautions, and say when a detail varies by revision. ` +
+    `Do not claim you read or cited this manual. Do not end with a "— Source:" line. ` +
+    `A disclaimer is added for you; do not repeat it.`
   );
+}
+
+/** Prefix a model answer and drop a trailing manual citation the prompt would otherwise demand. */
+export function prefixGeneralGuidance(content: string, opts?: GeneralGuidanceDevice | null): string {
+  const prefix = generalGuidancePrefix(opts);
+  let body = String(content || '').trim();
+  body = body.replace(/\n*—\s*Source:[\s\S]*$/i, '').trim();
+  body = body.replace(/\[\[cite:[^\]]*\]\]/g, '').trim();
+  if (!body || body === prefix) return prefix;
+  if (body.startsWith(prefix)) return body;
+  return `${prefix}\n\n${body}`;
 }

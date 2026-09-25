@@ -7,6 +7,7 @@ import {
   attachProsePages,
   citationLabel,
   citationViewerHref,
+  citationsForAssistantReply,
   citationsFromMeta,
   embedCitationMarker,
   extractPageRef,
@@ -124,6 +125,20 @@ test('meta citations and section extraction', () => {
   assert.equal(fromMeta[0].page, 12);
   assert.equal(citationLabel(fromMeta[0]), 'Xeo SM, p.12, §3.1');
   assert.equal(mergeCitations(fromMeta, fromMeta).length, 1);
+
+  const linked = citationsForAssistantReply(
+    { citations: [{ manualId: 17, title: 'CO2RE' }] },
+    17,
+    'See page 4 of the alignment procedure.'
+  );
+  assert.equal(linked[0].manualId, 17);
+  assert.equal(linked[0].page, 4);
+  const general = citationsForAssistantReply(
+    { generalGuidance: true, manualId: 17, citations: [{ manualId: 17, page: 4, title: 'CO2RE' }] },
+    17,
+    'Typical RF deck check is on page 4.'
+  );
+  assert.deepEqual(general, []);
 });
 
 test('AI assistant and viewer use structured cites, not public PDF URLs', () => {
