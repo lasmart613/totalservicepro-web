@@ -139,40 +139,296 @@ export function buildGrokChatPayload(opts: {
   };
 }
 
-/** Pull query-relevant windows from indexed PDF text (AI fallback). */
-export function excerptManualSearchText(text: string, query: string, maxChars = 8000): string {
-  const body = String(text || '').replace(/\s+/g, ' ').trim();
-  if (!body) return '';
-  if (body.length <= maxChars) return body;
+const EXCERPT_STOPWORDS = new Set([
+  'the', 'and', 'for', 'are', 'was', 'were', 'what', 'does', 'did', 'mean', 'means',
+  'how', 'why', 'when', 'where', 'which', 'who', 'with', 'from', 'this', 'that',
+  'into', 'about', 'your', 'you', 'our', 'can', 'could', 'would', 'should',
+  'please', 'tell', 'have', 'has', 'had', 'not', 'but', 'its', 'than', 'then',
+  'them', 'they', 'his', 'her', 'she', 'him', 'any', 'all', 'on', 'of', 'to', 'in',
+  'is', 'it', 'or', 'as', 'at', 'by', 'be', 'an', 'if',
+]);
 
+function excerptQueryTerms(query: string): string[] {
   const tokens = String(query || '')
     .toLowerCase()
     .split(/[^a-z0-9+]+/)
-    .filter((t) => t.length >= 3)
-    .slice(0, 8);
-  if (!tokens.length) return body.slice(0, maxChars);
-
-  const lower = body.toLowerCase();
-  const windows: string[] = [];
-  const seen = new Set<number>();
+    .filter(Boolean);
+  const terms: string[] = [];
+  const seen = new Set<string>();
   for (const token of tokens) {
-    let from = 0;
-    for (let n = 0; n < 3; n++) {
-      const i = lower.indexOf(token, from);
-      if (i < 0) break;
-      const start = Math.max(0, i - 280);
-      if ([...seen].some((s) => Math.abs(s - start) < 200)) {
-        from = i + token.length;
-        continue;
+    if (seen.has(token)) continue;
+    if (/^\d+$/.test(token)) {
+      seen.add(token);
+      terms.push(token);
+    } else if (token.length >= 2 && !EXCERPT_STOPWORDS.has(token)) {
+      seen.add(token);
+      terms.push(token);
+    }
+    if (terms.length >= 12) break;
+  }
+  return terms;
+}
+
+function termAt(hay: string, term: string, from: number): number {
+  let i = from;
+  while (i <= hay.length) {
+    const at = hay.indexOf(term, i);
+    if (at < 0) return -1;
+    const before = at > 0 ? hay.charAt(at - 1) : '';
+    const after = hay.charAt(at + term.length);
+    const edge = (ch: string) => ch === '' || /[^a-z0-9+]/.test(ch);
+    if (edge(before) && edge(after)) return at;
+    i = at + 1;
+  }
+  return -1;
+}
+
+/** Figure and section numbers such as 6-43 or 6.43 are not an error code. #43 still counts. */
+function gluedManualNumber(hay: string, term: string, at: number): boolean {
+  const before = at > 0 ? hay.charAt(at - 1) : '';
+  const after = hay.charAt(at + term.length);
+  if (before === '-' || before === '.' || before === '/') return true;
+  if (after === '-' || after === '/') return true;
+  if (after === '.' && /\d/.test(hay.charAt(at + term.length + 1))) return true;
+  return false;
+}
+
+function collectHits(hay: string, term: string): number[] {
+  const hits: number[] = [];
+  const numeric = /^\d+$/.test(term);
+  let from = 0;
+  while (hits.length < 8000) {
+    const at = termAt(hay, term, from);
+    if (at < 0) break;
+    from = at + Math.max(1, term.length);
+    if (numeric && gluedManualNumber(hay, term, at)) continue;
+    hits.push(at);
+  }
+  return hits;
+}
+
+function manualPageSpans(hay: string): Array<{ start: number; end: number }> {
+  const spans: Array<{ start: number; end: number }> = [];
+  let start = 0;
+  for (let i = 0; i < hay.length; i++) {
+    if (hay.charCodeAt(i) !== 12) continue;
+    if (i > start) spans.push({ start, end: i });
+    start = i + 1;
+  }
+  if (start < hay.length) spans.push({ start, end: hay.length });
+  if (!spans.length) spans.push({ start: 0, end: hay.length });
+  return spans;
+}
+
+function hitsOnSpan(hits: number[], start: number, end: number): number[] {
+  const out: number[] = [];
+  for (const hit of hits) {
+    if (hit < start) continue;
+    if (hit >= end) break;
+    out.push(hit);
+  }
+  return out;
+}
+
+/** Rare terms outrank a brand word that is printed on many pages. */
+function idfTermWeight(term: string, pageHits: number, pages: number): number {
+  const df = Math.max(0, pageHits);
+  let w = Math.log((pages + 1) / (df + 1)) + 1;
+  if (/^\d+$/.test(term)) w += 4;
+  if (pages > 1 && df > pages * 0.25) w *= 0.2;
+  return w;
+}
+
+const PHRASE_GAP = 120;
+
+function orderedTermChain(
+  terms: string[],
+  positions: Map<string, number[]>,
+  start: number,
+  end: number
+): { len: number; at: number } {
+  const lists = terms.map((term) => hitsOnSpan(positions.get(term) || [], start, end));
+  let bestLen = 0;
+  let bestAt = -1;
+  const walk = (index: number, cursor: number, origin: number, len: number) => {
+    if (len > bestLen || (len === bestLen && origin > bestAt)) {
+      bestLen = len;
+      bestAt = origin;
+    }
+    if (index >= terms.length) return;
+    walk(index + 1, cursor, origin, len);
+    const list = lists[index];
+    for (const hit of list) {
+      if (hit < cursor) continue;
+      if (len > 0 && hit > cursor + PHRASE_GAP) break;
+      walk(index + 1, hit + terms[index].length, len === 0 ? hit : origin, len + 1);
+      break;
+    }
+  };
+  walk(0, start, -1, 0);
+  return { len: bestLen, at: bestAt };
+}
+
+function errorCodeBoost(
+  hay: string,
+  terms: string[],
+  positions: Map<string, number[]>,
+  start: number,
+  end: number
+): { score: number; at: number } {
+  let score = 0;
+  let at = -1;
+  const words = terms.filter((term) => !/^\d+$/.test(term) && term.length >= 3);
+  for (const term of terms) {
+    if (!/^\d+$/.test(term)) continue;
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const errorRe = new RegExp(`error\\W{0,12}#?\\W{0,4}${escaped}`, 'i');
+    const hashRe = new RegExp(`#\\W{0,4}${escaped}`, 'i');
+    for (const hit of hitsOnSpan(positions.get(term) || [], start, end)) {
+      const winStart = Math.max(start, hit - 60);
+      const winEnd = Math.min(end, hit + term.length + 60);
+      const window = hay.slice(winStart, winEnd);
+      let add = 0;
+      if (errorRe.test(window)) add += 48;
+      if (hashRe.test(window)) add += 48;
+      if (/cw\s+laser/.test(window)) add += 36;
+      for (const word of words) {
+        const wordHits = positions.get(word) || [];
+        if (wordHits.some((where) => where >= winStart && where < winEnd)) add += 8;
       }
-      seen.add(start);
-      windows.push(body.slice(start, start + 900));
-      from = i + token.length;
+      if (add > score) {
+        score = add;
+        at = hit;
+      }
     }
   }
-  const joined = windows.join('\n…\n').trim();
-  if (!joined) return body.slice(0, maxChars);
-  return joined.slice(0, maxChars);
+  return { score, at };
+}
+
+/**
+ * Anchor where the specific query terms cluster.
+ * Error codes (#43, a bare 43 beside CW Laser, error 43) and multi-word phrases
+ * outrank a brand word. Terms are weighted by how many pages they appear on.
+ * Equal scores prefer the later hit so a contents line loses to the procedure.
+ * Returns -1 when nothing in the query is present.
+ */
+function excerptAnchor(raw: string, query: string): number {
+  const hay = String(raw || '').toLowerCase();
+  const terms = excerptQueryTerms(query);
+  if (!hay || !terms.length) return -1;
+  const positions = new Map<string, number[]>();
+  for (const term of terms) {
+    const hits = collectHits(hay, term);
+    if (hits.length) positions.set(term, hits);
+  }
+  if (!positions.size) return -1;
+
+  const spans = manualPageSpans(hay);
+  const df = new Map<string, number>();
+  for (const [term, hits] of positions) {
+    let pages = 0;
+    for (const span of spans) {
+      if (hits.some((hit) => hit >= span.start && hit < span.end)) pages += 1;
+    }
+    df.set(term, pages);
+  }
+
+  let bestScore = -1;
+  let bestAt = -1;
+  for (const span of spans) {
+    let score = 0;
+    let rareAt = -1;
+    let rareW = -1;
+    for (const term of terms) {
+      const hits = positions.get(term);
+      if (!hits) continue;
+      const onPage = hitsOnSpan(hits, span.start, span.end);
+      if (!onPage.length) continue;
+      const w = idfTermWeight(term, df.get(term) || onPage.length, spans.length);
+      score += w;
+      const at = onPage[onPage.length - 1];
+      if (w > rareW || (w === rareW && at > rareAt)) {
+        rareW = w;
+        rareAt = at;
+      }
+    }
+    if (score <= 0) continue;
+    const chain = orderedTermChain(terms, positions, span.start, span.end);
+    if (chain.len >= 3) score += chain.len * 8;
+    if (chain.len >= 5) score += 24;
+    const code = errorCodeBoost(hay, terms, positions, span.start, span.end);
+    score += code.score;
+    let at = chain.len >= 3 && chain.at >= 0 ? chain.at : rareAt;
+    if (code.score >= 36 && code.at >= 0) at = code.at;
+    const head = hay.slice(span.start, Math.min(span.end, span.start + 48));
+    const stamped = /\[\[pdfpage:\d{1,4}\]\]/.exec(head);
+    if (stamped && at < span.start + stamped.index + stamped[0].length) {
+      at = Math.min(span.end - 1, span.start + stamped.index + stamped[0].length);
+    }
+    if (at < span.start) at = span.start;
+    if (score > bestScore || (score === bestScore && at > bestAt)) {
+      bestScore = score;
+      bestAt = at;
+    }
+  }
+  return bestAt < 0 || bestScore <= 0 ? -1 : bestAt;
+}
+
+function lastPhysicalPageStamp(text: string): number | undefined {
+  const stamps = [...String(text || '').matchAll(/\[\[pdfpage:(\d{1,4})\]\]/g)];
+  if (!stamps.length) return undefined;
+  const n = Number(stamps[stamps.length - 1][1]);
+  if (n >= 1 && n <= 9999) return Math.floor(n);
+  return undefined;
+}
+
+/**
+ * Physical PDF page (1-based) for an indexed excerpt.
+ * Uses [[pdfpage:N]] stamps or form-feed breaks carried from extraction.
+ * Printed labels such as "page 7-8" or "(p. 7)" are not page numbers.
+ * Page 1 is not invented when the excerpt has no physical marker.
+ */
+export function indexedExcerptPage(raw: string, query: string): number | undefined {
+  const text = String(raw || '');
+  if (!text) return undefined;
+  const at = excerptAnchor(text, query);
+  if (at < 0) return undefined;
+  const before = text.slice(0, at);
+  const stamped = lastPhysicalPageStamp(before);
+  if (stamped) return stamped;
+  const feeds = before.match(/\f/g);
+  if (feeds && feeds.length) return Math.min(9999, feeds.length + 1);
+  return undefined;
+}
+
+/** Section marker nearest the indexed excerpt, when the chunk has no section field. */
+export function indexedExcerptSection(raw: string, query: string): string | undefined {
+  const text = String(raw || '');
+  if (!text) return undefined;
+  const at = excerptAnchor(text, query);
+  const window = text.slice(Math.max(0, at - 1500), at + 400);
+  const sect = window.match(/\b(?:section|sect\.?|§)\s*([0-9]+(?:\.[0-9]+){0,3})\b/i);
+  return sect?.[1] || undefined;
+}
+
+/** Pull the same clustered hit indexedExcerptPage uses, then strip page stamps. */
+export function excerptManualSearchText(text: string, query: string, maxChars = 8000): string {
+  const raw = String(text || '');
+  const body = raw
+    .replace(/\[\[pdfpage:\d+\]\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!body) return '';
+  if (body.length <= maxChars) return body;
+  const at = excerptAnchor(raw, query);
+  if (at < 0) return body.slice(0, maxChars);
+  const start = Math.max(0, at - 400);
+  return raw
+    .slice(start, start + maxChars)
+    .replace(/\[\[pdfpage:\d+\]\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxChars);
 }
 
 /** PDF to attach when the row is a single file (no chapter_metadata). */

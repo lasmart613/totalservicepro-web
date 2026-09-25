@@ -45,6 +45,9 @@ Thumbs.db
 .env.*
 !.env.example
 
+# Local copyrighted manual fixtures. Never commit.
+web/fixtures/private/
+
 # Google service-account keys (God Analytics / GA4). Never commit.
 *service-account*.json
 *-sa.json

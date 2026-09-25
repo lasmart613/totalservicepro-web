@@ -106,6 +106,12 @@ test('prose page mentions upgrade document-level Source chips', () => {
   assert.equal(extractPageRef('See page 42 of the flow-switch procedure.'), 42);
   assert.equal(extractPageRef('p.18 harness pinout'), 18);
   assert.equal(extractPageRef('no page mentioned'), undefined);
+  assert.equal(extractPageRef('Error 43 is on pages 7-8 of the manual.'), undefined);
+  const rangeHtml = formatAssistantHtml(
+    'Error 43 is on pages 7-8.\n\n— Source: CO2RE\n[[cite:id=17&t=CO2RE]]',
+    [{ manualId: 17, title: 'CO2RE' }]
+  );
+  assert.doesNotMatch(rangeHtml, /page=7(?!\d)/);
   const attached = attachProsePages(
     [{ manualId: 105, title: 'Cutera Xeo System' }],
     'Open page 42 and page 18 of the Xeo book.'
@@ -117,6 +123,38 @@ test('prose page mentions upgrade document-level Source chips', () => {
     []
   );
   assert.match(html, /href="\/manuals\/view\?id=105[^"]*page=42/);
+});
+
+test('printed page ranges stay plain unless a physical stamp matches the first page', () => {
+  const plain = formatAssistantHtml(
+    'See page 12-13 and p. 10–11.\n[[cite:id=17&t=CO2RE]]',
+    [{ manualId: 17, title: 'CO2RE' }]
+  );
+  assert.match(plain, /See page 12-13/);
+  assert.match(plain, /p\. 10–11/);
+  assert.doesNotMatch(plain, /<a[^>]*>[^<]*page 12-13/);
+  assert.doesNotMatch(plain, /<a[^>]*>[^<]*p\. 10/);
+  assert.doesNotMatch(plain, /page=12/);
+  assert.doesNotMatch(plain, /page=10(?!\d)/);
+  assert.doesNotMatch(plain, /page=1(?!\d).*page 12|page 12-13[^<]*page=1/);
+
+  const stamped = formatAssistantHtml(
+    'See pages 42-44 of the flow switch.\n[[pdfpage:42]]\n[[cite:id=105&t=Xeo]]',
+    [{ manualId: 105, title: 'Xeo' }]
+  );
+  assert.match(stamped, /href="\/manuals\/view\?id=105[^"]*page=42/);
+  assert.match(stamped, /pages 42-44/);
+  assert.doesNotMatch(stamped, /page=44/);
+  assert.doesNotMatch(stamped, /\[\[pdfpage:/);
+
+  const fromIndex = formatAssistantHtml(
+    'See pages 42-44 of the flow switch.\n[[cite:id=105&t=Xeo]]',
+    [{ manualId: 105, title: 'Xeo' }],
+    'intro\f[[pdfpage:42]] flow switch'
+  );
+  assert.match(fromIndex, /page=42/);
+  assert.doesNotMatch(fromIndex, /page=44/);
+  assert.match(fromIndex, /pages 42-44/);
 });
 
 test('meta citations and section extraction', () => {

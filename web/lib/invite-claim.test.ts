@@ -173,6 +173,10 @@ test('brand-new founder gets 200 claimed false and lands on /onboarding', () => 
   const route = readFileSync(join(here, '../app/api/team/claim/route.ts'), 'utf8');
   assert.match(route, /ok:\s*true,\s*claimed:\s*false,\s*pendingInvite:\s*false/);
   assert.doesNotMatch(route, /status:\s*404/);
+  assert.match(route, /Could not look up the team invite\./);
+  assert.match(route, /byIdError/);
+  assert.match(route, /openError/);
+  assert.match(route, /anyError/);
   const founder = { ok: true, claimed: false, pendingInvite: false, status: 200 };
   assert.equal(inviteInPlay(founder), false);
   assert.equal(routeAfterTeamClaim(founder, '/onboarding'), '/onboarding');

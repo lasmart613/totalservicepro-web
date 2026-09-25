@@ -128,7 +128,7 @@ const AUDIENCES: {
     ],
     shot: {
       src: '/landing/parts.webp',
-      alt: 'Parts marketplace with live Candela listings and prices',
+      alt: 'Parts for sale form for a used Alma Harmony XL handpiece, with one active listing priced at $1,850',
       caption: 'Parts for sale',
     },
   },
@@ -166,7 +166,7 @@ const HERO_SLIDES: {
     sub: 'Get found when a shop needs a part that’s on your shelf.',
     shot: {
       src: '/landing/parts.webp',
-      alt: 'Parts marketplace with live listings and prices',
+      alt: 'Parts for sale form for a used Alma Harmony XL handpiece, with one active listing priced at $1,850',
       caption: 'Parts for sale',
     },
   },
@@ -512,7 +512,7 @@ export function LandingPage() {
         />
         <Shot
           src="/landing/parts.webp"
-          alt="Parts marketplace with live Candela listings and prices"
+          alt="Parts for sale form for a used Alma Harmony XL handpiece, with one active listing priced at $1,850"
           caption="Parts for sale"
           sizesKind="gallery"
         />

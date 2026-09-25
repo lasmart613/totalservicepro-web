@@ -123,6 +123,7 @@ const MANUFACTURER_ALIAS_GROUPS: string[][] = [
     'ConBio / HOYA',
     'HOYA / ConBio',
   ],
+  ['Candela', 'candela', 'Syneron-Candela', 'Syneron Candela', 'Syneron'],
   ['Quanta System', 'Quanta', 'QuantaSystem'],
   [
     'AMS / Laserscope',
@@ -146,10 +147,21 @@ const MANUFACTURER_ALIAS_GROUPS: string[][] = [
     'Coherent/Lumenis',
     'Lumenis/Coherent',
   ],
+  ['DEKA', 'Deka', 'deka'],
+  ['GE OEC', 'Ge Oec', 'GE/OEC', 'OEC'],
 ];
 
 /** Always show this label once any alias in the group is present. */
-const FORCE_MANUFACTURER_LABEL = new Set(['AMS / Laserscope', 'Lumenis (Coherent)']);
+const FORCE_MANUFACTURER_LABEL = new Set(['AMS / Laserscope', 'Lumenis (Coherent)', 'DEKA', 'GE OEC']);
+
+/** Exact manufacturer option text, keyed by norm(). */
+const MANUFACTURER_DISPLAY: Record<string, string> = {
+  'ams / laserscope': 'AMS / Laserscope',
+  'lumenis (coherent)': 'Lumenis (Coherent)',
+  deka: 'DEKA',
+  'ge oec': 'GE OEC',
+  candela: 'Candela',
+};
 
 /**
  * Display labels keyed by modelDedupeKey. Option values stay a stored spelling.
@@ -161,8 +173,7 @@ const MODEL_DISPLAY: Record<string, string> = {
   vbeam2: 'Vbeam 2',
   coolglide: 'CoolGlide',
   vpyag: 'VP YAG',
-  p100h: 'P100H',
-  p30h: 'P30H',
+  p100h: 'Pulse 100H/50H',
   yc1600: 'YC-1600',
   pl003: 'PL003',
   alexlazr: 'AlexLAZR',
@@ -171,13 +182,40 @@ const MODEL_DISPLAY: Record<string, string> = {
   smoothbeam: 'SmoothBeam',
   bmbq810: 'BMBQ-810',
   fels25a: 'FELS-25A',
+  fels25aog: 'FELS-25A',
   visulasyagiii: 'Visulas YAG III',
   harmonyxl: 'Harmony XL',
   optimisii: 'Optimis II',
-  sm079: 'SM079',
-  '9900': '9900',
+  oec9900: 'OEC 9900',
+  powersuiteholmium: 'PowerSuite 100W Holmium',
+  powersuite100wholmium: 'PowerSuite 100W Holmium',
+  acupulseduo: 'AcuPulse Duo CO₂',
+  vbeamperfecta: 'VBeam Perfecta (Pulsed Dye)',
+  vbeamperfectapulseddye: 'VBeam Perfecta (Pulsed Dye)',
+  perfecta: 'VBeam Perfecta (Pulsed Dye)',
+  h20: 'Medilas H20',
+  h20medilasholmium: 'Medilas H20',
+  medilash20: 'Medilas H20',
+  h20h30: 'Medilas H20',
+  h30: 'Medilas H30',
+  h30medilasholmium: 'Medilas H30',
+  medilash30: 'Medilas H30',
+  ultrapulse5000: 'UltraPulse 5000',
+  ultrapulseduo: 'UltraPulse Duo',
   auraxp15wktp: 'Aura XP (15W KTP)',
+  gentlemaxpro7551064nm: 'GentleMax Pro (755/1064 nm)',
+  'gentlemaxpro755+1064nm': 'GentleMax Pro (755/1064 nm)',
+  picoway: 'PicoWay',
+  picowaypicosecondlaser: 'PicoWay',
+  'apogeeelite+eliteplus': 'Apogee Elite / Elite+',
+  acupulseduoco: 'AcuPulse Duo CO₂',
+  acupulseduoco2: 'AcuPulse Duo CO₂',
+  inteliguideco25w: 'InteliGuide CO₂ 25W',
+  inteliguideco225w: 'InteliGuide CO₂ 25W',
 };
+
+/** Opaque codes with no known product name. Hidden from pickers; stored values stay. */
+const HIDDEN_PICKER_KEYS = new Set(['sm079', 'pl003', 'p30h', 'p120']);
 
 const MODEL_WORD_CASE: Record<string, string> = {
   gentlemax: 'GentleMax',
@@ -214,6 +252,12 @@ const UPPER_MODEL_TOKENS = new Set([
   'nd',
   'er',
   'mpx',
+  'et',
+  'xc',
+  'hps',
+  'hr',
+  'mgl',
+  'si',
 ]);
 
 function looseBrandKey(value: string): string {
@@ -255,9 +299,23 @@ function humanizeModelToken(token: string): string {
  */
 export function modelDedupeKey(value: string): string {
   let s = String(value || '').toLowerCase();
+  s = s.replace(/\bpowersuite\s*revc\b/g, 'powersuite rev c');
   s = s.replace(/\b(?:rev(?:ision)?|ver(?:sion)?)\.?\s*[a-z0-9]+\b/g, ' ');
   s = s.replace(/\/\s*(?:[ivx]{1,4}|[a-z])\b/g, ' ');
   return s.replace(/[^a-z0-9+]+/g, '');
+}
+
+function polishModelLabel(label: string): string {
+  return String(label || '').replace(/\bUltrapulse\b/g, 'UltraPulse');
+}
+
+/** Glued "Revc" is the Rev C manual, not a separate model name. */
+function forcedModelSpelling(raw: string, display?: string | null): string | null {
+  const blob = `${raw || ''} ${display || ''}`;
+  if (/versapulse\s*powersuite\s*revc\b/i.test(blob) || /versapulse\s*powersuite\s*rev\s+c\b/i.test(blob)) {
+    return 'VersaPulse PowerSuite Rev C';
+  }
+  return null;
 }
 
 function isSpecSuffix(extra: string): boolean {
@@ -298,18 +356,24 @@ function humanizeCompactFallback(raw: string): string {
     .join(' ');
 }
 
+/** Plain lowercase snake/kebab/word codes. Anything with capitals or symbols is already a name. */
+function isPlainLowercaseCode(value: string): boolean {
+  return /^[a-z0-9]+(?:[_-][a-z0-9]+)*$/.test(String(value || '').trim());
+}
+
 /** Display text for a model code. Does not change the saved option value. */
 export function humanizeModelCode(value: string): string {
   const raw = String(value || '').trim();
   if (!raw) return '';
   const mapped = MODEL_DISPLAY[modelDedupeKey(raw)];
-  if (mapped) return mapped;
+  if (mapped) return polishModelLabel(mapped);
+  const forced = forcedModelSpelling(raw);
+  if (forced) return forced;
+  if (!isPlainLowercaseCode(raw)) return polishModelLabel(raw);
   if (looksLikeInternalCode(raw) || /[_-]/.test(raw)) {
-    return raw.split(/[_-]+/).filter(Boolean).map(formatModelToken).join(' ');
+    return polishModelLabel(raw.split(/[_-]+/).filter(Boolean).map(formatModelToken).join(' '));
   }
-  if (/[A-Z]/.test(raw) && !/[_-]/.test(raw) && humanCasingScore(raw) > 1 && !/\s/.test(raw)) return raw;
-  if (raw === raw.toLowerCase() && /^[a-z0-9]+$/.test(raw)) return humanizeCompactFallback(raw);
-  return formatModelLabel(raw);
+  return polishModelLabel(humanizeCompactFallback(raw));
 }
 
 export function titleCaseInternalCode(value: string): string {
@@ -323,13 +387,38 @@ export function titleCaseInternalCode(value: string): string {
 export function catalogChoiceLabel(value: string, explicit?: string | null): string {
   const display = String(explicit || '').trim();
   const raw = String(value || '').trim();
-  const mapped = MODEL_DISPLAY[modelDedupeKey(raw)] || (display ? MODEL_DISPLAY[modelDedupeKey(display)] : undefined);
-  if (mapped) return mapped;
-  if (display && !isCompactModelCode(display) && !looksLikeInternalCode(display)) {
-    if (/[()/]/.test(display)) return display;
-    return humanizeModelCode(display);
-  }
+  const forced = forcedModelSpelling(raw, display);
+  if (forced) return forced;
+  const mapped =
+    (raw && MODEL_DISPLAY[modelDedupeKey(raw)]) ||
+    (display && MODEL_DISPLAY[modelDedupeKey(display)]) ||
+    '';
+  if (mapped) return polishModelLabel(mapped);
+  if (display && !isPlainLowercaseCode(display)) return polishModelLabel(display);
   return humanizeModelCode(raw || display);
+}
+
+/** Manufacturer option text. Curated names are shown exactly; only a lowercase code is title-cased. */
+export function manufacturerChoiceLabel(value: string, explicit?: string | null): string {
+  const raw = String(value || '').trim();
+  const display = String(explicit || '').trim();
+  const mapped =
+    (raw && MANUFACTURER_DISPLAY[norm(raw)]) ||
+    (display && MANUFACTURER_DISPLAY[norm(display)]) ||
+    '';
+  if (mapped) return mapped;
+  if (display && !isPlainLowercaseCode(display)) return display;
+  const source = display || raw;
+  if (!source) return '';
+  if (!isPlainLowercaseCode(source)) return source;
+  if (looksLikeInternalCode(source) || /[_-]/.test(source)) {
+    return source
+      .split(/[_-]+/)
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+  return source.charAt(0).toUpperCase() + source.slice(1);
 }
 
 function catalogAliasSet(name: string): Set<string> {
@@ -593,12 +682,14 @@ function preferDisplayLabel(current: string, next: string): string {
 
 function mergeModelChoice(prev: CatalogChoice, next: CatalogChoice): CatalogChoice {
   const value = preferModelValue(prev.value, next.value);
+  const forced =
+    forcedModelSpelling(prev.value, prev.label) || forcedModelSpelling(next.value, next.label);
   const label = preferDisplayLabel(prev.label || prev.value, next.label || next.value);
   const mapped =
     MODEL_DISPLAY[modelDedupeKey(next.value)] ||
     MODEL_DISPLAY[modelDedupeKey(prev.value)] ||
     MODEL_DISPLAY[modelDedupeKey(label)];
-  return { value, label: mapped || label };
+  return { value, label: polishModelLabel(forced || mapped || label) };
 }
 
 /**
@@ -611,6 +702,7 @@ export function dedupeModelChoices(choices: CatalogChoice[]): CatalogChoice[] {
     const value = String(choice.value || '').trim();
     if (!value) continue;
     const key = modelChoiceKey(value);
+    if (HIDDEN_PICKER_KEYS.has(key)) continue;
     const label = catalogChoiceLabel(value, choice.label);
     const prev = byKey.get(key);
     byKey.set(key, prev ? mergeModelChoice(prev, { value, label }) : { value, label });
@@ -626,6 +718,29 @@ export function dedupeModelChoices(choices: CatalogChoice[]): CatalogChoice[] {
       byKey.set(key, mergeModelChoice(base, extra));
       byKey.delete(other);
     }
+  }
+  const curatedOwner = new Map<string, string>();
+  for (const key of Array.from(byKey.keys())) {
+    const curated = MODEL_DISPLAY[key];
+    if (!curated) continue;
+    const prevKey = curatedOwner.get(curated);
+    if (!prevKey || !byKey.has(prevKey)) {
+      curatedOwner.set(curated, key);
+      continue;
+    }
+    byKey.set(prevKey, mergeModelChoice(byKey.get(prevKey)!, byKey.get(key)!));
+    byKey.delete(key);
+  }
+  const waveKeys = ['gentlemaxpro7551064nm', 'gentlemaxpro755+1064nm'].filter((key) => byKey.has(key));
+  if (waveKeys.length && byKey.has('gentlemaxpro')) {
+    let owner = waveKeys[0];
+    for (const key of waveKeys.slice(1)) {
+      byKey.set(owner, mergeModelChoice(byKey.get(owner)!, byKey.get(key)!));
+      byKey.delete(key);
+    }
+    const merged = mergeModelChoice(byKey.get('gentlemaxpro')!, byKey.get(owner)!);
+    byKey.set(owner, { ...merged, label: 'GentleMax Pro (755/1064 nm)' });
+    byKey.delete('gentlemaxpro');
   }
   return Array.from(byKey.values()).sort(
     (a, b) => a.label.localeCompare(b.label) || a.value.localeCompare(b.value)
@@ -664,6 +779,41 @@ export function mergedModelOption(stored: string, options: CatalogChoice[]): str
   return hit?.value || raw;
 }
 
+/**
+ * Keep a ticket's saved model on the picker only while its own manufacturer
+ * is selected. Other brands must not inherit that model.
+ */
+export function withSavedModelChoice(
+  choices: CatalogChoice[],
+  savedModel: string,
+  selectedMake: string,
+  savedMake: string
+): CatalogChoice[] {
+  const selected = String(selectedMake || '').trim();
+  const saved = String(savedMake || '').trim();
+  if (!savedModel || !saved || !selected || !manufacturerNamesEqual(selected, saved)) return choices;
+  const value = mergedModelOption(savedModel, choices);
+  if (!value || choices.some((option) => option.value === value)) return choices;
+  const label =
+    manufacturerNamesEqual(selected, 'GE OEC') && modelDedupeKey(value) === '9900'
+      ? 'OEC 9900'
+      : catalogChoiceLabel(value);
+  return [...choices, { value, label }];
+}
+
+/**
+ * Keep a ticket's saved manufacturer on the picker when every model under
+ * that name is hidden. Other empty brands stay off the list.
+ */
+export function withSavedManufacturerChoice(choices: CatalogChoice[], savedMake: string): CatalogChoice[] {
+  const saved = String(savedMake || '').trim();
+  if (!saved) return choices;
+  if (choices.some((option) => option.value === saved || manufacturerNamesEqual(option.value, saved))) {
+    return choices;
+  }
+  return [...choices, { value: saved, label: manufacturerChoiceLabel(saved) }];
+}
+
 function collapseManufacturerNames(names: string[]): string[] {
   const groups: string[][] = [];
   for (const name of names) {
@@ -689,14 +839,37 @@ export function listCatalogManufacturers(live?: LiveCatalog): string[] {
   (live?.manufacturers || []).forEach((m) => {
     if (m?.name) names.push(m.name);
   });
-  return collapseManufacturerNames(names);
+  const collapsed = collapseManufacturerNames(names);
+  const staticNames = collapseManufacturerNames(staticManufacturerRows().map((row) => row.name));
+  return collapsed.filter((name) => {
+    if (listCatalogModelChoices(name, live).length > 0) return true;
+    if (FORCE_MANUFACTURER_LABEL.has(name) || MANUFACTURER_DISPLAY[norm(name)]) return true;
+    return staticNames.some((entry) => manufacturerNamesEqual(entry, name));
+  });
+}
+
+function collapseOec9900(choices: CatalogChoice[]): CatalogChoice[] {
+  const rest: CatalogChoice[] = [];
+  let oec: CatalogChoice | null = null;
+  for (const choice of choices) {
+    const key = modelDedupeKey(choice.value);
+    const labelKey = modelDedupeKey(choice.label);
+    if (key === '9900' || key === 'oec9900' || labelKey === '9900' || labelKey === 'oec9900') {
+      const next = { ...choice, label: 'OEC 9900' };
+      oec = oec ? { ...mergeModelChoice(oec, next), label: 'OEC 9900' } : next;
+    } else {
+      rest.push(choice);
+    }
+  }
+  const merged = oec ? [...rest, oec] : rest;
+  return merged.sort((a, b) => a.label.localeCompare(b.label) || a.value.localeCompare(b.value));
 }
 
 export function listCatalogManufacturerChoices(live?: LiveCatalog): CatalogChoice[] {
   const rows = live?.manufacturers || [];
   return listCatalogManufacturers(live).map((value) => {
     const row = rows.find((r) => r.name && manufacturerNamesEqual(r.name, value));
-    return { value, label: catalogChoiceLabel(value, row?.label) };
+    return { value, label: manufacturerChoiceLabel(value, row?.label) };
   });
 }
 
@@ -723,7 +896,9 @@ export function listCatalogModelChoices(
     const label = model.display || catalogChoiceLabel(value);
     choices.push({ value, label });
   }
-  return dedupeModelChoices(choices);
+  const deduped = dedupeModelChoices(choices);
+  if (manufacturerNamesEqual(manufacturer, 'GE OEC')) return collapseOec9900(deduped);
+  return deduped;
 }
 
 type QueryBuilder = {

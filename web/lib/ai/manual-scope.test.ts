@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'url';
 import {
@@ -159,6 +159,56 @@ test('single-file manuals attach the storage_path PDF; folders use chapters or a
   const feedsOnly = Array.from({ length: 151 }, () => 'handpiece notes').join('\f') + '\f RF deck calibration target value';
   assert.equal(indexedExcerptPage(feedsOnly, 'RF deck calibration'), 152);
   assert.equal(indexedExcerptPage('no markers here about calibration', 'calibration'), undefined);
+  const printed = 'Error 43 is described on pages 7-8 of the CO2RE handpiece chapter.';
+  assert.equal(indexedExcerptPage(printed, 'handpiece'), undefined);
+  const physical = `${'earlier page '.repeat(10)}\f`.repeat(149) + 'pages 7-8 RF deck calibration target';
+  assert.equal(indexedExcerptPage(physical, 'RF deck calibration'), 150);
+  const stamped = 'pages 7-8 intro\f[[pdfpage:150]] error 43 RF deck calibration';
+  assert.equal(indexedExcerptPage(stamped, 'RF deck calibration'), 150);
+
+  const pages: string[] = [];
+  for (let n = 1; n <= 161; n++) {
+    let text = `CO2RE service manual laser section ${n}.`;
+    if (n === 7) text += ' Figure 6-43 Error Message Screen. CO2RE laser power high.';
+    if (n === 141) text += ' Figure 6-43 Aligning Red Laser to CO2 Laser.';
+    if (n === 150) text += ' CW Laser\n  43   Power Too High. Reset power to clear error.';
+    if (n === 151) text += ' Pulsed Laser Power Too High. Laser CW Cal data missing.';
+    pages.push(`[[pdfpage:${n}]] ${text}`);
+  }
+  const co2re = pages.join('\f');
+  for (const question of [
+    'On the CO2RE, what does error #43 CW Laser Power Too High mean',
+    'error 43 CW laser power too high',
+    'CO2RE error 43',
+  ]) {
+    const page = indexedExcerptPage(co2re, question);
+    assert.ok(page === 150 || page === 151, `${question} -> ${page}`);
+    assert.match(excerptManualSearchText(co2re, question), /Power Too High/i);
+  }
+});
+
+test('CO2RE pdftotext reference anchors error 43 on physical page 150', (t) => {
+  const path = [
+    process.env.CO2RE_PDFTOTEXT,
+    '/home/ubuntu/.cursor/projects/workspace/uploads/CO2RE_pdftotext_reference_1dde.txt',
+  ].find((candidate) => candidate && existsSync(candidate));
+  if (!path) {
+    t.skip('CO2RE pdftotext reference is not in this environment');
+    return;
+  }
+  const raw = readFileSync(path, 'utf8');
+  const parts = raw.split('\f');
+  if (parts.length && parts[parts.length - 1] === '') parts.pop();
+  assert.equal(parts.length, 161);
+  const stamped = parts.map((page, index) => `[[pdfpage:${index + 1}]] ${page}`).join('\f');
+  for (const question of [
+    'On the CO2RE, what does error #43 CW Laser Power Too High mean',
+    'error 43 CW laser power too high',
+    'CO2RE error 43',
+  ]) {
+    const page = indexedExcerptPage(stamped, question);
+    assert.ok(page === 150 || page === 151, `${question} -> ${page}`);
+  }
 });
 
 const XEO_105 = {
@@ -330,6 +380,12 @@ test('large manuals are not attached, and a missing corpus still gets general gu
   assert.match(fn, /function humanizeDeviceCode/);
   assert.match(fn, /function indexedExcerptPage/);
   assert.match(fn, /indexedExcerptPage\(full, query\)/);
+  const pageFn = fn.slice(fn.indexOf('function lastPhysicalPageStamp'), fn.indexOf('function indexedExcerptSection'));
+  assert.match(pageFn, /pdfpage/);
+  assert.match(pageFn, /\\f/);
+  assert.doesNotMatch(pageFn, /pages\?\|pg/);
+  const extractFn = fn.slice(fn.indexOf('export function extractPageRef'), fn.indexOf('function hitPage'));
+  assert.match(extractFn, /isPrintedPageRange/);
   assert.match(fn, /yag:\s*'YAG'/);
   const client = readFileSync(join(here, '../../app/ai-assistant/AIAssistantClient.tsx'), 'utf8');
   assert.match(client, /assistantManualPicker/);
