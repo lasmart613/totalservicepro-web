@@ -8,10 +8,11 @@
  * pages. Citations (PR #149) key off those stamps, not the printed page label.
  */
 
-import { createRequire } from 'node:module';
-import { dirname, join, sep } from 'node:path';
-import { pathToFileURL } from 'node:url';
-import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { existsSync } from 'node:fs';
+import { join, sep } from 'node:path';
+import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
+// @ts-ignore -- pdfjs-dist ships no type declarations for the worker entry
+import * as pdfjsWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs';
 import { clipManualSearchText } from './manual-search-text.ts';
 
 export { clipManualSearchText, normalizeManualSearchText, MANUAL_SEARCH_TEXT_MAX } from './manual-search-text.ts';
@@ -33,15 +34,30 @@ export const MANUAL_SEARCH_PDF_MAX_BYTES = 200 * 1024 * 1024;
 /** Keep late physical pages. A 161-page manual does not fit in the old 200k clip. */
 export const PDF_INDEX_TEXT_MAX = 1_500_000;
 
-const require = createRequire(import.meta.url);
-const PDFJS_PKG = dirname(require.resolve('pdfjs-dist/package.json'));
+/*
+ * Node has no Web Worker, so pdf.js runs its worker in-process. Registering the
+ * statically imported worker module on globalThis.pdfjsWorker makes pdf.js use
+ * it directly instead of import()ing GlobalWorkerOptions.workerSrc. The static
+ * import also lets Next/Netlify file tracing ship the worker with every route
+ * that loads this module. Do not compute node_modules paths at module load:
+ * Turbopack rewrites a literal require.resolve() into a numeric module id, which
+ * broke `next build` ("path" argument received a number).
+ */
+(globalThis as { pdfjsWorker?: unknown }).pdfjsWorker ??= pdfjsWorker;
 
-GlobalWorkerOptions.workerSrc = pathToFileURL(
-  require.resolve('pdfjs-dist/legacy/build/pdf.worker.mjs')
-).href;
-
-function pdfjsDir(name: string): string {
-  return join(PDFJS_PKG, name) + sep;
+/**
+ * pdf.js data folders on disk (non-embedded CMaps and the standard 14 fonts).
+ * Paths are literal subfolders of the working directory, which is the app root
+ * locally, in tests, and in the Netlify server handler, so file tracing ships
+ * exactly these folders. Missing folders are skipped rather than thrown: text
+ * extraction still works without them.
+ */
+function pdfjsDataDir(name: 'cmaps' | 'standard_fonts'): string | undefined {
+  const dir =
+    name === 'cmaps'
+      ? join(process.cwd(), 'node_modules', 'pdfjs-dist', 'cmaps')
+      : join(process.cwd(), 'node_modules', 'pdfjs-dist', 'standard_fonts');
+  return existsSync(dir) ? dir + sep : undefined;
 }
 
 export function manualPdfByteLimitError(byteLength: number): string | null {
@@ -153,9 +169,9 @@ export async function extractPdfPageSlice(
     disableFontFace: true,
     useSystemFonts: false,
     verbosity: 0,
-    cMapUrl: pdfjsDir('cmaps'),
+    cMapUrl: pdfjsDataDir('cmaps'),
     cMapPacked: true,
-    standardFontDataUrl: pdfjsDir('standard_fonts'),
+    standardFontDataUrl: pdfjsDataDir('standard_fonts'),
   }) as unknown as PdfTask;
 
   let doc: PdfDoc | null = null;
