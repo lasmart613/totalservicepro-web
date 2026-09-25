@@ -10,6 +10,7 @@
 
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { postTeamClaim, type InviteClaimResult } from '@/lib/invite-claim';
+import { ensureOrganizationMembership } from '@/lib/pending-signup';
 
 const FALLBACK_SUPABASE_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
 const FALLBACK_SUPABASE_ANON_KEY =
@@ -247,12 +248,12 @@ export async function claimPendingInvitations(
     const { data: { user } } = await supabase.auth.getUser();
     const meta = user?.user_metadata || {};
 
-    await supabase.from('organization_memberships').upsert({
+    await ensureOrganizationMembership(supabase, {
       user_id: userId,
       organization_id: orgId,
       role: inv?.role || 'fse',
       is_home: false,
-    }, { onConflict: 'user_id,organization_id' });
+    });
 
     if (!existingProf?.organization_id) {
       const update: any = {

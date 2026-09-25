@@ -221,9 +221,12 @@ test('creating your own shop after an FSE invite still adds a home membership', 
   );
 
   const onboarding = readFileSync(join(here, '../app/onboarding/page.tsx'), 'utf8');
-  assert.match(onboarding, /organization_memberships/);
+  assert.match(onboarding, /ensureOrganizationMembership/);
   assert.match(onboarding, /is_home:\s*true/);
   assert.match(onboarding, /createdNewOrg/);
+  const pending = readFileSync(join(here, './pending-signup.ts'), 'utf8');
+  assert.match(pending, /organization_memberships/);
+  assert.doesNotMatch(pending, /organization_memberships'\)\.upsert/);
 
   const membershipsRoute = readFileSync(join(here, '../app/api/org/memberships/route.ts'), 'utf8');
   assert.match(membershipsRoute, /created_by/);

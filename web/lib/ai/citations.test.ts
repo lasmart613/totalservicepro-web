@@ -70,6 +70,15 @@ test('document-only citation still opens that manual', () => {
   assert.match(html, /page=1/);
 });
 
+test('index-excerpt cite chips keep (p. N) instead of opening page 1', () => {
+  const html = formatAssistantHtml(
+    'CO2RE handpiece check (p. 152).\n\n— Source: CO2RE\n[[cite:id=17&t=CO2RE]]',
+    [{ manualId: 17, title: 'CO2RE' }]
+  );
+  assert.match(html, /href="\/manuals\/view\?id=17[^"]*page=152/);
+  assert.doesNotMatch(html, /id=17[^"]*page=1(?!\d)/);
+});
+
 test('cite URL includes page= when marker has p= and omits it only when unknown', () => {
   const withPage = embedCitationMarker({
     manualId: 105,

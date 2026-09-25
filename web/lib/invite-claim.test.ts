@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { destAfterInviteClaim, inviteInPlay, shouldSendToMemberOnboarding } from './invite-claim.ts';
+import { destAfterInviteClaim, hasInviteToken, inviteInPlay, shouldSendToMemberOnboarding } from './invite-claim.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -112,25 +112,45 @@ test('password reset / invite callback claims before founder onboarding', () => 
   assert.match(setPassword, /inviteInPlay/);
 });
 
-test('founder onboarding claims on load and on finish; does not skip claim after save', () => {
+test('founder onboarding claims on load and on finish only when an invite token is present', () => {
   const onboarding = readFileSync(join(here, '../app/onboarding/page.tsx'), 'utf8');
-  assert.match(onboarding, /postTeamClaim|claimPendingInvitations/);
+  assert.match(onboarding, /hasInviteToken/);
+  assert.match(onboarding, /postTeamClaim/);
   assert.match(onboarding, /shouldSendToMemberOnboarding/);
   assert.match(onboarding, /inviteInPlay/);
   assert.match(onboarding, /saveOnboarding/);
   assert.match(onboarding, /destAfterInviteClaim/);
+  assert.match(onboarding, /ensureOrganizationMembership/);
+  assert.doesNotMatch(onboarding, /organization_memberships'\)\.upsert|organization_memberships'\)\.insert/);
   assert.doesNotMatch(onboarding, /inviteInPlay\(claimJson\) \|\| claimJson\.needsMemberOnboarding/);
   assert.doesNotMatch(
     onboarding,
     /Do not claim FSE invites onto a founder who just created this org/
   );
+  const claimCalls = onboarding.match(/await postTeamClaim/g) || [];
+  const gates = onboarding.match(/hasInviteToken\(\{/g) || [];
+  assert.equal(claimCalls.length, gates.length);
+  assert.ok(claimCalls.length >= 3);
+});
+
+test('hasInviteToken ignores a plain company signup and matches invite links', () => {
+  assert.equal(hasInviteToken({ search: '', metadata: { organization_type: 'service_company' } }), false);
+  assert.equal(hasInviteToken({ search: '?type=signup' }), false);
+  assert.equal(hasInviteToken({ hash: '#access_token=abc&type=signup' }), false);
+  assert.equal(hasInviteToken({ search: '?type=invite&token=abc' }), true);
+  assert.equal(hasInviteToken({ search: '?claim=clinic-token' }), true);
+  assert.equal(hasInviteToken({ metadata: { claim_token: 'abc' } }), true);
+  assert.equal(hasInviteToken({ metadata: { invite_token: '' } }), false);
 });
 
 test('applyPendingSignup claims a team invite instead of creating a new shop', () => {
   const pending = readFileSync(join(here, './pending-signup.ts'), 'utf8');
+  assert.match(pending, /pending\.extra\?\.claimToken/);
   assert.match(pending, /postTeamClaim/);
   assert.match(pending, /inviteInPlay/);
   assert.match(pending, /destAfterInviteClaim/);
+  assert.match(pending, /ensureOrganizationMembership/);
+  assert.doesNotMatch(pending, /organization_memberships'\)\.upsert/);
 });
 
 test('home and login claim a pending invite before sending someone to founder onboarding', () => {
@@ -141,4 +161,6 @@ test('home and login claim a pending invite before sending someone to founder on
   const login = readFileSync(join(here, '../app/login/page.tsx'), 'utf8');
   assert.match(login, /postTeamClaim|claimPendingInvitations/);
   assert.match(login, /inviteInPlay/);
+  assert.match(login, /requireInviteToken: true/);
+  assert.match(login, /hasInviteToken/);
 });

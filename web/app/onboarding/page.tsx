@@ -9,8 +9,8 @@ import { isOwnerish, isSupplier } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
-import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
-import { destAfterInviteClaim, inviteInPlay, postTeamClaim, shouldSendToMemberOnboarding } from '@/lib/invite-claim';
+import { applyPendingSignup, ensureOrganizationMembership, resolvePendingSignup } from '@/lib/pending-signup';
+import { destAfterInviteClaim, hasInviteToken, inviteInPlay, postTeamClaim, shouldSendToMemberOnboarding } from '@/lib/invite-claim';
 import {
   applyComplimentarySignupFields,
   missingComplimentaryColumn,
@@ -107,7 +107,14 @@ export default function Onboarding() {
       // Claim first so they join the inviting org instead of creating a new one.
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (session?.access_token) {
+        if (
+          session?.access_token &&
+          hasInviteToken({
+            search: window.location.search,
+            hash: window.location.hash,
+            metadata: user.user_metadata,
+          })
+        ) {
           const claimJson = await postTeamClaim(session.access_token);
           if (shouldSendToMemberOnboarding(claimJson)) {
             router.replace(destAfterInviteClaim(claimJson, '/onboarding/member'));
@@ -472,7 +479,14 @@ export default function Onboarding() {
     // Team invite in play: join that org and leave founder setup. Never create a new shop.
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (session?.access_token) {
+      if (
+        session?.access_token &&
+        hasInviteToken({
+          search: window.location.search,
+          hash: window.location.hash,
+          metadata: currentUser.user_metadata,
+        })
+      ) {
         const claimJson = await postTeamClaim(session.access_token);
         if (inviteInPlay(claimJson)) {
           router.replace(destAfterInviteClaim(claimJson, '/onboarding/member'));
@@ -589,13 +603,12 @@ export default function Onboarding() {
       // Membership first so the switcher lists this shop even if the profile
       // pointer stays on an FSE invite org (guard used to block that write).
       if (createdNewOrg && orgId) {
-        const { error: memErr } = await supabase.from('organization_memberships').insert({
+        await ensureOrganizationMembership(supabase, {
           user_id: currentUser.id,
           organization_id: orgId,
           role: creatorRole || 'company_admin',
           is_home: true,
         });
-        if (memErr) console.warn('home membership insert', memErr.message);
       }
       const creator = teamMembers.find(m => m.isCreator) || teamMembers[0];
       const creatorAddl = orgType === 'service' ? (creator?.additionalRoles || []) : [];
@@ -770,10 +783,18 @@ export default function Onboarding() {
       }
 
       await supabase.auth.updateUser({ data: { first_name: formData.firstName, last_name: formData.lastName } });
-      // If an invite is still open (forgot-password → this wizard), join that org now.
+      // If an invite token is still on this session, join that org now.
+      // A brand-new company signup has no token — do not POST /api/team/claim.
       try {
         const { data: { session: afterSession } } = await supabase.auth.getSession();
-        if (afterSession?.access_token) {
+        if (
+          afterSession?.access_token &&
+          hasInviteToken({
+            search: window.location.search,
+            hash: window.location.hash,
+            metadata: currentUser.user_metadata,
+          })
+        ) {
           await postTeamClaim(afterSession.access_token);
         }
       } catch (e) {

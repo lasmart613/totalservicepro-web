@@ -10,6 +10,8 @@ import {
   humanizeDeviceCode,
   humanizeGeneralGuidanceDisplay,
   excerptManualSearchText,
+  indexedExcerptPage,
+  indexedExcerptSection,
   generalGuidancePrefix,
   generalGuidanceSystemHint,
   prefixGeneralGuidance,
@@ -150,6 +152,13 @@ test('single-file manuals attach the storage_path PDF; folders use chapters or a
   assert.equal(hasAttachablePdfHint(ELITE_SM), true);
   assert.equal(hasAttachablePdfHint({ storage_path: '' }), false);
   assert.match(excerptManualSearchText('Alex 755 nm and YAG 1064 nm wavelengths.', 'wavelengths'), /1064/);
+
+  const indexed = `${'earlier page '.repeat(20)}\f`.repeat(151) + '(p. 152) RF deck calibration for the CO2RE handpiece. Section 8.4 alignment.';
+  assert.equal(indexedExcerptPage(indexed, 'RF deck calibration'), 152);
+  assert.equal(indexedExcerptSection(indexed, 'RF deck calibration'), '8.4');
+  const feedsOnly = Array.from({ length: 151 }, () => 'handpiece notes').join('\f') + '\f RF deck calibration target value';
+  assert.equal(indexedExcerptPage(feedsOnly, 'RF deck calibration'), 152);
+  assert.equal(indexedExcerptPage('no markers here about calibration', 'calibration'), undefined);
 });
 
 const XEO_105 = {
@@ -319,6 +328,8 @@ test('large manuals are not attached, and a missing corpus still gets general gu
     /I couldn't search this manual's text yet, so this is general guidance for the \$\{generalGuidanceDeviceName\(opts\)\}:/
   );
   assert.match(fn, /function humanizeDeviceCode/);
+  assert.match(fn, /function indexedExcerptPage/);
+  assert.match(fn, /indexedExcerptPage\(full, query\)/);
   assert.match(fn, /yag:\s*'YAG'/);
   const client = readFileSync(join(here, '../../app/ai-assistant/AIAssistantClient.tsx'), 'utf8');
   assert.match(client, /assistantManualPicker/);
