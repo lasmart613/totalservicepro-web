@@ -9,10 +9,14 @@ import {
   escapeIlike,
   folderPrefixForManual,
   indexManualSearchText,
+  assembleReindexedManual,
   mergeStampedManualPages,
   pdfPathsForManual,
+  reindexManualPageRange,
+  searchTextWriteRefusal,
   shouldKeepExistingSearchText,
 } from './manual-search-index.ts';
+import { MANUAL_FIXTURE_PATH } from './manuals.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -123,6 +127,115 @@ test('stamped page merge is idempotent and ignores unstamped text', () => {
   assert.match(second, /\[\[pdfpage:3\]\] CW Laser Power Too High/);
   const again = mergeStampedManualPages(second, [{ page: 3, text: 'CW Laser Power Too High' }], 4);
   assert.equal(again, second);
+  const blanked = mergeStampedManualPages(second, [{ page: 3, text: '' }], 4);
+  assert.match(blanked, /\[\[pdfpage:3\]\] CW Laser Power Too High/);
+  const kept = assembleReindexedManual(new Map([[1, 'cover'], [3, '']]), 4, second);
+  assert.match(kept, /\[\[pdfpage:3\]\] CW Laser Power Too High/);
+});
+
+function reindexHarness(opts?: { failPdf?: boolean; existing?: string }) {
+  const pdfBytes = readFileSync(join(here, '..', 'public', MANUAL_FIXTURE_PATH.replace(/^\//, '')));
+  const stage = new Map<string, string>();
+  let upserts = 0;
+  let failPdf = !!opts?.failPdf;
+  const existing = opts?.existing ?? '';
+  const client = {
+    storage: {
+      from() {
+        return {
+          download: async (path: string) => {
+            if (String(path).endsWith('.json')) {
+              const body = stage.get(path);
+              if (!body) return { data: null, error: { message: 'missing' } };
+              return { data: new Blob([body]), error: null };
+            }
+            if (failPdf) return { data: null, error: { message: 'missing' } };
+            return { data: new Blob([new Uint8Array(pdfBytes)]), error: null };
+          },
+          list: async () => ({ data: [], error: null }),
+          upload: async (path: string, body: string) => {
+            stage.set(path, body);
+            return { error: null };
+          },
+          remove: async (paths: string[]) => {
+            for (const path of paths) stage.delete(path);
+            return { error: null };
+          },
+        };
+      },
+    },
+    from(table: string) {
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        maybeSingle: async () => ({
+          data: table === 'manual_search_index' ? { search_text: existing } : null,
+          error: null,
+        }),
+        upsert() {
+          upserts += 1;
+          return { error: null };
+        },
+      };
+    },
+  };
+  return {
+    client,
+    get upserts() {
+      return upserts;
+    },
+    set failPdf(value: boolean) {
+      failPdf = value;
+    },
+    stage,
+  };
+}
+
+const FIXTURE_MANUAL = { id: 17, storage_path: 'shared/candela/CO2RE.pdf' };
+
+test('first-chunk-no-write', async () => {
+  const harness = reindexHarness({ existing: `${'troubleshooting '.repeat(80)}` });
+  const result = await reindexManualPageRange(harness.client, FIXTURE_MANUAL, { pageFrom: 1, pageCount: 1 });
+  assert.equal(result.ok, true);
+  assert.equal(result.done, false);
+  assert.equal(result.nextPage, 2);
+  assert.equal(harness.upserts, 0);
+  assert.equal(harness.stage.size, 1);
+  const staged = JSON.parse([...harness.stage.values()][0]);
+  assert.equal(staged.pages['1'] ? true : false, true);
+  assert.equal(staged.pages['2'], undefined);
+});
+
+test('partial-failure-no-write', async () => {
+  const harness = reindexHarness({ existing: `${'troubleshooting '.repeat(80)}` });
+  const first = await reindexManualPageRange(harness.client, FIXTURE_MANUAL, { pageFrom: 1, pageCount: 1 });
+  assert.equal(first.ok, true);
+  assert.equal(first.done, false);
+  harness.failPdf = true;
+  const failed = await reindexManualPageRange(harness.client, FIXTURE_MANUAL, { pageFrom: 2, pageCount: 1 });
+  assert.equal(failed.ok, false);
+  assert.equal(failed.done, false);
+  assert.equal(harness.upserts, 0);
+  assert.equal(harness.stage.size, 1);
+});
+
+test('thin-result-refused', async () => {
+  const existing = `${'troubleshooting thermopile calibration procedure '.repeat(80)}`;
+  const harness = reindexHarness({ existing });
+  const result = await reindexManualPageRange(harness.client, FIXTURE_MANUAL, { pageFrom: 1, pageCount: 40 });
+  assert.equal(result.ok, false);
+  assert.equal(result.done, false);
+  assert.match(result.error || '', /Refused to replace the manual index/);
+  assert.match(result.error || '', /80%/);
+  assert.equal(harness.upserts, 0);
+  const spaced = `${'P o w e r T o o H i g h '.repeat(400)}`;
+  assert.match(searchTextWriteRefusal(existing, spaced) || '', /single-letter/);
+  assert.match(searchTextWriteRefusal(existing, '[[pdfpage:1]]') || '', /empty/);
+  assert.equal(searchTextWriteRefusal('', `${'Power supply troubleshooting notes. '.repeat(30)}`), null);
 });
 
 test('single-manual page reindex never attaches the Grok collection', () => {

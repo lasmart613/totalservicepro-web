@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'url';
 import {
@@ -169,10 +169,10 @@ test('single-file manuals attach the storage_path PDF; folders use chapters or a
   const pages: string[] = [];
   for (let n = 1; n <= 161; n++) {
     let text = `CO2RE service manual laser section ${n}.`;
-    if (n === 2) text += ' On the CO2RE what does error mean for this laser.';
-    if (n === 3) text += ' error laser power notes.';
-    if (n === 4) text += ' CO2RE error 43 contents.';
-    if (n === 151) text += ' CO2RE error 43 CW Laser Power Too High. The CW laser power is too high.';
+    if (n === 7) text += ' Figure 6-43 Error Message Screen. CO2RE laser power high.';
+    if (n === 141) text += ' Figure 6-43 Aligning Red Laser to CO2 Laser.';
+    if (n === 150) text += ' CW Laser\n  43   Power Too High. Reset power to clear error.';
+    if (n === 151) text += ' Pulsed Laser Power Too High. Laser CW Cal data missing.';
     pages.push(`[[pdfpage:${n}]] ${text}`);
   }
   const co2re = pages.join('\f');
@@ -182,8 +182,32 @@ test('single-file manuals attach the storage_path PDF; folders use chapters or a
     'CO2RE error 43',
   ]) {
     const page = indexedExcerptPage(co2re, question);
-    assert.ok(page != null && Math.abs(page - 151) <= 1, `${question} -> ${page}`);
+    assert.ok(page === 150 || page === 151, `${question} -> ${page}`);
     assert.match(excerptManualSearchText(co2re, question), /Power Too High/i);
+  }
+});
+
+test('CO2RE pdftotext reference anchors error 43 on physical page 150', (t) => {
+  const path = [
+    process.env.CO2RE_PDFTOTEXT,
+    '/home/ubuntu/.cursor/projects/workspace/uploads/CO2RE_pdftotext_reference_1dde.txt',
+  ].find((candidate) => candidate && existsSync(candidate));
+  if (!path) {
+    t.skip('CO2RE pdftotext reference is not in this environment');
+    return;
+  }
+  const raw = readFileSync(path, 'utf8');
+  const parts = raw.split('\f');
+  if (parts.length && parts[parts.length - 1] === '') parts.pop();
+  assert.equal(parts.length, 161);
+  const stamped = parts.map((page, index) => `[[pdfpage:${index + 1}]] ${page}`).join('\f');
+  for (const question of [
+    'On the CO2RE, what does error #43 CW Laser Power Too High mean',
+    'error 43 CW laser power too high',
+    'CO2RE error 43',
+  ]) {
+    const page = indexedExcerptPage(stamped, question);
+    assert.ok(page === 150 || page === 151, `${question} -> ${page}`);
   }
 });
 

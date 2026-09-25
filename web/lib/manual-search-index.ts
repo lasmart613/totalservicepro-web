@@ -10,6 +10,7 @@ import {
   looksLikePdf,
   MANUAL_SEARCH_PDF_MAX_BYTES,
   PDF_INDEX_TEXT_MAX,
+  singleLetterTokenRatio,
   stampPdfPages,
   type PdfPageText,
 } from './manual-pdf-text.ts';
@@ -47,14 +48,27 @@ export function asManualCatalogId(value: unknown): number | null {
   return Number.isSafeInteger(n) ? n : null;
 }
 
+type StorageObject = {
+  arrayBuffer: () => Promise<ArrayBuffer>;
+  text?: () => Promise<string>;
+};
+
+type StorageBucket = {
+  download: (path: string) => Promise<{ data: StorageObject | null; error: { message?: string } | null }>;
+  list: (
+    path?: string,
+    options?: { limit?: number; offset?: number }
+  ) => Promise<{ data: Array<{ name: string; id?: string | null }> | null; error: { message?: string } | null }>;
+  upload?: (
+    path: string,
+    body: string,
+    options?: { upsert?: boolean; contentType?: string }
+  ) => Promise<{ error: { message?: string } | null }>;
+  remove?: (paths: string[]) => Promise<{ error: { message?: string } | null }>;
+};
+
 type StorageClient = {
-  from: (bucket: string) => {
-    download: (path: string) => Promise<{ data: Blob | null; error: { message?: string } | null }>;
-    list: (
-      path?: string,
-      options?: { limit?: number; offset?: number }
-    ) => Promise<{ data: Array<{ name: string; id?: string | null }> | null; error: { message?: string } | null }>;
-  };
+  from: (bucket: string) => StorageBucket;
 };
 
 type TableClient = {
@@ -178,7 +192,10 @@ export function mergeStampedManualPages(
   for (const update of updates) {
     const page = Math.floor(Number(update?.page));
     if (!Number.isFinite(page) || page < 1) continue;
-    map.set(page, String(update.text || '').replace(/\s+/g, ' ').trim());
+    const text = String(update.text || '').replace(/\s+/g, ' ').trim();
+    const prev = map.get(page) || '';
+    if (!text && prev) continue;
+    map.set(page, text);
   }
   let max = 0;
   for (const page of map.keys()) if (page > max) max = page;
@@ -203,10 +220,130 @@ export type ManualPageReindexResult = {
   error?: string;
 };
 
+/** JSON object in the manuals bucket. Not a PDF, so folder listing will not index it. */
+export function manualReindexStagePath(manualId: number): string {
+  return `manual-index-staging/${manualId}.json`;
+}
+
+type ReindexStage = {
+  manualId: number;
+  totalPages: number;
+  path?: string;
+  pages: Record<string, string>;
+};
+
+function stagePageMap(stage: ReindexStage | null): Map<number, string> {
+  const map = new Map<number, string>();
+  for (const [key, value] of Object.entries(stage?.pages || {})) {
+    const page = Number(key);
+    if (page >= 1) map.set(page, String(value || ''));
+  }
+  return map;
+}
+
+function stampedPageMap(existing: string): Map<number, string> {
+  const map = new Map<number, string>();
+  for (const part of String(existing || '').split('\f')) {
+    const match = part.match(/\[\[pdfpage:(\d{1,4})\]\]\s*([\s\S]*)$/);
+    if (!match) continue;
+    const page = Number(match[1]);
+    if (page >= 1) map.set(page, match[2].trim());
+  }
+  return map;
+}
+
+/**
+ * Build the stamped row from a finished stage. A blank new page keeps text
+ * the existing row already has for that physical page.
+ */
+export function assembleReindexedManual(
+  staged: Map<number, string>,
+  totalPages: number,
+  existing: string
+): string {
+  const prev = stampedPageMap(existing);
+  let total = Math.max(0, Math.floor(Number(totalPages) || 0));
+  for (const page of prev.keys()) if (page > total) total = page;
+  for (const page of staged.keys()) if (page > total) total = page;
+  if (!total) return '';
+  const pages: PdfPageText[] = [];
+  for (let page = 1; page <= total; page++) {
+    const fresh = (staged.get(page) || '').trim();
+    const old = (prev.get(page) || '').trim();
+    pages.push({ page, text: fresh || old });
+  }
+  return clipManualSearchText(stampPdfPages(pages), PDF_INDEX_TEXT_MAX);
+}
+
+/**
+ * Refuse an empty, much shorter, or letter-spaced replacement.
+ * Returns a clear error, or null when the row may be written.
+ */
+export function searchTextWriteRefusal(existing: string, incoming: string): string | null {
+  const next = String(incoming || '').trim();
+  const prev = String(existing || '').trim();
+  const nextBody = next.replace(/\[\[pdfpage:\d+\]\]/g, ' ').replace(/\s+/g, ' ').trim();
+  if (!nextBody) return 'Refused to replace the manual index: extracted text is empty.';
+  if (prev.length >= 500 && next.length < prev.length * 0.8) {
+    return 'Refused to replace the manual index: result is shorter than 80% of the existing row.';
+  }
+  const nextRatio = singleLetterTokenRatio(next);
+  const prevRatio = prev ? singleLetterTokenRatio(prev) : 0;
+  if (nextRatio > 0.25 && nextRatio > prevRatio + 0.05) {
+    return 'Refused to replace the manual index: too many single-letter tokens to replace the existing row.';
+  }
+  return null;
+}
+
+function applyPageUpdates(map: Map<number, string>, updates: PdfPageText[]): void {
+  for (const update of updates) {
+    const page = Math.floor(Number(update?.page));
+    if (!Number.isFinite(page) || page < 1) continue;
+    const text = String(update.text || '').replace(/\s+/g, ' ').trim();
+    const prev = map.get(page) || '';
+    if (!text && prev) continue;
+    map.set(page, text);
+  }
+}
+
+function missingStagePages(map: Map<number, string>, totalPages: number): number[] {
+  const missing: number[] = [];
+  for (let page = 1; page <= totalPages; page++) {
+    if (!map.has(page)) missing.push(page);
+  }
+  return missing;
+}
+
+async function readReindexStage(storage: StorageClient, manualId: number): Promise<ReindexStage | null> {
+  const { data, error } = await storage.from(MANUALS_BUCKET).download(manualReindexStagePath(manualId));
+  if (error || !data) return null;
+  try {
+    const raw = typeof data.text === 'function'
+      ? await data.text()
+      : Buffer.from(await data.arrayBuffer()).toString('utf8');
+    const parsed = JSON.parse(raw) as ReindexStage;
+    if (!parsed || typeof parsed !== 'object' || !parsed.pages) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+async function writeReindexStage(storage: StorageClient, stage: ReindexStage): Promise<string | null> {
+  const bucket = storage.from(MANUALS_BUCKET);
+  if (typeof bucket.upload !== 'function') return 'staging_unavailable';
+  const { error } = await bucket.upload(manualReindexStagePath(stage.manualId), JSON.stringify(stage), {
+    upsert: true,
+    contentType: 'application/json',
+  });
+  return error ? error.message || 'staging_write_failed' : null;
+}
+
 /**
  * Rewrite one manuals.id search row from physical PDF pages.
- * Bypasses shouldKeepExistingSearchText. Does not attach a Grok collection.
- * Call again with nextPage until done. pageCount is capped at 40.
+ * Chunks are staged in the manuals bucket and the search row is written once,
+ * after every page has been extracted. A thinner result is refused.
+ * Does not attach a collection. Call again with nextPage until done. pageCount is capped at 40.
  */
 export async function reindexManualPageRange(
   client: TableClient & { storage: StorageClient },
@@ -243,21 +380,63 @@ export async function reindexManualPageRange(
 
   const sliced = extractPdfPageSlice(bytes, { from: pageFrom, count: pageCount });
   if (!sliced.total) return empty('no_pages');
+  const pageTo = sliced.pages.length
+    ? sliced.pages[sliced.pages.length - 1].page
+    : Math.min(sliced.total, pageFrom + pageCount - 1);
+
+  let stage: ReindexStage | null = null;
+  if (pageFrom > 1) {
+    stage = await readReindexStage(client.storage, catalogId);
+    if (!stage) return { ...empty('Refused to write a partial index: staging data for earlier pages is missing.'), path, totalPages: sliced.total };
+    if (stage.totalPages && stage.totalPages !== sliced.total) {
+      return { ...empty('Refused to write a partial index: staged page count does not match this PDF.'), path, totalPages: sliced.total };
+    }
+  }
+  const map = pageFrom === 1 ? new Map<number, string>() : stagePageMap(stage);
+  applyPageUpdates(map, sliced.pages);
+  const pages: Record<string, string> = {};
+  let stagedChars = 0;
+  for (const [page, text] of map) {
+    pages[String(page)] = text;
+    stagedChars += text.length;
+  }
+  const nextStage: ReindexStage = { manualId: catalogId, totalPages: sliced.total, path, pages };
+  const stagedError = await writeReindexStage(client.storage, nextStage);
+  if (stagedError) return { ...empty(stagedError), path, totalPages: sliced.total };
+
+  const missing = missingStagePages(map, sliced.total);
+  if (missing.length) {
+    return {
+      ok: true,
+      manualId,
+      pageFrom,
+      pageTo,
+      totalPages: sliced.total,
+      nextPage: missing[0],
+      done: false,
+      chars: stagedChars,
+      path,
+    };
+  }
+
   const existing = await readExistingSearchText(client, catalogId);
-  const merged = mergeStampedManualPages(existing, sliced.pages, sliced.total);
+  const merged = assembleReindexedManual(map, sliced.total, existing);
+  const refusal = searchTextWriteRefusal(existing, merged);
+  if (refusal) return { ...empty(refusal), path, totalPages: sliced.total, chars: merged.length };
   const saved = await upsertManualSearchIndex(client, catalogId, merged);
   if (!saved.ok) return { ...empty(saved.error || 'upsert failed'), path, totalPages: sliced.total };
-  const pageTo = sliced.pages.length ? sliced.pages[sliced.pages.length - 1].page : Math.min(sliced.total, pageFrom + pageCount - 1);
-  const next = pageFrom + pageCount;
-  const done = next > sliced.total;
+  const bucket = client.storage.from(MANUALS_BUCKET);
+  if (typeof bucket.remove === 'function') {
+    await bucket.remove([manualReindexStagePath(catalogId)]).catch(() => undefined);
+  }
   return {
     ok: true,
     manualId,
     pageFrom,
     pageTo,
     totalPages: sliced.total,
-    nextPage: done ? null : next,
-    done,
+    nextPage: null,
+    done: true,
     chars: merged.length,
     path,
   };

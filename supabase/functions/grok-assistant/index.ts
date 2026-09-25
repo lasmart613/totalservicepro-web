@@ -1332,30 +1332,132 @@ function termAt(hay: string, term: string, from: number): number {
   return -1
 }
 
-function collectHits(hay: string, term: string, cap = 24): number[] {
+/** Figure and section numbers such as 6-43 or 6.43 are not an error code. #43 still counts. */
+function gluedManualNumber(hay: string, term: string, at: number): boolean {
+  const before = at > 0 ? hay.charAt(at - 1) : ''
+  const after = hay.charAt(at + term.length)
+  if (before === '-' || before === '.' || before === '/') return true
+  if (after === '-' || after === '/') return true
+  if (after === '.' && /\d/.test(hay.charAt(at + term.length + 1))) return true
+  return false
+}
+
+function collectHits(hay: string, term: string): number[] {
   const hits: number[] = []
+  const numeric = /^\d+$/.test(term)
   let from = 0
-  while (hits.length < cap) {
+  while (hits.length < 8000) {
     const at = termAt(hay, term, from)
     if (at < 0) break
+    from = at + Math.max(1, term.length)
+    if (numeric && gluedManualNumber(hay, term, at)) continue
     hits.push(at)
-    from = at + term.length
   }
   return hits
 }
 
-function termWeight(term: string, hits: number[]): number {
-  let w = 1
-  if (/^\d+$/.test(term)) w += 8
-  if (term.length <= 3) w += 2
-  if (hits.length <= 3) w += 6
-  else if (hits.length > 8) w *= 0.35
+function manualPageSpans(hay: string): Array<{ start: number; end: number }> {
+  const spans: Array<{ start: number; end: number }> = []
+  let start = 0
+  for (let i = 0; i < hay.length; i++) {
+    if (hay.charCodeAt(i) !== 12) continue
+    if (i > start) spans.push({ start, end: i })
+    start = i + 1
+  }
+  if (start < hay.length) spans.push({ start, end: hay.length })
+  if (!spans.length) spans.push({ start: 0, end: hay.length })
+  return spans
+}
+
+function hitsOnSpan(hits: number[], start: number, end: number): number[] {
+  const out: number[] = []
+  for (const hit of hits) {
+    if (hit < start) continue
+    if (hit >= end) break
+    out.push(hit)
+  }
+  return out
+}
+
+/** Rare terms outrank a brand word that is printed on many pages. */
+function idfTermWeight(term: string, pageHits: number, pages: number): number {
+  const df = Math.max(0, pageHits)
+  let w = Math.log((pages + 1) / (df + 1)) + 1
+  if (/^\d+$/.test(term)) w += 4
+  if (pages > 1 && df > pages * 0.25) w *= 0.2
   return w
+}
+
+const PHRASE_GAP = 120
+
+function orderedTermChain(
+  terms: string[],
+  positions: Map<string, number[]>,
+  start: number,
+  end: number
+): { len: number; at: number } {
+  const lists = terms.map((term) => hitsOnSpan(positions.get(term) || [], start, end))
+  let bestLen = 0
+  let bestAt = -1
+  const walk = (index: number, cursor: number, origin: number, len: number) => {
+    if (len > bestLen || (len === bestLen && origin > bestAt)) {
+      bestLen = len
+      bestAt = origin
+    }
+    if (index >= terms.length) return
+    walk(index + 1, cursor, origin, len)
+    const list = lists[index]
+    for (const hit of list) {
+      if (hit < cursor) continue
+      if (len > 0 && hit > cursor + PHRASE_GAP) break
+      walk(index + 1, hit + terms[index].length, len === 0 ? hit : origin, len + 1)
+      break
+    }
+  }
+  walk(0, start, -1, 0)
+  return { len: bestLen, at: bestAt }
+}
+
+function errorCodeBoost(
+  hay: string,
+  terms: string[],
+  positions: Map<string, number[]>,
+  start: number,
+  end: number
+): { score: number; at: number } {
+  let score = 0
+  let at = -1
+  const words = terms.filter((term) => !/^\d+$/.test(term) && term.length >= 3)
+  for (const term of terms) {
+    if (!/^\d+$/.test(term)) continue
+    const escaped = term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+    const errorRe = new RegExp(`error\\W{0,12}#?\\W{0,4}${escaped}`, 'i')
+    const hashRe = new RegExp(`#\\W{0,4}${escaped}`, 'i')
+    for (const hit of hitsOnSpan(positions.get(term) || [], start, end)) {
+      const winStart = Math.max(start, hit - 60)
+      const winEnd = Math.min(end, hit + term.length + 60)
+      const window = hay.slice(winStart, winEnd)
+      let add = 0
+      if (errorRe.test(window)) add += 48
+      if (hashRe.test(window)) add += 48
+      if (/cw\s+laser/.test(window)) add += 36
+      for (const word of words) {
+        const wordHits = positions.get(word) || []
+        if (wordHits.some((where) => where >= winStart && where < winEnd)) add += 8
+      }
+      if (add > score) {
+        score = add
+        at = hit
+      }
+    }
+  }
+  return { score, at }
 }
 
 /**
  * Anchor where the specific query terms cluster.
- * Numbers and rare tokens outrank stopwords and words that repeat on every page.
+ * Error codes (#43, a bare 43 beside CW Laser, error 43) and multi-word phrases
+ * outrank a brand word. Terms are weighted by how many pages they appear on.
  * Equal scores prefer the later hit so a contents line loses to the procedure.
  * Returns -1 when nothing in the query is present.
  */
@@ -1370,65 +1472,56 @@ function excerptAnchor(raw: string, query: string): number {
   }
   if (!positions.size) return -1
 
-  const seeds: number[] = []
+  const spans = manualPageSpans(hay)
+  const df = new Map<string, number>()
   for (const [term, hits] of positions) {
-    if (termWeight(term, hits) < 1 && positions.size > 1) continue
-    seeds.push(...hits)
-  }
-  if (!seeds.length) {
-    for (const hits of positions.values()) seeds.push(...hits)
-  }
-
-  let phraseAt = -1
-  let phraseScore = 0
-  const weighted = terms.filter((term) => {
-    const hits = positions.get(term)
-    return !!hits && termWeight(term, hits) >= 2
-  })
-  const phraseTerms = (weighted.length >= 2 ? weighted : terms).slice(0, 8)
-  for (let len = Math.min(6, phraseTerms.length); len >= 2; len--) {
-    for (let i = 0; i + len <= phraseTerms.length; i++) {
-      const pattern = phraseTerms
-        .slice(i, i + len)
-        .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
-        .join('\\W+')
-      const re = new RegExp(pattern, 'ig')
-      let match: RegExpExecArray | null
-      while ((match = re.exec(hay))) {
-        const score = len * 5
-        if (score > phraseScore || (score === phraseScore && match.index > phraseAt)) {
-          phraseScore = score
-          phraseAt = match.index
-        }
-        if (match.index === re.lastIndex) re.lastIndex += 1
-      }
+    let pages = 0
+    for (const span of spans) {
+      if (hits.some((hit) => hit >= span.start && hit < span.end)) pages += 1
     }
-    if (phraseScore >= 15) break
+    df.set(term, pages)
   }
-  if (phraseAt >= 0) seeds.push(phraseAt)
 
-  const WINDOW = 700
   let bestScore = -1
   let bestAt = -1
-  const seen = new Set<number>()
-  for (const seed of seeds) {
-    if (seen.has(seed)) continue
-    seen.add(seed)
-    const start = Math.max(0, seed - WINDOW)
-    const end = seed + WINDOW
+  for (const span of spans) {
     let score = 0
-    for (const [term, hits] of positions) {
-      if (hits.some((hit) => hit >= start && hit <= end)) score += termWeight(term, hits)
+    let rareAt = -1
+    let rareW = -1
+    for (const term of terms) {
+      const hits = positions.get(term)
+      if (!hits) continue
+      const onPage = hitsOnSpan(hits, span.start, span.end)
+      if (!onPage.length) continue
+      const w = idfTermWeight(term, df.get(term) || onPage.length, spans.length)
+      score += w
+      const at = onPage[onPage.length - 1]
+      if (w > rareW || (w === rareW && at > rareAt)) {
+        rareW = w
+        rareAt = at
+      }
     }
-    if (phraseAt >= start && phraseAt <= end) score += phraseScore
-    if (score > bestScore || (score === bestScore && seed > bestAt)) {
+    if (score <= 0) continue
+    const chain = orderedTermChain(terms, positions, span.start, span.end)
+    if (chain.len >= 3) score += chain.len * 8
+    if (chain.len >= 5) score += 24
+    const code = errorCodeBoost(hay, terms, positions, span.start, span.end)
+    score += code.score
+    let at = chain.len >= 3 && chain.at >= 0 ? chain.at : rareAt
+    if (code.score >= 36 && code.at >= 0) at = code.at
+    const head = hay.slice(span.start, Math.min(span.end, span.start + 48))
+    const stamped = /\[\[pdfpage:\d{1,4}\]\]/.exec(head)
+    if (stamped && at < span.start + stamped.index + stamped[0].length) {
+      at = Math.min(span.end - 1, span.start + stamped.index + stamped[0].length)
+    }
+    if (at < span.start) at = span.start
+    if (score > bestScore || (score === bestScore && at > bestAt)) {
       bestScore = score
-      bestAt = seed
+      bestAt = at
     }
   }
   return bestAt < 0 || bestScore <= 0 ? -1 : bestAt
 }
-
 
 function lastPhysicalPageStamp(text: string): number | undefined {
   const stamps = [...String(text || '').matchAll(/\[\[pdfpage:(\d{1,4})\]\]/g)]

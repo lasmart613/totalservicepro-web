@@ -9,16 +9,19 @@ export const maxDuration = 60;
 /**
  * POST /api/god/manuals/reindex-one
  * God-only. Rebuild manual_search_index for one manuals.id from physical PDF
- * pages. Reads the private `manuals` bucket with the service role and upserts
- * only that manual's row. Idempotent: the same pageFrom/pageCount writes the
- * same stamps. Chunked so a 161-page book cannot sit in one long extraction.
+ * pages. Reads the private `manuals` bucket with the service role. Each chunk
+ * is stored as staging JSON. The search row is written once, after every page
+ * is extracted. An empty, shorter, or letter-spaced result is refused and the
+ * existing row stays. Chunked so a 161-page book cannot sit in one long extraction.
  *
- * Does not upload or stamp a collection attachment. Only manual_search_index changes.
+ * Does not upload or stamp a collection attachment. Only manual_search_index
+ * changes, and only when done is true.
  *
  * Manual 17 (Candela CO2RE, 161 pages) — do not use Index this manual; that
  * route times out on a large PDF and can keep the old unstamped text.
  *
- * Repeat until done is true (pageCount max 40):
+ * Repeat until done is true (pageCount max 40). The first chunks do not
+ * replace the search row:
  *   curl -X POST "$ORIGIN/api/god/manuals/reindex-one" \
  *     -H "Authorization: Bearer $GOD_ACCESS_TOKEN" \
  *     -H "Content-Type: application/json" \
