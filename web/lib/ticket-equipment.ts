@@ -87,3 +87,22 @@ export function selectionAfterManufacturerChange(
     equipment_model_other: '',
   };
 }
+
+/** True for the dropdown "Other / custom…" sentinel (never a real option label). */
+export function isEquipmentSentinel(value: string | null | undefined): boolean {
+  return isOther(clean(value));
+}
+
+/**
+ * Keep a stored off-list value visible on the picker, but never append the
+ * "Other / custom…" sentinel as its own option (QA: Model showed "__other__").
+ */
+export function withStoredPickerChoice<T extends { value: string; label: string }>(
+  options: T[],
+  value: string,
+  label: (value: string) => string = (v) => v
+): Array<T | { value: string; label: string }> {
+  const v = clean(value);
+  if (!v || isOther(v) || options.some((option) => option.value === v)) return options;
+  return [...options, { value: v, label: label(v) }];
+}
