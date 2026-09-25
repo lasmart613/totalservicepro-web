@@ -18,7 +18,6 @@ import {
   asManualId,
   excerptManualSearchText,
   folderPrefixForAiAttach,
-  manualCorpusFallbackMessage,
   pdfPageCountFromBytes,
   pdfPathsForAiAttach,
   resolveManualFromCatalog,
@@ -1296,6 +1295,53 @@ async function searchIndexedManualText(
   return { text: excerpt, source: `${label || 'Selected manual'} (indexed PDF text)` }
 }
 
+/**
+ * Inlined from manual-scope.ts so a single-file raw.githubusercontent
+ * bootstrap of index.ts still prefixes general guidance when the isolate
+ * has an older manual-scope.ts. Keep the two copies in sync.
+ */
+function generalGuidanceDeviceName(opts?: {
+  brand?: string | null
+  model?: string | null
+  title?: string | null
+} | null): string {
+  const brand = String(opts?.brand ?? '').trim()
+  let device = String(opts?.model ?? '').trim() || String(opts?.title ?? '').trim()
+  if (brand && device.toLowerCase().startsWith(brand.toLowerCase())) {
+    device = device.slice(brand.length).trim().replace(/^[-–:—\s]+/, '').trim()
+  }
+  return [brand, device].filter(Boolean).join(' ') || 'this device'
+}
+
+function generalGuidanceSystemHint(opts?: {
+  brand?: string | null
+  model?: string | null
+  title?: string | null
+} | null): string {
+  const who = generalGuidanceDeviceName(opts)
+  return (
+    `\n\n## GENERAL GUIDANCE (no manual text)\n` +
+    `Override the empty-source rule for this turn. Indexed excerpts and a matching collection file are unavailable, so you cannot quote the ${who} manual. ` +
+    `Still answer helpfully from general field-service knowledge for the ${who}. ` +
+    `Give typical steps, values, and cautions, and say when a detail varies by revision. ` +
+    `Do not claim you read or cited this manual. Do not end with a "— Source:" line. ` +
+    `A disclaimer is added for you; do not repeat it.`
+  )
+}
+
+function prefixGeneralGuidance(
+  content: string,
+  opts?: { brand?: string | null; model?: string | null; title?: string | null } | null
+): string {
+  const prefix = `I couldn't search this manual's text yet, so this is general guidance for the ${generalGuidanceDeviceName(opts)}:`
+  let body = String(content || '').trim()
+  body = body.replace(/\n*—\s*Source:[\s\S]*$/i, '').trim()
+  body = body.replace(/\[\[cite:[^\]]*\]\]/g, '').trim()
+  if (!body || body === prefix) return prefix
+  if (body.startsWith(prefix)) return body
+  return `${prefix}\n\n${body}`
+}
+
 function formatManualContext(parts: Retrieved[], selectedLabel: string, emptyHint: string): string {
   if (!parts.length) {
     return (
@@ -1811,21 +1857,20 @@ serve(async (req) => {
         if (hasFaultDBHit) systemContent = composeSystem()
       }
 
-      // No collection file and no indexed excerpts: say so. A timed-out
-      // whole-PDF call used to fall through and the technician got no answer.
-      if (manualLabel && !hasManualPassages && !hasFaultDBHit && !hasCollectionPdfs) {
-        const content = manualCorpusFallbackMessage(manualLabel, { tooLarge: skippedLargePdf })
-        return new Response(
-          JSON.stringify({
-            choices: [{ message: { role: 'assistant', content } }],
-            _usage: {
-              text: { used: usage.text, limit: limits.text },
-              voice: { used: usage.voice, limit: limits.voice },
-            },
-            _meta: { ...replyMeta(), skippedWholePdf: skippedLargePdf },
-          }),
-          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
-        )
+      // No indexed excerpts, collection file, or fault-code hit. Most of the
+      // library is in this state. Answer from model knowledge and prefix a
+      // disclaimer — do not return a canned "couldn't answer" reply.
+      // Large PDFs stay unattached (skippedLargePdf). A small unindexed PDF
+      // that attached inside the timeout already returned above.
+      const useGeneralGuidance =
+        !!manualLabel && !hasManualPassages && !hasFaultDBHit && !hasCollectionPdfs
+      if (useGeneralGuidance) {
+        contextBlock = generalGuidanceSystemHint({
+          brand: manualMeta?.brand,
+          model: manualMeta?.model,
+          title: manualMeta?.title,
+        })
+        systemContent = composeSystem()
       }
 
       const xr = await fetchWithTimeout(
@@ -1850,20 +1895,33 @@ serve(async (req) => {
         })
       }
       const xd = await xr.json()
-      if (!citationLine && !hasFaultDBHit) ensureDocCite()
-      if (xd.choices?.[0]?.message?.content) {
-        applyReplyPages(String(xd.choices[0].message.content))
-      }
-      if (citationLine) {
+      if (useGeneralGuidance) {
         const ch = xd.choices?.[0]
-        if (ch?.message?.content) ch.message.content = ch.message.content.trim() + citationLine
+        if (ch?.message) {
+          ch.message.content = prefixGeneralGuidance(String(ch.message.content || ''), {
+            brand: manualMeta?.brand,
+            model: manualMeta?.model,
+            title: manualMeta?.title,
+          })
+        }
+      } else {
+        if (!citationLine && !hasFaultDBHit) ensureDocCite()
+        if (xd.choices?.[0]?.message?.content) {
+          applyReplyPages(String(xd.choices[0].message.content))
+        }
+        if (citationLine) {
+          const ch = xd.choices?.[0]
+          if (ch?.message?.content) ch.message.content = ch.message.content.trim() + citationLine
+        }
       }
       await logUsage(db, uid, 'grok_chat', xd.usage?.total_tokens || 0)
       xd._usage = {
         text: { used: usage.text + 1, limit: limits.text },
         voice: { used: usage.voice, limit: limits.voice },
       }
-      xd._meta = replyMeta()
+      xd._meta = useGeneralGuidance
+        ? { ...replyMeta(), generalGuidance: true, skippedWholePdf: skippedLargePdf, citations: [] }
+        : replyMeta()
       return new Response(JSON.stringify(xd), {
         status: 200,
         headers: { ...corsHeaders, 'Content-Type': 'application/json' },

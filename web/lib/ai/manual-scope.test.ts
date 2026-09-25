@@ -7,7 +7,9 @@ import {
   asManualId,
   buildGrokChatPayload,
   excerptManualSearchText,
-  manualCorpusFallbackMessage,
+  generalGuidancePrefix,
+  generalGuidanceSystemHint,
+  prefixGeneralGuidance,
   manualPathsAlign,
   pdfPageCountFromBytes,
   WHOLE_PDF_ATTACH_MAX_BYTES,
@@ -22,9 +24,11 @@ import {
 } from './manual-scope.ts';
 import {
   folderPrefixForAiAttach as edgeFolderPrefixForAiAttach,
+  generalGuidancePrefix as edgeGeneralGuidancePrefix,
   manualPathKey as edgeManualPathKey,
   normalizeManualPath as edgeNormalizeManualPath,
   pdfPathsForAiAttach as edgePdfPathsForAiAttach,
+  prefixGeneralGuidance as edgePrefixGeneralGuidance,
 } from '../../../supabase/functions/grok-assistant/manual-scope.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -229,7 +233,7 @@ test('AI assistant and grok-assistant send current id/path and do not skip incom
   assert.match(android, /manualId/);
 });
 
-test('large manuals are not sent whole, and a missing corpus gets a direct reply', () => {
+test('large manuals are not attached, and a missing corpus still gets general guidance', () => {
   assert.equal(WHOLE_PDF_ATTACH_MAX_BYTES, 3 * 1024 * 1024);
   assert.equal(WHOLE_PDF_ATTACH_MAX_PAGES, 60);
   assert.equal(wholePdfAttachAllowed([{ bytes: 7_700_000, pages: 161 }]), false);
@@ -242,23 +246,53 @@ test('large manuals are not sent whole, and a missing corpus gets a direct reply
   assert.equal(pdfPageCountFromBytes('<< /Count 42 /Type /Pages >>'), 42);
   assert.equal(pdfPageCountFromBytes('no pages here'), null);
 
-  const large = manualCorpusFallbackMessage('Candela CO2RE', { tooLarge: true });
-  assert.match(large, /Candela CO2RE/);
-  assert.match(large, /too large/i);
-  assert.match(large, /Find in the manual viewer/);
-  assert.match(large, /index this catalog id/i);
-  const missing = manualCorpusFallbackMessage('Candela CO2RE');
-  assert.doesNotMatch(missing, /too large/i);
+  const candela = { brand: 'Candela', model: 'CO2RE', title: 'CO2RE Service Manual' };
+  const prefix = "I couldn't search this manual's text yet, so this is general guidance for the Candela CO2RE:";
+  assert.equal(generalGuidancePrefix(candela), prefix);
+  assert.equal(generalGuidancePrefix({ brand: 'Candela', title: 'CO2RE Service Manual' }),
+    "I couldn't search this manual's text yet, so this is general guidance for the Candela CO2RE Service Manual:");
+  assert.equal(generalGuidancePrefix({ brand: 'Candela', model: 'Candela CO2RE' }), prefix);
+  assert.equal(generalGuidancePrefix({ model: 'GentleMax' }),
+    "I couldn't search this manual's text yet, so this is general guidance for the GentleMax:");
+  assert.match(generalGuidancePrefix({}), /this device:$/);
+  assert.equal(edgeGeneralGuidancePrefix(candela), generalGuidancePrefix(candela));
+
+  const hinted = generalGuidanceSystemHint(candela);
+  assert.match(hinted, /general field-service knowledge/);
+  assert.match(hinted, /Do not claim you read or cited this manual/);
+  assert.match(hinted, /Candela CO2RE/);
+
+  const answered = prefixGeneralGuidance(
+    'Check the RF deck calibration.\n\n— Source: Candela CO2RE\n[[cite:id=17&t=CO2RE]]',
+    candela
+  );
+  assert.equal(answered, `${prefix}\n\nCheck the RF deck calibration.`);
+  assert.equal(prefixGeneralGuidance('', candela), prefix);
+  assert.equal(prefixGeneralGuidance(`${prefix}\n\nAlready noted.`, candela), `${prefix}\n\nAlready noted.`);
+  assert.equal(edgePrefixGeneralGuidance('Check the RF deck.', candela), prefixGeneralGuidance('Check the RF deck.', candela));
 
   const fn = readFileSync(join(here, '../../../supabase/functions/grok-assistant/index.ts'), 'utf8');
   const chat = fn.slice(fn.indexOf("body.action === 'chat'"));
   const indexAt = chat.indexOf('searchIndexedManualText');
   const filesAt = chat.indexOf('responses+files failed');
+  const completionsAt = chat.indexOf('api.x.ai/v1/chat/completions');
+  const prefixAt = chat.indexOf('prefixGeneralGuidance(');
   assert.ok(indexAt > 0 && filesAt > indexAt, 'indexed excerpts run before a whole-PDF attach');
+  assert.ok(completionsAt > filesAt && prefixAt > completionsAt, 'general guidance prefixes the model answer');
   assert.match(chat, /!hasCollectionPdfs && !hasManualPassages/);
   assert.match(chat, /wholePdfAttachAllowed\(attachStats\)/);
-  assert.match(chat, /manualCorpusFallbackMessage\(manualLabel/);
+  assert.match(chat, /if \(!skippedLargePdf\)/);
+  assert.match(chat, /signStoragePdf/);
   assert.match(chat, /skip whole-pdf attach/);
+  assert.match(chat, /useGeneralGuidance/);
+  assert.match(chat, /!hasManualPassages && !hasFaultDBHit && !hasCollectionPdfs/);
+  assert.match(chat, /generalGuidanceSystemHint\(/);
+  assert.match(chat, /generalGuidance:\s*true/);
+  assert.match(
+    fn,
+    /I couldn't search this manual's text yet, so this is general guidance for the \$\{generalGuidanceDeviceName\(opts\)\}:/
+  );
+  assert.doesNotMatch(chat, /manualCorpusFallbackMessage\(/);
 });
 
 test('AI assistant thread scrolls long replies instead of clipping them', () => {

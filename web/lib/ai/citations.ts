@@ -249,6 +249,27 @@ export function formatUserHtml(content: string): string {
     .replace(/\n/g, '<br/>');
 }
 
+/**
+ * Citations to show under an assistant reply.
+ * General-guidance replies are model knowledge, so they do not deep-link the selected manual.
+ */
+export function citationsForAssistantReply(
+  meta: unknown,
+  fallbackManualId: number | null | undefined,
+  content: string
+): ManualCitation[] {
+  const obj = meta && typeof meta === 'object' ? (meta as Record<string, unknown>) : {};
+  if (obj.generalGuidance === true) return [];
+  const fromMeta = citationsFromMeta(meta, fallbackManualId ?? null);
+  const fallbackId = Number(fallbackManualId);
+  const seed: ManualCitation[] = fromMeta.length
+    ? fromMeta
+    : Number.isSafeInteger(fallbackId) && fallbackId > 0
+      ? [{ manualId: fallbackId }]
+      : [];
+  return attachProsePages(seed, String(content || ''));
+}
+
 export function citationsFromMeta(meta: unknown, fallbackManualId?: number | null): ManualCitation[] {
   const obj = meta && typeof meta === 'object' ? (meta as Record<string, unknown>) : {};
   const raw = Array.isArray(obj.citations) ? obj.citations : [];
