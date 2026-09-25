@@ -462,7 +462,8 @@ export async function applyPendingSignup(
 
   try {
     const { data: { session } } = await supabase.auth.getSession();
-    if (session?.access_token && pending.extra?.claimToken) {
+    // Email claim always runs. A clinic claimToken on the pending payload is not a gate.
+    if (session?.access_token) {
       const claim = await postTeamClaim(session.access_token);
       if (inviteInPlay(claim)) {
         clearPendingSignup();

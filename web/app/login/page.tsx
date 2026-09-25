@@ -8,7 +8,7 @@ import { nextPathFromSearchParams } from '@/lib/login-next';
 import { claimCustomerInvite } from '@/lib/customer-invite-client';
 import { clearPendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session';
-import { destAfterInviteClaim, hasInviteToken, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
+import { postTeamClaim, routeAfterTeamClaim } from '@/lib/invite-claim';
 import { publicAuthMessage } from '@/lib/auth-errors';
 
 function LoginInner() {
@@ -30,7 +30,7 @@ function LoginInner() {
   const claimToken = (searchParams.get('claim') || '').trim();
   const supabase = getSupabaseClient();
 
-  async function finishLogin(dest: string, opts?: { requireInviteToken?: boolean }) {
+  async function finishLogin(dest: string) {
     if (claimToken) {
       const { data: sessionData } = await supabase.auth.getSession();
       if (sessionData.session?.access_token) {
@@ -42,19 +42,10 @@ function LoginInner() {
       }
     }
     const { data: sessionData } = await supabase.auth.getSession();
-    const allowTeamClaim =
-      !opts?.requireInviteToken ||
-      hasInviteToken({
-        search: window.location.search,
-        hash: window.location.hash,
-        metadata: sessionData.session?.user?.user_metadata,
-      });
-    if (sessionData.session?.access_token && allowTeamClaim) {
+    if (sessionData.session?.access_token) {
       const claim = await postTeamClaim(sessionData.session.access_token);
-      if (inviteInPlay(claim)) {
-        router.push(destAfterInviteClaim(claim, dest.startsWith('/onboarding') ? '/onboarding/member' : dest));
-        return;
-      }
+      router.push(routeAfterTeamClaim(claim, dest));
+      return;
     }
     router.push(dest);
   }
@@ -174,7 +165,7 @@ function LoginInner() {
             'Account created and ready. You are signed in — no confirmation email is required (Confirm email is currently off in project settings).',
             true
           );
-          await finishLogin(nextPath && nextPath !== '/' ? nextPath : '/onboarding', { requireInviteToken: true });
+          await finishLogin(nextPath && nextPath !== '/' ? nextPath : '/onboarding');
           return;
         }
 
@@ -295,7 +286,7 @@ function LoginInner() {
           });
           if (!pwErr) {
             setMsg('Email confirmed! Signing you in…', true);
-            await finishLogin(nextPath && nextPath !== '/' ? nextPath : '/onboarding', { requireInviteToken: true });
+            await finishLogin(nextPath && nextPath !== '/' ? nextPath : '/onboarding');
             return;
           }
         }
@@ -307,8 +298,7 @@ function LoginInner() {
           ? nextPath && nextPath !== '/'
             ? nextPath
             : '/onboarding'
-          : nextPath || '/hub',
-        otpMode === 'signup' ? { requireInviteToken: true } : undefined
+          : nextPath || '/hub'
       );
     } catch (err: any) {
       setMsg(publicAuthError(err?.message) || 'Verification failed.');

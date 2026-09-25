@@ -3,7 +3,12 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { destAfterInviteClaim, hasInviteToken, inviteInPlay, shouldSendToMemberOnboarding } from './invite-claim.ts';
+import {
+  destAfterInviteClaim,
+  inviteInPlay,
+  routeAfterTeamClaim,
+  shouldSendToMemberOnboarding,
+} from './invite-claim.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -73,9 +78,10 @@ test('new company admin with unfinished onboarding stays on company setup', () =
 });
 
 test('no invitation → founder onboarding is allowed', () => {
-  const none = { ok: false, status: 404, error: 'No pending invitation found for this email.' };
+  const none = { ok: true, claimed: false, pendingInvite: false, status: 200 };
   assert.equal(inviteInPlay(none), false);
   assert.equal(destAfterInviteClaim(none, '/onboarding'), '/onboarding');
+  assert.equal(routeAfterTeamClaim(none, '/onboarding'), '/onboarding');
   assert.equal(inviteInPlay(null), false);
 });
 
@@ -99,6 +105,9 @@ test('claim route marks skip as accepted and returns routing flags', () => {
   assert.match(source, /inviteAccepted/);
   assert.match(source, /needsMemberOnboarding/);
   assert.match(source, /claimed:\s*true/);
+  assert.match(source, /ok:\s*true,\s*claimed:\s*false,\s*pendingInvite:\s*false/);
+  assert.doesNotMatch(source, /No pending invitation found for this email/);
+  assert.doesNotMatch(source, /status:\s*404/);
 });
 
 test('password reset / invite callback claims before founder onboarding', () => {
@@ -112,15 +121,15 @@ test('password reset / invite callback claims before founder onboarding', () => 
   assert.match(setPassword, /inviteInPlay/);
 });
 
-test('founder onboarding claims on load and on finish only when an invite token is present', () => {
+test('founder onboarding claims on load and on finish; does not skip claim after save', () => {
   const onboarding = readFileSync(join(here, '../app/onboarding/page.tsx'), 'utf8');
-  assert.match(onboarding, /hasInviteToken/);
   assert.match(onboarding, /postTeamClaim/);
   assert.match(onboarding, /shouldSendToMemberOnboarding/);
   assert.match(onboarding, /inviteInPlay/);
   assert.match(onboarding, /saveOnboarding/);
   assert.match(onboarding, /destAfterInviteClaim/);
   assert.match(onboarding, /ensureOrganizationMembership/);
+  assert.doesNotMatch(onboarding, /hasInviteToken/);
   assert.doesNotMatch(onboarding, /organization_memberships'\)\.upsert|organization_memberships'\)\.insert/);
   assert.doesNotMatch(onboarding, /inviteInPlay\(claimJson\) \|\| claimJson\.needsMemberOnboarding/);
   assert.doesNotMatch(
@@ -128,29 +137,48 @@ test('founder onboarding claims on load and on finish only when an invite token 
     /Do not claim FSE invites onto a founder who just created this org/
   );
   const claimCalls = onboarding.match(/await postTeamClaim/g) || [];
-  const gates = onboarding.match(/hasInviteToken\(\{/g) || [];
-  assert.equal(claimCalls.length, gates.length);
-  assert.ok(claimCalls.length >= 3);
+  assert.equal(claimCalls.length, 3);
 });
 
-test('hasInviteToken ignores a plain company signup and matches invite links', () => {
-  assert.equal(hasInviteToken({ search: '', metadata: { organization_type: 'service_company' } }), false);
-  assert.equal(hasInviteToken({ search: '?type=signup' }), false);
-  assert.equal(hasInviteToken({ hash: '#access_token=abc&type=signup' }), false);
-  assert.equal(hasInviteToken({ search: '?type=invite&token=abc' }), true);
-  assert.equal(hasInviteToken({ search: '?claim=clinic-token' }), true);
-  assert.equal(hasInviteToken({ metadata: { claim_token: 'abc' } }), true);
-  assert.equal(hasInviteToken({ metadata: { invite_token: '' } }), false);
-});
-
-test('applyPendingSignup claims a team invite instead of creating a new shop', () => {
+test('applyPendingSignup claims a team invite by email instead of creating a new shop', () => {
   const pending = readFileSync(join(here, './pending-signup.ts'), 'utf8');
-  assert.match(pending, /pending\.extra\?\.claimToken/);
-  assert.match(pending, /postTeamClaim/);
+  assert.match(pending, /if \(session\?\.access_token\)/);
+  assert.match(pending, /postTeamClaim\(session\.access_token\)/);
+  assert.doesNotMatch(pending, /access_token && pending\.extra\?\.claimToken/);
   assert.match(pending, /inviteInPlay/);
   assert.match(pending, /destAfterInviteClaim/);
   assert.match(pending, /ensureOrganizationMembership/);
   assert.doesNotMatch(pending, /organization_memberships'\)\.upsert/);
+});
+
+test('invitee who signs up at /login with no token is still claimed onto member onboarding', () => {
+  const login = readFileSync(join(here, '../app/login/page.tsx'), 'utf8');
+  assert.match(login, /postTeamClaim\(sessionData\.session\.access_token\)/);
+  assert.match(login, /routeAfterTeamClaim\(claim, dest\)/);
+  assert.doesNotMatch(login, /hasInviteToken|requireInviteToken/);
+  assert.match(login, /await finishLogin\(nextPath && nextPath !== '\/' \? nextPath : '\/onboarding'\)/);
+  const claimed = {
+    ok: true,
+    claimed: true,
+    pendingInvite: true,
+    organization_id: 4,
+    role: 'fse',
+    needsMemberOnboarding: true,
+  };
+  assert.equal(inviteInPlay(claimed), true);
+  assert.equal(routeAfterTeamClaim(claimed, '/onboarding'), '/onboarding/member');
+});
+
+test('brand-new founder gets 200 claimed false and lands on /onboarding', () => {
+  const route = readFileSync(join(here, '../app/api/team/claim/route.ts'), 'utf8');
+  assert.match(route, /ok:\s*true,\s*claimed:\s*false,\s*pendingInvite:\s*false/);
+  assert.doesNotMatch(route, /status:\s*404/);
+  const founder = { ok: true, claimed: false, pendingInvite: false, status: 200 };
+  assert.equal(inviteInPlay(founder), false);
+  assert.equal(routeAfterTeamClaim(founder, '/onboarding'), '/onboarding');
+
+  const client = readFileSync(join(here, './supabase/client.ts'), 'utf8');
+  assert.match(client, /res\.claimed === false && !res\.pendingInvite/);
 });
 
 test('home and login claim a pending invite before sending someone to founder onboarding', () => {
@@ -159,8 +187,7 @@ test('home and login claim a pending invite before sending someone to founder on
   assert.match(home, /inviteInPlay/);
 
   const login = readFileSync(join(here, '../app/login/page.tsx'), 'utf8');
-  assert.match(login, /postTeamClaim|claimPendingInvitations/);
-  assert.match(login, /inviteInPlay/);
-  assert.match(login, /requireInviteToken: true/);
-  assert.match(login, /hasInviteToken/);
+  assert.match(login, /postTeamClaim/);
+  assert.match(login, /routeAfterTeamClaim/);
+  assert.doesNotMatch(login, /hasInviteToken|requireInviteToken/);
 });

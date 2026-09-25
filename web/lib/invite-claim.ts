@@ -22,37 +22,6 @@ export type InviteClaimResult = {
   status?: number;
 };
 
-/**
- * True when this browser session arrived with a team or clinic invite token.
- * A brand-new company signup has neither, so callers must not POST /api/team/claim.
- */
-export function hasInviteToken(input?: {
-  search?: string;
-  hash?: string;
-  metadata?: Record<string, unknown> | null;
-} | null): boolean {
-  const search = String(input?.search || '');
-  const hash = String(input?.hash || '');
-  let params: URLSearchParams;
-  let hashParams: URLSearchParams;
-  try {
-    params = new URLSearchParams(search.startsWith('?') ? search.slice(1) : search);
-    hashParams = new URLSearchParams(hash.startsWith('#') ? hash.slice(1) : hash);
-  } catch {
-    return false;
-  }
-  const type = (params.get('type') || hashParams.get('type') || '').toLowerCase();
-  if (type === 'invite') return true;
-  for (const key of ['claim', 'invite', 'invite_token', 'invitation', 'invitation_id', 'invite_id']) {
-    if ((params.get(key) || hashParams.get(key) || '').trim()) return true;
-  }
-  const meta = input?.metadata || {};
-  for (const key of ['claim_token', 'invite_token', 'invitation_id', 'invite_id']) {
-    if (String(meta[key] ?? '').trim()) return true;
-  }
-  return false;
-}
-
 /** True when this session should join an invited org rather than create a new one. */
 export function inviteInPlay(result: InviteClaimResult | null | undefined): boolean {
   if (!result) return false;
@@ -111,6 +80,21 @@ export function destAfterInviteClaim(
     return result.needsMemberOnboarding === false ? '/hub' : '/onboarding/member';
   }
   return fallback;
+}
+
+/**
+ * Where login/signup goes after an email-based team claim.
+ * No invite token is required. `{ ok:true, claimed:false, pendingInvite:false }`
+ * stays on the requested page (founder `/onboarding`). A claimed invite goes to
+ * member setup.
+ */
+export function routeAfterTeamClaim(
+  claim: InviteClaimResult | null | undefined,
+  requestedDest: string
+): string {
+  if (!inviteInPlay(claim)) return requestedDest;
+  const fallback = requestedDest.startsWith('/onboarding') ? '/onboarding/member' : requestedDest;
+  return destAfterInviteClaim(claim, fallback);
 }
 
 export async function postTeamClaim(

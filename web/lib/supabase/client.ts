@@ -211,12 +211,14 @@ export async function claimPendingInvitations(
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token && typeof fetch !== 'undefined') {
         const res = await postTeamClaim(session.access_token);
+        const noInvite = res.ok && res.claimed === false && !res.pendingInvite;
+        if (noInvite || res.status === 404) return res;
         if (res.ok) {
-          console.log('[TSP] Claimed invitation via API for', clean);
+          if (res.claimed || res.pendingInvite) {
+            console.log('[TSP] Claimed invitation via API for', clean);
+          }
           return res;
         }
-        // 404 = no invite for this email. Do not invent a client-side join.
-        if (res.status === 404) return res;
       }
     } catch (apiErr) {
       console.warn('claim API fallback to client', apiErr);

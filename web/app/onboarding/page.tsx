@@ -10,7 +10,7 @@ import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { applyPendingSignup, ensureOrganizationMembership, resolvePendingSignup } from '@/lib/pending-signup';
-import { destAfterInviteClaim, hasInviteToken, inviteInPlay, postTeamClaim, shouldSendToMemberOnboarding } from '@/lib/invite-claim';
+import { destAfterInviteClaim, inviteInPlay, postTeamClaim, shouldSendToMemberOnboarding } from '@/lib/invite-claim';
 import {
   applyComplimentarySignupFields,
   missingComplimentaryColumn,
@@ -107,14 +107,7 @@ export default function Onboarding() {
       // Claim first so they join the inviting org instead of creating a new one.
       try {
         const { data: { session } } = await supabase.auth.getSession();
-        if (
-          session?.access_token &&
-          hasInviteToken({
-            search: window.location.search,
-            hash: window.location.hash,
-            metadata: user.user_metadata,
-          })
-        ) {
+        if (session?.access_token) {
           const claimJson = await postTeamClaim(session.access_token);
           if (shouldSendToMemberOnboarding(claimJson)) {
             router.replace(destAfterInviteClaim(claimJson, '/onboarding/member'));
@@ -479,14 +472,7 @@ export default function Onboarding() {
     // Team invite in play: join that org and leave founder setup. Never create a new shop.
     try {
       const { data: { session } } = await supabase.auth.getSession();
-      if (
-        session?.access_token &&
-        hasInviteToken({
-          search: window.location.search,
-          hash: window.location.hash,
-          metadata: currentUser.user_metadata,
-        })
-      ) {
+      if (session?.access_token) {
         const claimJson = await postTeamClaim(session.access_token);
         if (inviteInPlay(claimJson)) {
           router.replace(destAfterInviteClaim(claimJson, '/onboarding/member'));
@@ -783,18 +769,10 @@ export default function Onboarding() {
       }
 
       await supabase.auth.updateUser({ data: { first_name: formData.firstName, last_name: formData.lastName } });
-      // If an invite token is still on this session, join that org now.
-      // A brand-new company signup has no token — do not POST /api/team/claim.
+      // If an invite is still open (forgot-password → this wizard), join that org now.
       try {
         const { data: { session: afterSession } } = await supabase.auth.getSession();
-        if (
-          afterSession?.access_token &&
-          hasInviteToken({
-            search: window.location.search,
-            hash: window.location.hash,
-            metadata: currentUser.user_metadata,
-          })
-        ) {
+        if (afterSession?.access_token) {
           await postTeamClaim(afterSession.access_token);
         }
       } catch (e) {
