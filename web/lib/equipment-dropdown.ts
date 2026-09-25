@@ -484,6 +484,18 @@ export function dedupeManufacturerNames(names: string[]): string[] {
   return collapseManufacturerNames(names);
 }
 
+/**
+ * Select value for a stored manufacturer spelling.
+ * Exact option wins. Otherwise the merged alias (Alma Lasers → Alma) so the
+ * dropdown shows that option as selected.
+ */
+export function mergedManufacturerOption(stored: string, options: string[]): string {
+  const raw = String(stored || '').trim();
+  if (!raw) return '';
+  if (options.some((name) => name === raw)) return raw;
+  return options.find((name) => spellingVariant(name, raw)) || raw;
+}
+
 function collapseManufacturerNames(names: string[]): string[] {
   const groups: string[][] = [];
   for (const name of names) {

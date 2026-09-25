@@ -304,11 +304,22 @@ export function humanizeDeviceCode(value: string): string {
   return parts.map(humanizeDeviceToken).join(' ');
 }
 
-/** Rewrite snake_case device codes inside an already-built guidance sentence. */
+const GENERAL_GUIDANCE_LEAD =
+  "I couldn't search this manual's text yet, so this is general guidance for the ";
+
+/**
+ * Humanize only the device-name span on a general-guidance first line.
+ * The rest of the reply (part numbers, fault codes, hyphenated words, URLs) stays as written.
+ */
 export function humanizeGeneralGuidanceDisplay(content: string): string {
-  return String(content || '').replace(/[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)+/g, (code) =>
-    humanizeDeviceCode(code)
-  );
+  const text = String(content || '');
+  const nl = text.search(/\r?\n/);
+  const first = nl === -1 ? text : text.slice(0, nl);
+  const rest = nl === -1 ? '' : text.slice(nl);
+  if (!first.startsWith(GENERAL_GUIDANCE_LEAD) || !first.endsWith(':')) return text;
+  const device = first.slice(GENERAL_GUIDANCE_LEAD.length, -1).trim();
+  if (!device) return text;
+  return `${GENERAL_GUIDANCE_LEAD}${humanizeDeviceCode(device)}:${rest}`;
 }
 
 export type AssistantManualPicker = {

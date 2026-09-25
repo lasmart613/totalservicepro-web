@@ -203,6 +203,7 @@ export function formatAssistantHtml(content: string, extra?: ManualCitation[]): 
   const fromMarkers = parseCitationMarkers(content);
   const citations = attachProsePages(mergeCitations(extra, fromMarkers), stripCitationMarkers(content));
   const scopedId = citations[0]?.manualId;
+  // Device name on the general-guidance first line only. Never rewrite the reply body.
   let body = humanizeGeneralGuidanceDisplay(stripCitationMarkers(content));
   body = escapeHtml(body);
   body = body.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');

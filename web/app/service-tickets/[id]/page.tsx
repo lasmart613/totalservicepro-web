@@ -16,6 +16,7 @@ import {
   catalogChoiceLabel,
   dedupeManufacturerNames,
   dedupeModelChoices,
+  mergedManufacturerOption,
   normalizeManufacturerRow,
   normalizeModelRow,
 } from '@/lib/equipment-dropdown';
@@ -287,6 +288,14 @@ export default function ServiceTicketDetail() {
     );
   }
 
+  const makeOptions = dedupeManufacturerNames(
+    dbMfrs.map((m: any) => String(m.name || '')).filter(Boolean)
+  );
+  const storedMake = String(formData.equipment_make || '');
+  const makeValue = mergedManufacturerOption(storedMake, makeOptions);
+  const makeChoices =
+    makeValue && !makeOptions.includes(makeValue) ? [...makeOptions, makeValue] : makeOptions;
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
@@ -405,9 +414,9 @@ export default function ServiceTicketDetail() {
             <div className="space-y-4">
               <Field label="Make" value={isEditing ? (
                 dbMfrs.length > 0 ? (
-                  <select className="input" value={formData.equipment_make || ''} onChange={(e) => handleInputChange('equipment_make', e.target.value)}>
+                  <select className="input" value={makeValue} onChange={(e) => handleInputChange('equipment_make', e.target.value)}>
                     <option value="">-- Select --</option>
-                    {dedupeManufacturerNames(dbMfrs.map((m: any) => String(m.name || '')).filter(Boolean)).map((name) => (
+                    {makeChoices.map((name) => (
                       <option key={name} value={name}>{catalogChoiceLabel(name)}</option>
                     ))}
                   </select>

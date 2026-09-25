@@ -6,6 +6,8 @@ import { fileURLToPath } from 'node:url';
 import {
   fetchEquipmentCatalog,
   catalogChoiceLabel,
+  dedupeManufacturerNames,
+  mergedManufacturerOption,
   listCatalogManufacturerChoices,
   listCatalogManufacturers,
   listCatalogModelChoices,
@@ -372,6 +374,31 @@ test('HOYA Con-Bio aliases collapse and compact model codes humanize without cha
   const soprano = alma.filter((choice) => choice.value.trim().toLowerCase() === 'soprano titanium');
   assert.equal(soprano.length, 1);
   assert.equal(soprano[0].value, 'Soprano Titanium');
+});
+
+test('stored manufacturer alias selects the merged dropdown option', () => {
+  const options = dedupeManufacturerNames([
+    'Alma',
+    'Alma Lasers',
+    'Quanta',
+    'Quanta System',
+    'AMS',
+    'American Medical Systems',
+    'Con-Bio',
+    'HOYA ConBio',
+  ]);
+  assert.equal(mergedManufacturerOption('Alma Lasers', options), 'Alma');
+  assert.equal(mergedManufacturerOption('alma', options), 'Alma');
+  assert.equal(mergedManufacturerOption('Alma', options), 'Alma');
+  assert.equal(mergedManufacturerOption('Quanta', options), 'Quanta System');
+  assert.equal(mergedManufacturerOption('AMS', options), 'American Medical Systems');
+  assert.equal(mergedManufacturerOption('Con-Bio', options), 'HOYA ConBio');
+  assert.equal(mergedManufacturerOption('Acme Lasers', options), 'Acme Lasers');
+  assert.equal(mergedManufacturerOption('Alma Lasers', ['Alma Lasers']), 'Alma Lasers');
+
+  const edit = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
+  assert.match(edit, /mergedManufacturerOption\(storedMake, makeOptions\)/);
+  assert.match(edit, /value=\{makeValue\}/);
 });
 
 test('Android estimate generator loads manufacturers + laser_models', () => {
