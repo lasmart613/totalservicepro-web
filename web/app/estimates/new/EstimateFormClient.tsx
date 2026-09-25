@@ -22,7 +22,7 @@ import {
   writeWithColumnRetry,
   type LineItem,
 } from '@/lib/billing/save-helpers';
-import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
+import { listManufacturerChoices, listModelChoices } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import {
   DEFAULT_EQUIPMENT_TYPE,
@@ -69,7 +69,7 @@ export default function EstimateFormClient() {
   const catalog = useEquipmentCatalog(supabase);
   const [equipmentType, setEquipmentType] = useState<EquipmentType>(DEFAULT_EQUIPMENT_TYPE);
   const manufacturers = useMemo(
-    () => listManufacturers(catalog),
+    () => listManufacturerChoices(catalog),
     [catalog.manufacturers, catalog.models]
   );
   const [manufacturer, setManufacturer] = useState('');
@@ -80,7 +80,7 @@ export default function EstimateFormClient() {
   const models = useMemo(
     () =>
       manufacturer
-        ? listModelsForManufacturer(manufacturer, { ...catalog, equipmentType })
+        ? listModelChoices(manufacturer, { ...catalog, equipmentType })
         : [],
     [manufacturer, catalog.manufacturers, catalog.models, equipmentType]
   );
@@ -913,8 +913,8 @@ export default function EstimateFormClient() {
               >
                 <option value="">— Select —</option>
                 {manufacturers.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
+                  <option key={m.value} value={m.value}>
+                    {m.label}
                   </option>
                 ))}
               </select>
@@ -929,8 +929,8 @@ export default function EstimateFormClient() {
               >
                 <option value="">— Select —</option>
                 {models.map((m) => (
-                  <option key={m} value={m}>
-                    {m}
+                  <option key={m.value} value={m.value}>
+                    {m.label}
                   </option>
                 ))}
                 <option value="__other__">Other / custom…</option>

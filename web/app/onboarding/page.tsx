@@ -10,7 +10,7 @@ import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
-import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
+import { destAfterInviteClaim, inviteInPlay, postTeamClaim, shouldSendToMemberOnboarding } from '@/lib/invite-claim';
 import {
   applyComplimentarySignupFields,
   missingComplimentaryColumn,
@@ -109,7 +109,7 @@ export default function Onboarding() {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) {
           const claimJson = await postTeamClaim(session.access_token);
-          if (inviteInPlay(claimJson) || claimJson.needsMemberOnboarding) {
+          if (shouldSendToMemberOnboarding(claimJson)) {
             router.replace(destAfterInviteClaim(claimJson, '/onboarding/member'));
             return;
           }

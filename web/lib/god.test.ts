@@ -72,3 +72,9 @@ test('God chrome is API-gated and the allowlist stays server-side', () => {
   assert.match(home, /\/admin\/god\/crm/);
   assert.match(home, /GodAnalyticsBoard/);
 });
+
+test('god me returns a quiet non-admin response and does not include admin data', () => {
+  const route = readFileSync(join(here, '../app/api/god/me/route.ts'), 'utf8');
+  assert.match(route, /status === 404\) \{\s*return NextResponse\.json\(\{ ok: true, god: false \}\)/);
+  assert.match(route, /god: true, email: gate\.caller\.email/);
+});

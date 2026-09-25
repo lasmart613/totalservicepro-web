@@ -167,4 +167,6 @@ test('schedule page uses role filter, FSE colors, and an All control', () => {
   assert.match(src, /buildAssigneeColorMap/);
   assert.match(src, /colorFor/);
   assert.doesNotMatch(src, /organization_id\.eq\.\$\{oId\},assigned_to\.eq\.\$\{user\.id\}/);
+  assert.match(src, /assigned_to/);
+  assert.doesNotMatch(src, /^\s*assigned_fse,/m);
 });

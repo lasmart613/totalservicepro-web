@@ -18,6 +18,7 @@ import {
   pickPrimaryLocation,
   removeLocationFromList,
   serviceCallFromLocations,
+  ticketContactForLocation,
   ticketPhoneForLocation,
   validateLocationDraft,
   type CustomerLocation,
@@ -102,31 +103,53 @@ test('set-primary and remove promote another location without dropping the rest'
   assert.equal(removed[0].is_primary, true);
 });
 
-test('ticket location defaults to primary and can switch address without wiping a directory phone', () => {
+test('switching locations overwrites phone and contact, and clears them when the location has none', () => {
   const current = {
     customer_address: '100 Harbor Ave',
     customer_city: 'Evanston',
     customer_state: 'IL',
     customer_zip: '60201',
     customer_phone: '847-555-0142',
+    customer_contact: 'Directory desk',
   };
-  const primaryFields = applyLocationToTicketFields(current, mainOffice, { officePhone: '847-555-0100' });
-  assert.equal(primaryFields.customer_address, '100 Harbor Ave');
-  assert.equal(primaryFields.customer_phone, '847-555-0142');
-  assert.equal(primaryFields.customer_location_id, 1);
+  const branch = applyLocationToTicketFields(current, beverly, { officePhone: '847-555-0100' });
+  assert.equal(branch.customer_address, '400 Rodeo Dr');
+  assert.equal(branch.customer_city, 'Beverly Hills');
+  assert.equal(branch.customer_state, 'CA');
+  assert.equal(branch.customer_zip, '90210');
+  assert.equal(branch.customer_phone, '310-555-0199');
+  assert.equal(branch.customer_contact, 'Avery Cole');
+  assert.equal(branch.customer_location_id, 2);
 
-  const second = applyLocationToTicketFields(current, beverly, { officePhone: '847-555-0100' });
-  assert.equal(second.customer_address, '400 Rodeo Dr');
-  assert.equal(second.customer_city, 'Beverly Hills');
-  assert.equal(second.customer_state, 'CA');
-  assert.equal(second.customer_zip, '90210');
-  assert.equal(second.customer_phone, '310-555-0199');
-  assert.equal(second.customer_location_id, 2);
+  const backToMain = applyLocationToTicketFields(
+    {
+      customer_address: branch.customer_address,
+      customer_city: branch.customer_city,
+      customer_state: branch.customer_state,
+      customer_zip: branch.customer_zip,
+      customer_phone: branch.customer_phone,
+      customer_contact: branch.customer_contact,
+    },
+    mainOffice,
+    { officePhone: '847-555-0100' }
+  );
+  assert.equal(backToMain.customer_address, '100 Harbor Ave');
+  assert.equal(backToMain.customer_phone, '847-555-0100');
+  assert.equal(backToMain.customer_contact, 'Front desk');
+  assert.equal(backToMain.customer_location_id, 1);
+
+  const blank = applyLocationToTicketFields(backToMain, {
+    ...beverly,
+    phone: '',
+    contact_name: null,
+  });
+  assert.equal(blank.customer_phone, '');
+  assert.equal(blank.customer_contact, '');
   assert.match(formatLocationOption(beverly), /Beverly Hills - 400 Rodeo Dr/);
   assert.match(formatLocationOption(mainOffice), /\(Primary\)/);
 });
 
-test('ticket phone keeps the directory number when the primary location only repeats the office line', () => {
+test('ticket phone and contact come from the selected location even when it repeats the office line', () => {
   assert.equal(
     ticketPhoneForLocation({
       locationPhone: '847-555-0100',
@@ -134,17 +157,11 @@ test('ticket phone keeps the directory number when the primary location only rep
       officePhone: '847-555-0100',
       currentPhone: '847-555-0142',
     }),
-    '847-555-0142'
+    '847-555-0100'
   );
-  assert.equal(
-    ticketPhoneForLocation({
-      locationPhone: '312-555-0177',
-      isPrimary: true,
-      officePhone: '847-555-0100',
-      currentPhone: '847-555-0142',
-    }),
-    '312-555-0177'
-  );
+  assert.equal(ticketPhoneForLocation({ locationPhone: '', currentPhone: '310-555-0199' }), '');
+  assert.equal(ticketContactForLocation({ locationContact: 'Front desk' }), 'Front desk');
+  assert.equal(ticketContactForLocation({ locationContact: '  ' }), '');
   assert.equal(persistedLocationId('local-primary'), null);
   assert.equal(persistedLocationId(4), 4);
 });
