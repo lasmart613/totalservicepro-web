@@ -8,6 +8,8 @@ import {
   MANUAL_FIXTURE_PAGE_COUNT,
   MANUAL_FIXTURE_PATH,
   manualViewHref,
+  matchingTextItemIndexes,
+  matchingTextItemSpans,
   pageTextMatches,
   pdfInlineHeaders,
   PDFJS_SCRIPT_SRC,
@@ -36,6 +38,34 @@ test('in-viewer find is a case-insensitive substring match', () => {
   assert.equal(pageTextMatches('Optical train', 'collimator'), false);
   assert.equal(pageTextMatches('Align the collimator', '  COLLIMATOR '), true);
   assert.equal(pageTextMatches('page text', '   '), false);
+  // Whitespace-stripped matching is only for digit queries (subscript "2").
+  assert.equal(pageTextMatches('service manual', 'icem'), false);
+});
+
+test('in-viewer find matches a subscript digit that pdf.js split into its own item', () => {
+  // Viewer joins text items with spaces: ["CO", "2", "RE"] → "CO 2 RE".
+  assert.equal(pageTextMatches('CO 2 RE', 'CO2RE'), true);
+  assert.equal(pageTextMatches('CO 2 RE laser', 'co2re'), true);
+  assert.equal(pageTextMatches('The CO 2 laser calibration', 'CO2 laser'), true);
+  assert.equal(pageTextMatches('CO 2RE handpiece', 'CO2RE'), true);
+  assert.equal(pageTextMatches('optical train', 'CO2RE'), false);
+  const co2re = [{ str: 'CO' }, { str: '2' }, { str: 'RE' }];
+  assert.deepEqual(matchingTextItemIndexes(co2re, 'CO2RE'), [0, 1, 2]);
+  const co2laser = [{ str: 'CO' }, { str: '2' }, { str: ' laser' }];
+  assert.deepEqual(matchingTextItemIndexes(co2laser, 'CO2 laser'), [0, 1, 2]);
+  assert.deepEqual(
+    matchingTextItemSpans(
+      [{ str: 'Candela CO' }, { str: '2' }, { str: 'RE service manual' }],
+      'CO2RE'
+    ),
+    [
+      { index: 0, from: 8, to: 10 },
+      { index: 1, from: 0, to: 1 },
+      { index: 2, from: 0, to: 2 },
+    ]
+  );
+  assert.deepEqual(matchingTextItemIndexes([{ str: 'Inspect the reservoir cap' }], 'Reservoir'), [0]);
+  assert.deepEqual(matchingTextItemIndexes([{ str: 'Optical train' }], 'collimator'), []);
 });
 
 test('bookshelf opens the in-app viewer and does not window.open the PDF', () => {
@@ -139,6 +169,19 @@ test('repo fixture is a searchable three-page PDF (not a live org file)', () => 
   assert.match(text, /Page 1 of 3/);
   assert.match(text, /Page 2 of 3/);
   assert.match(text, /Page 3 of 3/);
+});
+
+test('subscript fixture splits the digit so Find can be checked locally', () => {
+  const fixtureRel = join(here, '..', 'public', 'fixtures', 'co2re-subscript.pdf');
+  const text = readFileSync(fixtureRel).toString('latin1');
+  assert.match(text, /^%PDF-1\./);
+  assert.match(text, /\(CO\) Tj/);
+  assert.match(text, /\(2\) Tj/);
+  assert.match(text, /\(RE service manual\) Tj/);
+  assert.match(text, /\( laser calibration/);
+  const demo = readFileSync(join(here, '../app/pdf-viewer-demo/page.tsx'), 'utf8');
+  assert.match(demo, /\/fixtures\//);
+  assert.match(demo, /co2re-subscript/);
 });
 
 test('fixture demo page uses the in-repo PDF and the same viewer', () => {

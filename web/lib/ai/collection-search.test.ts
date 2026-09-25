@@ -11,6 +11,7 @@ import {
   COLLECTION_NAME_FILTER_MAX,
   collectionNameFilters,
   collectionSearchBody,
+  compactDocKey,
   displayAttachedName,
   docHasForeignModel,
   docMatchesManual,
@@ -303,3 +304,86 @@ test('name filters stay few and compact-deduped so chat does not issue N serial 
 function compactIsBrand(value: string): boolean {
   return ['cutera', 'candela', 'cynosure'].includes(value.toLowerCase().replace(/[^a-z0-9]+/g, ''));
 }
+
+test('short CO2RE.pdf falls back to model tokens and does not exact-only miss a longer collection name', () => {
+  const expected = ['CO2RE.pdf'];
+  const collectionName = 'Candela_CO2RE_Service_Manual.pdf';
+  assert.equal(namesAlign('CO2RE.pdf', 'CO2RE.pdf'), true);
+  assert.equal(namesAlign('CO2RE.pdf', collectionName), false);
+  assert.equal(compactDocKey('CO2RE.pdf'), 'co2repdf');
+  assert.ok(compactDocKey('CO2RE.pdf').length < 12);
+
+  const nameById = {
+    file_co2: collectionName,
+    file_gm: 'GentleMax_Pro_Service_Manual.pdf',
+    file_cg: COOLGLIDE_15,
+  };
+  const ids = pickFileIdsForManual(nameById, expected, ['candela', 'co2re'], []);
+  assert.equal(ids.has('file_co2'), true);
+  assert.equal(ids.has('file_gm'), false);
+  assert.equal(ids.has('file_cg'), false);
+
+  const hits = [
+    {
+      text: 'CO2RE laser calibration procedure for the handpiece alignment check and power meter.',
+      source: collectionName,
+      fileId: 'file_co2',
+    },
+    {
+      text: 'GentleMax Pro wavelength table that is long enough to count as a retrieved passage.',
+      source: 'GentleMax_Pro_Service_Manual.pdf',
+      fileId: 'file_gm',
+    },
+  ];
+  const filtered = filterHitsForManual(hits, {
+    tokens: ['candela', 'co2re'],
+    chapterKeys: [],
+    expectedFilenames: expected,
+    requireMatch: true,
+  });
+  assert.equal(filtered.parts.length, 1);
+  assert.equal(filtered.parts[0].fileId, 'file_co2');
+});
+
+test('Xeo filename hits still exclude CoolGlide when token fallback is available', () => {
+  const expected = expectedFilenamesForPaths(XEO_PATHS);
+  const nameById = {
+    file_xeo_sm: 'Xeo_Service_Manual_RevB.pdf',
+    file_cg_15: COOLGLIDE_15,
+  };
+  const keys = chapterFileKeys(XEO_CHAPTERS);
+  const ids = pickFileIdsForManual(nameById, expected, ['cutera', 'xeo'], keys);
+  assert.equal(ids.has('file_xeo_sm'), true);
+  assert.equal(ids.has('file_cg_15'), false);
+
+  const onlyCoolGlide = pickFileIdsForManual(
+    { file_cg_15: COOLGLIDE_15 },
+    expected,
+    ['cutera', 'xeo'],
+    keys
+  );
+  assert.equal(onlyCoolGlide.has('file_cg_15'), false);
+
+  const filtered = filterHitsForManual(
+    [
+      {
+        text: 'Fault 322 — Flow Switch: Check the cooling-system flow switch and harness.',
+        source: 'Xeo_Service_Manual_RevB.pdf',
+        fileId: 'file_xeo_sm',
+      },
+      {
+        text: 'Fault 322 CoolGlide Ch.12 error-code table that is long enough to keep.',
+        source: COOLGLIDE_15,
+        fileId: 'file_cg_15',
+      },
+    ],
+    {
+      tokens: ['cutera', 'xeo'],
+      chapterKeys: keys,
+      expectedFilenames: expected,
+      requireMatch: true,
+    }
+  );
+  assert.equal(filtered.parts.length, 1);
+  assert.equal(filtered.parts[0].fileId, 'file_xeo_sm');
+});

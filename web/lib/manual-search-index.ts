@@ -147,6 +147,36 @@ export async function extractManualBodyText(
   return { text: chunks.join('\n'), files };
 }
 
+/**
+ * Keep a richer existing index row. The in-app FlateDecode extractor can
+ * return empty or much shorter text than a prior good extraction and must
+ * not wipe it. A comparable or longer extraction still replaces the row.
+ */
+export function shouldKeepExistingSearchText(
+  existing: string | null | undefined,
+  incoming: string | null | undefined
+): boolean {
+  const prev = String(existing || '').trim();
+  const next = String(incoming || '').trim();
+  if (!prev) return false;
+  if (!next) return true;
+  return prev.length >= 500 && next.length * 2 < prev.length;
+}
+
+async function readExistingSearchText(db: TableClient, manualId: number): Promise<string> {
+  try {
+    const { data, error } = await db
+      .from('manual_search_index')
+      .select('search_text')
+      .eq('manual_id', manualId)
+      .maybeSingle();
+    if (error || !data?.search_text) return '';
+    return String(data.search_text);
+  } catch {
+    return '';
+  }
+}
+
 export async function upsertManualSearchIndex(
   db: TableClient,
   manualId: string | number,
@@ -172,6 +202,16 @@ export async function indexManualSearchText(
   const manualId = catalogId == null ? '' : String(catalogId);
   if (catalogId == null) return { manualId: '', ok: false, chars: 0, files: 0, skipped: 'missing_id' };
   const extracted = await extractManualBodyText(client.storage, manual);
+  const existingText = await readExistingSearchText(client, catalogId);
+  if (shouldKeepExistingSearchText(existingText, extracted.text || '')) {
+    return {
+      manualId,
+      ok: true,
+      chars: existingText.trim().length,
+      files: extracted.files,
+      skipped: 'kept_existing_index',
+    };
+  }
   const saved = await upsertManualSearchIndex(client, catalogId, extracted.text || '');
   if (!extracted.text) {
     return { manualId, ok: false, chars: 0, files: extracted.files, skipped: extracted.skipped || saved.error };

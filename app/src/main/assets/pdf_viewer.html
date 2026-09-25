@@ -1100,7 +1100,12 @@
     function pageTextMatches(haystack, query) {
         const q = String(query || '').trim().toLowerCase();
         if (!q) return false;
-        return String(haystack || '').toLowerCase().includes(q);
+        const hay = String(haystack || '').toLowerCase();
+        if (hay.includes(q)) return true;
+        // Subscript digits are their own pdf.js items ("CO 2 RE"). Same rule as web/lib/manuals.ts.
+        if (!/\d/.test(q)) return false;
+        const qCompact = q.replace(/\s+/g, '');
+        return !!qCompact && hay.replace(/\s+/g, '').includes(qCompact);
     }
 
     async function ensurePageTextCache() {

@@ -133,6 +133,12 @@ export default function GodManualsCatalogPage() {
         attached += batchCollections.filter((c) => c.ok).length;
         if (json.afterId != null) afterId = json.afterId;
         if (!json.processed || !json.remaining) break;
+        if (target && (json.results || []).some((r) => r.skipped === 'kept_existing_index')) {
+          const detail = `Catalog id ${target}: kept the existing manual_search_index text. The new extraction was empty or much shorter, so it was not written over the current row.`;
+          setReindexNote(detail);
+          toast.success(detail);
+          return;
+        }
       }
       const collectionNote = attachCollection
         ? attachAll

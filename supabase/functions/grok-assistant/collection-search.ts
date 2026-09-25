@@ -332,11 +332,18 @@ export function pickFileIdsForManual(
 ): Set<string> {
   const ids = new Set<string>()
   const expected = expectedFilenames.filter(Boolean)
-  for (const [id, name] of Object.entries(nameById)) {
-    if (expected.length) {
+  const entries = Object.entries(nameById)
+  if (expected.length) {
+    for (const [id, name] of entries) {
       if (expected.some((e) => namesAlign(e, name))) ids.add(id)
-      continue
     }
+    // Short stems such as CO2RE.pdf compact to under NAME_ALIGN_MIN, so they
+    // only exact-match. When nothing aligned, use model/manufacturer tokens.
+    // Skip that fallback once a filename hit exists — Xeo's Attached names
+    // must not also pull CoolGlide in via a loose token.
+    if (ids.size) return ids
+  }
+  for (const [id, name] of entries) {
     if (docMatchesManual(name, tokens, chapterKeys)) ids.add(id)
   }
   return ids
@@ -364,9 +371,15 @@ export function filterHitsForManual(
   }
   const named = expected.length
     ? hits.filter((p) => expected.some((e) => namesAlign(e, p.source)))
-    : hits.filter((p) => docMatchesManual(p.source, opts.tokens, opts.chapterKeys))
+    : []
   if (named.length) {
     return { parts: named.slice(0, 12), filteredOut: hits.length - named.length }
+  }
+  // No filename hit (short CO2RE.pdf vs a longer collection name): model tokens.
+  // Foreign-model markers still reject CoolGlide when Xeo is selected.
+  const tokenMatched = hits.filter((p) => docMatchesManual(p.source, opts.tokens, opts.chapterKeys))
+  if (tokenMatched.length) {
+    return { parts: tokenMatched.slice(0, 12), filteredOut: hits.length - tokenMatched.length }
   }
   return { parts: [], filteredOut: hits.length }
 }

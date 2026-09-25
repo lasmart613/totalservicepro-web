@@ -1,0 +1,52 @@
+%PDF-1.4
+1 0 obj
+<< /Type /Catalog /Pages 2 0 R >>
+endobj
+2 0 obj
+<< /Type /Pages /Kids [3 0 R] /Count 1 >>
+endobj
+3 0 obj
+<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>
+endobj
+4 0 obj
+<< /Length 398 >>
+stream
+BT
+/F1 22 Tf
+1 0 0 1 72 700 Tm
+(Candela ) Tj
+1 0 0 1 160.04 700 Tm
+(CO) Tj
+1 0 0 1 193.04 693.00 Tm
+(2) Tj
+1 0 0 1 205.28 700 Tm
+(RE service manual) Tj
+1 0 0 1 72 640 Tm
+(CO) Tj
+1 0 0 1 105.00 633.00 Tm
+(2) Tj
+1 0 0 1 117.23 640 Tm
+( laser calibration procedure for the handpiece.) Tj
+1 0 0 1 72 580 Tm
+(Inspect the reservoir cap and align the collimator.) Tj
+1 0 0 1 72 520 Tm
+(Page 1 of 1) Tj
+ET
+endstream
+endobj
+5 0 obj
+<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>
+endobj
+xref
+0 6
+0000000000 65535 f 
+0000000009 00000 n 
+0000000058 00000 n 
+0000000115 00000 n 
+0000000241 00000 n 
+0000000689 00000 n 
+trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+759
+%%EOF

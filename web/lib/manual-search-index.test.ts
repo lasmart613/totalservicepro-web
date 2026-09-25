@@ -8,7 +8,9 @@ import {
   chapterPathsFromMetadata,
   escapeIlike,
   folderPrefixForManual,
+  indexManualSearchText,
   pdfPathsForManual,
+  shouldKeepExistingSearchText,
 } from './manual-search-index.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -63,6 +65,50 @@ test('asManualCatalogId accepts bigint catalog ids and rejects uuid', () => {
   assert.equal(asManualCatalogId(null), null);
   assert.equal(asManualCatalogId('3fa85f64-5717-4562-b3fc-2c963f66afa6'), null);
   assert.equal(asManualCatalogId('not-a-number'), null);
+});
+
+test('reindex keeps a richer manual_search_index row instead of writing a worse extraction', async () => {
+  assert.equal(shouldKeepExistingSearchText('short', ''), true);
+  assert.equal(shouldKeepExistingSearchText('x'.repeat(2000), ''), true);
+  assert.equal(shouldKeepExistingSearchText('x'.repeat(2000), 'y'.repeat(400)), true);
+  assert.equal(shouldKeepExistingSearchText('x'.repeat(2000), 'y'.repeat(1200)), false);
+  assert.equal(shouldKeepExistingSearchText('', 'fresh text'), false);
+
+  let upserts = 0;
+  const existing = 'CO2RE calibration '.repeat(80);
+  const client = {
+    storage: {
+      from() {
+        return {
+          download: async () => ({ data: null, error: { message: 'missing' } }),
+          list: async () => ({ data: [], error: null }),
+        };
+      },
+    },
+    from() {
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        maybeSingle: async () => ({ data: { search_text: existing }, error: null }),
+        upsert() {
+          upserts += 1;
+          return { error: null };
+        },
+      };
+    },
+  };
+  const result = await indexManualSearchText(client, {
+    id: 17,
+    storage_path: 'shared/candela/CO2RE.pdf',
+  });
+  assert.equal(result.ok, true);
+  assert.equal(result.skipped, 'kept_existing_index');
+  assert.equal(result.chars, existing.trim().length);
+  assert.equal(upserts, 0);
 });
 
 test('search API is catalog-wide and never returns PDF bodies or signed URLs', () => {

@@ -18,8 +18,13 @@ import {
   asManualId,
   excerptManualSearchText,
   folderPrefixForAiAttach,
+  manualCorpusFallbackMessage,
+  pdfPageCountFromBytes,
   pdfPathsForAiAttach,
   resolveManualFromCatalog,
+  WHOLE_PDF_ATTACH_MAX_BYTES,
+  wholePdfAttachAllowed,
+  type PdfAttachStat,
 } from './manual-scope.ts'
 import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
 import { extractFaultCodes } from './fault-codes.ts'
@@ -363,11 +368,18 @@ export function pickFileIdsForManual(
 ): Set<string> {
   const ids = new Set<string>()
   const expected = expectedFilenames.filter(Boolean)
-  for (const [id, name] of Object.entries(nameById)) {
-    if (expected.length) {
+  const entries = Object.entries(nameById)
+  if (expected.length) {
+    for (const [id, name] of entries) {
       if (expected.some((e) => namesAlign(e, name))) ids.add(id)
-      continue
     }
+    // Short stems such as CO2RE.pdf compact to under NAME_ALIGN_MIN, so they
+    // only exact-match. When nothing aligned, use model/manufacturer tokens.
+    // Skip that fallback once a filename hit exists — Xeo's Attached names
+    // must not also pull CoolGlide in via a loose token.
+    if (ids.size) return ids
+  }
+  for (const [id, name] of entries) {
     if (docMatchesManual(name, tokens, chapterKeys)) ids.add(id)
   }
   return ids
@@ -395,9 +407,15 @@ export function filterHitsForManual(
   }
   const named = expected.length
     ? hits.filter((p) => expected.some((e) => namesAlign(e, p.source)))
-    : hits.filter((p) => docMatchesManual(p.source, opts.tokens, opts.chapterKeys))
+    : []
   if (named.length) {
     return { parts: named.slice(0, 12), filteredOut: hits.length - named.length }
+  }
+  // No filename hit (short CO2RE.pdf vs a longer collection name): model tokens.
+  // Foreign-model markers still reject CoolGlide when Xeo is selected.
+  const tokenMatched = hits.filter((p) => docMatchesManual(p.source, opts.tokens, opts.chapterKeys))
+  if (tokenMatched.length) {
+    return { parts: tokenMatched.slice(0, 12), filteredOut: hits.length - tokenMatched.length }
   }
   return { parts: [], filteredOut: hits.length }
 }
@@ -884,6 +902,70 @@ function pickRelevantChapters(chapters: any[], userText: string, schematic: bool
     push(row.c)
   }
   return picked.slice(0, schematic ? 4 : 3)
+}
+
+function objectByteSize(row: { metadata?: { size?: unknown; contentLength?: unknown }; size?: unknown } | null): number | null {
+  const meta = row?.metadata || {}
+  const n = Number(meta.size ?? meta.contentLength ?? row?.size)
+  return Number.isFinite(n) && n > 0 ? n : null
+}
+
+async function readStorageRange(
+  path: string,
+  range: string
+): Promise<{ bytes: Uint8Array; total: number | null } | null> {
+  const supabaseUrl = Deno.env.get('SUPABASE_URL') || ''
+  const key = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') || ''
+  if (!supabaseUrl || !key) return null
+  const encoded = path.split('/').map(encodeURIComponent).join('/')
+  try {
+    const res = await fetch(`${supabaseUrl}/storage/v1/object/manuals/${encoded}`, {
+      headers: { Authorization: `Bearer ${key}`, apikey: key, Range: range },
+    })
+    if (!res.ok && res.status !== 206) return null
+    const totalHeader = res.headers.get('content-range') || ''
+    const total = Number(totalHeader.split('/')[1])
+    return {
+      bytes: new Uint8Array(await res.arrayBuffer()),
+      total: Number.isFinite(total) && total > 0 ? total : null,
+    }
+  } catch (e) {
+    console.warn('pdf range read failed', path, e)
+    return null
+  }
+}
+
+/** Size from Storage metadata, page count from a small head/tail window. */
+async function statManualPdf(db: any, path: string): Promise<PdfAttachStat> {
+  const clean = String(path || '')
+    .replace(/\\/g, '/')
+    .replace(/^\/+/, '')
+    .replace(/^manuals\//i, '')
+  const slash = clean.lastIndexOf('/')
+  const dir = slash >= 0 ? clean.slice(0, slash) : ''
+  const name = slash >= 0 ? clean.slice(slash + 1) : clean
+  let bytes: number | null = null
+  try {
+    const { data } = await db.storage.from('manuals').list(dir, { limit: 100, search: name })
+    const row = (data || []).find((obj: { name?: string }) => obj.name === name)
+    bytes = objectByteSize(row)
+  } catch (e) {
+    console.warn('pdf stat failed', clean, e)
+  }
+  if (bytes != null && bytes > WHOLE_PDF_ATTACH_MAX_BYTES) return { bytes, pages: null }
+  let pages: number | null = null
+  const head = await readStorageRange(clean, 'bytes=0-262143')
+  if (head) {
+    if (bytes == null && head.total != null) bytes = head.total
+    pages = pdfPageCountFromBytes(head.bytes)
+    if (!pages && head.total != null && head.total > head.bytes.length) {
+      const start = Math.max(0, head.total - 262144)
+      const tail = await readStorageRange(clean, `bytes=${start}-${head.total - 1}`)
+      if (tail) pages = pdfPageCountFromBytes(tail.bytes)
+    }
+  }
+  if (bytes != null && bytes > WHOLE_PDF_ATTACH_MAX_BYTES) return { bytes, pages }
+  return { bytes, pages }
 }
 
 async function signStoragePdf(path: string): Promise<string | null> {
@@ -1555,6 +1637,7 @@ serve(async (req) => {
         (schematicQ || !hasManualPassages) &&
         Date.now() - chatStarted < 18_000
       let attachedNames: string[] = []
+      let skippedLargePdf = false
       const ensureDocCite = () => {
         const scopedId = asManualId(manualMeta?.id)
         if (scopedId == null || hasFaultDBHit) return
@@ -1640,7 +1723,10 @@ serve(async (req) => {
             } else {
               console.warn('responses+collection files failed', rr?.status ?? 'timeout', rr ? await rr.text() : '')
             }
-          } else if (manualMeta && attachPaths.length && !hasCollectionPdfs) {
+          } else if (manualMeta && attachPaths.length && !hasCollectionPdfs && !hasManualPassages) {
+            // Indexed excerpts already prefer manual_search_index (hasManualPassages).
+            // Sending a multi-megabyte signed URL (Candela CO2RE, 7.7 MB / 161 pages)
+            // blows the 22s responses budget ("responses+files failed timeout").
             const chapterList = attachPaths.map((p) => ({ storage_path: p, title: manualMeta.title }))
             const picks = pickRelevantChapters(
               chapterList,
@@ -1648,10 +1734,18 @@ serve(async (req) => {
               schematicQ,
               manualMeta.entry_file_path || attachPaths[0] || ''
             )
+            const attachStats: PdfAttachStat[] = []
+            for (const ch of picks) attachStats.push(await statManualPdf(db, ch.storage_path))
+            if (picks.length && !wholePdfAttachAllowed(attachStats)) {
+              skippedLargePdf = true
+              console.warn('skip whole-pdf attach', manualMeta?.id, attachStats)
+            }
             const signed: { name: string; url: string }[] = []
-            for (const ch of picks) {
-              const url = await signStoragePdf(ch.storage_path)
-              if (url) signed.push({ name: basenamePath(ch.storage_path) || ch.title, url })
+            if (!skippedLargePdf) {
+              for (const ch of picks) {
+                const url = await signStoragePdf(ch.storage_path)
+                if (url) signed.push({ name: basenamePath(ch.storage_path) || ch.title, url })
+              }
             }
             if (signed.length) {
               attachedNames = signed.map((s) => s.name)
@@ -1715,6 +1809,23 @@ serve(async (req) => {
       if (!hasManualPassages && !hasFaultDBHit && faultCodes.length) {
         await applyFaultLookup()
         if (hasFaultDBHit) systemContent = composeSystem()
+      }
+
+      // No collection file and no indexed excerpts: say so. A timed-out
+      // whole-PDF call used to fall through and the technician got no answer.
+      if (manualLabel && !hasManualPassages && !hasFaultDBHit && !hasCollectionPdfs) {
+        const content = manualCorpusFallbackMessage(manualLabel, { tooLarge: skippedLargePdf })
+        return new Response(
+          JSON.stringify({
+            choices: [{ message: { role: 'assistant', content } }],
+            _usage: {
+              text: { used: usage.text, limit: limits.text },
+              voice: { used: usage.voice, limit: limits.voice },
+            },
+            _meta: { ...replyMeta(), skippedWholePdf: skippedLargePdf },
+          }),
+          { status: 200, headers: { ...corsHeaders, 'Content-Type': 'application/json' } }
+        )
       }
 
       const xr = await fetchWithTimeout(
