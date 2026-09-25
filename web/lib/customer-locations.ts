@@ -275,6 +275,7 @@ export function serviceCallFromLocations(
     customer_state: string;
     customer_zip: string;
     customer_phone: string;
+    customer_contact: string;
   } | null;
 } {
   const locations = sortLocations(collapseExtraPrimaries(rows.filter((row) => row && row.id != null)));
@@ -300,6 +301,7 @@ export function serviceCallFromLocations(
       customer_state: applied.customer_state,
       customer_zip: applied.customer_zip,
       customer_phone: applied.customer_phone,
+      customer_contact: applied.customer_contact,
     },
   };
 }
@@ -398,9 +400,8 @@ export function removeLocationFromList(
 }
 
 /**
- * Primary location phone often matches the main-office number from backfill.
- * Keep a more specific directory phone already filled on the ticket in that case.
- * A phone typed on an additional location always wins.
+ * Switching locations replaces the ticket phone with that location's phone.
+ * An empty location phone clears the field. Directory numbers are not kept.
  */
 export function ticketPhoneForLocation(opts: {
   locationPhone?: string | null;
@@ -408,12 +409,12 @@ export function ticketPhoneForLocation(opts: {
   officePhone?: string | null;
   currentPhone?: string | null;
 }): string {
-  const loc = String(opts.locationPhone || '').trim();
-  const current = String(opts.currentPhone || '').trim();
-  const office = String(opts.officePhone || '').trim();
-  if (!loc) return current;
-  if (opts.isPrimary && office && loc === office && current && current !== loc) return current;
-  return loc;
+  return String(opts.locationPhone || '').trim();
+}
+
+/** Same overwrite rule for the location contact name. */
+export function ticketContactForLocation(opts: { locationContact?: string | null }): string {
+  return String(opts.locationContact || '').trim();
 }
 
 export type TicketLocationFields = {
@@ -422,6 +423,7 @@ export type TicketLocationFields = {
   customer_state: string;
   customer_zip: string;
   customer_phone: string;
+  customer_contact: string;
   customer_location_id: string | number | null;
 };
 
@@ -432,6 +434,7 @@ export function applyLocationToTicketFields(
     customer_state?: string | null;
     customer_zip?: string | null;
     customer_phone?: string | null;
+    customer_contact?: string | null;
   },
   loc: CustomerLocation,
   opts?: { officePhone?: string | null }
@@ -451,6 +454,7 @@ export function applyLocationToTicketFields(
       officePhone: opts?.officePhone,
       currentPhone: current.customer_phone,
     }),
+    customer_contact: ticketContactForLocation({ locationContact: loc.contact_name }),
     customer_location_id: persistedLocationId(loc.id),
   };
 }

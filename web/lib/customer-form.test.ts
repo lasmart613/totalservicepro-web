@@ -33,6 +33,15 @@ test('ticket customer autofill matches assigned shops by name or city', () => {
   assert.equal(emptyQuery.length, 3);
 });
 
+test('customer equipment loads by customer_organization_id only', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const page = readFileSync(join(here, '../app/customers/[id]/page.tsx'), 'utf8');
+  assert.match(page, /from\('equipment'\)/);
+  assert.doesNotMatch(page, /from\('equipment'\)[\s\S]{0,240}\.eq\('organization_id'/);
+  const requests = readFileSync(join(here, '../app/service-requests/page.tsx'), 'utf8');
+  assert.doesNotMatch(requests, /from\('equipment'\)[\s\S]{0,240}\.eq\('organization_id'/);
+});
+
 test('exact name match is used instead of creating a duplicate company', () => {
   assert.equal(matchLinkedCustomer(LUXOR_CUSTOMERS, ' galactic med spa ')?.id, 2);
   assert.equal(matchLinkedCustomer(LUXOR_CUSTOMERS, 'Not On Roster'), null);

@@ -125,14 +125,6 @@ function ServiceRequestsInner() {
         .eq('customer_organization_id', oId)
         .order('manufacturer');
       eqList = (eq || []) as Laser[];
-      if (!eqList.length) {
-        const { data: eq2 } = await supabase
-          .from('equipment')
-          .select('id, manufacturer, model, serial_number, room')
-          .eq('organization_id', oId)
-          .order('manufacturer');
-        eqList = (eq2 || []) as Laser[];
-      }
       setLasers(eqList);
     }
 

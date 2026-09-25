@@ -13,6 +13,7 @@ import { AssignFseSelect } from '@/components/AssignFseSelect';
 import {
   modelBelongsToManufacturer,
   modelMatchesEquipmentType,
+  catalogChoiceLabel,
   normalizeManufacturerRow,
   normalizeModelRow,
 } from '@/lib/equipment-dropdown';
@@ -161,7 +162,7 @@ export default function ServiceTicketDetail() {
         try {
           const { data: m } = await supabase.from('manufacturers').select('id, name').order('name');
           setDbMfrs(m || []);
-          const { data: lm } = await supabase.from('laser_models').select('id, name, label, manufacturer_id').order('name');
+          const { data: lm } = await supabase.from('laser_models').select('id, name, manufacturer_id').order('name');
           setDbLaserModels(lm || []);
         } catch (e) { /* fallback to free text ok */ }
       } catch (err) {
@@ -405,7 +406,7 @@ export default function ServiceTicketDetail() {
                 dbMfrs.length > 0 ? (
                   <select className="input" value={formData.equipment_make || ''} onChange={(e) => handleInputChange('equipment_make', e.target.value)}>
                     <option value="">-- Select --</option>
-                    {dbMfrs.map((m:any) => <option key={m.id} value={m.name}>{m.name}</option>)}
+                    {dbMfrs.map((m:any) => <option key={m.id} value={m.name}>{catalogChoiceLabel(m.name, m.display_name || m.label)}</option>)}
                   </select>
                 ) : <input className="input" value={formData.equipment_make || ''} onChange={(e) => handleInputChange('equipment_make', e.target.value)} />
               ) : ticket.equipment_make} />
@@ -422,7 +423,14 @@ export default function ServiceTicketDetail() {
                       .filter((m:any) =>
                         modelMatchesEquipmentType(m.equipment_type, formData.equipment_type)
                       )
-                      .map((m:any) => <option key={m.id} value={m.name || m.label}>{m.label || m.name}</option>)}
+                      .map((m:any) => {
+                        const value = m.name || '';
+                        return (
+                          <option key={m.id} value={value}>
+                            {catalogChoiceLabel(value, m.display_name || m.display || m.title)}
+                          </option>
+                        );
+                      })}
                   </select>
                 ) : <input className="input" value={formData.equipment_model || ''} onChange={(e) => handleInputChange('equipment_model', e.target.value)} />
               ) : ticket.equipment_model} />

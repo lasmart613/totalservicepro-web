@@ -53,7 +53,7 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
     if (serial) {
       const { data: rows } = await sb
         .from('equipment')
-        .select('id, customer_organization_id, organization_id, manufacturer, model, name, serial_number')
+        .select('id, customer_organization_id, manufacturer, model, serial_number')
         .ilike('serial_number', serial)
         .limit(5);
       const list = rows || [];
@@ -66,24 +66,14 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
     }
 
     if (!existing && manufacturer && model) {
-      let q = await sb
+      const q = await sb
         .from('equipment')
-        .select('id, customer_organization_id, organization_id')
+        .select('id, customer_organization_id')
         .eq('customer_organization_id', orgId)
         .eq('manufacturer', manufacturer)
         .eq('model', model)
         .limit(1)
         .maybeSingle();
-      if (!q.data) {
-        q = await sb
-          .from('equipment')
-          .select('id, customer_organization_id, organization_id')
-          .eq('organization_id', orgId)
-          .eq('manufacturer', manufacturer)
-          .eq('model', model)
-          .limit(1)
-          .maybeSingle();
-      }
       existing = q.data;
     }
 
@@ -91,9 +81,6 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
       const patch: Record<string, any> = {};
       if (String(existing.customer_organization_id || '') !== String(orgId)) {
         patch.customer_organization_id = orgId;
-      }
-      if (String(existing.organization_id || '') !== String(orgId)) {
-        patch.organization_id = orgId;
       }
       if (manufacturer) patch.manufacturer = manufacturer;
       if (model) patch.model = model;
@@ -103,7 +90,6 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
         let { error } = await sb.from('equipment').update(patch).eq('id', existing.id);
         if (error && /column|schema cache/i.test(error.message || '')) {
           if (/pulse_count/i.test(error.message || '')) delete patch.pulse_count;
-          if (/organization_id/i.test(error.message || '')) delete patch.organization_id;
           if (/name/i.test(error.message || '')) delete patch.name;
           if (Object.keys(patch).length) {
             await sb.from('equipment').update(patch).eq('id', existing.id);
@@ -116,7 +102,6 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
     const safeModel = model || manufacturer || serial || name || 'Unknown Laser';
     const insert: Record<string, any> = {
       customer_organization_id: orgId,
-      organization_id: orgId,
       manufacturer: manufacturer || null,
       model: safeModel,
       serial_number: serial || null,
@@ -137,7 +122,7 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
         if (race?.id) {
           await sb
             .from('equipment')
-            .update({ customer_organization_id: orgId, organization_id: orgId })
+            .update({ customer_organization_id: orgId })
             .eq('id', race.id);
           return race.id;
         }
@@ -155,22 +140,8 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
         .select('id')
         .maybeSingle();
       if (ins.error) {
-        ins = await sb
-          .from('equipment')
-          .insert([
-            {
-              organization_id: orgId,
-              manufacturer: manufacturer || null,
-              model: safeModel,
-              serial_number: serial || null,
-            },
-          ])
-          .select('id')
-          .maybeSingle();
-        if (ins.error) {
-          console.warn('ensureEquipment insert', ins.error);
-          return null;
-        }
+        console.warn('ensureEquipment insert', ins.error);
+        return null;
       }
     }
     return ins.data?.id ?? null;

@@ -50,7 +50,7 @@ import {
   serviceCallFromLocations,
   type CustomerLocation,
 } from '@/lib/customer-locations';
-import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { listManufacturerChoices, listModelChoices, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import {
   OTHER_MANUFACTURER,
@@ -100,6 +100,7 @@ type TicketForm = {
   customer_state: string;
   customer_zip: string;
   customer_phone: string;
+  customer_contact: string;
   customer_email: string;
 };
 
@@ -122,6 +123,7 @@ const EMPTY_FORM = (presetDate?: string): TicketForm => ({
   customer_state: '',
   customer_zip: '',
   customer_phone: '',
+  customer_contact: '',
   customer_email: '',
 });
 
@@ -157,12 +159,11 @@ export default function ServiceSchedule() {
   const router = useRouter();
   const catalog = useEquipmentCatalog(supabase);
   const manufacturers = useMemo(
-    () => listManufacturers(catalog),
+    () => listManufacturerChoices(catalog),
     [catalog.manufacturers, catalog.models]
   );
   const modelOptions = useMemo(
-    () =>
-      form.equipment_make ? listModelsForManufacturer(form.equipment_make, catalog) : [],
+    () => (form.equipment_make ? listModelChoices(form.equipment_make, catalog) : []),
     [form.equipment_make, catalog.manufacturers, catalog.models]
   );
 
@@ -246,7 +247,6 @@ export default function ServiceSchedule() {
             status,
             organization_id,
             assigned_to,
-            assigned_fse,
             priority
           `;
 
@@ -257,19 +257,11 @@ export default function ServiceSchedule() {
       let data: any[] | null = null;
       let error: any = null;
 
-      let cols = selectCols;
-      const dropAssignedFse = (err: { message?: string } | null) => {
-        if (err && /assigned_fse/i.test(err.message || '')) {
-          cols = cols.replace(/,?assigned_fse,?\s*/g, '\n            ').replace(/,\s*,/g, ',');
-          return true;
-        }
-        return false;
-      };
-
+      // Assignee is service_tickets.assigned_to. assigned_fse is not on the live table.
       if (oId != null) {
         let q = supabase
           .from('service_tickets')
-          .select(cols)
+          .select(selectCols)
           .eq('organization_id', oId);
         if (!leadView) {
           q = q.eq('assigned_to', user.id);
@@ -277,25 +269,12 @@ export default function ServiceSchedule() {
         const q1 = await q.order('service_date', { ascending: true }).limit(500);
         data = q1.data;
         error = q1.error;
-        if (dropAssignedFse(error)) {
-          let retryQ = supabase
-            .from('service_tickets')
-            .select(cols)
-            .eq('organization_id', oId);
-          if (!leadView) {
-            retryQ = retryQ.eq('assigned_to', user.id);
-          }
-          const retry = await retryQ.order('service_date', { ascending: true }).limit(500);
-          data = retry.data;
-          error = retry.error;
-        }
 
         if (error) {
           console.warn('schedule org filter failed, retrying org-only', error);
-          dropAssignedFse(error);
           const q2 = await supabase
             .from('service_tickets')
-            .select(cols)
+            .select(selectCols)
             .eq('organization_id', oId)
             .order('service_date', { ascending: true })
             .limit(500);
@@ -305,31 +284,20 @@ export default function ServiceSchedule() {
       } else {
         const q3 = await supabase
           .from('service_tickets')
-          .select(cols)
+          .select(selectCols)
           .eq('assigned_to', user.id)
           .order('service_date', { ascending: true })
           .limit(500);
         data = q3.data;
         error = q3.error;
-        if (dropAssignedFse(error)) {
-          const retry = await supabase
-            .from('service_tickets')
-            .select(cols)
-            .eq('assigned_to', user.id)
-            .order('service_date', { ascending: true })
-            .limit(500);
-          data = retry.data;
-          error = retry.error;
-        }
       }
 
       // Last resort: RLS-only, then client-filter by org + role
       if (error) {
         console.warn('schedule filtered query failed, retrying RLS-only', error);
-        dropAssignedFse(error);
         const q4 = await supabase
           .from('service_tickets')
-          .select(cols)
+          .select(selectCols)
           .order('service_date', { ascending: true })
           .limit(500);
         if (q4.error) throw q4.error;
@@ -413,6 +381,7 @@ export default function ServiceSchedule() {
         customer_state: fields.customer_state,
         customer_zip: fields.customer_zip,
         customer_phone: fields.customer_phone,
+        customer_contact: fields.customer_contact,
       };
     });
   }
@@ -427,6 +396,7 @@ export default function ServiceSchedule() {
       customer_state: c.state || '',
       customer_zip: c.zip || '',
       customer_phone: c.phone || '',
+      customer_contact: c.contact || '',
       customer_email: c.email || '',
     };
     let rows: CustomerLocation[] = [];
@@ -464,6 +434,7 @@ export default function ServiceSchedule() {
       customer_state: fields.customer_state,
       customer_zip: fields.customer_zip,
       customer_phone: fields.customer_phone,
+      customer_contact: fields.customer_contact,
     }));
   }
 
@@ -1428,9 +1399,9 @@ export default function ServiceSchedule() {
                     }}
                   >
                     <option value="">— Select —</option>
-                    {manufacturers.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
+                    {manufacturers.map((mfr) => (
+                      <option key={mfr.value} value={mfr.value}>
+                        {mfr.label}
                       </option>
                     ))}
                     <option value={OTHER_MANUFACTURER}>Other / custom…</option>
@@ -1463,9 +1434,9 @@ export default function ServiceSchedule() {
                     <option value="">
                       {form.equipment_make ? '— Select —' : 'Select manufacturer first'}
                     </option>
-                    {modelOptions.map((name) => (
-                      <option key={name} value={name}>
-                        {name}
+                    {modelOptions.map((modelChoice) => (
+                      <option key={modelChoice.value} value={modelChoice.value}>
+                        {modelChoice.label}
                       </option>
                     ))}
                     <option value={OTHER_MODEL}>Other / custom…</option>
@@ -1532,6 +1503,14 @@ export default function ServiceSchedule() {
                     className="input"
                     value={form.customer_phone}
                     onChange={(e) => setForm({ ...form, customer_phone: e.target.value })}
+                  />
+                </div>
+                <div>
+                  <label className="label">Contact</label>
+                  <input
+                    className="input"
+                    value={form.customer_contact}
+                    onChange={(e) => setForm({ ...form, customer_contact: e.target.value })}
                   />
                 </div>
               </div>

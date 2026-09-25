@@ -336,7 +336,7 @@ export default function CustomerProfilePage() {
   }
 
   async function loadEquipment(customerId: string) {
-    // Prefer customer_organization_id (web / My Lasers); fallback organization_id (Android legacy)
+    // equipment.customer_organization_id is the customer link. There is no organization_id column.
     try {
       const { data, error } = await supabase
         .from('equipment')
@@ -345,27 +345,8 @@ export default function CustomerProfilePage() {
         .order('manufacturer', { ascending: true })
         .limit(200);
 
-      if (!error && data && data.length > 0) {
-        setEquipment(data as EquipmentRow[]);
-        return;
-      }
-
-      // Fallback: organization_id
-      const r2 = await supabase
-        .from('equipment')
-        .select('*')
-        .eq('organization_id', customerId)
-        .order('manufacturer', { ascending: true })
-        .limit(200);
-
-      if (!r2.error && r2.data) {
-        setEquipment(r2.data as EquipmentRow[]);
-        return;
-      }
-
-      // If first query succeeded empty, keep empty
       if (!error) {
-        setEquipment([]);
+        setEquipment((data as EquipmentRow[]) || []);
         return;
       }
 

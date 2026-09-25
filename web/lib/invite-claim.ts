@@ -30,6 +30,32 @@ export function inviteInPlay(result: InviteClaimResult | null | undefined): bool
   return false;
 }
 
+const FOUNDER_ROLES = new Set(['company_admin', 'admin', 'owner', 'parts_supplier', 'supplier']);
+
+/**
+ * Team-member setup, not company onboarding.
+ * A new service-company admin has an org and onboarding_completed=false, and the
+ * claim API reports needsMemberOnboarding for that too. That flag alone must not
+ * send them to /onboarding/member. Invited members still do.
+ */
+export function shouldSendToMemberOnboarding(
+  result: InviteClaimResult | null | undefined
+): boolean {
+  if (!result || result.ok === false) return false;
+  const role = String(result.role || '').toLowerCase();
+  if (FOUNDER_ROLES.has(role) && !inviteInPlay(result)) return false;
+  if (inviteInPlay(result)) return true;
+  if (
+    result.inviteAccepted &&
+    result.organization_id &&
+    result.needsMemberOnboarding !== false &&
+    !FOUNDER_ROLES.has(role)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /**
  * Where to send someone after signup, password reset, or onboarding
  * when a team invite may be in play.
@@ -45,6 +71,12 @@ export function destAfterInviteClaim(
     return '/onboarding/member';
   }
   if (result?.organization_id) {
+    const role = String(result.role || '').toLowerCase();
+    // A new company admin already has an org and onboarding_completed=false.
+    // That is company setup, not team-member setup.
+    if (FOUNDER_ROLES.has(role)) {
+      return result.needsMemberOnboarding === false ? '/hub' : fallback;
+    }
     return result.needsMemberOnboarding === false ? '/hub' : '/onboarding/member';
   }
   return fallback;

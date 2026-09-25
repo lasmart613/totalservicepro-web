@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { destAfterInviteClaim, inviteInPlay } from './invite-claim.ts';
+import { destAfterInviteClaim, inviteInPlay, shouldSendToMemberOnboarding } from './invite-claim.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -32,6 +32,44 @@ test('Tony path: pending invite is in play and never routes to founder onboardin
   };
   assert.equal(inviteInPlay(alreadyJoined), true);
   assert.equal(destAfterInviteClaim(alreadyJoined, '/onboarding'), '/hub');
+});
+
+test('new company admin with unfinished onboarding stays on company setup', () => {
+  const founder = {
+    ok: true,
+    skipped: true,
+    claimed: false,
+    pendingInvite: false,
+    organization_id: 12,
+    role: 'company_admin',
+    needsMemberOnboarding: true,
+  };
+  assert.equal(inviteInPlay(founder), false);
+  assert.equal(shouldSendToMemberOnboarding(founder), false);
+  assert.equal(destAfterInviteClaim(founder, '/onboarding'), '/onboarding');
+
+  const invited = {
+    ok: true,
+    claimed: true,
+    pendingInvite: true,
+    organization_id: 4,
+    role: 'fse',
+    needsMemberOnboarding: true,
+  };
+  assert.equal(shouldSendToMemberOnboarding(invited), true);
+  assert.equal(destAfterInviteClaim(invited, '/onboarding'), '/onboarding/member');
+
+  const acceptedMember = {
+    ok: true,
+    skipped: true,
+    claimed: false,
+    pendingInvite: false,
+    inviteAccepted: true,
+    organization_id: 4,
+    role: 'fse',
+    needsMemberOnboarding: true,
+  };
+  assert.equal(shouldSendToMemberOnboarding(acceptedMember), true);
 });
 
 test('no invitation → founder onboarding is allowed', () => {
@@ -77,9 +115,11 @@ test('password reset / invite callback claims before founder onboarding', () => 
 test('founder onboarding claims on load and on finish; does not skip claim after save', () => {
   const onboarding = readFileSync(join(here, '../app/onboarding/page.tsx'), 'utf8');
   assert.match(onboarding, /postTeamClaim|claimPendingInvitations/);
+  assert.match(onboarding, /shouldSendToMemberOnboarding/);
   assert.match(onboarding, /inviteInPlay/);
   assert.match(onboarding, /saveOnboarding/);
   assert.match(onboarding, /destAfterInviteClaim/);
+  assert.doesNotMatch(onboarding, /inviteInPlay\(claimJson\) \|\| claimJson\.needsMemberOnboarding/);
   assert.doesNotMatch(
     onboarding,
     /Do not claim FSE invites onto a founder who just created this org/

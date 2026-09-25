@@ -5,7 +5,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   fetchEquipmentCatalog,
+  catalogChoiceLabel,
+  listCatalogManufacturerChoices,
   listCatalogManufacturers,
+  listCatalogModelChoices,
   listCatalogModels,
   manufacturerMatches,
   modelBelongsToManufacturer,
@@ -210,7 +213,7 @@ test('fetchEquipmentCatalog pages manufacturers and laser_models', async () => {
 test('estimate form and invoice form load the live catalog join', () => {
   const estimate = readFileSync(join(here, '../app/estimates/new/EstimateFormClient.tsx'), 'utf8');
   assert.match(estimate, /useEquipmentCatalog/);
-  assert.match(estimate, /listModelsForManufacturer/);
+  assert.match(estimate, /listModelChoices/);
   assert.match(estimate, /equipmentType|equipment_type/);
   assert.doesNotMatch(estimate, /listManufacturers\(\)/);
 
@@ -219,9 +222,84 @@ test('estimate form and invoice form load the live catalog join', () => {
   assert.doesNotMatch(invoice, /listManufacturers\(\)/);
 });
 
-test('service tickets join models by manufacturer id or name', () => {
+test('service tickets join models by manufacturer id or name without a label column', () => {
   const tickets = readFileSync(join(here, '../app/service-tickets/[id]/page.tsx'), 'utf8');
   assert.match(tickets, /modelBelongsToManufacturer/);
+  assert.match(tickets, /select\('id, name, manufacturer_id'\)/);
+  assert.doesNotMatch(tickets, /select\('id, name, label/);
+});
+
+test('internal codes display a human label and duplicate spellings collapse', () => {
+  assert.equal(catalogChoiceLabel('alex_trivantage'), 'Alex Trivantage');
+  assert.equal(catalogChoiceLabel('candela_core', 'Candela Core'), 'Candela Core');
+  assert.equal(catalogChoiceLabel('Xeo'), 'Xeo');
+
+  const live = {
+    manufacturers: [
+      normalizeManufacturerRow({ id: 1, name: 'Alma' }),
+      normalizeManufacturerRow({ id: 2, name: 'Alma Lasers' }),
+      normalizeManufacturerRow({ id: 3, name: 'alex_trivantage', display_name: 'Alex TriVantage' }),
+      normalizeManufacturerRow({ id: 4, name: 'Hoya ConBio' }),
+    ],
+    models: [
+      normalizeModelRow({
+        id: 9,
+        name: 'candela_core',
+        manufacturer: 'Candela',
+        manufacturer_id: 2,
+      }),
+    ],
+  };
+  const mfrs = listCatalogManufacturers(live);
+  assert.ok(mfrs.includes('Alma'));
+  assert.equal(mfrs.includes('Alma Lasers'), false);
+  assert.ok(mfrs.includes('alex_trivantage'));
+  assert.equal(mfrs.filter((name) => /hoya|conbio/i.test(name)).length, 1);
+  assert.ok(mfrs.includes('HOYA ConBio'));
+
+  const choices = listCatalogManufacturerChoices(live);
+  assert.equal(choices.find((c) => c.value === 'alex_trivantage')?.label, 'Alex TriVantage');
+  assert.equal(choices.find((c) => c.value === 'Alma')?.value, 'Alma');
+
+  const modelChoices = listCatalogModelChoices('Candela', live);
+  const core = modelChoices.find((c) => c.value === 'candela_core');
+  assert.ok(core);
+  assert.equal(core?.label, 'Candela Core');
+  assert.equal(core?.value, 'candela_core');
+});
+
+test('Syneron does not list Candela models', () => {
+  const syneron = normalizeManufacturerRow({ id: 8, name: 'Syneron' });
+  const live = {
+    manufacturers: [syneron, CANDELA, normalizeManufacturerRow({ id: 11, name: 'Syneron Candela' })],
+    models: [
+      normalizeModelRow({
+        id: 1,
+        name: 'GentleMax',
+        label: 'GentleMax',
+        manufacturer: 'Candela',
+        manufacturer_id: 2,
+      }),
+      normalizeModelRow({
+        id: 2,
+        name: 'eLight',
+        label: 'eLight',
+        manufacturer: 'Syneron',
+        manufacturer_id: 8,
+      }),
+      normalizeModelRow({
+        id: 3,
+        name: 'GentleLASE',
+        label: 'GentleLASE',
+        manufacturer: 'Candela',
+        manufacturer_id: 8,
+      }),
+    ],
+  };
+  const names = listCatalogModels('Syneron', live);
+  assert.ok(names.includes('eLight'));
+  assert.equal(names.some((name) => /gentle/i.test(name)), false);
+  assert.equal(manufacturerMatches('Syneron', { id: 2, name: 'Candela' }), false);
 });
 
 test('Android estimate generator loads manufacturers + laser_models', () => {

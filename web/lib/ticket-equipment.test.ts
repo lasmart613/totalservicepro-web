@@ -95,8 +95,8 @@ test('clearing or changing manufacturer resets model', () => {
 test('calendar add-ticket form uses the shared catalog dropdowns and persists resolved values', () => {
   const src = readFileSync(join(here, '../app/service-schedule/page.tsx'), 'utf8');
   assert.match(src, /useEquipmentCatalog/);
-  assert.match(src, /listManufacturers\(catalog\)/);
-  assert.match(src, /listModelsForManufacturer\(form\.equipment_make, catalog\)/);
+  assert.match(src, /listManufacturerChoices\(catalog\)/);
+  assert.match(src, /listModelChoices\(form\.equipment_make, catalog\)/);
   assert.match(src, /OTHER_MANUFACTURER/);
   assert.match(src, /OTHER_MODEL/);
   assert.match(src, /selectionAfterManufacturerChange/);
