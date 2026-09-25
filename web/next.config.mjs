@@ -15,6 +15,16 @@ const nextConfig = {
   },
   // Netlify Next Runtime packages the app — do not use standalone
   outputFileTracingRoot: path.join(__dirname),
+  // pdf.js legacy build resolves its worker, cmaps, and standard fonts from
+  // node_modules at runtime (manual reindex). Do not bundle it.
+  serverExternalPackages: ['pdfjs-dist'],
+  outputFileTracingIncludes: {
+    '/api/god/manuals/**': [
+      './node_modules/pdfjs-dist/legacy/build/**',
+      './node_modules/pdfjs-dist/cmaps/**',
+      './node_modules/pdfjs-dist/standard_fonts/**',
+    ],
+  },
   images: {
     unoptimized: true,
   },

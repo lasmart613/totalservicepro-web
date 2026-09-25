@@ -10,12 +10,16 @@ import {
   folderPrefixForManual,
   indexManualSearchText,
   assembleReindexedManual,
+  extractQualityImproves,
+  manualPdfByteLimitError,
   mergeStampedManualPages,
   pdfPathsForManual,
   reindexManualPageRange,
   searchTextWriteRefusal,
   shouldKeepExistingSearchText,
 } from './manual-search-index.ts';
+import { MANUAL_SEARCH_PDF_MAX_BYTES } from './manual-pdf-text.ts';
+import { buildTextPdf } from './manual-pdf-fixtures.ts';
 import { MANUAL_FIXTURE_PATH } from './manuals.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -76,7 +80,12 @@ test('reindex keeps a richer manual_search_index row instead of writing a worse 
   assert.equal(shouldKeepExistingSearchText('short', ''), true);
   assert.equal(shouldKeepExistingSearchText('x'.repeat(2000), ''), true);
   assert.equal(shouldKeepExistingSearchText('x'.repeat(2000), 'y'.repeat(400)), true);
-  assert.equal(shouldKeepExistingSearchText('x'.repeat(2000), 'y'.repeat(1200)), false);
+  assert.equal(shouldKeepExistingSearchText('x'.repeat(2000), 'y'.repeat(1200)), true);
+  const cleaner = 'Check the laser power supply and replace the thermopile connection. '.repeat(8);
+  assert.equal(cleaner.length < 2000 * 0.8, true);
+  assert.equal(extractQualityImproves('x'.repeat(2000), cleaner), true);
+  assert.equal(shouldKeepExistingSearchText('x'.repeat(2000), cleaner), false);
+  assert.equal(searchTextWriteRefusal('x'.repeat(2000), cleaner), null);
   assert.equal(shouldKeepExistingSearchText('', 'fresh text'), false);
 
   let upserts = 0;
@@ -230,7 +239,8 @@ test('thin-result-refused', async () => {
   assert.equal(result.ok, false);
   assert.equal(result.done, false);
   assert.match(result.error || '', /Refused to replace the manual index/);
-  assert.match(result.error || '', /80%/);
+  assert.match(result.error || '', /dictionary-word ratio|garbage ratio/);
+  assert.doesNotMatch(result.error || '', /80%/);
   assert.equal(harness.upserts, 0);
   const spaced = `${'P o w e r T o o H i g h '.repeat(400)}`;
   assert.match(searchTextWriteRefusal(existing, spaced) || '', /single-letter/);
@@ -279,4 +289,265 @@ test('search API is catalog-wide and never returns PDF bodies or signed URLs', (
   assert.match(bigintFix, /manual_id bigint PRIMARY KEY REFERENCES public\.manuals\(id\)/);
   assert.match(bigintFix, /RETURNS TABLE\(manual_id bigint\)/);
   assert.doesNotMatch(bigintFix, /manual_id uuid/);
+});
+
+function folderStorage(pdfs: Record<string, Buffer>, opts?: { existingError?: string; throwRead?: boolean }) {
+  let upserts = 0;
+  let saved = '';
+  let downloaded = 0;
+  const client = {
+    storage: {
+      from() {
+        return {
+          download: async (path: string) => {
+            downloaded += 1;
+            const bytes = pdfs[path];
+            if (!bytes) return { data: null, error: { message: 'missing' } };
+            return { data: new Blob([new Uint8Array(bytes)]), error: null };
+          },
+          list: async (prefix: string) => ({
+            data: Object.keys(pdfs)
+              .filter((path) => path.startsWith(`${prefix}/`) && !path.slice(prefix.length + 1).includes('/'))
+              .map((path) => ({ name: path.slice(prefix.length + 1), id: path })),
+            error: null,
+          }),
+        };
+      },
+    },
+    from() {
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        maybeSingle: async () => {
+          if (opts?.throwRead) throw new Error('connection reset');
+          if (opts?.existingError) return { data: null, error: { message: opts.existingError } };
+          return { data: null, error: null };
+        },
+        upsert(payload: { search_text?: string }) {
+          upserts += 1;
+          saved = String(payload?.search_text || '');
+          return { error: null };
+        },
+      };
+    },
+  };
+  return {
+    client,
+    get upserts() {
+      return upserts;
+    },
+    get saved() {
+      return saved;
+    },
+    get downloaded() {
+      return downloaded;
+    },
+  };
+}
+
+test('folder manuals concatenate every PDF and continue physical page stamps', async () => {
+  const intro = buildTextPdf(['intro reservoir']);
+  const later = buildTextPdf(['error forty three', 'optical collimator']);
+  const pdfs = {
+    'shared/demo/10-later.pdf': later,
+    'shared/demo/2-intro.pdf': intro,
+  };
+  const harness = folderStorage(pdfs);
+  const manual = { id: 54, storage_path: 'shared/demo', is_folder: true };
+  const indexed = await indexManualSearchText(harness.client, manual);
+  assert.equal(indexed.ok, true);
+  assert.equal(indexed.files, 2);
+  assert.match(harness.saved, /\[\[pdfpage:1\]\] intro reservoir/);
+  assert.match(harness.saved, /\[\[pdfpage:2\]\] error forty three/);
+  assert.match(harness.saved, /\[\[pdfpage:3\]\] optical collimator/);
+  assert.equal((harness.saved.match(/\[\[pdfpage:\d+\]\]/g) || []).length, 3);
+
+  const staged = folderStorage(pdfs);
+  const stageClient = staged.client;
+  const store = new Map<string, string>();
+  const originalFrom = stageClient.storage.from.bind(stageClient.storage);
+  stageClient.storage.from = () => {
+    const base = originalFrom();
+    return {
+      ...base,
+      download: async (path: string) => {
+        if (String(path).endsWith('.json')) {
+          const body = store.get(path);
+          if (!body) return { data: null, error: { message: 'missing' } };
+          return { data: new Blob([body]), error: null };
+        }
+        return base.download(path);
+      },
+      upload: async (path: string, body: string) => {
+        store.set(path, body);
+        return { error: null };
+      },
+      remove: async (paths: string[]) => {
+        for (const path of paths) store.delete(path);
+        return { error: null };
+      },
+    };
+  };
+  const first = await reindexManualPageRange(stageClient, manual, { pageFrom: 1, pageCount: 1 });
+  assert.equal(first.ok, true);
+  assert.equal(first.done, false);
+  assert.equal(first.nextPage, 2);
+  assert.equal(first.totalPages, 3);
+  const second = await reindexManualPageRange(stageClient, manual, { pageFrom: 2, pageCount: 1 });
+  assert.equal(second.ok, true);
+  assert.equal(second.nextPage, 3);
+  const third = await reindexManualPageRange(stageClient, manual, { pageFrom: 3, pageCount: 1 });
+  assert.equal(third.ok, true);
+  assert.equal(third.done, true);
+  assert.match(staged.saved, /\[\[pdfpage:1\]\] intro reservoir/);
+  assert.match(staged.saved, /\[\[pdfpage:2\]\] error forty three/);
+  assert.match(staged.saved, /\[\[pdfpage:3\]\] optical collimator/);
+});
+
+test('chapter_metadata order is kept and page stamps continue across files', async () => {
+  const harness = folderStorage({
+    'shared/demo/a.pdf': buildTextPdf(['alpha reservoir']),
+    'shared/demo/b.pdf': buildTextPdf(['beta collimator']),
+  });
+  const indexed = await indexManualSearchText(harness.client, {
+    id: 8,
+    storage_path: 'shared/demo',
+    is_folder: true,
+    chapter_metadata: [{ storage_path: 'shared/demo/b.pdf' }, { storage_path: 'shared/demo/a.pdf' }],
+  });
+  assert.equal(indexed.ok, true);
+  assert.equal(indexed.files, 2);
+  assert.match(harness.saved, /\[\[pdfpage:1\]\] beta collimator/);
+  assert.match(harness.saved, /\[\[pdfpage:2\]\] alpha reservoir/);
+});
+
+test('oversized PDFs fail with a limit message and are not truncated or written', async () => {
+  assert.equal(manualPdfByteLimitError(MANUAL_SEARCH_PDF_MAX_BYTES), null);
+  const message = manualPdfByteLimitError(MANUAL_SEARCH_PDF_MAX_BYTES + 1) || '';
+  assert.match(message, /200 MB/);
+  assert.match(message, /Netlify/);
+  assert.match(message, /truncated/);
+  let reads = 0;
+  let upserts = 0;
+  const client = {
+    storage: {
+      from() {
+        return {
+          download: async () => ({
+            data: {
+              size: MANUAL_SEARCH_PDF_MAX_BYTES + 1,
+              arrayBuffer: async () => {
+                reads += 1;
+                return new ArrayBuffer(0);
+              },
+            },
+            error: null,
+          }),
+          list: async () => ({ data: [], error: null }),
+        };
+      },
+    },
+    from() {
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        maybeSingle: async () => ({ data: null, error: null }),
+        upsert() {
+          upserts += 1;
+          return { error: null };
+        },
+      };
+    },
+  };
+  const indexed = await indexManualSearchText(client, { id: 9, storage_path: 'shared/huge.pdf' });
+  assert.equal(indexed.ok, false);
+  assert.match(indexed.skipped || '', /indexer limit/);
+  assert.equal(reads, 0);
+  assert.equal(upserts, 0);
+  const ranged = await reindexManualPageRange(client, { id: 9, storage_path: 'shared/huge.pdf' }, { pageFrom: 1, pageCount: 1 });
+  assert.equal(ranged.ok, false);
+  assert.match(ranged.error || '', /indexer limit/);
+  assert.equal(upserts, 0);
+});
+
+test('a manual_search_index read error fails closed and does not upsert', async () => {
+  let upserts = 0;
+  const client = {
+    storage: {
+      from() {
+        return {
+          download: async () => ({ data: null, error: { message: 'missing' } }),
+          list: async () => ({ data: [], error: null }),
+        };
+      },
+    },
+    from() {
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        maybeSingle: async () => {
+          throw new Error('connection reset');
+        },
+        upsert() {
+          upserts += 1;
+          return { error: null };
+        },
+      };
+    },
+  };
+  const indexed = await indexManualSearchText(client, { id: 9, storage_path: 'shared/missing.pdf' });
+  assert.equal(indexed.ok, false);
+  assert.match(indexed.skipped || '', /could not read the existing row/);
+  assert.match(indexed.skipped || '', /connection reset/);
+  assert.equal(upserts, 0);
+
+  const pdfBytes = readFileSync(join(here, '..', 'public', MANUAL_FIXTURE_PATH.replace(/^\//, '')));
+  const rangedClient = {
+    storage: {
+      from() {
+        return {
+          download: async (path: string) => {
+            if (String(path).endsWith('.json')) return { data: null, error: { message: 'missing' } };
+            return { data: new Blob([new Uint8Array(pdfBytes)]), error: null };
+          },
+          list: async () => ({ data: [], error: null }),
+          upload: async () => ({ error: null }),
+          remove: async () => ({ error: null }),
+        };
+      },
+    },
+    from() {
+      return {
+        select() {
+          return this;
+        },
+        eq() {
+          return this;
+        },
+        maybeSingle: async () => ({ data: null, error: { message: 'timeout reading manual_search_index' } }),
+        upsert() {
+          upserts += 1;
+          return { error: null };
+        },
+      };
+    },
+  };
+  const ranged = await reindexManualPageRange(rangedClient, FIXTURE_MANUAL, { pageFrom: 1, pageCount: 40 });
+  assert.equal(ranged.ok, false);
+  assert.equal(ranged.done, false);
+  assert.match(ranged.error || '', /could not read the existing row/);
+  assert.match(ranged.error || '', /timeout reading manual_search_index/);
+  assert.equal(upserts, 0);
 });

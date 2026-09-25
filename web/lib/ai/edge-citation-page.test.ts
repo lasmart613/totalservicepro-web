@@ -140,7 +140,7 @@ test('real CO2RE extract: error 43 cites physical page 150, never printed 7', as
   const bytes = readFileSync(path);
   assert.equal(bytes.length, CO2RE_BYTES);
   assert.equal(createHash('sha256').update(bytes).digest('hex'), CO2RE_SHA256);
-  const text = extractPdfSearchText(bytes);
+  const text = await extractPdfSearchText(bytes);
   assert.equal((text.match(/\[\[pdfpage:\d+\]\]/g) || []).length, 161);
   await assertPhysical150(await loadEdge(), text);
 });
