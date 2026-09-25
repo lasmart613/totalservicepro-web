@@ -36,14 +36,23 @@ export function extractSectionRef(text: string): string | undefined {
   return undefined
 }
 
-/** First explicit page mention when xAI omits page_number. */
+/** A printed span such as "pages 7-8" is a label, not a physical page. */
+function isPrintedPageRange(text: string, matchEnd: number): boolean {
+  return /^\s*[-–—]\s*\d/.test(text.slice(matchEnd))
+}
+
+/** First explicit page mention when xAI omits page_number. Skips printed ranges. */
 export function extractPageRef(text: string): number | undefined {
   const raw = String(text || '')
-  const page = raw.match(/\b(?:pages?|pp?\.?)\s*(\d{1,4})\b/i)
-  if (!page?.[1]) return undefined
-  const n = Number(page[1])
-  if (!Number.isFinite(n) || n < 1 || n > 9999) return undefined
-  return Math.floor(n)
+  const re = /\b(?:pages?|pp?\.?)\s*(\d{1,4})\b/gi
+  let match: RegExpExecArray | null
+  while ((match = re.exec(raw))) {
+    if (isPrintedPageRange(raw, match.index + match[0].length)) continue
+    const n = Number(match[1])
+    if (!Number.isFinite(n) || n < 1 || n > 9999) continue
+    return Math.floor(n)
+  }
+  return undefined
 }
 
 function hitPage(row: Record<string, unknown>, text = ''): number | undefined {

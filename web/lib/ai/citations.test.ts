@@ -106,6 +106,12 @@ test('prose page mentions upgrade document-level Source chips', () => {
   assert.equal(extractPageRef('See page 42 of the flow-switch procedure.'), 42);
   assert.equal(extractPageRef('p.18 harness pinout'), 18);
   assert.equal(extractPageRef('no page mentioned'), undefined);
+  assert.equal(extractPageRef('Error 43 is on pages 7-8 of the manual.'), undefined);
+  const rangeHtml = formatAssistantHtml(
+    'Error 43 is on pages 7-8.\n\n— Source: CO2RE\n[[cite:id=17&t=CO2RE]]',
+    [{ manualId: 17, title: 'CO2RE' }]
+  );
+  assert.doesNotMatch(rangeHtml, /page=7(?!\d)/);
   const attached = attachProsePages(
     [{ manualId: 105, title: 'Cutera Xeo System' }],
     'Open page 42 and page 18 of the Xeo book.'

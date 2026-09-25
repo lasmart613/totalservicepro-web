@@ -14,6 +14,7 @@ import {
   type ManualViewPayload,
 } from '@/lib/manuals';
 import { asPositivePage } from '@/lib/ai/citations';
+import { fittedPageBoxHeight, viewerPhysicalPage } from '@/lib/pdf-viewer-page';
 import { ViewerAiPanel } from '@/components/ViewerAiPanel';
 
 type PdfTextRun = {
@@ -173,17 +174,22 @@ function PdfPageCanvas({
   zoom,
   eager,
   highlightQuery,
+  boxHeight,
+  onReady,
 }: {
   pdf: PdfDoc;
   pageNumber: number;
   zoom: number;
   eager?: boolean;
   highlightQuery?: string;
+  boxHeight: number;
+  onReady?: (pageNumber: number) => void;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const onReadyRef = useRef(onReady);
+  onReadyRef.current = onReady;
   const [inView, setInView] = useState(!!eager);
-  const [ready, setReady] = useState(false);
   const [boxes, setBoxes] = useState<FindBox[]>([]);
   const [canvasCss, setCanvasCss] = useState<{ width: number; height: number } | null>(null);
 
@@ -247,7 +253,7 @@ function PdfPageCanvas({
       if (!cancelled) {
         setCanvasCss({ width: Math.floor(viewport.width), height: Math.floor(viewport.height) });
         setBoxes(nextBoxes);
-        setReady(true);
+        onReadyRef.current?.(pageNumber);
       }
     })().catch(() => {});
     return () => {
@@ -260,7 +266,7 @@ function PdfPageCanvas({
       ref={wrapRef}
       data-pdf-page={pageNumber}
       className="flex justify-center py-3 px-2"
-      style={{ minHeight: ready ? undefined : 480 }}
+      style={{ minHeight: boxHeight || undefined }}
     >
       <div className="relative" style={canvasCss ? { width: canvasCss.width, height: canvasCss.height } : undefined}>
         <canvas ref={canvasRef} className="block max-w-full bg-white shadow-lg" />
@@ -308,6 +314,9 @@ export function ManualPdfViewer({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pdfRef = useRef<PdfDoc | null>(null);
   const searchGen = useRef(0);
+  const zoomRef = useRef(1);
+  const pendingJump = useRef<number | null>(null);
+  const jumpLockUntil = useRef(0);
 
   const [title, setTitle] = useState(titleFromQuery || 'Service Manual');
   const [catalogPath, setCatalogPath] = useState(storagePathFromQuery || '');
@@ -318,7 +327,9 @@ export function ManualPdfViewer({
   const [showChapters, setShowChapters] = useState(false);
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(0);
+  const [pageBoxHeight, setPageBoxHeight] = useState(0);
   const [zoom, setZoom] = useState(1);
+  zoomRef.current = zoom;
   const [loading, setLoading] = useState(true);
   const [progress, setProgress] = useState(0);
   const [error, setError] = useState<string | null>(null);
@@ -356,6 +367,17 @@ export function ManualPdfViewer({
       const doc = await openPdfDocument(pdfjs, src, (loaded, total) => {
         if (total > 0) setProgress(Math.min(95, Math.round((loaded / total) * 100)));
       });
+      let height = 0;
+      try {
+        const first = await doc.getPage(1);
+        const base = first.getViewport({ scale: 1 });
+        const width = scrollRef.current?.clientWidth || 800;
+        height = fittedPageBoxHeight(base.width, base.height, width, zoomRef.current);
+      } catch {
+        const width = scrollRef.current?.clientWidth || 800;
+        height = fittedPageBoxHeight(612, 792, width, zoomRef.current);
+      }
+      setPageBoxHeight(height);
       attachDoc(doc);
     },
     [attachDoc]
@@ -506,12 +528,22 @@ export function ManualPdfViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [manualId, sourceUrl]);
 
-  const scrollToPage = useCallback((n: number) => {
+  const scrollToPage = useCallback((n: number, behavior: ScrollBehavior = 'smooth') => {
     const root = scrollRef.current;
     if (!root) return;
     const el = root.querySelector(`[data-pdf-page="${n}"]`);
-    if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    if (el) el.scrollIntoView({ behavior, block: 'start' });
   }, []);
+
+  const jumpToPhysicalPage = useCallback(
+    (n: number) => {
+      pendingJump.current = n;
+      jumpLockUntil.current = Date.now() + 800;
+      setPage(n);
+      scrollToPage(n, 'auto');
+    },
+    [scrollToPage]
+  );
 
   const goToPage = useCallback(
     (n: number) => {
@@ -533,7 +565,11 @@ export function ManualPdfViewer({
           .sort((a, b) => b.intersectionRatio - a.intersectionRatio)[0];
         if (!visible) return;
         const n = Number((visible.target as HTMLElement).dataset.pdfPage);
-        if (n) setPage(n);
+        if (!n) return;
+        const locked = pendingJump.current;
+        if (locked && n !== locked && Date.now() < jumpLockUntil.current) return;
+        if (locked && n === locked) pendingJump.current = null;
+        setPage(n);
       },
       { root, threshold: [0.35, 0.6] }
     );
@@ -580,19 +616,30 @@ export function ManualPdfViewer({
   }
 
   useEffect(() => {
-    if (loading || !pageCount) return;
-    const target = asPositivePage(initialPage);
-    if (target) {
-      const t = window.setTimeout(() => goToPage(Math.min(target, pageCount)), 60);
-      return () => clearTimeout(t);
+    if (loading || !pageCount || !pageBoxHeight) return;
+    const requested = asPositivePage(initialPage);
+    if (requested) {
+      const target = viewerPhysicalPage(requested, pageCount);
+      if (!target) return;
+      let cancelled = false;
+      const jump = () => {
+        if (!cancelled) jumpToPhysicalPage(target);
+      };
+      const first = window.setTimeout(jump, 0);
+      const again = window.setTimeout(jump, 80);
+      return () => {
+        cancelled = true;
+        window.clearTimeout(first);
+        window.clearTimeout(again);
+      };
     }
     const find = String(initialSection || initialFind || '').trim();
     if (!find) return;
     setQuery(find);
     void runSearch(0, find);
-    // Deep-link jump after the PDF pages mount.
+    // Deep-link jump after the fitted page height is known.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docEpoch, loading, pageCount]);
+  }, [docEpoch, loading, pageCount, pageBoxHeight, initialPage, jumpToPhysicalPage]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -816,7 +863,7 @@ export function ManualPdfViewer({
               </div>
             </div>
           )}
-          {!loading && !error && pages.length > 0 && pdf && (
+          {!loading && !error && pages.length > 0 && pdf && pageBoxHeight > 0 && (
             <div key={docEpoch} className="pb-8">
               {pages.map((n) => (
                 <PdfPageCanvas
@@ -824,8 +871,12 @@ export function ManualPdfViewer({
                   pdf={pdf}
                   pageNumber={n}
                   zoom={zoom}
-                  eager={n <= 2}
+                  boxHeight={pageBoxHeight}
+                  eager={n <= 2 || n === viewerPhysicalPage(asPositivePage(initialPage) || 0, pageCount)}
                   highlightQuery={hits.includes(n) ? query : ''}
+                  onReady={(readyPage) => {
+                    if (pendingJump.current === readyPage) jumpToPhysicalPage(readyPage);
+                  }}
                 />
               ))}
             </div>

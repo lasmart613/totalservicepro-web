@@ -159,6 +159,12 @@ test('single-file manuals attach the storage_path PDF; folders use chapters or a
   const feedsOnly = Array.from({ length: 151 }, () => 'handpiece notes').join('\f') + '\f RF deck calibration target value';
   assert.equal(indexedExcerptPage(feedsOnly, 'RF deck calibration'), 152);
   assert.equal(indexedExcerptPage('no markers here about calibration', 'calibration'), undefined);
+  const printed = 'Error 43 is described on pages 7-8 of the CO2RE handpiece chapter.';
+  assert.equal(indexedExcerptPage(printed, 'handpiece'), undefined);
+  const physical = `${'earlier page '.repeat(10)}\f`.repeat(149) + 'pages 7-8 RF deck calibration target';
+  assert.equal(indexedExcerptPage(physical, 'RF deck calibration'), 150);
+  const stamped = 'pages 7-8 intro\f[[pdfpage:150]] error 43 RF deck calibration';
+  assert.equal(indexedExcerptPage(stamped, 'RF deck calibration'), 150);
 });
 
 const XEO_105 = {
@@ -330,6 +336,12 @@ test('large manuals are not attached, and a missing corpus still gets general gu
   assert.match(fn, /function humanizeDeviceCode/);
   assert.match(fn, /function indexedExcerptPage/);
   assert.match(fn, /indexedExcerptPage\(full, query\)/);
+  const pageFn = fn.slice(fn.indexOf('function lastPhysicalPageStamp'), fn.indexOf('function indexedExcerptSection'));
+  assert.match(pageFn, /pdfpage/);
+  assert.match(pageFn, /\\f/);
+  assert.doesNotMatch(pageFn, /pages\?\|pg/);
+  const extractFn = fn.slice(fn.indexOf('export function extractPageRef'), fn.indexOf('function hitPage'));
+  assert.match(extractFn, /isPrintedPageRange/);
   assert.match(fn, /yag:\s*'YAG'/);
   const client = readFileSync(join(here, '../../app/ai-assistant/AIAssistantClient.tsx'), 'utf8');
   assert.match(client, /assistantManualPicker/);

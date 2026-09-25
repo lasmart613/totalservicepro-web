@@ -44,11 +44,22 @@ export function extractSectionRef(text: string): string | undefined {
   return undefined;
 }
 
+/** A printed span such as "pages 7-8" is a label, not a physical page. */
+function isPrintedPageRange(text: string, matchEnd: number): boolean {
+  return /^\s*[-–—]\s*\d/.test(text.slice(matchEnd));
+}
+
 /** First explicit page mention in a retrieved passage or model reply. */
 export function extractPageRef(text: string): number | undefined {
   const raw = String(text || '');
-  const page = raw.match(/\b(?:pages?|pp?\.?)\s*(\d{1,4})\b/i);
-  return page?.[1] ? asPositivePage(page[1]) : undefined;
+  const re = /\b(?:pages?|pp?\.?)\s*(\d{1,4})\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(raw))) {
+    if (isPrintedPageRange(raw, match.index + match[0].length)) continue;
+    const page = asPositivePage(match[1]);
+    if (page) return page;
+  }
+  return undefined;
 }
 
 export function extractPageRefs(text: string): number[] {
@@ -58,6 +69,7 @@ export function extractPageRefs(text: string): number[] {
   const re = /\b(?:pages?|pp?\.?)\s*(\d{1,4})\b/gi;
   let m: RegExpExecArray | null;
   while ((m = re.exec(raw))) {
+    if (isPrintedPageRange(raw, m.index + m[0].length)) continue;
     const page = asPositivePage(m[1]);
     if (!page || seen.has(page)) continue;
     seen.add(page);
@@ -213,7 +225,7 @@ export function formatAssistantHtml(content: string, extra?: ManualCitation[]): 
       manualId: scopedId,
       title: citations.find((c) => c.title)?.title,
     };
-    body = body.replace(/\b((?:page|p\.?)\s*)(\d{1,4})\b/gi, (_all, prefix: string, num: string) => {
+    body = body.replace(/\b((?:page|p\.?)\s*)(\d{1,4})(?!\s*[-–—]\s*\d)/gi, (_all, prefix: string, num: string) => {
       const page = asPositivePage(num);
       const hit = (page && citations.find((c) => c.page === page)) || {
         ...fallback,

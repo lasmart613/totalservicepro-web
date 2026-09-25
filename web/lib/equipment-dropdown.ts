@@ -123,6 +123,7 @@ const MANUFACTURER_ALIAS_GROUPS: string[][] = [
     'ConBio / HOYA',
     'HOYA / ConBio',
   ],
+  ['Candela', 'candela', 'Syneron-Candela', 'Syneron Candela', 'Syneron'],
   ['Quanta System', 'Quanta', 'QuantaSystem'],
   [
     'AMS / Laserscope',
@@ -146,10 +147,21 @@ const MANUFACTURER_ALIAS_GROUPS: string[][] = [
     'Coherent/Lumenis',
     'Lumenis/Coherent',
   ],
+  ['DEKA', 'Deka', 'deka'],
+  ['GE OEC', 'Ge Oec', 'GE/OEC', 'OEC'],
 ];
 
 /** Always show this label once any alias in the group is present. */
-const FORCE_MANUFACTURER_LABEL = new Set(['AMS / Laserscope', 'Lumenis (Coherent)']);
+const FORCE_MANUFACTURER_LABEL = new Set(['AMS / Laserscope', 'Lumenis (Coherent)', 'DEKA', 'GE OEC']);
+
+/** Exact manufacturer option text, keyed by norm(). */
+const MANUFACTURER_DISPLAY: Record<string, string> = {
+  'ams / laserscope': 'AMS / Laserscope',
+  'lumenis (coherent)': 'Lumenis (Coherent)',
+  deka: 'DEKA',
+  'ge oec': 'GE OEC',
+  candela: 'Candela',
+};
 
 /**
  * Display labels keyed by modelDedupeKey. Option values stay a stored spelling.
@@ -171,13 +183,26 @@ const MODEL_DISPLAY: Record<string, string> = {
   smoothbeam: 'SmoothBeam',
   bmbq810: 'BMBQ-810',
   fels25a: 'FELS-25A',
+  fels25aog: 'FELS-25A',
   visulasyagiii: 'Visulas YAG III',
   harmonyxl: 'Harmony XL',
   optimisii: 'Optimis II',
-  sm079: 'SM079',
-  '9900': '9900',
+  '9900': 'OEC 9900',
+  oec9900: 'OEC 9900',
   auraxp15wktp: 'Aura XP (15W KTP)',
+  gentlemaxpro7551064nm: 'GentleMax Pro (755/1064 nm)',
+  'gentlemaxpro755+1064nm': 'GentleMax Pro (755/1064 nm)',
+  picoway: 'PicoWay',
+  picowaypicosecondlaser: 'PicoWay',
+  'apogeeelite+eliteplus': 'Apogee Elite / Elite+',
+  acupulseduoco: 'AcuPulse Duo CO₂',
+  acupulseduoco2: 'AcuPulse Duo CO₂',
+  inteliguideco25w: 'InteliGuide CO₂ 25W',
+  inteliguideco225w: 'InteliGuide CO₂ 25W',
 };
+
+/** Opaque codes with no known product name. Hidden from pickers; stored values stay. */
+const HIDDEN_PICKER_KEYS = new Set(['sm079', 'pl003']);
 
 const MODEL_WORD_CASE: Record<string, string> = {
   gentlemax: 'GentleMax',
@@ -214,6 +239,12 @@ const UPPER_MODEL_TOKENS = new Set([
   'nd',
   'er',
   'mpx',
+  'et',
+  'xc',
+  'hps',
+  'hr',
+  'mgl',
+  'si',
 ]);
 
 function looseBrandKey(value: string): string {
@@ -298,18 +329,22 @@ function humanizeCompactFallback(raw: string): string {
     .join(' ');
 }
 
+/** Plain lowercase snake/kebab/word codes. Anything with capitals or symbols is already a name. */
+function isPlainLowercaseCode(value: string): boolean {
+  return /^[a-z0-9]+(?:[_-][a-z0-9]+)*$/.test(String(value || '').trim());
+}
+
 /** Display text for a model code. Does not change the saved option value. */
 export function humanizeModelCode(value: string): string {
   const raw = String(value || '').trim();
   if (!raw) return '';
   const mapped = MODEL_DISPLAY[modelDedupeKey(raw)];
   if (mapped) return mapped;
+  if (!isPlainLowercaseCode(raw)) return raw;
   if (looksLikeInternalCode(raw) || /[_-]/.test(raw)) {
     return raw.split(/[_-]+/).filter(Boolean).map(formatModelToken).join(' ');
   }
-  if (/[A-Z]/.test(raw) && !/[_-]/.test(raw) && humanCasingScore(raw) > 1 && !/\s/.test(raw)) return raw;
-  if (raw === raw.toLowerCase() && /^[a-z0-9]+$/.test(raw)) return humanizeCompactFallback(raw);
-  return formatModelLabel(raw);
+  return humanizeCompactFallback(raw);
 }
 
 export function titleCaseInternalCode(value: string): string {
@@ -323,13 +358,36 @@ export function titleCaseInternalCode(value: string): string {
 export function catalogChoiceLabel(value: string, explicit?: string | null): string {
   const display = String(explicit || '').trim();
   const raw = String(value || '').trim();
-  const mapped = MODEL_DISPLAY[modelDedupeKey(raw)] || (display ? MODEL_DISPLAY[modelDedupeKey(display)] : undefined);
+  const mapped =
+    (raw && MODEL_DISPLAY[modelDedupeKey(raw)]) ||
+    (display && MODEL_DISPLAY[modelDedupeKey(display)]) ||
+    '';
   if (mapped) return mapped;
-  if (display && !isCompactModelCode(display) && !looksLikeInternalCode(display)) {
-    if (/[()/]/.test(display)) return display;
-    return humanizeModelCode(display);
-  }
+  if (display && !isPlainLowercaseCode(display)) return display;
   return humanizeModelCode(raw || display);
+}
+
+/** Manufacturer option text. Curated names are shown exactly; only a lowercase code is title-cased. */
+export function manufacturerChoiceLabel(value: string, explicit?: string | null): string {
+  const raw = String(value || '').trim();
+  const display = String(explicit || '').trim();
+  const mapped =
+    (raw && MANUFACTURER_DISPLAY[norm(raw)]) ||
+    (display && MANUFACTURER_DISPLAY[norm(display)]) ||
+    '';
+  if (mapped) return mapped;
+  if (display && !isPlainLowercaseCode(display)) return display;
+  const source = display || raw;
+  if (!source) return '';
+  if (!isPlainLowercaseCode(source)) return source;
+  if (looksLikeInternalCode(source) || /[_-]/.test(source)) {
+    return source
+      .split(/[_-]+/)
+      .filter(Boolean)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+      .join(' ');
+  }
+  return source.charAt(0).toUpperCase() + source.slice(1);
 }
 
 function catalogAliasSet(name: string): Set<string> {
@@ -611,6 +669,7 @@ export function dedupeModelChoices(choices: CatalogChoice[]): CatalogChoice[] {
     const value = String(choice.value || '').trim();
     if (!value) continue;
     const key = modelChoiceKey(value);
+    if (HIDDEN_PICKER_KEYS.has(key)) continue;
     const label = catalogChoiceLabel(value, choice.label);
     const prev = byKey.get(key);
     byKey.set(key, prev ? mergeModelChoice(prev, { value, label }) : { value, label });
@@ -626,6 +685,18 @@ export function dedupeModelChoices(choices: CatalogChoice[]): CatalogChoice[] {
       byKey.set(key, mergeModelChoice(base, extra));
       byKey.delete(other);
     }
+  }
+  const curatedOwner = new Map<string, string>();
+  for (const key of Array.from(byKey.keys())) {
+    const curated = MODEL_DISPLAY[key];
+    if (!curated) continue;
+    const prevKey = curatedOwner.get(curated);
+    if (!prevKey || !byKey.has(prevKey)) {
+      curatedOwner.set(curated, key);
+      continue;
+    }
+    byKey.set(prevKey, mergeModelChoice(byKey.get(prevKey)!, byKey.get(key)!));
+    byKey.delete(key);
   }
   return Array.from(byKey.values()).sort(
     (a, b) => a.label.localeCompare(b.label) || a.value.localeCompare(b.value)
@@ -664,6 +735,24 @@ export function mergedModelOption(stored: string, options: CatalogChoice[]): str
   return hit?.value || raw;
 }
 
+/**
+ * Keep a ticket's saved model on the picker only while its own manufacturer
+ * is selected. Other brands must not inherit that model.
+ */
+export function withSavedModelChoice(
+  choices: CatalogChoice[],
+  savedModel: string,
+  selectedMake: string,
+  savedMake: string
+): CatalogChoice[] {
+  const selected = String(selectedMake || '').trim();
+  const saved = String(savedMake || '').trim();
+  if (!savedModel || !saved || !selected || !manufacturerNamesEqual(selected, saved)) return choices;
+  const value = mergedModelOption(savedModel, choices);
+  if (!value || choices.some((option) => option.value === value)) return choices;
+  return [...choices, { value, label: catalogChoiceLabel(value) }];
+}
+
 function collapseManufacturerNames(names: string[]): string[] {
   const groups: string[][] = [];
   for (const name of names) {
@@ -696,7 +785,7 @@ export function listCatalogManufacturerChoices(live?: LiveCatalog): CatalogChoic
   const rows = live?.manufacturers || [];
   return listCatalogManufacturers(live).map((value) => {
     const row = rows.find((r) => r.name && manufacturerNamesEqual(r.name, value));
-    return { value, label: catalogChoiceLabel(value, row?.label) };
+    return { value, label: manufacturerChoiceLabel(value, row?.label) };
   });
 }
 

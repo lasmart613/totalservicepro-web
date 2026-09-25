@@ -154,31 +154,29 @@ function excerptAnchor(raw: string, query: string): number {
   return at < 0 ? 0 : at;
 }
 
-function lastIndexedPageMarker(text: string): number | undefined {
-  const paren = [...String(text || '').matchAll(/\(\s*p\.?\s*(\d{1,4})\s*\)/gi)];
-  if (paren.length) {
-    const n = Number(paren[paren.length - 1][1]);
-    if (n >= 1 && n <= 9999) return Math.floor(n);
-  }
-  const pages = [...String(text || '').matchAll(/\b(?:pages?|pg|pp)\.?\s*(\d{1,4})\b/gi)];
-  if (!pages.length) return undefined;
-  const n = Number(pages[pages.length - 1][1]);
-  if (n > 1 && n <= 9999) return Math.floor(n);
+function lastPhysicalPageStamp(text: string): number | undefined {
+  const stamps = [...String(text || '').matchAll(/\[\[pdfpage:(\d{1,4})\]\]/g)];
+  if (!stamps.length) return undefined;
+  const n = Number(stamps[stamps.length - 1][1]);
+  if (n >= 1 && n <= 9999) return Math.floor(n);
   return undefined;
 }
 
 /**
- * Page for an indexed-PDF excerpt. Prefers a nearby "(p. N)" marker, then the
- * last "page N", then a form-feed page count. Page 1 is not invented.
+ * Physical PDF page (1-based) for an indexed excerpt.
+ * Uses [[pdfpage:N]] stamps or form-feed breaks carried from extraction.
+ * Printed labels such as "page 7-8" or "(p. 7)" are not page numbers.
+ * Page 1 is not invented when the excerpt has no physical marker.
  */
 export function indexedExcerptPage(raw: string, query: string): number | undefined {
   const text = String(raw || '');
   if (!text) return undefined;
   const at = excerptAnchor(text, query);
-  const marked = lastIndexedPageMarker(text.slice(Math.max(0, at - 5000), at + 400));
-  if (marked) return marked;
   if (at <= 0) return undefined;
-  const feeds = text.slice(0, at).match(/\f/g);
+  const before = text.slice(0, at);
+  const stamped = lastPhysicalPageStamp(before);
+  if (stamped) return stamped;
+  const feeds = before.match(/\f/g);
   if (feeds && feeds.length) return Math.min(9999, feeds.length + 1);
   return undefined;
 }
@@ -195,7 +193,10 @@ export function indexedExcerptSection(raw: string, query: string): string | unde
 
 /** Pull query-relevant windows from indexed PDF text (AI fallback). */
 export function excerptManualSearchText(text: string, query: string, maxChars = 8000): string {
-  const body = String(text || '').replace(/\s+/g, ' ').trim();
+  const body = String(text || '')
+    .replace(/\[\[pdfpage:\d+\]\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
   if (!body) return '';
   if (body.length <= maxChars) return body;
 

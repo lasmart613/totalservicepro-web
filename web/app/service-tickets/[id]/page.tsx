@@ -12,10 +12,12 @@ import { updateOmittingCharOverflow } from '@/lib/char-overflow';
 import { AssignFseSelect } from '@/components/AssignFseSelect';
 import {
   catalogChoiceLabel,
+  manufacturerChoiceLabel,
   mergedManufacturerOption,
   mergedModelOption,
   normalizeManufacturerRow,
   normalizeModelRow,
+  withSavedModelChoice,
 } from '@/lib/equipment-dropdown';
 import { listManufacturerChoices, listModelChoices } from '@/lib/laser-catalog';
 import {
@@ -298,7 +300,7 @@ export default function ServiceTicketDetail() {
   );
   const makeChoices =
     makeValue && !makeOptions.some((option) => option.value === makeValue)
-      ? [...makeOptions, { value: makeValue, label: makeValue }]
+      ? [...makeOptions, { value: makeValue, label: manufacturerChoiceLabel(makeValue) }]
       : makeOptions;
   const modelOptions = listModelChoices(makeValue || storedMake, {
     ...liveCatalog,
@@ -306,10 +308,12 @@ export default function ServiceTicketDetail() {
   });
   const storedModel = String(formData.equipment_model || '');
   const modelValue = mergedModelOption(storedModel, modelOptions);
-  const modelChoices =
-    modelValue && !modelOptions.some((option) => option.value === modelValue)
-      ? [...modelOptions, { value: modelValue, label: catalogChoiceLabel(modelValue) }]
-      : modelOptions;
+  const modelChoices = withSavedModelChoice(
+    modelOptions,
+    storedModel,
+    makeValue || storedMake,
+    String(ticket.equipment_make || '')
+  );
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -436,7 +440,7 @@ export default function ServiceTicketDetail() {
                     ))}
                   </select>
                 ) : <input className="input" value={formData.equipment_make || ''} onChange={(e) => handleInputChange('equipment_make', e.target.value)} />
-              ) : ticket.equipment_make} />
+              ) : manufacturerChoiceLabel(ticket.equipment_make)} />
 
               <Field label="Model" value={isEditing ? (
                 dbLaserModels.length > 0 ? (

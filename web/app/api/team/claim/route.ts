@@ -78,16 +78,19 @@ export async function POST(req: NextRequest) {
 
     let inv: any = null;
     if (body.inviteId) {
-      const { data: byId } = await admin
+      const { data: byId, error: byIdError } = await admin
         .from('engineer_invitations')
         .select('*')
         .eq('id', body.inviteId)
         .maybeSingle();
+      if (byIdError) {
+        return NextResponse.json({ ok: false, error: 'Could not look up the team invite.' }, { status: 500 });
+      }
       const invEmail = String(byId?.email || '').toLowerCase().trim();
       if (byId && (!invEmail || invEmail === email)) inv = byId;
     }
     if (!inv) {
-      const { data: openInv } = await admin
+      const { data: openInv, error: openError } = await admin
         .from('engineer_invitations')
         .select('*')
         .ilike('email', email)
@@ -95,16 +98,22 @@ export async function POST(req: NextRequest) {
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
+      if (openError) {
+        return NextResponse.json({ ok: false, error: 'Could not look up the team invite.' }, { status: 500 });
+      }
       inv = openInv;
     }
     if (!inv && !body.inviteId) {
-      const { data: anyInv } = await admin
+      const { data: anyInv, error: anyError } = await admin
         .from('engineer_invitations')
         .select('*')
         .ilike('email', email)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
+      if (anyError) {
+        return NextResponse.json({ ok: false, error: 'Could not look up the team invite.' }, { status: 500 });
+      }
       inv = anyInv;
     }
 

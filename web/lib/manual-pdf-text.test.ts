@@ -21,6 +21,8 @@ test('fixture PDF text is extractable for library body search', () => {
   assert.match(text, /reservoir/i);
   assert.match(text, /collimator/i);
   assert.match(normalizeManualSearchText(text), /page 1 of 3/);
+  assert.match(text, /\[\[pdfpage:3\]\]/);
+  assert.ok(text.includes('\f'));
 });
 
 test('clip and normalize keep substring search usable', () => {
