@@ -72,11 +72,17 @@ test('document-only citation still opens that manual', () => {
 
 test('index-excerpt cite chips keep (p. N) instead of opening page 1', () => {
   const html = formatAssistantHtml(
-    'CO2RE handpiece check (p. 152).\n\n— Source: CO2RE\n[[cite:id=17&t=CO2RE]]',
+    'CO2RE handpiece check (p. 152).\n\n— Source: CO2RE\n[[cite:id=17&p=152&t=CO2RE]]',
     [{ manualId: 17, title: 'CO2RE' }]
   );
   assert.match(html, /href="\/manuals\/view\?id=17[^"]*page=152/);
   assert.doesNotMatch(html, /id=17[^"]*page=1(?!\d)/);
+  // Without a physical cite/stamp, prose "p. 152" is a printed label: no page=152.
+  const unstamped = formatAssistantHtml(
+    'CO2RE handpiece check (p. 152).\n\n— Source: CO2RE\n[[cite:id=17&t=CO2RE]]',
+    [{ manualId: 17, title: 'CO2RE' }]
+  );
+  assert.doesNotMatch(unstamped, /page=152/);
 });
 
 test('cite URL includes page= when marker has p= and omits it only when unknown', () => {
@@ -102,7 +108,7 @@ test('cite URL includes page= when marker has p= and omits it only when unknown'
   );
 });
 
-test('prose page mentions upgrade document-level Source chips', () => {
+test('prose page mentions never become page= unless a physical stamp matches', () => {
   assert.equal(extractPageRef('See page 42 of the flow-switch procedure.'), 42);
   assert.equal(extractPageRef('p.18 harness pinout'), 18);
   assert.equal(extractPageRef('no page mentioned'), undefined);
@@ -112,17 +118,32 @@ test('prose page mentions upgrade document-level Source chips', () => {
     [{ manualId: 17, title: 'CO2RE' }]
   );
   assert.doesNotMatch(rangeHtml, /page=7(?!\d)/);
-  const attached = attachProsePages(
+  // Printed labels in prose do not mint pages.
+  const unstamped = attachProsePages(
     [{ manualId: 105, title: 'Cutera Xeo System' }],
     'Open page 42 and page 18 of the Xeo book.'
   );
-  assert.equal(attached[0].page, 42);
-  assert.ok(attached.some((c) => c.page === 18));
+  assert.equal(unstamped.length, 1);
+  assert.equal(unstamped[0].page, undefined);
+  // Same physical stamp present: page is physical, so it may upgrade.
+  const stamped = attachProsePages(
+    [{ manualId: 105, title: 'Cutera Xeo System' }],
+    'Open page 42 of the Xeo book. [[pdfpage:42]]'
+  );
+  assert.equal(stamped[0].page, 42);
+  // Backend physical page wins over a printed "page 7" in prose (CO2RE #43 = PDF p.150).
+  const co2re = formatAssistantHtml(
+    'Error 43 is in the troubleshooting table on page 7 (7-8).\n\n— Source: Candela CO2RE, p.150\n[[cite:id=17&p=150&t=Candela+CO2RE]]',
+    []
+  );
+  assert.doesNotMatch(co2re, /page=7(?!\d)/);
+  assert.match(co2re, /href="\/manuals\/view\?id=17[^"]*page=150/);
   const html = formatAssistantHtml(
     'See page 42 of the flow switch procedure.\n\n— Source: Cutera Xeo System\n[[cite:id=105&t=Cutera+Xeo+System]]',
     []
   );
-  assert.match(html, /href="\/manuals\/view\?id=105[^"]*page=42/);
+  assert.doesNotMatch(html, /page=42/);
+  assert.match(html, /href="\/manuals\/view\?id=105/);
 });
 
 test('printed page ranges stay plain unless a physical stamp matches the first page', () => {
@@ -179,7 +200,13 @@ test('meta citations and section extraction', () => {
     'See page 4 of the alignment procedure.'
   );
   assert.equal(linked[0].manualId, 17);
-  assert.equal(linked[0].page, 4);
+  assert.equal(linked[0].page, undefined, 'printed prose page never becomes page=');
+  const physical = citationsForAssistantReply(
+    { citations: [{ manualId: 17, title: 'CO2RE', page: 150 }] },
+    17,
+    'See the troubleshooting table on page 7-8 and page 7.'
+  );
+  assert.deepEqual(physical.map((c) => c.page), [150]);
   const general = citationsForAssistantReply(
     { generalGuidance: true, manualId: 17, citations: [{ manualId: 17, page: 4, title: 'CO2RE' }] },
     17,

@@ -79,12 +79,13 @@ export function extractPageRefs(text: string): number[] {
 }
 
 /**
- * xAI chunks often omit page_number. If the passage or reply names "page N",
- * attach that to document-level cites so Source chips get `page=`.
+ * Model prose names PRINTED labels ("troubleshooting table on page 7-8", "page 7").
+ * Those stay in the text but only become `page=` when the same physical
+ * [[pdfpage:N]] stamp is present. Otherwise cites keep the backend's physical page.
  */
 export function attachProsePages(citations: ManualCitation[], text: string): ManualCitation[] {
   if (!citations.length) return [];
-  const pages = extractPageRefs(text);
+  const pages = extractPageRefs(text).filter((page) => hasPhysicalPageStamp([text], page));
   if (!pages.length) return mergeCitations(citations);
   const scoped = citations[0];
   const upgraded = citations.map((c, i) => {
@@ -180,7 +181,9 @@ export function mergeCitations(...lists: Array<ManualCitation[] | undefined | nu
       out.push({ manualId: id, ...(page ? { page } : {}), ...(section ? { section } : {}), ...(title ? { title } : {}) });
     }
   }
-  return out;
+  // A bare document cite (opens page 1) is redundant once the same manual has a physical page/section.
+  const located = new Set(out.filter((c) => c.page || c.section).map((c) => c.manualId));
+  return out.filter((c) => c.page || c.section || !located.has(c.manualId));
 }
 
 export function citationLabel(c: ManualCitation): string {
@@ -249,10 +252,11 @@ export function formatAssistantHtml(
       /\b((?:pages?|p\.?)\s*)(\d{1,4})(?!\d)(?!\s*[-–—]\s*\d)/gi,
       (_all, prefix: string, num: string) => {
       const page = asPositivePage(num);
-      const hit = (page && citations.find((c) => c.page === page)) || {
-        ...fallback,
-        ...(page ? { page } : {}),
-      };
+      // A prose "page 7" is a printed label unless a cite or stamp says it is physical.
+      const physical = !!page && hasPhysicalPageStamp([content, indexText], page);
+      const hit =
+        (page && citations.find((c) => c.page === page)) ||
+        (physical ? { ...fallback, page } : citations[0] || fallback);
       return viewerAnchor(hit, `${prefix}${num}`);
     });
     body = body.replace(
