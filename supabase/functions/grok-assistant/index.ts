@@ -467,7 +467,8 @@ export function citationsFromParts(
   const out: ManualCitation[] = []
   const seen = new Set<string>()
   for (const p of parts) {
-    const page = p.page && p.page > 0 ? p.page : extractPageRef(p.text)
+    // Physical page only (stamp / xAI page_number). Never regex a printed "7-8" label out of passage text.
+    const page = p.page && p.page > 0 ? p.page : undefined
     const section = p.section || extractSectionRef(p.text)
     const key = `${page || ''}|${section || ''}|${p.source}`
     if (seen.has(key)) continue
@@ -495,29 +496,35 @@ export function formatCitationLine(citations: ManualCitation[], fallback = ''): 
   return `\n\n— Source: ${labels.join('; ')}\n${markers}`
 }
 
-/** Upgrade document-level cites when the model names "page N". */
-export function attachProsePages(citations: ManualCitation[], text: string): ManualCitation[] {
+/**
+ * Model prose ("troubleshooting table on page 7-8") names PRINTED page labels.
+ * Those may stay in the answer text but never become a citation page= value —
+ * citation pages come only from the [[pdfpage:N]] stamp before the matched
+ * excerpt (or xAI page_number). Returns the citations unchanged (deduped).
+ */
+export function attachProsePages(citations: ManualCitation[], _text: string): ManualCitation[] {
   if (!citations.length) return []
-  const pages: number[] = []
-  const seen = new Set<number>()
-  const re = /\b(?:pages?|pp?\.?)\s*(\d{1,4})\b/gi
-  let m: RegExpExecArray | null
-  while ((m = re.exec(String(text || '')))) {
-    const n = Number(m[1])
-    if (!Number.isFinite(n) || n < 1 || n > 9999 || seen.has(n)) continue
-    seen.add(n)
-    pages.push(Math.floor(n))
-  }
-  if (!pages.length) return citations
-  const scoped = citations[0]
-  const out = citations.map((c, i) => (c.page ? c : { ...c, page: pages[i] || pages[0] }))
-  const have = new Set(out.map((c) => c.page).filter((p): p is number => !!p))
-  for (const page of pages) {
-    if (have.has(page)) continue
-    out.push({ manualId: scoped.manualId, title: scoped.title, page })
-    have.add(page)
+  const seen = new Set<string>()
+  const out: ManualCitation[] = []
+  for (const c of citations) {
+    const key = `${c.manualId}|${c.page || ''}|${c.section || ''}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push(c)
   }
   return out.slice(0, 8)
+}
+
+/** Stamped manual_search_index excerpt leads context and owns the page cites. */
+export function mergeIndexedParts(
+  indexed: Retrieved | null,
+  parts: Retrieved[]
+): { parts: Retrieved[]; citeParts: Retrieved[] } {
+  if (!indexed) return { parts, citeParts: parts }
+  if (indexed.page && indexed.page > 0) {
+    return { parts: [indexed, ...parts].slice(0, 12), citeParts: [indexed] }
+  }
+  return parts.length ? { parts, citeParts: parts } : { parts: [indexed], citeParts: [indexed] }
 }
 
 export function preferServiceManualName(name: string): boolean {
@@ -1863,6 +1870,14 @@ serve(async (req) => {
             'hybrid',
             expectedFilenames
           )
+          // Cheap DB read; runs beside collection search so a stamped index row
+          // always supplies the physical page even when collection chunks exist.
+          const indexedP: Promise<Retrieved | null> = manualMeta
+            ? searchIndexedManualText(db, manualMeta.id, sq, manualLabel).catch((e) => {
+                console.warn('indexed manual search failed soft', e)
+                return null
+              })
+            : Promise.resolve(null)
           const resolveP = wantResolve
             ? withBudget(
                 resolveCollectionManualDocs({
@@ -1922,7 +1937,7 @@ serve(async (req) => {
           let parts = searched.parts
           let filteredOut = searched.filteredOut
 
-          if (!parts.length && faultCodes.length && Date.now() - chatStarted < 18_000) {
+          if (!parts.length && faultCodes.length && Date.now() - chatStarted < 18_000 && !(await indexedP)?.page) {
             const kw = await searchManualCollection(
               XAI_KEY,
               sq,
@@ -1939,10 +1954,9 @@ serve(async (req) => {
             }
           }
 
-          if (!parts.length && manualMeta) {
-            const indexed = await searchIndexedManualText(db, manualMeta.id, sq, manualLabel)
-            if (indexed) parts = [indexed]
-          }
+          const merged = mergeIndexedParts(await indexedP, parts)
+          parts = merged.parts
+          const citeParts = merged.citeParts
 
           if (parts.length > 0) {
             hasManualPassages = true
@@ -1951,7 +1965,7 @@ serve(async (req) => {
             const manCite = srcs.map((c) => c.split('/').filter((p) => p && p !== 'shared').join(' › ')).join('; ')
             const scopedId = asManualId(manualMeta?.id)
             if (scopedId != null) {
-              manualCitations = citationsFromParts(parts, scopedId, manualLabel || manCite)
+              manualCitations = citationsFromParts(citeParts, scopedId, manualLabel || manCite)
               citationLine = formatCitationLine(manualCitations, manCite)
             } else {
               citationLine = `\n\n— Source: ${manCite}`

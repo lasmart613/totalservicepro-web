@@ -55,6 +55,8 @@ import { listManufacturerChoices, listModelChoices, OTHER_MODEL } from '@/lib/la
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import {
   OTHER_MANUFACTURER,
+  isEquipmentSentinel,
+  withStoredPickerChoice,
   resolveTicketEquipment,
   selectionAfterManufacturerChange,
 } from '@/lib/ticket-equipment';
@@ -163,23 +165,27 @@ export default function ServiceSchedule() {
     () => listManufacturerChoices(catalog),
     [catalog.manufacturers, catalog.models]
   );
-  const makeValue = mergedManufacturerOption(
-    form.equipment_make,
-    manufacturers.map((option) => option.value)
-  );
-  const makeChoices =
-    makeValue && !manufacturers.some((option) => option.value === makeValue)
-      ? [...manufacturers, { value: makeValue, label: makeValue }]
-      : manufacturers;
+  // "Other / custom…" is a sentinel: keep it selected as-is (a catalog maker named
+  // "Other" must not absorb it) and never list it as a model option.
+  const makeIsOther = isEquipmentSentinel(form.equipment_make);
+  const makeValue = makeIsOther
+    ? OTHER_MANUFACTURER
+    : mergedManufacturerOption(
+        form.equipment_make,
+        manufacturers.map((option) => option.value)
+      );
+  const makeChoices = withStoredPickerChoice(manufacturers, makeValue);
   const modelOptions = useMemo(
-    () => ((makeValue || form.equipment_make) ? listModelChoices(makeValue || form.equipment_make, catalog) : []),
-    [form.equipment_make, makeValue, catalog.manufacturers, catalog.models]
+    () =>
+      makeIsOther
+        ? []
+        : (makeValue || form.equipment_make) ? listModelChoices(makeValue || form.equipment_make, catalog) : [],
+    [form.equipment_make, makeValue, makeIsOther, catalog.manufacturers, catalog.models]
   );
-  const modelValue = mergedModelOption(form.equipment_model, modelOptions);
-  const modelChoices =
-    modelValue && !modelOptions.some((option) => option.value === modelValue)
-      ? [...modelOptions, { value: modelValue, label: catalogChoiceLabel(modelValue) }]
-      : modelOptions;
+  const modelValue = isEquipmentSentinel(form.equipment_model)
+    ? OTHER_MODEL
+    : mergedModelOption(form.equipment_model, modelOptions);
+  const modelChoices = withStoredPickerChoice(modelOptions, modelValue, (v) => catalogChoiceLabel(v));
 
   const year = cursor.getFullYear();
   const month0 = cursor.getMonth();
