@@ -165,6 +165,26 @@ test('single-file manuals attach the storage_path PDF; folders use chapters or a
   assert.equal(indexedExcerptPage(physical, 'RF deck calibration'), 150);
   const stamped = 'pages 7-8 intro\f[[pdfpage:150]] error 43 RF deck calibration';
   assert.equal(indexedExcerptPage(stamped, 'RF deck calibration'), 150);
+
+  const pages: string[] = [];
+  for (let n = 1; n <= 161; n++) {
+    let text = `CO2RE service manual laser section ${n}.`;
+    if (n === 2) text += ' On the CO2RE what does error mean for this laser.';
+    if (n === 3) text += ' error laser power notes.';
+    if (n === 4) text += ' CO2RE error 43 contents.';
+    if (n === 151) text += ' CO2RE error 43 CW Laser Power Too High. The CW laser power is too high.';
+    pages.push(`[[pdfpage:${n}]] ${text}`);
+  }
+  const co2re = pages.join('\f');
+  for (const question of [
+    'On the CO2RE, what does error #43 CW Laser Power Too High mean',
+    'error 43 CW laser power too high',
+    'CO2RE error 43',
+  ]) {
+    const page = indexedExcerptPage(co2re, question);
+    assert.ok(page != null && Math.abs(page - 151) <= 1, `${question} -> ${page}`);
+    assert.match(excerptManualSearchText(co2re, question), /Power Too High/i);
+  }
 });
 
 const XEO_105 = {

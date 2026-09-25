@@ -148,7 +148,7 @@ export default function GodManualsCatalogPage() {
             : ` Grok collection attach failed (${lastCollection?.skipped || 'see logs'}). Search index still wrote.`
         : '';
       const detail = target
-        ? `Catalog id ${target}: indexed ${indexed} (${processed} attempted). Incomplete PDFs are included when storage_path is a real file.${collectionNote}`
+        ? `Catalog id ${target}: indexed ${indexed} (${processed} attempted). Incomplete PDFs are included when storage_path is a real file. Large books such as CO2RE (id 17) should use Reindex pages (no Grok) instead — Index this manual times out.${collectionNote}`
         : attachAll
           ? `Catch-up: indexed ${indexed} PDF text row(s), attached ${attached} to Grok (${processed} attempted).${collectionNote}`
           : `Indexed ${indexed} PDF(s) this run (${processed} attempted). Repeat if the catalog is large.`;
@@ -156,6 +156,38 @@ export default function GodManualsCatalogPage() {
       toast.success(detail);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Reindex failed');
+    } finally {
+      setReindexing(false);
+    }
+  }
+
+  async function reindexPages(manualId: string) {
+    setReindexing(true);
+    try {
+      const headers = await godAuthHeader();
+      const target = String(manualId || '').trim();
+      let pageFrom = 1;
+      let last: { totalPages?: number; done?: boolean; nextPage?: number | null; error?: string } = {};
+      for (let i = 0; i < 80; i++) {
+        const res = await fetch('/api/god/manuals/reindex-one', {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({ manualId: Number(target), pageFrom, pageCount: 40 }),
+        });
+        const json = (await res.json().catch(() => ({}))) as typeof last & { ok?: boolean };
+        if (!res.ok || !json.ok) {
+          toast.error(json.error || 'Page reindex failed');
+          return;
+        }
+        last = json;
+        if (json.done || !json.nextPage) break;
+        pageFrom = json.nextPage;
+      }
+      const detail = `Catalog id ${target}: reindexed ${last.totalPages || 0} physical pages into manual_search_index. The Grok collection was not changed.`;
+      setReindexNote(detail);
+      toast.success(detail);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Page reindex failed');
     } finally {
       setReindexing(false);
     }
@@ -235,10 +267,15 @@ export default function GodManualsCatalogPage() {
           every unstamped file/folder PDF into the shared xAI collection and stamps{' '}
           <code>xai_collection_id</code> (Larry only; one PDF per request — repeat until remaining
           is 0). Use a catalog id + <strong className="text-[var(--text)]">Attach to Grok
-          collection</strong> for a single row. Live grok-assistant still searches the shared
-          collection; the stamp marks that this PDF was uploaded. <code>is_incomplete</code> does
-          not skip either action. Clear the Incomplete badge separately in God → Tables → manuals
-          if the PDF is actually complete.
+          collection</strong> for a single row. For one large PDF,{' '}
+          <strong className="text-[var(--text)]">Reindex pages (no Grok)</strong> rewrites only
+          that manual’s <code>manual_search_index</code> row in 40-page chunks with physical
+          page stamps. Manual 17 (CO2RE) is that path: catalog id 17, then Reindex pages. Do not
+          use Index this manual for id 17 — it times out and must not replace the row. This page
+          reindex never uploads the Grok collection attachment. Live grok-assistant still searches
+          the shared collection; the stamp marks that this PDF was uploaded.{' '}
+          <code>is_incomplete</code> does not skip either action. Clear the Incomplete badge
+          separately in God → Tables → manuals if the PDF is actually complete.
         </p>
         <div className="flex flex-wrap items-end gap-2 mb-2">
           <button
@@ -272,8 +309,17 @@ export default function GodManualsCatalogPage() {
             className="btn btn-secondary text-sm"
             disabled={reindexing || !reindexManualId.trim()}
             onClick={() => reindexBatch(true, reindexManualId)}
+            title="Times out on large PDFs. Use Reindex pages for manual 17."
           >
             Index this manual
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary text-sm"
+            disabled={reindexing || !reindexManualId.trim()}
+            onClick={() => reindexPages(reindexManualId)}
+          >
+            Reindex pages (no Grok)
           </button>
           <button
             type="button"

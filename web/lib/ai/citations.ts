@@ -207,11 +207,21 @@ function viewerAnchor(c: ManualCitation, label: string): string {
   return `<a class="ai-cite-link" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
 }
 
+function hasPhysicalPageStamp(sources: Array<string | undefined>, page: number): boolean {
+  const re = new RegExp(`\\[\\[pdfpage:${page}\\]\\]`);
+  return sources.some((src) => re.test(String(src || '')));
+}
+
 /**
  * Safe HTML for an assistant bubble: escaped text, bold, citation links.
  * Page/section phrases become links only when a scoped manualId is known.
+ * A printed range links to its first page only when that physical page is stamped.
  */
-export function formatAssistantHtml(content: string, extra?: ManualCitation[]): string {
+export function formatAssistantHtml(
+  content: string,
+  extra?: ManualCitation[],
+  indexText?: string
+): string {
   const fromMarkers = parseCitationMarkers(content);
   const citations = attachProsePages(mergeCitations(extra, fromMarkers), stripCitationMarkers(content));
   const scopedId = citations[0]?.manualId;
@@ -219,13 +229,25 @@ export function formatAssistantHtml(content: string, extra?: ManualCitation[]): 
   let body = humanizeGeneralGuidanceDisplay(stripCitationMarkers(content));
   body = escapeHtml(body);
   body = body.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+  body = body.replace(/\[\[pdfpage:\d+\]\]/g, '');
 
   if (scopedId) {
     const fallback: ManualCitation = {
       manualId: scopedId,
       title: citations.find((c) => c.title)?.title,
     };
-    body = body.replace(/\b((?:page|p\.?)\s*)(\d{1,4})(?!\s*[-–—]\s*\d)/gi, (_all, prefix: string, num: string) => {
+    body = body.replace(
+      /\b((?:pages?|p\.?)\s*)(\d{1,4})(?!\d)\s*([-–—])\s*(\d{1,4})(?!\d)/gi,
+      (all, prefix: string, num: string, dash: string, end: string) => {
+        const page = asPositivePage(num);
+        if (!page || !hasPhysicalPageStamp([content, indexText], page)) return all;
+        const hit = citations.find((c) => c.page === page) || { ...fallback, page };
+        return viewerAnchor(hit, `${prefix}${num}${dash}${end}`);
+      }
+    );
+    body = body.replace(
+      /\b((?:pages?|p\.?)\s*)(\d{1,4})(?!\d)(?!\s*[-–—]\s*\d)/gi,
+      (_all, prefix: string, num: string) => {
       const page = asPositivePage(num);
       const hit = (page && citations.find((c) => c.page === page)) || {
         ...fallback,

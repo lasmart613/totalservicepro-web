@@ -9,6 +9,7 @@ import {
   escapeIlike,
   folderPrefixForManual,
   indexManualSearchText,
+  mergeStampedManualPages,
   pdfPathsForManual,
   shouldKeepExistingSearchText,
 } from './manual-search-index.ts';
@@ -109,6 +110,31 @@ test('reindex keeps a richer manual_search_index row instead of writing a worse 
   assert.equal(result.skipped, 'kept_existing_index');
   assert.equal(result.chars, existing.trim().length);
   assert.equal(upserts, 0);
+});
+
+test('stamped page merge is idempotent and ignores unstamped text', () => {
+  const first = mergeStampedManualPages('loose text with no stamps', [{ page: 1, text: 'cover' }], 4);
+  assert.match(first, /\[\[pdfpage:1\]\] cover/);
+  assert.match(first, /\[\[pdfpage:4\]\]/);
+  assert.equal((first.match(/\[\[pdfpage:\d+\]\]/g) || []).length, 4);
+  assert.doesNotMatch(first, /loose text/);
+  const second = mergeStampedManualPages(first, [{ page: 3, text: 'CW Laser Power Too High' }], 4);
+  assert.match(second, /\[\[pdfpage:1\]\] cover/);
+  assert.match(second, /\[\[pdfpage:3\]\] CW Laser Power Too High/);
+  const again = mergeStampedManualPages(second, [{ page: 3, text: 'CW Laser Power Too High' }], 4);
+  assert.equal(again, second);
+});
+
+test('single-manual page reindex never attaches the Grok collection', () => {
+  const route = readFileSync(join(here, '../app/api/god/manuals/reindex-one/route.ts'), 'utf8');
+  const godPage = readFileSync(join(here, '../app/admin/god/manuals/page.tsx'), 'utf8');
+  assert.match(route, /requireGodCaller/);
+  assert.match(route, /reindexManualPageRange/);
+  assert.match(route, /manualId":17/);
+  assert.doesNotMatch(route, /attachCollection|grok-assistant|xai_collection/);
+  assert.match(godPage, /Reindex pages \(no Grok\)/);
+  assert.match(godPage, /reindex-one/);
+  assert.match(godPage, /catalog id 17/);
 });
 
 test('search API is catalog-wide and never returns PDF bodies or signed URLs', () => {

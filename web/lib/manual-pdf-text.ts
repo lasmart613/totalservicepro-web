@@ -138,12 +138,71 @@ function looseStreamText(latin: string): string {
   return parts.join('\n');
 }
 
-function pdfObjectBodies(latin: string): Map<number, string> {
-  const objs = new Map<number, string>();
-  const re = /(\d+)\s+\d+\s+obj\b([\s\S]*?)\bendobj\b/g;
+type ScannedObject = { header: string; payload: string | null };
+
+/**
+ * Walk objects by /Length so compressed streams are not scanned as objects.
+ * Object streams (PDF 1.5+) hold the page tree for manuals such as CO2RE.
+ */
+function scanPdfObjects(latin: string): Map<number, ScannedObject> {
+  const objs = new Map<number, ScannedObject>();
+  const re = /(\d+)\s+\d+\s+obj/g;
   let match: RegExpExecArray | null;
-  while ((match = re.exec(latin))) objs.set(Number(match[1]), match[2]);
+  while ((match = re.exec(latin))) {
+    const id = Number(match[1]);
+    const bodyStart = match.index + match[0].length;
+    const window = latin.slice(bodyStart, bodyStart + 2000);
+    const streamMatch = /stream\r?\n/.exec(window);
+    const endObjAt = window.indexOf('endobj');
+    if (streamMatch && (endObjAt < 0 || streamMatch.index < endObjAt)) {
+      const header = window.slice(0, streamMatch.index);
+      const absStream = bodyStart + streamMatch.index + streamMatch[0].length;
+      const lengthMatch = header.match(/\/Length\s+(\d+)/);
+      let raw = '';
+      let nextFrom = absStream;
+      if (lengthMatch) {
+        const length = Number(lengthMatch[1]);
+        raw = latin.slice(absStream, absStream + length);
+        nextFrom = absStream + length;
+      } else {
+        const endStream = latin.indexOf('endstream', absStream);
+        raw = endStream >= 0 ? latin.slice(absStream, endStream) : '';
+        nextFrom = endStream >= 0 ? endStream : absStream + 1;
+      }
+      const payload = /FlateDecode|\/Fl\b/.test(header) ? tryInflate(Buffer.from(raw, 'latin1')) : raw;
+      objs.set(id, { header, payload });
+      const endObj = latin.indexOf('endobj', nextFrom);
+      re.lastIndex = endObj >= 0 ? endObj + 6 : nextFrom;
+      continue;
+    }
+    const end = latin.indexOf('endobj', bodyStart);
+    if (end < 0) break;
+    objs.set(id, { header: latin.slice(bodyStart, end), payload: null });
+    re.lastIndex = end + 6;
+  }
   return objs;
+}
+
+function expandObjectStreams(objs: Map<number, ScannedObject>): Map<number, string> {
+  const bodies = new Map<number, string>();
+  for (const [id, obj] of objs) {
+    bodies.set(id, obj.header);
+    if (!obj.payload || !/\/ObjStm\b/.test(obj.header)) continue;
+    const first = Number(obj.header.match(/\/First\s+(\d+)/)?.[1]);
+    const count = Number(obj.header.match(/\/N\s+(\d+)/)?.[1]);
+    if (!Number.isFinite(first) || !Number.isFinite(count) || count < 1) continue;
+    const toks = obj.payload.slice(0, first).trim().split(/\s+/);
+    if (toks.length < count * 2) continue;
+    const packed = obj.payload.slice(first);
+    for (let k = 0; k < count; k++) {
+      const innerId = Number(toks[k * 2]);
+      const off = Number(toks[k * 2 + 1]);
+      const end = k + 1 < count ? Number(toks[(k + 1) * 2 + 1]) : packed.length;
+      if (!Number.isFinite(innerId) || off < 0 || end < off || end > packed.length) continue;
+      bodies.set(innerId, packed.slice(off, end));
+    }
+  }
+  return bodies;
 }
 
 function contentObjectIds(body: string): number[] {
@@ -153,57 +212,97 @@ function contentObjectIds(body: string): number[] {
   return one ? [Number(one[1])] : [];
 }
 
-function pageIdsInOrder(objs: Map<number, string>): number[] {
-  let pagesId: number | null = null;
-  for (const [id, body] of objs) {
-    if (/\/Type\s*\/Catalog\b/.test(body)) {
-      const ref = body.match(/\/Pages\s+(\d+)\s+\d+\s+R/);
-      if (ref) pagesId = Number(ref[1]);
-      break;
+function pageBodiesInOrder(bodies: Map<number, string>): string[] {
+  let root: number | null = null;
+  let best = -1;
+  for (const [id, body] of bodies) {
+    if (!/\/Type\s*\/Pages\b/.test(body)) continue;
+    const count = Number(body.match(/\/Count\s+(\d+)/)?.[1] || 0);
+    if (count >= best) {
+      best = count;
+      root = id;
     }
   }
-  if (pagesId == null) return [];
-  const out: number[] = [];
+  if (root == null) {
+    for (const [id, body] of bodies) {
+      if (/\/Type\s*\/Catalog\b/.test(body)) {
+        const ref = body.match(/\/Pages\s+(\d+)\s+\d+\s+R/);
+        if (ref) root = Number(ref[1]);
+        break;
+      }
+    }
+  }
+  if (root == null) return [];
+  const out: string[] = [];
   const seen = new Set<number>();
   const walk = (id: number) => {
     if (seen.has(id)) return;
     seen.add(id);
-    const body = objs.get(id);
+    const body = bodies.get(id);
     if (!body) return;
-    if (/\/Type\s*\/Pages\b/.test(body) || /\/Kids\s*\[/.test(body)) {
+    if (/\/Type\s*\/Pages\b/.test(body)) {
       const kids = body.match(/\/Kids\s*\[([^\]]*)\]/);
       if (!kids) return;
       for (const ref of kids[1].matchAll(/(\d+)\s+\d+\s+R/g)) walk(Number(ref[1]));
       return;
     }
-    if (/\/Type\s*\/Page\b/.test(body) || /\/Contents\b/.test(body)) out.push(id);
+    if (/\/Type\s*\/Page(?!s)\b/.test(body)) out.push(body);
   };
-  walk(pagesId);
+  walk(root);
   return out;
 }
 
-function textForObject(objs: Map<number, string>, id: number): string {
-  const body = objs.get(id) || '';
-  const streams = [...body.matchAll(/stream\r?\n([\s\S]*?)endstream/g)];
-  return streams.map((stream) => textFromStream(body, stream[1] || '')).join(' ');
+function textForContent(id: number, objs: Map<number, ScannedObject>): string {
+  const obj = objs.get(id);
+  if (!obj?.payload) return '';
+  return extractOperators(obj.payload);
 }
 
+export type PdfPageText = { page: number; text: string };
+
 /**
- * Page-ordered text with a form feed and [[pdfpage:N]] stamp between pages.
- * Null when the page tree cannot be read.
+ * One page-tree walk. `pages` is the requested physical slice; `total` is the
+ * whole tree so a chunked reindex can resume without a second parse.
  */
-function pageOrderedSearchText(latin: string): string | null {
-  const objs = pdfObjectBodies(latin);
-  const pages = pageIdsInOrder(objs);
-  if (pages.length < 2) return null;
-  const parts = pages.map((pageId, index) => {
-    const body = objs.get(pageId) || '';
-    const contentIds = contentObjectIds(body);
-    const chunks = (contentIds.length ? contentIds : [pageId]).map((id) => textForObject(objs, id));
-    return `[[pdfpage:${index + 1}]] ${chunks.join(' ')}`.trim();
+export function extractPdfPageSlice(
+  bytes: Uint8Array | Buffer,
+  range?: { from?: number; count?: number }
+): { total: number; pages: PdfPageText[] } {
+  const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  if (!buf.length) return { total: 0, pages: [] };
+  const latin = buf.toString('latin1');
+  const objs = scanPdfObjects(latin);
+  const ordered = pageBodiesInOrder(expandObjectStreams(objs));
+  const from = Math.max(1, Math.floor(Number(range?.from) || 1));
+  const to = range?.count == null ? ordered.length : from + Math.max(0, Math.floor(range.count)) - 1;
+  const pages: PdfPageText[] = [];
+  ordered.forEach((body, index) => {
+    const page = index + 1;
+    if (page < from || page > to) return;
+    pages.push({
+      page,
+      text: contentObjectIds(body)
+        .map((id) => textForContent(id, objs))
+        .join(' ')
+        .replace(/\s+/g, ' ')
+        .trim(),
+    });
   });
-  if (!parts.some((part) => part.replace(/\[\[pdfpage:\d+\]\]/g, '').trim())) return null;
-  return parts.join('\f');
+  return { total: ordered.length, pages };
+}
+
+/** Physical pages in tree order. Empty when the file has no readable page tree. */
+export function extractPdfPages(
+  bytes: Uint8Array | Buffer,
+  range?: { from?: number; count?: number }
+): PdfPageText[] {
+  return extractPdfPageSlice(bytes, range).pages;
+}
+
+/** Index text with a [[pdfpage:N]] stamp and a form feed before every page after the first. */
+export function stampPdfPages(pages: PdfPageText[]): string {
+  if (!pages.length) return '';
+  return pages.map((page) => `[[pdfpage:${page.page}]] ${page.text}`.trim()).join('\f');
 }
 
 /**
@@ -211,16 +310,15 @@ function pageOrderedSearchText(latin: string): string | null {
  * service-manual PDFs; not a full renderer. Multi-page files keep the
  * physical page index (form feed + [[pdfpage:N]]), not the printed label.
  */
+/** Keep late physical pages. A 161-page manual does not fit in the old 200k clip. */
+export const PDF_INDEX_TEXT_MAX = 1_500_000;
+
 export function extractPdfSearchText(bytes: Uint8Array | Buffer): string {
   const buf = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
   if (!buf.length) return '';
-  const latin = buf.toString('latin1');
-  const loose = looseStreamText(latin);
-  const ordered = pageOrderedSearchText(latin);
-  const looseLen = loose.replace(/\s/g, '').length;
-  const orderedLen = ordered ? ordered.replace(/\[\[pdfpage:\d+\]\]/g, '').replace(/\s/g, '').length : 0;
-  if (ordered && orderedLen >= Math.max(1, looseLen) * 0.5) return clipManualSearchText(ordered);
-  return clipManualSearchText(loose);
+  const pages = extractPdfPages(buf);
+  if (pages.length) return clipManualSearchText(stampPdfPages(pages), PDF_INDEX_TEXT_MAX);
+  return clipManualSearchText(looseStreamText(buf.toString('latin1')), PDF_INDEX_TEXT_MAX);
 }
 
 export function looksLikePdf(bytes: Uint8Array | Buffer): boolean {

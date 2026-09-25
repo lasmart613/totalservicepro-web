@@ -17,6 +17,7 @@ import {
   mergedModelOption,
   normalizeManufacturerRow,
   normalizeModelRow,
+  withSavedManufacturerChoice,
   withSavedModelChoice,
 } from '@/lib/equipment-dropdown';
 import { listManufacturerChoices, listModelChoices } from '@/lib/laser-catalog';
@@ -298,10 +299,12 @@ export default function ServiceTicketDetail() {
     storedMake,
     makeOptions.map((option) => option.value)
   );
-  const makeChoices =
+  const makeChoices = withSavedManufacturerChoice(
     makeValue && !makeOptions.some((option) => option.value === makeValue)
       ? [...makeOptions, { value: makeValue, label: manufacturerChoiceLabel(makeValue) }]
-      : makeOptions;
+      : makeOptions,
+    String(ticket.equipment_make || '')
+  );
   const modelOptions = listModelChoices(makeValue || storedMake, {
     ...liveCatalog,
     equipmentType: formData.equipment_type,

@@ -3,7 +3,16 @@
  * public.manual_search_index. Do not import from client components.
  */
 
-import { extractPdfSearchText, looksLikePdf, MANUAL_SEARCH_PDF_MAX_BYTES } from './manual-pdf-text.ts';
+import {
+  clipManualSearchText,
+  extractPdfPageSlice,
+  extractPdfSearchText,
+  looksLikePdf,
+  MANUAL_SEARCH_PDF_MAX_BYTES,
+  PDF_INDEX_TEXT_MAX,
+  stampPdfPages,
+  type PdfPageText,
+} from './manual-pdf-text.ts';
 
 export const MANUALS_BUCKET = 'manuals';
 export const MANUAL_REINDEX_BATCH = 4;
@@ -14,6 +23,7 @@ export type ManualIndexRow = {
   storage_path?: string | null;
   is_folder?: unknown;
   chapter_metadata?: unknown;
+  entry_file_path?: string | null;
 };
 
 export type ManualIndexResult = {
@@ -152,6 +162,107 @@ export async function extractManualBodyText(
  * return empty or much shorter text than a prior good extraction and must
  * not wipe it. A comparable or longer extraction still replaces the row.
  */
+/** Replace one physical-page slice inside a stamped index. Unstamped text is dropped. */
+export function mergeStampedManualPages(
+  existing: string,
+  updates: Array<Pick<PdfPageText, 'page' | 'text'>>,
+  totalPages?: number
+): string {
+  const map = new Map<number, string>();
+  for (const part of String(existing || '').split('\f')) {
+    const match = part.match(/\[\[pdfpage:(\d{1,4})\]\]\s*([\s\S]*)$/);
+    if (!match) continue;
+    const page = Number(match[1]);
+    if (page >= 1) map.set(page, match[2].trim());
+  }
+  for (const update of updates) {
+    const page = Math.floor(Number(update?.page));
+    if (!Number.isFinite(page) || page < 1) continue;
+    map.set(page, String(update.text || '').replace(/\s+/g, ' ').trim());
+  }
+  let max = 0;
+  for (const page of map.keys()) if (page > max) max = page;
+  const total = Math.floor(Number(totalPages) || 0);
+  if (total > max) max = total;
+  if (!max) return '';
+  const pages: PdfPageText[] = [];
+  for (let page = 1; page <= max; page++) pages.push({ page, text: map.get(page) || '' });
+  return clipManualSearchText(stampPdfPages(pages), PDF_INDEX_TEXT_MAX);
+}
+
+export type ManualPageReindexResult = {
+  ok: boolean;
+  manualId: string;
+  pageFrom: number;
+  pageTo: number;
+  totalPages: number;
+  nextPage: number | null;
+  done: boolean;
+  chars: number;
+  path?: string;
+  error?: string;
+};
+
+/**
+ * Rewrite one manuals.id search row from physical PDF pages.
+ * Bypasses shouldKeepExistingSearchText. Does not attach a Grok collection.
+ * Call again with nextPage until done. pageCount is capped at 40.
+ */
+export async function reindexManualPageRange(
+  client: TableClient & { storage: StorageClient },
+  manual: ManualIndexRow,
+  opts?: { pageFrom?: number; pageCount?: number }
+): Promise<ManualPageReindexResult> {
+  const catalogId = asManualCatalogId(manual.id);
+  const manualId = catalogId == null ? '' : String(catalogId);
+  const pageFrom = Math.max(1, Math.floor(Number(opts?.pageFrom) || 1));
+  const pageCount = Math.min(40, Math.max(1, Math.floor(Number(opts?.pageCount) || 40)));
+  const empty = (error: string): ManualPageReindexResult => ({
+    ok: false,
+    manualId,
+    pageFrom,
+    pageTo: 0,
+    totalPages: 0,
+    nextPage: null,
+    done: false,
+    chars: 0,
+    error,
+  });
+  if (catalogId == null) return empty('missing_id');
+
+  let paths = pdfPathsForManual(manual);
+  const entry = clipPath(manual.entry_file_path);
+  if (!paths.length && entry && /\.pdf$/i.test(entry)) paths = [entry];
+  const folder = folderPrefixForManual(manual);
+  if (!paths.length && folder) paths = await listPdfPaths(client.storage, folder);
+  if (!paths.length) return empty('no_pdf_path');
+
+  const path = paths[0];
+  const bytes = await downloadPdfBytes(client.storage, path);
+  if (!bytes || !looksLikePdf(bytes)) return empty('no_pdf');
+
+  const sliced = extractPdfPageSlice(bytes, { from: pageFrom, count: pageCount });
+  if (!sliced.total) return empty('no_pages');
+  const existing = await readExistingSearchText(client, catalogId);
+  const merged = mergeStampedManualPages(existing, sliced.pages, sliced.total);
+  const saved = await upsertManualSearchIndex(client, catalogId, merged);
+  if (!saved.ok) return { ...empty(saved.error || 'upsert failed'), path, totalPages: sliced.total };
+  const pageTo = sliced.pages.length ? sliced.pages[sliced.pages.length - 1].page : Math.min(sliced.total, pageFrom + pageCount - 1);
+  const next = pageFrom + pageCount;
+  const done = next > sliced.total;
+  return {
+    ok: true,
+    manualId,
+    pageFrom,
+    pageTo,
+    totalPages: sliced.total,
+    nextPage: done ? null : next,
+    done,
+    chars: merged.length,
+    path,
+  };
+}
+
 export function shouldKeepExistingSearchText(
   existing: string | null | undefined,
   incoming: string | null | undefined

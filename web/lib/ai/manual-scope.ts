@@ -139,19 +139,145 @@ export function buildGrokChatPayload(opts: {
   };
 }
 
-function excerptAnchor(raw: string, query: string): number {
-  const lower = String(raw || '').toLowerCase();
+const EXCERPT_STOPWORDS = new Set([
+  'the', 'and', 'for', 'are', 'was', 'were', 'what', 'does', 'did', 'mean', 'means',
+  'how', 'why', 'when', 'where', 'which', 'who', 'with', 'from', 'this', 'that',
+  'into', 'about', 'your', 'you', 'our', 'can', 'could', 'would', 'should',
+  'please', 'tell', 'have', 'has', 'had', 'not', 'but', 'its', 'than', 'then',
+  'them', 'they', 'his', 'her', 'she', 'him', 'any', 'all', 'on', 'of', 'to', 'in',
+  'is', 'it', 'or', 'as', 'at', 'by', 'be', 'an', 'if',
+]);
+
+function excerptQueryTerms(query: string): string[] {
   const tokens = String(query || '')
     .toLowerCase()
     .split(/[^a-z0-9+]+/)
-    .filter((token) => token.length >= 3)
-    .slice(0, 8);
-  let at = -1;
+    .filter(Boolean);
+  const terms: string[] = [];
+  const seen = new Set<string>();
   for (const token of tokens) {
-    const i = lower.indexOf(token);
-    if (i >= 0 && (at < 0 || i < at)) at = i;
+    if (seen.has(token)) continue;
+    if (/^\d+$/.test(token)) {
+      seen.add(token);
+      terms.push(token);
+    } else if (token.length >= 2 && !EXCERPT_STOPWORDS.has(token)) {
+      seen.add(token);
+      terms.push(token);
+    }
+    if (terms.length >= 12) break;
   }
-  return at < 0 ? 0 : at;
+  return terms;
+}
+
+function termAt(hay: string, term: string, from: number): number {
+  let i = from;
+  while (i <= hay.length) {
+    const at = hay.indexOf(term, i);
+    if (at < 0) return -1;
+    const before = at > 0 ? hay.charAt(at - 1) : '';
+    const after = hay.charAt(at + term.length);
+    const edge = (ch: string) => ch === '' || /[^a-z0-9+]/.test(ch);
+    if (edge(before) && edge(after)) return at;
+    i = at + 1;
+  }
+  return -1;
+}
+
+function collectHits(hay: string, term: string, cap = 24): number[] {
+  const hits: number[] = [];
+  let from = 0;
+  while (hits.length < cap) {
+    const at = termAt(hay, term, from);
+    if (at < 0) break;
+    hits.push(at);
+    from = at + term.length;
+  }
+  return hits;
+}
+
+function termWeight(term: string, hits: number[]): number {
+  let w = 1;
+  if (/^\d+$/.test(term)) w += 8;
+  if (term.length <= 3) w += 2;
+  if (hits.length <= 3) w += 6;
+  else if (hits.length > 8) w *= 0.35;
+  return w;
+}
+
+/**
+ * Anchor where the specific query terms cluster.
+ * Numbers and rare tokens outrank stopwords and words that repeat on every page.
+ * Equal scores prefer the later hit so a contents line loses to the procedure.
+ * Returns -1 when nothing in the query is present.
+ */
+function excerptAnchor(raw: string, query: string): number {
+  const hay = String(raw || '').toLowerCase();
+  const terms = excerptQueryTerms(query);
+  if (!hay || !terms.length) return -1;
+  const positions = new Map<string, number[]>();
+  for (const term of terms) {
+    const hits = collectHits(hay, term);
+    if (hits.length) positions.set(term, hits);
+  }
+  if (!positions.size) return -1;
+
+  const seeds: number[] = [];
+  for (const [term, hits] of positions) {
+    if (termWeight(term, hits) < 1 && positions.size > 1) continue;
+    seeds.push(...hits);
+  }
+  if (!seeds.length) {
+    for (const hits of positions.values()) seeds.push(...hits);
+  }
+
+  let phraseAt = -1;
+  let phraseScore = 0;
+  const weighted = terms.filter((term) => {
+    const hits = positions.get(term);
+    return !!hits && termWeight(term, hits) >= 2;
+  });
+  const phraseTerms = (weighted.length >= 2 ? weighted : terms).slice(0, 8);
+  for (let len = Math.min(6, phraseTerms.length); len >= 2; len--) {
+    for (let i = 0; i + len <= phraseTerms.length; i++) {
+      const pattern = phraseTerms
+        .slice(i, i + len)
+        .map((term) => term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'))
+        .join('\\W+');
+      const re = new RegExp(pattern, 'ig');
+      let match: RegExpExecArray | null;
+      while ((match = re.exec(hay))) {
+        const score = len * 5;
+        if (score > phraseScore || (score === phraseScore && match.index > phraseAt)) {
+          phraseScore = score;
+          phraseAt = match.index;
+        }
+        if (match.index === re.lastIndex) re.lastIndex += 1;
+      }
+    }
+    if (phraseScore >= 15) break;
+  }
+  if (phraseAt >= 0) seeds.push(phraseAt);
+
+  const WINDOW = 700;
+  let bestScore = -1;
+  let bestAt = -1;
+  const seen = new Set<number>();
+  for (const seed of seeds) {
+    if (seen.has(seed)) continue;
+    seen.add(seed);
+    const start = Math.max(0, seed - WINDOW);
+    const end = seed + WINDOW;
+    let score = 0;
+    for (const [term, hits] of positions) {
+      if (hits.some((hit) => hit >= start && hit <= end)) score += termWeight(term, hits);
+    }
+    if (phraseAt >= start && phraseAt <= end) score += phraseScore;
+    if (score > bestScore || (score === bestScore && seed > bestAt)) {
+      bestScore = score;
+      bestAt = seed;
+    }
+  }
+  return bestAt < 0 || bestScore <= 0 ? -1 : bestAt;
 }
 
 function lastPhysicalPageStamp(text: string): number | undefined {
@@ -172,7 +298,7 @@ export function indexedExcerptPage(raw: string, query: string): number | undefin
   const text = String(raw || '');
   if (!text) return undefined;
   const at = excerptAnchor(text, query);
-  if (at <= 0) return undefined;
+  if (at < 0) return undefined;
   const before = text.slice(0, at);
   const stamped = lastPhysicalPageStamp(before);
   if (stamped) return stamped;
@@ -191,43 +317,24 @@ export function indexedExcerptSection(raw: string, query: string): string | unde
   return sect?.[1] || undefined;
 }
 
-/** Pull query-relevant windows from indexed PDF text (AI fallback). */
+/** Pull the same clustered hit indexedExcerptPage uses, then strip page stamps. */
 export function excerptManualSearchText(text: string, query: string, maxChars = 8000): string {
-  const body = String(text || '')
+  const raw = String(text || '');
+  const body = raw
     .replace(/\[\[pdfpage:\d+\]\]/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
   if (!body) return '';
   if (body.length <= maxChars) return body;
-
-  const tokens = String(query || '')
-    .toLowerCase()
-    .split(/[^a-z0-9+]+/)
-    .filter((t) => t.length >= 3)
-    .slice(0, 8);
-  if (!tokens.length) return body.slice(0, maxChars);
-
-  const lower = body.toLowerCase();
-  const windows: string[] = [];
-  const seen = new Set<number>();
-  for (const token of tokens) {
-    let from = 0;
-    for (let n = 0; n < 3; n++) {
-      const i = lower.indexOf(token, from);
-      if (i < 0) break;
-      const start = Math.max(0, i - 280);
-      if ([...seen].some((s) => Math.abs(s - start) < 200)) {
-        from = i + token.length;
-        continue;
-      }
-      seen.add(start);
-      windows.push(body.slice(start, start + 900));
-      from = i + token.length;
-    }
-  }
-  const joined = windows.join('\n…\n').trim();
-  if (!joined) return body.slice(0, maxChars);
-  return joined.slice(0, maxChars);
+  const at = excerptAnchor(raw, query);
+  if (at < 0) return body.slice(0, maxChars);
+  const start = Math.max(0, at - 400);
+  return raw
+    .slice(start, start + maxChars)
+    .replace(/\[\[pdfpage:\d+\]\]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxChars);
 }
 
 /** PDF to attach when the row is a single file (no chapter_metadata). */

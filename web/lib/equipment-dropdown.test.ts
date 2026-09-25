@@ -20,6 +20,7 @@ import {
   modelMatchesEquipmentType,
   normalizeManufacturerRow,
   normalizeModelRow,
+  withSavedManufacturerChoice,
   withSavedModelChoice,
 } from './equipment-dropdown.ts';
 import { listManufacturers, listModelsForManufacturer } from './laser-catalog.ts';
@@ -263,12 +264,14 @@ test('internal codes display a human label and duplicate spellings collapse', ()
   const mfrs = listCatalogManufacturers(live);
   assert.ok(mfrs.includes('Alma'));
   assert.equal(mfrs.includes('Alma Lasers'), false);
-  assert.ok(mfrs.includes('alex_trivantage'));
+  assert.equal(mfrs.includes('alex_trivantage'), false);
   assert.equal(mfrs.filter((name) => /hoya|conbio/i.test(name)).length, 1);
   assert.ok(mfrs.includes('HOYA ConBio'));
 
   const choices = listCatalogManufacturerChoices(live);
-  assert.equal(choices.find((c) => c.value === 'alex_trivantage')?.label, 'Alex TriVantage');
+  assert.equal(choices.some((c) => c.value === 'alex_trivantage'), false);
+  const keptMake = withSavedManufacturerChoice(choices, 'alex_trivantage');
+  assert.ok(keptMake.some((c) => c.value === 'alex_trivantage'));
   assert.equal(choices.find((c) => c.value === 'Alma')?.value, 'Alma');
 
   const modelChoices = listCatalogModelChoices('Candela', live);
@@ -321,8 +324,9 @@ test('HOYA Con-Bio aliases collapse and compact model codes humanize without cha
   assert.equal(catalogChoiceLabel('gentlemax'), 'GentleMax');
   assert.equal(catalogChoiceLabel('vbeam2'), 'Vbeam 2');
   assert.equal(catalogChoiceLabel('vpyag'), 'VP YAG');
-  assert.equal(catalogChoiceLabel('p100h'), 'P100H');
+  assert.equal(catalogChoiceLabel('p100h'), 'Pulse 100H/50H');
   assert.equal(catalogChoiceLabel('p30h'), 'P30H');
+  assert.equal(catalogChoiceLabel('p120'), 'P120');
   assert.equal(catalogChoiceLabel('yc1600'), 'YC-1600');
   assert.equal(catalogChoiceLabel('pl003'), 'PL003');
   assert.equal(catalogChoiceLabel('xeo2'), 'XEO2');
@@ -359,7 +363,7 @@ test('HOYA Con-Bio aliases collapse and compact model codes humanize without cha
   const gentle = candela.filter((choice) => choice.value.trim().toLowerCase() === 'gentlemax pro');
   assert.equal(gentle.length, 1);
   assert.equal(gentle[0].value, 'GentleMax Pro');
-  assert.equal(gentle[0].label, 'GentleMax Pro');
+  assert.equal(gentle[0].label, 'GentleMax Pro (755/1064 nm)');
 
   const cutera = listCatalogModelChoices('Cutera', {
     ...live,
@@ -414,6 +418,7 @@ test('stored manufacturer alias selects the merged dropdown option', () => {
   assert.match(edit, /mergedManufacturerOption/);
   assert.match(edit, /mergedModelOption/);
   assert.match(edit, /withSavedModelChoice/);
+  assert.match(edit, /withSavedManufacturerChoice/);
   assert.match(edit, /value=\{makeValue\}/);
   assert.match(edit, /value=\{modelValue\}/);
 });
@@ -470,7 +475,7 @@ test('near-duplicate models share one display label and keep the stored code', (
   assert.equal(catalogChoiceLabel('optimis ii'), 'Optimis II');
   assert.equal(catalogChoiceLabel('sm079'), 'SM079');
   assert.equal(catalogChoiceLabel('PL003'), 'PL003');
-  assert.equal(catalogChoiceLabel('9900'), 'OEC 9900');
+  assert.equal(catalogChoiceLabel('9900'), '9900');
   assert.equal(catalogChoiceLabel('zz9'), 'ZZ9');
 });
 
@@ -551,8 +556,8 @@ test('curated dropdown labels stay exact on the option builder', () => {
   assert.ok(live.some((choice) => choice.label === 'LightSheer ET'));
   assert.ok(live.some((choice) => choice.label === 'LightSheer XC'));
   assert.ok(live.some((choice) => choice.label === 'GreenLight HPS'));
-  assert.equal(live.filter((choice) => /9900/.test(choice.label)).length, 1);
-  assert.equal(live.find((choice) => /9900/.test(choice.label))?.label, 'OEC 9900');
+  assert.equal(live.filter((choice) => choice.label === '9900').length, 1);
+  assert.equal(live.filter((choice) => choice.label === 'OEC 9900').length, 1);
   assert.equal(live.filter((choice) => /FELS/i.test(choice.label)).length, 1);
   assert.equal(live.find((choice) => /FELS/i.test(choice.label))?.label, 'FELS-25A');
   assert.equal(live.filter((choice) => choice.label === 'PicoWay').length, 1);
@@ -569,6 +574,82 @@ test('curated dropdown labels stay exact on the option builder', () => {
   assert.ok(kept.some((choice) => choice.label === 'CO2RE' && choice.value === 'CO2RE'));
   assert.equal(catalogChoiceLabel('sm079'), 'SM079');
   assert.equal(catalogChoiceLabel('PL003'), 'PL003');
+});
+
+test('remaining curated labels merge and empty brands stay hidden', () => {
+  const lumenis = dedupeModelChoices([
+    { value: 'VersaPulse PowerSuite', label: 'VersaPulse PowerSuite' },
+    { value: 'VersaPulse PowerSuite Revc', label: 'VersaPulse PowerSuite Revc' },
+    { value: 'PowerSuite Holmium', label: 'PowerSuite Holmium' },
+    { value: 'PowerSuite 100W Holmium', label: 'PowerSuite 100W Holmium' },
+    { value: 'Acupulse Duo', label: 'Acupulse Duo' },
+    { value: 'AcuPulse Duo CO₂', label: 'AcuPulse Duo CO₂' },
+    { value: 'Ultrapulse 5000', label: 'Ultrapulse 5000' },
+    { value: 'Ultrapulse Duo', label: 'Ultrapulse Duo' },
+  ]);
+  assert.equal(lumenis.filter((choice) => /VersaPulse PowerSuite/i.test(choice.label)).length, 1);
+  assert.equal(lumenis.find((choice) => /VersaPulse PowerSuite/i.test(choice.label))?.label, 'VersaPulse PowerSuite Rev C');
+  assert.equal(lumenis.filter((choice) => /PowerSuite/i.test(choice.label) && !/VersaPulse/i.test(choice.label)).length, 1);
+  assert.ok(lumenis.some((choice) => choice.label === 'PowerSuite 100W Holmium'));
+  assert.equal(lumenis.filter((choice) => /AcuPulse Duo/i.test(choice.label)).length, 1);
+  assert.ok(lumenis.some((choice) => choice.label === 'AcuPulse Duo CO₂'));
+  assert.ok(lumenis.some((choice) => choice.label === 'UltraPulse 5000'));
+  assert.ok(lumenis.some((choice) => choice.label === 'UltraPulse Duo'));
+  assert.equal(catalogChoiceLabel('VersaPulse PowerSuite Revc'), 'VersaPulse PowerSuite Rev C');
+
+  const candela = dedupeModelChoices([
+    { value: 'GentleMax Pro', label: 'GentleMax Pro' },
+    { value: 'GentleMax Pro (755/1064 nm)', label: 'GentleMax Pro (755/1064 nm)' },
+    { value: 'GentleMax Pro Plus', label: 'GentleMax Pro Plus' },
+    { value: 'VBeam Perfecta', label: 'VBeam Perfecta' },
+    { value: 'VBeam Perfecta (Pulsed Dye)', label: 'VBeam Perfecta (Pulsed Dye)' },
+    { value: 'P100H', label: 'P100H' },
+    { value: 'P120', label: 'P120' },
+    { value: 'P30H', label: 'P30H' },
+  ]);
+  assert.equal(candela.filter((choice) => /GentleMax Pro/i.test(choice.label)).length, 2);
+  assert.ok(candela.some((choice) => choice.label === 'GentleMax Pro (755/1064 nm)'));
+  assert.ok(candela.some((choice) => choice.label === 'GentleMax Pro Plus'));
+  assert.equal(candela.filter((choice) => /VBeam Perfecta/i.test(choice.label)).length, 1);
+  assert.equal(candela.find((choice) => /VBeam Perfecta/i.test(choice.label))?.label, 'VBeam Perfecta (Pulsed Dye)');
+  assert.ok(candela.some((choice) => choice.label === 'Pulse 100H/50H'));
+  assert.equal(candela.some((choice) => /P120|P30H/.test(choice.label)), false);
+  assert.equal(catalogChoiceLabel('P30H'), 'P30H');
+  assert.equal(catalogChoiceLabel('P120'), 'P120');
+
+  const dornier = listCatalogModelChoices('Dornier', {
+    manufacturers: [normalizeManufacturerRow({ id: 40, name: 'Dornier' })],
+    models: [
+      normalizeModelRow({ id: 1, name: 'H20', label: 'H20', manufacturer: 'Dornier', manufacturer_id: 40 }),
+      normalizeModelRow({ id: 2, name: 'H20', label: 'H20 (Medilas holmium)', manufacturer: 'Dornier', manufacturer_id: 40 }),
+      normalizeModelRow({ id: 3, name: 'H20 H30', label: 'H20 H30', manufacturer: 'Dornier', manufacturer_id: 40 }),
+      normalizeModelRow({ id: 4, name: 'H30', label: 'H30 (Medilas holmium)', manufacturer: 'Dornier', manufacturer_id: 40 }),
+    ],
+  });
+  const h20 = dornier.filter((choice) => choice.label === 'Medilas H20');
+  const h30 = dornier.filter((choice) => choice.label === 'Medilas H30');
+  assert.equal(h20.length, 1);
+  assert.equal(h30.length, 1);
+  assert.equal(dornier.some((choice) => /H20 H30|Medilas holmium/i.test(choice.label)), false);
+
+  const ge = listCatalogModelChoices('GE OEC', {
+    manufacturers: [normalizeManufacturerRow({ id: 99, name: 'GE OEC' })],
+    models: [
+      normalizeModelRow({ id: 9, name: '9900', label: '9900', manufacturer: 'GE OEC', manufacturer_id: 99 }),
+    ],
+  });
+  assert.ok(ge.some((choice) => choice.label === 'OEC 9900'));
+  assert.equal(catalogChoiceLabel('9900'), '9900');
+
+  const polaris = {
+    manufacturers: [normalizeManufacturerRow({ id: 70, name: 'Polaris' })],
+    models: [
+      normalizeModelRow({ id: 8, name: 'P30H', label: 'P30H', manufacturer: 'Polaris', manufacturer_id: 70 }),
+    ],
+  };
+  assert.equal(listCatalogManufacturers(polaris).includes('Polaris'), false);
+  const kept = withSavedManufacturerChoice(listCatalogManufacturerChoices(polaris), 'Polaris');
+  assert.ok(kept.some((choice) => choice.value === 'Polaris'));
 });
 
 test('Android estimate generator loads manufacturers + laser_models', () => {
