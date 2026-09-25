@@ -5,7 +5,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'url';
 import {
   asManualId,
+  assistantManualPicker,
   buildGrokChatPayload,
+  humanizeDeviceCode,
+  humanizeGeneralGuidanceDisplay,
   excerptManualSearchText,
   generalGuidancePrefix,
   generalGuidanceSystemHint,
@@ -254,7 +257,30 @@ test('large manuals are not attached, and a missing corpus still gets general gu
   assert.equal(generalGuidancePrefix({ brand: 'Candela', model: 'Candela CO2RE' }), prefix);
   assert.equal(generalGuidancePrefix({ model: 'GentleMax' }),
     "I couldn't search this manual's text yet, so this is general guidance for the GentleMax:");
+  const zeiss = { brand: 'Zeiss', model: 'visulas_yag_iii', title: 'Visulas YAG III Service Manual' };
+  const zeissPrefix =
+    "I couldn't search this manual's text yet, so this is general guidance for the Zeiss Visulas YAG III:";
+  assert.equal(humanizeDeviceCode('visulas_yag_iii'), 'Visulas YAG III');
+  assert.equal(generalGuidancePrefix(zeiss), zeissPrefix);
+  assert.equal(edgeGeneralGuidancePrefix(zeiss), generalGuidancePrefix(zeiss));
+  assert.equal(
+    humanizeGeneralGuidanceDisplay(
+      "I couldn't search this manual's text yet, so this is general guidance for the Zeiss visulas_yag_iii:"
+    ),
+    zeissPrefix
+  );
   assert.match(generalGuidancePrefix({}), /this device:$/);
+  const picked = assistantManualPicker(
+    [
+      { id: '76', brand: 'Zeiss', title: 'Visulas YAG III Service Manual', storage_path: 'shared/zeiss/visulas_yag_iii/manual.pdf' },
+      { id: 16, brand: 'Cynosure', title: 'Elite Service Manual', storage_path: 'shared/cynosure/elite' },
+    ],
+    '76'
+  );
+  assert.equal(picked?.id, 76);
+  assert.equal(picked?.brand, 'Zeiss');
+  assert.match(picked?.storagePath || '', /visulas_yag_iii/);
+  assert.equal(assistantManualPicker([], 76), null);
   assert.equal(edgeGeneralGuidancePrefix(candela), generalGuidancePrefix(candela));
 
   const hinted = generalGuidanceSystemHint(candela);
@@ -292,6 +318,12 @@ test('large manuals are not attached, and a missing corpus still gets general gu
     fn,
     /I couldn't search this manual's text yet, so this is general guidance for the \$\{generalGuidanceDeviceName\(opts\)\}:/
   );
+  assert.match(fn, /function humanizeDeviceCode/);
+  assert.match(fn, /yag:\s*'YAG'/);
+  const client = readFileSync(join(here, '../../app/ai-assistant/AIAssistantClient.tsx'), 'utf8');
+  assert.match(client, /assistantManualPicker/);
+  assert.match(client, /fetchAllPages/);
+  assert.match(client, /eq\('id', urlManualId\)/);
   assert.doesNotMatch(chat, /manualCorpusFallbackMessage\(/);
 });
 

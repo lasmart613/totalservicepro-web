@@ -6,6 +6,8 @@
  * links — never raw PDF / signed Storage URLs.
  */
 
+import { humanizeGeneralGuidanceDisplay } from './manual-scope.ts';
+
 /** Keep in sync with MANUAL_VIEW_PATH — avoid importing manuals.ts (Node test vs Next). */
 const VIEWER_PATH = '/manuals/view';
 
@@ -201,7 +203,7 @@ export function formatAssistantHtml(content: string, extra?: ManualCitation[]): 
   const fromMarkers = parseCitationMarkers(content);
   const citations = attachProsePages(mergeCitations(extra, fromMarkers), stripCitationMarkers(content));
   const scopedId = citations[0]?.manualId;
-  let body = stripCitationMarkers(content);
+  let body = humanizeGeneralGuidanceDisplay(stripCitationMarkers(content));
   body = escapeHtml(body);
   body = body.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
 

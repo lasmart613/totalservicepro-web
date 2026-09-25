@@ -55,7 +55,7 @@ test('22001 without a typed limit still defaults to character(3)', () => {
   assert.equal(charLimitFromError('value too long for type character(3)'), 3);
 });
 
-test('ticket CHAR(3) shortens Medium/Scheduled/Repair then omits city and UUID', () => {
+test('ticket CHAR(3) shortens Medium/Scheduled/Repair, omits city, and keeps uuid assigned_to', () => {
   const payload: Record<string, unknown> = {
     ticket_number: 'LPX-TKT-20260827-01',
     customer_name: 'Orange Medical Spa',
@@ -69,9 +69,8 @@ test('ticket CHAR(3) shortens Medium/Scheduled/Repair then omits city and UUID',
     assigned_to: '11111111-1111-1111-1111-111111111111',
     customer_phone: '714-555-0100',
   };
-  assert.equal(stripOverflowingAddressFields(payload, 3), 'assigned_to');
-  assert.equal(payload.assigned_to, undefined);
   assert.equal(stripOverflowingAddressFields(payload, 3), 'customer_phone');
+  assert.equal(payload.assigned_to, '11111111-1111-1111-1111-111111111111');
   assert.equal(stripOverflowingAddressFields(payload, 3), 'customer_city');
   assert.equal(payload.customer_city, undefined);
   assert.equal(stripOverflowingAddressFields(payload, 3), 'priority');
@@ -83,6 +82,7 @@ test('ticket CHAR(3) shortens Medium/Scheduled/Repair then omits city and UUID',
   assert.equal(payload.ticket_number, 'LPX-TKT-20260827-01');
   assert.equal(payload.customer_name, 'Orange Medical Spa');
   assert.equal(payload.customer_state, 'CA');
+  assert.equal(payload.assigned_to, '11111111-1111-1111-1111-111111111111');
 });
 
 test('injectShortDefaults fills ticket_prefix and USA when payload already fits', () => {
@@ -116,7 +116,7 @@ test('insertOmittingCharOverflow retries ticket insert until CHAR(3) fields are 
   });
   assert.equal(error, null);
   assert.equal(data.id, 7);
-  assert.equal(payload.assigned_to, undefined);
+  assert.equal(payload.assigned_to, '11111111-1111-1111-1111-111111111111');
   assert.ok(['Med', undefined].includes(payload.priority as string | undefined));
   assert.ok(client.seen.length >= 2);
 });
@@ -144,6 +144,7 @@ test('Add Service Ticket submit uses omit-and-retry on every write, including ti
   assert.match(form, /insertOmittingCharOverflow\(supabase, 'organizations'/);
   assert.match(form, /insertOmittingCharOverflow\(\s*supabase,\s*'organization_customers'/);
   assert.match(form, /ticket_prefix: shortTicketPrefix/);
-  assert.match(form, /country: region\.country/);
+  assert.doesNotMatch(form, /country: region\.country/);
+  assert.match(form, /finalizeOrganizationPayload/);
   assert.doesNotMatch(schedule, /from\('service_tickets'\)\s*\n\s*\.insert\(\[payload\]\)/);
 });

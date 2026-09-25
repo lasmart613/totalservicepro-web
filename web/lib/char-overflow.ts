@@ -53,11 +53,12 @@ export const CHAR_OVERFLOW_KEEP = new Set([
   'organization_id',
   'service_organization_id',
   'customer_organization_id',
+  // Live service_tickets.assigned_to is uuid, not character(n).
+  'assigned_to',
 ]);
 
 const STRIP_FIRST = [
   'created_by',
-  'assigned_to',
   'specialties',
   'zip',
   'postal_code',

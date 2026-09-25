@@ -27,7 +27,7 @@ import {
 } from './customer-contacts.ts';
 import { normalizeRegionInput } from './geo.ts';
 import { syncPrimaryLocationFromForm } from './customer-locations.ts';
-import { emptySocialFields, socialPayloadFromForm, type SocialFormFields } from './social-links.ts';
+import { emptySocialFields, type SocialFormFields } from './social-links.ts';
 import { chunkIds, fetchAllPages, uniqueLinkedIds } from './supabase/paginate.ts';
 
 export const CUSTOMER_BIZ_TYPES = [
@@ -136,13 +136,11 @@ export function customerOrgPayload(
   const primaryName = directory.primaryRole
     ? roleDisplayName(directory.roles[directory.primaryRole])
     : '';
-  return {
+  const row: Record<string, unknown> = {
     name: form.name.trim(),
     address: form.address.trim() || null,
     city: form.city.trim() || null,
     state: region.state,
-    // Override a leftover CHAR(3) DEFAULT such as 'United States'.
-    ...(region.country ? { country: region.country } : {}),
     zip: form.zip.trim() || null,
     phone: form.phone.trim() || null,
     email: form.email.trim() || null,
@@ -150,14 +148,109 @@ export function customerOrgPayload(
     notes: form.notes.trim() || null,
     biz_type: biz,
     facility_type: biz,
-    // Empty array can still be written into a leftover CHAR(n) specialties column.
+    // Live specialties is text[]. Omit an empty array; never send a string.
     ...(form.specialties.length ? { specialties: form.specialties } : {}),
     contact_name: primaryName || form.contact_name.trim() || null,
     directory_contacts: serializeDirectoryContacts(directory),
     logo_url: form.logo_url.trim() && !isBlobLogoUrl(form.logo_url) ? form.logo_url.trim() : null,
-    ...socialPayloadFromForm(form),
     ...extras,
   };
+  return finalizeOrganizationPayload(row);
+}
+
+/**
+ * Live organizations columns (PostgREST schema cache).
+ * Social URL columns and country are not on the table — sending them is a
+ * PGRST204 per column, and a new customer with a state used to burn 9 of those
+ * (8 social nulls + country) before the insert succeeded.
+ * There is no contact or organization_type column.
+ * list_in_directory and storefront_enabled are boolean NOT NULL default false.
+ */
+const ORG_COLUMNS_NOT_ON_LIVE = new Set([
+  'country',
+  'country_code',
+  'currency',
+  'postal_code',
+  'contact',
+  'contact_person',
+  'organization_type',
+  'x_url',
+  'instagram_url',
+  'facebook_url',
+  'tiktok_url',
+  'youtube_url',
+  'linkedin_url',
+  'yelp_url',
+  'threads_url',
+]);
+
+const ORG_TYPE_VALUES = new Set([
+  'service_company',
+  'vendor',
+  'parts_supplier',
+  'customer',
+  'laser_clinic',
+  'laser_rental',
+  'laser_reseller',
+]);
+
+const ORG_TEXT_ARRAYS = ['supported_brands', 'service_territories', 'specialties'] as const;
+
+function asOrgTextArray(val: unknown): string[] | undefined {
+  if (val == null || val === '') return undefined;
+  const items = Array.isArray(val) ? val : typeof val === 'string' ? val.split(/[,|]/) : [];
+  const out = items.map((item) => String(item).trim()).filter(Boolean);
+  return out.length ? out : undefined;
+}
+
+function asOrgJsonObject(val: unknown): Record<string, unknown> | undefined {
+  if (val == null || val === '') return undefined;
+  if (typeof val === 'string') {
+    try {
+      const parsed = JSON.parse(val);
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        return parsed as Record<string, unknown>;
+      }
+    } catch {
+      return undefined;
+    }
+    return undefined;
+  }
+  if (typeof val === 'object' && !Array.isArray(val)) return val as Record<string, unknown>;
+  return undefined;
+}
+
+/** Shape an organizations insert/update so the first PostgREST call matches live columns. */
+export function finalizeOrganizationPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, val] of Object.entries(payload)) {
+    if (ORG_COLUMNS_NOT_ON_LIVE.has(key)) continue;
+    if (key === 'list_in_directory' || key === 'storefront_enabled') {
+      if (typeof val === 'boolean') out[key] = val;
+      continue;
+    }
+    if ((ORG_TEXT_ARRAYS as readonly string[]).includes(key)) {
+      const arr = asOrgTextArray(val);
+      if (arr) out[key] = arr;
+      continue;
+    }
+    if (key === 'directory_contacts') {
+      const json = asOrgJsonObject(val);
+      if (json) out[key] = json;
+      continue;
+    }
+    if (key === 'ticket_prefix') {
+      out[key] = shortTicketPrefix(typeof val === 'string' ? val : '');
+      continue;
+    }
+    if (key === 'type') {
+      const t = String(val ?? '').trim();
+      out[key] = ORG_TYPE_VALUES.has(t) ? t : 'customer';
+      continue;
+    }
+    out[key] = val;
+  }
+  return out;
 }
 
 export function directoryFormFromOrg(

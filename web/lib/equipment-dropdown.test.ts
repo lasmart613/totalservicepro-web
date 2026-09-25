@@ -302,6 +302,78 @@ test('Syneron does not list Candela models', () => {
   assert.equal(manufacturerMatches('Syneron', { id: 2, name: 'Candela' }), false);
 });
 
+test('HOYA Con-Bio aliases collapse and compact model codes humanize without changing values', () => {
+  assert.equal(catalogChoiceLabel('coolglide'), 'CoolGlide');
+  assert.equal(catalogChoiceLabel('co2re'), 'CO2RE');
+  assert.equal(catalogChoiceLabel('gentlemax'), 'GentleMax');
+  assert.equal(catalogChoiceLabel('vbeam2'), 'Vbeam 2');
+  assert.equal(catalogChoiceLabel('vpyag'), 'VP YAG');
+  assert.equal(catalogChoiceLabel('p100h'), 'P100H');
+  assert.equal(catalogChoiceLabel('p30h'), 'P30H');
+  assert.equal(catalogChoiceLabel('yc1600'), 'YC-1600');
+  assert.equal(catalogChoiceLabel('pl003'), 'PL003');
+  assert.equal(catalogChoiceLabel('xeo2'), 'XEO2');
+  assert.equal(catalogChoiceLabel('CoolGlide'), 'CoolGlide');
+
+  const live = {
+    manufacturers: [
+      normalizeManufacturerRow({ id: 1, name: 'Con-Bio' }),
+      normalizeManufacturerRow({ id: 2, name: 'HOYA ConBio' }),
+      normalizeManufacturerRow({ id: 3, name: 'Quanta' }),
+      normalizeManufacturerRow({ id: 4, name: 'Quanta System' }),
+      normalizeManufacturerRow({ id: 5, name: 'AMS' }),
+      normalizeManufacturerRow({ id: 6, name: 'American Medical Systems' }),
+    ],
+    models: [
+      normalizeModelRow({ id: 1, name: 'coolglide', label: 'coolglide', manufacturer: 'Cutera', manufacturer_id: 10 }),
+      normalizeModelRow({ id: 2, name: 'Gentlemax Pro', label: 'Gentlemax Pro', manufacturer: 'Candela', manufacturer_id: 2 }),
+      normalizeModelRow({ id: 3, name: 'GentleMax Pro', label: 'GentleMax Pro', manufacturer: 'Candela', manufacturer_id: 2 }),
+      normalizeModelRow({ id: 4, name: 'Stellar M22', label: 'Stellar M22', manufacturer: 'Lumenis', manufacturer_id: 20 }),
+      normalizeModelRow({ id: 5, name: 'Stellar M22', label: 'Stellar M22', manufacturer: 'Lumenis', manufacturer_id: 20 }),
+      normalizeModelRow({ id: 6, name: 'Soprano Titanium', label: 'Soprano Titanium', manufacturer: 'Alma', manufacturer_id: 21 }),
+      normalizeModelRow({ id: 7, name: 'soprano titanium', label: 'soprano titanium', manufacturer: 'Alma', manufacturer_id: 21 }),
+    ],
+  };
+  const mfrs = listCatalogManufacturers(live);
+  assert.equal(mfrs.filter((name) => /con-?bio|hoya conbio/i.test(name)).length, 1);
+  assert.ok(mfrs.includes('HOYA ConBio'));
+  assert.equal(mfrs.filter((name) => /quanta/i.test(name)).length, 1);
+  assert.ok(mfrs.includes('Quanta System'));
+  assert.equal(mfrs.filter((name) => /^(ams|american medical systems)$/i.test(name)).length, 1);
+  assert.ok(mfrs.includes('American Medical Systems'));
+
+  const candela = listCatalogModelChoices('Candela', live);
+  const gentle = candela.filter((choice) => choice.value.trim().toLowerCase() === 'gentlemax pro');
+  assert.equal(gentle.length, 1);
+  assert.equal(gentle[0].value, 'GentleMax Pro');
+  assert.equal(gentle[0].label, 'GentleMax Pro');
+
+  const cutera = listCatalogModelChoices('Cutera', {
+    ...live,
+    models: live.models.filter((model) => /coolglide/i.test(model.label)),
+  });
+  const glide = cutera.find((choice) => /coolglide/i.test(choice.value));
+  assert.ok(glide);
+  assert.equal(glide?.value, 'coolglide');
+  assert.equal(glide?.label, 'CoolGlide');
+
+  const lumenis = listCatalogModelChoices('Lumenis', {
+    manufacturers: [normalizeManufacturerRow({ id: 20, name: 'Lumenis' })],
+    models: live.models.filter((model) => /stellar/i.test(model.label)),
+  });
+  const stellar = lumenis.filter((choice) => choice.value.trim().toLowerCase() === 'stellar m22');
+  assert.equal(stellar.length, 1);
+  assert.equal(stellar[0].value, 'Stellar M22');
+
+  const alma = listCatalogModelChoices('Alma', {
+    manufacturers: [normalizeManufacturerRow({ id: 21, name: 'Alma' })],
+    models: live.models.filter((model) => /soprano/i.test(model.label)),
+  });
+  const soprano = alma.filter((choice) => choice.value.trim().toLowerCase() === 'soprano titanium');
+  assert.equal(soprano.length, 1);
+  assert.equal(soprano[0].value, 'Soprano Titanium');
+});
+
 test('Android estimate generator loads manufacturers + laser_models', () => {
   const html = readFileSync(join(here, '../../app/src/main/assets/estimate_generator.html'), 'utf8');
   assert.match(html, /manufacturers/);

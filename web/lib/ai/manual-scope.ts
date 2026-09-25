@@ -267,10 +267,81 @@ export type GeneralGuidanceDevice = {
   title?: string | null;
 };
 
+const DEVICE_CODE_TOKENS: Record<string, string> = {
+  yag: 'YAG',
+  co2: 'CO2',
+  co2re: 'CO2RE',
+  nd: 'Nd',
+  er: 'Er',
+  ktp: 'KTP',
+  ipl: 'IPL',
+  rf: 'RF',
+  mpx: 'MPX',
+  iii: 'III',
+  ii: 'II',
+  iv: 'IV',
+  vi: 'VI',
+  vii: 'VII',
+  viii: 'VIII',
+};
+
+function humanizeDeviceToken(token: string): string {
+  const key = token.toLowerCase();
+  if (DEVICE_CODE_TOKENS[key]) return DEVICE_CODE_TOKENS[key];
+  if (/^[ivx]+$/i.test(token) && token.length <= 4) return token.toUpperCase();
+  if (/\d/.test(token)) return token.toUpperCase();
+  return token.charAt(0).toUpperCase() + token.slice(1).toLowerCase();
+}
+
+/** visulas_yag_iii → Visulas YAG III. Mixed-case titles are left alone. */
+export function humanizeDeviceCode(value: string): string {
+  const raw = String(value || '').trim();
+  if (!raw) return '';
+  if (/[A-Z]/.test(raw) && !/[_-]/.test(raw)) return raw;
+  if (!/[_-]/.test(raw) && /\s/.test(raw)) return raw;
+  const parts = raw.split(/[_\-\s]+/).filter(Boolean);
+  if (!parts.length) return raw;
+  return parts.map(humanizeDeviceToken).join(' ');
+}
+
+/** Rewrite snake_case device codes inside an already-built guidance sentence. */
+export function humanizeGeneralGuidanceDisplay(content: string): string {
+  return String(content || '').replace(/[A-Za-z][A-Za-z0-9]*(?:[_-][A-Za-z0-9]+)+/g, (code) =>
+    humanizeDeviceCode(code)
+  );
+}
+
+export type AssistantManualPicker = {
+  id: number;
+  brand: string;
+  storagePath: string;
+  title: string;
+};
+
+/** Brand + manual row for /ai-assistant?manualId=. Id match is numeric, not string-strict. */
+export function assistantManualPicker(
+  rows: Array<Pick<CatalogManual, 'id' | 'brand' | 'storage_path' | 'title'>>,
+  manualId: unknown
+): AssistantManualPicker | null {
+  const want = asManualId(manualId);
+  if (want == null) return null;
+  const hit = rows.find((row) => asManualId(row.id) === want);
+  if (!hit) return null;
+  const storagePath = String(hit.storage_path || '').trim();
+  const title = String(hit.title || '').trim();
+  if (!storagePath || !title) return null;
+  return {
+    id: want,
+    brand: String(hit.brand || '').trim(),
+    storagePath,
+    title,
+  };
+}
+
 /** Manufacturer + model label for a general-knowledge answer. */
 export function generalGuidanceDeviceName(opts?: GeneralGuidanceDevice | null): string {
-  const brand = String(opts?.brand ?? '').trim();
-  let device = String(opts?.model ?? '').trim() || String(opts?.title ?? '').trim();
+  const brand = humanizeDeviceCode(String(opts?.brand ?? '').trim());
+  let device = humanizeDeviceCode(String(opts?.model ?? '').trim() || String(opts?.title ?? '').trim());
   if (brand && device.toLowerCase().startsWith(brand.toLowerCase())) {
     device = device.slice(brand.length).trim().replace(/^[-–:—\s]+/, '').trim();
   }
