@@ -47,7 +47,7 @@ import {
   applyLocationToTicketFields,
   loadCustomerLocations,
   persistedLocationId,
-  pickPrimaryLocation,
+  serviceCallFromLocations,
   type CustomerLocation,
 } from '@/lib/customer-locations';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
@@ -437,26 +437,34 @@ export default function ServiceSchedule() {
       console.warn('customer locations', err);
       rows = [];
     }
-    setCustomerLocations(rows);
-    const primary = pickPrimaryLocation(rows);
-    if (primary) {
-      const fields = applyLocationToTicketFields(base, primary, { officePhone: c.officePhone });
-      setSelectedLocationId(
-        fields.customer_location_id != null ? String(fields.customer_location_id) : String(primary.id)
-      );
-      setForm((prev) => ({
-        ...prev,
-        ...base,
-        customer_address: fields.customer_address,
-        customer_city: fields.customer_city,
-        customer_state: fields.customer_state,
-        customer_zip: fields.customer_zip,
-        customer_phone: fields.customer_phone,
-      }));
+    const resolved = serviceCallFromLocations(
+      rows,
+      {
+        address: base.customer_address,
+        city: base.customer_city,
+        state: base.customer_state,
+        zip: base.customer_zip,
+        phone: base.customer_phone,
+      },
+      c.officePhone
+    );
+    setCustomerLocations(resolved.locations);
+    if (!resolved.fields) {
+      setSelectedLocationId('');
+      setForm((prev) => ({ ...prev, ...base }));
       return;
     }
-    setSelectedLocationId('');
-    setForm((prev) => ({ ...prev, ...base }));
+    const fields = resolved.fields;
+    setSelectedLocationId(resolved.selectedId);
+    setForm((prev) => ({
+      ...prev,
+      ...base,
+      customer_address: fields.customer_address,
+      customer_city: fields.customer_city,
+      customer_state: fields.customer_state,
+      customer_zip: fields.customer_zip,
+      customer_phone: fields.customer_phone,
+    }));
   }
 
   useEffect(() => {

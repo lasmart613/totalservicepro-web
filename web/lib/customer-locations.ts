@@ -25,6 +25,8 @@ export type CustomerLocation = {
   phone?: string | null;
   contact_name?: string | null;
   is_primary: boolean;
+  /** ISO timestamp from the row. Used only to choose which primary to show. */
+  updated_at?: string | null;
   /** Shown from the organization address before a locations row exists. */
   localOnly?: boolean;
 };
@@ -64,7 +66,7 @@ export type LocationWriteResult = {
 };
 
 const SELECT_FULL =
-  'id, organization_id, name, address, city, state, zip, phone, contact_name, is_primary';
+  'id, organization_id, name, address, city, state, zip, phone, contact_name, is_primary, updated_at';
 const SELECT_SAFE = 'id, organization_id, name, address, city, state, zip, phone, is_primary';
 
 type LocationsClient = {
@@ -158,6 +160,7 @@ export function normalizeLocation(row: Record<string, unknown> | null | undefine
     phone: clean(row.phone),
     contact_name: clean(row.contact_name),
     is_primary: row.is_primary === true,
+    updated_at: row.updated_at == null || row.updated_at === '' ? null : String(row.updated_at),
     localOnly: false,
   };
 }
@@ -169,9 +172,31 @@ export function sortLocations(locations: CustomerLocation[]): CustomerLocation[]
   });
 }
 
+/** Newest updated_at first. Same timestamp, or a missing one, breaks the tie by higher id. */
+function comparePrimaryRecency(a: CustomerLocation, b: CustomerLocation): number {
+  const at = String(a.updated_at || '');
+  const bt = String(b.updated_at || '');
+  if (at !== bt) return bt.localeCompare(at);
+  return String(b.id).localeCompare(String(a.id), undefined, { numeric: true });
+}
+
 export function pickPrimaryLocation(locations: CustomerLocation[]): CustomerLocation | null {
   if (!locations.length) return null;
-  return locations.find((loc) => loc.is_primary) || sortLocations(locations)[0] || null;
+  const flagged = locations.filter((loc) => loc.is_primary);
+  if (flagged.length > 1) return [...flagged].sort(comparePrimaryRecency)[0] || null;
+  if (flagged.length === 1) return flagged[0];
+  return sortLocations(locations)[0] || null;
+}
+
+/** Display and ticket pickers show one primary. Stored flags are not written back. */
+export function collapseExtraPrimaries(locations: CustomerLocation[]): CustomerLocation[] {
+  const flagged = locations.filter((loc) => loc.is_primary);
+  if (flagged.length <= 1) return locations;
+  const chosen = pickPrimaryLocation(locations);
+  if (!chosen) return locations;
+  return locations.map((loc) =>
+    String(loc.id) === String(chosen.id) ? loc : { ...loc, is_primary: false }
+  );
 }
 
 /** Address already stored on the customer, shown until a locations row exists. */
@@ -194,10 +219,6 @@ export function localPrimaryFromOrg(
   };
 }
 
-/**
- * Rows to render. Real rows win. Otherwise the organization address is the
- * primary location, with nothing written until the user saves.
- */
 /** Primary card tracks the address fields on the customer form while they are edited. */
 export function overlayPrimaryFromForm(
   locations: CustomerLocation[],
@@ -216,18 +237,71 @@ export function overlayPrimaryFromForm(
   });
 }
 
+/**
+ * Rows to render. Real rows win, with at most one primary badge.
+ * An empty list (missing table, or RLS returning no rows) keeps the organization address.
+ */
 export function locationsForDisplay(
   rows: CustomerLocation[],
   org: LocationAddressFields & { id?: number | string | null }
 ): CustomerLocation[] {
-  const sorted = sortLocations(rows.filter((row) => row && row.id != null));
-  if (sorted.length) {
+  const present = rows.filter((row) => row && row.id != null);
+  if (present.length) {
+    const sorted = sortLocations(collapseExtraPrimaries(present));
     if (sorted.some((row) => row.is_primary)) return sorted;
     const [first, ...rest] = sorted;
     return [{ ...first, is_primary: true }, ...rest];
   }
+  // No visible rows: table missing, or RLS returned an empty list. Keep the org address.
   const local = localPrimaryFromOrg(org);
   return local ? [local] : [];
+}
+
+/**
+ * New Service Call after a locations load.
+ * `fields` is null when there is nothing to apply, so the caller keeps the
+ * organization address already on the ticket form.
+ */
+export function serviceCallFromLocations(
+  rows: CustomerLocation[],
+  org: LocationAddressFields,
+  officePhone?: string | null
+): {
+  locations: CustomerLocation[];
+  selectedId: string;
+  fields: {
+    customer_address: string;
+    customer_city: string;
+    customer_state: string;
+    customer_zip: string;
+    customer_phone: string;
+  } | null;
+} {
+  const locations = sortLocations(collapseExtraPrimaries(rows.filter((row) => row && row.id != null)));
+  const primary = pickPrimaryLocation(locations);
+  if (!primary) return { locations, selectedId: '', fields: null };
+  const applied = applyLocationToTicketFields(
+    {
+      customer_address: org.address || '',
+      customer_city: org.city || '',
+      customer_state: org.state || '',
+      customer_zip: org.zip || '',
+      customer_phone: org.phone || '',
+    },
+    primary,
+    { officePhone }
+  );
+  return {
+    locations,
+    selectedId: applied.customer_location_id != null ? String(applied.customer_location_id) : String(primary.id),
+    fields: {
+      customer_address: applied.customer_address,
+      customer_city: applied.customer_city,
+      customer_state: applied.customer_state,
+      customer_zip: applied.customer_zip,
+      customer_phone: applied.customer_phone,
+    },
+  };
 }
 
 export function formatLocationLine(loc: LocationAddressFields): string {
@@ -429,7 +503,9 @@ export async function loadCustomerLocations(
       };
     }
     const locations = sortLocations(
-      (data || []).map((row) => normalizeLocation(row)).filter((row): row is CustomerLocation => Boolean(row))
+      collapseExtraPrimaries(
+        (data || []).map((row) => normalizeLocation(row)).filter((row): row is CustomerLocation => Boolean(row))
+      )
     );
     return { locations, unavailable: false, schemaLag };
   } catch (err) {

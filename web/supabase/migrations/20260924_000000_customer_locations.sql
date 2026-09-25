@@ -10,9 +10,15 @@
 --
 -- APPLY ON LIVE SUPABASE (SQL editor or CLI) before Add location can save.
 -- Until then the customer screen keeps the single address and does not crash.
+-- Logged-in reads that return no rows (RLS with nothing visible yet) do the same.
+--
+-- Existing location rows are not rewritten. is_primary flags already stored stay
+-- as they are, including a customer that currently has more than one primary.
+-- A trigger clears the other primaries only when a later insert or is_primary
+-- update saves a row as primary, so another writer is not rejected.
 --
 --   1. Paste this file and Run.
---   2. Confirm a primary row for an existing customer:
+--   2. Backfill check (only orgs that had zero location rows and an address):
 --        select l.organization_id, l.name, l.address, l.city, l.state, l.is_primary
 --        from public.locations l
 --        join public.organizations o on o.id = l.organization_id
@@ -49,20 +55,38 @@ ALTER TABLE public.locations ADD COLUMN IF NOT EXISTS updated_at timestamptz DEF
 CREATE INDEX IF NOT EXISTS locations_organization_id_idx
   ON public.locations (organization_id);
 
--- One primary flag per organization. Keep the lowest id when duplicates exist.
-UPDATE public.locations AS extra
-SET is_primary = false
-WHERE extra.is_primary IS TRUE
-  AND extra.id IS DISTINCT FROM (
-    SELECT MIN(keep.id)
-    FROM public.locations AS keep
-    WHERE keep.organization_id = extra.organization_id
-      AND keep.is_primary IS TRUE
-  );
+-- Do not keep a unique "one primary" index. Another writer updates this table,
+-- and a partial unique index would start rejecting those saves. Drop it if an
+-- earlier draft of this file created it.
+DROP INDEX IF EXISTS public.locations_one_primary_per_org;
 
-CREATE UNIQUE INDEX IF NOT EXISTS locations_one_primary_per_org
-  ON public.locations (organization_id)
-  WHERE COALESCE(is_primary, false) IS TRUE;
+-- When a row is saved as primary, clear the flag on the other rows for that
+-- organization. Does not run against existing data by itself.
+CREATE OR REPLACE FUNCTION public.locations_single_primary()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public
+AS $$
+BEGIN
+  IF NEW.is_primary IS TRUE THEN
+    UPDATE public.locations
+    SET is_primary = false
+    WHERE organization_id = NEW.organization_id
+      AND id IS DISTINCT FROM NEW.id
+      AND is_primary IS TRUE;
+  END IF;
+  RETURN NEW;
+END;
+$$;
+
+DROP TRIGGER IF EXISTS locations_single_primary ON public.locations;
+CREATE TRIGGER locations_single_primary
+  BEFORE INSERT OR UPDATE OF is_primary
+  ON public.locations
+  FOR EACH ROW
+  EXECUTE FUNCTION public.locations_single_primary();
+
+GRANT EXECUTE ON FUNCTION public.locations_single_primary() TO authenticated;
 
 -- Existing single address becomes "Main office" only when that customer has
 -- no location rows yet. Orgs that already have locations are left alone.
@@ -112,30 +136,6 @@ BEGIN
     $sql$;
   END IF;
 END $$;
-
--- Customer orgs that already had location rows but no primary get one.
-UPDATE public.locations l
-SET is_primary = true
-WHERE COALESCE(l.is_primary, false) IS NOT TRUE
-  AND l.id = (
-    SELECT l2.id
-    FROM public.locations l2
-    WHERE l2.organization_id = l.organization_id
-    ORDER BY l2.created_at NULLS LAST, l2.id
-    LIMIT 1
-  )
-  AND NOT EXISTS (
-    SELECT 1
-    FROM public.locations p
-    WHERE p.organization_id = l.organization_id
-      AND p.is_primary IS TRUE
-  )
-  AND EXISTS (
-    SELECT 1
-    FROM public.organizations o
-    WHERE o.id = l.organization_id
-      AND o.type IN ('customer', 'laser_clinic', 'laser_rental', 'laser_reseller')
-  );
 
 COMMENT ON TABLE public.locations IS
   'Addresses for an organization. A customer has one primary location (mirrors organizations address columns) plus optional extra locations.';

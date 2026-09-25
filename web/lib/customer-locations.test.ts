@@ -17,6 +17,7 @@ import {
   persistedLocationId,
   pickPrimaryLocation,
   removeLocationFromList,
+  serviceCallFromLocations,
   ticketPhoneForLocation,
   validateLocationDraft,
   type CustomerLocation,
@@ -227,6 +228,10 @@ test('customer edit screen exposes Add location and new service calls pick a loc
   assert.match(schedule, /customer_location_id/);
   assert.match(schedule, /loadCustomerLocations/);
 
+  assert.match(page, /address: form\.address/);
+  assert.match(schedule, /serviceCallFromLocations/);
+  assert.match(schedule, /if \(!resolved\.fields\)/);
+
   assert.match(migration, /CREATE TABLE IF NOT EXISTS public\.locations/);
   assert.match(migration, /ADD COLUMN IF NOT EXISTS contact_name/);
   assert.match(migration, /NOT EXISTS/);
@@ -236,4 +241,146 @@ test('customer edit screen exposes Add location and new service calls pick a loc
   assert.match(migration, /customer_location_id/);
   assert.match(migration, /ON DELETE SET NULL/);
   assert.match(migration, /ENABLE ROW LEVEL SECURITY/);
+  assert.match(migration, /CREATE OR REPLACE FUNCTION public\.locations_single_primary/);
+  assert.match(migration, /DROP TRIGGER IF EXISTS locations_single_primary/);
+  assert.match(migration, /BEFORE INSERT OR UPDATE OF is_primary/);
+  assert.match(migration, /EXECUTE FUNCTION public\.locations_single_primary/);
+  assert.match(migration, /DROP INDEX IF EXISTS public\.locations_one_primary_per_org/);
+  assert.doesNotMatch(migration, /CREATE UNIQUE INDEX/);
+  assert.doesNotMatch(migration, /UPDATE public\.locations AS extra/);
+  assert.doesNotMatch(migration, /SET is_primary = true/);
+  assert.doesNotMatch(migration, /Allow all/i);
+});
+
+test('a successful empty locations read still shows the organization address', async () => {
+  const org = {
+    address: '100 Harbor Ave',
+    city: 'Evanston',
+    state: 'IL',
+    zip: '60201',
+    phone: '847-555-0100',
+  };
+  const loaded = await loadCustomerLocations(
+    {
+      from() {
+        const builder = {
+          select: () => builder,
+          eq: () => builder,
+          order: async () => ({ data: [], error: null }),
+        };
+        return builder;
+      },
+    },
+    44
+  );
+  assert.equal(loaded.unavailable, false);
+  assert.deepEqual(loaded.locations, []);
+
+  const shown = locationsForDisplay(loaded.locations, org);
+  assert.equal(shown.length, 1);
+  assert.equal(shown[0].name, PRIMARY_LOCATION_NAME);
+  assert.equal(shown[0].address, '100 Harbor Ave');
+  assert.equal(shown[0].city, 'Evanston');
+  assert.equal(shown[0].state, 'IL');
+  assert.equal(shown[0].zip, '60201');
+  assert.equal(shown[0].is_primary, true);
+  assert.equal(shown[0].localOnly, true);
+
+  const ticket = serviceCallFromLocations(
+    loaded.locations,
+    { ...org, phone: '847-555-0142' },
+    '847-555-0100'
+  );
+  assert.equal(ticket.fields, null);
+  assert.equal(ticket.selectedId, '');
+  assert.deepEqual(ticket.locations, []);
+});
+
+test('two primary flags display the most recently updated location', async () => {
+  const older: CustomerLocation = {
+    ...mainOffice,
+    id: 4,
+    name: 'North clinic',
+    updated_at: '2026-01-02T00:00:00.000Z',
+    is_primary: true,
+  };
+  const newer: CustomerLocation = {
+    ...beverly,
+    id: 9,
+    name: 'South clinic',
+    updated_at: '2026-08-23T12:00:00.000Z',
+    is_primary: true,
+  };
+
+  assert.equal(pickPrimaryLocation([older, newer])?.id, 9);
+  assert.equal(pickPrimaryLocation([newer, older])?.id, 9);
+
+  const shown = locationsForDisplay([older, newer], {
+    address: '100 Harbor Ave',
+    city: 'Evanston',
+    state: 'IL',
+    zip: '60201',
+  });
+  assert.equal(shown.length, 2);
+  assert.equal(shown.filter((loc) => loc.is_primary).length, 1);
+  assert.equal(shown.find((loc) => loc.is_primary)?.name, 'South clinic');
+
+  const tied = locationsForDisplay(
+    [
+      { ...older, id: 4, updated_at: '2026-08-23T12:00:00.000Z' },
+      { ...newer, id: 9, updated_at: '2026-08-23T12:00:00.000Z' },
+    ],
+    {}
+  );
+  assert.equal(tied.filter((loc) => loc.is_primary).length, 1);
+  assert.equal(tied.find((loc) => loc.is_primary)?.id, 9);
+
+  const missingStamp = locationsForDisplay(
+    [
+      { ...older, id: 3, updated_at: null },
+      { ...newer, id: 8, updated_at: undefined },
+    ],
+    {}
+  );
+  assert.equal(missingStamp.filter((loc) => loc.is_primary).length, 1);
+  assert.equal(missingStamp.find((loc) => loc.is_primary)?.id, 8);
+
+  const ticket = serviceCallFromLocations(
+    [older, newer],
+    {
+      address: '100 Harbor Ave',
+      city: 'Evanston',
+      state: 'IL',
+      zip: '60201',
+      phone: '847-555-0142',
+    },
+    '847-555-0100'
+  );
+  assert.equal(ticket.fields?.customer_address, '400 Rodeo Dr');
+  assert.equal(ticket.fields?.customer_city, 'Beverly Hills');
+  assert.equal(ticket.locations.filter((loc) => loc.is_primary).length, 1);
+  assert.equal(ticket.selectedId, '9');
+
+  const loaded = await loadCustomerLocations(
+    {
+      from() {
+        const builder = {
+          select: () => builder,
+          eq: () => builder,
+          order: async () => ({
+            data: [
+              { id: 4, name: 'North clinic', address: '100 Harbor Ave', is_primary: true, updated_at: '2026-01-02T00:00:00.000Z' },
+              { id: 9, name: 'South clinic', address: '400 Rodeo Dr', is_primary: true, updated_at: '2026-08-23T12:00:00.000Z' },
+            ],
+            error: null,
+          }),
+        };
+        return builder;
+      },
+    },
+    44
+  );
+  assert.equal(loaded.unavailable, false);
+  assert.equal(loaded.locations.filter((loc) => loc.is_primary).length, 1);
+  assert.equal(loaded.locations.find((loc) => loc.is_primary)?.id, 9);
 });
