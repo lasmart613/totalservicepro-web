@@ -30,6 +30,8 @@ type Props = {
   inviteHint?: boolean;
   /** Customer org.type — LinkedIn / Yelp show for laser-clinic customers. */
   orgType?: string | null;
+  /** Extra locations, rendered under the primary address. */
+  afterAddress?: React.ReactNode;
 };
 
 export function CustomerInfoForm({
@@ -39,6 +41,7 @@ export function CustomerInfoForm({
   onLogoFileChange,
   inviteHint,
   orgType,
+  afterAddress,
 }: Props) {
   const logoInputRef = useRef<HTMLInputElement>(null);
   const [logoError, setLogoError] = useState<string | null>(null);
@@ -365,7 +368,7 @@ export function CustomerInfoForm({
           )}
           <div>
             <label className="block text-[11px] font-bold uppercase tracking-wide text-[var(--text3)] mb-1">
-              Address
+              Primary address
             </label>
             <input
               className="input w-full"
@@ -373,6 +376,9 @@ export function CustomerInfoForm({
               disabled={disabled}
               onChange={(e) => setField('address', e.target.value)}
             />
+            <p className="text-[11px] text-[var(--text3)] mt-1">
+              This is the main location. Use Add location for another office or clinic.
+            </p>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-1">
@@ -412,6 +418,7 @@ export function CustomerInfoForm({
               />
             </div>
           </div>
+          {afterAddress}
         </div>
       </div>
 
