@@ -12,10 +12,16 @@ import { MANUAL_FIXTURE_PATH } from '@/lib/manuals';
  */
 function PdfViewerDemoInner() {
   const params = useSearchParams();
+  const requested = params.get('file') || '';
+  const source =
+    requested.startsWith('/fixtures/') && requested.endsWith('.pdf') && !requested.includes('..')
+      ? requested
+      : MANUAL_FIXTURE_PATH;
+  const subscript = source.includes('co2re-subscript');
   return (
     <ManualPdfViewer
-      title="Sample service manual (3-page fixture)"
-      sourceUrl={MANUAL_FIXTURE_PATH}
+      title={subscript ? 'CO2RE subscript fixture' : 'Sample service manual (3-page fixture)'}
+      sourceUrl={source}
       initialPage={params.get('page')}
       initialSection={params.get('section')}
       initialFind={params.get('q')}

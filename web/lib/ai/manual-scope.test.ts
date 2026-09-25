@@ -7,7 +7,12 @@ import {
   asManualId,
   buildGrokChatPayload,
   excerptManualSearchText,
+  manualCorpusFallbackMessage,
   manualPathsAlign,
+  pdfPageCountFromBytes,
+  WHOLE_PDF_ATTACH_MAX_BYTES,
+  WHOLE_PDF_ATTACH_MAX_PAGES,
+  wholePdfAttachAllowed,
   normalizeManualPath,
   manualPathKey,
   folderPrefixForAiAttach,
@@ -222,6 +227,38 @@ test('AI assistant and grok-assistant send current id/path and do not skip incom
   assert.match(godPage, /Attach missing Grok collections/);
   assert.match(reindex, /manualsNeedingXaiAttach|attachCollection/);
   assert.match(android, /manualId/);
+});
+
+test('large manuals are not sent whole, and a missing corpus gets a direct reply', () => {
+  assert.equal(WHOLE_PDF_ATTACH_MAX_BYTES, 3 * 1024 * 1024);
+  assert.equal(WHOLE_PDF_ATTACH_MAX_PAGES, 60);
+  assert.equal(wholePdfAttachAllowed([{ bytes: 7_700_000, pages: 161 }]), false);
+  assert.equal(wholePdfAttachAllowed([{ bytes: WHOLE_PDF_ATTACH_MAX_BYTES + 1, pages: 10 }]), false);
+  assert.equal(wholePdfAttachAllowed([{ bytes: 900_000, pages: 80 }]), false);
+  assert.equal(wholePdfAttachAllowed([{ bytes: 900_000, pages: 40 }]), true);
+  assert.equal(wholePdfAttachAllowed([{ bytes: null, pages: null }]), true);
+  assert.equal(wholePdfAttachAllowed([]), false);
+  assert.equal(pdfPageCountFromBytes('<< /Type /Pages /Count 161 /Kids [1 0 R] >>'), 161);
+  assert.equal(pdfPageCountFromBytes('<< /Count 42 /Type /Pages >>'), 42);
+  assert.equal(pdfPageCountFromBytes('no pages here'), null);
+
+  const large = manualCorpusFallbackMessage('Candela CO2RE', { tooLarge: true });
+  assert.match(large, /Candela CO2RE/);
+  assert.match(large, /too large/i);
+  assert.match(large, /Find in the manual viewer/);
+  assert.match(large, /index this catalog id/i);
+  const missing = manualCorpusFallbackMessage('Candela CO2RE');
+  assert.doesNotMatch(missing, /too large/i);
+
+  const fn = readFileSync(join(here, '../../../supabase/functions/grok-assistant/index.ts'), 'utf8');
+  const chat = fn.slice(fn.indexOf("body.action === 'chat'"));
+  const indexAt = chat.indexOf('searchIndexedManualText');
+  const filesAt = chat.indexOf('responses+files failed');
+  assert.ok(indexAt > 0 && filesAt > indexAt, 'indexed excerpts run before a whole-PDF attach');
+  assert.match(chat, /!hasCollectionPdfs && !hasManualPassages/);
+  assert.match(chat, /wholePdfAttachAllowed\(attachStats\)/);
+  assert.match(chat, /manualCorpusFallbackMessage\(manualLabel/);
+  assert.match(chat, /skip whole-pdf attach/);
 });
 
 test('AI assistant thread scrolls long replies instead of clipping them', () => {

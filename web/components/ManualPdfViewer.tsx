@@ -7,6 +7,7 @@ import {
   MANUAL_VIEW_STORAGE_KEY,
   PDFJS_SCRIPT_SRC,
   PDFJS_WORKER_SRC,
+  matchingTextItemSpans,
   pageTextMatches,
   readManualView,
   type ManualChapter,
@@ -15,12 +16,26 @@ import {
 import { asPositivePage } from '@/lib/ai/citations';
 import { ViewerAiPanel } from '@/components/ViewerAiPanel';
 
+type PdfTextRun = {
+  str?: string;
+  width?: number;
+  height?: number;
+  transform?: number[];
+};
+
+type PdfViewport = {
+  width: number;
+  height: number;
+  scale?: number;
+  transform: number[];
+};
+
 type PdfPageProxy = {
-  getViewport: (opts: { scale: number }) => { width: number; height: number };
-  render: (opts: { canvasContext: CanvasRenderingContext2D; viewport: { width: number; height: number } }) => {
+  getViewport: (opts: { scale: number }) => PdfViewport;
+  render: (opts: { canvasContext: CanvasRenderingContext2D; viewport: PdfViewport }) => {
     promise: Promise<void>;
   };
-  getTextContent?: () => Promise<{ items: Array<{ str?: string }> }>;
+  getTextContent?: () => Promise<{ items: PdfTextRun[] }>;
 };
 
 type PdfDoc = {
@@ -150,21 +165,27 @@ async function fetchPdfBytes(opts: {
   throw new Error(json.error || 'Could not load the manual in the app viewer');
 }
 
+type FindBox = { x: number; y: number; w: number; h: number };
+
 function PdfPageCanvas({
   pdf,
   pageNumber,
   zoom,
   eager,
+  highlightQuery,
 }: {
   pdf: PdfDoc;
   pageNumber: number;
   zoom: number;
   eager?: boolean;
+  highlightQuery?: string;
 }) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [inView, setInView] = useState(!!eager);
   const [ready, setReady] = useState(false);
+  const [boxes, setBoxes] = useState<FindBox[]>([]);
+  const [canvasCss, setCanvasCss] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
     const el = wrapRef.current;
@@ -201,12 +222,38 @@ function PdfPageCanvas({
       if (!ctx) return;
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       await pdfPage.render({ canvasContext: ctx, viewport }).promise;
-      if (!cancelled) setReady(true);
+      const nextBoxes: FindBox[] = [];
+      const util = window.pdfjsLib && (window.pdfjsLib as PdfJsLib & { Util?: { transform: (a: number[], b: number[]) => number[] } }).Util;
+      if (highlightQuery && pdfPage.getTextContent && util?.transform) {
+        const text = await pdfPage.getTextContent();
+        for (const span of matchingTextItemSpans(text.items || [], highlightQuery)) {
+          const item = text.items?.[span.index];
+          if (!item?.transform || !item.str) continue;
+          const tx = util.transform(viewport.transform, item.transform);
+          const fontHeight = Math.hypot(tx[2], tx[3]) || item.height || 12;
+          const scale = viewport.scale || 1;
+          const fullW = Math.max((item.width || 0) * scale, fontHeight * 0.45);
+          const len = Math.max(item.str.length, 1);
+          const start = Math.min(span.from, len) / len;
+          const end = Math.min(Math.max(span.to, span.from + 1), len) / len;
+          nextBoxes.push({
+            x: tx[4] + fullW * start,
+            y: tx[5] - fontHeight,
+            w: Math.max(fullW * (end - start), fontHeight * 0.35),
+            h: fontHeight * 1.05,
+          });
+        }
+      }
+      if (!cancelled) {
+        setCanvasCss({ width: Math.floor(viewport.width), height: Math.floor(viewport.height) });
+        setBoxes(nextBoxes);
+        setReady(true);
+      }
     })().catch(() => {});
     return () => {
       cancelled = true;
     };
-  }, [inView, pdf, pageNumber, zoom]);
+  }, [inView, pdf, pageNumber, zoom, highlightQuery]);
 
   return (
     <div
@@ -215,7 +262,27 @@ function PdfPageCanvas({
       className="flex justify-center py-3 px-2"
       style={{ minHeight: ready ? undefined : 480 }}
     >
-      <canvas ref={canvasRef} className="block max-w-full bg-white shadow-lg" />
+      <div className="relative" style={canvasCss ? { width: canvasCss.width, height: canvasCss.height } : undefined}>
+        <canvas ref={canvasRef} className="block max-w-full bg-white shadow-lg" />
+        {boxes.length > 0 && (
+          <div className="pointer-events-none absolute inset-0" aria-hidden="true">
+            {boxes.map((box, i) => (
+              <div
+                key={i}
+                data-find-hit=""
+                className="absolute rounded-sm"
+                style={{
+                  left: box.x,
+                  top: box.y,
+                  width: box.w,
+                  height: box.h,
+                  background: 'rgba(251, 191, 36, 0.45)',
+                }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
@@ -752,7 +819,14 @@ export function ManualPdfViewer({
           {!loading && !error && pages.length > 0 && pdf && (
             <div key={docEpoch} className="pb-8">
               {pages.map((n) => (
-                <PdfPageCanvas key={`${docEpoch}-${n}`} pdf={pdf} pageNumber={n} zoom={zoom} eager={n <= 2} />
+                <PdfPageCanvas
+                  key={`${docEpoch}-${n}`}
+                  pdf={pdf}
+                  pageNumber={n}
+                  zoom={zoom}
+                  eager={n <= 2}
+                  highlightQuery={hits.includes(n) ? query : ''}
+                />
               ))}
             </div>
           )}

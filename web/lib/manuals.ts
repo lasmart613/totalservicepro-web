@@ -89,9 +89,81 @@ export function isLikelyPdfPath(path: string | null | undefined): boolean {
   return /\.pdf($|[?#])/i.test(String(path || ''));
 }
 
-/** Case-insensitive substring match used by in-viewer Find. */
+export type PdfTextItem = { str?: string };
+
+export type TextMatchSpan = { index: number; from: number; to: number };
+
+/**
+ * Case-insensitive substring match used by in-viewer Find.
+ * pdf.js emits a subscript digit as its own text item. The viewer joins items
+ * with spaces, so "CO₂RE" is "CO 2 RE" and a plain includes() misses "CO2RE".
+ * Queries that contain a digit also match with whitespace removed. Other
+ * queries stay a plain substring so "ice m" does not hit "service manual".
+ */
 export function pageTextMatches(haystack: string, query: string): boolean {
   const q = String(query || '').trim().toLowerCase();
   if (!q) return false;
-  return String(haystack || '').toLowerCase().includes(q);
+  const hay = String(haystack || '').toLowerCase();
+  if (hay.includes(q)) return true;
+  if (!/\d/.test(q)) return false;
+  const qCompact = q.replace(/\s+/g, '');
+  if (!qCompact) return false;
+  return hay.replace(/\s+/g, '').includes(qCompact);
+}
+
+function mergeCharSpans(hits: Array<{ index: number; char: number }>): TextMatchSpan[] {
+  const spans: TextMatchSpan[] = [];
+  for (const hit of hits) {
+    const prev = spans[spans.length - 1];
+    if (prev && prev.index === hit.index && hit.char <= prev.to) {
+      prev.to = Math.max(prev.to, hit.char + 1);
+      prev.from = Math.min(prev.from, hit.char);
+      continue;
+    }
+    spans.push({ index: hit.index, from: hit.char, to: hit.char + 1 });
+  }
+  return spans;
+}
+
+/**
+ * Character spans inside pdf.js text items that form a Find hit.
+ * Subscript digits stay separate items; the highlight covers only the matched
+ * glyphs inside a longer run such as "Candela CO".
+ */
+export function matchingTextItemSpans(items: PdfTextItem[] | null | undefined, query: string): TextMatchSpan[] {
+  const parts = (items || []).map((it) => String(it?.str || ''));
+  const q = String(query || '').trim().toLowerCase();
+  if (!q || !pageTextMatches(parts.join(' '), q)) return [];
+  const spaced = parts.join(' ').toLowerCase();
+  if (spaced.includes(q)) {
+    const at = spaced.indexOf(q);
+    const hits: Array<{ index: number; char: number }> = [];
+    let cursor = 0;
+    parts.forEach((part, index) => {
+      for (let c = 0; c < part.length; c++) {
+        const pos = cursor + c;
+        if (pos >= at && pos < at + q.length) hits.push({ index, char: c });
+      }
+      cursor += part.length + 1;
+    });
+    return mergeCharSpans(hits);
+  }
+  const qCompact = q.replace(/\s+/g, '');
+  const map: Array<{ index: number; char: number }> = [];
+  let compact = '';
+  parts.forEach((part, index) => {
+    for (let c = 0; c < part.length; c++) {
+      if (/\s/.test(part[c])) continue;
+      compact += part[c].toLowerCase();
+      map.push({ index, char: c });
+    }
+  });
+  const at = compact.indexOf(qCompact);
+  if (at < 0) return [];
+  return mergeCharSpans(map.slice(at, at + qCompact.length));
+}
+
+/** Text-item indexes that form a Find hit. */
+export function matchingTextItemIndexes(items: PdfTextItem[] | null | undefined, query: string): number[] {
+  return [...new Set(matchingTextItemSpans(items, query).map((span) => span.index))];
 }

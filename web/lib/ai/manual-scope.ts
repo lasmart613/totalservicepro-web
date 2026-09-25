@@ -223,3 +223,53 @@ export function hasAttachablePdfHint(manual: {
   if (pdfPathsForAiAttach(manual).length) return true;
   return folderPrefixForAiAttach(manual) != null;
 }
+
+/** Whole-PDF model attach above either limit times out the 22s responses call. */
+export const WHOLE_PDF_ATTACH_MAX_BYTES = 3 * 1024 * 1024;
+export const WHOLE_PDF_ATTACH_MAX_PAGES = 60;
+
+export type PdfAttachStat = { bytes?: number | null; pages?: number | null };
+
+/** Allow a signed-URL PDF attach only when every file is small enough to read in time. */
+export function wholePdfAttachAllowed(files: PdfAttachStat[]): boolean {
+  if (!files.length) return false;
+  for (const file of files) {
+    const bytes = file?.bytes;
+    const pages = file?.pages;
+    if (typeof bytes === 'number' && Number.isFinite(bytes) && bytes > WHOLE_PDF_ATTACH_MAX_BYTES) return false;
+    if (typeof pages === 'number' && Number.isFinite(pages) && pages > WHOLE_PDF_ATTACH_MAX_PAGES) return false;
+  }
+  return true;
+}
+
+/** Best-effort page count from a PDF byte window (catalog head or trailer tail). */
+export function pdfPageCountFromBytes(bytes: Uint8Array | string): number | null {
+  const text = typeof bytes === 'string' ? bytes : new TextDecoder('latin1').decode(bytes);
+  let max = 0;
+  const patterns = [
+    /\/Type\s*\/Pages\b[\s\S]{0,400}?\/Count\s+(\d+)/g,
+    /\/Count\s+(\d+)[\s\S]{0,120}?\/Type\s*\/Pages\b/g,
+  ];
+  for (const rx of patterns) {
+    rx.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = rx.exec(text))) {
+      const n = Number(match[1]);
+      if (Number.isFinite(n) && n > max && n < 100000) max = n;
+    }
+  }
+  return max > 0 ? max : null;
+}
+
+/** Shown when chat has neither indexed excerpts nor a collection file to read. */
+export function manualCorpusFallbackMessage(label: string, opts?: { tooLarge?: boolean }): string {
+  const name = String(label || '').trim() || 'this manual';
+  const large = opts?.tooLarge
+    ? ' The PDF is too large to send in one step (over about 3 MB or 60 pages), and that request times out before an answer comes back.'
+    : '';
+  return (
+    `I couldn't answer from "${name}" yet.${large} ` +
+    `There's no matching Grok collection file and no indexed excerpts to quote. ` +
+    `Use Find in the manual viewer for a word or fault code, or ask an admin to index this catalog id so I can answer from the text.`
+  );
+}
