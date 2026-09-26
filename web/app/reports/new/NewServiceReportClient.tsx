@@ -22,7 +22,10 @@ import {
   catalogManufacturerValue,
   catalogModelValue,
   loadTicketReportContext,
+  omitRejectedReportColumn,
+  reportSaveErrorMessage,
   REPORT_SERVICE_TYPE_OPTIONS,
+  serviceReportTicketColumns,
   type ExistingTicketReport,
 } from '@/lib/ticket-service-report';
 import {
@@ -1368,8 +1371,7 @@ export default function NewServiceReport() {
         customer_contact_name: custContactName || selectedCustomer?.contact_name || null,
         date_out: dateOut || null,
         next_pm_due: nextPm || null,
-        ticket_id: linkedTicketId || null,
-        ticket_number: ticketNum || null,
+        ...serviceReportTicketColumns({ ticketId: linkedTicketId, ticketNumber: ticketNum }),
         comments: comments || null,
         ground_resistance: groundResistance === '' ? null : groundResistance,
         leakage_current: leakageCurrent === '' ? null : leakageCurrent,
@@ -1410,35 +1412,19 @@ export default function NewServiceReport() {
       };
 
       // Retry without columns PostgREST says are missing (schema drift / unapplied migrations).
-      // ticket_id is text in the generated schema; drop it if this database still types it as uuid.
-      function dropUnwritableColumn(body: Record<string, any>, error: { message?: string } | null): boolean {
-        const m = String(error?.message || '');
-        const col = m.match(/Could not find the '([^']+)' column/i)?.[1];
-        if (col && col in body) {
-          console.warn('service_reports missing column, retry without:', col);
-          delete body[col];
-          return true;
-        }
-        if (/ticket_id/i.test(m) && /uuid|invalid input syntax/i.test(m) && 'ticket_id' in body) {
-          console.warn('service_reports.ticket_id rejected, retry without it');
-          delete body.ticket_id;
-          return true;
-        }
-        return false;
-      }
-
+      // 22P02 (invalid uuid) drops ticket_id even when the message does not name the column.
       async function writeReport(payload: Record<string, any>, id: any) {
         let body = { ...payload };
         for (let attempt = 0; attempt < 6; attempt++) {
           if (id) {
             const { error } = await supabase.from('service_reports').update(body).eq('id', id);
             if (!error) return { id, error: null as any };
-            if (dropUnwritableColumn(body, error)) continue;
+            if (omitRejectedReportColumn(body, error)) continue;
             return { id, error };
           }
           const { data: ins, error } = await supabase.from('service_reports').insert(body).select('id').single();
           if (!error && ins?.id) return { id: ins.id, error: null as any };
-          if (dropUnwritableColumn(body, error)) continue;
+          if (omitRejectedReportColumn(body, error)) continue;
           return { id: null, error };
         }
         return { id: null, error: new Error('Could not save report after schema retries') };
@@ -1446,7 +1432,10 @@ export default function NewServiceReport() {
 
       let savedId = currentReportId;
       const result = await writeReport(reportData, savedId);
-      if (result.error) throw result.error;
+      if (result.error) {
+        toast.error('Save error: ' + reportSaveErrorMessage(result.error));
+        return;
+      }
       if (!savedId && result.id) {
         savedId = result.id;
         setCurrentReportId(savedId);
@@ -1472,7 +1461,7 @@ export default function NewServiceReport() {
       }
     } catch (e: any) {
       console.error(e);
-      toast.error('Save error: ' + (e.message || e));
+      toast.error('Save error: ' + reportSaveErrorMessage(e));
     } finally {
       setSaving(false);
     }

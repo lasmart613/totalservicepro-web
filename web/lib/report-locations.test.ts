@@ -9,6 +9,7 @@ import {
   groupEquipmentForSite,
   loadCustomerEquipment,
   reportLocationControl,
+  resetEquipmentLocationProbe,
   reportSiteFields,
   shouldClearEquipmentSelection,
 } from './report-locations.ts';
@@ -127,7 +128,8 @@ test('ticket prefill preselects the ticket location', () => {
   assert.equal(hidden.selectedId, '');
 });
 
-test('missing equipment.location_id still returns the lasers as unassigned', async () => {
+test('missing equipment.location_id is remembered for the rest of the session', async () => {
+  resetEquipmentLocationProbe();
   const calls: string[] = [];
   const supabase = {
     from() {
@@ -142,7 +144,10 @@ test('missing equipment.location_id still returns the lasers as unassigned', asy
               if (columns.includes('location_id')) {
                 return Promise.resolve({
                   data: null,
-                  error: { message: "Could not find the 'location_id' column of 'equipment' in the schema cache" },
+                  error: {
+                    code: '42703',
+                    message: 'column equipment.location_id does not exist',
+                  },
                 });
               }
               return Promise.resolve({
@@ -159,6 +164,13 @@ test('missing equipment.location_id still returns the lasers as unassigned', asy
   assert.equal(rows.length, 1);
   assert.equal(rows[0].location_id, null);
   assert.equal(calls.length, 2);
+
+  const again = await loadCustomerEquipment(supabase, 99);
+  assert.equal(again.length, 1);
+  assert.equal(again[0].location_id, null);
+  assert.equal(calls.length, 3);
+  assert.equal(calls[2].includes('location_id'), false);
+  resetEquipmentLocationProbe();
 });
 
 test('service report form shows the location dropdown and resets on customer change', () => {

@@ -422,14 +422,71 @@ function normalizeExisting(rows: any[]): ExistingTicketReport[] {
   return out;
 }
 
+/**
+ * Live service_reports.ticket_id is uuid. Numeric service_tickets.id must not
+ * be written there (22P02). Those reports link through ticket_number.
+ */
+export function serviceReportTicketColumns(input: {
+  ticketId?: unknown;
+  ticketNumber?: unknown;
+}): { ticket_id?: string; ticket_number: string | null } {
+  const ticketNumber = clean(input.ticketNumber) || null;
+  const ticketId = clean(input.ticketId);
+  if (looksLikeUuid(ticketId)) return { ticket_id: ticketId, ticket_number: ticketNumber };
+  return { ticket_number: ticketNumber };
+}
+
+export function reportSaveErrorMessage(error: unknown): string {
+  if (error == null || error === '') return 'Could not save the report';
+  if (typeof error === 'string') return error.trim() || 'Could not save the report';
+  if (error instanceof Error && error.message.trim()) return error.message.trim();
+  const row = error as { message?: string; details?: string; hint?: string; code?: string };
+  const text = [row.message, row.details, row.hint]
+    .map((part) => clean(part))
+    .filter(Boolean)
+    .join(' ');
+  if (text) return text;
+  if (row.code) return `Could not save the report (${row.code})`;
+  return 'Could not save the report';
+}
+
+/**
+ * Drop a column PostgREST rejected. 22P02 is invalid uuid and often does not
+ * name ticket_id, so that code still removes ticket_id.
+ */
+export function omitRejectedReportColumn(
+  body: Record<string, unknown>,
+  error: { message?: string; code?: string; details?: string } | null | undefined
+): boolean {
+  if (!error) return false;
+  const message = String(error.message || '');
+  const code = String(error.code || '');
+  const text = `${code} ${message} ${error.details || ''}`;
+  const invalidUuid = code === '22P02' || /22P02|invalid input syntax for type uuid/i.test(text);
+  if (invalidUuid && 'ticket_id' in body) {
+    delete body.ticket_id;
+    return true;
+  }
+  if (/ticket_id/i.test(text) && /uuid|invalid input syntax/i.test(text) && 'ticket_id' in body) {
+    delete body.ticket_id;
+    return true;
+  }
+  const col = message.match(/Could not find the '([^']+)' column/i)?.[1];
+  if (col && col in body) {
+    delete body[col];
+    return true;
+  }
+  return false;
+}
+
 /** Reports already saved for this ticket, scoped to the ticket's shop. */
 export async function listReportsForTicket(
   supabase: TicketReportClient,
   ticket: Record<string, unknown>
 ): Promise<ExistingTicketReport[]> {
-  const ticketId = normalizeTicketId(ticket.id);
+  const rawId = clean(ticket.id);
   const ticketNumber = clean(ticket.ticket_number);
-  if (!ticketId && !ticketNumber) return [];
+  if (!rawId && !ticketNumber) return [];
   const orgId = ticket.organization_id;
   const columns = 'id, report_number, status, ticket_id, ticket_number, organization_id';
 
@@ -440,8 +497,9 @@ export async function listReportsForTicket(
   };
 
   const rows: any[] = [];
-  if (ticketId) {
-    const byId = await many(scoped('ticket_id', ticketId));
+  // ticket_id is uuid. A numeric service_tickets.id makes PostgREST return 400.
+  if (looksLikeUuid(rawId)) {
+    const byId = await many(scoped('ticket_id', rawId));
     if (!byId.error && Array.isArray(byId.data)) rows.push(...byId.data);
   }
   if (ticketNumber) {

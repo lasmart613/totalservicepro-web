@@ -9,8 +9,12 @@ import {
   loadTicketReportContext,
   mapTicketServiceType,
   newServiceReportHref,
+  omitRejectedReportColumn,
   reportPrefillFromTicket,
+  reportSaveErrorMessage,
+  serviceReportTicketColumns,
   ticketProblemComments,
+  listReportsForTicket,
 } from './ticket-service-report.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -278,6 +282,80 @@ test('schedule ticket view shows Create Service Report for report writers', () =
   assert.match(actions, /hidden w-full[\s\S]*sm:flex/);
   assert.match(form, /loadTicketReportContext/);
   assert.match(form, /ticketId/);
-  assert.match(form, /ticket_id: linkedTicketId/);
+  assert.match(form, /serviceReportTicketColumns/);
+  assert.match(form, /omitRejectedReportColumn/);
+  assert.match(form, /toast\.error\('Save error: ' \+ reportSaveErrorMessage/);
   assert.match(form, /This form starts a new one/);
+  assert.match(actions, /hidden w-full sm:flex/);
+});
+
+test('numeric ticket id is not sent as uuid ticket_id', () => {
+  const columns = serviceReportTicketColumns({ ticketId: '62', ticketNumber: 'ACME-62' });
+  assert.equal('ticket_id' in columns, false);
+  assert.equal(columns.ticket_number, 'ACME-62');
+
+  const uuid = '11111111-1111-4111-8111-111111111111';
+  const withUuid = serviceReportTicketColumns({ ticketId: uuid, ticketNumber: 'ACME-62' });
+  assert.equal(withUuid.ticket_id, uuid);
+  assert.equal(withUuid.ticket_number, 'ACME-62');
+});
+
+test('22P02 drops ticket_id even when the error does not name the column', () => {
+  const body: Record<string, unknown> = {
+    ticket_id: '62',
+    ticket_number: 'ACME-62',
+    status: 'draft',
+  };
+  const dropped = omitRejectedReportColumn(body, {
+    code: '22P02',
+    message: 'invalid input syntax for type uuid: "62"',
+  });
+  assert.equal(dropped, true);
+  assert.equal('ticket_id' in body, false);
+  assert.equal(body.ticket_number, 'ACME-62');
+  assert.equal(body.status, 'draft');
+  assert.equal(
+    reportSaveErrorMessage({ code: '22P02', message: 'invalid input syntax for type uuid: "62"' }),
+    'invalid input syntax for type uuid: "62"'
+  );
+  assert.equal(reportSaveErrorMessage({ code: '22P02' }), 'Could not save the report (22P02)');
+  assert.equal(reportSaveErrorMessage(null), 'Could not save the report');
+});
+
+test('existing-report lookup skips ticket_id when the ticket id is not a uuid', async () => {
+  const queries: string[] = [];
+  const supabase = {
+    from(table: string) {
+      const builder: any = {
+        select() {
+          return builder;
+        },
+        eq(column: string, value: unknown) {
+          queries.push(`${table}.${column}=${value}`);
+          return builder;
+        },
+        then(onFulfilled: any, onRejected: any) {
+          return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
+        },
+      };
+      return builder;
+    },
+  };
+
+  await listReportsForTicket(supabase as any, {
+    id: 62,
+    ticket_number: 'ACME-62',
+    organization_id: 7,
+  });
+  assert.equal(queries.some((query) => query.includes('ticket_id')), false);
+  assert.ok(queries.some((query) => query.includes('ticket_number=ACME-62')));
+
+  queries.length = 0;
+  const uuid = '11111111-1111-4111-8111-111111111111';
+  await listReportsForTicket(supabase as any, {
+    id: uuid,
+    ticket_number: 'ACME-62',
+    organization_id: 7,
+  });
+  assert.ok(queries.some((query) => query.includes(`ticket_id=${uuid}`)));
 });

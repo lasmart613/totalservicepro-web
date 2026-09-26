@@ -188,9 +188,19 @@ export function shouldClearEquipmentSelection(
   return ![...groups.atSite, ...groups.unassigned].some((row) => String(row.id) === id);
 }
 
-function missingLocationColumn(message?: string | null): boolean {
-  const text = String(message || '');
-  return /location_id/i.test(text) && /column|schema cache|does not exist|PGRST204/i.test(text);
+/** Remember a missing equipment.location_id so later customer picks skip that select. */
+let equipmentLocationIdMissing = false;
+
+export function resetEquipmentLocationProbe(): void {
+  equipmentLocationIdMissing = false;
+}
+
+function missingLocationColumn(error?: { message?: string; code?: string } | null): boolean {
+  if (!error) return false;
+  const code = String(error.code || '');
+  const text = `${code} ${error.message || ''}`;
+  if (code === '42703' || code === 'PGRST204' || /PGRST204/i.test(text)) return true;
+  return /location_id/i.test(text) && /column|schema cache|does not exist|42703/i.test(text);
 }
 
 function normalizeEquipment(row: Record<string, unknown> | null | undefined): ReportEquipmentRow | null {
@@ -217,10 +227,11 @@ export async function loadCustomerEquipment(
   try {
     let res = await supabase
       .from('equipment')
-      .select(full)
+      .select(equipmentLocationIdMissing ? safe : full)
       .eq('customer_organization_id', customerId)
       .limit(200);
-    if (res?.error && missingLocationColumn(res.error.message)) {
+    if (res?.error && missingLocationColumn(res.error)) {
+      equipmentLocationIdMissing = true;
       res = await supabase
         .from('equipment')
         .select(safe)

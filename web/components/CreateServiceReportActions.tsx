@@ -43,13 +43,15 @@ export function CreateServiceReportActions({
   return (
     <div className="flex w-full flex-col gap-2 sm:w-auto sm:items-end">
       {canCreate && (
-        <Link
-          href={href}
-          data-testid="create-service-report"
-          className="btn btn-primary hidden w-full items-center justify-center gap-2 sm:flex sm:w-auto"
-        >
-          Create Service Report
-        </Link>
+        <div className="hidden w-full sm:flex sm:w-auto">
+          <Link
+            href={href}
+            data-testid="create-service-report"
+            className="btn btn-primary flex w-full items-center justify-center gap-2 sm:w-auto"
+          >
+            Create Service Report
+          </Link>
+        </div>
       )}
       {reports.length > 0 && (
         <div className="flex flex-col gap-1 text-xs text-[var(--text3)] sm:text-right">
