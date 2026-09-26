@@ -4,6 +4,10 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 The site is deployed to Netlify project "totalservicepro" (linked, logged in as larrysmart@gmail.com).
 
+## Public service-manual, note, and troubleshooting pages
+
+Indexable pages (`/service-manuals`, `/blog`, `/troubleshooting`) are typed data in `lib/seo/publicContent.ts`, not rows from the private manuals table. To add a page, append one object to `SERVICE_MANUALS`, `BLOG_POSTS`, or `TROUBLESHOOTING_GUIDES`. Do not put public URLs under `/manuals` — robots `Disallow: /manuals` blocks that tree, and the in-app library stays auth-gated. Details: [lib/seo/README.md](lib/seo/README.md).
+
 ## Getting Started
 
 First, run the development server:

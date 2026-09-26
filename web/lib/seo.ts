@@ -1,4 +1,9 @@
 import type { Metadata } from 'next';
+import {
+  blogSitemapPaths as contentBlogSitemapPaths,
+  serviceManualSitemapPaths as contentServiceManualSitemapPaths,
+  troubleshootingSitemapPaths as contentTroubleshootingSitemapPaths,
+} from './seo/publicContent.ts';
 
 /** Canonical production origin for crawlers. Preview hosts still canonicalize here. */
 export const SEO_ORIGIN = 'https://repairplanet.net';
@@ -36,35 +41,49 @@ export const PUBLIC_SITEMAP_PATHS = [
 export const SITEMAP_EXCLUDED_PATHS = ['/login', '/forgot-password', '/unsubscribe'] as const;
 
 /**
- * Future public manual pages live at /service-manuals/[make]/[model].
+ * Public manual pages from web/lib/seo/publicContent.ts.
+ * Includes the hub, /service-manuals/[make], and /service-manuals/[make]/[model].
  * /manuals stays a private, robots-disallowed prefix — do not list it here.
- * Return [] until those pages exist.
  */
 export function serviceManualSitemapPaths(): string[] {
-  return [];
+  return contentServiceManualSitemapPaths();
 }
 
 /**
- * Future posts live at /blog/[slug]. Return [] until those pages exist.
+ * Public notes from web/lib/seo/publicContent.ts: /blog and /blog/[slug].
  */
 export function blogSitemapPaths(): string[] {
-  return [];
+  return contentBlogSitemapPaths();
+}
+
+/**
+ * Public troubleshooting notes. Same module as the manual and blog hooks.
+ * Not under /manuals.
+ */
+export function troubleshootingSitemapPaths(): string[] {
+  return contentTroubleshootingSitemapPaths();
 }
 
 export function collectSitemapPaths(): string[] {
   const manuals = serviceManualSitemapPaths();
   const posts = blogSitemapPaths();
+  const guides = troubleshootingSitemapPaths();
   for (const path of manuals) {
-    if (!path.startsWith('/service-manuals/')) {
-      throw new Error(`service manual sitemap path must start with /service-manuals/: ${path}`);
+    if (path !== '/service-manuals' && !path.startsWith('/service-manuals/')) {
+      throw new Error(`service manual sitemap path must start with /service-manuals: ${path}`);
     }
   }
   for (const path of posts) {
-    if (!path.startsWith('/blog/')) {
-      throw new Error(`blog sitemap path must start with /blog/: ${path}`);
+    if (path !== '/blog' && !path.startsWith('/blog/')) {
+      throw new Error(`blog sitemap path must start with /blog: ${path}`);
     }
   }
-  return [...PUBLIC_SITEMAP_PATHS, ...manuals, ...posts];
+  for (const path of guides) {
+    if (path !== '/troubleshooting' && !path.startsWith('/troubleshooting/')) {
+      throw new Error(`troubleshooting sitemap path must start with /troubleshooting: ${path}`);
+    }
+  }
+  return [...PUBLIC_SITEMAP_PATHS, ...manuals, ...posts, ...guides];
 }
 
 /**
