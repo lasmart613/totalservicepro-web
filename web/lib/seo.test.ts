@@ -12,14 +12,17 @@ import {
   ROBOTS_DISALLOW,
   SEO_ORIGIN,
   SITEMAP_EXCLUDED_PATHS,
+  blogSitemapPaths,
   canonicalUrl,
   collectSitemapPaths,
   privateAppMetadata,
   publicPageMetadata,
   robotsTxt,
   siteJsonLd,
+  serviceManualSitemapPaths,
   sitemapEntries,
   sitemapXml,
+  troubleshootingSitemapPaths,
 } from './seo.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -52,7 +55,14 @@ test('generated sitemap lists indexable URLs with lastmod', () => {
   assert.equal(existsSync(join(publicDir, 'sitemap.xml')), false);
   assert.match(body, /<urlset xmlns="http:\/\/www.sitemaps.org\/schemas\/sitemap\/0.9">/);
   const paths = collectSitemapPaths();
-  assert.deepEqual(paths, [...PUBLIC_SITEMAP_PATHS]);
+  assert.deepEqual(paths, [
+    ...PUBLIC_SITEMAP_PATHS,
+    ...serviceManualSitemapPaths(),
+    ...blogSitemapPaths(),
+    ...troubleshootingSitemapPaths(),
+  ]);
+  assert.ok(serviceManualSitemapPaths().some((path) => path.startsWith('/service-manuals/')));
+  assert.ok(blogSitemapPaths().some((path) => path.startsWith('/blog/')));
   for (const path of paths) {
     assert.match(body, new RegExp(`<loc>${canonicalUrl(path)}</loc>\\s*<lastmod>2026-09-26</lastmod>`));
   }
@@ -71,7 +81,7 @@ test('generated sitemap lists indexable URLs with lastmod', () => {
     assert.doesNotMatch(body, new RegExp(`<loc>${SEO_ORIGIN}${banned}</loc>`));
   }
   const entries = sitemapEntries(now);
-  assert.equal(entries.length, PUBLIC_SITEMAP_PATHS.length);
+  assert.equal(entries.length, paths.length);
   assert.ok(entries.every((entry) => entry.lastmod === '2026-09-26'));
   const route = readFileSync(join(webDir, 'app', 'sitemap.ts'), 'utf8');
   assert.match(route, /sitemapEntries/);
