@@ -19,6 +19,13 @@ import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
 import {
+  catalogManufacturerValue,
+  catalogModelValue,
+  loadTicketReportContext,
+  REPORT_SERVICE_TYPE_OPTIONS,
+  type ExistingTicketReport,
+} from '@/lib/ticket-service-report';
+import {
   DEFAULT_EQUIPMENT_TYPE,
   EQUIPMENT_TYPES,
   equipmentTypeOrDefault,
@@ -110,10 +117,23 @@ export default function NewServiceReport() {
   const searchParams = useSearchParams();
   const editReportId = searchParams?.get('id') || null;
   const equipmentTypeParam = searchParams?.get('equipment_type') || searchParams?.get('type') || '';
+  const ticketIdParam = editReportId
+    ? ''
+    : String(searchParams?.get('ticketId') || searchParams?.get('ticket_id') || '').trim();
   const supabase = getSupabaseClient();
 
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [currentUserOrgId, setCurrentUserOrgId] = useState<number | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [linkedTicketId, setLinkedTicketId] = useState<string | null>(null);
+  const [ticketEquipmentId, setTicketEquipmentId] = useState<string | number | null>(null);
+  const [ticketExistingReports, setTicketExistingReports] = useState<ExistingTicketReport[]>([]);
+  const [ticketContextReady, setTicketContextReady] = useState(!ticketIdParam);
+  const [ticketCatalogKey, setTicketCatalogKey] = useState(0);
+  const ticketMakeRef = useRef('');
+  const ticketModelRef = useRef('');
+  const selectModelRef = useRef<(key: string) => void>(() => {});
+  const ticketCatalogApplied = useRef(false);
   const [currentProfile, setCurrentProfile] = useState<any>(null);
   const [techCompanyCache, setTechCompanyCache] = useState<any>({});
 
@@ -298,8 +318,14 @@ export default function NewServiceReport() {
 
   useEffect(() => {
     (async () => {
+      let signedIn = false;
+      try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return router.push('/login');
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+      signedIn = true;
       setCurrentUser(user);
 
       // signature_data / role / additional_roles optional; fall back if not migrated yet
@@ -346,6 +372,9 @@ export default function NewServiceReport() {
       }
       // default date
       if (!dateOut) setDateOut(new Date().toISOString().slice(0,10));
+      } finally {
+        if (signedIn) setSessionReady(true);
+      }
     })();
   }, [router, supabase]);
 
@@ -419,6 +448,8 @@ export default function NewServiceReport() {
         setCurrentReportId(r.id);
         if (r.status === 'complete') setIsSubmitted(true);
         if (r.report_number) setReportNumber(r.report_number);
+        if (r.ticket_id) setLinkedTicketId(String(r.ticket_id));
+        if (r.equipment_id) setTicketEquipmentId(r.equipment_id);
         if (r.ticket_number) setTicketNum(r.ticket_number);
         if (r.service_type) setServiceType(r.service_type);
         if (r.date_out) setDateOut(String(r.date_out).slice(0, 10));
@@ -562,8 +593,9 @@ export default function NewServiceReport() {
   }, [editReportId, currentUser, supabase]);
 
   // New reports: load device-type template (fallback laser) once the tech is signed in.
+  // When opened from a ticket, wait until that prefill sets equipment type.
   useEffect(() => {
-    if (!currentUser || editReportId) return;
+    if (!currentUser || editReportId || !ticketContextReady) return;
     let cancelled = false;
     (async () => {
       try {
@@ -584,7 +616,7 @@ export default function NewServiceReport() {
     };
     // equipmentType changes are handled by onEquipmentTypeChange so extras are preserved.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, editReportId, supabase]);
+  }, [currentUser, editReportId, supabase, ticketContextReady]);
 
   async function onEquipmentTypeChange(next: EquipmentType) {
     const previous = currentItemsWithAnswers();
@@ -689,6 +721,99 @@ export default function NewServiceReport() {
     else setSelectedDbMfr(mfgName);
   }, [dbManufacturers, selectedDbModel, selectedDbMfr, equipName]);
 
+  // /reports/new?ticketId=… — prefill from the schedule ticket (RLS + caller org).
+  useEffect(() => {
+    if (!sessionReady || !ticketIdParam || editReportId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ctx = await loadTicketReportContext(supabase, ticketIdParam, {
+          organizationId: currentUserOrgId,
+        });
+        if (cancelled) return;
+        if (!ctx) {
+          toast.error('Could not load that ticket for this report');
+          setTicketContextReady(true);
+          return;
+        }
+        const prefill = ctx.prefill;
+        setLinkedTicketId(prefill.ticketId);
+        setTicketEquipmentId(prefill.equipmentId);
+        setTicketExistingReports(ctx.existingReports);
+        if (prefill.ticketNumber) setTicketNum(prefill.ticketNumber);
+        if (prefill.serviceType) setServiceType(prefill.serviceType);
+        if (prefill.dateOut) setDateOut(prefill.dateOut);
+        if (prefill.serialNumber) setSerialNumber(prefill.serialNumber);
+        if (prefill.comments) setComments(prefill.comments);
+        if (prefill.serviceEngineer) setServiceEngineer(prefill.serviceEngineer);
+        if (prefill.customerName) {
+          setSearchTerm(prefill.customerName);
+          setSelectedCustomer({
+            id: prefill.customerOrganizationId,
+            name: prefill.customerName,
+            address: prefill.customerAddress,
+            city: prefill.customerCity,
+            state: prefill.customerState,
+            phone: prefill.customerPhone,
+            email: prefill.customerEmail,
+            contact_name: prefill.customerContactName,
+          });
+        }
+        setCustAddress(prefill.customerAddress);
+        setCustCity(prefill.customerCity);
+        setCustState(prefill.customerState);
+        setCustContactName(prefill.customerContactName);
+        setCustPhone(prefill.customerPhone);
+        setCustEmail(prefill.customerEmail);
+        ticketMakeRef.current = prefill.equipmentMake;
+        ticketModelRef.current = prefill.equipmentModel;
+        if (prefill.equipmentMake) setSelectedDbMfr(prefill.equipmentMake);
+        if (prefill.equipmentModel) {
+          selectModelRef.current(prefill.equipmentModel);
+          setSelectedDbModel(prefill.equipmentModel);
+          setSelectedModelKey(prefill.equipmentModel);
+        }
+        if (prefill.equipmentName) setEquipName(prefill.equipmentName);
+        setEquipmentType(prefill.equipmentType);
+        setTicketCatalogKey((n) => n + 1);
+        setTicketContextReady(true);
+        toast.success(
+          prefill.ticketNumber
+            ? `Filled from ticket ${prefill.ticketNumber}`
+            : 'Filled from service ticket'
+        );
+      } catch (e) {
+        console.warn('ticket report prefill', e);
+        if (!cancelled) {
+          toast.error('Could not load that ticket for this report');
+          setTicketContextReady(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionReady, ticketIdParam, editReportId, currentUserOrgId, supabase]);
+
+  // Match ticket make/model onto catalog option values once those lists load.
+  useEffect(() => {
+    if (ticketCatalogApplied.current) return;
+    const make = ticketMakeRef.current;
+    const model = ticketModelRef.current;
+    if (!make && !model) return;
+    if (make && !dbManufacturers.length) return;
+    if (model && !dbLaserModels.length) return;
+    ticketCatalogApplied.current = true;
+    if (make && dbManufacturers.length) {
+      const value = catalogManufacturerValue(make, dbManufacturers);
+      if (value) setSelectedDbMfr(value);
+    }
+    if (model && dbLaserModels.length) {
+      const value = catalogModelValue(model, dbLaserModels);
+      if (value) setSelectedDbModel(value);
+    }
+  }, [dbManufacturers, dbLaserModels, ticketCatalogKey]);
+
   async function loadCustomers(orgId: any) {
     try {
       if (!orgId) {
@@ -775,6 +900,7 @@ export default function NewServiceReport() {
       setPowerMeasurements(seeded);
     }
   }
+  selectModelRef.current = selectModel;
 
   function selectDbManufacturer(mfr: string) {
     setSelectedDbMfr(mfr);
@@ -1032,7 +1158,7 @@ export default function NewServiceReport() {
         report_number: rn || reportNumber || null,
         service_engineer: engineerName,
         customer_organization_id: custId || null,
-        equipment_id: linkedEquipmentId || null,
+        equipment_id: linkedEquipmentId || ticketEquipmentId || null,
         equipment_name:
           equipName ||
           currentModel?.label ||
@@ -1052,6 +1178,7 @@ export default function NewServiceReport() {
         customer_contact_name: custContactName || selectedCustomer?.contact_name || null,
         date_out: dateOut || null,
         next_pm_due: nextPm || null,
+        ticket_id: linkedTicketId || null,
         ticket_number: ticketNum || null,
         comments: comments || null,
         ground_resistance: groundResistance === '' ? null : groundResistance,
@@ -1092,31 +1219,36 @@ export default function NewServiceReport() {
           (status === 'complete' ? new Date().toISOString().slice(0, 10) : null),
       };
 
-      // Retry without columns PostgREST says are missing (schema drift / unapplied migrations)
+      // Retry without columns PostgREST says are missing (schema drift / unapplied migrations).
+      // ticket_id is text in the generated schema; drop it if this database still types it as uuid.
+      function dropUnwritableColumn(body: Record<string, any>, error: { message?: string } | null): boolean {
+        const m = String(error?.message || '');
+        const col = m.match(/Could not find the '([^']+)' column/i)?.[1];
+        if (col && col in body) {
+          console.warn('service_reports missing column, retry without:', col);
+          delete body[col];
+          return true;
+        }
+        if (/ticket_id/i.test(m) && /uuid|invalid input syntax/i.test(m) && 'ticket_id' in body) {
+          console.warn('service_reports.ticket_id rejected, retry without it');
+          delete body.ticket_id;
+          return true;
+        }
+        return false;
+      }
+
       async function writeReport(payload: Record<string, any>, id: any) {
         let body = { ...payload };
         for (let attempt = 0; attempt < 6; attempt++) {
           if (id) {
             const { error } = await supabase.from('service_reports').update(body).eq('id', id);
             if (!error) return { id, error: null as any };
-            const m = String(error.message || '');
-            const col = m.match(/Could not find the '([^']+)' column/i)?.[1];
-            if (col && col in body) {
-              console.warn('service_reports missing column, retry without:', col);
-              delete body[col];
-              continue;
-            }
+            if (dropUnwritableColumn(body, error)) continue;
             return { id, error };
           }
           const { data: ins, error } = await supabase.from('service_reports').insert(body).select('id').single();
           if (!error && ins?.id) return { id: ins.id, error: null as any };
-          const m = String(error?.message || '');
-          const col = m.match(/Could not find the '([^']+)' column/i)?.[1];
-          if (col && col in body) {
-            console.warn('service_reports missing column, retry without:', col);
-            delete body[col];
-            continue;
-          }
+          if (dropUnwritableColumn(body, error)) continue;
           return { id: null, error };
         }
         return { id: null, error: new Error('Could not save report after schema retries') };
@@ -1312,19 +1444,33 @@ export default function NewServiceReport() {
     <div className="min-h-screen bg-[var(--bg)] pb-24">
       <Header />
       <div className="max-w-5xl mx-auto px-6 py-8">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
             <Link href="/reports" className="text-[var(--gold)]"><ArrowLeft size={24} /></Link>
-            <h1 className="text-3xl font-bold">
+            <h1 className="text-2xl font-bold sm:text-3xl">
               {currentReportId ? (isSubmitted ? 'Service Report' : 'Edit Draft Report') : 'New Service Report'}
             </h1>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-2">
             <button onClick={() => saveReport('draft')} disabled={saving} className="btn btn-secondary flex items-center gap-2"><Save size={16}/> Save Draft</button>
             <button onClick={() => saveReport('complete')} disabled={saving || isSubmitted} className="btn btn-primary flex items-center gap-2"><Check size={18} /> Submit Complete</button>
             <button onClick={() => window.print()} className="btn btn-ghost flex items-center gap-2 text-xs">Print / Save PDF</button>
           </div>
         </div>
+
+        {ticketIdParam && ticketExistingReports.length > 0 && (
+          <div className="mb-4 rounded-lg border border-[var(--gold-border)] bg-[var(--gold-glow)] p-3 text-sm">
+            This ticket already has {ticketExistingReports.length === 1 ? 'a service report' : `${ticketExistingReports.length} service reports`}. This form starts a new one.
+            <div className="mt-2 flex flex-col gap-1">
+              {ticketExistingReports.map((report) => (
+                <Link key={report.id} href={`/reports/${report.id}`} className="text-[var(--gold)] underline">
+                  Open {report.reportNumber || 'existing report'}
+                  {report.status ? ` (${report.status})` : ''}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Customer Info — full editable fields (Android parity) */}
         <div className="section mb-6 p-6">
@@ -1418,11 +1564,12 @@ export default function NewServiceReport() {
             <div>
               <label className="label">Service Type</label>
               <select className="input" value={serviceType} onChange={e=>setServiceType(e.target.value)}>
-                <option value="PM">PM</option>
-                <option value="Repair">Repair</option>
-                <option value="PM+Repair">PM + Repair</option>
-                <option value="Install">Install</option>
-                <option value="Cal">Cal</option>
+                {REPORT_SERVICE_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+                {serviceType && !REPORT_SERVICE_TYPE_OPTIONS.some((option) => option.value === serviceType) && (
+                  <option value={serviceType}>{serviceType}</option>
+                )}
               </select>
             </div>
             <div><label className="label">Date Out</label><input type="date" className="input" value={dateOut} onChange={e=>setDateOut(e.target.value)} /></div>

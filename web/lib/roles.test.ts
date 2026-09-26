@@ -6,6 +6,7 @@ import {
   canAccessRepairAi,
   canAccessServiceManuals,
   canAssignShopTestEquipment,
+  canCreateServiceReports,
   canSeeAllShopTickets,
   isAdmin,
   isFieldEngineer,
@@ -44,6 +45,24 @@ test('Larry FSE maps to fse / engineer / technician only', () => {
   assert.equal(canSeeAllShopTickets('fse'), false);
   assert.equal(canSeeAllShopTickets('engineer'), false);
   assert.equal(canSeeAllShopTickets('technician'), false);
+});
+
+test('service report create matches shop staff, not owners or suppliers', () => {
+  assert.equal(canCreateServiceReports('fse', 'service_company'), true);
+  assert.equal(canCreateServiceReports('engineer'), true);
+  assert.equal(canCreateServiceReports('technician'), true);
+  assert.equal(canCreateServiceReports('admin', 'service_company'), true);
+  assert.equal(canCreateServiceReports('company_admin'), true);
+  assert.equal(canCreateServiceReports('service_manager'), true);
+  assert.equal(canCreateServiceReports('dispatcher'), true);
+  assert.equal(canCreateServiceReports('scheduler'), true);
+  assert.equal(canCreateServiceReports('billing_manager'), true);
+  assert.equal(canCreateServiceReports('owner', 'laser_clinic'), false);
+  assert.equal(canCreateServiceReports('customer', 'customer'), false);
+  assert.equal(canCreateServiceReports('parts_supplier', 'parts_supplier'), false);
+  assert.equal(canCreateServiceReports('supplier', 'vendor'), false);
+  assert.equal(canCreateServiceReports('', null), false);
+  assert.equal(canCreateServiceReports('viewer'), false);
 });
 
 test('unknown or empty role does not get the full shop schedule', () => {

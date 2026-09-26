@@ -177,6 +177,17 @@ export function canCreateTickets(role?: RoleLike): boolean {
   return isPro(role) || r === 'dispatcher' || r === 'scheduler';
 }
 
+/**
+ * Create a service report from the schedule ticket view.
+ * Same people who write reports today: service-company staff and field techs.
+ * Clinic owners and parts suppliers can view history; they do not get this button.
+ */
+export function canCreateServiceReports(role?: RoleLike, orgType?: OrgTypeLike): boolean {
+  if (isOwnerish(role, orgType) || isSupplier(role, orgType)) return false;
+  if (isFieldEngineer(role)) return true;
+  return isServiceCompany(role, orgType);
+}
+
 /** Bid on marketplace needs (service pros incl. admin) */
 export function canBidMarketplace(role?: RoleLike): boolean {
   return isPro(role);
