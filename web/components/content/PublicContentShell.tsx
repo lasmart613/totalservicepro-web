@@ -13,7 +13,7 @@ const NAV = [
 
 export function PublicContentShell({ children }: { children: ReactNode }) {
   return (
-    <div className="lp-root">
+    <div className="lp-root content-shell">
       <script
         dangerouslySetInnerHTML={{
           __html: "document.documentElement.classList.add('landing-mode')",

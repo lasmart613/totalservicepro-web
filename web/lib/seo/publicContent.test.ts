@@ -188,6 +188,17 @@ test('manual notes and articles are in the requested length', () => {
   }
 });
 
+test('content CTAs keep readable text and mobile Register stays visible', () => {
+  const css = readFileSync(join(webDir, 'components', 'content', 'content.css'), 'utf8');
+  const shell = readFileSync(join(webDir, 'components', 'content', 'PublicContentShell.tsx'), 'utf8');
+  assert.match(css, /\.content-prose a:not\(\.lp-btn\)/);
+  assert.match(css, /\.content-cta \.lp-btn-primary[\s\S]*color:\s*#111827/);
+  assert.match(css, /\.content-shell \.lp-nav-cta \.lp-btn-outline[\s\S]*display:\s*inline-flex/);
+  assert.match(shell, /content-shell/);
+  assert.match(shell, /lp-btn lp-btn-outline/);
+  assert.match(shell, />\s*Register\s*</);
+});
+
 test('adding a manual is one array entry and the route is derived', () => {
   const source = readFileSync(join(here, 'publicContent.ts'), 'utf8');
   assert.match(source, /export const SERVICE_MANUALS/);

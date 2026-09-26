@@ -72,8 +72,14 @@
   padding-left: 1.2rem;
 }
 
-.content-prose a {
+.content-prose a:not(.lp-btn) {
   color: #fbbf24;
+}
+
+/* Primary CTA sits on amber. Keep the label dark; the prose link color must not win. */
+.content-cta .lp-btn-primary,
+.content-cta .lp-btn-primary:hover {
+  color: #111827;
 }
 
 .content-related {
@@ -92,7 +98,7 @@
   gap: 8px;
 }
 
-.content-related a {
+.content-prose .content-related a {
   display: block;
   padding: 12px 14px;
   background: #1f2937;
@@ -131,7 +137,7 @@
   gap: 10px;
 }
 
-.content-index a {
+.content-prose .content-index a {
   display: block;
   padding: 14px 16px;
   background: #1f2937;
@@ -156,4 +162,11 @@
   color: #9ca3af;
   font-size: 14px;
   line-height: 1.45;
+}
+
+/* Landing nav hides .lp-btn-outline under 800px. Content pages use a short Register label and keep it visible. */
+@media (max-width: 799px) {
+  .content-shell .lp-nav-cta .lp-btn-outline {
+    display: inline-flex;
+  }
 }
