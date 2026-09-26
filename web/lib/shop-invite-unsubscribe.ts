@@ -46,6 +46,7 @@ export function unsubscribePageHeaders(token?: string | null): Record<string, st
   const headers: Record<string, string> = {
     'Content-Type': 'text/html; charset=utf-8',
     'Cache-Control': 'no-store',
+    'X-Robots-Tag': 'noindex, follow',
     'List-Unsubscribe-Post': LIST_UNSUBSCRIBE_POST,
   };
   if (isValidUnsubscribeToken(token)) {
@@ -101,6 +102,7 @@ export function shopInviteUnsubscribePageHtml(opts: {
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="robots" content="noindex, follow" />
   <title>${esc(title)}</title>
 </head>
 <body style="margin:0;padding:0;background:#0b0f14;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#e8edf4;">

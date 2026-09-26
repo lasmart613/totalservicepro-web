@@ -378,7 +378,9 @@ function LoginInner() {
           <Link href="/" className="inline-block">
             <span className="font-extrabold text-3xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </Link>
-          <p className="text-[var(--text3)] mt-1 text-sm tracking-wide">Professional Laser Service Tools</p>
+          <p className="text-[var(--text3)] mt-1 text-sm tracking-wide">
+            Field service tools for biomedical equipment — lasers, lithotriptors, C-arms, and more.
+          </p>
         </div>
 
         <div className="card p-8">
@@ -598,9 +600,34 @@ function LoginInner() {
   );
 }
 
+function LoginStaticIntro() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] p-6">
+      <div className="w-full max-w-md">
+        <div className="text-center mb-8">
+          <Link href="/" className="inline-block">
+            <span className="font-extrabold text-3xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
+          </Link>
+          <p className="text-[var(--text3)] mt-1 text-sm tracking-wide">
+            Field service tools for biomedical equipment — lasers, lithotriptors, C-arms, and more.
+          </p>
+        </div>
+        <div className="card p-8">
+          <h1 className="text-2xl font-bold mb-4" style={{ color: 'var(--gold)' }}>Sign in</h1>
+          <p className="text-sm text-[var(--text3)] mb-4">
+            Sign in to Total Service Pro on RepairPlanet — shop schedule, directory, and marketplace for
+            biomedical and laser repair companies.
+          </p>
+          <p className="text-[var(--text3)]">Loading…</p>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function LoginPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center bg-[var(--bg)] text-[var(--text3)]">Loading…</div>}>
+    <Suspense fallback={<LoginStaticIntro />}>
       <LoginInner />
     </Suspense>
   );

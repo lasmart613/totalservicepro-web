@@ -53,7 +53,7 @@ export default function ForgotPasswordPage() {
             </span>
           </Link>
           <p className="text-[var(--text3)] mt-1 text-sm tracking-wide">
-            Professional Laser Service Tools
+            Field service tools for biomedical equipment — lasers, lithotriptors, C-arms, and more.
           </p>
         </div>
 

@@ -566,15 +566,25 @@ function OwnerSignupInner() {
   );
 }
 
+function OwnerSignupStatic() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] p-6">
+      <div className="w-full max-w-md">
+        <p className="text-sm font-semibold" style={{ color: 'var(--gold)' }}>Total Service Pro</p>
+        <h1 className="text-2xl font-bold mt-1">Sign up as a clinic or equipment owner</h1>
+        <p className="text-sm text-[var(--text3)] mt-2">
+          Hospitals, clinics, rental companies, and resellers. Track medical devices and find biomedical
+          service — lasers, lithotriptors, C-arms, and more.
+        </p>
+        <p className="text-[var(--text3)] mt-4">Loading sign up…</p>
+      </div>
+    </div>
+  );
+}
+
 export default function OwnerSignup() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center text-[var(--text3)]">
-          Loading sign up…
-        </div>
-      }
-    >
+    <Suspense fallback={<OwnerSignupStatic />}>
       <OwnerSignupInner />
     </Suspense>
   );
