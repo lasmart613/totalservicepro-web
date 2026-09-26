@@ -26,6 +26,23 @@ import {
   type ExistingTicketReport,
 } from '@/lib/ticket-service-report';
 import {
+  formatLocationOption,
+  loadCustomerLocations,
+  locationsForDisplay,
+  type CustomerLocation,
+} from '@/lib/customer-locations';
+import {
+  UNASSIGNED_EQUIPMENT_LABEL,
+  equipmentOptionLabel,
+  groupEquipmentForSite,
+  loadCustomerEquipment,
+  matchLocationId,
+  reportLocationControl,
+  reportSiteFields,
+  shouldClearEquipmentSelection,
+  type ReportEquipmentRow,
+} from '@/lib/report-locations';
+import {
   DEFAULT_EQUIPMENT_TYPE,
   EQUIPMENT_TYPES,
   equipmentTypeOrDefault,
@@ -134,6 +151,18 @@ export default function NewServiceReport() {
   const ticketModelRef = useRef('');
   const selectModelRef = useRef<(key: string) => void>(() => {});
   const ticketCatalogApplied = useRef(false);
+  const locationRequestRef = useRef(0);
+  const locationLoadRef = useRef<{
+    preferredId: string | number | null;
+    applyFields: boolean;
+    preserveEquipmentId: string | number | null;
+    matchAddress: { address: string; city: string; state: string } | null;
+  }>({
+    preferredId: null,
+    applyFields: false,
+    preserveEquipmentId: null,
+    matchAddress: null,
+  });
   const [currentProfile, setCurrentProfile] = useState<any>(null);
   const [techCompanyCache, setTechCompanyCache] = useState<any>({});
 
@@ -144,6 +173,12 @@ export default function NewServiceReport() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: '', address: '', city: '', state: '', phone: '', email: '', contactName: '' });
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
+  const [customerPick, setCustomerPick] = useState(0);
+  const [customerLocations, setCustomerLocations] = useState<CustomerLocation[]>([]);
+  const [selectedLocationId, setSelectedLocationId] = useState('');
+  const [siteName, setSiteName] = useState('');
+  const [customerEquipment, setCustomerEquipment] = useState<ReportEquipmentRow[]>([]);
+  const [selectedEquipmentId, setSelectedEquipmentId] = useState('');
 
   // Core report fields
   const [selectedModelKey, setSelectedModelKey] = useState('');
@@ -462,6 +497,17 @@ export default function NewServiceReport() {
         if (r.service_engineer) setServiceEngineer(r.service_engineer);
         if (r.customer_name) {
           setSearchTerm(r.customer_name);
+          locationLoadRef.current = {
+            preferredId: null,
+            applyFields: false,
+            preserveEquipmentId: r.equipment_id ?? null,
+            matchAddress: {
+              address: r.customer_address || '',
+              city: r.customer_city || '',
+              state: r.customer_state || '',
+            },
+          };
+          if (r.equipment_id) setSelectedEquipmentId(String(r.equipment_id));
           setSelectedCustomer((prev: any) =>
             prev || {
               id: r.customer_organization_id || null,
@@ -469,6 +515,7 @@ export default function NewServiceReport() {
               address: r.customer_address,
               city: r.customer_city,
               state: r.customer_state,
+              zip: r.customer_zip || null,
               phone: r.customer_phone,
               email: r.customer_email,
               contact_name: r.customer_contact_name,
@@ -748,6 +795,12 @@ export default function NewServiceReport() {
         if (prefill.serviceEngineer) setServiceEngineer(prefill.serviceEngineer);
         if (prefill.customerName) {
           setSearchTerm(prefill.customerName);
+          locationLoadRef.current = {
+            preferredId: prefill.locationId,
+            applyFields: false,
+            preserveEquipmentId: prefill.equipmentId,
+            matchAddress: null,
+          };
           setSelectedCustomer({
             id: prefill.customerOrganizationId,
             name: prefill.customerName,
@@ -758,6 +811,10 @@ export default function NewServiceReport() {
             email: prefill.customerEmail,
             contact_name: prefill.customerContactName,
           });
+        }
+        if (prefill.siteName) setSiteName(prefill.siteName);
+        if (prefill.equipmentId != null && prefill.equipmentId !== '') {
+          setSelectedEquipmentId(String(prefill.equipmentId));
         }
         setCustAddress(prefill.customerAddress);
         setCustCity(prefill.customerCity);
@@ -814,6 +871,90 @@ export default function NewServiceReport() {
     }
   }, [dbManufacturers, dbLaserModels, ticketCatalogKey]);
 
+  function applyLocationFields(loc: CustomerLocation) {
+    const fields = reportSiteFields(loc);
+    setCustAddress(fields.address);
+    setCustCity(fields.city);
+    setCustState(fields.state);
+    setCustPhone(fields.phone);
+    setCustContactName(fields.contactName);
+    setSiteName(fields.siteName);
+  }
+
+  function resetEquipmentPick() {
+    setSelectedEquipmentId('');
+    setTicketEquipmentId(null);
+    setEquipName('');
+    setSerialNumber('');
+    setSelectedDbMfr('');
+    setSelectedDbModel('');
+    setSelectedModelKey('');
+  }
+
+  // Locations and lasers for the selected customer. Ticket prefill queues a
+  // location id before setSelectedCustomer so this effect can preselect it.
+  useEffect(() => {
+    const customerId = selectedCustomer?.id;
+    if (customerId == null || customerId === '') {
+      setCustomerLocations([]);
+      setCustomerEquipment([]);
+      setSelectedLocationId('');
+      return;
+    }
+    const request = ++locationRequestRef.current;
+    const queued = locationLoadRef.current;
+    locationLoadRef.current = {
+      preferredId: null,
+      applyFields: false,
+      preserveEquipmentId: null,
+      matchAddress: null,
+    };
+    let cancelled = false;
+    (async () => {
+      try {
+        const [loaded, equipment] = await Promise.all([
+          loadCustomerLocations(supabase, customerId),
+          loadCustomerEquipment(supabase, customerId),
+        ]);
+        if (cancelled || request !== locationRequestRef.current) return;
+        const locations = locationsForDisplay(loaded.locations, {
+          id: customerId,
+          address: selectedCustomer.address,
+          city: selectedCustomer.city,
+          state: selectedCustomer.state,
+          zip: selectedCustomer.zip,
+          phone: selectedCustomer.phone,
+          contact_name: selectedCustomer.contact_name,
+        });
+        setCustomerLocations(locations);
+        setCustomerEquipment(equipment);
+        let preferred = queued.preferredId;
+        if ((preferred == null || preferred === '') && queued.matchAddress) {
+          preferred = matchLocationId(locations, queued.matchAddress) || null;
+        }
+        const control = reportLocationControl(locations, preferred, {
+          fallback: queued.applyFields || queued.preferredId != null ? 'primary' : 'none',
+        });
+        setSelectedLocationId(control.selectedId);
+        const loc = locations.find((row) => String(row.id) === control.selectedId);
+        if (loc && queued.applyFields) applyLocationFields(loc);
+        else if (loc) setSiteName((prev) => prev || loc.name || '');
+        if (queued.preserveEquipmentId != null && queued.preserveEquipmentId !== '') {
+          setSelectedEquipmentId(String(queued.preserveEquipmentId));
+        } else if (queued.applyFields) {
+          setSelectedEquipmentId('');
+        }
+      } catch (e) {
+        console.warn('report locations', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // selectedCustomer fields are read for the org snapshot of this pick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomer?.id, customerPick, supabase]);
+
   async function loadCustomers(orgId: any) {
     try {
       if (!orgId) {
@@ -830,7 +971,19 @@ export default function NewServiceReport() {
   const filteredCustomers = filterLinkedCustomers(customerOptions, searchTerm, 12);
 
   const handleSelectCustomer = (customer: any) => {
+    locationLoadRef.current = {
+      preferredId: null,
+      applyFields: true,
+      preserveEquipmentId: null,
+      matchAddress: null,
+    };
+    resetEquipmentPick();
+    setSelectedLocationId('');
+    setSiteName('');
+    setCustomerLocations([]);
+    setCustomerEquipment([]);
     setSelectedCustomer(customer);
+    setCustomerPick((n) => n + 1);
     setSearchTerm(customer.name || '');
     setCustAddress(customer.address || '');
     setCustCity(customer.city || '');
@@ -841,6 +994,43 @@ export default function NewServiceReport() {
     setCustWebsite(customer.website || '');
     setShowCustDrop(false);
   };
+
+  function handleLocationChange(id: string) {
+    setSelectedLocationId(id);
+    const loc = customerLocations.find((row) => String(row.id) === id);
+    if (loc) applyLocationFields(loc);
+    else setSiteName('');
+    const groups = groupEquipmentForSite(customerEquipment, id, {
+      keepIds: [ticketEquipmentId],
+      siteLabel: loc?.name || '',
+    });
+    if (shouldClearEquipmentSelection(customerEquipment, groups, selectedEquipmentId)) {
+      resetEquipmentPick();
+    }
+  }
+
+  function handleEquipmentChange(id: string) {
+    setSelectedEquipmentId(id);
+    if (!id) return;
+    const row = customerEquipment.find((item) => String(item.id) === id);
+    if (!row) return;
+    setTicketEquipmentId(row.id);
+    const make = String(row.manufacturer || '').trim();
+    const model = String(row.model || '').trim();
+    if (row.serial_number) setSerialNumber(String(row.serial_number));
+    setEquipName([make, model].filter(Boolean).join(' '));
+    if (make) {
+      const value = dbManufacturers.length ? catalogManufacturerValue(make, dbManufacturers) : make;
+      setSelectedDbMfr(value);
+      ticketMakeRef.current = make;
+    }
+    if (model) {
+      const value = dbLaserModels.length ? catalogModelValue(model, dbLaserModels) : model;
+      ticketModelRef.current = model;
+      selectDbModelValue(value);
+    }
+    setEquipName([make, model].filter(Boolean).join(' '));
+  }
 
   const handleAddNewCustomer = async () => {
     if (!newCustomer.name.trim() || !currentUserOrgId) return;
@@ -1440,6 +1630,15 @@ export default function NewServiceReport() {
     );
   }
 
+  const locationUi = reportLocationControl(customerLocations, selectedLocationId || null, {
+    fallback: 'none',
+  });
+  const selectedLocation = customerLocations.find((loc) => String(loc.id) === (selectedLocationId || locationUi.selectedId));
+  const equipmentGroups = groupEquipmentForSite(customerEquipment, selectedLocationId || locationUi.selectedId, {
+    keepIds: [ticketEquipmentId],
+    siteLabel: selectedLocation?.name || siteName,
+  });
+
   return (
     <div className="min-h-screen bg-[var(--bg)] pb-24">
       <Header />
@@ -1485,7 +1684,14 @@ export default function NewServiceReport() {
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
                   setShowCustDrop(true);
-                  if (!e.target.value) setSelectedCustomer(null);
+                  if (!e.target.value) {
+                    setSelectedCustomer(null);
+                    setCustomerLocations([]);
+                    setSelectedLocationId('');
+                    setSiteName('');
+                    setCustomerEquipment([]);
+                    resetEquipmentPick();
+                  }
                 }}
                 onFocus={() => setShowCustDrop(true)}
                 placeholder="Type clinic / facility name…"
@@ -1513,7 +1719,42 @@ export default function NewServiceReport() {
             <button onClick={()=>setShowAddModal(true)} className="btn btn-secondary text-sm py-3">+ Add</button>
           </div>
 
+          {locationUi.shown && (
+            <div className="mb-3">
+              <label className="label" htmlFor="report-location">Location</label>
+              <select
+                id="report-location"
+                data-testid="report-location"
+                className="input w-full"
+                value={selectedLocationId || locationUi.selectedId}
+                disabled={locationUi.disabled}
+                onChange={(e) => handleLocationChange(e.target.value)}
+              >
+                {locationUi.mode === 'multiple' && <option value="">Select a location</option>}
+                {customerLocations.map((loc) => (
+                  <option key={String(loc.id)} value={String(loc.id)}>
+                    {formatLocationOption(loc)}
+                  </option>
+                ))}
+              </select>
+              {locationUi.disabled && (
+                <p className="text-[10px] text-[var(--text3)] mt-1">This customer has one location.</p>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="md:col-span-2">
+              <label className="label" htmlFor="report-site">Site</label>
+              <input
+                id="report-site"
+                data-testid="report-site"
+                className="input w-full"
+                value={siteName}
+                onChange={(e) => setSiteName(e.target.value)}
+                placeholder="Filled from the location"
+              />
+            </div>
             <div className="md:col-span-2">
               <label className="label">Address</label>
               <input className="input w-full" value={custAddress} onChange={e=>setCustAddress(e.target.value)} placeholder="123 Main St" />
@@ -1605,6 +1846,38 @@ export default function NewServiceReport() {
         {/* Manufacturer + Model dropdowns (sole equipment name source for draft/save) */}
         <div className="section mb-6 p-6">
           <h3 className="text-xl font-semibold mb-4">⚙️ Equipment Name / Model</h3>
+          {selectedCustomer?.id && (
+            <div className="mb-3">
+              <label className="label" htmlFor="report-equipment">Equipment at this site</label>
+              <select
+                id="report-equipment"
+                data-testid="report-equipment"
+                className="input w-full"
+                value={selectedEquipmentId}
+                onChange={(e) => handleEquipmentChange(e.target.value)}
+              >
+                <option value="">Select equipment or enter it below</option>
+                {equipmentGroups.atSite.length > 0 && (
+                  <optgroup label={equipmentGroups.siteLabel}>
+                    {equipmentGroups.atSite.map((row) => (
+                      <option key={String(row.id)} value={String(row.id)}>
+                        {equipmentOptionLabel(row)}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {equipmentGroups.unassigned.length > 0 && (
+                  <optgroup label={UNASSIGNED_EQUIPMENT_LABEL}>
+                    {equipmentGroups.unassigned.map((row) => (
+                      <option key={String(row.id)} value={String(row.id)}>
+                        {equipmentOptionLabel(row)}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+          )}
           <div className="mb-3">
             <label className="text-xs text-[var(--text3)]">Equipment type</label>
             <select

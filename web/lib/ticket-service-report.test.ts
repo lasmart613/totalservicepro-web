@@ -114,6 +114,8 @@ test('ticket fields map onto the service report, with site and device filling bl
   assert.equal(prefill.customerPhone, '555-0100');
   assert.equal(prefill.customerEmail, 'desk@north.test');
   assert.equal(prefill.customerContactName, 'Site Lead');
+  assert.equal(prefill.locationId, null);
+  assert.equal(prefill.siteName, 'Surgery suite');
   assert.equal(prefill.equipmentMake, 'Candela');
   assert.equal(prefill.equipmentModel, 'GentleMax Pro');
   assert.equal(prefill.equipmentName, 'Candela GentleMax Pro');
@@ -234,6 +236,8 @@ test('loader uses linked records and still allows another report when one exists
   assert.ok(ctx);
   assert.equal(ctx.prefill.customerAddress, '500 Site Rd, 94704');
   assert.equal(ctx.prefill.customerCity, 'Berkeley');
+  assert.equal(ctx.prefill.locationId, 3);
+  assert.equal(ctx.prefill.siteName, 'Surgery suite');
   assert.equal(ctx.prefill.equipmentMake, 'Candela');
   assert.equal(ctx.prefill.equipmentModel, 'GentleMax Pro');
   assert.equal(ctx.prefill.serialNumber, 'SN-9');

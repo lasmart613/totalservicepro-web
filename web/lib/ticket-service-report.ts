@@ -9,6 +9,7 @@
  * on the current /reports/new model (ticketId query + service_reports.ticket_id).
  */
 
+import { persistedLocationId } from './customer-locations.ts';
 import { memberDisplayName, looksLikeUuid } from './ticket-assignees.ts';
 import {
   equipmentTypeOrDefault,
@@ -38,6 +39,10 @@ export type TicketReportPrefill = {
   customerPhone: string;
   customerEmail: string;
   customerContactName: string;
+  /** locations.id from the ticket. Null when the ticket has no customer_location_id. */
+  locationId: string | number | null;
+  /** Location or legacy site name. Empty when the ticket has neither. */
+  siteName: string;
   equipmentId: string | number | null;
   equipmentMake: string;
   equipmentModel: string;
@@ -225,6 +230,8 @@ export function reportPrefillFromTicket(source: TicketReportSource): TicketRepor
     customerPhone: gapFill(ticket.customer_phone, location?.phone, customer?.phone),
     customerEmail: gapFill(ticket.customer_email, null, customer?.email),
     customerContactName: gapFill(null, location?.contact_name, customer?.contact_name),
+    locationId: persistedLocationId(ticket.customer_location_id),
+    siteName: clean(location?.name),
     equipmentId: (ticket.equipment_id ?? equipment?.id ?? null) as string | number | null,
     equipmentMake: make,
     equipmentModel: model,
