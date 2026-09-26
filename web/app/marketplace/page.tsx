@@ -97,7 +97,9 @@ export default function Marketplace() {
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
           <div>
             <h1 className="text-3xl font-extrabold">Marketplace</h1>
-            <p className="text-[var(--text3)]">Buy, sell, and connect in the laser service ecosystem</p>
+            <p className="text-[var(--text3)]">
+              Buy, sell, and connect across biomedical equipment — lasers, lithotriptors, C-arms, and more.
+            </p>
           </div>
 
           {(isPro(userRole) || isSupplier(userRole, orgType)) && (
@@ -127,11 +129,12 @@ export default function Marketplace() {
             <p className="text-sm text-[var(--text3)] flex-1">Parts listed for sale by suppliers and companies</p>
           </Link>
 
-          {/* Used Laser Systems */}
           <Link href="/marketplace/used-systems" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
             <div className="text-4xl mb-4">🖥️</div>
-            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Used Laser Systems</h3>
-            <p className="text-sm text-[var(--text3)] flex-1">Buy or sell pre-owned laser equipment</p>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Used systems</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">
+              Buy or sell pre-owned biomedical equipment — lasers, lithotriptors, C-arms, and more
+            </p>
           </Link>
 
           {/* Consumables */}

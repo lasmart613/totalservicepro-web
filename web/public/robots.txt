@@ -6,7 +6,6 @@ Allow: /marketplace
 Allow: /directory
 Allow: /signup
 Allow: /login
-Allow: /parts
 Allow: /find-a-rep
 Allow: /unsubscribe
 Disallow: /admin
@@ -41,5 +40,6 @@ Disallow: /marketplace/list
 Disallow: /marketplace/my-listings
 Disallow: /marketplace/storefront
 Disallow: /pdf-viewer-demo
+Disallow: /dev
 
 Sitemap: https://repairplanet.net/sitemap.xml
