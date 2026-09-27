@@ -9,6 +9,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { CL_AESTHETIC, CL_ELECTRICAL, CL_MECHANICAL, MODELS, resolveModelDef } from '@/lib/models';
 import {
+  canonicalManufacturerSpelling,
   manufacturerNameFromSelection,
   manufacturerNamesEqual,
   mergedManufacturerOption,
@@ -339,13 +340,18 @@ export default function NewServiceReport() {
     () => ({ manufacturers: dbManufacturers, models: dbLaserModels }),
     [dbManufacturers, dbLaserModels]
   );
-  const manufacturerChoices = useMemo(() => {
-    const base = listManufacturerChoices(reportCatalog);
-    return withSavedManufacturerChoice(
-      base,
-      manufacturerNameFromSelection(selectedDbMfr, dbManufacturers)
-    );
-  }, [reportCatalog, selectedDbMfr, dbManufacturers]);
+  const baseManufacturerChoices = useMemo(
+    () => listManufacturerChoices(reportCatalog),
+    [reportCatalog]
+  );
+  const manufacturerChoices = useMemo(
+    () =>
+      withSavedManufacturerChoice(
+        baseManufacturerChoices,
+        manufacturerNameFromSelection(selectedDbMfr, dbManufacturers)
+      ),
+    [baseManufacturerChoices, selectedDbMfr, dbManufacturers]
+  );
   const manufacturerValue = useMemo(() => {
     const name = manufacturerNameFromSelection(selectedDbMfr, dbManufacturers);
     if (!name) return '';
@@ -356,6 +362,15 @@ export default function NewServiceReport() {
       ) || name
     );
   }, [selectedDbMfr, dbManufacturers, manufacturerChoices]);
+  const catalogManufacturerName = useMemo(
+    () =>
+      canonicalManufacturerSpelling(
+        manufacturerValue || selectedDbMfr,
+        dbManufacturers,
+        dbLaserModels
+      ),
+    [manufacturerValue, selectedDbMfr, dbManufacturers, dbLaserModels]
+  );
   const modelChoices = useMemo(
     () =>
       modelsForReportManufacturer(
@@ -1183,7 +1198,7 @@ export default function NewServiceReport() {
     const dbRow = dbLaserModels.find(
       (x: any) => (x.name || x.label) === modelVal || x.name === found || x.label === found
     );
-    const brand = manufacturerValue || '';
+    const brand = catalogManufacturerName || manufacturerValue || '';
     const inferred = equipmentTypeOrDefault(
       dbRow?.equipment_type ||
         inferEquipmentType({
@@ -1336,10 +1351,7 @@ export default function NewServiceReport() {
 
   async function ensureLinkedEquipment(orgId: any) {
     if (!orgId) return null;
-    const mfrName =
-      manufacturerValue ||
-      manufacturerNameFromSelection(selectedDbMfr, dbManufacturers) ||
-      '';
+    const mfrName = catalogManufacturerName || manufacturerValue || '';
     const modelName = selectedDbModel || selectedModelKey || currentModel?.label || '';
     return ensureEquipment({
       client: supabase,
@@ -1407,7 +1419,7 @@ export default function NewServiceReport() {
         equipment_id: linkedEquipmentId || ticketEquipmentId || null,
         equipment_name:
           equipName ||
-          [manufacturerValue, selectedDbModel || selectedModelKey || currentModel?.label]
+          [catalogManufacturerName || manufacturerValue, selectedDbModel || selectedModelKey || currentModel?.label]
             .filter(Boolean)
             .join(' ') ||
           null,
@@ -1990,8 +2002,8 @@ export default function NewServiceReport() {
             </select>
           </div>
 
-          {(manufacturerValue || currentModel?.mfg) && (
-            <div className="text-sm text-[var(--text3)] mt-1">Mfg: {manufacturerValue || currentModel?.mfg}</div>
+          {(catalogManufacturerName || manufacturerValue || currentModel?.mfg) && (
+            <div className="text-sm text-[var(--text3)] mt-1">Mfg: {catalogManufacturerName || manufacturerValue || currentModel?.mfg}</div>
           )}
           <div className="text-[10px] text-[var(--text3)] mt-1">Models are limited to the selected manufacturer. Use +Add for a new manufacturer.</div>
         </div>

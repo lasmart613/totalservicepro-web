@@ -15,10 +15,13 @@ import {
   listCatalogManufacturers,
   listCatalogModelChoices,
   listCatalogModels,
+  canonicalManufacturerSpelling,
   manufacturerMatches,
   manufacturerNameFromSelection,
+  manufacturerNormalizeCount,
   modelBelongsToManufacturer,
   modelsForReportManufacturer,
+  resetManufacturerNormalizeCount,
   modelMatchesEquipmentType,
   normalizeManufacturerRow,
   normalizeModelRow,
@@ -126,6 +129,12 @@ test('Alma Lasers does not offer Candela models', () => {
   ];
 
   assert.equal(manufacturerNameFromSelection('5', manufacturers), 'Alma Lasers');
+  assert.equal(canonicalManufacturerSpelling('Alma', manufacturers), 'Alma Lasers');
+  assert.equal(canonicalManufacturerSpelling('5', manufacturers), 'Alma Lasers');
+  assert.equal(
+    canonicalManufacturerSpelling('Alma', [normalizeManufacturerRow({ id: 21, name: 'Alma' })]),
+    'Alma'
+  );
   assert.equal(
     modelBelongsToManufacturer(models[0], '5', manufacturers),
     true,
@@ -146,6 +155,58 @@ test('Alma Lasers does not offer Candela models', () => {
       `${selected} must not list Candela models`
     );
   }
+});
+
+test('catalog index normalizes each manufacturer once, not once per model per render', () => {
+  const manufacturers = [
+    normalizeManufacturerRow({ id: 5, name: 'Alma Lasers' }),
+    normalizeManufacturerRow({ id: 2, name: 'Candela' }),
+  ];
+  const models = [];
+  for (let i = 0; i < 400; i++) {
+    models.push(
+      normalizeModelRow({
+        id: 1000 + i,
+        name: `Soprano ${i}`,
+        label: `Soprano ${i}`,
+        manufacturer_id: 5,
+        equipment_type: 'laser',
+      })
+    );
+    models.push(
+      normalizeModelRow({
+        id: 2000 + i,
+        name: `Gentle ${i}`,
+        label: `Gentle ${i}`,
+        manufacturer: 'Candela',
+        manufacturer_id: 2,
+        equipment_type: 'laser',
+      })
+    );
+  }
+
+  resetManufacturerNormalizeCount();
+  const first = modelsForReportManufacturer('Alma Lasers', manufacturers, models, 'laser');
+  const built = manufacturerNormalizeCount();
+  assert.ok(first.some((choice) => /soprano 0/i.test(choice.value)));
+  assert.equal(first.some((choice) => /gentle 0/i.test(choice.value)), false);
+  assert.ok(
+    built < models.length,
+    `normalized ${built} times while indexing ${models.length} models`
+  );
+
+  const marked = manufacturerNormalizeCount();
+  const started = performance.now();
+  const alma = modelsForReportManufacturer('Alma Lasers', manufacturers, models, 'laser');
+  const candela = modelsForReportManufacturer('Candela', manufacturers, models, 'laser');
+  const elapsed = performance.now() - started;
+  assert.equal(manufacturerNormalizeCount(), marked);
+  assert.ok(elapsed < 200, `manufacturer pick took ${elapsed.toFixed(1)}ms`);
+  assert.ok(alma.some((choice) => /soprano 1/i.test(choice.value)));
+  assert.equal(alma.some((choice) => /gentle 1/i.test(choice.value)), false);
+  assert.ok(candela.some((choice) => /gentle 1/i.test(choice.value)));
+  assert.equal(candela.some((choice) => /soprano 1/i.test(choice.value)), false);
+  assert.equal(canonicalManufacturerSpelling('Alma', manufacturers, models), 'Alma Lasers');
 });
 
 test('manufacturer_id vs name join (tickets / company bug) does not empty Cutera', () => {

@@ -166,6 +166,7 @@ test('service report saves the selected manufacturer and model, not another bran
   const start = src.indexOf('async function ensureLinkedEquipment');
   const end = src.indexOf('async function saveReport');
   const fn = src.slice(start, end);
+  assert.match(fn, /catalogManufacturerName/);
   assert.match(fn, /manufacturerValue/);
   assert.match(fn, /selectedDbModel \|\| selectedModelKey \|\| currentModel\?\.label \|\| ''/);
   assert.doesNotMatch(fn, /currentModel\?\.mfg/);
