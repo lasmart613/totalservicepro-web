@@ -16,6 +16,7 @@ function equipmentClient(opts?: {
   const inserts: any[] = [];
   const updates: any[] = [];
   let insertAttempts = 0;
+  let modelLookups = 0;
 
   function builder(kind: 'query' | 'write') {
     const b: any = {
@@ -44,6 +45,7 @@ function equipmentClient(opts?: {
           }
           return Promise.resolve({ data: { id: opts?.insertId ?? 42 }, error: null });
         }
+        modelLookups += 1;
         return Promise.resolve({ data: opts?.modelRow ?? null, error: null });
       },
       insert(rows: any) {
@@ -65,6 +67,9 @@ function equipmentClient(opts?: {
   return {
     inserts,
     updates,
+    get modelLookups() {
+      return modelLookups;
+    },
     client: {
       from() {
         return builder('query');
@@ -154,12 +159,16 @@ test('equipment insert retry never sends name or status', async () => {
   }
 });
 
-test('service report does not use the equipment name as the model', () => {
+test('service report saves the selected manufacturer and model, not another brand', () => {
   const src = readFileSync(join(here, '../app/reports/new/NewServiceReportClient.tsx'), 'utf8');
+  assert.match(src, /modelsForReportManufacturer/);
+  assert.doesNotMatch(src, /modelKeys\.map/);
   const start = src.indexOf('async function ensureLinkedEquipment');
   const end = src.indexOf('async function saveReport');
   const fn = src.slice(start, end);
-  assert.match(fn, /currentModel\?\.label \|\| selectedDbModel \|\| selectedModelKey \|\| ''/);
+  assert.match(fn, /manufacturerValue/);
+  assert.match(fn, /selectedDbModel \|\| selectedModelKey \|\| currentModel\?\.label \|\| ''/);
+  assert.doesNotMatch(fn, /currentModel\?\.mfg/);
   assert.doesNotMatch(fn, /selectedModelKey\s*\|\|\s*equipName/);
   assert.match(fn, /model:\s*modelName/);
 });
@@ -182,7 +191,87 @@ test('ensureEquipment reuses a serial match instead of inserting a blank duplica
     manufacturer: 'Candela',
     model: 'GentleMax',
     serial: 'SN-100',
+    name: 'Lobby laser',
+    pulseCount: '1200',
   });
   assert.equal(id, 77);
   assert.equal(db.inserts.length, 0);
+  assert.equal(db.updates.length, 1);
+  assert.equal(Object.hasOwn(db.updates[0], 'name'), false);
+  assert.equal(Object.hasOwn(db.updates[0], 'pulse_count'), false);
+  assert.equal(db.updates[0].manufacturer, 'Candela');
+  assert.equal(db.updates[0].model, 'GentleMax');
+});
+
+test('ensureEquipment ignores a lookup row whose serial is not the one typed', async () => {
+  const db = equipmentClient({
+    serialRows: [
+      {
+        id: 77,
+        customer_organization_id: 9,
+        manufacturer: 'Alma Lasers',
+        model: 'Soprano Titanium',
+        serial_number: 'OTHER-SN',
+      },
+    ],
+    modelRow: { id: 88, customer_organization_id: 9 },
+  });
+  const id = await ensureEquipment({
+    client: db.client,
+    customerOrgId: 9,
+    manufacturer: 'Alma Lasers',
+    model: 'Soprano Titanium',
+    serial: 'NEW-SN',
+  });
+  assert.equal(id, 42);
+  assert.equal(db.inserts.length, 1);
+  assert.equal(db.inserts[0][0].serial_number, 'NEW-SN');
+  assert.equal(db.updates.length, 0);
+});
+
+test('ensureEquipment does not reuse make and model when the typed serial is new', async () => {
+  const db = equipmentClient({
+    serialRows: [],
+    modelRow: { id: 88, customer_organization_id: 9 },
+  });
+  const id = await ensureEquipment({
+    client: db.client,
+    customerOrgId: 9,
+    manufacturer: 'Alma Lasers',
+    model: 'Soprano Titanium',
+    serial: 'NEW-SN',
+    name: 'Wrong laser',
+    pulseCount: '50',
+  });
+  assert.equal(id, 42);
+  assert.equal(db.modelLookups, 0);
+  assert.equal(db.updates.length, 0);
+  assert.equal(db.inserts.length, 1);
+  const row = db.inserts[0][0];
+  assert.equal(row.manufacturer, 'Alma Lasers');
+  assert.equal(row.model, 'Soprano Titanium');
+  assert.equal(row.serial_number, 'NEW-SN');
+  assert.equal(Object.hasOwn(row, 'name'), false);
+});
+
+test('ensureEquipment reuses make and model only when no serial was typed', async () => {
+  const db = equipmentClient({
+    serialRows: [],
+    modelRow: { id: 88, customer_organization_id: 9 },
+  });
+  const id = await ensureEquipment({
+    client: db.client,
+    customerOrgId: 9,
+    manufacturer: 'Alma Lasers',
+    model: 'Soprano Titanium',
+    serial: '   ',
+    name: 'Lobby laser',
+    pulseCount: '50',
+  });
+  assert.equal(id, 88);
+  assert.equal(db.modelLookups, 1);
+  assert.equal(db.inserts.length, 0);
+  assert.equal(db.updates.length, 1);
+  assert.equal(Object.hasOwn(db.updates[0], 'name'), false);
+  assert.equal(Object.hasOwn(db.updates[0], 'pulse_count'), false);
 });

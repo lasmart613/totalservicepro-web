@@ -484,6 +484,33 @@ export function manufacturerMatches(selected: string, mfr: CatalogManufacturer):
   return manufacturerNamesEqual(sel, mfr.name || '');
 }
 
+/** Manufacturers the selection refers to, including alias rows (Alma Lasers → Alma). */
+function manufacturersForSelection(
+  selected: string,
+  manufacturers: CatalogManufacturer[]
+): CatalogManufacturer[] {
+  const direct = manufacturers.filter((m) => manufacturerMatches(selected, m));
+  return manufacturers.filter((m) => {
+    if (direct.includes(m)) return true;
+    return direct.some((row) => row.name && m.name && manufacturerNamesEqual(row.name, m.name));
+  });
+}
+
+/**
+ * Dropdown value may be manufacturers.id or a name. Return the stored name.
+ */
+export function manufacturerNameFromSelection(
+  selected: string,
+  manufacturers: CatalogManufacturer[] = []
+): string {
+  const sel = String(selected || '').trim();
+  if (!sel) return '';
+  const byId = manufacturers.find((m) => m.id != null && String(m.id) === sel);
+  if (byId?.name) return byId.name;
+  const byName = manufacturers.find((m) => m.name && manufacturerNamesEqual(m.name, sel));
+  return byName?.name || sel;
+}
+
 export function modelBelongsToManufacturer(
   model: CatalogModel,
   selected: string,
@@ -492,32 +519,22 @@ export function modelBelongsToManufacturer(
   const sel = String(selected || '').trim();
   if (!sel || !model) return false;
 
+  const pool = manufacturersForSelection(sel, manufacturers);
   const text = String(model.manufacturer || '').trim();
-  if (text && !manufacturerNamesEqual(sel, text)) {
-    const selectedNames = manufacturers.filter((m) => manufacturerMatches(sel, m));
-    const textMatchesSelection = selectedNames.some(
-      (m) => m.name && manufacturerNamesEqual(m.name, text)
-    );
-    if (!textMatchesSelection) return false;
+  if (text) {
+    if (manufacturerNamesEqual(sel, text)) return true;
+    if (pool.some((m) => m.name && manufacturerNamesEqual(m.name, text))) return true;
+    // A Candela label stays Candela even when manufacturer_id is stale.
+    return false;
   }
 
   if (model.manufacturer_id != null && String(model.manufacturer_id) === sel) return true;
-
-  const matched = manufacturers.filter((m) => manufacturerMatches(sel, m));
-  if (
-    matched.some(
-      (m) =>
-        m.id != null &&
-        model.manufacturer_id != null &&
-        String(m.id) === String(model.manufacturer_id)
-    )
-  ) {
-    return true;
-  }
-
-  if (text && manufacturerNamesEqual(sel, text)) return true;
-
-  return matched.some((m) => m.name && text && manufacturerNamesEqual(m.name, text));
+  return pool.some(
+    (m) =>
+      m.id != null &&
+      model.manufacturer_id != null &&
+      String(m.id) === String(model.manufacturer_id)
+  );
 }
 
 /**
@@ -899,6 +916,24 @@ export function listCatalogModelChoices(
   const deduped = dedupeModelChoices(choices);
   if (manufacturerNamesEqual(manufacturer, 'GE OEC')) return collapseOec9900(deduped);
   return deduped;
+}
+
+/**
+ * Report-form model list for the selected manufacturer (id or name).
+ * Alias rows share a list (Alma Lasers → Alma). Other brands are excluded.
+ */
+export function modelsForReportManufacturer(
+  selected: string,
+  manufacturers: CatalogManufacturer[] = [],
+  models: CatalogModel[] = [],
+  equipmentType?: string | null
+): CatalogChoice[] {
+  const name = manufacturerNameFromSelection(selected, manufacturers);
+  if (!name) return [];
+  const live = { manufacturers, models, equipmentType };
+  const options = listCatalogManufacturers(live);
+  const canonical = mergedManufacturerOption(name, options) || name;
+  return listCatalogModelChoices(canonical, live);
 }
 
 type QueryBuilder = {

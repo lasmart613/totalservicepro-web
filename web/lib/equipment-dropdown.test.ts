@@ -16,7 +16,9 @@ import {
   listCatalogModelChoices,
   listCatalogModels,
   manufacturerMatches,
+  manufacturerNameFromSelection,
   modelBelongsToManufacturer,
+  modelsForReportManufacturer,
   modelMatchesEquipmentType,
   normalizeManufacturerRow,
   normalizeModelRow,
@@ -90,6 +92,60 @@ test('Cutera live rows appear when selected value is manufacturer_id 10', () => 
   const names = listCatalogModels('10', LIVE);
   assert.ok(names.includes('Xeo'));
   assert.ok(names.includes('Excel V'));
+});
+
+test('Alma Lasers does not offer Candela models', () => {
+  const manufacturers = [
+    normalizeManufacturerRow({ id: 5, name: 'Alma Lasers' }),
+    normalizeManufacturerRow({ id: 21, name: 'Alma' }),
+    normalizeManufacturerRow({ id: 2, name: 'Candela' }),
+  ];
+  const models = [
+    normalizeModelRow({
+      id: 1,
+      name: 'Soprano Titanium',
+      label: 'Soprano Titanium',
+      manufacturer_id: 21,
+      equipment_type: 'laser',
+    }),
+    normalizeModelRow({
+      id: 2,
+      name: 'GentleMax Pro',
+      label: 'GentleMax Pro',
+      manufacturer: 'Candela',
+      manufacturer_id: 2,
+      equipment_type: 'laser',
+    }),
+    normalizeModelRow({
+      id: 3,
+      name: 'VBeam Perfecta',
+      label: 'VBeam Perfecta',
+      manufacturer_id: 2,
+      equipment_type: 'laser',
+    }),
+  ];
+
+  assert.equal(manufacturerNameFromSelection('5', manufacturers), 'Alma Lasers');
+  assert.equal(
+    modelBelongsToManufacturer(models[0], '5', manufacturers),
+    true,
+    'Alma model linked by id must match the Alma Lasers row'
+  );
+  assert.equal(modelBelongsToManufacturer(models[1], '5', manufacturers), false);
+  assert.equal(modelBelongsToManufacturer(models[2], 'Alma Lasers', manufacturers), false);
+
+  for (const selected of ['Alma Lasers', '5', 'Alma']) {
+    const choices = modelsForReportManufacturer(selected, manufacturers, models, 'laser');
+    assert.ok(
+      choices.some((choice) => /soprano titanium/i.test(choice.value)),
+      `${selected} should list Soprano Titanium`
+    );
+    assert.equal(
+      choices.some((choice) => /gentlemax|vbeam|perfecta/i.test(`${choice.value} ${choice.label}`)),
+      false,
+      `${selected} must not list Candela models`
+    );
+  }
 });
 
 test('manufacturer_id vs name join (tickets / company bug) does not empty Cutera', () => {

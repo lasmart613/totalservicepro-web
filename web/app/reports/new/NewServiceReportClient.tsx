@@ -9,11 +9,15 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { CL_AESTHETIC, CL_ELECTRICAL, CL_MECHANICAL, MODELS, resolveModelDef } from '@/lib/models';
 import {
-  modelBelongsToManufacturer,
-  modelMatchesEquipmentType,
+  manufacturerNameFromSelection,
+  manufacturerNamesEqual,
+  mergedManufacturerOption,
+  modelsForReportManufacturer,
   normalizeManufacturerRow,
   normalizeModelRow,
+  withSavedManufacturerChoice,
 } from '@/lib/equipment-dropdown';
+import { listManufacturerChoices } from '@/lib/laser-catalog';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
@@ -331,26 +335,71 @@ export default function NewServiceReport() {
   const [currentReportId, setCurrentReportId] = useState<string | null>(null);
   const [isSubmitted, setIsSubmitted] = useState(false);
 
-  const modelKeys = Object.keys(MODELS);
-  const filteredDbModels = dbLaserModels.filter((m: any) => {
-    const mfrOk = !selectedDbMfr || modelBelongsToManufacturer(m, selectedDbMfr, dbManufacturers);
-    return mfrOk && modelMatchesEquipmentType(m.equipment_type, equipmentType);
-  });
+  const reportCatalog = useMemo(
+    () => ({ manufacturers: dbManufacturers, models: dbLaserModels }),
+    [dbManufacturers, dbLaserModels]
+  );
+  const manufacturerChoices = useMemo(() => {
+    const base = listManufacturerChoices(reportCatalog);
+    return withSavedManufacturerChoice(
+      base,
+      manufacturerNameFromSelection(selectedDbMfr, dbManufacturers)
+    );
+  }, [reportCatalog, selectedDbMfr, dbManufacturers]);
+  const manufacturerValue = useMemo(() => {
+    const name = manufacturerNameFromSelection(selectedDbMfr, dbManufacturers);
+    if (!name) return '';
+    return (
+      mergedManufacturerOption(
+        name,
+        manufacturerChoices.map((choice) => choice.value)
+      ) || name
+    );
+  }, [selectedDbMfr, dbManufacturers, manufacturerChoices]);
+  const modelChoices = useMemo(
+    () =>
+      modelsForReportManufacturer(
+        manufacturerValue,
+        dbManufacturers,
+        dbLaserModels,
+        equipmentType
+      ),
+    [manufacturerValue, dbManufacturers, dbLaserModels, equipmentType]
+  );
+  const selectedModelValue = selectedDbModel || selectedModelKey;
+  const modelInList = modelChoices.some(
+    (choice) => choice.value === selectedModelValue || choice.label === selectedModelValue
+  );
+  const extraModelDef = selectedModelValue
+    ? resolveModelDef(selectedModelValue, selectedModelValue)
+    : null;
+  const extraModelIsForeign =
+    !!extraModelDef?.mfg &&
+    !!manufacturerValue &&
+    !manufacturerNamesEqual(extraModelDef.mfg, manufacturerValue);
+  const showExtraModel = !!selectedModelValue && !modelInList && !extraModelIsForeign;
 
-  // Resolve DB names (e.g. "VBeam Perfecta") → static MODELS (Perfecta) for params + perf
+  // Resolve DB names (e.g. "VBeam Perfecta") → static MODELS (Perfecta) for params + perf.
+  // A definition from another brand must not replace the selected manufacturer.
   const resolvedModelKey = selectedDbModel || selectedModelKey;
-  const currentModel = resolvedModelKey
+  const resolvedModel = resolvedModelKey
     ? resolveModelDef(resolvedModelKey, equipName) ||
       (MODELS as any)[resolvedModelKey] ||
       Object.values(MODELS).find(
         (m: any) =>
           m.label === resolvedModelKey ||
-          m.mfg === resolvedModelKey ||
           (m.label &&
             String(resolvedModelKey).toLowerCase().includes(String(m.label).toLowerCase().split('(')[0].trim()))
       ) ||
       null
     : null;
+  const currentModel =
+    resolvedModel &&
+    manufacturerValue &&
+    resolvedModel.mfg &&
+    !manufacturerNamesEqual(resolvedModel.mfg, manufacturerValue)
+      ? null
+      : resolvedModel;
 
   // Labels come from the device-type SR template (laser seed = Android CL_*). Fallback arrays stay imported from models.ts.
 
@@ -1104,47 +1153,52 @@ export default function NewServiceReport() {
 
   function selectDbModelValue(modelVal: string) {
     setSelectedDbModel(modelVal);
-    // Fuzzy resolve DB names → static MODELS keys (VBeam Perfecta → Perfecta)
+    // Fuzzy resolve DB names → static MODELS keys (VBeam Perfecta → Perfecta),
+    // but only within the selected manufacturer. Alma must not become Candela.
+    const sameBrand = (mfg: string) =>
+      !manufacturerValue || !mfg || manufacturerNamesEqual(mfg, manufacturerValue);
+    const matches = Object.keys(MODELS).filter(
+      (k) => k === modelVal || (MODELS as any)[k]?.label === modelVal
+    );
     let found =
-      Object.keys(MODELS).find(
-        (k) =>
-          k === modelVal ||
-          (MODELS as any)[k]?.label === modelVal ||
-          (MODELS as any)[k]?.mfg === modelVal
-      ) || '';
+      matches.find((k) => sameBrand(String((MODELS as any)[k]?.mfg || ''))) || '';
     if (!found) {
       const resolved = resolveModelDef(modelVal, modelVal);
-      if (resolved) {
-        found =
-          Object.keys(MODELS).find((k) => MODELS[k] === resolved) || modelVal;
+      if (resolved && sameBrand(resolved.mfg || '')) {
+        found = Object.keys(MODELS).find((k) => MODELS[k] === resolved) || modelVal;
       } else {
         found = modelVal;
       }
     }
-    selectModel(found);
+    const picked = (MODELS as any)[found];
+    if (picked && !sameBrand(String(picked.mfg || ''))) {
+      setSelectedModelKey(modelVal);
+      setPowerMeasurements([]);
+      setModelParams({});
+    } else {
+      selectModel(found);
+    }
+    // Keep the dropdown value. selectModel stores a static MODELS key for params only.
+    setSelectedDbModel(modelVal);
     const dbRow = dbLaserModels.find(
       (x: any) => (x.name || x.label) === modelVal || x.name === found || x.label === found
     );
+    const brand = manufacturerValue || '';
     const inferred = equipmentTypeOrDefault(
       dbRow?.equipment_type ||
         inferEquipmentType({
           equipment_type: dbRow?.equipment_type,
           title: modelVal,
           model: modelVal,
-          brand: currentModel?.mfg || '',
+          brand,
         })
     );
     if (inferred !== equipmentType) {
       void onEquipmentTypeChange(inferred);
     }
     // Derive equipment_name from manufacturer + model dropdowns (no free-text field)
-    const m = resolveModelDef(found, modelVal) || (MODELS as any)[found];
-    if (m) {
-      setEquipName(`${m.mfg || ''} ${m.label || modelVal}`.trim());
-    } else if (modelVal) {
-      const mfrRow = dbManufacturers.find((x: any) => String(x.id) === String(selectedDbMfr) || x.name === selectedDbMfr);
-      const mfrName = mfrRow?.name || selectedDbMfr || '';
-      setEquipName([mfrName, modelVal].filter(Boolean).join(' ').trim());
+    if (modelVal || brand) {
+      setEquipName([brand, modelVal].filter(Boolean).join(' ').trim());
     }
     // Assign report number once when equipment is chosen
     if (!reportNumber && currentUserOrgId) {
@@ -1282,11 +1336,11 @@ export default function NewServiceReport() {
 
   async function ensureLinkedEquipment(orgId: any) {
     if (!orgId) return null;
-    const mfrRow = dbManufacturers.find(
-      (x: any) => String(x.id) === String(selectedDbMfr) || x.name === selectedDbMfr
-    );
-    const mfrName = currentModel?.mfg || mfrRow?.name || selectedDbMfr || '';
-    const modelName = currentModel?.label || selectedDbModel || selectedModelKey || '';
+    const mfrName =
+      manufacturerValue ||
+      manufacturerNameFromSelection(selectedDbMfr, dbManufacturers) ||
+      '';
+    const modelName = selectedDbModel || selectedModelKey || currentModel?.label || '';
     return ensureEquipment({
       client: supabase,
       customerOrgId: orgId,
@@ -1353,11 +1407,9 @@ export default function NewServiceReport() {
         equipment_id: linkedEquipmentId || ticketEquipmentId || null,
         equipment_name:
           equipName ||
-          currentModel?.label ||
-          [dbManufacturers.find((x: any) => String(x.id) === String(selectedDbMfr) || x.name === selectedDbMfr)?.name, selectedDbModel]
+          [manufacturerValue, selectedDbModel || selectedModelKey || currentModel?.label]
             .filter(Boolean)
             .join(' ') ||
-          selectedDbModel ||
           null,
         sku: sku || null,
         serial_number: serialNumber || null,
@@ -1887,24 +1939,19 @@ export default function NewServiceReport() {
             </div>
           </div>
 
-          {/* Manufacturer from manufacturers table */}
+          {/* Manufacturer, then only that manufacturer's models */}
           <div className="mb-2 flex gap-2 items-end">
             <div className="flex-1">
               <label className="text-xs text-[var(--text3)]">Manufacturer</label>
               <select 
                 className="input mb-1 w-full" 
-                value={selectedDbMfr} 
+                value={manufacturerValue} 
                 onChange={e => selectDbManufacturer(e.target.value)}
               >
                 <option value="">-- Select Manufacturer --</option>
-                {dbManufacturers.length > 0 
-                  ? dbManufacturers.map((m: any) => (
-                      <option key={m.id || m.name} value={m.id || m.name}>{m.name}</option>
-                    ))
-                  : [...new Set(Object.values(MODELS).map((m: any) => m.mfg || 'Unknown'))].map((mfg, i) => (
-                      <option key={i} value={mfg}>{mfg}</option>
-                    ))
-                }
+                {manufacturerChoices.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
               </select>
             </div>
             <button 
@@ -1915,8 +1962,8 @@ export default function NewServiceReport() {
                   try {
                     const { data } = await supabase.from('manufacturers').insert({name: name.trim()}).select().single();
                     if (data) {
-                      setDbManufacturers(prev => [...prev, {id: data.id, name: data.name}]);
-                      selectDbManufacturer(data.id || data.name);
+                      setDbManufacturers(prev => [...prev, normalizeManufacturerRow(data)]);
+                      selectDbManufacturer(data.name || data.id);
                     }
                   } catch(e){ toast.error('Failed to add manufacturer: ' + (e as any).message); }
                 }
@@ -1925,38 +1972,28 @@ export default function NewServiceReport() {
             </button>
           </div>
 
-          {/* Laser Model from laser_models table */}
+          {/* Laser Model filtered by the selected manufacturer */}
           <div>
             <label className="text-xs text-[var(--text3)]">Model</label>
             <select 
               className="input mb-1 w-full" 
-              value={selectedDbModel || selectedModelKey} 
+              value={selectedModelValue} 
               onChange={e => selectDbModelValue(e.target.value)}
             >
               <option value="">-- Select Model --</option>
-              {/* Preserve loaded model_type even if not in filtered list (report open / DB name mismatch) */}
-              {(selectedDbModel || selectedModelKey) &&
-                !(filteredDbModels.length > 0
-                  ? filteredDbModels.some(
-                      (m: any) =>
-                        (m.name || m.label) === (selectedDbModel || selectedModelKey)
-                    )
-                  : modelKeys.includes(selectedDbModel || selectedModelKey)) && (
-                  <option value={selectedDbModel || selectedModelKey}>
-                    {selectedDbModel || selectedModelKey}
-                  </option>
-                )}
-              {filteredDbModels.length > 0 
-                ? filteredDbModels.map((m: any) => (
-                    <option key={m.id || m.name} value={m.name || m.label}>{m.label || m.name}</option>
-                  ))
-                : modelKeys.map(k => <option key={k} value={k}>{k} — {(MODELS as any)[k].label}</option>)
-              }
+              {showExtraModel && (
+                <option value={selectedModelValue}>{selectedModelValue}</option>
+              )}
+              {modelChoices.map((m) => (
+                <option key={m.value} value={m.value}>{m.label}</option>
+              ))}
             </select>
           </div>
 
-          {currentModel && <div className="text-sm text-[var(--text3)] mt-1">Mfg: {currentModel.mfg}</div>}
-          <div className="text-[10px] text-[var(--text3)] mt-1">Data from manufacturers + laser_models tables (fallback to static MODELS if empty). Use +Add for new.</div>
+          {(manufacturerValue || currentModel?.mfg) && (
+            <div className="text-sm text-[var(--text3)] mt-1">Mfg: {manufacturerValue || currentModel?.mfg}</div>
+          )}
+          <div className="text-[10px] text-[var(--text3)] mt-1">Models are limited to the selected manufacturer. Use +Add for a new manufacturer.</div>
         </div>
 
         {/* Checklists — template by equipment_type (laser seed = Android CL_*) + extras */}

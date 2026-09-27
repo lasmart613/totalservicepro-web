@@ -60,12 +60,12 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
       existing =
         list.find(
           (r: any) => normSerial(r.serial_number).toLowerCase() === serial.toLowerCase()
-        ) ||
-        list[0] ||
-        null;
+        ) || null;
     }
 
-    if (!existing && manufacturer && model) {
+    // A typed serial that misses must not reuse another laser of the same
+    // make and model — that links the wrong machine and never stores the serial.
+    if (!existing && !serial && manufacturer && model) {
       const q = await sb
         .from('equipment')
         .select('id, customer_organization_id')
@@ -84,17 +84,10 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
       }
       if (manufacturer) patch.manufacturer = manufacturer;
       if (model) patch.model = model;
-      if (name) patch.name = name;
-      if (pulse) patch.pulse_count = pulse;
+      // Live equipment has no name or pulse_count columns. Sending them 400s, then retries.
       if (Object.keys(patch).length) {
-        let { error } = await sb.from('equipment').update(patch).eq('id', existing.id);
-        if (error && /column|schema cache/i.test(error.message || '')) {
-          if (/pulse_count/i.test(error.message || '')) delete patch.pulse_count;
-          if (/name/i.test(error.message || '')) delete patch.name;
-          if (Object.keys(patch).length) {
-            await sb.from('equipment').update(patch).eq('id', existing.id);
-          }
-        }
+        const { error } = await sb.from('equipment').update(patch).eq('id', existing.id);
+        if (error) console.warn('ensureEquipment update', error);
       }
       return existing.id;
     }
