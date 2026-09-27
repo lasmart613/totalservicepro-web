@@ -41,5 +41,6 @@ Disallow: /marketplace/list
 Disallow: /marketplace/my-listings
 Disallow: /marketplace/storefront
 Disallow: /pdf-viewer-demo
+Disallow: /dev
 
 Sitemap: https://repairplanet.net/sitemap.xml
