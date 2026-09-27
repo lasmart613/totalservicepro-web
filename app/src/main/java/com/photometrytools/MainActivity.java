@@ -1,7 +1,6 @@
 package com.photometrytools;
 
 import android.annotation.SuppressLint;
-import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -261,14 +260,16 @@ public class MainActivity extends AppCompatActivity {
         public void openUrl(String url) {
             if (url == null) return;
             runOnUiThread(() -> {
-                // geo: is handled inside navigateInWebView, which returns true so this
-                // method does not start the same intent a second time.
-                if (!navigateInWebView(url)) {
-                    try {
+                try {
+                    // geo: is handled inside navigateInWebView, which returns true so this
+                    // method does not start the same intent a second time.
+                    if (!navigateInWebView(url)) {
                         startExternal(url);
-                    } catch (ActivityNotFoundException e) {
-                        showToast("Could not open link: " + e.getMessage());
                     }
+                } catch (SecurityException e) {
+                    recoverOpenFailure(url);
+                } catch (RuntimeException e) {
+                    recoverOpenFailure(url);
                 }
             });
         }
@@ -590,10 +591,24 @@ public class MainActivity extends AppCompatActivity {
             try {
                 startExternal(geoUrl);
                 return;
-            } catch (ActivityNotFoundException ignored) {
-                // Maps disappeared between resolve and start; use the browser.
+            } catch (SecurityException ignored) {
+                // Fall through to the https Maps URL.
+            } catch (RuntimeException ignored) {
+                // ActivityNotFoundException and other start failures.
             }
         }
+        openHttpsMapsFallback(geoUrl);
+    }
+
+    private void recoverOpenFailure(String url) {
+        if (isGeoUrl(url)) {
+            openHttpsMapsFallback(url);
+            return;
+        }
+        showToast("Could not open link");
+    }
+
+    private void openHttpsMapsFallback(String geoUrl) {
         String https = mapsSearchUrlFromGeo(geoUrl);
         if (https == null) {
             Toast.makeText(this, "Could not open maps", Toast.LENGTH_SHORT).show();
@@ -601,14 +616,20 @@ public class MainActivity extends AppCompatActivity {
         }
         try {
             startExternal(https);
-        } catch (ActivityNotFoundException e) {
+        } catch (SecurityException e) {
+            Toast.makeText(this, "Could not open maps", Toast.LENGTH_SHORT).show();
+        } catch (RuntimeException e) {
             Toast.makeText(this, "Could not open maps", Toast.LENGTH_SHORT).show();
         }
     }
 
     private boolean canResolve(String url) {
-        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-        return intent.resolveActivity(getPackageManager()) != null;
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            return intent.resolveActivity(getPackageManager()) != null;
+        } catch (RuntimeException e) {
+            return false;
+        }
     }
 
     private void startExternal(String url) {
@@ -619,13 +640,7 @@ public class MainActivity extends AppCompatActivity {
 
     /** geo:0,0?q=address → https://www.google.com/maps/search/?api=1&query=address */
     private String mapsSearchUrlFromGeo(String geoUrl) {
-        try {
-            String q = Uri.parse(geoUrl).getQueryParameter("q");
-            if (q == null || q.trim().isEmpty()) return null;
-            return "https://www.google.com/maps/search/?api=1&query=" + Uri.encode(q);
-        } catch (Exception e) {
-            return null;
-        }
+        return GeoMapsUrl.mapsSearchUrlFromGeo(geoUrl, Uri::decode, Uri::encode);
     }
 
     private String mapAssetUrlToProduction(String url) {

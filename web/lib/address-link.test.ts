@@ -88,6 +88,9 @@ test('AddressLink is the shared clickable service address and does not activate 
   assert.match(home, /TicketAddressLink/);
   assert.match(java, /openGeoOrMaps/);
   assert.match(java, /resolveActivity/);
-  assert.match(java, /ActivityNotFoundException/);
+  assert.match(java, /catch \(SecurityException/);
+  assert.match(java, /catch \(RuntimeException/);
+  assert.match(java, /GeoMapsUrl\.mapsSearchUrlFromGeo\(geoUrl, Uri::decode, Uri::encode\)/);
+  assert.doesNotMatch(java, /getQueryParameter\("q"\)/);
   assert.match(java, /openGeoOrMaps\(url\);\s*return true;/);
 });
