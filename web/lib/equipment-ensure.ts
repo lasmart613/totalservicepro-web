@@ -99,6 +99,10 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
       return existing.id;
     }
 
+    // Name or pulse count alone is not a machine. Inserting would store a blank
+    // laser (model falls back to the label or "Unknown Laser").
+    if (!manufacturer && !model && !serial) return null;
+
     const safeModel = model || manufacturer || serial || name || 'Unknown Laser';
     const insert: Record<string, any> = {
       customer_organization_id: orgId,
