@@ -1,6 +1,7 @@
 package com.photometrytools;
 
 import android.annotation.SuppressLint;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.graphics.Bitmap;
@@ -260,12 +261,12 @@ public class MainActivity extends AppCompatActivity {
         public void openUrl(String url) {
             if (url == null) return;
             runOnUiThread(() -> {
+                // geo: is handled inside navigateInWebView, which returns true so this
+                // method does not start the same intent a second time.
                 if (!navigateInWebView(url)) {
                     try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        startActivity(intent);
-                    } catch (Exception e) {
+                        startExternal(url);
+                    } catch (ActivityNotFoundException e) {
                         showToast("Could not open link: " + e.getMessage());
                     }
                 }
@@ -458,11 +459,19 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
+                if (uri != null && isGeoUrl(uri.toString())) {
+                    openGeoOrMaps(uri.toString());
+                    return true;
+                }
                 return uri != null && !navigateInWebView(uri.toString());
             }
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                if (isGeoUrl(url)) {
+                    openGeoOrMaps(url);
+                    return true;
+                }
                 return !navigateInWebView(url);
             }
 
@@ -521,6 +530,11 @@ public class MainActivity extends AppCompatActivity {
     private boolean navigateInWebView(String url) {
         if (url == null) return true;
         String lower = url.toLowerCase(Locale.US);
+        if (isGeoUrl(url)) {
+            // One launch. Returning true tells openUrl not to start the intent again.
+            openGeoOrMaps(url);
+            return true;
+        }
         if (lower.startsWith("mailto:") || lower.startsWith("tel:") || lower.startsWith("sms:")) {
             try {
                 startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
@@ -561,6 +575,57 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception ignored) {
         }
         return false;
+    }
+
+    private boolean isGeoUrl(String url) {
+        return url != null && url.toLowerCase(Locale.US).startsWith("geo:");
+    }
+
+    /**
+     * Start the geo intent once. If nothing can handle it, open the https Maps
+     * search URL in a browser so a phone without the Maps app still works.
+     */
+    private void openGeoOrMaps(String geoUrl) {
+        if (canResolve(geoUrl)) {
+            try {
+                startExternal(geoUrl);
+                return;
+            } catch (ActivityNotFoundException ignored) {
+                // Maps disappeared between resolve and start; use the browser.
+            }
+        }
+        String https = mapsSearchUrlFromGeo(geoUrl);
+        if (https == null) {
+            Toast.makeText(this, "Could not open maps", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            startExternal(https);
+        } catch (ActivityNotFoundException e) {
+            Toast.makeText(this, "Could not open maps", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private boolean canResolve(String url) {
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+        return intent.resolveActivity(getPackageManager()) != null;
+    }
+
+    private void startExternal(String url) {
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(intent);
+    }
+
+    /** geo:0,0?q=address → https://www.google.com/maps/search/?api=1&query=address */
+    private String mapsSearchUrlFromGeo(String geoUrl) {
+        try {
+            String q = Uri.parse(geoUrl).getQueryParameter("q");
+            if (q == null || q.trim().isEmpty()) return null;
+            return "https://www.google.com/maps/search/?api=1&query=" + Uri.encode(q);
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     private String mapAssetUrlToProduction(String url) {

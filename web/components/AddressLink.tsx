@@ -42,6 +42,7 @@ export function AddressLink({
       target="_blank"
       rel="noopener noreferrer"
       className={className}
+      title={full}
       onClick={(event: MouseEvent<HTMLAnchorElement>) => {
         event.stopPropagation();
         if (openNativeServiceAddress(full)) event.preventDefault();

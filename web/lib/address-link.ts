@@ -1,9 +1,9 @@
 /**
  * Service-address maps links.
  *
- * Web and mobile browsers use the Google Maps search URL. Native Android
- * (Capacitor, or this app's WebView bridge) opens a geo: intent so the
- * Google Maps app handles it, then falls back to the https URL.
+ * Web and mobile browsers use the Google Maps search URL. The Android WebView
+ * calls Android.openUrl(geo:) once; MainActivity launches that intent a single
+ * time and falls back to the https URL when Maps is not installed.
  */
 
 export type AddressParts = {
@@ -41,12 +41,17 @@ function firstText(...values: unknown[]): string {
   return '';
 }
 
-/** Street, city, state, zip joined with ", ", skipping blanks. */
+/**
+ * "Street, City, ST 85251". ZIP is separated from the state by a space.
+ * Any non-empty subset is kept (for example "Tempe, AZ"). Fully empty is "".
+ */
 export function formatServiceAddress(parts: AddressParts | null | undefined): string {
   if (!parts) return '';
-  return [text(parts.street), text(parts.city), text(parts.state), text(parts.zip)]
-    .filter(Boolean)
-    .join(', ');
+  const street = text(parts.street);
+  const city = text(parts.city);
+  const stateZip = [text(parts.state), text(parts.zip)].filter(Boolean).join(' ');
+  const locality = [city, stateZip].filter(Boolean).join(', ');
+  return [street, locality].filter(Boolean).join(', ');
 }
 
 export function ticketAddressParts(ticket: AddressSource | null | undefined): AddressParts {
@@ -81,95 +86,26 @@ type AndroidBridge = {
   isStub?: boolean;
 };
 
-type AppLauncher = {
-  openUrl?: (opts: { url: string }) => Promise<unknown>;
-  canOpenUrl?: (opts: { url: string }) => Promise<{ value?: boolean }>;
-};
-
-type CapacitorLike = {
-  isNativePlatform?: () => boolean;
-  getPlatform?: () => string;
-  Plugins?: { AppLauncher?: AppLauncher };
-};
-
 type MapsWindow = Window & {
   Android?: AndroidBridge;
-  Capacitor?: CapacitorLike;
 };
 
-function mapsWindow(): MapsWindow | null {
+function realAndroidBridge(): AndroidBridge | null {
   if (typeof window === 'undefined') return null;
-  return window as MapsWindow;
-}
-
-function realAndroidBridge(w: MapsWindow): AndroidBridge | null {
-  const bridge = w.Android;
+  const bridge = (window as MapsWindow).Android;
   if (!bridge || bridge.isStub || typeof bridge.openUrl !== 'function') return null;
   return bridge;
 }
 
-/** Capacitor native Android, or this app's Android WebView JavascriptInterface. */
-export function hasNativeAndroidMaps(w: MapsWindow | null = mapsWindow()): boolean {
-  if (!w) return false;
-  if (realAndroidBridge(w)) return true;
-  const cap = w.Capacitor;
-  if (!cap?.isNativePlatform?.()) return false;
-  const platform = cap.getPlatform?.();
-  if (platform) return platform === 'android';
-  return /Android/i.test(w.navigator?.userAgent || '');
-}
-
-async function openCapacitorGeo(w: MapsWindow, geo: string, httpsUrl: string): Promise<void> {
-  const launcher = w.Capacitor?.Plugins?.AppLauncher;
-  const webFallback = () => {
-    w.open(httpsUrl, '_blank', 'noopener,noreferrer');
-  };
-  try {
-    if (launcher?.openUrl) {
-      if (!launcher.canOpenUrl) {
-        await launcher.openUrl({ url: geo });
-        return;
-      }
-      const can = await launcher.canOpenUrl({ url: geo });
-      if (can?.value) {
-        await launcher.openUrl({ url: geo });
-        return;
-      }
-    }
-    const opened = w.open(geo, '_system');
-    if (!opened) webFallback();
-  } catch {
-    try {
-      const opened = w.open(geo, '_system');
-      if (!opened) webFallback();
-    } catch {
-      webFallback();
-    }
-  }
-}
-
 /**
- * On native Android, open geo:0,0?q= so the Maps app launches.
- * Returns true when the caller should cancel the https anchor navigation.
+ * Ask the Android WebView to open geo: once. MainActivity resolves the intent
+ * and falls back to the https Maps URL. Returns true when the https anchor
+ * should not also navigate. Browsers (no bridge) return false.
  */
 export function openNativeServiceAddress(fullAddress: string): boolean {
   const urls = serviceAddressMapsUrls(fullAddress);
-  const w = mapsWindow();
-  if (!urls || !w || !hasNativeAndroidMaps(w)) return false;
-  const bridge = realAndroidBridge(w);
-  if (bridge?.openUrl) {
-    try {
-      bridge.openUrl(urls.geo);
-      return true;
-    } catch {
-      try {
-        bridge.openUrl(urls.https);
-        return true;
-      } catch {
-        return false;
-      }
-    }
-  }
-  void openCapacitorGeo(w, urls.geo, urls.https);
+  const bridge = realAndroidBridge();
+  if (!urls || !bridge?.openUrl) return false;
+  bridge.openUrl(urls.geo);
   return true;
 }

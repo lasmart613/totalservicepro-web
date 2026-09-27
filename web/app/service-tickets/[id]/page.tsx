@@ -464,9 +464,13 @@ export default function ServiceTicketDetail() {
                   className="underline text-[var(--gold)]"
                 />
               )} />
-              <Field label="City" value={isEditing ? <input className="input" value={formData.customer_city || formData.city || ''} onChange={(e) => handleInputChange('customer_city', e.target.value)} /> : (ticket.customer_city || ticket.city)} />
-              <Field label="State" value={isEditing ? <input className="input" value={formData.customer_state || formData.state || ''} onChange={(e) => handleInputChange('customer_state', e.target.value)} /> : (ticket.customer_state || ticket.state)} />
-              <Field label="ZIP" value={isEditing ? <input className="input" value={formData.zip || ''} onChange={(e) => handleInputChange('zip', e.target.value)} /> : ticket.zip} />
+              {isEditing && (
+                <>
+                  <Field label="City" value={<input className="input" value={formData.customer_city || formData.city || ''} onChange={(e) => handleInputChange('customer_city', e.target.value)} />} />
+                  <Field label="State" value={<input className="input" value={formData.customer_state || formData.state || ''} onChange={(e) => handleInputChange('customer_state', e.target.value)} />} />
+                  <Field label="ZIP" value={<input className="input" value={formData.zip || ''} onChange={(e) => handleInputChange('zip', e.target.value)} />} />
+                </>
+              )}
             </div>
           </div>
 

@@ -2541,77 +2541,39 @@
         return String(v == null ? '' : v).trim();
     }
 
-    /** Street, city, state, zip — same join as web/lib/address-link.ts */
+    /** "Street, City, ST 85251" — same join as web/lib/address-link.ts */
     function ticketFullAddress(t) {
         if (!t) return '';
         const org = t._customerOrg || {};
-        return [
-            cleanAddrPart(t.customer_address || t.address || org.address),
-            cleanAddrPart(t.customer_city || t.city || org.city),
-            cleanAddrPart(t.customer_state || t.state || org.state),
-            cleanAddrPart(t.zip || t.customer_zip || org.zip)
-        ].filter(Boolean).join(', ');
+        const street = cleanAddrPart(t.customer_address || t.address || org.address);
+        const city = cleanAddrPart(t.customer_city || t.city || org.city);
+        const state = cleanAddrPart(t.customer_state || t.state || org.state);
+        const zip = cleanAddrPart(t.zip || t.customer_zip || org.zip);
+        const stateZip = [state, zip].filter(Boolean).join(' ');
+        const locality = [city, stateZip].filter(Boolean).join(', ');
+        return [street, locality].filter(Boolean).join(', ');
     }
 
     function mapsSearchHref(addr) {
         return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addr);
     }
 
-    function hasNativeAndroidMaps() {
-        if (window.Android && !Android.isStub && typeof Android.openUrl === 'function') return true;
-        const cap = window.Capacitor;
-        if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return false;
-        const platform = typeof cap.getPlatform === 'function' ? cap.getPlatform() : '';
-        if (platform) return platform === 'android';
-        return /Android/i.test(navigator.userAgent || '');
+    function hasRealAndroidBridge() {
+        return !!(window.Android && !Android.isStub && typeof Android.openUrl === 'function');
     }
 
     function openNativeMaps(addr) {
-        const geo = 'geo:0,0?q=' + encodeURIComponent(addr);
-        const web = mapsSearchHref(addr);
-        if (window.Android && !Android.isStub && typeof Android.openUrl === 'function') {
-            try { Android.openUrl(geo); return; } catch (e) {
-                try { Android.openUrl(web); return; } catch (e2) {}
-            }
-        }
-        const cap = window.Capacitor;
-        const launcher = cap && cap.Plugins && cap.Plugins.AppLauncher;
-        const fallbackWeb = () => window.open(web, '_blank', 'noopener');
-        try {
-            if (launcher && typeof launcher.openUrl === 'function') {
-                const openGeo = () => Promise.resolve(launcher.openUrl({ url: geo })).catch(() => {
-                    const opened = window.open(geo, '_system');
-                    if (!opened) fallbackWeb();
-                });
-                if (typeof launcher.canOpenUrl === 'function') {
-                    Promise.resolve(launcher.canOpenUrl({ url: geo })).then((can) => {
-                        if (can && can.value) openGeo();
-                        else {
-                            const opened = window.open(geo, '_system');
-                            if (!opened) fallbackWeb();
-                        }
-                    }).catch(() => {
-                        const opened = window.open(geo, '_system');
-                        if (!opened) fallbackWeb();
-                    });
-                    return;
-                }
-                openGeo();
-                return;
-            }
-            const opened = window.open(geo, '_system');
-            if (!opened) fallbackWeb();
-        } catch (e) {
-            fallbackWeb();
-        }
+        if (!addr || !hasRealAndroidBridge()) return false;
+        // MainActivity launches geo once and falls back to the https Maps URL.
+        Android.openUrl('geo:0,0?q=' + encodeURIComponent(addr));
+        return true;
     }
 
     function onAddressLinkClick(event, addr) {
         if (event) event.stopPropagation();
         if (!addr) return false;
-        if (hasNativeAndroidMaps()) {
+        if (openNativeMaps(addr)) {
             if (event) event.preventDefault();
-            openNativeMaps(addr);
             return false;
         }
         return true;
@@ -2623,6 +2585,7 @@
         a.href = mapsSearchHref(addr);
         a.target = '_blank';
         a.rel = 'noopener noreferrer';
+        a.title = addr;
         a.textContent = addr;
         a.onclick = (e) => onAddressLinkClick(e, addr);
         a.addEventListener('touchend', (e) => e.stopPropagation(), { passive: true });
@@ -2633,7 +2596,7 @@
         if (!addr) return '—';
         const href = mapsSearchHref(addr);
         const cls = className ? ('ticket-address-link ' + className) : 'ticket-address-link';
-        return '<a class="' + cls + '" href="' + escHtml(href) + '" target="_blank" rel="noopener noreferrer" data-addr="' + encodeURIComponent(addr) + '" onclick="return onAddressLinkClick(event, decodeURIComponent(this.getAttribute(\'data-addr\')||\'\'))">' + escHtml(addr) + '</a>';
+        return '<a class="' + cls + '" href="' + escHtml(href) + '" target="_blank" rel="noopener noreferrer" title="' + escHtml(addr) + '" data-addr="' + encodeURIComponent(addr) + '" onclick="return onAddressLinkClick(event, decodeURIComponent(this.getAttribute(\'data-addr\')||\'\'))">' + escHtml(addr) + '</a>';
     }
 
     /* ── Ticket actions restored from robust previous version ── */
@@ -2650,14 +2613,9 @@
         // Fallback web link (Google Maps directions)
         const web = 'https://www.google.com/maps/dir/?api=1&destination=' + encodeURIComponent(addr);
 
-        if (window.Android && typeof Android.openUrl === 'function') {
-            try {
-                Android.openUrl(geo);
-            } catch (e) {
-                Android.openUrl(web);
-            }
+        if (hasRealAndroidBridge()) {
+            Android.openUrl(geo);
         } else {
-            // Web / fallback
             window.open(web, '_blank');
         }
     }
