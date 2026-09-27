@@ -2,6 +2,7 @@
  * Ensure a laser/equipment row exists; serial is stable identity across owner transfers.
  * Port of Android assets/equipment-ensure.js
  */
+import { manufacturerNamesEqual } from './equipment-dropdown.ts';
 
 export type EnsureEquipmentOpts = {
   customerOrgId: string | number | null | undefined;
@@ -26,6 +27,22 @@ function coerceOrgId(orgId: string | number | null | undefined): string | number
 
 function normSerial(serial?: string | null): string {
   return String(serial || '').trim();
+}
+
+function sameSpelling(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/**
+ * Keep a matched laser's stored manufacturer when the form sent a different
+ * spelling of the same brand (a dropdown label, or Lumenis vs Coherent / Lumenis).
+ */
+function manufacturerForMatchedLaser(stored: unknown, incoming: string): string | null {
+  const next = String(incoming || '').trim();
+  if (!next) return null;
+  const current = String(stored || '').trim();
+  if (current && !sameSpelling(current, next) && manufacturerNamesEqual(current, next)) return null;
+  return next;
 }
 
 /**
@@ -65,16 +82,22 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
 
     // A typed serial that misses must not reuse another laser of the same
     // make and model — that links the wrong machine and never stores the serial.
+    // Blank serial reuses the same model under any stored spelling of the make
+    // (Lumenis, Coherent, and "Coherent / Lumenis" are one brand).
     if (!existing && !serial && manufacturer && model) {
-      const q = await sb
+      const { data: rows } = await sb
         .from('equipment')
-        .select('id, customer_organization_id')
+        .select('id, customer_organization_id, manufacturer, model')
         .eq('customer_organization_id', orgId)
-        .eq('manufacturer', manufacturer)
         .eq('model', model)
-        .limit(1)
-        .maybeSingle();
-      existing = q.data;
+        .limit(40);
+      const matches = (rows || []).filter((row: any) =>
+        manufacturerNamesEqual(String(row?.manufacturer || ''), manufacturer)
+      );
+      existing =
+        matches.find((row: any) => sameSpelling(String(row?.manufacturer || ''), manufacturer)) ||
+        matches[0] ||
+        null;
     }
 
     if (existing?.id) {
@@ -82,7 +105,8 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
       if (String(existing.customer_organization_id || '') !== String(orgId)) {
         patch.customer_organization_id = orgId;
       }
-      if (manufacturer) patch.manufacturer = manufacturer;
+      const keepManufacturer = manufacturerForMatchedLaser(existing.manufacturer, manufacturer);
+      if (keepManufacturer) patch.manufacturer = keepManufacturer;
       if (model) patch.model = model;
       // Live equipment has no name or pulse_count columns. Sending them 400s, then retries.
       if (Object.keys(patch).length) {

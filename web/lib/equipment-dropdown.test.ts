@@ -209,6 +209,83 @@ test('catalog index normalizes each manufacturer once, not once per model per re
   assert.equal(canonicalManufacturerSpelling('Alma', manufacturers, models), 'Alma Lasers');
 });
 
+test('display manufacturer names save as the stored manufacturers-table spelling', () => {
+  const lumenis = [
+    normalizeManufacturerRow({ id: 1, name: 'Lumenis' }),
+    normalizeManufacturerRow({ id: 2, name: 'Coherent' }),
+  ];
+  assert.equal(canonicalManufacturerSpelling('Lumenis (Coherent)', lumenis), 'Lumenis');
+  assert.equal(canonicalManufacturerSpelling('Coherent', lumenis), 'Lumenis');
+  assert.equal(canonicalManufacturerSpelling('Coherent / Lumenis', lumenis), 'Lumenis');
+  assert.equal(canonicalManufacturerSpelling('Lumenis', lumenis), 'Lumenis');
+  assert.equal(
+    canonicalManufacturerSpelling('Lumenis (Coherent)', [
+      normalizeManufacturerRow({ id: 2, name: 'Coherent' }),
+    ]),
+    'Coherent'
+  );
+
+  assert.equal(
+    canonicalManufacturerSpelling('AMS / Laserscope', [
+      normalizeManufacturerRow({ id: 3, name: 'Laserscope' }),
+    ]),
+    'Laserscope'
+  );
+  assert.equal(
+    canonicalManufacturerSpelling('AMS / Laserscope', [
+      normalizeManufacturerRow({ id: 4, name: 'AMS' }),
+    ]),
+    'AMS'
+  );
+  assert.equal(
+    canonicalManufacturerSpelling('AMS / Laserscope', [
+      normalizeManufacturerRow({ id: 5, name: 'American Medical Systems' }),
+    ]),
+    'American Medical Systems'
+  );
+  assert.equal(
+    canonicalManufacturerSpelling('AMS / Laserscope', [
+      normalizeManufacturerRow({ id: 4, name: 'AMS' }),
+      normalizeManufacturerRow({ id: 3, name: 'Laserscope' }),
+    ]),
+    'AMS'
+  );
+
+  assert.equal(
+    canonicalManufacturerSpelling('BioLitec', [
+      normalizeManufacturerRow({ id: 6, name: 'Bio Litec' }),
+    ]),
+    'Bio Litec'
+  );
+  assert.equal(
+    canonicalManufacturerSpelling('InMode', [
+      normalizeManufacturerRow({ id: 7, name: 'In Mode' }),
+    ]),
+    'In Mode'
+  );
+  assert.equal(
+    canonicalManufacturerSpelling('BioLitec', [
+      normalizeManufacturerRow({ id: 1, name: 'Lumenis' }),
+    ]),
+    'BioLitec'
+  );
+  assert.equal(
+    canonicalManufacturerSpelling('InMode', [
+      normalizeManufacturerRow({ id: 1, name: 'Lumenis' }),
+    ]),
+    'InMode'
+  );
+  assert.equal(canonicalManufacturerSpelling('Other', lumenis), 'Other');
+  assert.equal(
+    canonicalManufacturerSpelling('Custom Handpiece', lumenis),
+    'Custom Handpiece'
+  );
+
+  const shown = listCatalogManufacturers({ manufacturers: lumenis });
+  assert.ok(shown.includes('Lumenis (Coherent)'));
+  assert.equal(shown.includes('Lumenis'), false);
+});
+
 test('manufacturer_id vs name join (tickets / company bug) does not empty Cutera', () => {
   assert.equal(manufacturerMatches('Cutera', CUTERA), true);
   assert.equal(manufacturerMatches('10', CUTERA), true);

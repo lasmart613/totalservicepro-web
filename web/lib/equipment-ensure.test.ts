@@ -10,6 +10,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 function equipmentClient(opts?: {
   serialRows?: any[];
   modelRow?: any | null;
+  modelRows?: any[] | null;
   insertId?: number;
   failFirstInsert?: boolean;
 }) {
@@ -32,6 +33,13 @@ function equipmentClient(opts?: {
       limit(n: number) {
         if (n === 5) {
           return Promise.resolve({ data: opts?.serialRows ?? [], error: null });
+        }
+        if (n === 40) {
+          modelLookups += 1;
+          const rows =
+            opts?.modelRows ??
+            (opts?.modelRow ? [opts.modelRow] : []);
+          return Promise.resolve({ data: rows, error: null });
         }
         return b;
       },
@@ -258,7 +266,7 @@ test('ensureEquipment does not reuse make and model when the typed serial is new
 test('ensureEquipment reuses make and model only when no serial was typed', async () => {
   const db = equipmentClient({
     serialRows: [],
-    modelRow: { id: 88, customer_organization_id: 9 },
+    modelRow: { id: 88, customer_organization_id: 9, manufacturer: 'Alma Lasers' },
   });
   const id = await ensureEquipment({
     client: db.client,
@@ -275,4 +283,54 @@ test('ensureEquipment reuses make and model only when no serial was typed', asyn
   assert.equal(db.updates.length, 1);
   assert.equal(Object.hasOwn(db.updates[0], 'name'), false);
   assert.equal(Object.hasOwn(db.updates[0], 'pulse_count'), false);
+  assert.equal(db.updates[0].manufacturer, 'Alma Lasers');
+});
+
+test('ensureEquipment reuses make and model stored as Coherent or Coherent / Lumenis', async () => {
+  for (const stored of ['Coherent', 'Coherent / Lumenis']) {
+    const db = equipmentClient({
+      modelRows: [
+        { id: 1, customer_organization_id: 9, manufacturer: 'Candela', model: 'AcuPulse Duo' },
+        { id: 44, customer_organization_id: 9, manufacturer: stored, model: 'AcuPulse Duo' },
+      ],
+    });
+    const id = await ensureEquipment({
+      client: db.client,
+      customerOrgId: 9,
+      manufacturer: 'Lumenis',
+      model: 'AcuPulse Duo',
+      serial: '',
+    });
+    assert.equal(id, 44, stored);
+    assert.equal(db.inserts.length, 0, stored);
+    assert.equal(db.updates.length, 1, stored);
+    assert.equal(Object.hasOwn(db.updates[0], 'manufacturer'), false, stored);
+    assert.equal(db.updates[0].model, 'AcuPulse Duo');
+  }
+});
+
+test('ensureEquipment does not overwrite a matched laser with a display manufacturer', async () => {
+  const db = equipmentClient({
+    serialRows: [
+      {
+        id: 44,
+        customer_organization_id: 9,
+        manufacturer: 'Coherent / Lumenis',
+        model: 'AcuPulse Duo',
+        serial_number: 'SN-1',
+      },
+    ],
+  });
+  const id = await ensureEquipment({
+    client: db.client,
+    customerOrgId: 9,
+    manufacturer: 'Lumenis (Coherent)',
+    model: 'AcuPulse Duo',
+    serial: 'SN-1',
+  });
+  assert.equal(id, 44);
+  assert.equal(db.inserts.length, 0);
+  assert.equal(db.updates.length, 1);
+  assert.equal(Object.hasOwn(db.updates[0], 'manufacturer'), false);
+  assert.equal(db.updates[0].model, 'AcuPulse Duo');
 });

@@ -506,6 +506,9 @@ export function manufacturerNamesEqual(a: string, b: string): boolean {
   if (!left || !right) return false;
   if (norm(left) === norm(right)) return true;
   if (normalizeManufacturerKey(left) === normalizeManufacturerKey(right)) return true;
+  const compactLeft = compactManufacturerKey(left);
+  const compactRight = compactManufacturerKey(right);
+  if (compactLeft.length >= 4 && compactLeft === compactRight) return true;
   // "Coherent / Lumenis" still matches either side. A space-joined pair such as
   // "Syneron Candela" does not match Syneron or Candela unless they share an alias.
   if (left.includes('/') || right.includes('/')) {
@@ -906,9 +909,40 @@ const manufacturerIndexCache = new WeakMap<
   WeakMap<readonly CatalogModel[], ManufacturerModelIndex>
 >();
 
+/** Letters and digits only, so "In Mode" and "InMode" share a key. */
+function compactManufacturerKey(value: string): string {
+  return norm(value).replace(/[^a-z0-9]+/g, '');
+}
+
+/**
+ * Stored manufacturers-table spelling for one alias group.
+ * A forced dropdown label ("Lumenis (Coherent)", "AMS / Laserscope") is not a
+ * stored name. "Alma Lasers" still wins over the short row "Alma".
+ */
+function storedAliasSpelling(group: string[], stored: string[]): string {
+  const forced = FORCE_MANUFACTURER_LABEL.has(group[0]) ? norm(group[0]) : '';
+  const withoutDisplay = forced ? stored.filter((n) => norm(n) !== forced) : stored;
+  const pool = withoutDisplay.length ? withoutDisplay : stored;
+  let preferred = pool[0];
+  for (const entry of group) {
+    const hit = pool.find((n) => norm(n) === norm(entry));
+    if (hit) {
+      preferred = hit;
+      break;
+    }
+  }
+  const longer = pool.filter(
+    (n) => n.length > preferred.length && norm(n).startsWith(norm(preferred))
+  );
+  if (!longer.length) return preferred;
+  longer.sort((a, b) => b.length - a.length || a.localeCompare(b));
+  return longer[0];
+}
+
 /**
  * Among live catalog spellings, keep the stored name. "Alma Lasers" wins over
  * the short static label "Alma" when that longer catalog name is present.
+ * Dropdown labels that are not manufacturers rows are never returned.
  */
 function catalogSaveSpelling(names: string[]): string {
   const unique: string[] = [];
@@ -924,15 +958,32 @@ function catalogSaveSpelling(names: string[]): string {
   for (const group of MANUFACTURER_ALIAS_GROUPS) {
     const inGroup = unique.filter((n) => group.some((entry) => norm(entry) === norm(n)));
     if (!inGroup.length) continue;
-    const preferred = preferCanonicalManufacturer(inGroup);
-    const longer = inGroup.filter(
-      (n) => n.length > preferred.length && norm(n).startsWith(norm(preferred))
-    );
-    if (!longer.length) return preferred;
-    longer.sort((a, b) => b.length - a.length || a.localeCompare(b));
-    return longer[0];
+    return storedAliasSpelling(group, inGroup);
   }
   return preferCanonicalManufacturer(unique);
+}
+
+/**
+ * One manufacturers row whose spelling matches aside from spaces and punctuation.
+ * Ambiguous hits stay unresolved so a display name is not guessed.
+ */
+function compactStoredManufacturer(
+  selected: string,
+  manufacturers: readonly CatalogManufacturer[]
+): string {
+  const compact = compactManufacturerKey(selected);
+  if (compact.length < 4) return '';
+  const hits: string[] = [];
+  const seen = new Set<string>();
+  for (const row of manufacturers) {
+    const name = String(row?.name || '').trim();
+    const key = norm(name);
+    if (!name || seen.has(key) || compactManufacturerKey(name) !== compact) continue;
+    seen.add(key);
+    hits.push(name);
+  }
+  if (hits.length !== 1) return '';
+  return hits[0];
 }
 
 function liveCatalogRefs(live?: LiveCatalog): {
@@ -1123,7 +1174,9 @@ export function listCatalogModelChoices(
 
 /**
  * Saved manufacturer spelling from the loaded catalog.
- * Selecting the collapsed label "Alma" stores "Alma Lasers" when that is the catalog row.
+ * Dropdown labels map to a manufacturers-table row: "Alma" stores "Alma Lasers",
+ * "Lumenis (Coherent)" stores "Lumenis", "AMS / Laserscope" stores whichever
+ * alias row exists. A name with no stored equivalent, including "Other", is kept.
  */
 export function canonicalManufacturerSpelling(
   selected: string,
@@ -1135,7 +1188,7 @@ export function canonicalManufacturerSpelling(
   const { manufacturers: mfrs, models: mods } = liveCatalogRefs({ manufacturers, models });
   const index = manufacturerModelIndex(mfrs, mods);
   const key = index.selectionKey(sel);
-  return index.canonicalByKey.get(key) || sel;
+  return index.canonicalByKey.get(key) || compactStoredManufacturer(sel, mfrs) || sel;
 }
 
 /**
