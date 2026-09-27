@@ -99,24 +99,21 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
       return existing.id;
     }
 
-    // Name or pulse count alone is not a machine. Inserting would store a blank
-    // laser (model falls back to the label or "Unknown Laser").
-    if (!manufacturer && !model && !serial) return null;
+    // Live equipment.manufacturer and serial_number are NOT NULL, and name/status
+    // columns are not on that table. Insert only a complete machine.
+    if (!manufacturer || !model || !serial) return null;
 
-    const safeModel = model || manufacturer || serial || name || 'Unknown Laser';
     const insert: Record<string, any> = {
       customer_organization_id: orgId,
-      manufacturer: manufacturer || null,
-      model: safeModel,
-      serial_number: serial || null,
-      name: name || safeModel,
-      status: 'Active',
+      manufacturer,
+      model,
+      serial_number: serial,
     };
     if (pulse) insert.pulse_count = pulse;
 
     let ins = await sb.from('equipment').insert([insert]).select('id').maybeSingle();
     if (ins.error) {
-      if (serial && /unique|duplicate/i.test(ins.error.message || '')) {
+      if (/unique|duplicate/i.test(ins.error.message || '')) {
         const { data: race } = await sb
           .from('equipment')
           .select('id')
@@ -131,18 +128,13 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
           return race.id;
         }
       }
-      ins = await sb
-        .from('equipment')
-        .insert([
-          {
-            customer_organization_id: orgId,
-            manufacturer: manufacturer || null,
-            model: safeModel,
-            serial_number: serial || null,
-          },
-        ])
-        .select('id')
-        .maybeSingle();
+      const retry: Record<string, any> = {
+        customer_organization_id: orgId,
+        manufacturer,
+        model,
+        serial_number: serial,
+      };
+      ins = await sb.from('equipment').insert([retry]).select('id').maybeSingle();
       if (ins.error) {
         console.warn('ensureEquipment insert', ins.error);
         return null;

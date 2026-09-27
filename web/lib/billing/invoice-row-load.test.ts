@@ -32,6 +32,10 @@ test('every invoice fallback select includes invoice_data', () => {
     INVOICE_ROW_SELECTS.some((cols) => cols.trim() === 'id, created_by, organization_id, total'),
     false
   );
+  const last = INVOICE_ROW_SELECTS[INVOICE_ROW_SELECTS.length - 1];
+  assert.match(last, /\bcustomer_organization_id\b/);
+  assert.match(last, /\bstatus\b/);
+  assert.match(last, /\binvoice_data\b/);
 });
 
 test('column-missing selects fall through and still return invoice_data', async () => {

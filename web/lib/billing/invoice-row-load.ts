@@ -12,7 +12,7 @@ export const INVOICE_ROW_SELECTS = [
   'id, created_by, organization_id, customer_name, customer_organization_id, total, amount_paid, invoice_data, invoice_number, status',
   'id, created_by, organization_id, customer_name, customer_organization_id, total, amount_paid, invoice_data, status',
   'id, created_by, organization_id, customer_name, total, amount_paid, invoice_data, status',
-  'id, created_by, organization_id, total, invoice_data',
+  'id, created_by, organization_id, customer_organization_id, total, invoice_data, status',
 ] as const;
 
 const COLUMN_MISSING = /column|does not exist|schema cache/i;

@@ -1286,8 +1286,7 @@ export default function NewServiceReport() {
       (x: any) => String(x.id) === String(selectedDbMfr) || x.name === selectedDbMfr
     );
     const mfrName = currentModel?.mfg || mfrRow?.name || selectedDbMfr || '';
-    const modelName =
-      currentModel?.label || selectedDbModel || selectedModelKey || equipName || '';
+    const modelName = currentModel?.label || selectedDbModel || selectedModelKey || '';
     return ensureEquipment({
       client: supabase,
       customerOrgId: orgId,
