@@ -24,6 +24,7 @@ import {
   upcomingOpenTickets,
 } from '@/lib/tickets';
 import { isEstimateAwaitingCustomerAction } from '@/lib/billing/save-helpers';
+import { TicketAddressLink } from '@/components/AddressLink';
 
 export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
   const router = useRouter();
@@ -193,7 +194,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
 
         const { data: tickets, error: tErr } = await supabase
           .from('service_tickets')
-          .select('id, status, service_date, assigned_to, customer_name, service_type, scheduled_time')
+          .select('id, status, service_date, assigned_to, customer_name, service_type, scheduled_time, customer_address, address, customer_city, city, customer_state, state, zip')
           .eq('organization_id', orgId)
           .limit(500);
 
@@ -666,18 +667,25 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
                   <ul>
                     {upcoming.map((t) => (
                       <li key={t.id} className="border-b border-[var(--border)] last:border-0">
-                        <Link
-                          href={`/service-tickets/${t.id}`}
-                          className="block px-5 py-3 hover:bg-[var(--surface3)]"
-                        >
-                          <div className="font-semibold">
-                            {(t.service_type || 'Service') + ' — ' + (t.customer_name || 'Customer')}
-                          </div>
-                          <div className="text-xs text-[var(--text3)] mt-0.5">
-                            {ticketDateYmd(t.service_date)}
-                            {t.scheduled_time ? ` · ${String(t.scheduled_time).slice(0, 5)}` : ''}
-                          </div>
-                        </Link>
+                        <div className="px-5 py-3 hover:bg-[var(--surface3)]">
+                          <Link
+                            href={`/service-tickets/${t.id}`}
+                            className="block"
+                            onClick={(ev) => ev.stopPropagation()}
+                          >
+                            <div className="font-semibold">
+                              {(t.service_type || 'Service') + ' — ' + (t.customer_name || 'Customer')}
+                            </div>
+                            <div className="text-xs text-[var(--text3)] mt-0.5">
+                              {ticketDateYmd(t.service_date)}
+                              {t.scheduled_time ? ` · ${String(t.scheduled_time).slice(0, 5)}` : ''}
+                            </div>
+                          </Link>
+                          <TicketAddressLink
+                            ticket={t}
+                            className="text-xs mt-1 inline-block underline text-[var(--gold)]"
+                          />
+                        </div>
                       </li>
                     ))}
                   </ul>

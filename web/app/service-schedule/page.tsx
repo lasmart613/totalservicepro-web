@@ -25,6 +25,7 @@ import {
 import { AddCustomerModal } from '@/components/AddCustomerModal';
 import { AssignFseSelect } from '@/components/AssignFseSelect';
 import { CustomerLocationSelect } from '@/components/CustomerLocationSelect';
+import { TicketAddressLink } from '@/components/AddressLink';
 import { insertOmittingCharOverflow } from '@/lib/char-overflow';
 import {
   applyTicketAssignee,
@@ -217,6 +218,10 @@ export default function ServiceSchedule() {
       assigned_to: ticketAssigneeId(ticket),
       organization_id: ticket.organization_id,
       priority: ticket.priority,
+      customer_address: ticket.customer_address || ticket.address || '',
+      customer_city: ticket.customer_city || ticket.city || '',
+      customer_state: ticket.customer_state || ticket.state || '',
+      zip: ticket.zip || ticket.customer_zip || '',
     };
   }, []);
 
@@ -262,6 +267,13 @@ export default function ServiceSchedule() {
             end_time,
             service_type,
             customer_name,
+            customer_address,
+            address,
+            customer_city,
+            city,
+            customer_state,
+            state,
+            zip,
             equipment_model,
             equipment_make,
             status,
@@ -976,17 +988,22 @@ export default function ServiceSchedule() {
                         {dayCalls.length > 0 && (
                           <div className="text-[10px] leading-snug space-y-0.5">
                             {dayCalls.slice(0, 3).map((call) => (
-                              <Link
-                                key={call.id}
-                                href={`/service-tickets/${call.id}`}
-                                className="block break-words hover:underline rounded px-0.5"
-                                style={{ color: colorFor(call.assigned_to) }}
-                                onClick={(ev) => ev.stopPropagation()}
-                                title={`${call.time} • ${call.title}${call.equipment_model ? ` • ${call.equipment_model}` : ''}`}
-                              >
-                                {call.time} {call.title}
-                                {call.equipment_model && ` • ${call.equipment_model}`}
-                              </Link>
+                              <div key={call.id} onClick={(ev) => ev.stopPropagation()}>
+                                <Link
+                                  href={`/service-tickets/${call.id}`}
+                                  className="block break-words hover:underline rounded px-0.5"
+                                  style={{ color: colorFor(call.assigned_to) }}
+                                  onClick={(ev) => ev.stopPropagation()}
+                                  title={`${call.time} • ${call.title}${call.equipment_model ? ` • ${call.equipment_model}` : ''}`}
+                                >
+                                  {call.time} {call.title}
+                                  {call.equipment_model && ` • ${call.equipment_model}`}
+                                </Link>
+                                <TicketAddressLink
+                                  ticket={call}
+                                  className="block truncate underline text-[9px]"
+                                />
+                              </div>
                             ))}
                             {dayCalls.length > 3 && (
                               <div className="text-[var(--text3)] text-[9px]">
@@ -1064,9 +1081,16 @@ export default function ServiceSchedule() {
                             >
                               ⋮⋮
                             </span>
-                            <Link href={`/service-tickets/${call.id}`} className="hover:underline flex-1">
-                              {call.time} {call.title}
-                            </Link>
+                            <div className="flex-1 min-w-0">
+                              <Link
+                                href={`/service-tickets/${call.id}`}
+                                className="hover:underline block"
+                                onClick={(ev) => ev.stopPropagation()}
+                              >
+                                {call.time} {call.title}
+                              </Link>
+                              <TicketAddressLink ticket={call} className="block truncate underline" />
+                            </div>
                           </div>
                         ))}
                     </div>
@@ -1113,22 +1137,31 @@ export default function ServiceSchedule() {
               {visibleCalls
                 .filter((c) => c.date === dayYmd)
                 .map((call) => (
-                  <Link
+                  <div
                     key={call.id}
-                    href={`/service-tickets/${call.id}`}
-                    className="block p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)]"
+                    className="block p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] cursor-pointer"
                     style={{ borderLeft: `4px solid ${colorFor(call.assigned_to)}` }}
+                    onClick={() => router.push(`/service-tickets/${call.id}`)}
                   >
-                    <div className="font-semibold" style={{ color: colorFor(call.assigned_to) }}>
+                    <Link
+                      href={`/service-tickets/${call.id}`}
+                      className="font-semibold block"
+                      style={{ color: colorFor(call.assigned_to) }}
+                      onClick={(ev) => ev.stopPropagation()}
+                    >
                       {call.time} · {call.title}
-                    </div>
+                    </Link>
                     {call.equipment_model && (
                       <div className="text-xs text-[var(--text3)] mt-1">{call.equipment_model}</div>
                     )}
+                    <TicketAddressLink
+                      ticket={call}
+                      className="text-xs mt-1 inline-block underline text-[var(--gold)]"
+                    />
                     <div className="text-xs text-[var(--text3)] mt-1">
                       FSE: {assigneeName(assignees, call.assigned_to, 'Unassigned')}
                     </div>
-                  </Link>
+                  </div>
                 ))}
             </div>
           </div>
@@ -1149,22 +1182,32 @@ export default function ServiceSchedule() {
             )}
             <div className="space-y-2">
               {visibleAgenda.map((call) => (
-                <Link
+                <div
                   key={call.id}
-                  href={`/service-tickets/${call.id}`}
-                  className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] flex justify-between gap-3"
+                  className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] flex justify-between gap-3 cursor-pointer"
                   style={{ borderLeft: `4px solid ${colorFor(call.assigned_to)}` }}
+                  onClick={() => router.push(`/service-tickets/${call.id}`)}
                 >
                   <div>
-                    <div className="font-semibold">{call.title}</div>
+                    <Link
+                      href={`/service-tickets/${call.id}`}
+                      className="font-semibold block"
+                      onClick={(ev) => ev.stopPropagation()}
+                    >
+                      {call.title}
+                    </Link>
                     <div className="text-xs text-[var(--text3)]">
                       {call.date} · {call.time}
                       {call.equipment_model ? ` · ${call.equipment_model}` : ''}
                       {` · ${assigneeName(assignees, call.assigned_to, 'Unassigned')}`}
                     </div>
+                    <TicketAddressLink
+                      ticket={call}
+                      className="text-xs mt-1 inline-block underline text-[var(--gold)]"
+                    />
                   </div>
                   <div className="text-xs text-[var(--gold)]">{call.status}</div>
-                </Link>
+                </div>
               ))}
             </div>
             {visibleUnscheduled.length > 0 && (
@@ -1174,20 +1217,30 @@ export default function ServiceSchedule() {
                 </h3>
                 <div className="space-y-2">
                   {visibleUnscheduled.map((call) => (
-                    <Link
+                    <div
                       key={call.id}
-                      href={`/service-tickets/${call.id}`}
-                      className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] flex justify-between gap-3"
+                      className="p-3 rounded-lg border border-[var(--border)] hover:border-[var(--gold)] flex justify-between gap-3 cursor-pointer"
                       style={{ borderLeft: `4px solid ${colorFor(call.assigned_to)}` }}
+                      onClick={() => router.push(`/service-tickets/${call.id}`)}
                     >
                       <div>
-                        <div className="font-semibold">{call.title}</div>
+                        <Link
+                          href={`/service-tickets/${call.id}`}
+                          className="font-semibold block"
+                          onClick={(ev) => ev.stopPropagation()}
+                        >
+                          {call.title}
+                        </Link>
                         <div className="text-xs text-[var(--text3)]">
                           No service date · {assigneeName(assignees, call.assigned_to, 'Unassigned')}
                         </div>
+                        <TicketAddressLink
+                          ticket={call}
+                          className="text-xs mt-1 inline-block underline text-[var(--gold)]"
+                        />
                       </div>
                       <div className="text-xs text-[var(--gold)]">{call.status}</div>
-                    </Link>
+                    </div>
                   ))}
                 </div>
               </div>

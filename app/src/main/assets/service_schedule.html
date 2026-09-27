@@ -92,6 +92,21 @@
             text-overflow: ellipsis; background: #FBBF24; color: #111;
             min-width: 0;
         }
+        .month-address, .tg-event-address, .agenda-address, a.ticket-address-link {
+            color: inherit;
+            text-decoration: underline;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .month-address, .tg-event-address {
+            display: block;
+            font-size: 9px;
+            font-weight: 500;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+        .agenda-address { font-size: 12px; margin-top: 2px; }
         .month-event.my-task {
             border: 2px solid var(--gold);
             padding: 0 2px;
@@ -901,7 +916,11 @@
             dayTickets.slice(0,2).forEach(t => {
                 const ev = document.createElement('div');
                 ev.className = 'month-event' + (currentUser?.id && t.assigned_to === currentUser.id ? ' my-task' : '');
-                ev.textContent = (t.scheduled_time ? t.scheduled_time.slice(0,5) + ' ' : '') + (t.customer_name || 'Ticket');
+                const title = document.createElement('div');
+                title.textContent = (t.scheduled_time ? t.scheduled_time.slice(0,5) + ' ' : '') + (t.customer_name || 'Ticket');
+                ev.appendChild(title);
+                const addr = ticketFullAddress(t);
+                if (addr) ev.appendChild(addressAnchor(addr, 'month-address'));
                 ev.onclick = (e) => { e.stopPropagation(); showTicketDetail(t); };
                 cell.appendChild(ev);
             });
@@ -1104,12 +1123,22 @@
                     const wPx = Math.max(48, pxPerDay - 6);
                     ev.style.cssText = `top:${topPx}px;height:${heightPx}px;left:${leftPx}px;width:${wPx}px;position:absolute;pointer-events:auto;z-index:10;`;
 
-                    ev.innerHTML = `
-                        <div class="tg-event-title">${t.customer_name || 'Ticket'}</div>
-                        <div class="tg-event-time">${timeLabel}</div>
-                    `;
+                    const titleEl = document.createElement('div');
+                    titleEl.className = 'tg-event-title';
+                    titleEl.textContent = t.customer_name || 'Ticket';
+                    const timeEl2 = document.createElement('div');
+                    timeEl2.className = 'tg-event-time';
+                    timeEl2.textContent = timeLabel;
+                    ev.appendChild(titleEl);
+                    ev.appendChild(timeEl2);
+                    const addr = ticketFullAddress(t);
+                    if (addr) ev.appendChild(addressAnchor(addr, 'tg-event-address'));
                     ev.onclick = (e) => { e.stopPropagation(); e.preventDefault(); showTicketDetail(t); };
-                    ev.addEventListener('touchend', (e) => { e.stopPropagation(); showTicketDetail(t); }, {passive: true});
+                    ev.addEventListener('touchend', (e) => {
+                        if (e.target && e.target.closest && e.target.closest('a')) return;
+                        e.stopPropagation();
+                        showTicketDetail(t);
+                    }, {passive: true});
 
                     body.appendChild(ev);
                 });
@@ -1247,11 +1276,13 @@
                 const content = document.createElement('div');
                 content.className = 'agenda-content';
                 const equip = [t.equipment_make, t.equipment_model].filter(Boolean).join(' ');
+                const addr = ticketFullAddress(t);
                 content.innerHTML = `
                     <div class="agenda-time">${t.scheduled_time ? t.scheduled_time.slice(0,5) : 'Time TBD'}${t.end_time ? ' – ' + t.end_time.slice(0,5) : ''}</div>
-                    <div class="agenda-customer">${t.customer_name || 'No customer'}</div>
-                    <div class="agenda-equipment">${equip ? equip + ' · ' : ''}${t.service_type || ''}</div>
-                    <div class="agenda-ticket">${t.ticket_number || ''}</div>
+                    <div class="agenda-customer">${escHtml(t.customer_name || 'No customer')}</div>
+                    <div class="agenda-equipment">${escHtml(equip ? equip + ' · ' : '')}${escHtml(t.service_type || '')}</div>
+                    ${addr ? `<div class="agenda-address">${addressAnchorHtml(addr, 'agenda-address')}</div>` : ''}
+                    <div class="agenda-ticket">${escHtml(t.ticket_number || '')}</div>
                 `;
                 item.appendChild(content);
 
@@ -2498,15 +2529,118 @@
         window.location.href = page;
     }
 
+    function escHtml(s) {
+        return String(s == null ? '' : s)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    }
+
+    function cleanAddrPart(v) {
+        return String(v == null ? '' : v).trim();
+    }
+
+    /** Street, city, state, zip — same join as web/lib/address-link.ts */
+    function ticketFullAddress(t) {
+        if (!t) return '';
+        const org = t._customerOrg || {};
+        return [
+            cleanAddrPart(t.customer_address || t.address || org.address),
+            cleanAddrPart(t.customer_city || t.city || org.city),
+            cleanAddrPart(t.customer_state || t.state || org.state),
+            cleanAddrPart(t.zip || t.customer_zip || org.zip)
+        ].filter(Boolean).join(', ');
+    }
+
+    function mapsSearchHref(addr) {
+        return 'https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(addr);
+    }
+
+    function hasNativeAndroidMaps() {
+        if (window.Android && !Android.isStub && typeof Android.openUrl === 'function') return true;
+        const cap = window.Capacitor;
+        if (!cap || typeof cap.isNativePlatform !== 'function' || !cap.isNativePlatform()) return false;
+        const platform = typeof cap.getPlatform === 'function' ? cap.getPlatform() : '';
+        if (platform) return platform === 'android';
+        return /Android/i.test(navigator.userAgent || '');
+    }
+
+    function openNativeMaps(addr) {
+        const geo = 'geo:0,0?q=' + encodeURIComponent(addr);
+        const web = mapsSearchHref(addr);
+        if (window.Android && !Android.isStub && typeof Android.openUrl === 'function') {
+            try { Android.openUrl(geo); return; } catch (e) {
+                try { Android.openUrl(web); return; } catch (e2) {}
+            }
+        }
+        const cap = window.Capacitor;
+        const launcher = cap && cap.Plugins && cap.Plugins.AppLauncher;
+        const fallbackWeb = () => window.open(web, '_blank', 'noopener');
+        try {
+            if (launcher && typeof launcher.openUrl === 'function') {
+                const openGeo = () => Promise.resolve(launcher.openUrl({ url: geo })).catch(() => {
+                    const opened = window.open(geo, '_system');
+                    if (!opened) fallbackWeb();
+                });
+                if (typeof launcher.canOpenUrl === 'function') {
+                    Promise.resolve(launcher.canOpenUrl({ url: geo })).then((can) => {
+                        if (can && can.value) openGeo();
+                        else {
+                            const opened = window.open(geo, '_system');
+                            if (!opened) fallbackWeb();
+                        }
+                    }).catch(() => {
+                        const opened = window.open(geo, '_system');
+                        if (!opened) fallbackWeb();
+                    });
+                    return;
+                }
+                openGeo();
+                return;
+            }
+            const opened = window.open(geo, '_system');
+            if (!opened) fallbackWeb();
+        } catch (e) {
+            fallbackWeb();
+        }
+    }
+
+    function onAddressLinkClick(event, addr) {
+        if (event) event.stopPropagation();
+        if (!addr) return false;
+        if (hasNativeAndroidMaps()) {
+            if (event) event.preventDefault();
+            openNativeMaps(addr);
+            return false;
+        }
+        return true;
+    }
+
+    function addressAnchor(addr, className) {
+        const a = document.createElement('a');
+        a.className = className || 'ticket-address-link';
+        a.href = mapsSearchHref(addr);
+        a.target = '_blank';
+        a.rel = 'noopener noreferrer';
+        a.textContent = addr;
+        a.onclick = (e) => onAddressLinkClick(e, addr);
+        a.addEventListener('touchend', (e) => e.stopPropagation(), { passive: true });
+        return a;
+    }
+
+    function addressAnchorHtml(addr, className) {
+        if (!addr) return '—';
+        const href = mapsSearchHref(addr);
+        const cls = className ? ('ticket-address-link ' + className) : 'ticket-address-link';
+        return '<a class="' + cls + '" href="' + escHtml(href) + '" target="_blank" rel="noopener noreferrer" data-addr="' + encodeURIComponent(addr) + '" onclick="return onAddressLinkClick(event, decodeURIComponent(this.getAttribute(\'data-addr\')||\'\'))">' + escHtml(addr) + '</a>';
+    }
+
     /* ── Ticket actions restored from robust previous version ── */
     function navigateToTicket() {
         if (!selectedTicket) return;
         const t = selectedTicket;
-        // Build best address we have (direct, denormalized, or from enriched _customerOrg)
-        const org = t._customerOrg || {};
-        let addr = [t.address, t.city, t.state, t.zip].filter(Boolean).join(', ');
-        if (!addr) addr = [t.customer_address, t.customer_city, t.customer_state].filter(Boolean).join(', ');
-        if (!addr) addr = [org.address, org.city, org.state].filter(Boolean).join(', ');
+        const addr = ticketFullAddress(t);
         if (!addr) {
             if (typeof showToast === 'function') showToast('No address on file for navigation', 'error');
             return;
@@ -2645,13 +2779,7 @@
         // Build the best possible full address from direct ticket fields, denormalized customer_* fields,
         // or the attached _customerOrg (from enrichment or legacy joins).
         const org = t._customerOrg || {};
-        const addrParts = [
-            t.address || t.customer_address || org.address,
-            t.city || t.customer_city || org.city,
-            t.state || t.customer_state || org.state,
-            t.zip || org.zip
-        ].filter(Boolean);
-        const addr = addrParts.length ? addrParts.join(', ') : '—';
+        const addr = ticketFullAddress(t);
 
         const phone = t.customer_phone || t.phone || org.phone || '—';
         const email = t.customer_email || t.email || org.email || '—';
@@ -2683,7 +2811,7 @@
                         <div class="ticket-field"><div class="ticket-label">Name</div><div class="ticket-value"><strong>${cust}</strong></div></div>
                         <div class="ticket-field">
                             <div class="ticket-label">Address</div>
-                            <div class="ticket-value">${addr !== '—' ? addr.replace(/, /g, '<br>') : '—'}</div>
+                            <div class="ticket-value">${addr ? addressAnchorHtml(addr) : '—'}</div>
                         </div>
                         <div class="ticket-field"><div class="ticket-label">Phone</div><div class="ticket-value">${phone}</div></div>
                         <div class="ticket-field"><div class="ticket-label">Email</div><div class="ticket-value">${email}</div></div>
