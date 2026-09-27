@@ -19,6 +19,33 @@ import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
 import {
+  catalogManufacturerValue,
+  catalogModelValue,
+  loadTicketReportContext,
+  omitRejectedReportColumn,
+  reportSaveErrorMessage,
+  REPORT_SERVICE_TYPE_OPTIONS,
+  serviceReportTicketColumns,
+  type ExistingTicketReport,
+} from '@/lib/ticket-service-report';
+import {
+  formatLocationOption,
+  loadCustomerLocations,
+  locationsForDisplay,
+  type CustomerLocation,
+} from '@/lib/customer-locations';
+import {
+  UNASSIGNED_EQUIPMENT_LABEL,
+  equipmentOptionLabel,
+  groupEquipmentForSite,
+  loadCustomerEquipment,
+  matchLocationId,
+  reportLocationControl,
+  reportSiteFields,
+  shouldClearEquipmentSelection,
+  type ReportEquipmentRow,
+} from '@/lib/report-locations';
+import {
   DEFAULT_EQUIPMENT_TYPE,
   EQUIPMENT_TYPES,
   equipmentTypeOrDefault,
@@ -110,10 +137,35 @@ export default function NewServiceReport() {
   const searchParams = useSearchParams();
   const editReportId = searchParams?.get('id') || null;
   const equipmentTypeParam = searchParams?.get('equipment_type') || searchParams?.get('type') || '';
+  const ticketIdParam = editReportId
+    ? ''
+    : String(searchParams?.get('ticketId') || searchParams?.get('ticket_id') || '').trim();
   const supabase = getSupabaseClient();
 
   const [currentUser, setCurrentUser] = useState<any>(null);
   const [currentUserOrgId, setCurrentUserOrgId] = useState<number | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
+  const [linkedTicketId, setLinkedTicketId] = useState<string | null>(null);
+  const [ticketEquipmentId, setTicketEquipmentId] = useState<string | number | null>(null);
+  const [ticketExistingReports, setTicketExistingReports] = useState<ExistingTicketReport[]>([]);
+  const [ticketContextReady, setTicketContextReady] = useState(!ticketIdParam);
+  const [ticketCatalogKey, setTicketCatalogKey] = useState(0);
+  const ticketMakeRef = useRef('');
+  const ticketModelRef = useRef('');
+  const selectModelRef = useRef<(key: string) => void>(() => {});
+  const ticketCatalogApplied = useRef(false);
+  const locationRequestRef = useRef(0);
+  const locationLoadRef = useRef<{
+    preferredId: string | number | null;
+    applyFields: boolean;
+    preserveEquipmentId: string | number | null;
+    matchAddress: { address: string; city: string; state: string } | null;
+  }>({
+    preferredId: null,
+    applyFields: false,
+    preserveEquipmentId: null,
+    matchAddress: null,
+  });
   const [currentProfile, setCurrentProfile] = useState<any>(null);
   const [techCompanyCache, setTechCompanyCache] = useState<any>({});
 
@@ -124,6 +176,12 @@ export default function NewServiceReport() {
   const [showAddModal, setShowAddModal] = useState(false);
   const [newCustomer, setNewCustomer] = useState({ name: '', address: '', city: '', state: '', phone: '', email: '', contactName: '' });
   const [selectedCustomer, setSelectedCustomer] = useState<any>(null);
+  const [customerPick, setCustomerPick] = useState(0);
+  const [customerLocations, setCustomerLocations] = useState<CustomerLocation[]>([]);
+  const [selectedLocationId, setSelectedLocationId] = useState('');
+  const [siteName, setSiteName] = useState('');
+  const [customerEquipment, setCustomerEquipment] = useState<ReportEquipmentRow[]>([]);
+  const [selectedEquipmentId, setSelectedEquipmentId] = useState('');
 
   // Core report fields
   const [selectedModelKey, setSelectedModelKey] = useState('');
@@ -298,8 +356,14 @@ export default function NewServiceReport() {
 
   useEffect(() => {
     (async () => {
+      let signedIn = false;
+      try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) return router.push('/login');
+      if (!user) {
+        router.push('/login');
+        return;
+      }
+      signedIn = true;
       setCurrentUser(user);
 
       // signature_data / role / additional_roles optional; fall back if not migrated yet
@@ -346,6 +410,9 @@ export default function NewServiceReport() {
       }
       // default date
       if (!dateOut) setDateOut(new Date().toISOString().slice(0,10));
+      } finally {
+        if (signedIn) setSessionReady(true);
+      }
     })();
   }, [router, supabase]);
 
@@ -419,6 +486,8 @@ export default function NewServiceReport() {
         setCurrentReportId(r.id);
         if (r.status === 'complete') setIsSubmitted(true);
         if (r.report_number) setReportNumber(r.report_number);
+        if (r.ticket_id) setLinkedTicketId(String(r.ticket_id));
+        if (r.equipment_id) setTicketEquipmentId(r.equipment_id);
         if (r.ticket_number) setTicketNum(r.ticket_number);
         if (r.service_type) setServiceType(r.service_type);
         if (r.date_out) setDateOut(String(r.date_out).slice(0, 10));
@@ -431,6 +500,17 @@ export default function NewServiceReport() {
         if (r.service_engineer) setServiceEngineer(r.service_engineer);
         if (r.customer_name) {
           setSearchTerm(r.customer_name);
+          locationLoadRef.current = {
+            preferredId: null,
+            applyFields: false,
+            preserveEquipmentId: r.equipment_id ?? null,
+            matchAddress: {
+              address: r.customer_address || '',
+              city: r.customer_city || '',
+              state: r.customer_state || '',
+            },
+          };
+          if (r.equipment_id) setSelectedEquipmentId(String(r.equipment_id));
           setSelectedCustomer((prev: any) =>
             prev || {
               id: r.customer_organization_id || null,
@@ -438,6 +518,7 @@ export default function NewServiceReport() {
               address: r.customer_address,
               city: r.customer_city,
               state: r.customer_state,
+              zip: r.customer_zip || null,
               phone: r.customer_phone,
               email: r.customer_email,
               contact_name: r.customer_contact_name,
@@ -562,8 +643,9 @@ export default function NewServiceReport() {
   }, [editReportId, currentUser, supabase]);
 
   // New reports: load device-type template (fallback laser) once the tech is signed in.
+  // When opened from a ticket, wait until that prefill sets equipment type.
   useEffect(() => {
-    if (!currentUser || editReportId) return;
+    if (!currentUser || editReportId || !ticketContextReady) return;
     let cancelled = false;
     (async () => {
       try {
@@ -584,7 +666,7 @@ export default function NewServiceReport() {
     };
     // equipmentType changes are handled by onEquipmentTypeChange so extras are preserved.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, editReportId, supabase]);
+  }, [currentUser, editReportId, supabase, ticketContextReady]);
 
   async function onEquipmentTypeChange(next: EquipmentType) {
     const previous = currentItemsWithAnswers();
@@ -689,6 +771,193 @@ export default function NewServiceReport() {
     else setSelectedDbMfr(mfgName);
   }, [dbManufacturers, selectedDbModel, selectedDbMfr, equipName]);
 
+  // /reports/new?ticketId=… — prefill from the schedule ticket (RLS + caller org).
+  useEffect(() => {
+    if (!sessionReady || !ticketIdParam || editReportId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const ctx = await loadTicketReportContext(supabase, ticketIdParam, {
+          organizationId: currentUserOrgId,
+        });
+        if (cancelled) return;
+        if (!ctx) {
+          toast.error('Could not load that ticket for this report');
+          setTicketContextReady(true);
+          return;
+        }
+        const prefill = ctx.prefill;
+        setLinkedTicketId(prefill.ticketId);
+        setTicketEquipmentId(prefill.equipmentId);
+        setTicketExistingReports(ctx.existingReports);
+        if (prefill.ticketNumber) setTicketNum(prefill.ticketNumber);
+        if (prefill.serviceType) setServiceType(prefill.serviceType);
+        if (prefill.dateOut) setDateOut(prefill.dateOut);
+        if (prefill.serialNumber) setSerialNumber(prefill.serialNumber);
+        if (prefill.comments) setComments(prefill.comments);
+        if (prefill.serviceEngineer) setServiceEngineer(prefill.serviceEngineer);
+        if (prefill.customerName) {
+          setSearchTerm(prefill.customerName);
+          locationLoadRef.current = {
+            preferredId: prefill.locationId,
+            applyFields: false,
+            preserveEquipmentId: prefill.equipmentId,
+            matchAddress: null,
+          };
+          setSelectedCustomer({
+            id: prefill.customerOrganizationId,
+            name: prefill.customerName,
+            address: prefill.customerAddress,
+            city: prefill.customerCity,
+            state: prefill.customerState,
+            phone: prefill.customerPhone,
+            email: prefill.customerEmail,
+            contact_name: prefill.customerContactName,
+          });
+        }
+        if (prefill.siteName) setSiteName(prefill.siteName);
+        if (prefill.equipmentId != null && prefill.equipmentId !== '') {
+          setSelectedEquipmentId(String(prefill.equipmentId));
+        }
+        setCustAddress(prefill.customerAddress);
+        setCustCity(prefill.customerCity);
+        setCustState(prefill.customerState);
+        setCustContactName(prefill.customerContactName);
+        setCustPhone(prefill.customerPhone);
+        setCustEmail(prefill.customerEmail);
+        ticketMakeRef.current = prefill.equipmentMake;
+        ticketModelRef.current = prefill.equipmentModel;
+        if (prefill.equipmentMake) setSelectedDbMfr(prefill.equipmentMake);
+        if (prefill.equipmentModel) {
+          selectModelRef.current(prefill.equipmentModel);
+          setSelectedDbModel(prefill.equipmentModel);
+          setSelectedModelKey(prefill.equipmentModel);
+        }
+        if (prefill.equipmentName) setEquipName(prefill.equipmentName);
+        setEquipmentType(prefill.equipmentType);
+        setTicketCatalogKey((n) => n + 1);
+        setTicketContextReady(true);
+        toast.success(
+          prefill.ticketNumber
+            ? `Filled from ticket ${prefill.ticketNumber}`
+            : 'Filled from service ticket'
+        );
+      } catch (e) {
+        console.warn('ticket report prefill', e);
+        if (!cancelled) {
+          toast.error('Could not load that ticket for this report');
+          setTicketContextReady(true);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [sessionReady, ticketIdParam, editReportId, currentUserOrgId, supabase]);
+
+  // Match ticket make/model onto catalog option values once those lists load.
+  useEffect(() => {
+    if (ticketCatalogApplied.current) return;
+    const make = ticketMakeRef.current;
+    const model = ticketModelRef.current;
+    if (!make && !model) return;
+    if (make && !dbManufacturers.length) return;
+    if (model && !dbLaserModels.length) return;
+    ticketCatalogApplied.current = true;
+    if (make && dbManufacturers.length) {
+      const value = catalogManufacturerValue(make, dbManufacturers);
+      if (value) setSelectedDbMfr(value);
+    }
+    if (model && dbLaserModels.length) {
+      const value = catalogModelValue(model, dbLaserModels);
+      if (value) setSelectedDbModel(value);
+    }
+  }, [dbManufacturers, dbLaserModels, ticketCatalogKey]);
+
+  function applyLocationFields(loc: CustomerLocation) {
+    const fields = reportSiteFields(loc);
+    setCustAddress(fields.address);
+    setCustCity(fields.city);
+    setCustState(fields.state);
+    setCustPhone(fields.phone);
+    setCustContactName(fields.contactName);
+    setSiteName(fields.siteName);
+  }
+
+  function resetEquipmentPick() {
+    setSelectedEquipmentId('');
+    setTicketEquipmentId(null);
+    setEquipName('');
+    setSerialNumber('');
+    setSelectedDbMfr('');
+    setSelectedDbModel('');
+    setSelectedModelKey('');
+  }
+
+  // Locations and lasers for the selected customer. Ticket prefill queues a
+  // location id before setSelectedCustomer so this effect can preselect it.
+  useEffect(() => {
+    const customerId = selectedCustomer?.id;
+    if (customerId == null || customerId === '') {
+      setCustomerLocations([]);
+      setCustomerEquipment([]);
+      setSelectedLocationId('');
+      return;
+    }
+    const request = ++locationRequestRef.current;
+    const queued = locationLoadRef.current;
+    locationLoadRef.current = {
+      preferredId: null,
+      applyFields: false,
+      preserveEquipmentId: null,
+      matchAddress: null,
+    };
+    let cancelled = false;
+    (async () => {
+      try {
+        const [loaded, equipment] = await Promise.all([
+          loadCustomerLocations(supabase, customerId),
+          loadCustomerEquipment(supabase, customerId),
+        ]);
+        if (cancelled || request !== locationRequestRef.current) return;
+        const locations = locationsForDisplay(loaded.locations, {
+          id: customerId,
+          address: selectedCustomer.address,
+          city: selectedCustomer.city,
+          state: selectedCustomer.state,
+          zip: selectedCustomer.zip,
+          phone: selectedCustomer.phone,
+          contact_name: selectedCustomer.contact_name,
+        });
+        setCustomerLocations(locations);
+        setCustomerEquipment(equipment);
+        let preferred = queued.preferredId;
+        if ((preferred == null || preferred === '') && queued.matchAddress) {
+          preferred = matchLocationId(locations, queued.matchAddress) || null;
+        }
+        const control = reportLocationControl(locations, preferred, {
+          fallback: queued.applyFields || queued.preferredId != null ? 'primary' : 'none',
+        });
+        setSelectedLocationId(control.selectedId);
+        const loc = locations.find((row) => String(row.id) === control.selectedId);
+        if (loc && queued.applyFields) applyLocationFields(loc);
+        else if (loc) setSiteName((prev) => prev || loc.name || '');
+        if (queued.preserveEquipmentId != null && queued.preserveEquipmentId !== '') {
+          setSelectedEquipmentId(String(queued.preserveEquipmentId));
+        } else if (queued.applyFields) {
+          setSelectedEquipmentId('');
+        }
+      } catch (e) {
+        console.warn('report locations', e);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // selectedCustomer fields are read for the org snapshot of this pick.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedCustomer?.id, customerPick, supabase]);
+
   async function loadCustomers(orgId: any) {
     try {
       if (!orgId) {
@@ -705,7 +974,19 @@ export default function NewServiceReport() {
   const filteredCustomers = filterLinkedCustomers(customerOptions, searchTerm, 12);
 
   const handleSelectCustomer = (customer: any) => {
+    locationLoadRef.current = {
+      preferredId: null,
+      applyFields: true,
+      preserveEquipmentId: null,
+      matchAddress: null,
+    };
+    resetEquipmentPick();
+    setSelectedLocationId('');
+    setSiteName('');
+    setCustomerLocations([]);
+    setCustomerEquipment([]);
     setSelectedCustomer(customer);
+    setCustomerPick((n) => n + 1);
     setSearchTerm(customer.name || '');
     setCustAddress(customer.address || '');
     setCustCity(customer.city || '');
@@ -716,6 +997,43 @@ export default function NewServiceReport() {
     setCustWebsite(customer.website || '');
     setShowCustDrop(false);
   };
+
+  function handleLocationChange(id: string) {
+    setSelectedLocationId(id);
+    const loc = customerLocations.find((row) => String(row.id) === id);
+    if (loc) applyLocationFields(loc);
+    else setSiteName('');
+    const groups = groupEquipmentForSite(customerEquipment, id, {
+      keepIds: [ticketEquipmentId],
+      siteLabel: loc?.name || '',
+    });
+    if (shouldClearEquipmentSelection(customerEquipment, groups, selectedEquipmentId)) {
+      resetEquipmentPick();
+    }
+  }
+
+  function handleEquipmentChange(id: string) {
+    setSelectedEquipmentId(id);
+    if (!id) return;
+    const row = customerEquipment.find((item) => String(item.id) === id);
+    if (!row) return;
+    setTicketEquipmentId(row.id);
+    const make = String(row.manufacturer || '').trim();
+    const model = String(row.model || '').trim();
+    if (row.serial_number) setSerialNumber(String(row.serial_number));
+    setEquipName([make, model].filter(Boolean).join(' '));
+    if (make) {
+      const value = dbManufacturers.length ? catalogManufacturerValue(make, dbManufacturers) : make;
+      setSelectedDbMfr(value);
+      ticketMakeRef.current = make;
+    }
+    if (model) {
+      const value = dbLaserModels.length ? catalogModelValue(model, dbLaserModels) : model;
+      ticketModelRef.current = model;
+      selectDbModelValue(value);
+    }
+    setEquipName([make, model].filter(Boolean).join(' '));
+  }
 
   const handleAddNewCustomer = async () => {
     if (!newCustomer.name.trim() || !currentUserOrgId) return;
@@ -775,6 +1093,7 @@ export default function NewServiceReport() {
       setPowerMeasurements(seeded);
     }
   }
+  selectModelRef.current = selectModel;
 
   function selectDbManufacturer(mfr: string) {
     setSelectedDbMfr(mfr);
@@ -1032,7 +1351,7 @@ export default function NewServiceReport() {
         report_number: rn || reportNumber || null,
         service_engineer: engineerName,
         customer_organization_id: custId || null,
-        equipment_id: linkedEquipmentId || null,
+        equipment_id: linkedEquipmentId || ticketEquipmentId || null,
         equipment_name:
           equipName ||
           currentModel?.label ||
@@ -1052,7 +1371,7 @@ export default function NewServiceReport() {
         customer_contact_name: custContactName || selectedCustomer?.contact_name || null,
         date_out: dateOut || null,
         next_pm_due: nextPm || null,
-        ticket_number: ticketNum || null,
+        ...serviceReportTicketColumns({ ticketId: linkedTicketId, ticketNumber: ticketNum }),
         comments: comments || null,
         ground_resistance: groundResistance === '' ? null : groundResistance,
         leakage_current: leakageCurrent === '' ? null : leakageCurrent,
@@ -1092,31 +1411,20 @@ export default function NewServiceReport() {
           (status === 'complete' ? new Date().toISOString().slice(0, 10) : null),
       };
 
-      // Retry without columns PostgREST says are missing (schema drift / unapplied migrations)
+      // Retry without columns PostgREST says are missing (schema drift / unapplied migrations).
+      // 22P02 (invalid uuid) drops ticket_id even when the message does not name the column.
       async function writeReport(payload: Record<string, any>, id: any) {
         let body = { ...payload };
         for (let attempt = 0; attempt < 6; attempt++) {
           if (id) {
             const { error } = await supabase.from('service_reports').update(body).eq('id', id);
             if (!error) return { id, error: null as any };
-            const m = String(error.message || '');
-            const col = m.match(/Could not find the '([^']+)' column/i)?.[1];
-            if (col && col in body) {
-              console.warn('service_reports missing column, retry without:', col);
-              delete body[col];
-              continue;
-            }
+            if (omitRejectedReportColumn(body, error)) continue;
             return { id, error };
           }
           const { data: ins, error } = await supabase.from('service_reports').insert(body).select('id').single();
           if (!error && ins?.id) return { id: ins.id, error: null as any };
-          const m = String(error?.message || '');
-          const col = m.match(/Could not find the '([^']+)' column/i)?.[1];
-          if (col && col in body) {
-            console.warn('service_reports missing column, retry without:', col);
-            delete body[col];
-            continue;
-          }
+          if (omitRejectedReportColumn(body, error)) continue;
           return { id: null, error };
         }
         return { id: null, error: new Error('Could not save report after schema retries') };
@@ -1124,7 +1432,10 @@ export default function NewServiceReport() {
 
       let savedId = currentReportId;
       const result = await writeReport(reportData, savedId);
-      if (result.error) throw result.error;
+      if (result.error) {
+        toast.error('Save error: ' + reportSaveErrorMessage(result.error));
+        return;
+      }
       if (!savedId && result.id) {
         savedId = result.id;
         setCurrentReportId(savedId);
@@ -1150,7 +1461,7 @@ export default function NewServiceReport() {
       }
     } catch (e: any) {
       console.error(e);
-      toast.error('Save error: ' + (e.message || e));
+      toast.error('Save error: ' + reportSaveErrorMessage(e));
     } finally {
       setSaving(false);
     }
@@ -1308,23 +1619,46 @@ export default function NewServiceReport() {
     );
   }
 
+  const locationUi = reportLocationControl(customerLocations, selectedLocationId || null, {
+    fallback: 'none',
+  });
+  const selectedLocation = customerLocations.find((loc) => String(loc.id) === (selectedLocationId || locationUi.selectedId));
+  const equipmentGroups = groupEquipmentForSite(customerEquipment, selectedLocationId || locationUi.selectedId, {
+    keepIds: [ticketEquipmentId],
+    siteLabel: selectedLocation?.name || siteName,
+  });
+
   return (
     <div className="min-h-screen bg-[var(--bg)] pb-24">
       <Header />
       <div className="max-w-5xl mx-auto px-6 py-8">
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
+        <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex min-w-0 items-center gap-3">
             <Link href="/reports" className="text-[var(--gold)]"><ArrowLeft size={24} /></Link>
-            <h1 className="text-3xl font-bold">
+            <h1 className="text-2xl font-bold sm:text-3xl">
               {currentReportId ? (isSubmitted ? 'Service Report' : 'Edit Draft Report') : 'New Service Report'}
             </h1>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-wrap gap-2">
             <button onClick={() => saveReport('draft')} disabled={saving} className="btn btn-secondary flex items-center gap-2"><Save size={16}/> Save Draft</button>
             <button onClick={() => saveReport('complete')} disabled={saving || isSubmitted} className="btn btn-primary flex items-center gap-2"><Check size={18} /> Submit Complete</button>
             <button onClick={() => window.print()} className="btn btn-ghost flex items-center gap-2 text-xs">Print / Save PDF</button>
           </div>
         </div>
+
+        {ticketIdParam && ticketExistingReports.length > 0 && (
+          <div className="mb-4 rounded-lg border border-[var(--gold-border)] bg-[var(--gold-glow)] p-3 text-sm">
+            This ticket already has {ticketExistingReports.length === 1 ? 'a service report' : `${ticketExistingReports.length} service reports`}. This form starts a new one.
+            <div className="mt-2 flex flex-col gap-1">
+              {ticketExistingReports.map((report) => (
+                <Link key={report.id} href={`/reports/${report.id}`} className="text-[var(--gold)] underline">
+                  Open {report.reportNumber || 'existing report'}
+                  {report.status ? ` (${report.status})` : ''}
+                </Link>
+              ))}
+            </div>
+          </div>
+        )}
 
         {/* Customer Info — full editable fields (Android parity) */}
         <div className="section mb-6 p-6">
@@ -1339,7 +1673,14 @@ export default function NewServiceReport() {
                 onChange={(e) => {
                   setSearchTerm(e.target.value);
                   setShowCustDrop(true);
-                  if (!e.target.value) setSelectedCustomer(null);
+                  if (!e.target.value) {
+                    setSelectedCustomer(null);
+                    setCustomerLocations([]);
+                    setSelectedLocationId('');
+                    setSiteName('');
+                    setCustomerEquipment([]);
+                    resetEquipmentPick();
+                  }
                 }}
                 onFocus={() => setShowCustDrop(true)}
                 placeholder="Type clinic / facility name…"
@@ -1367,7 +1708,42 @@ export default function NewServiceReport() {
             <button onClick={()=>setShowAddModal(true)} className="btn btn-secondary text-sm py-3">+ Add</button>
           </div>
 
+          {locationUi.shown && (
+            <div className="mb-3">
+              <label className="label" htmlFor="report-location">Location</label>
+              <select
+                id="report-location"
+                data-testid="report-location"
+                className="input w-full"
+                value={selectedLocationId || locationUi.selectedId}
+                disabled={locationUi.disabled}
+                onChange={(e) => handleLocationChange(e.target.value)}
+              >
+                {locationUi.mode === 'multiple' && <option value="">Select a location</option>}
+                {customerLocations.map((loc) => (
+                  <option key={String(loc.id)} value={String(loc.id)}>
+                    {formatLocationOption(loc)}
+                  </option>
+                ))}
+              </select>
+              {locationUi.disabled && (
+                <p className="text-[10px] text-[var(--text3)] mt-1">This customer has one location.</p>
+              )}
+            </div>
+          )}
+
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="md:col-span-2">
+              <label className="label" htmlFor="report-site">Site</label>
+              <input
+                id="report-site"
+                data-testid="report-site"
+                className="input w-full"
+                value={siteName}
+                onChange={(e) => setSiteName(e.target.value)}
+                placeholder="Filled from the location"
+              />
+            </div>
             <div className="md:col-span-2">
               <label className="label">Address</label>
               <input className="input w-full" value={custAddress} onChange={e=>setCustAddress(e.target.value)} placeholder="123 Main St" />
@@ -1418,11 +1794,12 @@ export default function NewServiceReport() {
             <div>
               <label className="label">Service Type</label>
               <select className="input" value={serviceType} onChange={e=>setServiceType(e.target.value)}>
-                <option value="PM">PM</option>
-                <option value="Repair">Repair</option>
-                <option value="PM+Repair">PM + Repair</option>
-                <option value="Install">Install</option>
-                <option value="Cal">Cal</option>
+                {REPORT_SERVICE_TYPE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+                {serviceType && !REPORT_SERVICE_TYPE_OPTIONS.some((option) => option.value === serviceType) && (
+                  <option value={serviceType}>{serviceType}</option>
+                )}
               </select>
             </div>
             <div><label className="label">Date Out</label><input type="date" className="input" value={dateOut} onChange={e=>setDateOut(e.target.value)} /></div>
@@ -1458,6 +1835,38 @@ export default function NewServiceReport() {
         {/* Manufacturer + Model dropdowns (sole equipment name source for draft/save) */}
         <div className="section mb-6 p-6">
           <h3 className="text-xl font-semibold mb-4">⚙️ Equipment Name / Model</h3>
+          {selectedCustomer?.id && (
+            <div className="mb-3">
+              <label className="label" htmlFor="report-equipment">Equipment at this site</label>
+              <select
+                id="report-equipment"
+                data-testid="report-equipment"
+                className="input w-full"
+                value={selectedEquipmentId}
+                onChange={(e) => handleEquipmentChange(e.target.value)}
+              >
+                <option value="">Select equipment or enter it below</option>
+                {equipmentGroups.atSite.length > 0 && (
+                  <optgroup label={equipmentGroups.siteLabel}>
+                    {equipmentGroups.atSite.map((row) => (
+                      <option key={String(row.id)} value={String(row.id)}>
+                        {equipmentOptionLabel(row)}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {equipmentGroups.unassigned.length > 0 && (
+                  <optgroup label={UNASSIGNED_EQUIPMENT_LABEL}>
+                    {equipmentGroups.unassigned.map((row) => (
+                      <option key={String(row.id)} value={String(row.id)}>
+                        {equipmentOptionLabel(row)}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+              </select>
+            </div>
+          )}
           <div className="mb-3">
             <label className="text-xs text-[var(--text3)]">Equipment type</label>
             <select

@@ -31,6 +31,9 @@ import {
   ticketAssigneeId,
   type TicketAssignee,
 } from '@/lib/ticket-assignees';
+import { canCreateServiceReports } from '@/lib/roles';
+import { listReportsForTicket, type ExistingTicketReport } from '@/lib/ticket-service-report';
+import { CreateServiceReportActions } from '@/components/CreateServiceReportActions';
 
 const TICKET_SAVE_FIELDS = [
   'status',
@@ -70,6 +73,9 @@ export default function ServiceTicketDetail() {
   const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
   const [userId, setUserId] = useState<string | null>(null);
   const [selfName, setSelfName] = useState('');
+  const [viewerRole, setViewerRole] = useState<string | null>(null);
+  const [viewerOrgType, setViewerOrgType] = useState<string | null>(null);
+  const [existingReports, setExistingReports] = useState<ExistingTicketReport[]>([]);
 
   // DB dropdowns for equipment
   const [dbMfrs, setDbMfrs] = useState<any[]>([]);
@@ -111,6 +117,12 @@ export default function ServiceTicketDetail() {
         const normalized = { ...ticketData, assigned_to: assigned };
         setTicket(normalized);
         setFormData(normalized);
+        try {
+          setExistingReports(await listReportsForTicket(supabase, normalized));
+        } catch (reportErr) {
+          console.warn('ticket reports', reportErr);
+          setExistingReports([]);
+        }
 
         const nextShopId = ticketData.organization_id;
         setCustSearch(ticketData.customer_name || '');
@@ -131,20 +143,33 @@ export default function ServiceTicketDetail() {
           meId = user?.id || null;
           setUserId(meId);
           if (meId) {
-            const { data: prof } = await supabase
+            const withOrg = await supabase
               .from('user_profiles')
-              .select('first_name, last_name, email, role')
+              .select('first_name, last_name, email, role, organizations(type)')
               .eq('id', meId)
               .maybeSingle();
+            const prof = withOrg.error
+              ? (
+                  await supabase
+                    .from('user_profiles')
+                    .select('first_name, last_name, email, role')
+                    .eq('id', meId)
+                    .maybeSingle()
+                ).data
+              : withOrg.data;
             meName =
               [prof?.first_name, prof?.last_name].filter(Boolean).join(' ') ||
               prof?.email ||
               '';
             meRole = prof?.role || '';
+            const orgRow = Array.isArray(prof?.organizations) ? prof.organizations[0] : prof?.organizations;
+            setViewerOrgType(orgRow?.type || null);
             setSelfName(meName);
           }
+          setViewerRole(meRole || '');
         } catch (e) {
           console.warn('ticket editor session', e);
+          setViewerRole('');
         }
 
         try {
@@ -318,33 +343,41 @@ export default function ServiceTicketDetail() {
     String(ticket.equipment_make || '')
   );
 
+  const canCreateReport =
+    viewerRole != null && canCreateServiceReports(viewerRole, viewerOrgType);
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
 
-      <div className="max-w-7xl mx-auto w-full px-4 py-8">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-4">
-            <Link href="/service-schedule" className="btn btn-secondary p-3">
+      <div className={`max-w-7xl mx-auto w-full px-4 py-8 ${canCreateReport ? 'pb-24 sm:pb-8' : ''}`}>
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div className="flex min-w-0 items-center gap-4">
+            <Link href="/service-schedule" className="btn btn-secondary shrink-0 p-3">
               <ArrowLeft size={20} />
             </Link>
-            <div>
-              <h1 className="text-4xl font-extrabold">Ticket #{ticket.ticket_number}</h1>
+            <div className="min-w-0">
+              <h1 className="text-3xl font-extrabold sm:text-4xl break-words">Ticket #{ticket.ticket_number}</h1>
               <p className="text-[var(--text3)]">{ticket.customer_name}</p>
             </div>
           </div>
 
-          <div className="flex gap-3">
+          <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto sm:justify-end">
+            <CreateServiceReportActions
+              canCreate={canCreateReport}
+              ticketId={ticket.id}
+              existingReports={existingReports}
+            />
             {!isEditing ? (
-              <button onClick={() => setIsEditing(true)} className="btn btn-primary flex items-center gap-2">
+              <button onClick={() => setIsEditing(true)} className="btn btn-primary flex w-full items-center justify-center gap-2 sm:w-auto">
                 <Edit2 size={18} /> Edit Ticket
               </button>
             ) : (
               <>
-                <button onClick={handleCancel} className="btn btn-secondary flex items-center gap-2">
+                <button onClick={handleCancel} className="btn btn-secondary flex flex-1 items-center justify-center gap-2 sm:flex-none">
                   <X size={18} /> Cancel
                 </button>
-                <button onClick={handleSave} disabled={saving} className="btn btn-primary flex items-center gap-2 disabled:opacity-60">
+                <button onClick={handleSave} disabled={saving} className="btn btn-primary flex flex-1 items-center justify-center gap-2 disabled:opacity-60 sm:flex-none">
                   <Save size={18} /> {saving ? 'Saving...' : 'Save Changes'}
                 </button>
               </>
@@ -508,6 +541,12 @@ export default function ServiceTicketDetail() {
           </div>
         </div>
       </div>
+      <CreateServiceReportActions
+        placement="dock"
+        canCreate={canCreateReport}
+        ticketId={ticket.id}
+        existingReports={existingReports}
+      />
     </div>
   );
 }
