@@ -33,11 +33,12 @@ function sameSpelling(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
-/** GentleLase, GENTLELASE, and GL-VPYAG / GL VPYAG are the same stored model. */
+/** GentleLase, GENTLELASE, and GL-VPYAG / GL VPYAG are the same stored model. "+" stays distinct (Excel V+). */
 function looseModelKey(value: unknown): string {
   return String(value ?? '')
     .trim()
     .toLowerCase()
+    .replace(/\+/g, 'plus')
     .replace(/[^a-z0-9]+/g, '');
 }
 

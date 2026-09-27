@@ -466,3 +466,43 @@ test('blank serial reuses equipment whose model differs only by case or punctuat
     assert.equal(db.updates.length, 0, storedModels[i]);
   }
 });
+
+test('loose model comparison does not treat a plus model as the base model', async () => {
+  const pairs = [
+    ['Excel V', 'Excel V+'],
+    ['Apogee', 'Apogee+'],
+    ['Elite', 'Elite+'],
+  ];
+  for (const [plain, plus] of pairs) {
+    const db = equipmentClient({
+      modelRows: [
+        { id: 8, customer_organization_id: 9, manufacturer: 'Cutera', model: plus },
+      ],
+    });
+    const id = await ensureEquipment({
+      client: db.client,
+      customerOrgId: 9,
+      manufacturer: 'Cutera',
+      model: plain,
+      serial: '',
+    });
+    assert.equal(id, null, `${plain} must not reuse ${plus}`);
+    assert.equal(db.inserts.length, 0, plain);
+    assert.equal(db.updates.length, 0, plain);
+  }
+
+  const plusWord = equipmentClient({
+    modelRows: [
+      { id: 9, customer_organization_id: 9, manufacturer: 'Cutera', model: 'Excel V Plus' },
+    ],
+  });
+  const matched = await ensureEquipment({
+    client: plusWord.client,
+    customerOrgId: 9,
+    manufacturer: 'Cutera',
+    model: 'Excel V+',
+    serial: '',
+  });
+  assert.equal(matched, 9);
+  assert.equal(plusWord.updates.length, 0);
+});
