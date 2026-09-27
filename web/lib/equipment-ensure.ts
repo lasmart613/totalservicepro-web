@@ -33,15 +33,25 @@ function sameSpelling(a: string, b: string): boolean {
   return a.trim().toLowerCase() === b.trim().toLowerCase();
 }
 
-/**
- * Keep a matched laser's stored manufacturer when the form sent a different
- * spelling of the same brand (a dropdown label, or Lumenis vs Coherent / Lumenis).
- */
-function manufacturerForMatchedLaser(stored: unknown, incoming: string): string | null {
+/** GentleLase, GENTLELASE, and GL-VPYAG / GL VPYAG are the same stored model. */
+function looseModelKey(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function modelsLooselyEqual(stored: unknown, incoming: unknown): boolean {
+  const left = looseModelKey(stored);
+  const right = looseModelKey(incoming);
+  return Boolean(left) && left === right;
+}
+
+/** Fill a blank stored field. A non-blank value, including BioLitec vs Biolitec, stays. */
+function fillBlank(stored: unknown, incoming: string): string | null {
   const next = String(incoming || '').trim();
-  if (!next) return null;
   const current = String(stored || '').trim();
-  if (current && !sameSpelling(current, next) && manufacturerNamesEqual(current, next)) return null;
+  if (!next || current) return null;
   return next;
 }
 
@@ -83,18 +93,25 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
     // A typed serial that misses must not reuse another laser of the same
     // make and model — that links the wrong machine and never stores the serial.
     // Blank serial reuses the same model under any stored spelling of the make
-    // (Lumenis, Coherent, and "Coherent / Lumenis" are one brand).
+    // (Lumenis, Coherent, and "Coherent / Lumenis" are one brand). Model text
+    // matches without case, spaces, or punctuation (GENTLELASE, GL-VPYAG).
     if (!existing && !serial && manufacturer && model) {
       const { data: rows } = await sb
         .from('equipment')
         .select('id, customer_organization_id, manufacturer, model')
         .eq('customer_organization_id', orgId)
-        .eq('model', model)
-        .limit(40);
-      const matches = (rows || []).filter((row: any) =>
-        manufacturerNamesEqual(String(row?.manufacturer || ''), manufacturer)
+        .limit(200);
+      const matches = (rows || []).filter(
+        (row: any) =>
+          manufacturerNamesEqual(String(row?.manufacturer || ''), manufacturer) &&
+          modelsLooselyEqual(row?.model, model)
       );
       existing =
+        matches.find(
+          (row: any) =>
+            sameSpelling(String(row?.manufacturer || ''), manufacturer) &&
+            sameSpelling(String(row?.model || ''), model)
+        ) ||
         matches.find((row: any) => sameSpelling(String(row?.manufacturer || ''), manufacturer)) ||
         matches[0] ||
         null;
@@ -105,9 +122,11 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
       if (String(existing.customer_organization_id || '') !== String(orgId)) {
         patch.customer_organization_id = orgId;
       }
-      const keepManufacturer = manufacturerForMatchedLaser(existing.manufacturer, manufacturer);
+      // Stored manufacturer and model are identity. Fill them only when blank.
+      const keepManufacturer = fillBlank(existing.manufacturer, manufacturer);
       if (keepManufacturer) patch.manufacturer = keepManufacturer;
-      if (model) patch.model = model;
+      const keepModel = fillBlank(existing.model, model);
+      if (keepModel) patch.model = keepModel;
       // Live equipment has no name or pulse_count columns. Sending them 400s, then retries.
       if (Object.keys(patch).length) {
         const { error } = await sb.from('equipment').update(patch).eq('id', existing.id);

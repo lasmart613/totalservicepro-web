@@ -34,7 +34,7 @@ function equipmentClient(opts?: {
         if (n === 5) {
           return Promise.resolve({ data: opts?.serialRows ?? [], error: null });
         }
-        if (n === 40) {
+        if (n === 200) {
           modelLookups += 1;
           const rows =
             opts?.modelRows ??
@@ -205,11 +205,7 @@ test('ensureEquipment reuses a serial match instead of inserting a blank duplica
   });
   assert.equal(id, 77);
   assert.equal(db.inserts.length, 0);
-  assert.equal(db.updates.length, 1);
-  assert.equal(Object.hasOwn(db.updates[0], 'name'), false);
-  assert.equal(Object.hasOwn(db.updates[0], 'pulse_count'), false);
-  assert.equal(db.updates[0].manufacturer, 'Candela');
-  assert.equal(db.updates[0].model, 'GentleMax');
+  assert.equal(db.updates.length, 0);
 });
 
 test('ensureEquipment ignores a lookup row whose serial is not the one typed', async () => {
@@ -266,7 +262,12 @@ test('ensureEquipment does not reuse make and model when the typed serial is new
 test('ensureEquipment reuses make and model only when no serial was typed', async () => {
   const db = equipmentClient({
     serialRows: [],
-    modelRow: { id: 88, customer_organization_id: 9, manufacturer: 'Alma Lasers' },
+    modelRow: {
+      id: 88,
+      customer_organization_id: 9,
+      manufacturer: 'Alma Lasers',
+      model: 'Soprano Titanium',
+    },
   });
   const id = await ensureEquipment({
     client: db.client,
@@ -280,10 +281,7 @@ test('ensureEquipment reuses make and model only when no serial was typed', asyn
   assert.equal(id, 88);
   assert.equal(db.modelLookups, 1);
   assert.equal(db.inserts.length, 0);
-  assert.equal(db.updates.length, 1);
-  assert.equal(Object.hasOwn(db.updates[0], 'name'), false);
-  assert.equal(Object.hasOwn(db.updates[0], 'pulse_count'), false);
-  assert.equal(db.updates[0].manufacturer, 'Alma Lasers');
+  assert.equal(db.updates.length, 0);
 });
 
 test('ensureEquipment reuses make and model stored as Coherent or Coherent / Lumenis', async () => {
@@ -303,9 +301,7 @@ test('ensureEquipment reuses make and model stored as Coherent or Coherent / Lum
     });
     assert.equal(id, 44, stored);
     assert.equal(db.inserts.length, 0, stored);
-    assert.equal(db.updates.length, 1, stored);
-    assert.equal(Object.hasOwn(db.updates[0], 'manufacturer'), false, stored);
-    assert.equal(db.updates[0].model, 'AcuPulse Duo');
+    assert.equal(db.updates.length, 0, stored);
   }
 });
 
@@ -330,7 +326,143 @@ test('ensureEquipment does not overwrite a matched laser with a display manufact
   });
   assert.equal(id, 44);
   assert.equal(db.inserts.length, 0);
-  assert.equal(db.updates.length, 1);
-  assert.equal(Object.hasOwn(db.updates[0], 'manufacturer'), false);
-  assert.equal(db.updates[0].model, 'AcuPulse Duo');
+  assert.equal(db.updates.length, 0);
+});
+
+test('serial match keeps stored model and manufacturer, including BioLitec capitalization', async () => {
+  const cases = [
+    {
+      stored: { manufacturer: 'Candela', model: 'GENTLELASE' },
+      incoming: { manufacturer: 'Candela', model: 'GentleLase' },
+    },
+    {
+      stored: { manufacturer: 'Candela', model: 'MGLASE' },
+      incoming: { manufacturer: 'Candela', model: 'MGL ASE' },
+    },
+    {
+      stored: { manufacturer: 'Candela', model: 'GL-VPYAG' },
+      incoming: { manufacturer: 'Candela', model: 'GL VPYAG' },
+    },
+    {
+      stored: { manufacturer: 'Candela', model: 'GL-YAG' },
+      incoming: { manufacturer: 'Candela', model: 'GL YAG' },
+    },
+    {
+      stored: { manufacturer: 'biolitec', model: 'D-15' },
+      incoming: { manufacturer: 'BioLitec', model: 'Diode D-15' },
+    },
+  ];
+  for (const row of cases) {
+    const db = equipmentClient({
+      serialRows: [
+        {
+          id: 19,
+          customer_organization_id: 9,
+          manufacturer: row.stored.manufacturer,
+          model: row.stored.model,
+          serial_number: 'SN-KEEP',
+        },
+      ],
+    });
+    const id = await ensureEquipment({
+      client: db.client,
+      customerOrgId: 9,
+      manufacturer: row.incoming.manufacturer,
+      model: row.incoming.model,
+      serial: 'SN-KEEP',
+    });
+    assert.equal(id, 19, row.stored.model);
+    assert.equal(db.inserts.length, 0, row.stored.model);
+    assert.equal(db.updates.length, 0, row.stored.model);
+  }
+});
+
+test('serial match updates only the customer on a transfer and fills blank make or model', async () => {
+  const transfer = equipmentClient({
+    serialRows: [
+      {
+        id: 19,
+        customer_organization_id: 4,
+        manufacturer: 'Candela',
+        model: 'GENTLELASE',
+        serial_number: 'SN-KEEP',
+      },
+    ],
+  });
+  const transferred = await ensureEquipment({
+    client: transfer.client,
+    customerOrgId: 9,
+    manufacturer: 'Candela',
+    model: 'GentleLase',
+    serial: 'SN-KEEP',
+  });
+  assert.equal(transferred, 19);
+  assert.equal(transfer.updates.length, 1);
+  assert.deepEqual(transfer.updates[0], { customer_organization_id: 9 });
+
+  const blanks = equipmentClient({
+    serialRows: [
+      {
+        id: 21,
+        customer_organization_id: 9,
+        manufacturer: '   ',
+        model: '',
+        serial_number: 'SN-BLANK',
+      },
+    ],
+  });
+  const filled = await ensureEquipment({
+    client: blanks.client,
+    customerOrgId: 9,
+    manufacturer: 'Candela',
+    model: 'GentleLase',
+    serial: 'SN-BLANK',
+  });
+  assert.equal(filled, 21);
+  assert.equal(blanks.updates.length, 1);
+  assert.deepEqual(blanks.updates[0], { manufacturer: 'Candela', model: 'GentleLase' });
+
+  const modelOnly = equipmentClient({
+    serialRows: [
+      {
+        id: 22,
+        customer_organization_id: 9,
+        manufacturer: 'Candela',
+        model: '',
+        serial_number: 'SN-MODEL',
+      },
+    ],
+  });
+  const modeled = await ensureEquipment({
+    client: modelOnly.client,
+    customerOrgId: 9,
+    manufacturer: 'Alma Lasers',
+    model: 'GentleLase',
+    serial: 'SN-MODEL',
+  });
+  assert.equal(modeled, 22);
+  assert.deepEqual(modelOnly.updates[0], { model: 'GentleLase' });
+});
+
+test('blank serial reuses equipment whose model differs only by case or punctuation', async () => {
+  const storedModels = ['GENTLELASE', 'MGLASE', 'GL-VPYAG', 'GL-YAG'];
+  const picked = ['GentleLase', 'MGL ASE', 'GL VPYAG', 'GL YAG'];
+  for (let i = 0; i < storedModels.length; i++) {
+    const db = equipmentClient({
+      modelRows: [
+        { id: 1, customer_organization_id: 9, manufacturer: 'Candela', model: 'GentleMax' },
+        { id: 30 + i, customer_organization_id: 9, manufacturer: 'Candela', model: storedModels[i] },
+      ],
+    });
+    const id = await ensureEquipment({
+      client: db.client,
+      customerOrgId: 9,
+      manufacturer: 'Candela',
+      model: picked[i],
+      serial: '',
+    });
+    assert.equal(id, 30 + i, storedModels[i]);
+    assert.equal(db.inserts.length, 0, storedModels[i]);
+    assert.equal(db.updates.length, 0, storedModels[i]);
+  }
 });
