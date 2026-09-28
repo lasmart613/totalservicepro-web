@@ -5,6 +5,7 @@ import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import { buildDocTopHeader } from '@/lib/billing/doc-html';
 import {
   BRAND_COLOR_PRESETS,
+  CLEARED_BRAND_COLORS,
   contrastCheck,
   normalizeHex,
   resolveCompanyTheme,
@@ -18,8 +19,10 @@ type CompanyBrandingEditorProps = {
   logoUrl?: string | null;
   primary: string;
   accent: string;
-  onPrimaryChange: (hex: string) => void;
-  onAccentChange: (hex: string) => void;
+  onPrimaryChange?: (hex: string) => void;
+  onAccentChange?: (hex: string) => void;
+  /** Sets primary and accent together. Settings uses this so a preset cannot lose one color. */
+  onColorsChange?: (primary: string, accent: string) => void;
   onLogoFile?: (file: File) => void;
   onLogoClear?: () => void;
   uploadingLogo?: boolean;
@@ -79,6 +82,7 @@ export function CompanyBrandingEditor({
   accent,
   onPrimaryChange,
   onAccentChange,
+  onColorsChange,
   onLogoFile,
   onLogoClear,
   uploadingLogo,
@@ -99,6 +103,15 @@ export function CompanyBrandingEditor({
       cancelled = true;
     };
   }, [premium, logoUrl]);
+
+  function commitPair(nextPrimary: string, nextAccent: string) {
+    if (onColorsChange) {
+      onColorsChange(nextPrimary, nextAccent);
+      return;
+    }
+    onPrimaryChange?.(nextPrimary);
+    onAccentChange?.(nextAccent);
+  }
 
   const preview = resolveCompanyTheme(
     premium
@@ -182,10 +195,7 @@ export function CompanyBrandingEditor({
                   <button
                     key={preset.id}
                     type="button"
-                    onClick={() => {
-                      onPrimaryChange(preset.primary);
-                      onAccentChange(preset.accent);
-                    }}
+                    onClick={() => commitPair(preset.primary, preset.accent)}
                     className={`flex items-center gap-2 rounded-full border px-3 py-1 text-xs ${
                       active ? 'border-[var(--gold)]' : 'border-[var(--border)]'
                     }`}
@@ -205,10 +215,7 @@ export function CompanyBrandingEditor({
               <button
                 type="button"
                 className="rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--text3)]"
-                onClick={() => {
-                  onPrimaryChange('');
-                  onAccentChange('');
-                }}
+                onClick={() => commitPair(CLEARED_BRAND_COLORS.primary, CLEARED_BRAND_COLORS.accent)}
               >
                 RepairPlanet default
               </button>
@@ -221,10 +228,7 @@ export function CompanyBrandingEditor({
               <button
                 type="button"
                 className="flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1 text-xs"
-                onClick={() => {
-                  onPrimaryChange(suggestions.primary);
-                  onAccentChange(suggestions.accent);
-                }}
+                onClick={() => commitPair(suggestions.primary, suggestions.accent)}
               >
                 <span className="inline-block h-3 w-3 rounded-full" style={{ background: suggestions.primary }} />
                 <span className="inline-block h-3 w-3 rounded-full" style={{ background: suggestions.accent }} />
@@ -234,8 +238,8 @@ export function CompanyBrandingEditor({
           )}
 
           <div className="grid gap-4 sm:grid-cols-2">
-            <ColorField label="Primary" value={primary} onChange={onPrimaryChange} />
-            <ColorField label="Accent" value={accent} onChange={onAccentChange} />
+            <ColorField label="Primary" value={primary} onChange={(hex) => commitPair(hex, accent)} />
+            <ColorField label="Accent" value={accent} onChange={(hex) => commitPair(primary, hex)} />
           </div>
           <p className="text-xs text-[var(--text3)]">
             Text on each color is chosen automatically so it stays readable. AA is the WCAG target for body text.

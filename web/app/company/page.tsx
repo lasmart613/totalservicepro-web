@@ -25,7 +25,7 @@ import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
 import { orgCanUpgrade, orgIsPaid, upgradeTargetForOrg } from '@/lib/org-plan';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import { CompanyBrandingEditor } from '@/components/CompanyBrandingEditor';
-import { normalizeHex } from '@/lib/company-theme';
+import { applyBrandColorPair, normalizeHex } from '@/lib/company-theme';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -102,6 +102,7 @@ function CompanyProfile() {
   const [inviteHistory, setInviteHistory] = useState<any[]>([]);
   const [saving, setSaving] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [removingLogo, setRemovingLogo] = useState(false);
   const [addMessage, setAddMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = getSupabaseClient();
@@ -530,6 +531,29 @@ function CompanyProfile() {
     if (file) uploadLogo(file);
   }
 
+  async function removeLogo() {
+    if (!org.logo_url) return;
+    if (!window.confirm('Remove the company logo?')) return;
+    const orgId = linkedOrgId ?? org.id;
+    if (!orgId) {
+      toast.error('Save facility details first, then remove the logo.');
+      return;
+    }
+    setRemovingLogo(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const access = sessionData.session?.access_token;
+      if (!access) throw new Error('Sign-in session missing. Sign in again to remove the logo.');
+      const saved = await saveOwnOrganizationProfile(access, { id: orgId, logo_url: null });
+      if (!saved.ok) throw new Error(saved.error || 'Logo was not removed.');
+      setOrg((current: Record<string, unknown>) => ({ ...current, logo_url: null }));
+      toast.success('Logo removed.');
+    } catch (err: any) {
+      toast.error('Could not remove logo: ' + (err.message || err));
+    }
+    setRemovingLogo(false);
+  }
+
   async function addTeamMember() {
     if (!newTeam.email || !newTeam.fullName) {
       setAddMessage('Email and full name required.');
@@ -891,27 +915,37 @@ function CompanyProfile() {
             <div>
               <label className="label">Company Logo</label>
               {org.logo_url && <img src={org.logo_url} alt="Company logo" className="mb-3 max-h-24 rounded border" />}
-              <input type="file" ref={fileInputRef} onChange={handleLogoSelect} accept={LOGO_ACCEPT} className="block w-full text-sm" disabled={uploadingLogo} />
-              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadingLogo} className="btn btn-secondary mt-2 text-sm">
+              <input type="file" ref={fileInputRef} onChange={handleLogoSelect} accept={LOGO_ACCEPT} className="block w-full text-sm" disabled={uploadingLogo || removingLogo} />
+              <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadingLogo || removingLogo} className="btn btn-secondary mt-2 text-sm">
                 {uploadingLogo ? 'Uploading...' : org.logo_url ? 'Replace logo' : 'Choose & Upload Logo'}
               </button>
               <p className="text-xs text-[var(--text3)] mt-2">PNG, JPG, WebP, or SVG. Max 2 MB.</p>
             </div>
 
             <div className="md:col-span-2">
-              <h3 className="font-semibold mb-2">Branding</h3>
+              <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                <h3 className="font-semibold">Branding</h3>
+                {org.logo_url ? (
+                  <button type="button" onClick={removeLogo} disabled={uploadingLogo || removingLogo} className="btn btn-secondary text-sm">
+                    {removingLogo ? 'Removing...' : 'Remove logo'}
+                  </button>
+                ) : null}
+              </div>
               <CompanyBrandingEditor
                 premium={orgIsPaid(org)}
                 companyName={org.name || ''}
                 logoUrl={org.logo_url || ''}
                 primary={org.brand_primary_color || ''}
                 accent={org.brand_accent_color || ''}
-                onPrimaryChange={(hex) => setOrg({ ...org, brand_primary_color: hex })}
-                onAccentChange={(hex) => setOrg({ ...org, brand_accent_color: hex })}
+                onColorsChange={(primary, accent) =>
+                  setOrg((current: Record<string, unknown>) => applyBrandColorPair(current, primary, accent))
+                }
               />
-              <p className="text-xs text-[var(--text3)] mt-2">
-                Save company details to keep color changes. Colors apply on Premium, Team, and Enterprise.
-              </p>
+              {orgIsPaid(org) ? (
+                <p className="text-xs text-[var(--text3)] mt-2">
+                  Save company details to keep color changes. Colors apply on Premium, Team, and Enterprise.
+                </p>
+              ) : null}
             </div>
           </div>
 
