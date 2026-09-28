@@ -139,7 +139,11 @@ function CompanyProfile() {
       try {
         const { data: m } = await supabase.from('manufacturers').select('id,name').order('name');
         setDbMfrs(m || []);
-        const { data: lm } = await supabase.from('laser_models').select('id,name,label,manufacturer_id').order('name');
+        // `name` is the display name. `label` is not a laser_models column and 400s the read.
+        const { data: lm } = await supabase
+          .from('laser_models')
+          .select('id, name, manufacturer_id')
+          .order('name');
         setDbModels(lm || []);
       } catch {}
     })();
@@ -154,7 +158,7 @@ function CompanyProfile() {
             .filter((m: any) =>
               modelBelongsToManufacturer(normalizeModelRow(m), selectedManufacturer, dbMfrs.map(normalizeManufacturerRow))
             )
-            .map((m: any) => ({ key: m.name, label: m.label || m.name, manufacturer: selectedManufacturer }))
+            .map((m: any) => ({ key: m.name, label: m.name || m.label, manufacturer: selectedManufacturer }))
         : listModelsForManufacturer(selectedManufacturer).map((label) => ({
             key: label,
             label,

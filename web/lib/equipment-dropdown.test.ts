@@ -434,6 +434,18 @@ test('service tickets join models by manufacturer id or name without a label col
   assert.match(schedule, /listModelChoices/);
 });
 
+test('company page reads laser_models by name, not a label column', () => {
+  const company = readFileSync(join(here, '../app/company/page.tsx'), 'utf8');
+  assert.match(company, /from\('laser_models'\)\s*\.select\('id, name, manufacturer_id'\)/);
+  assert.doesNotMatch(company, /from\('laser_models'\)[\s\S]{0,180}label/);
+  assert.match(company, /label:\s*m\.name\s*\|\|\s*m\.label/);
+
+  const god = readFileSync(join(here, './god-tables.ts'), 'utf8');
+  const modelsBlock = god.slice(god.indexOf("key: 'laser_models'"), god.indexOf("key: 'test_equipment'"));
+  assert.match(modelsBlock, /listColumns:\s*\['id', 'name', 'manufacturer_id'\]/);
+  assert.doesNotMatch(modelsBlock, /'label'/);
+});
+
 test('internal codes display a human label and duplicate spellings collapse', () => {
   assert.equal(catalogChoiceLabel('alex_trivantage'), 'Alex Trivantage');
   assert.equal(catalogChoiceLabel('candela_core', 'Candela Core'), 'Candela Core');

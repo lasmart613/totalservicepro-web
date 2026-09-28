@@ -6,7 +6,7 @@
  *
  * Dropdown population for manufacturers / laser models now comes from Supabase tables:
  *   - manufacturers (id, name)
- *   - laser_models (id, name, label, manufacturer_id)
+ *   - laser_models (id, name, manufacturer_id) — `name` is the display name; there is no label column
  *
  * The tables drive selects in NewServiceReportClient, company equipment, service-tickets editing, etc.
  * MODELS object kept for the detailed perf testing UI (can be synced to laser_models json columns later).
