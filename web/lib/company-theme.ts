@@ -32,6 +32,32 @@ export type BrandColorPreset = {
   accent: string;
 };
 
+/**
+ * Empty pair for the RepairPlanet default preset.
+ * Both fields clear so a later save stores null, not a leftover accent.
+ */
+export const CLEARED_BRAND_COLORS = {
+  primary: '',
+  accent: '',
+} as const;
+
+/**
+ * One form update for a primary + accent pair.
+ * Settings presets must not apply the two colors as separate spreads of the
+ * same snapshot — the second write would keep the stale primary.
+ */
+export function applyBrandColorPair<T extends object>(
+  org: T,
+  primary: string,
+  accent: string
+): T & { brand_primary_color: string; brand_accent_color: string } {
+  return {
+    ...org,
+    brand_primary_color: primary,
+    brand_accent_color: accent,
+  };
+}
+
 /** Six starting palettes. RepairPlanet ink + gold is the first. */
 export const BRAND_COLOR_PRESETS: readonly BrandColorPreset[] = [
   { id: 'midnight-gold', label: 'Midnight Gold', primary: '#111827', accent: '#FBBF24' },

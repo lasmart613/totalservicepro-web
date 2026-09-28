@@ -2,9 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   BRAND_COLOR_PRESETS,
+  CLEARED_BRAND_COLORS,
   REPAIR_PLANET_THEME,
   TEXT_DARK,
   TEXT_LIGHT,
+  applyBrandColorPair,
   companyBrandingEnabled,
   contrastCheck,
   contrastRatio,
@@ -52,6 +54,36 @@ test('about six brand presets are distinct hex pairs', () => {
     assert.ok(normalizeHex(preset.accent));
     assert.notEqual(preset.primary, preset.accent);
   }
+});
+
+test('a preset sets both colors in one update, and RepairPlanet default clears both', () => {
+  const stale = {
+    name: 'Ocean Laser',
+    brand_primary_color: '#111827',
+    brand_accent_color: '#FBBF24',
+  };
+  const ocean = BRAND_COLOR_PRESETS.find((preset) => preset.id === 'ocean');
+  assert.ok(ocean);
+
+  // Two spreads of the same snapshot: the accent write drops the new primary.
+  const accentOnly = { ...stale, brand_accent_color: ocean.accent };
+  assert.equal(accentOnly.brand_primary_color, stale.brand_primary_color);
+  assert.equal(accentOnly.brand_accent_color, ocean.accent);
+
+  const branded = applyBrandColorPair(stale, ocean.primary, ocean.accent);
+  assert.equal(branded.brand_primary_color, ocean.primary);
+  assert.equal(branded.brand_accent_color, ocean.accent);
+  assert.equal(branded.name, 'Ocean Laser');
+
+  const cleared = applyBrandColorPair(
+    branded,
+    CLEARED_BRAND_COLORS.primary,
+    CLEARED_BRAND_COLORS.accent
+  );
+  assert.equal(cleared.brand_primary_color, '');
+  assert.equal(cleared.brand_accent_color, '');
+  assert.equal(normalizeHex(cleared.brand_primary_color), null);
+  assert.equal(normalizeHex(cleared.brand_accent_color), null);
 });
 
 test('missing org and unpaid orgs use the RepairPlanet fallback', () => {
