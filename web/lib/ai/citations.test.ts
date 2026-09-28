@@ -9,6 +9,7 @@ import {
   citationViewerHref,
   citationsForAssistantReply,
   citationsFromMeta,
+  sourceLineMatchesCitation,
   embedCitationMarker,
   extractPageRef,
   extractSectionRef,
@@ -213,6 +214,52 @@ test('meta citations and section extraction', () => {
     'Typical RF deck check is on page 4.'
   );
   assert.deepEqual(general, []);
+});
+
+test('an unscoped reply does not deep-link Auriga page labels to the open manual page 1', () => {
+  const auriga =
+    'Which system or chair model is this for? No manual is currently selected.\n\n' +
+    'See page 3 of the Auriga hydraulic section.\n\n' +
+    '— Source: Auriga Service Manual, p.3; LightSheer Duet, p.12';
+  const cites = citationsForAssistantReply({ manualId: null, citations: [], manualLabel: '' }, 1086, auriga);
+  assert.deepEqual(cites, []);
+  const html = formatAssistantHtml(auriga, cites);
+  assert.doesNotMatch(html, /id=1086/);
+  assert.doesNotMatch(html, /page=1/);
+  assert.match(html, /Auriga Service Manual/);
+  assert.equal(
+    sourceLineMatchesCitation('Auriga Service Manual, p.3', {
+      manualId: 1086,
+      title: 'Midmark Ritter 112/113 Special Procedure Table Service Manual',
+    }),
+    false
+  );
+
+  const scoped = citationsForAssistantReply(
+    {
+      manualId: 1086,
+      manualLabel: 'Midmark Ritter 112/113 Special Procedure Table Service Manual',
+      hasManualPassages: true,
+      citations: [
+        {
+          manualId: 1086,
+          title: 'Midmark Ritter 112/113 Special Procedure Table Service Manual',
+          page: 14,
+        },
+      ],
+    },
+    1086,
+    'Replace the back actuator. See page 3 of Auriga.\n\n— Source: Auriga Service Manual, p.3'
+  );
+  assert.equal(scoped.length, 1);
+  assert.equal(scoped[0].manualId, 1086);
+  assert.equal(scoped[0].page, 14);
+  const scopedHtml = formatAssistantHtml(
+    'Replace the back actuator.\n\n— Source: Midmark Ritter 112/113 Special Procedure Table Service Manual, p.14\n[[cite:id=1086&p=14&t=Midmark+Ritter+112]]',
+    scoped
+  );
+  assert.match(scopedHtml, /href="\/manuals\/view\?id=1086[^"]*page=14/);
+  assert.doesNotMatch(scopedHtml, /id=1086[^"]*page=1(?!\d)/);
 });
 
 test('general-guidance humanizing touches only the device name on the first line', () => {

@@ -216,6 +216,43 @@ function hasPhysicalPageStamp(sources: Array<string | undefined>, page: number):
 }
 
 /**
+ * A source line may deep-link only when it names the cited manual.
+ * Auriga page labels must not become links to a different open manual.
+ */
+const SOURCE_TITLE_STOP = new Set([
+  'service',
+  'manual',
+  'operator',
+  'system',
+  'special',
+  'procedure',
+  'table',
+  'user',
+  'guide',
+  'technical',
+  'repair',
+  'the',
+  'and',
+  'for',
+]);
+
+export function sourceLineMatchesCitation(source: string, citation: ManualCitation | undefined): boolean {
+  if (!citation) return false;
+  const title = String(citation.title || '')
+    .trim()
+    .toLowerCase();
+  const text = String(source || '')
+    .trim()
+    .toLowerCase();
+  if (!title || !text) return false;
+  if (text.includes(title) || title.includes(text)) return true;
+  const tokens = title.split(/[^a-z0-9]+/).filter((t) => t.length >= 3 && !SOURCE_TITLE_STOP.has(t));
+  if (!tokens.length) return false;
+  const hits = tokens.filter((t) => text.includes(t));
+  return hits.length >= Math.min(2, tokens.length);
+}
+
+/**
  * Safe HTML for an assistant bubble: escaped text, bold, citation links.
  * Page/section phrases become links only when a scoped manualId is known.
  * A printed range links to its first page only when that physical page is stamped.
@@ -250,14 +287,15 @@ export function formatAssistantHtml(
     );
     body = body.replace(
       /\b((?:pages?|p\.?)\s*)(\d{1,4})(?!\d)(?!\s*[-–—]\s*\d)/gi,
-      (_all, prefix: string, num: string) => {
+      (all, prefix: string, num: string) => {
       const page = asPositivePage(num);
-      // A prose "page 7" is a printed label unless a cite or stamp says it is physical.
+      // A printed "page 7" stays plain unless a cite or stamp says that physical page.
+      // Do not retarget it at page 1 of a different open manual.
       const physical = !!page && hasPhysicalPageStamp([content, indexText], page);
-      const hit =
-        (page && citations.find((c) => c.page === page)) ||
-        (physical ? { ...fallback, page } : citations[0] || fallback);
-      return viewerAnchor(hit, `${prefix}${num}`);
+      const hit = page ? citations.find((c) => c.page === page) : undefined;
+      if (hit) return viewerAnchor(hit, `${prefix}${num}`);
+      if (physical && page) return viewerAnchor({ ...fallback, page }, `${prefix}${num}`);
+      return all;
     });
     body = body.replace(
       /\b((?:section|sect\.?|§)\s*)([0-9]+(?:\.[0-9]+){0,3})\b/gi,
@@ -269,7 +307,7 @@ export function formatAssistantHtml(
   }
 
   body = body.replace(/(^|\n|<br\/>)[—\-]\s*Source:\s*([^<\n]+)/gi, (_all, lead: string, src: string) => {
-    const primary = citations[0];
+    const primary = citations.find((c) => sourceLineMatchesCitation(src, c));
     if (!primary) return `${lead}— Source: ${src}`;
     return `${lead}— Source: ${viewerAnchor(primary, src.trim() || citationLabel(primary))}`;
   });
@@ -302,13 +340,32 @@ export function citationsForAssistantReply(
   const obj = meta && typeof meta === 'object' ? (meta as Record<string, unknown>) : {};
   if (obj.generalGuidance === true) return [];
   const fromMeta = citationsFromMeta(meta, fallbackManualId ?? null);
+  const metaId = Number(obj.manualId);
   const fallbackId = Number(fallbackManualId);
-  const seed: ManualCitation[] = fromMeta.length
-    ? fromMeta
-    : Number.isSafeInteger(fallbackId) && fallbackId > 0
-      ? [{ manualId: fallbackId }]
-      : [];
-  return attachProsePages(seed, String(content || ''));
+  const confirmedId =
+    Number.isSafeInteger(metaId) && metaId > 0
+      ? metaId
+      : Number.isSafeInteger(fallbackId) && fallbackId > 0
+        ? fallbackId
+        : 0;
+  // Drop cites for a different book than the one the server scoped.
+  const scoped = confirmedId
+    ? fromMeta.filter((c) => c.manualId === confirmedId)
+    : fromMeta;
+  if (scoped.length) return attachProsePages(scoped, String(content || ''));
+  // The viewer id alone must not invent a page-1 cite. That retargeted
+  // Auriga source lines onto the open manual when the server had not scoped it.
+  const serverConfirmed =
+    Number.isSafeInteger(metaId) &&
+    metaId > 0 &&
+    (obj.hasManualPassages === true || obj.hasCollectionPdfs === true) &&
+    (!Number.isSafeInteger(fallbackId) || fallbackId < 1 || fallbackId === metaId);
+  if (!serverConfirmed) return [];
+  const title = cleanSection(obj.manualLabel);
+  return attachProsePages(
+    [{ manualId: metaId, ...(title ? { title } : {}) }],
+    String(content || '')
+  );
 }
 
 export function citationsFromMeta(meta: unknown, fallbackManualId?: number | null): ManualCitation[] {
