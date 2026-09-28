@@ -342,7 +342,7 @@ export default function EstimateFormClient() {
         const { data: profile } = await supabase
           .from('user_profiles')
           .select(
-            'organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url)'
+            'organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url, slogan)'
           )
           .eq('id', user.id)
           .maybeSingle();

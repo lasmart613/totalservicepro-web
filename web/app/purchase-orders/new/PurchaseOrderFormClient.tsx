@@ -298,7 +298,7 @@ export default function PurchaseOrderFormClient() {
         if (orgId) {
           const { data: org } = await supabase
             .from('organizations')
-            .select('name, address, city, state, zip, phone, email, website, logo_url')
+            .select('name, address, city, state, zip, phone, email, website, logo_url, slogan')
             .eq('id', orgId)
             .maybeSingle();
           setCompany({
