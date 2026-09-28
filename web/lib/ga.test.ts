@@ -72,8 +72,10 @@ test('root layout installs GA4 gtag via next/script after the browser mounts', (
   const component = readFileSync(join(webDir, 'components', 'GoogleAnalytics.tsx'), 'utf8');
   const ga = readFileSync(join(here, 'ga.ts'), 'utf8');
   assert.match(layout, /GoogleAnalytics/);
+  assert.match(layout, /rel="preconnect" href="https:\/\/www\.googletagmanager\.com"/);
   assert.match(component, /next\/script/);
-  assert.match(component, /afterInteractive/);
+  assert.match(component, /lazyOnload/);
+  assert.doesNotMatch(component, /afterInteractive/);
   assert.match(component, /googletagmanager\.com\/gtag\/js/);
   assert.match(component, /gtag\('config'/);
   assert.match(component, /'use client'/);

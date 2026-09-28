@@ -63,7 +63,7 @@ function Shot({
           height={dim.height}
           loading={priority ? 'eager' : 'lazy'}
           decoding="async"
-          fetchPriority={priority ? 'high' : 'low'}
+          fetchPriority={priority ? 'auto' : 'low'}
         />
       ) : (
         <div
@@ -335,8 +335,12 @@ function HeroCarousel() {
         }
       }}
     >
-      <p className="lp-hero-tagline">
-        For BMETs, laser service engineers, and medical-device owners
+      <h1 className="lp-hero-tagline">
+        Field service software for independent biomedical and aesthetic-laser repair companies
+      </h1>
+      <p className="lp-hero-intro">
+        For BMETs, laser service engineers, and medical-device owners. Dispatch, service history, and a
+        parts marketplace for lasers, lithotriptors, C-arms, and other biomedical equipment.
       </p>
       <aside className="lp-hero-find" id="find-a-rep" aria-label="Find a service or repair company">
         <FindRepForm variant="hero" />
@@ -378,11 +382,7 @@ function HeroCarousel() {
                 }
               >
                 <p className="lp-kicker">{s.audience}</p>
-                {idx === i ? (
-                  <h1 className="lp-title">{s.title}</h1>
-                ) : (
-                  <p className="lp-title">{s.title}</p>
-                )}
+                <p className="lp-title">{s.title}</p>
                 <p className="lp-hero-subhead">{s.sub}</p>
               </div>
               <Shot
