@@ -36,11 +36,36 @@ export interface WavelengthSpec {
   optionalLabel?: string;
 }
 
+/** A stored parameter. `key` stays stable when the on-screen label changes. */
+export type ModelParamSpec = {
+  key: string;
+  label: string;
+  numeric?: boolean;
+};
+
+export type ModelParam = string | ModelParamSpec;
+
+export function paramStorageKey(param: ModelParam): string {
+  return typeof param === 'string' ? param : param.key;
+}
+
+export function paramDisplayLabel(param: ModelParam): string {
+  return typeof param === 'string' ? param : param.label;
+}
+
+/** Shot counters that opt in with `numeric: true` are integer inputs. Other params keep the previous text/decimal split. */
+export function paramInputMode(param: ModelParam): 'numeric' | 'decimal' | 'text' {
+  if (typeof param !== 'string' && param.numeric === true) return 'numeric';
+  const label = paramDisplayLabel(param);
+  if (/s\/n|serial|kit|status|level/i.test(label)) return 'text';
+  return 'decimal';
+}
+
 export interface ModelDef {
   mfg: string;
   label: string;
   wavelengths: WavelengthSpec[];
-  params: string[];
+  params: ModelParam[];
   dyeParams?: boolean;
   wlTest?: boolean;
   gasTest?: boolean;
@@ -68,6 +93,19 @@ const CYNOSURE_ELITE_PARAMS = [
   'Coolant Temp (°C)',
   'DI Conductivity (µS/cm)'
 ];
+
+/**
+ * Apogee Elite MPX keeps the Handpiece Shots storage key so older reports still load.
+ * The label is BBL Handpiece Shots. Alex and YAG lamp counters stay. Pump-chamber counters are new.
+ */
+const APOGEE_ELITE_MPX_PARAMS: ModelParam[] = CYNOSURE_ELITE_PARAMS.flatMap((param) => {
+  if (param !== 'Handpiece Shots') return [param];
+  return [
+    { key: 'Handpiece Shots', label: 'BBL Handpiece Shots', numeric: true },
+    { key: 'Alex Pump Chamber Shots', label: 'Alex Pump Chamber Shots', numeric: true },
+    { key: 'YAG Pump Chamber Shots', label: 'YAG Pump Chamber Shots', numeric: true },
+  ];
+});
 
 export const MODELS: Record<string, ModelDef> = {
   PowerSuite: {
@@ -799,7 +837,7 @@ export const MODELS: Record<string, ModelDef> = {
         tolLabel: 'Tol ±10%'
       }
     ],
-    params: CYNOSURE_ELITE_PARAMS
+    params: APOGEE_ELITE_MPX_PARAMS
   },
   'Cynosure Elite': {
     mfg: 'Cynosure',
@@ -1105,6 +1143,54 @@ export function resolveModelDef(
   });
   if (bestKey && bestScore >= 20) return MODELS[bestKey];
   return null;
+}
+
+/** Fill missing model counters without overwriting values already stored under their keys. */
+export function mergeModelParamValues(
+  model: { params?: ModelParam[] } | null | undefined,
+  values: Record<string, any> | null | undefined
+): Record<string, any> {
+  const next: Record<string, any> = { ...(values || {}) };
+  for (const param of model?.params || []) {
+    const key = paramStorageKey(param);
+    if (next[key] == null) next[key] = '';
+  }
+  return next;
+}
+
+export type SystemParameterRow = { key: string; label: string; value: string };
+
+/**
+ * Report view / PDF rows. Stored keys are relabeled from the model definition.
+ * Missing counters on a recognized model are shown empty so new MPX fields appear on older saves.
+ */
+export function systemParameterRows(
+  stored: Record<string, any> | null | undefined,
+  modelType?: string | null,
+  equipmentName?: string | null
+): SystemParameterRow[] {
+  const data = stored && typeof stored === 'object' ? stored : {};
+  const storedKeys = Object.keys(data).filter((key) => !key.startsWith('__'));
+  if (!storedKeys.length) return [];
+  const model = resolveModelDef(modelType || equipmentName || '', equipmentName || modelType || '');
+  const rows: SystemParameterRow[] = [];
+  const seen = new Set<string>();
+  const push = (key: string, label: string) => {
+    if (!key || key.startsWith('__') || seen.has(key)) return;
+    seen.add(key);
+    const raw = data[key];
+    const value = raw == null || String(raw).trim() === '' ? '—' : String(raw);
+    rows.push({ key, label, value });
+  };
+  if (model?.params?.length) {
+    for (const param of model.params) push(paramStorageKey(param), paramDisplayLabel(param));
+    for (const key of storedKeys) {
+      if (!seen.has(key)) push(key, key);
+    }
+  } else {
+    for (const key of storedKeys) push(key, key);
+  }
+  return rows;
 }
 
 // Build manufacturer grouping (used for selects)

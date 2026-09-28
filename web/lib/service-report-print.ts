@@ -11,6 +11,8 @@ import {
   type CompanyTheme,
   type ThemeScope,
 } from './company-theme.ts';
+import { viewMeasurement } from './fluence-measurement.ts';
+import { systemParameterRows } from './models.ts';
 
 export type PrintReportInput = {
   report_number?: string | null;
@@ -48,6 +50,7 @@ export type PrintReportInput = {
   tech_company_phone?: string | null;
   tech_company_logo_url?: string | null;
   status?: string | null;
+  model_type?: string | null;
   theme?: CompanyTheme | null;
   themeScope?: ThemeScope;
 };
@@ -98,24 +101,22 @@ function perfTable(measurements: any[] | null | undefined, accent = '#FBBF24'): 
   const rows = measurements
     .map((m) => {
       if (!m) return '';
-      const set = m.set ?? m.setting ?? '—';
-      const actual = m.actual ?? m.measured ?? '—';
-      const unit = m.unit || '';
-      const dev = m.deviation ?? m.dev ?? '—';
-      const pass =
-        m.pass === true || m.result === 'PASS' || String(m.result || '').toUpperCase() === 'PASS';
-      const fail =
-        m.pass === false || m.result === 'FAIL' || String(m.result || '').toUpperCase() === 'FAIL';
-      const resultStr = pass ? 'PASS' : fail ? 'FAIL' : '—';
+      const view = viewMeasurement(m);
+      const pass = view.pass === true;
+      const fail = view.pass === false;
       const color = pass ? '#16a34a' : fail ? '#dc2626' : '#555';
-      const wl = m.wavelength || m.name || '';
+      const outcome = pass ? 'PASS' : fail ? 'FAIL' : '';
+      const resultText = view.legacy
+        ? view.result
+        : `${view.result}${outcome ? ` ${outcome}` : ''}`.trim();
       return (
         `<tr>` +
-        `<td style="padding:5px 8px;border:1px solid #ddd">${esc(wl)}</td>` +
-        `<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">${esc(set)} ${esc(unit)}</td>` +
-        `<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">${esc(actual)}</td>` +
-        `<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">${esc(dev)}</td>` +
-        `<td style="padding:5px 8px;border:1px solid #ddd;text-align:center;font-weight:700;color:${color}">${resultStr}</td>` +
+        `<td style="padding:5px 8px;border:1px solid #ddd">${esc(view.wavelength)}</td>` +
+        `<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">${esc(view.spot)}</td>` +
+        `<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">${esc(view.set)}</td>` +
+        `<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">${esc(view.measured)}</td>` +
+        `<td style="padding:5px 8px;border:1px solid #ddd;text-align:center">${esc(resultText)}</td>` +
+        `<td style="padding:5px 8px;border:1px solid #ddd;text-align:center;font-weight:700;color:${color}">${esc(view.error)}</td>` +
         `</tr>`
       );
     })
@@ -127,10 +128,11 @@ function perfTable(measurements: any[] | null | undefined, accent = '#FBBF24'): 
     `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px">` +
     `<tr style="background:#f5f5f5">` +
     `<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Wavelength</th>` +
+    `<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Spot</th>` +
     `<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Set</th>` +
-    `<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Actual</th>` +
-    `<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">% Dev</th>` +
-    `<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Result</th></tr>` +
+    `<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Measured</th>` +
+    `<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Result</th>` +
+    `<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Error %</th></tr>` +
     rows +
     `</table>`
   );
@@ -188,21 +190,19 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
     `</td></tr></table>`;
 
   let paramsHTML = '';
-  if (r.model_parameters && typeof r.model_parameters === 'object') {
-    const keys = Object.keys(r.model_parameters).filter((k) => !k.startsWith('__'));
-    if (keys.length) {
-      paramsHTML =
-        `<h3 style="margin:14px 0 6px;color:#111;border-bottom:2px solid ${accent};padding-bottom:4px;font-size:13px">System Parameters</h3>` +
-        `<table style="width:100%;border-collapse:collapse;font-size:11px">` +
-        keys
-          .map(
-            (k) =>
-              `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;font-weight:600;width:50%">${esc(k)}</td>` +
-              `<td style="padding:4px 8px;border-bottom:1px solid #eee">${esc(r.model_parameters![k] ?? '—')}</td></tr>`
-          )
-          .join('') +
-        `</table>`;
-    }
+  const parameterRows = systemParameterRows(r.model_parameters, r.model_type, r.equipment_name);
+  if (parameterRows.length) {
+    paramsHTML =
+      `<h3 style="margin:14px 0 6px;color:#111;border-bottom:2px solid ${accent};padding-bottom:4px;font-size:13px">System Parameters</h3>` +
+      `<table style="width:100%;border-collapse:collapse;font-size:11px">` +
+      parameterRows
+        .map(
+          (row) =>
+            `<tr><td style="padding:4px 8px;border-bottom:1px solid #eee;font-weight:600;width:50%">${esc(row.label)}</td>` +
+            `<td style="padding:4px 8px;border-bottom:1px solid #eee">${esc(row.value)}</td></tr>`
+        )
+        .join('') +
+      `</table>`;
   }
 
   let safetyHTML = '';

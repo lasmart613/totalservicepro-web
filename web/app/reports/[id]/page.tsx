@@ -7,6 +7,8 @@ import { useParams } from 'next/navigation';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isOwnerish } from '@/lib/roles';
 import { buildServiceReportPrintHTML } from '@/lib/service-report-print';
+import { viewMeasurement } from '@/lib/fluence-measurement';
+import { systemParameterRows } from '@/lib/models';
 import { getCompanyTheme, REPAIR_PLANET_THEME, type CompanyTheme } from '@/lib/company-theme';
 import { resolveCustomerEmailOnFile, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import { toast } from 'sonner';
@@ -334,37 +336,68 @@ export default function ReportDetail() {
                       <thead>
                         <tr className="text-left text-[var(--text3)]">
                           <th className="p-2 border-b border-[var(--border)]">Wavelength</th>
+                          <th className="p-2 border-b border-[var(--border)]">Spot</th>
                           <th className="p-2 border-b border-[var(--border)]">Set</th>
-                          <th className="p-2 border-b border-[var(--border)]">Actual</th>
+                          <th className="p-2 border-b border-[var(--border)]">Measured</th>
                           <th className="p-2 border-b border-[var(--border)]">Result</th>
+                          <th className="p-2 border-b border-[var(--border)]">Error %</th>
                         </tr>
                       </thead>
                       <tbody>
-                        {report.power_measurements.map((m: any, i: number) => (
-                          <tr key={i}>
-                            <td className="p-2 border-b border-[var(--border)]">
-                              {m.wavelength || m.name || '—'}
-                            </td>
-                            <td className="p-2 border-b border-[var(--border)]">
-                              {m.set ?? m.setting ?? '—'} {m.unit || ''}
-                            </td>
-                            <td className="p-2 border-b border-[var(--border)]">
-                              {m.actual ?? m.measured ?? '—'}
-                            </td>
-                            <td className="p-2 border-b border-[var(--border)] font-bold">
-                              {m.pass === true || m.result === 'PASS'
-                                ? 'PASS'
-                                : m.pass === false || m.result === 'FAIL'
-                                  ? 'FAIL'
-                                  : m.deviation || '—'}
-                            </td>
-                          </tr>
-                        ))}
+                        {report.power_measurements.map((m: any, i: number) => {
+                          const view = viewMeasurement(m);
+                          const outcome = view.pass === true ? 'PASS' : view.pass === false ? 'FAIL' : '';
+                          const resultText = view.legacy
+                            ? view.result
+                            : `${view.result}${outcome ? ` ${outcome}` : ''}`.trim();
+                          return (
+                            <tr key={i}>
+                              <td className="p-2 border-b border-[var(--border)]">{view.wavelength}</td>
+                              <td className="p-2 border-b border-[var(--border)]">{view.spot}</td>
+                              <td className="p-2 border-b border-[var(--border)]">{view.set}</td>
+                              <td className="p-2 border-b border-[var(--border)]">{view.measured}</td>
+                              <td className="p-2 border-b border-[var(--border)]">{resultText}</td>
+                              <td
+                                className={`p-2 border-b border-[var(--border)] font-bold ${
+                                  view.pass === false
+                                    ? 'text-red-400'
+                                    : view.pass
+                                      ? 'text-green-400'
+                                      : ''
+                                }`}
+                              >
+                                {view.error}
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
                 </div>
               )}
+
+              {(() => {
+                const parameterRows = systemParameterRows(
+                  report.model_parameters,
+                  report.model_type,
+                  report.equipment_name
+                );
+                if (!parameterRows.length) return null;
+                return (
+                  <div>
+                    <h3 className="font-bold text-[var(--gold)] mb-2">System Parameters</h3>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs">
+                      {parameterRows.map((row) => (
+                        <div key={row.key} className="flex justify-between gap-2 border-b border-[var(--border)] py-1">
+                          <span className="text-[var(--text2)]">{row.label}</span>
+                          <span className="font-bold">{row.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
 
               {report.comments && (
                 <div className="pt-3 border-t border-[var(--border)]">
