@@ -4,6 +4,7 @@
  */
 
 import { createHmac, timingSafeEqual } from 'crypto';
+import type { CompanyTheme } from './company-theme.ts';
 
 export const CUSTOMER_INVITE_TTL_SEC = 60 * 60 * 24 * 30; // 30 days
 
@@ -141,12 +142,41 @@ export function resolveFreeAccountUrls(opts: {
  * Short footer for service report / estimate / invoice *emails only*.
  * Same offer + destination as the Directory invite. Do not use in PDF builders.
  */
+function emailBrandHeader(theme: CompanyTheme | null | undefined): string {
+  if (!theme?.branded) return '';
+  const logo = theme.logoUrl
+    ? `<img src="${esc(theme.logoUrl)}" alt="" width="120" style="max-width:120px;max-height:48px;object-fit:contain;display:block;background:#ffffff;padding:4px;border-radius:4px;" />`
+    : '';
+  return (
+    `<table data-tsp-brand-header="1" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
+    `style="border-collapse:collapse;background:${theme.primary};border-bottom:3px solid ${theme.accent};">` +
+    `<tr>` +
+    `<td style="padding:12px 16px;vertical-align:middle;">${logo}</td>` +
+    `<td style="padding:12px 16px;text-align:right;vertical-align:middle;font-family:Segoe UI,Roboto,Helvetica,Arial,sans-serif;` +
+    `font-size:16px;font-weight:800;color:${theme.onPrimary};">${esc(theme.companyName)}</td>` +
+    `</tr></table>`
+  );
+}
+
+function emailCtaAnchorStyle(theme: CompanyTheme | null | undefined): string {
+  if (theme?.branded) {
+    return (
+      `display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:${theme.onAccent};` +
+      `text-decoration:none;border-radius:8px;background:${theme.accent};`
+    );
+  }
+  return 'display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;';
+}
+
 export function buildFreeAccountEmailCtaHtml(opts: {
   signupUrl: string;
   loginUrl: string;
   companyName?: string | null;
+  theme?: CompanyTheme | null;
 }): string {
   const company = esc(opts.companyName?.trim() || 'your clinic');
+  const branded = !!opts.theme?.branded;
+  const buttonBg = branded ? opts.theme!.accent : '#d4a017';
   return (
     `<table class="tsp-free-account-cta" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
     `style="margin:20px 0 0;border-collapse:collapse;">` +
@@ -159,9 +189,9 @@ export function buildFreeAccountEmailCtaHtml(opts: {
     `and keep ${company}&apos;s equipment list in My Lasers.` +
     `</p>` +
     `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:12px 0 8px;"><tr>` +
-    `<td style="border-radius:8px;background:#d4a017;">` +
+    `<td style="border-radius:8px;background:${buttonBg};">` +
     `<a href="${esc(opts.signupUrl)}" ` +
-    `style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;">` +
+    `style="${emailCtaAnchorStyle(opts.theme)}">` +
     `Create your free account</a>` +
     `</td></tr></table>` +
     `<p style="margin:0;font-size:12px;line-height:1.5;color:#9aa0a6;">` +
@@ -252,6 +282,7 @@ export function wrapCustomerFacingDocumentEmail(opts: {
   signupUrl: string;
   loginUrl: string;
   companyName?: string | null;
+  theme?: CompanyTheme | null;
 }): string {
   const title = esc(opts.subject);
   const already = opts.documentHtml.includes('tsp-free-account-cta');
@@ -261,11 +292,17 @@ export function wrapCustomerFacingDocumentEmail(opts: {
         signupUrl: opts.signupUrl,
         loginUrl: opts.loginUrl,
         companyName: opts.companyName,
+        theme: opts.theme,
       });
+  const header =
+    opts.theme?.branded && !opts.documentHtml.includes('data-tsp-brand-header')
+      ? emailBrandHeader(opts.theme)
+      : '';
   return `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/><title>${title}</title></head>
 <body style="margin:0;padding:16px;background:#f4f4f5;font-family:system-ui,sans-serif;">
   <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:12px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.06);">
+    ${header}
     ${opts.documentHtml}
     ${cta}
   </div>
@@ -289,6 +326,7 @@ export function buildCustomerInviteHtml(opts: {
   serviceCompanyName?: string | null;
   signupUrl: string;
   loginUrl: string;
+  theme?: CompanyTheme | null;
 }): string {
   const company = esc(opts.companyName || 'your clinic');
   const greet = opts.contactName?.trim()
@@ -297,6 +335,29 @@ export function buildCustomerInviteHtml(opts: {
   const fromWho = opts.serviceCompanyName?.trim()
     ? `<strong style="color:#f1f3f4;">${esc(opts.serviceCompanyName.trim())}</strong> added`
     : 'Your laser service provider added';
+  const branded = !!opts.theme?.branded;
+  const logo = branded && opts.theme?.logoUrl
+    ? `<img src="${esc(opts.theme.logoUrl)}" alt="" style="max-width:120px;max-height:48px;object-fit:contain;display:block;margin:0 auto 10px;background:#ffffff;padding:4px;border-radius:4px;" />`
+    : '';
+  const headerCell = branded
+    ? `<td data-tsp-brand-header="1" style="padding:28px 28px 8px;text-align:center;background:${opts.theme!.primary};">` +
+      `${logo}` +
+      `<div style="font-size:22px;font-weight:800;color:${opts.theme!.onPrimary};letter-spacing:0.02em;">RepairPlanet</div>` +
+      `<div style="font-size:12px;color:${opts.theme!.onPrimary};margin-top:6px;">Total Service Pro · laser service for clinics</div>` +
+      `</td>`
+    : `<td style="padding:28px 28px 8px;text-align:center;">` +
+      `<div style="font-size:22px;font-weight:800;color:#d4a017;letter-spacing:0.02em;">RepairPlanet</div>` +
+      `<div style="font-size:12px;color:#9aa0a6;margin-top:6px;">Total Service Pro · laser service for clinics</div>` +
+      `</td>`;
+  const ctaCell = branded
+    ? `<td align="center" style="border-radius:8px;background:${opts.theme!.accent};">` +
+      `<a href="${esc(opts.signupUrl)}" ` +
+      `style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:${opts.theme!.onAccent};text-decoration:none;border-radius:8px;background:${opts.theme!.accent};">` +
+      `Create your free account</a></td>`
+    : `<td align="center" style="border-radius:8px;background:#d4a017;">` +
+      `<a href="${esc(opts.signupUrl)}" ` +
+      `style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;">` +
+      `Create your free account</a></td>`;
 
   return `<!DOCTYPE html>
 <html>
@@ -311,10 +372,7 @@ export function buildCustomerInviteHtml(opts: {
       <td align="center">
         <table role="presentation" width="100%" style="max-width:560px;background:#1a1d24;border:1px solid #2a2f3a;border-radius:12px;overflow:hidden;">
           <tr>
-            <td style="padding:28px 28px 8px;text-align:center;">
-              <div style="font-size:22px;font-weight:800;color:#d4a017;letter-spacing:0.02em;">RepairPlanet</div>
-              <div style="font-size:12px;color:#9aa0a6;margin-top:6px;">Total Service Pro · laser service for clinics</div>
-            </td>
+            ${headerCell}
           </tr>
           <tr>
             <td style="padding:8px 28px 24px;">
@@ -343,12 +401,7 @@ export function buildCustomerInviteHtml(opts: {
               </ul>
               <table role="presentation" cellspacing="0" cellpadding="0" style="margin:22px 0;">
                 <tr>
-                  <td align="center" style="border-radius:8px;background:#d4a017;">
-                    <a href="${esc(opts.signupUrl)}"
-                       style="display:inline-block;padding:14px 28px;font-size:15px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;">
-                      Create your free account
-                    </a>
-                  </td>
+                  ${ctaCell}
                 </tr>
               </table>
               <p style="margin:0 0 14px;font-size:13px;line-height:1.5;color:#9aa0a6;">

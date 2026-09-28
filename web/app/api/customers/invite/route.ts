@@ -15,6 +15,7 @@ import {
   verifyCustomerInvite,
 } from '@/lib/customer-invite';
 import { fetchDirectoryContactSources, pickCrmReachEmail, resolveDirectoryContact } from '@/lib/customer-contacts';
+import { getCompanyTheme } from '@/lib/company-theme';
 
 /**
  * GET /api/customers/invite?token=
@@ -175,12 +176,14 @@ export async function POST(req: NextRequest) {
     const signupUrl = customerInviteSignupUrl(origin, claimToken, companyName, toEmail);
     const loginUrl = customerInviteLoginUrl(origin, claimToken);
     const subject = customerInviteSubject(companyName);
+    const theme = await getCompanyTheme(prof.organization_id, supabase);
     const html = buildCustomerInviteHtml({
       companyName,
       contactName: resolved.name || (customer as { contact_name?: string | null }).contact_name,
-      serviceCompanyName: callerOrg?.name || null,
+      serviceCompanyName: callerOrg?.name || theme.companyName || null,
       signupUrl,
       loginUrl,
+      theme,
     });
     const text = buildCustomerInviteText({
       companyName,

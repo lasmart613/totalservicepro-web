@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { canAccessCompanyProfile, isOwnerish } from '@/lib/roles';
 import { isOwnerOrgType } from '@/lib/org-types';
+import { companyBrandingEnabled, normalizeHex, type CompanyThemeSource } from '@/lib/company-theme';
 
 /**
  * POST /api/org/profile
@@ -29,6 +30,8 @@ const ALLOWED_FIELDS = [
   'list_in_directory',
   'supported_brands',
   'logo_url',
+  'brand_primary_color',
+  'brand_accent_color',
 ] as const;
 
 type AllowedField = (typeof ALLOWED_FIELDS)[number];
@@ -124,6 +127,37 @@ export async function POST(req: NextRequest) {
     }
 
     const payload = pickAllowed(body);
+    if ('brand_primary_color' in payload || 'brand_accent_color' in payload) {
+      const planSelects = [
+        'is_premium, subscription_tier, plan, premium_until, premium_grant',
+        'is_premium, subscription_tier, plan',
+        'is_premium',
+      ];
+      let plan: CompanyThemeSource | null = null;
+      for (const columns of planSelects) {
+        const { data, error } = await admin
+          .from('organizations')
+          .select(columns)
+          .eq('id', linkedId)
+          .maybeSingle();
+        if (!error) {
+          plan = (data || null) as CompanyThemeSource | null;
+          break;
+        }
+        if (!/subscription_tier|premium_until|premium_grant|\bplan\b|column/i.test(error.message || '')) break;
+      }
+      if (!companyBrandingEnabled(plan)) {
+        delete payload.brand_primary_color;
+        delete payload.brand_accent_color;
+      } else {
+        if ('brand_primary_color' in payload) {
+          payload.brand_primary_color = normalizeHex(payload.brand_primary_color);
+        }
+        if ('brand_accent_color' in payload) {
+          payload.brand_accent_color = normalizeHex(payload.brand_accent_color);
+        }
+      }
+    }
     if (Object.keys(payload).length === 0) {
       return NextResponse.json({ error: 'No profile fields to save' }, { status: 400 });
     }

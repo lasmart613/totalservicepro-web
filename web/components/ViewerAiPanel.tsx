@@ -19,13 +19,14 @@ type Props = {
   title?: string | null;
   storagePath?: string | null;
   brand?: string | null;
+  model?: string | null;
 };
 
 function defaultUsage(): AiUsage {
   return { text: { used: 0, limit: 5 }, voice: { used: 0, limit: 1 }, tier: 'free' };
 }
 
-export function ViewerAiPanel({ manualId, title, storagePath, brand }: Props) {
+export function ViewerAiPanel({ manualId, title, storagePath, brand, model }: Props) {
   const supabase = getSupabaseClient();
   const scopedId = asManualId(manualId);
   const [ready, setReady] = useState(false);
@@ -124,12 +125,18 @@ export function ViewerAiPanel({ manualId, title, storagePath, brand }: Props) {
       messages: nextMsgs,
       manualId: scopedId,
       manualPath: storagePath || '',
+      manualTitle: title || '',
+      manualBrand: brand || '',
+      manualModel: model || '',
     });
     const result = await grokChat({
       accessToken: token,
       messages: payload.messages,
       manualPath: payload.manualPath,
       manualId: payload.manualId,
+      manualTitle: payload.manualTitle,
+      manualBrand: payload.manualBrand,
+      manualModel: payload.manualModel,
       scopeChanged: payload.scopeChanged,
     });
     if (!result.ok) {

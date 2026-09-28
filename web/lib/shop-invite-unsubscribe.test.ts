@@ -64,6 +64,8 @@ test('HTTPS form posts List-Unsubscribe=One-Click to /unsubscribe', () => {
   const pageHeaders = unsubscribePageHeaders(token);
   assert.equal(pageHeaders['List-Unsubscribe'], listUnsubscribeHeader(token));
   assert.equal(pageHeaders['List-Unsubscribe-Post'], LIST_UNSUBSCRIBE_POST);
+  assert.equal(pageHeaders['X-Robots-Tag'], 'noindex, follow');
+  assert.match(html, /name="robots" content="noindex, follow"/);
 });
 
 test('public unsubscribe route is GET form + POST one-click, not God-gated', () => {

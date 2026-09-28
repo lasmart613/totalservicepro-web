@@ -1606,6 +1606,8 @@ export type Database = {
           laser_models: string | null
           linkedin_url: string | null
           logo_url: string | null
+          brand_primary_color: string | null
+          brand_accent_color: string | null
           name: string
           notes: string | null
           num_laser_systems: number | null
@@ -1651,6 +1653,8 @@ export type Database = {
           laser_models?: string | null
           linkedin_url?: string | null
           logo_url?: string | null
+          brand_primary_color?: string | null
+          brand_accent_color?: string | null
           name: string
           notes?: string | null
           num_laser_systems?: number | null
@@ -1696,6 +1700,8 @@ export type Database = {
           laser_models?: string | null
           linkedin_url?: string | null
           logo_url?: string | null
+          brand_primary_color?: string | null
+          brand_accent_color?: string | null
           name?: string
           notes?: string | null
           num_laser_systems?: number | null

@@ -6,7 +6,6 @@ Allow: /marketplace
 Allow: /directory
 Allow: /signup
 Allow: /login
-Allow: /parts
 Allow: /find-a-rep
 Allow: /unsubscribe
 Disallow: /admin

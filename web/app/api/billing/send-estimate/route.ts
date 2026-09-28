@@ -14,6 +14,7 @@ import {
   wrapCustomerFacingDocumentEmail,
 } from '@/lib/customer-invite';
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
+import { getCompanyTheme } from '@/lib/company-theme';
 
 /**
  * POST /api/billing/send-estimate
@@ -232,12 +233,14 @@ export async function POST(req: NextRequest) {
       estimateId != null
         ? `${origin}/login?next=${encodeURIComponent(estimateCustomerPath(estimateId))}`
         : claimLoginUrl;
+    const theme = callerOrgId != null ? await getCompanyTheme(callerOrgId, supabase) : null;
     const wrapped = wrapCustomerFacingDocumentEmail({
       subject,
       documentHtml: html,
       signupUrl,
       loginUrl,
       companyName,
+      theme,
     });
 
     const rr = await fetch('https://api.resend.com/emails', {
