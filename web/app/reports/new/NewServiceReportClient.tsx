@@ -7,7 +7,26 @@ import { Header } from '@/components/Header';
 import { ArrowLeft, Check, Save } from 'lucide-react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
-import { CL_AESTHETIC, CL_ELECTRICAL, CL_MECHANICAL, MODELS, resolveModelDef } from '@/lib/models';
+import {
+  CL_AESTHETIC,
+  CL_ELECTRICAL,
+  CL_MECHANICAL,
+  MODELS,
+  mergeModelParamValues,
+  paramStorageKey,
+  resolveModelDef,
+  type ModelParam,
+} from '@/lib/models';
+import {
+  applyMeasurementEdit,
+  defaultSpotChoice,
+  hydrateMeasurement,
+  newFluenceMeasurement,
+  seedMeasurementForWavelength,
+  spotSizeChoicesMm,
+} from '@/lib/fluence-measurement';
+import { PerformanceMeasurements } from '@/components/PerformanceMeasurements';
+import { SystemParameterFields } from '@/components/SystemParameterFields';
 import {
   canonicalManufacturerSpelling,
   manufacturerNameFromSelection,
@@ -619,16 +638,7 @@ export default function NewServiceReport() {
           setCheckAesthetic(normalizeChecklistMap(r.checklist_aesthetic));
         }
         if (Array.isArray(r.power_measurements)) {
-          setPowerMeasurements(
-            r.power_measurements.map((pm: any) => ({
-              wavelength: pm.wavelength || pm.name || '',
-              setting: pm.setting ?? pm.set ?? '',
-              measured: pm.measured ?? pm.actual ?? '',
-              unit: pm.unit || 'W',
-              pass: pm.pass === true || pm.result === 'PASS' || pm.result === 'Pass',
-              deviation: pm.deviation || '',
-            }))
-          );
+          setPowerMeasurements(r.power_measurements.map((pm: any) => hydrateMeasurement(pm)));
         }
         if (r.model_parameters && typeof r.model_parameters === 'object') setModelParams(r.model_parameters);
         if (r.ground_resistance != null) setGroundResistance(r.ground_resistance);
@@ -1140,21 +1150,15 @@ export default function NewServiceReport() {
     setPowerMeasurements([]); setModelParams({});
     const m = (MODELS as any)[key];
     if (m && m.params) {
-      const p: any = {};
-      m.params.forEach((param: string) => { p[param] = ''; });
+      const p: Record<string, string> = {};
+      m.params.forEach((param: ModelParam) => {
+        p[paramStorageKey(param)] = '';
+      });
       setModelParams(p);
     }
-    // Seed perf rows from model wavelengths + first set (closer Android model-driven perf table parity)
+    // J/cm² channels seed a fluence row. Other units keep the older set / measured / unit row.
     if (m && m.wavelengths?.length) {
-      const seeded = m.wavelengths.map((w: any) => ({
-        wavelength: w.name,
-        setting: (w.sets && w.sets[0]) || '',
-        measured: '',
-        unit: w.unit || 'W',
-        pass: true,
-        deviation: ''
-      }));
-      setPowerMeasurements(seeded);
+      setPowerMeasurements(m.wavelengths.map((w: any) => seedMeasurementForWavelength(m, w)));
     }
   }
   selectModelRef.current = selectModel;
@@ -1237,33 +1241,16 @@ export default function NewServiceReport() {
     setter((prev: any) => ({ ...prev, ...next }));
   }
 
-  /** Standard units for all systems (dropdown only — never free-text) */
-  const PERF_UNITS = [
-    'J/cm²',
-    'W/cm²',
-    'mW/cm²',
-    'J',
-    'mJ',
-    'µJ',
-    'mJ/spot',
-    'W',
-    'mW',
-    '%',
-  ] as const;
-
   function addPerfRow() {
     const firstWl = currentModel?.wavelengths?.[0];
-    const u = firstWl?.unit || 'J/cm²';
     setPowerMeasurements((prev) => [
       ...prev,
-      {
-        wavelength: firstWl?.name || 'Output',
-        setting: (firstWl?.sets && firstWl.sets[0]) || '',
-        measured: '',
-        unit: u,
-        pass: true,
-        deviation: '',
-      },
+      newFluenceMeasurement({
+        wavelength: firstWl?.name || '',
+        spotSizeMm: defaultSpotChoice(currentModel, firstWl?.name),
+        setFluence: firstWl?.unit === 'J/cm²' && firstWl.sets?.[0] != null ? String(firstWl.sets[0]) : '',
+        measuredMode: 'fluence',
+      }),
     ]);
   }
 
@@ -1288,20 +1275,9 @@ export default function NewServiceReport() {
   }
 
   function updatePerf(idx: number, key: string, val: any) {
-    setPowerMeasurements(prev => {
+    setPowerMeasurements((prev) => {
       const copy = [...prev];
-      copy[idx] = { ...copy[idx], [key]: val };
-      // auto deviation calc if measured
-      if (key === 'measured' || key === 'setting') {
-        const row = copy[idx];
-        const setVal = parseFloat(row.setting);
-        const meas = parseFloat(row.measured);
-        if (!isNaN(setVal) && !isNaN(meas) && setVal) {
-          const dev = ((meas - setVal) / setVal * 100);
-          row.deviation = dev.toFixed(1) + '%';
-          row.pass = Math.abs(dev) <= 10; // typical Android tol
-        }
-      }
+      copy[idx] = applyMeasurementEdit(copy[idx], key, val, currentModel);
       return copy;
     });
   }
@@ -1446,7 +1422,7 @@ export default function NewServiceReport() {
         checklist_mechanical: dualChecklists.mechanical,
         checklist_aesthetic: dualChecklists.aesthetic,
         power_measurements: powerMeasurements,
-        model_parameters: modelParams,
+        model_parameters: mergeModelParamValues(currentModel, modelParams),
         test_equipment: testEquipment
           .filter((t) => t.used !== false && (t.model || t.type || t.name || t.serial))
           .map((t) => ({
@@ -2013,68 +1989,14 @@ export default function NewServiceReport() {
         {renderChecklist(mechanicalLabels, checkMechanical, setCheckMechanical, '🔧 Mechanical & Optical', 'mechanical')}
         {renderChecklist(aestheticLabels, checkAesthetic, setCheckAesthetic, '🎨 Aesthetic Condition', 'aesthetic')}
 
-        {/* Performance Testing — always available (generic rows if no OEM wavelengths) */}
-        <div className="section mb-6">
-          <div className="section-hdr"><h3>📊 Performance Testing</h3></div>
-          <div className="section-body p-4">
-            <p className="text-[10px] text-[var(--text3)] mb-2">
-              {currentModel?.wavelengths?.length
-                ? 'Model-seeded wavelengths available in the dropdown; add rows as needed.'
-                : 'No OEM wavelength table for this model — enter freeform measurements.'}
-            </p>
-            <button type="button" onClick={addPerfRow} className="btn btn-secondary text-sm mb-3">+ Add Measurement Row</button>
-            {powerMeasurements.length === 0 && (
-              <div className="text-sm text-[var(--text3)] mb-2">No measurements yet. Add a row to record set vs actual.</div>
-            )}
-            {powerMeasurements.map((row, i) => (
-              <div key={i} className="grid grid-cols-2 sm:grid-cols-6 gap-2 mb-2 items-center text-sm">
-                {currentModel?.wavelengths?.length ? (
-                  <select className="input" value={row.wavelength} onChange={e=>updatePerf(i,'wavelength',e.target.value)}>
-                    <option value="">— Wavelength —</option>
-                    {currentModel.wavelengths.map((w:any) => <option key={w.name} value={w.name}>{w.name}</option>)}
-                    {row.wavelength && !currentModel.wavelengths.some((w:any)=>w.name===row.wavelength) && (
-                      <option value={row.wavelength}>{row.wavelength}</option>
-                    )}
-                  </select>
-                ) : (
-                  <input className="input" placeholder="Wavelength / channel" value={row.wavelength} onChange={e=>updatePerf(i,'wavelength',e.target.value)} />
-                )}
-                <input className="input" placeholder="Set" value={row.setting} onChange={e=>updatePerf(i,'setting',e.target.value)} />
-                <input className="input" placeholder="Measured" value={row.measured} onChange={e=>updatePerf(i,'measured',e.target.value)} />
-                {/* Unit: dropdown only for all systems — never free-text */}
-                <select
-                  className="input"
-                  value={
-                    PERF_UNITS.includes(row.unit as (typeof PERF_UNITS)[number])
-                      ? row.unit
-                      : row.unit
-                        ? row.unit
-                        : 'J/cm²'
-                  }
-                  onChange={(e) => updatePerf(i, 'unit', e.target.value)}
-                  aria-label="Unit"
-                  title="Unit"
-                >
-                  <option value="" disabled>
-                    Unit
-                  </option>
-                  {PERF_UNITS.map((u) => (
-                    <option key={u} value={u}>
-                      {u}
-                    </option>
-                  ))}
-                  {row.unit && !PERF_UNITS.includes(row.unit as (typeof PERF_UNITS)[number]) && (
-                    <option value={row.unit}>{row.unit}</option>
-                  )}
-                </select>
-                <div className={`text-xs font-bold ${row.pass === false ? 'text-red-400' : row.pass ? 'text-green-400' : 'text-[var(--text3)]'}`}>
-                  {row.deviation || '—'} {row.pass === true ? 'PASS' : row.pass === false ? 'FAIL' : ''}
-                </div>
-                <button type="button" onClick={()=>removePerf(i)} className="text-red-400 text-xs">× Remove</button>
-              </div>
-            ))}
-          </div>
-        </div>
+        <PerformanceMeasurements
+          rows={powerMeasurements}
+          wavelengths={currentModel?.wavelengths}
+          spotSizes={spotSizeChoicesMm(currentModel)}
+          onAdd={addPerfRow}
+          onRemove={removePerf}
+          onChange={updatePerf}
+        />
 
         {/* System Parameters — show when model has params OR saved modelParams keys exist */}
         {(currentModel?.params?.length > 0 || Object.keys(modelParams).filter(k => !k.startsWith('__') && !k.startsWith('wlt_') && !k.startsWith('gas_') && !k.startsWith('fiber_')).length > 0) && (
@@ -2083,23 +2005,15 @@ export default function NewServiceReport() {
             <p className="text-[10px] text-[var(--text3)] mb-3">
               Model-specific counters and voltages (e.g. VBeam Perfecta: pulses, dye, HV Final, bubble sense).
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {(currentModel?.params?.length
-                ? currentModel.params
-                : Object.keys(modelParams).filter((k) => !k.startsWith('__') && !/^wlt_|^gas_|^fiber_/.test(k))
-              ).map((p: string) => (
-                <div key={p}>
-                  <label className="text-xs font-semibold text-[var(--text2)]">{p}</label>
-                  <input
-                    className="input"
-                    inputMode={/s\/n|serial|kit|status|level/i.test(p) ? 'text' : 'decimal'}
-                    value={modelParams[p] || ''}
-                    onChange={(e) => setModelParams({ ...modelParams, [p]: e.target.value })}
-                    placeholder={p}
-                  />
-                </div>
-              ))}
-            </div>
+            <SystemParameterFields
+              params={
+                currentModel?.params?.length
+                  ? currentModel.params
+                  : Object.keys(modelParams).filter((k) => !k.startsWith('__') && !/^wlt_|^gas_|^fiber_/.test(k))
+              }
+              values={modelParams}
+              onChange={(key, value) => setModelParams({ ...modelParams, [key]: value })}
+            />
             {(currentModel?.wlTest || ['wlt_nofilter','wlt_hd1_pre','wlt_ophir_pre','wlt_filter','wlt_hd1_post','wlt_ophir_post'].some(k => modelParams[k] != null && modelParams[k] !== '')) && (
               <div className="mt-4 pt-4 border-t border-[var(--border)]">
                 <h4 className="text-sm font-bold text-[var(--gold)] mb-2">Wavelength Test</h4>
