@@ -3,7 +3,21 @@
  * Used for on-screen preview and print-to-PDF (same visual quality as the app).
  * Free-account marketing CTA is email-only — see wrapCustomerFacingDocumentEmail.
  * Do not add that footer here or PDFs will pick it up.
+ *
+ * Company brand colors come from getCompanyTheme. Unbranded (free, or paid with
+ * no colors) keeps this file's RepairPlanet gold rules. Email scope colors only
+ * the header bar and logo; section rules stay gold. The email CTA is styled in
+ * the wrapper, not here.
  */
+
+import {
+  readableOn,
+  themeAccentForScope,
+  type CompanyTheme,
+  type ThemeScope,
+} from '../company-theme.ts';
+
+export type DocThemeScope = ThemeScope;
 
 export type DocCompany = {
   company_name?: string;
@@ -125,12 +139,34 @@ export function ensureEstimateActionCtas(html: string, actionUrl: string): strin
   return next;
 }
 
+/** Gold rule used everywhere a paid brand color is not applied. */
+export function documentRuleColor(
+  theme: CompanyTheme | null | undefined,
+  scope: DocThemeScope | undefined
+): string {
+  return themeAccentForScope(theme, scope);
+}
+
+function payButtonStyle(theme: CompanyTheme | null | undefined): string {
+  if (theme?.branded) {
+    return (
+      `display:inline-block;background:${theme.accent};color:${theme.onAccent};padding:14px 28px;border-radius:8px;` +
+      `text-decoration:none;font-weight:700;font-size:14px;letter-spacing:0.02em;`
+    );
+  }
+  return (
+    `display:inline-block;background:#635BFF;color:#fff;padding:14px 28px;border-radius:8px;` +
+    `text-decoration:none;font-weight:700;font-size:14px;letter-spacing:0.02em;`
+  );
+}
+
 /** Top header: logo | company block | title/number/date — matches Android buildDocTopHeader */
 export function buildDocTopHeader(
   company: DocCompany,
   docTitle: string,
   docNum: string,
-  docDate: string
+  docDate: string,
+  options?: { theme?: CompanyTheme | null; themeScope?: DocThemeScope }
 ): string {
   const cName = company.company_name || '';
   const cAddr = [company.address, company.city, company.state, company.zip].filter(Boolean).join(', ');
@@ -139,12 +175,23 @@ export function buildDocTopHeader(
   const cWebsite = company.website || '';
   const cSlogan = company.slogan || '';
 
+  const theme = options?.theme?.branded ? options.theme : null;
+  const ink = theme ? theme.onPrimary : '#111';
+  const muted = theme ? theme.onPrimary : '#444';
+  const meta = theme ? theme.onPrimary : '#555';
+  const numberColor = theme ? readableOn(theme.accent, theme.primary, theme.onPrimary) : '#B45309';
+  const linkColor = theme ? readableOn(theme.accent, theme.primary, theme.onPrimary) : '#0a66c2';
+  const rule = theme ? theme.accent : '#FBBF24';
+  const logoStyle = theme
+    ? 'max-width:105px;max-height:55px;object-fit:contain;border-radius:4px;display:block;background:#ffffff;padding:4px;'
+    : 'max-width:105px;max-height:55px;object-fit:contain;border-radius:4px;display:block;';
+
   let logoBlock = '';
   if (company.logo_url) {
     logoBlock =
-      `<img src="${esc(company.logo_url)}" style="max-width:105px;max-height:55px;object-fit:contain;border-radius:4px;display:block;" alt="Company Logo" />` +
+      `<img src="${esc(company.logo_url)}" style="${logoStyle}" alt="Company Logo" />` +
       (cSlogan
-        ? `<div style="font-size:9px;font-style:italic;color:#555;margin-top:2px;line-height:1.1;max-width:105px;">${esc(cSlogan)}</div>`
+        ? `<div style="font-size:9px;font-style:italic;color:${meta};margin-top:2px;line-height:1.1;max-width:105px;">${esc(cSlogan)}</div>`
         : '');
   }
 
@@ -152,33 +199,42 @@ export function buildDocTopHeader(
   if (cName || cAddr || cPhone || cEmail || cWebsite) {
     companyBlock =
       (cName
-        ? `<div style="font-size:14px;font-weight:800;color:#111;line-height:1.1;">${esc(cName)}</div>`
+        ? `<div style="font-size:14px;font-weight:800;color:${ink};line-height:1.1;">${esc(cName)}</div>`
         : '') +
-      (cAddr ? `<div style="font-size:10px;color:#444;line-height:1.15;">${esc(cAddr)}</div>` : '') +
-      (cPhone ? `<div style="font-size:10px;color:#444;">${esc(cPhone)}</div>` : '') +
-      (cEmail ? `<div style="font-size:10px;color:#444;">${esc(cEmail)}</div>` : '') +
-      (cWebsite ? `<div style="font-size:10px;color:#0a66c2;">${esc(cWebsite)}</div>` : '');
+      (cAddr ? `<div style="font-size:10px;color:${muted};line-height:1.15;">${esc(cAddr)}</div>` : '') +
+      (cPhone ? `<div style="font-size:10px;color:${muted};">${esc(cPhone)}</div>` : '') +
+      (cEmail ? `<div style="font-size:10px;color:${muted};">${esc(cEmail)}</div>` : '') +
+      (cWebsite ? `<div style="font-size:10px;color:${linkColor};">${esc(cWebsite)}</div>` : '');
   }
+
+  const bar = theme
+    ? `background:${theme.primary};color:${theme.onPrimary};border-bottom:3px solid ${rule};`
+    : `border-bottom:3px solid ${rule};`;
+  const brandAttr = theme ? ' data-tsp-brand-header="1"' : '';
+
+  const logoPad = theme ? 'padding:8px 8px 8px 0;' : 'padding-right:8px;';
+  const midPad = theme ? 'padding:8px 8px 8px 0;' : 'padding-right:8px;';
+  const titlePad = theme ? 'padding:8px 0;' : '';
 
   if (logoBlock || companyBlock) {
     return (
-      `<table style="width:100%;border-bottom:3px solid #FBBF24;padding-bottom:6px;margin-bottom:10px;border-collapse:collapse;"><tr>` +
-      `<td style="width:120px;vertical-align:top;padding-right:8px;">${logoBlock}</td>` +
-      `<td style="vertical-align:top;padding-right:8px;font-size:10px;">${companyBlock}</td>` +
-      `<td style="width:130px;vertical-align:top;text-align:right;white-space:nowrap;">` +
-      `<div style="font-size:16px;font-weight:700;color:#111;">${esc(docTitle)}</div>` +
+      `<table${brandAttr} style="width:100%;${bar}padding-bottom:6px;margin-bottom:10px;border-collapse:collapse;"><tr>` +
+      `<td style="width:120px;vertical-align:top;${logoPad}">${logoBlock}</td>` +
+      `<td style="vertical-align:top;${midPad}font-size:10px;">${companyBlock}</td>` +
+      `<td style="width:130px;vertical-align:top;text-align:right;white-space:nowrap;${titlePad}">` +
+      `<div style="font-size:16px;font-weight:700;color:${ink};">${esc(docTitle)}</div>` +
       (docNum
-        ? `<div style="font-size:12px;color:#B45309;font-weight:700;">${esc(docNum)}</div>`
+        ? `<div style="font-size:12px;color:${numberColor};font-weight:700;">${esc(docNum)}</div>`
         : '') +
-      (docDate ? `<div style="font-size:10px;color:#555;">${esc(docDate)}</div>` : '') +
+      (docDate ? `<div style="font-size:10px;color:${meta};">${esc(docDate)}</div>` : '') +
       `</td></tr></table>`
     );
   }
 
   return (
-    `<div style="border-bottom:3px solid #FBBF24;padding-bottom:4px;margin-bottom:8px;text-align:right;">` +
-    `<div style="font-size:16px;font-weight:700;color:#111;">${esc(docTitle)}</div>` +
-    (docDate ? `<div style="font-size:10px;color:#555;">${esc(docDate)}</div>` : '') +
+    `<div${brandAttr} style="${bar}padding-bottom:4px;margin-bottom:8px;text-align:right;">` +
+    `<div style="font-size:16px;font-weight:700;color:${ink};">${esc(docTitle)}</div>` +
+    (docDate ? `<div style="font-size:10px;color:${meta};">${esc(docDate)}</div>` : '') +
     `</div>`
   );
 }
@@ -231,6 +287,9 @@ export type InvoiceHtmlInput = {
   collectableAmount?: number;
   /** Stripe Checkout / Payment Link URL for the collectable amount */
   paymentUrl?: string | null;
+  theme?: CompanyTheme | null;
+  /** document = header + accent rules. email = header and logo only. */
+  themeScope?: DocThemeScope;
 };
 
 export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
@@ -253,9 +312,11 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
       })()
     : '—';
 
+  const rule = documentRuleColor(input.theme, input.themeScope);
+
   let linesHtml =
     `<table style="width:100%;border-collapse:collapse;font-size:11px;margin:0 0 12px;">` +
-    `<thead><tr style="background:#f5f5f5;border-bottom:2px solid #FBBF24;">` +
+    `<thead><tr style="background:#f5f5f5;border-bottom:2px solid ${rule};">` +
     `<th style="text-align:left;padding:6px 4px;">Part #</th>` +
     `<th style="text-align:left;padding:6px 4px;">Description</th>` +
     `<th style="text-align:right;padding:6px 4px;">Qty</th>` +
@@ -302,7 +363,10 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
 
   return (
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;font-size:12px;line-height:1.35;max-width:800px;margin:auto;">` +
-    buildDocTopHeader(input.company, 'Invoice', input.invNumber, dateLabel) +
+    buildDocTopHeader(input.company, 'Invoice', input.invNumber, dateLabel, {
+      theme: input.theme,
+      themeScope: input.themeScope,
+    }) +
     customerBillTo({
       ...input.customer,
       // show due in bill-to grid like app
@@ -324,14 +388,14 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         )}</div>`
       : '') +
     `</div></div>` +
-    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px;">Line Items</h3>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">Line Items</h3>` +
     linesHtml +
     (input.description
       ? `<div style="margin:0 0 12px;font-size:11px;color:#444;"><strong>Notes:</strong> ${esc(
           input.description
         )}</div>`
       : '') +
-    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px;">Amounts</h3>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">Amounts</h3>` +
     `<div style="font-size:13px;font-weight:600;">` +
     `<div>Subtotal: ${money(input.subtotal)}</div>` +
     `<div>Tax: ${money(input.tax)}</div>` +
@@ -339,7 +403,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
       total
     )}</div>` +
     (hasSplit
-      ? `<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid #FBBF24;border-radius:6px;font-size:12px;">` +
+      ? `<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid ${rule};border-radius:6px;font-size:12px;">` +
         `<div style="font-weight:800;font-size:12px;color:#92400e;margin-bottom:6px;">Payment split</div>` +
         `<div>Due now (parts/travel deposit): <strong>${money(dueNow)}</strong></div>` +
         `<div>Remaining (due on completion): <strong>${money(deferred)}</strong></div>` +
@@ -366,7 +430,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
           : '') +
         `</div>`
       : deposit > 0
-        ? `<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid #FBBF24;border-radius:6px;font-size:12px;">` +
+        ? `<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid ${rule};border-radius:6px;font-size:12px;">` +
           `<div>Deposit received: <strong>${money(deposit)}</strong>` +
           (input.depositDate
             ? ` on ${esc(
@@ -405,8 +469,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
     (input.paymentUrl && collectable > 0
       ? `<div style="margin:18px 0 8px;text-align:center;">` +
         `<a href="${esc(input.paymentUrl)}" ` +
-        `style="display:inline-block;background:#635BFF;color:#fff;padding:14px 28px;border-radius:8px;` +
-        `text-decoration:none;font-weight:700;font-size:14px;letter-spacing:0.02em;">` +
+        `style="${payButtonStyle(input.theme)}">` +
         `${
           hasSplit && !input.deferredReleased && deposit <= 0
             ? `Pay deposit ${money(collectable)} securely with Stripe`
@@ -572,10 +635,13 @@ export type EstimateHtmlInput = {
   validDays?: number;
   /** Clinic estimate page (https://repairplanet.net/estimates/{id}). */
   actionUrl?: string | null;
+  theme?: CompanyTheme | null;
+  themeScope?: DocThemeScope;
 };
 
 export function buildEstimateHtml(input: EstimateHtmlInput): string {
   const services = input.services?.length ? input.services : ['Not specified'];
+  const rule = documentRuleColor(input.theme, input.themeScope);
   const deposit = Number(input.deposit) || 0;
   const balance =
     input.balanceDue != null
@@ -629,7 +695,7 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
     `<span style="font-size:1.25rem;">Grand Total: ${money(input.total)}</span></div>`;
   if (deposit > 0) {
     cost +=
-      `<div style="margin-top:14px;padding:12px;background:#fffbeb;border:1px solid #FBBF24;border-radius:6px;">` +
+      `<div style="margin-top:14px;padding:12px;background:#fffbeb;border:1px solid ${rule};border-radius:6px;">` +
       `<div style="font-weight:800;font-size:13px;color:#92400e;margin-bottom:6px;">Parts / Travel Deposit</div>` +
       `<div style="font-size:12px;color:#111;line-height:1.45;">` +
       `A deposit of <strong>${money(deposit)}</strong> (covering estimated parts and travel-related costs) ` +
@@ -645,7 +711,10 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
 
   return (
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;font-size:12px;line-height:1.35;max-width:800px;margin:auto;">` +
-    buildDocTopHeader(input.company, 'Service Estimate', input.estNumber, input.dateStr) +
+    buildDocTopHeader(input.company, 'Service Estimate', input.estNumber, input.dateStr, {
+      theme: input.theme,
+      themeScope: input.themeScope,
+    }) +
     (input.actionUrl ? buildEstimateActionCtasHtml(input.actionUrl, 'banner') : '') +
     customerBillTo(input.customer) +
     `<div style="margin-bottom:10px;padding:6px 8px;background:#f9f9f9;border:1px solid #eee;border-radius:4px;">` +
@@ -670,15 +739,15 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
       : '') +
     `<div><span style="color:#666;font-size:8px;">DATE</span> ${esc(input.dateStr)}</div>` +
     `</div></div>` +
-    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px;">Services Included</h3>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">Services Included</h3>` +
     `<div style="font-size:12px;margin-bottom:12px;">${services
       .map((s) => `• ${esc(s)}`)
       .join('<br>')}</div>` +
-    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px;">Reported Issues</h3>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">Reported Issues</h3>` +
     `<pre style="white-space:pre-wrap;font-family:inherit;margin:0 0 12px;font-size:12px;background:#f9f9f9;padding:8px;border-radius:4px;">${esc(
       input.issues || 'No issues noted'
     )}</pre>` +
-    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px;">Cost Breakdown</h3>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">Cost Breakdown</h3>` +
     cost +
     `<div style="margin-top:28px;font-size:11px;color:#555;text-align:center;border-top:1px solid #eee;padding-top:12px;">` +
     `<div style="margin-top:10px;padding:10px;background:#f8f4e8;border:1px solid #e8d9a0;border-radius:6px;font-size:11px;color:#111;">` +

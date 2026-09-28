@@ -7,7 +7,8 @@ import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
-import { buildInvoiceHtml, type DocCompany } from '@/lib/billing/doc-html';
+import { buildInvoiceHtml, type DocCompany, type DocThemeScope } from '@/lib/billing/doc-html';
+import { getCompanyTheme, type CompanyTheme } from '@/lib/company-theme';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
   coerceOrgId,
@@ -56,6 +57,7 @@ export default function InvoiceFormClient() {
   const [docNumber, setDocNumber] = useState('');
   const [status, setStatus] = useState('draft');
   const [company, setCompany] = useState<DocCompany>({});
+  const [companyTheme, setCompanyTheme] = useState<CompanyTheme | null>(null);
   const [emailing, setEmailing] = useState(false);
 
   const [customers, setCustomers] = useState<CustomerOpt[]>([]);
@@ -412,7 +414,14 @@ export default function InvoiceFormClient() {
             tech_name: techName,
           });
         }
-        if (orgId) await loadCustomers(orgId);
+        if (orgId) {
+          await loadCustomers(orgId);
+          try {
+            setCompanyTheme(await getCompanyTheme(orgId, supabase));
+          } catch (themeErr) {
+            console.warn('company theme', themeErr);
+          }
+        }
         await loadParts();
 
         if (editIdParam) {
@@ -605,7 +614,7 @@ export default function InvoiceFormClient() {
     }
   }
 
-  function buildInvoiceEmailHtml() {
+  function buildInvoiceEmailHtml(themeScope: DocThemeScope = 'email') {
     return buildInvoiceHtml({
       company,
       customer: {
@@ -636,7 +645,20 @@ export default function InvoiceFormClient() {
       deferred: collectable.hasDeferredSplit ? collectable.deferredOriginal : undefined,
       deferredReleased: collectable.deferredReleased,
       collectableAmount: collectable.stripeAmount,
+      theme: companyTheme,
+      themeScope,
     });
+  }
+
+  function openInvoicePreview() {
+    const html = buildInvoiceEmailHtml('document');
+    const preview = window.open('', '_blank');
+    if (!preview) {
+      toast.error('Pop-up blocked — allow pop-ups to preview the invoice');
+      return;
+    }
+    preview.document.write(html);
+    preview.document.close();
   }
 
   /** Save draft, email via Resend, only set status=sent when email actually delivered. */
@@ -1255,6 +1277,13 @@ export default function InvoiceFormClient() {
             onClick={() => saveInvoice('draft')}
           >
             {saving ? 'Saving…' : 'Save Draft'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary min-w-[120px]"
+            onClick={openInvoicePreview}
+          >
+            Preview / PDF
           </button>
           <button
             type="button"

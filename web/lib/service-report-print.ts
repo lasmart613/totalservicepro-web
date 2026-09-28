@@ -2,7 +2,15 @@
  * Build print-ready HTML for a service report (Android exportPDF layout parity).
  * Uses tables only — reliable across browsers and WebView PDF.
  * Free-account CTA is added only when /api/billing/send-report wraps email HTML.
+ * Brand colors: header and logo always, section rules only for document/PDF scope.
  */
+
+import {
+  readableOn,
+  themeAccentForScope,
+  type CompanyTheme,
+  type ThemeScope,
+} from './company-theme.ts';
 
 export type PrintReportInput = {
   report_number?: string | null;
@@ -40,6 +48,8 @@ export type PrintReportInput = {
   tech_company_phone?: string | null;
   tech_company_logo_url?: string | null;
   status?: string | null;
+  theme?: CompanyTheme | null;
+  themeScope?: ThemeScope;
 };
 
 function esc(s: any): string {
@@ -52,7 +62,8 @@ function esc(s: any): string {
 
 function checklistTable(
   title: string,
-  data: Record<string, string> | null | undefined
+  data: Record<string, string> | null | undefined,
+  accent = '#FBBF24'
 ): string {
   if (!data || typeof data !== 'object') return '';
   const keys = Object.keys(data);
@@ -73,7 +84,7 @@ function checklistTable(
     })
     .join('');
   return (
-    `<h3 style="margin:14px 0 6px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px">${esc(title)}</h3>` +
+    `<h3 style="margin:14px 0 6px;color:#111;border-bottom:2px solid ${accent};padding-bottom:4px;font-size:13px">${esc(title)}</h3>` +
     `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px">` +
     `<tr style="background:#f5f5f5"><th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Item</th>` +
     `<th style="padding:5px 8px;border:1px solid #ddd;text-align:center;width:72px">Result</th></tr>` +
@@ -82,7 +93,7 @@ function checklistTable(
   );
 }
 
-function perfTable(measurements: any[] | null | undefined): string {
+function perfTable(measurements: any[] | null | undefined, accent = '#FBBF24'): string {
   if (!Array.isArray(measurements) || !measurements.length) return '';
   const rows = measurements
     .map((m) => {
@@ -112,7 +123,7 @@ function perfTable(measurements: any[] | null | undefined): string {
     .join('');
   if (!rows) return '';
   return (
-    `<h3 style="margin:14px 0 6px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px">Performance Testing</h3>` +
+    `<h3 style="margin:14px 0 6px;color:#111;border-bottom:2px solid ${accent};padding-bottom:4px;font-size:13px">Performance Testing</h3>` +
     `<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:8px">` +
     `<tr style="background:#f5f5f5">` +
     `<th style="padding:5px 8px;border:1px solid #ddd;text-align:left">Wavelength</th>` +
@@ -130,34 +141,50 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
   const reportNum = r.report_number || '—';
   const dateOut = r.date_out || '—';
   const addr = [r.customer_address, r.customer_city, r.customer_state].filter(Boolean).join(', ');
+  const theme = r.theme?.branded ? r.theme : null;
+  const accent = themeAccentForScope(r.theme, r.themeScope);
+  const ink = theme ? theme.onPrimary : '#111';
+  const muted = theme ? theme.onPrimary : '#444';
+  const meta = theme ? theme.onPrimary : '#555';
+  const numberColor = theme ? readableOn(theme.accent, theme.primary, theme.onPrimary) : '#B45309';
 
   let logo = '';
   if (r.tech_company_logo_url) {
-    logo = `<img src="${esc(r.tech_company_logo_url)}" style="max-width:105px;max-height:55px;object-fit:contain" alt="Logo" />`;
+    const logoStyle = theme
+      ? 'max-width:105px;max-height:55px;object-fit:contain;background:#ffffff;padding:4px;border-radius:4px;display:block'
+      : 'max-width:105px;max-height:55px;object-fit:contain';
+    logo = `<img src="${esc(r.tech_company_logo_url)}" style="${logoStyle}" alt="Logo" />`;
   }
   const company =
     (r.tech_company_name
-      ? `<div style="font-size:14px;font-weight:800">${esc(r.tech_company_name)}</div>`
+      ? `<div style="font-size:14px;font-weight:800${theme ? `;color:${ink}` : ''}">${esc(r.tech_company_name)}</div>`
       : '') +
     ([r.tech_company_address, r.tech_company_city, r.tech_company_state].filter(Boolean).length
-      ? `<div style="font-size:10px;color:#444">${esc(
+      ? `<div style="font-size:10px;color:${muted}">${esc(
           [r.tech_company_address, r.tech_company_city, r.tech_company_state]
             .filter(Boolean)
             .join(', ')
         )}</div>`
       : '') +
     (r.tech_company_phone
-      ? `<div style="font-size:10px;color:#444">${esc(r.tech_company_phone)}</div>`
+      ? `<div style="font-size:10px;color:${muted}">${esc(r.tech_company_phone)}</div>`
       : '');
 
+  const bar = theme
+    ? `background:${theme.primary};color:${theme.onPrimary};border-bottom:3px solid ${theme.accent};`
+    : 'border-bottom:3px solid #FBBF24;';
+  const brandAttr = theme ? ' data-tsp-brand-header="1"' : '';
+  const logoCell = theme ? 'padding:8px 8px 8px 0' : 'padding-right:8px';
+  const midCell = theme ? 'padding:8px 0' : '';
+  const titleCell = theme ? 'padding:8px 0' : '';
   const header =
-    `<table style="width:100%;border-bottom:3px solid #FBBF24;margin-bottom:10px;border-collapse:collapse"><tr>` +
-    `<td style="width:120px;vertical-align:top;padding-right:8px">${logo}</td>` +
-    `<td style="vertical-align:top;font-size:10px">${company}</td>` +
-    `<td style="width:120px;vertical-align:top;text-align:right">` +
-    `<div style="font-size:16px;font-weight:700">Service Report</div>` +
-    `<div style="font-size:12px;color:#B45309;font-weight:700">${esc(reportNum)}</div>` +
-    `<div style="font-size:10px;color:#555">${esc(dateOut)}</div>` +
+    `<table${brandAttr} style="width:100%;${bar}margin-bottom:10px;border-collapse:collapse"><tr>` +
+    `<td style="width:120px;vertical-align:top;${logoCell}">${logo}</td>` +
+    `<td style="vertical-align:top;font-size:10px;${midCell}">${company}</td>` +
+    `<td style="width:120px;vertical-align:top;text-align:right;${titleCell}">` +
+    `<div style="font-size:16px;font-weight:700${theme ? `;color:${ink}` : ''}">Service Report</div>` +
+    `<div style="font-size:12px;color:${numberColor};font-weight:700">${esc(reportNum)}</div>` +
+    `<div style="font-size:10px;color:${meta}">${esc(dateOut)}</div>` +
     `</td></tr></table>`;
 
   let paramsHTML = '';
@@ -165,7 +192,7 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
     const keys = Object.keys(r.model_parameters).filter((k) => !k.startsWith('__'));
     if (keys.length) {
       paramsHTML =
-        `<h3 style="margin:14px 0 6px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px">System Parameters</h3>` +
+        `<h3 style="margin:14px 0 6px;color:#111;border-bottom:2px solid ${accent};padding-bottom:4px;font-size:13px">System Parameters</h3>` +
         `<table style="width:100%;border-collapse:collapse;font-size:11px">` +
         keys
           .map(
@@ -185,7 +212,7 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
     const grPass = r.ground_resistance_pass ?? (gr != null && gr <= 0.2);
     const lcPass = r.leakage_current_pass ?? (lc != null && lc <= 300);
     safetyHTML =
-      `<h3 style="margin:14px 0 6px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px">Electrical Safety</h3>` +
+      `<h3 style="margin:14px 0 6px;color:#111;border-bottom:2px solid ${accent};padding-bottom:4px;font-size:13px">Electrical Safety</h3>` +
       `<table style="width:100%;border-collapse:collapse;font-size:11px">` +
       (gr != null
         ? `<tr><td style="padding:5px 8px;border-bottom:1px solid #eee;font-weight:600">Ground Resistance</td>` +
@@ -233,17 +260,17 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
     `<td style="padding:2px 4px 2px 0"><span style="font-size:8px;color:#666">ENGINEER (FSE)</span><br><strong>${esc(engineer)}</strong></td>` +
     `<td style="padding:2px 0 2px 4px"><span style="font-size:8px;color:#666">NEXT PM</span><br><strong>${esc(r.next_pm_due || '—')}</strong></td>` +
     `</tr></table></div>` +
-    checklistTable('Electrical Checklist', r.checklist_electrical || undefined) +
-    checklistTable('Mechanical & Optical', r.checklist_mechanical || undefined) +
-    checklistTable('Aesthetic Condition', r.checklist_aesthetic || undefined) +
-    perfTable(r.power_measurements) +
+    checklistTable('Electrical Checklist', r.checklist_electrical || undefined, accent) +
+    checklistTable('Mechanical & Optical', r.checklist_mechanical || undefined, accent) +
+    checklistTable('Aesthetic Condition', r.checklist_aesthetic || undefined, accent) +
+    perfTable(r.power_measurements, accent) +
     paramsHTML +
     safetyHTML +
     (r.comments
-      ? `<h3 style="margin:14px 0 6px;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px">Comments &amp; Notes</h3>` +
+      ? `<h3 style="margin:14px 0 6px;border-bottom:2px solid ${accent};padding-bottom:4px;font-size:13px">Comments &amp; Notes</h3>` +
         `<p style="font-size:12px;background:#f9f9f9;padding:10px;border-radius:4px">${esc(r.comments)}</p>`
       : '') +
-    `<div style="margin-top:28px;border-top:2px solid #FBBF24;padding-top:12px">` +
+    `<div style="margin-top:28px;border-top:2px solid ${accent};padding-top:12px">` +
     `<table style="width:100%;font-size:12px;margin-bottom:10px"><tr>` +
     `<td>Technician: <strong>${esc(engineer)}</strong></td>` +
     `<td style="text-align:right">Date of Service: ${esc(dateOut)}</td></tr></table>` +
