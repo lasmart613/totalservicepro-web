@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -28,6 +28,7 @@ import {
   estimatePartsDeposit,
   resolveInvoiceCollectable,
 } from '@/lib/billing/invoice-collectable';
+import { invoiceDataForSave } from '@/lib/billing/invoice-form-data';
 
 type CustomerOpt = LinkedCustomerOpt;
 
@@ -46,6 +47,7 @@ export default function InvoiceFormClient() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<string | number | null>(editIdParam);
+  const savedIdRef = useRef<string | number | null>(editIdParam);
   const [sourceEstimateId, setSourceEstimateId] = useState<string | number | null>(
     fromEstimateParam
   );
@@ -197,6 +199,7 @@ export default function InvoiceFormClient() {
         toast.error('Could not load invoice');
         return;
       }
+      savedIdRef.current = data.id;
       setSavedId(data.id);
       setStatus(data.status || 'draft');
       setCustomerName(data.customer_name || '');
@@ -475,6 +478,48 @@ export default function InvoiceFormClient() {
       const items = lineItems.filter(
         (li) => li.part_number || li.description || li.qty || li.unit_price
       );
+      const existingId = savedIdRef.current;
+
+      const formInvoiceData = {
+        line_items: items,
+        ...collectableInvoiceDataFields(
+          resolveInvoiceCollectable({
+            total,
+            amountPaid: nextStatus === 'paid' ? total : received,
+            invoice_data: {
+              partsDeposit: collectable.partsDeposit,
+              dueNow: collectable.dueNowOriginal,
+              deferred: collectable.deferredOriginal,
+              deferredReleased: opts?.deferredReleased ?? deferredReleased,
+              deposit: nextStatus === 'paid' ? total : received,
+            },
+          })
+        ),
+        deposit:
+          nextStatus === 'paid'
+            ? Math.round(Number(total) * 100) / 100
+            : received,
+        travelDeposit:
+          nextStatus === 'paid'
+            ? Math.round(Number(total) * 100) / 100
+            : received,
+        depositDate: depositDate || null,
+        depositMethod: depositMethod || null,
+        balanceDue: nextStatus === 'paid' ? 0 : collectable.remainingOwed,
+        manufacturer,
+        model,
+        serial,
+        pulse_count: pulseCount,
+        invoice_number: invNum,
+        invNumber: invNum,
+        custAddress,
+        custCity,
+        custState,
+        custZip,
+        custPhone,
+        custEmail,
+        custContact,
+      };
 
       const payload: Record<string, any> = {
         customer_name: name,
@@ -495,49 +540,10 @@ export default function InvoiceFormClient() {
         paid_at: nextStatus === 'paid' ? new Date().toISOString() : null,
         payment_method: depositMethod || null,
         invoice_number: invNum,
-        invoice_data: {
-          line_items: items,
-          ...collectableInvoiceDataFields(
-            resolveInvoiceCollectable({
-              total,
-              amountPaid: nextStatus === 'paid' ? total : received,
-              invoice_data: {
-                partsDeposit: collectable.partsDeposit,
-                dueNow: collectable.dueNowOriginal,
-                deferred: collectable.deferredOriginal,
-                deferredReleased: opts?.deferredReleased ?? deferredReleased,
-                deposit: nextStatus === 'paid' ? total : received,
-              },
-            })
-          ),
-          deposit:
-            nextStatus === 'paid'
-              ? Math.round(Number(total) * 100) / 100
-              : received,
-          travelDeposit:
-            nextStatus === 'paid'
-              ? Math.round(Number(total) * 100) / 100
-              : received,
-          depositDate: depositDate || null,
-          depositMethod: depositMethod || null,
-          balanceDue: nextStatus === 'paid' ? 0 : collectable.remainingOwed,
-          manufacturer,
-          model,
-          serial,
-          pulse_count: pulseCount,
-          invoice_number: invNum,
-          invNumber: invNum,
-          custAddress,
-          custCity,
-          custState,
-          custZip,
-          custPhone,
-          custEmail,
-          custContact,
-        },
+        invoice_data: await invoiceDataForSave(supabase, existingId, formInvoiceData),
       };
 
-      if (!savedId) {
+      if (!existingId) {
         payload.created_by = userId;
         payload.created_at = new Date().toISOString();
       }
@@ -546,11 +552,12 @@ export default function InvoiceFormClient() {
         supabase,
         'service_invoices',
         payload,
-        savedId
+        existingId
       );
       if (result.error) throw result.error;
 
       if (result.id) {
+        savedIdRef.current = result.id;
         setSavedId(result.id);
         setStatus(nextStatus);
         try {
@@ -582,7 +589,7 @@ export default function InvoiceFormClient() {
         else if (nextStatus === 'partially_paid') toast.success('Invoice marked as partially paid.');
         else toast.success('Invoice saved.');
       }
-      return result.id || savedId;
+      return result.id || existingId;
     } catch (err: any) {
       const em = err?.message || String(err);
       if (/service_invoices|schema cache|does not exist/i.test(em)) {

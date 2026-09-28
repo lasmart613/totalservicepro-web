@@ -12,31 +12,7 @@ import {
   wrapCustomerFacingDocumentEmail,
 } from '@/lib/customer-invite';
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
-
-const INV_SELECT_FULL =
-  'id, created_by, organization_id, customer_name, customer_organization_id, total, amount_paid, invoice_data, invoice_number, status';
-const INV_SELECT_CORE =
-  'id, created_by, organization_id, customer_name, customer_organization_id, total, amount_paid, status';
-const INV_SELECT_MIN = 'id, created_by, organization_id, customer_name, total, amount_paid, status';
-
-async function loadInvoiceRow(
-  client: SupabaseClient,
-  invoiceId: string | number
-): Promise<{ row: any | null; errorMsg: string | null }> {
-  // Try richest select first; fall back if columns missing in this DB
-  for (const cols of [INV_SELECT_FULL, INV_SELECT_CORE, INV_SELECT_MIN, 'id, created_by, organization_id, total']) {
-    const { data, error } = await client
-      .from('service_invoices')
-      .select(cols)
-      .eq('id', invoiceId)
-      .maybeSingle();
-    if (!error && data) return { row: data, errorMsg: null };
-    if (error && !/column|does not exist|schema cache/i.test(error.message || '')) {
-      return { row: null, errorMsg: error.message };
-    }
-  }
-  return { row: null, errorMsg: null };
-}
+import { loadInvoiceRow, mergePaymentFieldsIntoInvoiceData } from '@/lib/billing/invoice-row-load';
 
 /**
  * POST /api/billing/send-invoice
@@ -287,31 +263,28 @@ export async function POST(req: NextRequest) {
             }
           }
           // Persist link only on an invoice this caller already owns.
+          // Merge into the loaded invoice_data. If that JSON was not read,
+          // skip the write — replacing the column with only these four fields
+          // wipes line items on Resend or a retry after an email error.
           if (invoiceId && inv) {
             try {
-              let idata: any = inv?.invoice_data || {};
-              if (typeof idata === 'string') {
-                try {
-                  idata = JSON.parse(idata);
-                } catch {
-                  idata = {};
-                }
-              }
-              idata = {
-                ...idata,
-                payment_url: paymentUrl,
-                stripe_checkout_session_id: stripeSessionId,
+              const merged = mergePaymentFieldsIntoInvoiceData(inv, {
+                payment_url: pay.url,
+                stripe_checkout_session_id: pay.sessionId,
                 payment_amount: payAmount,
                 payment_kind: collectable.paymentKind,
-              };
-              const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
-              const { error: upErr } = await writer
-                .from('service_invoices')
-                .update({ invoice_data: idata, updated_at: new Date().toISOString() })
-                .eq('id', invoiceId);
-              if (upErr) {
-                // invoice_data column may not exist — ignore
-                console.warn('could not persist payment_url', upErr.message);
+              });
+              if (merged) {
+                const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
+                const { error: upErr } = await writer
+                  .from('service_invoices')
+                  .update({ invoice_data: merged, updated_at: new Date().toISOString() })
+                  .eq('id', invoiceId);
+                if (upErr) {
+                  console.warn('could not persist payment_url', upErr.message);
+                }
+              } else {
+                console.warn('send-invoice: skipped payment_url persist; invoice_data was not loaded');
               }
             } catch (e) {
               console.warn('could not persist payment_url', e);

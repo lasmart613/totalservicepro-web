@@ -421,33 +421,83 @@ export function manufacturerChoiceLabel(value: string, explicit?: string | null)
   return source.charAt(0).toUpperCase() + source.slice(1);
 }
 
-function catalogAliasSet(name: string): Set<string> {
-  const keys = new Set<string>();
-  const n = String(name || '').trim();
-  if (!n) return keys;
-  keys.add(norm(n));
-  n.split('/').forEach((part) => {
-    const p = part.trim();
-    if (p) keys.add(norm(p));
-  });
-  const sorted = tokens(n).sort().join(' ');
-  if (sorted) keys.add(sorted);
+/**
+ * Alias and loose-brand keys, built once. Comparing names must not rescan
+ * EQUIPMENT_CATALOG or the alias groups for every model.
+ */
+const MANUFACTURER_ALIAS_NORM = new Map<string, string>();
+const MANUFACTURER_LOOSE_KEY = new Map<string, string>();
+const manufacturerKeyCache = new Map<string, string>();
+let manufacturerAliasMapReady = false;
+let manufacturerNormalizeCalls = 0;
+
+export function manufacturerNormalizeCount(): number {
+  return manufacturerNormalizeCalls;
+}
+
+export function resetManufacturerNormalizeCount(): void {
+  manufacturerNormalizeCalls = 0;
+}
+
+function ensureManufacturerAliasMap(): void {
+  if (manufacturerAliasMapReady) return;
+  manufacturerAliasMapReady = true;
+  const add = (alias: string, key: string) => {
+    const n = norm(alias);
+    if (n && !MANUFACTURER_ALIAS_NORM.has(n)) MANUFACTURER_ALIAS_NORM.set(n, key);
+  };
+  for (const group of MANUFACTURER_ALIAS_GROUPS) {
+    const key = norm(group[0]);
+    for (const alias of group) add(alias, key);
+    const loose = looseBrandKey(group[0]);
+    if (loose && !MANUFACTURER_LOOSE_KEY.has(loose)) MANUFACTURER_LOOSE_KEY.set(loose, key);
+  }
   for (const row of EQUIPMENT_CATALOG) {
     const names = [row.name, ...(row.aliases || [])];
-    if (names.some((alias) => norm(alias) === norm(n))) {
-      names.forEach((alias) => {
-        keys.add(norm(alias));
-        const aliasSorted = tokens(alias).sort().join(' ');
-        if (aliasSorted) keys.add(aliasSorted);
-      });
-    }
+    const key = MANUFACTURER_ALIAS_NORM.get(norm(row.name)) || norm(row.name);
+    for (const alias of names) add(alias, key);
+    const loose = looseBrandKey(row.name);
+    if (loose && !MANUFACTURER_LOOSE_KEY.has(loose)) MANUFACTURER_LOOSE_KEY.set(loose, key);
   }
-  for (const group of MANUFACTURER_ALIAS_GROUPS) {
-    if (group.some((alias) => norm(alias) === norm(n))) {
-      group.forEach((alias) => keys.add(norm(alias)));
-    }
+}
+
+function computeManufacturerKey(name: string): string {
+  ensureManufacturerAliasMap();
+  const n = norm(name);
+  const direct = MANUFACTURER_ALIAS_NORM.get(n);
+  if (direct) return direct;
+  const loose = looseBrandKey(name);
+  if (loose) {
+    const viaLoose = MANUFACTURER_LOOSE_KEY.get(loose);
+    if (viaLoose) return viaLoose;
+    return loose;
   }
-  return keys;
+  return n;
+}
+
+/** Group key for a manufacturer spelling. Counted so tests can see per-model scans. */
+export function normalizeManufacturerKey(name: string): string {
+  const raw = String(name || '').trim();
+  if (!raw) return '';
+  manufacturerNormalizeCalls += 1;
+  const n = norm(raw);
+  const hit = manufacturerKeyCache.get(n);
+  if (hit) return hit;
+  const key = computeManufacturerKey(raw);
+  manufacturerKeyCache.set(n, key);
+  return key;
+}
+
+function cachedManufacturerKey(name: string): string | undefined {
+  const raw = String(name || '').trim();
+  if (!raw) return undefined;
+  return manufacturerKeyCache.get(norm(raw));
+}
+
+function rememberManufacturerKey(name: string): string {
+  const cached = cachedManufacturerKey(name);
+  if (cached) return cached;
+  return normalizeManufacturerKey(name);
 }
 
 export function manufacturerNamesEqual(a: string, b: string): boolean {
@@ -455,17 +505,12 @@ export function manufacturerNamesEqual(a: string, b: string): boolean {
   const right = String(b || '').trim();
   if (!left || !right) return false;
   if (norm(left) === norm(right)) return true;
-  const ka = catalogAliasSet(left);
-  const kb = catalogAliasSet(right);
-  for (const key of ka) {
-    if (key && kb.has(key)) return true;
-  }
-  const looseLeft = looseBrandKey(left);
-  const looseRight = looseBrandKey(right);
-  // "Alma" / "Alma Lasers" and "Quanta" / "Quanta System".
-  if (looseLeft && looseLeft === looseRight) return true;
+  if (normalizeManufacturerKey(left) === normalizeManufacturerKey(right)) return true;
+  const compactLeft = compactManufacturerKey(left);
+  const compactRight = compactManufacturerKey(right);
+  if (compactLeft.length >= 4 && compactLeft === compactRight) return true;
   // "Coherent / Lumenis" still matches either side. A space-joined pair such as
-  // "Syneron Candela" does not match Syneron or Candela.
+  // "Syneron Candela" does not match Syneron or Candela unless they share an alias.
   if (left.includes('/') || right.includes('/')) {
     const ta = tokens(left);
     const tb = tokens(right);
@@ -484,6 +529,29 @@ export function manufacturerMatches(selected: string, mfr: CatalogManufacturer):
   return manufacturerNamesEqual(sel, mfr.name || '');
 }
 
+/**
+ * Dropdown value may be manufacturers.id or a name. Return the stored name.
+ */
+export function manufacturerNameFromSelection(
+  selected: string,
+  manufacturers: CatalogManufacturer[] = []
+): string {
+  const sel = String(selected || '').trim();
+  if (!sel) return '';
+  const byId = manufacturers.find((m) => m.id != null && String(m.id) === sel);
+  if (byId?.name) return byId.name;
+  const byName = manufacturers.find((m) => m.name && manufacturerNamesEqual(m.name, sel));
+  return byName?.name || sel;
+}
+
+function keyForSelection(selected: string, manufacturers: CatalogManufacturer[]): string {
+  const sel = String(selected || '').trim();
+  if (!sel) return '';
+  const byId = manufacturers.find((m) => m.id != null && String(m.id) === sel);
+  if (byId?.name) return rememberManufacturerKey(byId.name);
+  return rememberManufacturerKey(sel);
+}
+
 export function modelBelongsToManufacturer(
   model: CatalogModel,
   selected: string,
@@ -491,33 +559,20 @@ export function modelBelongsToManufacturer(
 ): boolean {
   const sel = String(selected || '').trim();
   if (!sel || !model) return false;
+  const selKey = keyForSelection(sel, manufacturers);
+  if (!selKey) return false;
 
   const text = String(model.manufacturer || '').trim();
-  if (text && !manufacturerNamesEqual(sel, text)) {
-    const selectedNames = manufacturers.filter((m) => manufacturerMatches(sel, m));
-    const textMatchesSelection = selectedNames.some(
-      (m) => m.name && manufacturerNamesEqual(m.name, text)
-    );
-    if (!textMatchesSelection) return false;
+  if (text) {
+    // A Candela label stays Candela even when manufacturer_id is stale.
+    return rememberManufacturerKey(text) === selKey;
   }
 
   if (model.manufacturer_id != null && String(model.manufacturer_id) === sel) return true;
-
-  const matched = manufacturers.filter((m) => manufacturerMatches(sel, m));
-  if (
-    matched.some(
-      (m) =>
-        m.id != null &&
-        model.manufacturer_id != null &&
-        String(m.id) === String(model.manufacturer_id)
-    )
-  ) {
-    return true;
-  }
-
-  if (text && manufacturerNamesEqual(sel, text)) return true;
-
-  return matched.some((m) => m.name && text && manufacturerNamesEqual(m.name, text));
+  const owner = manufacturers.find(
+    (m) => m.id != null && model.manufacturer_id != null && String(m.id) === String(model.manufacturer_id)
+  );
+  return Boolean(owner?.name && rememberManufacturerKey(owner.name) === selKey);
 }
 
 /**
@@ -564,7 +619,11 @@ export function normalizeModelRow(row: any): CatalogModel {
   };
 }
 
+let cachedStaticManufacturers: CatalogManufacturer[] | null = null;
+let cachedStaticModels: CatalogModel[] | null = null;
+
 export function staticManufacturerRows(): CatalogManufacturer[] {
+  if (cachedStaticManufacturers) return cachedStaticManufacturers;
   const names = new Set<string>(FALLBACK_MFRS);
   Object.values(MODELS).forEach((m) => {
     if (m?.mfg) {
@@ -576,13 +635,15 @@ export function staticManufacturerRows(): CatalogManufacturer[] {
     }
   });
   EQUIPMENT_CATALOG.forEach((m) => names.add(m.name));
-  return Array.from(names)
+  cachedStaticManufacturers = Array.from(names)
     .filter(Boolean)
     .sort((a, b) => a.localeCompare(b))
     .map((name) => ({ id: null, name }));
+  return cachedStaticManufacturers;
 }
 
 export function staticModelRows(): CatalogModel[] {
+  if (cachedStaticModels) return cachedStaticModels;
   const out: CatalogModel[] = [];
   Object.entries(MODELS).forEach(([key, def]) => {
     out.push({
@@ -606,6 +667,7 @@ export function staticModelRows(): CatalogModel[] {
       });
     }
   }
+  cachedStaticModels = out;
   return out;
 }
 
@@ -831,6 +893,213 @@ function collapseManufacturerNames(names: string[]): string[] {
     .sort((a, b) => a.localeCompare(b));
 }
 
+const NO_MANUFACTURERS: CatalogManufacturer[] = [];
+const NO_MODELS: CatalogModel[] = [];
+
+type ManufacturerModelIndex = {
+  modelsByKey: Map<string, CatalogModel[]>;
+  idToKey: Map<string, string>;
+  canonicalByKey: Map<string, string>;
+  staticKeys: Set<string>;
+  selectionKey(selected: string): string;
+};
+
+const manufacturerIndexCache = new WeakMap<
+  readonly CatalogManufacturer[],
+  WeakMap<readonly CatalogModel[], ManufacturerModelIndex>
+>();
+
+/** Letters and digits only, so "In Mode" and "InMode" share a key. */
+function compactManufacturerKey(value: string): string {
+  return norm(value).replace(/[^a-z0-9]+/g, '');
+}
+
+/**
+ * Stored manufacturers-table spelling for one alias group.
+ * A forced dropdown label ("Lumenis (Coherent)", "AMS / Laserscope") is not a
+ * stored name. "Alma Lasers" still wins over the short row "Alma".
+ */
+function storedAliasSpelling(group: string[], stored: string[]): string {
+  const forced = FORCE_MANUFACTURER_LABEL.has(group[0]) ? norm(group[0]) : '';
+  const withoutDisplay = forced ? stored.filter((n) => norm(n) !== forced) : stored;
+  const pool = withoutDisplay.length ? withoutDisplay : stored;
+  let preferred = pool[0];
+  for (const entry of group) {
+    const hit = pool.find((n) => norm(n) === norm(entry));
+    if (hit) {
+      preferred = hit;
+      break;
+    }
+  }
+  const longer = pool.filter(
+    (n) => n.length > preferred.length && norm(n).startsWith(norm(preferred))
+  );
+  if (!longer.length) return preferred;
+  longer.sort((a, b) => b.length - a.length || a.localeCompare(b));
+  return longer[0];
+}
+
+/**
+ * Among live catalog spellings, keep the stored name. "Alma Lasers" wins over
+ * the short static label "Alma" when that longer catalog name is present.
+ * Dropdown labels that are not manufacturers rows are never returned.
+ */
+function catalogSaveSpelling(names: string[]): string {
+  const unique: string[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    const n = norm(name);
+    if (!n || seen.has(n)) continue;
+    seen.add(n);
+    unique.push(name);
+  }
+  if (!unique.length) return '';
+  if (unique.length === 1) return unique[0];
+  for (const group of MANUFACTURER_ALIAS_GROUPS) {
+    const inGroup = unique.filter((n) => group.some((entry) => norm(entry) === norm(n)));
+    if (!inGroup.length) continue;
+    return storedAliasSpelling(group, inGroup);
+  }
+  return preferCanonicalManufacturer(unique);
+}
+
+/**
+ * One manufacturers row whose spelling matches aside from spaces and punctuation.
+ * Ambiguous hits stay unresolved so a display name is not guessed.
+ */
+function compactStoredManufacturer(
+  selected: string,
+  manufacturers: readonly CatalogManufacturer[]
+): string {
+  const compact = compactManufacturerKey(selected);
+  if (compact.length < 4) return '';
+  const hits: string[] = [];
+  const seen = new Set<string>();
+  for (const row of manufacturers) {
+    const name = String(row?.name || '').trim();
+    const key = norm(name);
+    if (!name || seen.has(key) || compactManufacturerKey(name) !== compact) continue;
+    seen.add(key);
+    hits.push(name);
+  }
+  if (hits.length !== 1) return '';
+  return hits[0];
+}
+
+function liveCatalogRefs(live?: LiveCatalog): {
+  manufacturers: readonly CatalogManufacturer[];
+  models: readonly CatalogModel[];
+} {
+  return {
+    manufacturers: live?.manufacturers?.length ? live.manufacturers : NO_MANUFACTURERS,
+    models: live?.models?.length ? live.models : NO_MODELS,
+  };
+}
+
+function buildManufacturerModelIndex(
+  manufacturers: readonly CatalogManufacturer[],
+  models: readonly CatalogModel[]
+): ManufacturerModelIndex {
+  const idToKey = new Map<string, string>();
+  const namesByKey = new Map<string, string[]>();
+  const staticKeys = new Set<string>();
+  const remember = (name: string) => rememberManufacturerKey(name);
+
+  for (const row of manufacturers) {
+    if (!row?.name) continue;
+    const key = remember(row.name);
+    const list = namesByKey.get(key);
+    if (list) list.push(row.name);
+    else namesByKey.set(key, [row.name]);
+    if (row.id != null) idToKey.set(String(row.id), key);
+  }
+  for (const row of staticManufacturerRows()) {
+    if (!row.name) continue;
+    staticKeys.add(remember(row.name));
+  }
+
+  const texts = new Set<string>();
+  const allModels = [...staticModelRows(), ...models];
+  for (const model of allModels) {
+    const text = String(model.manufacturer || '').trim();
+    if (text) texts.add(text);
+  }
+  for (const text of texts) remember(text);
+
+  const modelsByKey = new Map<string, CatalogModel[]>();
+  const push = (key: string | undefined, model: CatalogModel) => {
+    if (!key) return;
+    const list = modelsByKey.get(key);
+    if (list) list.push(model);
+    else modelsByKey.set(key, [model]);
+  };
+  for (const model of allModels) {
+    const text = String(model.manufacturer || '').trim();
+    if (text) {
+      push(cachedManufacturerKey(text), model);
+      continue;
+    }
+    if (model.manufacturer_id != null) push(idToKey.get(String(model.manufacturer_id)), model);
+  }
+
+  const canonicalByKey = new Map<string, string>();
+  for (const [key, groupNames] of namesByKey) {
+    const spelling = catalogSaveSpelling(groupNames);
+    if (spelling) canonicalByKey.set(key, spelling);
+  }
+
+  return {
+    modelsByKey,
+    idToKey,
+    canonicalByKey,
+    staticKeys,
+    selectionKey(selected: string) {
+      const sel = String(selected || '').trim();
+      if (!sel) return '';
+      const byId = idToKey.get(sel);
+      if (byId) return byId;
+      const cached = cachedManufacturerKey(sel);
+      if (cached) return cached;
+      return rememberManufacturerKey(sel);
+    },
+  };
+}
+
+function manufacturerModelIndex(
+  manufacturers: readonly CatalogManufacturer[],
+  models: readonly CatalogModel[]
+): ManufacturerModelIndex {
+  let inner = manufacturerIndexCache.get(manufacturers);
+  if (!inner) {
+    inner = new WeakMap();
+    manufacturerIndexCache.set(manufacturers, inner);
+  }
+  const hit = inner.get(models);
+  if (hit) return hit;
+  const built = buildManufacturerModelIndex(manufacturers, models);
+  inner.set(models, built);
+  return built;
+}
+
+function bucketHasVisibleModel(models: CatalogModel[] | undefined): boolean {
+  if (!models?.length) return false;
+  return models.some((model) => {
+    const value = String(model.label || model.name || '').trim();
+    if (!value) return false;
+    return !HIDDEN_PICKER_KEYS.has(modelDedupeKey(value));
+  });
+}
+
+function choicesForModels(models: CatalogModel[]): CatalogChoice[] {
+  const choices: CatalogChoice[] = [];
+  for (const model of models) {
+    const value = model.label || model.name;
+    if (!value) continue;
+    choices.push({ value, label: model.display || catalogChoiceLabel(value) });
+  }
+  return dedupeModelChoices(choices);
+}
+
 export function listCatalogManufacturers(live?: LiveCatalog): string[] {
   const names: string[] = [];
   staticManufacturerRows().forEach((m) => {
@@ -840,11 +1109,13 @@ export function listCatalogManufacturers(live?: LiveCatalog): string[] {
     if (m?.name) names.push(m.name);
   });
   const collapsed = collapseManufacturerNames(names);
-  const staticNames = collapseManufacturerNames(staticManufacturerRows().map((row) => row.name));
+  const { manufacturers, models } = liveCatalogRefs(live);
+  const index = manufacturerModelIndex(manufacturers, models);
   return collapsed.filter((name) => {
-    if (listCatalogModelChoices(name, live).length > 0) return true;
+    const key = index.selectionKey(name);
+    if (bucketHasVisibleModel(index.modelsByKey.get(key))) return true;
     if (FORCE_MANUFACTURER_LABEL.has(name) || MANUFACTURER_DISPLAY[norm(name)]) return true;
-    return staticNames.some((entry) => manufacturerNamesEqual(entry, name));
+    return index.staticKeys.has(key);
   });
 }
 
@@ -867,8 +1138,11 @@ function collapseOec9900(choices: CatalogChoice[]): CatalogChoice[] {
 
 export function listCatalogManufacturerChoices(live?: LiveCatalog): CatalogChoice[] {
   const rows = live?.manufacturers || [];
+  const { manufacturers, models } = liveCatalogRefs(live);
+  const index = manufacturerModelIndex(manufacturers, models);
   return listCatalogManufacturers(live).map((value) => {
-    const row = rows.find((r) => r.name && manufacturerNamesEqual(r.name, value));
+    const key = index.selectionKey(value);
+    const row = rows.find((r) => r.name && index.selectionKey(r.name) === key);
     return { value, label: manufacturerChoiceLabel(value, row?.label) };
   });
 }
@@ -885,20 +1159,50 @@ export function listCatalogModelChoices(
   live?: LiveCatalog & { equipmentType?: string | null | EquipmentType }
 ): CatalogChoice[] {
   if (!manufacturer || manufacturer === '__other__') return [];
-  const manufacturers = [...staticManufacturerRows(), ...(live?.manufacturers || [])];
-  const models = [...staticModelRows(), ...(live?.models || [])];
-  const choices: CatalogChoice[] = [];
-  for (const model of models) {
-    if (!modelBelongsToManufacturer(model, manufacturer, manufacturers)) continue;
-    if (!modelMatchesEquipmentType(model.equipment_type, live?.equipmentType)) continue;
-    const value = model.label || model.name;
-    if (!value) continue;
-    const label = model.display || catalogChoiceLabel(value);
-    choices.push({ value, label });
-  }
-  const deduped = dedupeModelChoices(choices);
-  if (manufacturerNamesEqual(manufacturer, 'GE OEC')) return collapseOec9900(deduped);
+  const { manufacturers, models } = liveCatalogRefs(live);
+  const index = manufacturerModelIndex(manufacturers, models);
+  const key = index.selectionKey(manufacturer);
+  const bucket = index.modelsByKey.get(key) || [];
+  const filtered = live?.equipmentType
+    ? bucket.filter((model) => modelMatchesEquipmentType(model.equipment_type, live.equipmentType))
+    : bucket;
+  const deduped = choicesForModels(filtered);
+  const geKey = cachedManufacturerKey('GE OEC');
+  if (geKey && key === geKey) return collapseOec9900(deduped);
   return deduped;
+}
+
+/**
+ * Saved manufacturer spelling from the loaded catalog.
+ * Dropdown labels map to a manufacturers-table row: "Alma" stores "Alma Lasers",
+ * "Lumenis (Coherent)" stores "Lumenis", "AMS / Laserscope" stores whichever
+ * alias row exists. A name with no stored equivalent, including "Other", is kept.
+ */
+export function canonicalManufacturerSpelling(
+  selected: string,
+  manufacturers: CatalogManufacturer[] = [],
+  models: CatalogModel[] = []
+): string {
+  const sel = String(selected || '').trim();
+  if (!sel) return '';
+  const { manufacturers: mfrs, models: mods } = liveCatalogRefs({ manufacturers, models });
+  const index = manufacturerModelIndex(mfrs, mods);
+  const key = index.selectionKey(sel);
+  return index.canonicalByKey.get(key) || compactStoredManufacturer(sel, mfrs) || sel;
+}
+
+/**
+ * Report-form model list for the selected manufacturer (id or name).
+ * Uses the memoized manufacturer→model map. Alias rows share a list.
+ */
+export function modelsForReportManufacturer(
+  selected: string,
+  manufacturers: CatalogManufacturer[] = [],
+  models: CatalogModel[] = [],
+  equipmentType?: string | null
+): CatalogChoice[] {
+  if (!String(selected || '').trim()) return [];
+  return listCatalogModelChoices(selected, { manufacturers, models, equipmentType });
 }
 
 type QueryBuilder = {
