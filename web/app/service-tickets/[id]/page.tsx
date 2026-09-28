@@ -34,6 +34,7 @@ import {
 import { canCreateServiceReports } from '@/lib/roles';
 import { listReportsForTicket, type ExistingTicketReport } from '@/lib/ticket-service-report';
 import { CreateServiceReportActions } from '@/components/CreateServiceReportActions';
+import { TicketAddressLink } from '@/components/AddressLink';
 
 const TICKET_SAVE_FIELDS = [
   'status',
@@ -456,10 +457,20 @@ export default function ServiceTicketDetail() {
 
               <Field label="Phone" value={isEditing ? <input className="input" value={formData.customer_phone || ''} onChange={(e) => handleInputChange('customer_phone', e.target.value)} /> : ticket.customer_phone} />
               <Field label="Email" value={isEditing ? <input className="input" value={formData.customer_email || ''} onChange={(e) => handleInputChange('customer_email', e.target.value)} /> : ticket.customer_email} />
-              <Field label="Address" value={isEditing ? <input className="input" value={formData.customer_address || formData.address || ''} onChange={(e) => handleInputChange('customer_address', e.target.value)} /> : (ticket.customer_address || ticket.address)} />
-              <Field label="City" value={isEditing ? <input className="input" value={formData.customer_city || formData.city || ''} onChange={(e) => handleInputChange('customer_city', e.target.value)} /> : (ticket.customer_city || ticket.city)} />
-              <Field label="State" value={isEditing ? <input className="input" value={formData.customer_state || formData.state || ''} onChange={(e) => handleInputChange('customer_state', e.target.value)} /> : (ticket.customer_state || ticket.state)} />
-              <Field label="ZIP" value={isEditing ? <input className="input" value={formData.zip || ''} onChange={(e) => handleInputChange('zip', e.target.value)} /> : ticket.zip} />
+              <Field label="Address" value={isEditing ? <input className="input" value={formData.customer_address || formData.address || ''} onChange={(e) => handleInputChange('customer_address', e.target.value)} /> : (
+                <TicketAddressLink
+                  ticket={ticket}
+                  emptyText="—"
+                  className="underline text-[var(--gold)]"
+                />
+              )} />
+              {isEditing && (
+                <>
+                  <Field label="City" value={<input className="input" value={formData.customer_city || formData.city || ''} onChange={(e) => handleInputChange('customer_city', e.target.value)} />} />
+                  <Field label="State" value={<input className="input" value={formData.customer_state || formData.state || ''} onChange={(e) => handleInputChange('customer_state', e.target.value)} />} />
+                  <Field label="ZIP" value={<input className="input" value={formData.zip || ''} onChange={(e) => handleInputChange('zip', e.target.value)} />} />
+                </>
+              )}
             </div>
           </div>
 

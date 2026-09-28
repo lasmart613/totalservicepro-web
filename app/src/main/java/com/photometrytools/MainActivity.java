@@ -260,14 +260,16 @@ public class MainActivity extends AppCompatActivity {
         public void openUrl(String url) {
             if (url == null) return;
             runOnUiThread(() -> {
-                if (!navigateInWebView(url)) {
-                    try {
-                        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                        startActivity(intent);
-                    } catch (Exception e) {
-                        showToast("Could not open link: " + e.getMessage());
+                try {
+                    // geo: is handled inside navigateInWebView, which returns true so this
+                    // method does not start the same intent a second time.
+                    if (!navigateInWebView(url)) {
+                        startExternal(url);
                     }
+                } catch (SecurityException e) {
+                    recoverOpenFailure(url);
+                } catch (RuntimeException e) {
+                    recoverOpenFailure(url);
                 }
             });
         }
@@ -458,11 +460,19 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
+                if (uri != null && isGeoUrl(uri.toString())) {
+                    openGeoOrMaps(uri.toString());
+                    return true;
+                }
                 return uri != null && !navigateInWebView(uri.toString());
             }
 
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                if (isGeoUrl(url)) {
+                    openGeoOrMaps(url);
+                    return true;
+                }
                 return !navigateInWebView(url);
             }
 
@@ -521,6 +531,11 @@ public class MainActivity extends AppCompatActivity {
     private boolean navigateInWebView(String url) {
         if (url == null) return true;
         String lower = url.toLowerCase(Locale.US);
+        if (isGeoUrl(url)) {
+            // One launch. Returning true tells openUrl not to start the intent again.
+            openGeoOrMaps(url);
+            return true;
+        }
         if (lower.startsWith("mailto:") || lower.startsWith("tel:") || lower.startsWith("sms:")) {
             try {
                 startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
@@ -561,6 +576,71 @@ public class MainActivity extends AppCompatActivity {
         } catch (Exception ignored) {
         }
         return false;
+    }
+
+    private boolean isGeoUrl(String url) {
+        return url != null && url.toLowerCase(Locale.US).startsWith("geo:");
+    }
+
+    /**
+     * Start the geo intent once. If nothing can handle it, open the https Maps
+     * search URL in a browser so a phone without the Maps app still works.
+     */
+    private void openGeoOrMaps(String geoUrl) {
+        if (canResolve(geoUrl)) {
+            try {
+                startExternal(geoUrl);
+                return;
+            } catch (SecurityException ignored) {
+                // Fall through to the https Maps URL.
+            } catch (RuntimeException ignored) {
+                // ActivityNotFoundException and other start failures.
+            }
+        }
+        openHttpsMapsFallback(geoUrl);
+    }
+
+    private void recoverOpenFailure(String url) {
+        if (isGeoUrl(url)) {
+            openHttpsMapsFallback(url);
+            return;
+        }
+        showToast("Could not open link");
+    }
+
+    private void openHttpsMapsFallback(String geoUrl) {
+        String https = mapsSearchUrlFromGeo(geoUrl);
+        if (https == null) {
+            Toast.makeText(this, "Could not open maps", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        try {
+            startExternal(https);
+        } catch (SecurityException e) {
+            Toast.makeText(this, "Could not open maps", Toast.LENGTH_SHORT).show();
+        } catch (RuntimeException e) {
+            Toast.makeText(this, "Could not open maps", Toast.LENGTH_SHORT).show();
+        }
+    }
+
+    private boolean canResolve(String url) {
+        try {
+            Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            return intent.resolveActivity(getPackageManager()) != null;
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private void startExternal(String url) {
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+        intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        startActivity(intent);
+    }
+
+    /** geo:0,0?q=address → https://www.google.com/maps/search/?api=1&query=address */
+    private String mapsSearchUrlFromGeo(String geoUrl) {
+        return GeoMapsUrl.mapsSearchUrlFromGeo(geoUrl, Uri::decode, Uri::encode);
     }
 
     private String mapAssetUrlToProduction(String url) {
