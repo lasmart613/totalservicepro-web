@@ -2,6 +2,7 @@
  * Ensure a laser/equipment row exists; serial is stable identity across owner transfers.
  * Port of Android assets/equipment-ensure.js
  */
+import { manufacturerNamesEqual } from './equipment-dropdown.ts';
 
 export type EnsureEquipmentOpts = {
   customerOrgId: string | number | null | undefined;
@@ -26,6 +27,33 @@ function coerceOrgId(orgId: string | number | null | undefined): string | number
 
 function normSerial(serial?: string | null): string {
   return String(serial || '').trim();
+}
+
+function sameSpelling(a: string, b: string): boolean {
+  return a.trim().toLowerCase() === b.trim().toLowerCase();
+}
+
+/** GentleLase, GENTLELASE, and GL-VPYAG / GL VPYAG are the same stored model. "+" stays distinct (Excel V+). */
+function looseModelKey(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\+/g, 'plus')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+function modelsLooselyEqual(stored: unknown, incoming: unknown): boolean {
+  const left = looseModelKey(stored);
+  const right = looseModelKey(incoming);
+  return Boolean(left) && left === right;
+}
+
+/** Fill a blank stored field. A non-blank value, including BioLitec vs Biolitec, stays. */
+function fillBlank(stored: unknown, incoming: string): string | null {
+  const next = String(incoming || '').trim();
+  const current = String(stored || '').trim();
+  if (!next || current) return null;
+  return next;
 }
 
 /**
@@ -60,21 +88,34 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
       existing =
         list.find(
           (r: any) => normSerial(r.serial_number).toLowerCase() === serial.toLowerCase()
-        ) ||
-        list[0] ||
-        null;
+        ) || null;
     }
 
-    if (!existing && manufacturer && model) {
-      const q = await sb
+    // A typed serial that misses must not reuse another laser of the same
+    // make and model — that links the wrong machine and never stores the serial.
+    // Blank serial reuses the same model under any stored spelling of the make
+    // (Lumenis, Coherent, and "Coherent / Lumenis" are one brand). Model text
+    // matches without case, spaces, or punctuation (GENTLELASE, GL-VPYAG).
+    if (!existing && !serial && manufacturer && model) {
+      const { data: rows } = await sb
         .from('equipment')
-        .select('id, customer_organization_id')
+        .select('id, customer_organization_id, manufacturer, model')
         .eq('customer_organization_id', orgId)
-        .eq('manufacturer', manufacturer)
-        .eq('model', model)
-        .limit(1)
-        .maybeSingle();
-      existing = q.data;
+        .limit(200);
+      const matches = (rows || []).filter(
+        (row: any) =>
+          manufacturerNamesEqual(String(row?.manufacturer || ''), manufacturer) &&
+          modelsLooselyEqual(row?.model, model)
+      );
+      existing =
+        matches.find(
+          (row: any) =>
+            sameSpelling(String(row?.manufacturer || ''), manufacturer) &&
+            sameSpelling(String(row?.model || ''), model)
+        ) ||
+        matches.find((row: any) => sameSpelling(String(row?.manufacturer || ''), manufacturer)) ||
+        matches[0] ||
+        null;
     }
 
     if (existing?.id) {
@@ -82,19 +123,15 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
       if (String(existing.customer_organization_id || '') !== String(orgId)) {
         patch.customer_organization_id = orgId;
       }
-      if (manufacturer) patch.manufacturer = manufacturer;
-      if (model) patch.model = model;
-      if (name) patch.name = name;
-      if (pulse) patch.pulse_count = pulse;
+      // Stored manufacturer and model are identity. Fill them only when blank.
+      const keepManufacturer = fillBlank(existing.manufacturer, manufacturer);
+      if (keepManufacturer) patch.manufacturer = keepManufacturer;
+      const keepModel = fillBlank(existing.model, model);
+      if (keepModel) patch.model = keepModel;
+      // Live equipment has no name or pulse_count columns. Sending them 400s, then retries.
       if (Object.keys(patch).length) {
-        let { error } = await sb.from('equipment').update(patch).eq('id', existing.id);
-        if (error && /column|schema cache/i.test(error.message || '')) {
-          if (/pulse_count/i.test(error.message || '')) delete patch.pulse_count;
-          if (/name/i.test(error.message || '')) delete patch.name;
-          if (Object.keys(patch).length) {
-            await sb.from('equipment').update(patch).eq('id', existing.id);
-          }
-        }
+        const { error } = await sb.from('equipment').update(patch).eq('id', existing.id);
+        if (error) console.warn('ensureEquipment update', error);
       }
       return existing.id;
     }
