@@ -14,7 +14,8 @@ declare global {
 
 /**
  * GA4 gtag for repairplanet.net. Mounts only after a real browser check so
- * SSR / prerender never double-counts. Skips /admin and /god, local `next
+ * SSR / prerender never double-counts. The gtag script uses lazyOnload so it
+ * does not compete with first paint. Skips /admin and /god, local `next
  * dev`, and Netlify deploy-preview hosts.
  */
 export function GoogleAnalytics() {
@@ -36,8 +37,22 @@ export function GoogleAnalytics() {
     });
 
   useEffect(() => {
-    if (!enabled || typeof window.gtag !== 'function') return;
-    window.gtag('config', measurementId, { page_path: pathname });
+    if (!enabled) return;
+    const send = () => {
+      if (typeof window.gtag !== 'function') return false;
+      window.gtag('config', measurementId, { page_path: pathname });
+      return true;
+    };
+    if (send()) return;
+    // lazyOnload can trail the first client navigation; retry until gtag exists.
+    const id = window.setInterval(() => {
+      if (send()) window.clearInterval(id);
+    }, 500);
+    const stop = window.setTimeout(() => window.clearInterval(id), 10000);
+    return () => {
+      window.clearInterval(id);
+      window.clearTimeout(stop);
+    };
   }, [enabled, measurementId, pathname]);
 
   if (!enabled || gaSkipsPath(pathname)) return null;
@@ -46,9 +61,9 @@ export function GoogleAnalytics() {
     <>
       <Script
         src={`https://www.googletagmanager.com/gtag/js?id=${measurementId}`}
-        strategy="afterInteractive"
+        strategy="lazyOnload"
       />
-      <Script id="ga4-gtag" strategy="afterInteractive">
+      <Script id="ga4-gtag" strategy="lazyOnload">
         {`
           window.dataLayer = window.dataLayer || [];
           function gtag(){dataLayer.push(arguments);}

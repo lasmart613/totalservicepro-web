@@ -77,28 +77,26 @@ export default function ConsumablesMarketplace() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div>Loading listings...</div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="max-w-7xl mx-auto w-full px-4 py-8">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-3xl font-extrabold">Consumables Marketplace</h1>
-            <p className="text-[var(--text3)]">Dye kits, cryogen, filters, windows, tips, and other used-up items</p>
+            <h1 className="text-3xl font-extrabold">Consumables</h1>
+            <p className="text-[var(--text3)]">
+              Handpieces, fibers, tips, gels, and other consumables for biomedical equipment — lasers,
+              lithotriptors, C-arms, and more.
+            </p>
           </div>
           <Link href="/marketplace/list?type=consumable" className="btn btn-primary">
             + Create New Listing
           </Link>
         </div>
 
+        {loading ? (
+          <div className="card p-8 text-center text-[var(--text3)]">Loading listings...</div>
+        ) : (
         <div className="card p-8 text-center">
           {listings.length === 0 ? (
           <p className="text-lg mb-4">No listings yet.</p>
@@ -172,6 +170,7 @@ export default function ConsumablesMarketplace() {
           </div>
         )}
         </div>
+        )}
       </div>
     </div>
   );

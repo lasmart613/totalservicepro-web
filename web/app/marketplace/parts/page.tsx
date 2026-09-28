@@ -131,22 +131,17 @@ export default function PartsMarketplace() {
     }
   };
 
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div>Loading listings...</div>
-      </div>
-    );
-  }
-
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="max-w-7xl mx-auto w-full px-4 py-8">
         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
           <div>
-            <h1 className="text-3xl font-extrabold">Parts Marketplace</h1>
-            <p className="text-[var(--text3)]">Parts currently listed for sale</p>
+            <h1 className="text-3xl font-extrabold">Parts for sale</h1>
+            <p className="text-[var(--text3)]">
+              Parts listed for sale by suppliers and repair companies. Biomedical service parts — lasers,
+              lithotriptors, and C-arms.
+            </p>
           </div>
           <div className="flex flex-wrap gap-2">
             <Link href="/marketplace/storefront" className="btn btn-secondary whitespace-nowrap">
@@ -268,7 +263,9 @@ export default function PartsMarketplace() {
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 mt-4 text-sm text-[var(--text3)]">
             <span>
-              {listings.length === 0
+              {loading
+                ? 'Loading listings...'
+                : listings.length === 0
                 ? 'No listings yet'
                 : `Showing ${filtered.length} of ${listings.length}`}
             </span>
@@ -280,6 +277,9 @@ export default function PartsMarketplace() {
           </div>
         </div>
 
+        {loading ? (
+          <div className="card p-8 text-center text-[var(--text3)]">Loading listings...</div>
+        ) : (
         <div className="card p-8 text-center">
           {listings.length === 0 ? (
           <p className="text-lg mb-4">No listings yet.</p>
@@ -367,6 +367,7 @@ export default function PartsMarketplace() {
           </div>
         )}
         </div>
+        )}
       </div>
     </div>
   );

@@ -44,9 +44,51 @@ function TileLines({
   );
 }
 
-function PublicPlans() {
-  const [audience, setAudience] = usePlanAudienceFromUrl();
+function PlanCards({ audience }: { audience: PlanAudience }) {
+  return (
+    <div className="lp-paths">
+      <article className="lp-path" style={{ cursor: 'default' }}>
+        <h3>Free Plan</h3>
+        <p className="lp-lede" style={{ margin: '0 0 12px' }}>
+          <strong>$0</strong> / month
+        </p>
+        <TileLines audience={audience} tile="free" />
+        <Link href="/signup" className="lp-btn lp-btn-primary">
+          Register for Total Service Pro
+        </Link>
+      </article>
+      <article className="lp-path" style={{ cursor: 'default' }}>
+        <h3>Premium</h3>
+        <p className="lp-lede" style={{ margin: '0 0 12px' }}>
+          <strong>{PLAN_OFFERS.premium_monthly.displayAmount}</strong>{' '}
+          {PLAN_OFFERS.premium_monthly.displayPeriod}
+        </p>
+        <TileLines audience={audience} tile="premium" />
+        <Link href="/signup" className="lp-btn lp-btn-ghost">
+          Register for Total Service Pro
+        </Link>
+      </article>
+      <article className="lp-path" style={{ cursor: 'default' }}>
+        <h3>Team</h3>
+        <p className="lp-lede" style={{ margin: '0 0 12px' }}>
+          <strong>{PLAN_OFFERS.team_monthly.displayAmount}</strong>{' '}
+          {PLAN_OFFERS.team_monthly.displayPeriod}
+        </p>
+        <TileLines audience={audience} tile="team" />
+        <Link href="/signup" className="lp-btn lp-btn-ghost">
+          Register for Total Service Pro
+        </Link>
+      </article>
+    </div>
+  );
+}
 
+/** Static catalog for the first paint. Does not call useSearchParams, so crawlers see it. */
+function PublicPlansStatic() {
+  return <PlansIntro audience="company" cards={<PlanCards audience="company" />} />;
+}
+
+function PlansIntro({ audience, cards }: { audience: PlanAudience; cards: React.ReactNode }) {
   return (
     <LandingShell>
       <section className="lp-section" style={{ marginTop: 0, borderTop: 'none' }}>
@@ -57,42 +99,7 @@ function PublicPlans() {
           {planAudienceLabel(audience).toLowerCase()}, then create your account.
           Signed-in companies upgrade from this page without registering again.
         </p>
-        <PlanAudienceSelector value={audience} onChange={setAudience} variant="landing">
-        <div className="lp-paths">
-          <article className="lp-path" style={{ cursor: 'default' }}>
-            <h3>Free Plan</h3>
-            <p className="lp-lede" style={{ margin: '0 0 12px' }}>
-              <strong>$0</strong> / month
-            </p>
-            <TileLines audience={audience} tile="free" />
-            <Link href="/signup" className="lp-btn lp-btn-primary">
-              Register for Total Service Pro
-            </Link>
-          </article>
-          <article className="lp-path" style={{ cursor: 'default' }}>
-            <h3>Premium</h3>
-            <p className="lp-lede" style={{ margin: '0 0 12px' }}>
-              <strong>{PLAN_OFFERS.premium_monthly.displayAmount}</strong>{' '}
-              {PLAN_OFFERS.premium_monthly.displayPeriod}
-            </p>
-            <TileLines audience={audience} tile="premium" />
-            <Link href="/signup" className="lp-btn lp-btn-ghost">
-              Register for Total Service Pro
-            </Link>
-          </article>
-          <article className="lp-path" style={{ cursor: 'default' }}>
-            <h3>Team</h3>
-            <p className="lp-lede" style={{ margin: '0 0 12px' }}>
-              <strong>{PLAN_OFFERS.team_monthly.displayAmount}</strong>{' '}
-              {PLAN_OFFERS.team_monthly.displayPeriod}
-            </p>
-            <TileLines audience={audience} tile="team" />
-            <Link href="/signup" className="lp-btn lp-btn-ghost">
-              Register for Total Service Pro
-            </Link>
-          </article>
-        </div>
-        </PlanAudienceSelector>
+        {cards}
         <div className="lp-actions" style={{ marginTop: 28 }}>
           <Link href="/signup" className="lp-btn lp-btn-primary">
             Register for a Free Plan
@@ -103,6 +110,21 @@ function PublicPlans() {
         </div>
       </section>
     </LandingShell>
+  );
+}
+
+function PublicPlans() {
+  const [audience, setAudience] = usePlanAudienceFromUrl();
+
+  return (
+    <PlansIntro
+      audience={audience}
+      cards={
+        <PlanAudienceSelector value={audience} onChange={setAudience} variant="landing">
+          <PlanCards audience={audience} />
+        </PlanAudienceSelector>
+      }
+    />
   );
 }
 
@@ -366,37 +388,17 @@ function PlansGate() {
   }, []);
 
   if (auth === 'loading') {
-    return (
-      <div className="min-h-screen flex flex-col">
-        <Header />
-        <div className="max-w-5xl mx-auto w-full px-4 py-10 text-[var(--text3)]">Loading plans…</div>
-      </div>
-    );
+    return <PublicPlansStatic />;
   }
   if (auth === 'in') {
     return (
-      <Suspense
-        fallback={
-          <div className="min-h-screen flex flex-col">
-            <Header />
-            <div className="max-w-5xl mx-auto w-full px-4 py-10 text-[var(--text3)]">Loading plans…</div>
-          </div>
-        }
-      >
+      <Suspense fallback={<PublicPlansStatic />}>
         <SignedInPlans />
       </Suspense>
     );
   }
   return (
-    <Suspense
-      fallback={
-        <LandingShell>
-          <section className="lp-section" style={{ marginTop: 0, borderTop: 'none' }}>
-            <p className="lp-lede">Loading plans…</p>
-          </section>
-        </LandingShell>
-      }
-    >
+    <Suspense fallback={<PublicPlansStatic />}>
       <PublicPlans />
     </Suspense>
   );
