@@ -2,7 +2,10 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Header } from '@/components/Header';
-import { Upload, ArrowRight, Check } from 'lucide-react';
+import { ArrowRight, Check } from 'lucide-react';
+import { CompanyBrandingEditor } from '@/components/CompanyBrandingEditor';
+import { normalizeHex } from '@/lib/company-theme';
+import { orgIsPaid, type OrgPlanFields } from '@/lib/org-plan';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { isOwnerish, isSupplier } from '@/lib/roles';
@@ -68,6 +71,9 @@ export default function Onboarding() {
   const [isSoleProp, setIsSoleProp] = useState(false);
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
+  const [orgPlan, setOrgPlan] = useState<OrgPlanFields>({});
+  const [brandPrimary, setBrandPrimary] = useState('');
+  const [brandAccent, setBrandAccent] = useState('');
   const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
   const [teamEmail, setTeamEmail] = useState('');
   const [teamFirst, setTeamFirst] = useState('');
@@ -226,6 +232,15 @@ export default function Onboarding() {
         }));
         if (o.supported_brands?.length) setSelectedBrands(o.supported_brands);
         if (o.logo_url) setLogoPreview(o.logo_url);
+        setOrgPlan({
+          is_premium: o.is_premium,
+          subscription_tier: o.subscription_tier,
+          plan: o.plan,
+          premium_until: o.premium_until,
+          premium_grant: o.premium_grant,
+        });
+        if (o.brand_primary_color) setBrandPrimary(String(o.brand_primary_color));
+        if (o.brand_accent_color) setBrandAccent(String(o.brand_accent_color));
       } else {
         // Prefer signup metadata / pending payload over a trigger-defaulted fse role
         const metaRole = String(meta.role || pending?.role || '').toLowerCase();
@@ -404,15 +419,18 @@ export default function Onboarding() {
     }));
   }
 
-  async function handleLogo(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0];
-    if (!f) return;
-    if (f.size > 5*1024*1024) { alert('Max 5MB'); return; }
-    setLogoFile(f);
+  function acceptLogoFile(file: File) {
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Max 5MB');
+      return;
+    }
+    setLogoFile(file);
     const reader = new FileReader();
-    reader.onload = ev => setLogoPreview(ev.target?.result as string);
-    reader.readAsDataURL(f);
+    reader.onload = (ev) => setLogoPreview(ev.target?.result as string);
+    reader.readAsDataURL(file);
   }
+
+  const brandingUnlocked = orgIsPaid(orgPlan) || (!existingOrgId && orgType === 'service');
 
   function toggleBrand(b: string) {
     setSelectedBrands(prev => prev.includes(b) ? prev.filter(x=>x!==b) : [...prev, b]);
@@ -583,6 +601,19 @@ export default function Onboarding() {
           throw new Error(iErr?.message || 'Could not create organization.');
         }
         orgId = newOrg.id;
+      }
+
+      if (brandingUnlocked && orgId) {
+        const { error: colorErr } = await supabase
+          .from('organizations')
+          .update({
+            brand_primary_color: normalizeHex(brandPrimary),
+            brand_accent_color: normalizeHex(brandAccent),
+          })
+          .eq('id', orgId);
+        if (colorErr && !/brand_primary_color|brand_accent_color|column/i.test(colorErr.message || '')) {
+          console.warn('brand colors', colorErr.message);
+        }
       }
 
       const creatorRole = resolveCreatorRole();
@@ -1035,16 +1066,26 @@ export default function Onboarding() {
         )}
 
         {step === 4 && (
-          <div className="max-w-md mx-auto">
-            <h2 className="text-2xl font-bold mb-4">
-              {orgType === 'clinic' ? 'Facility Logo (optional)' : 'Company Logo (optional)'}
-            </h2>
-            <div className="border-2 border-dashed p-8 text-center rounded-2xl cursor-pointer" onClick={() => document.getElementById('logoInput')?.click()}>
-              {logoPreview ? <img src={logoPreview} alt="logo" className="max-h-20 mx-auto" /> : <Upload size={48} className="mx-auto mb-3" />}
-              <div>Tap to choose logo (PNG/JPG)</div>
-            </div>
-            <input id="logoInput" type="file" accept="image/*" className="hidden" onChange={handleLogo} />
-            {logoPreview && <button onClick={()=>{setLogoPreview(null);setLogoFile(null);}} className="text-xs mt-2 text-red-400">Remove</button>}
+          <div className="max-w-2xl mx-auto">
+            <h2 className="text-2xl font-bold mb-2">Branding</h2>
+            <p className="text-sm text-[var(--text3)] mb-4">
+              Your logo appears on invoices, estimates, and service reports. Premium plans can also set the header colors.
+            </p>
+            <CompanyBrandingEditor
+              premium={brandingUnlocked}
+              companyName={formData.companyName || ''}
+              logoUrl={logoPreview}
+              primary={brandPrimary}
+              accent={brandAccent}
+              onPrimaryChange={setBrandPrimary}
+              onAccentChange={setBrandAccent}
+              onLogoFile={acceptLogoFile}
+              onLogoClear={() => {
+                setLogoPreview(null);
+                setLogoFile(null);
+              }}
+              showLogoUpload
+            />
           </div>
         )}
 

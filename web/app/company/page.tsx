@@ -22,8 +22,10 @@ import {
 import { LOGO_ACCEPT, validateLogoFile } from '@/lib/customer-logo';
 import { persistCustomerLogo, loadLinkedCustomers } from '@/lib/customer-form';
 import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
-import { orgCanUpgrade, upgradeTargetForOrg } from '@/lib/org-plan';
+import { orgCanUpgrade, orgIsPaid, upgradeTargetForOrg } from '@/lib/org-plan';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
+import { CompanyBrandingEditor } from '@/components/CompanyBrandingEditor';
+import { normalizeHex } from '@/lib/company-theme';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -471,6 +473,10 @@ function CompanyProfile() {
         list_in_directory: !!currentOrg.list_in_directory,
         supported_brands: Array.isArray(currentOrg.supported_brands) ? currentOrg.supported_brands : null,
       };
+      if (orgIsPaid(currentOrg)) {
+        updateData.brand_primary_color = normalizeHex(currentOrg.brand_primary_color);
+        updateData.brand_accent_color = normalizeHex(currentOrg.brand_accent_color);
+      }
 
       // Claimed owners: client PATCH is a silent RLS no-op (204, 0 rows).
       // Same service-role path as invite/claim — only the caller's linked org.
@@ -890,6 +896,22 @@ function CompanyProfile() {
                 {uploadingLogo ? 'Uploading...' : org.logo_url ? 'Replace logo' : 'Choose & Upload Logo'}
               </button>
               <p className="text-xs text-[var(--text3)] mt-2">PNG, JPG, WebP, or SVG. Max 2 MB.</p>
+            </div>
+
+            <div className="md:col-span-2">
+              <h3 className="font-semibold mb-2">Branding</h3>
+              <CompanyBrandingEditor
+                premium={orgIsPaid(org)}
+                companyName={org.name || ''}
+                logoUrl={org.logo_url || ''}
+                primary={org.brand_primary_color || ''}
+                accent={org.brand_accent_color || ''}
+                onPrimaryChange={(hex) => setOrg({ ...org, brand_primary_color: hex })}
+                onAccentChange={(hex) => setOrg({ ...org, brand_accent_color: hex })}
+              />
+              <p className="text-xs text-[var(--text3)] mt-2">
+                Save company details to keep color changes. Colors apply on Premium, Team, and Enterprise.
+              </p>
             </div>
           </div>
 

@@ -7,7 +7,8 @@ import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
-import { buildEstimateHtml, type DocCompany } from '@/lib/billing/doc-html';
+import { buildEstimateHtml, type DocCompany, type DocThemeScope } from '@/lib/billing/doc-html';
+import { getCompanyTheme, type CompanyTheme } from '@/lib/company-theme';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
   coerceOrgId,
@@ -49,6 +50,7 @@ export default function EstimateFormClient() {
   const allocatedNumberRef = useRef('');
   const [status, setStatus] = useState('draft');
   const [company, setCompany] = useState<DocCompany>({});
+  const [companyTheme, setCompanyTheme] = useState<CompanyTheme | null>(null);
   const [emailing, setEmailing] = useState(false);
 
   // Customer — full linked set (paged), typeahead is client-side only
@@ -365,7 +367,14 @@ export default function EstimateFormClient() {
             tech_name: techName,
           });
         }
-        if (orgId) await loadCustomers(orgId);
+        if (orgId) {
+          await loadCustomers(orgId);
+          try {
+            setCompanyTheme(await getCompanyTheme(orgId, supabase));
+          } catch (themeErr) {
+            console.warn('company theme', themeErr);
+          }
+        }
         await loadParts();
 
         // Restore local pricing defaults
@@ -629,7 +638,7 @@ export default function EstimateFormClient() {
     }
   }
 
-  function buildEstimateEmailHtml() {
+  function buildEstimateEmailHtml(themeScope: DocThemeScope = 'email') {
     const modelName = model === '__other__' ? customModel.trim() : model;
     const svcLabels = services.map((s) => SERVICE_TYPE_LABELS[s] || s);
     if (otherService.trim()) svcLabels.push(otherService.trim());
@@ -686,7 +695,20 @@ export default function EstimateFormClient() {
       deposit: totals.depositAmt,
       balanceDue: totals.balanceDue,
       validDays: 30,
+      theme: companyTheme,
+      themeScope,
     });
+  }
+
+  function openEstimatePreview() {
+    const html = buildEstimateEmailHtml('document');
+    const preview = window.open('', '_blank');
+    if (!preview) {
+      toast.error('Pop-up blocked — allow pop-ups to preview the estimate');
+      return;
+    }
+    preview.document.write(html);
+    preview.document.close();
   }
 
   async function finalizeAndEmailEstimate() {
@@ -1297,6 +1319,13 @@ export default function EstimateFormClient() {
             onClick={() => saveEstimate('draft')}
           >
             {saving ? 'Saving…' : 'Save Draft'}
+          </button>
+          <button
+            type="button"
+            className="btn btn-secondary min-w-[120px]"
+            onClick={openEstimatePreview}
+          >
+            Preview / PDF
           </button>
           <button
             type="button"

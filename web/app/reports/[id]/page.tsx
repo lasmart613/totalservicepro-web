@@ -7,6 +7,7 @@ import { useParams } from 'next/navigation';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isOwnerish } from '@/lib/roles';
 import { buildServiceReportPrintHTML } from '@/lib/service-report-print';
+import { getCompanyTheme, REPAIR_PLANET_THEME, type CompanyTheme } from '@/lib/company-theme';
 import { resolveCustomerEmailOnFile, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import { toast } from 'sonner';
 
@@ -32,6 +33,7 @@ export default function ReportDetail() {
   const [loading, setLoading] = useState(true);
   const [emailing, setEmailing] = useState(false);
   const [emailOnFile, setEmailOnFile] = useState('');
+  const [theme, setTheme] = useState<CompanyTheme>(REPAIR_PLANET_THEME);
 
   useEffect(() => {
     (async () => {
@@ -39,6 +41,7 @@ export default function ReportDetail() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
+      let viewerOrgId: string | number | null = null;
       if (user) {
         const { data: prof } = await supabase
           .from('user_profiles')
@@ -47,6 +50,7 @@ export default function ReportDetail() {
           .maybeSingle();
         let oType: string | null = null;
         if (prof?.organization_id) {
+          viewerOrgId = prof.organization_id;
           const { data: org } = await supabase
             .from('organizations')
             .select('type')
@@ -71,6 +75,14 @@ export default function ReportDetail() {
             data.test_equipment = parseMaybeJson(data.test_equipment);
           }
           setReport(data);
+          const themeOrgId = data?.organization_id || viewerOrgId;
+          if (themeOrgId) {
+            try {
+              setTheme(await getCompanyTheme(themeOrgId, supabase));
+            } catch (themeErr) {
+              console.warn('company theme', themeErr);
+            }
+          }
         } catch {
           setReport(null);
         }
@@ -102,7 +114,7 @@ export default function ReportDetail() {
   function openPrint() {
     if (!report) return;
     try {
-      const html = buildServiceReportPrintHTML(report);
+      const html = buildServiceReportPrintHTML({ ...report, theme, themeScope: 'document' });
       const w = window.open('', '_blank');
       if (!w) {
         toast.error('Pop-up blocked — allow pop-ups to print');
@@ -146,7 +158,7 @@ export default function ReportDetail() {
         toast.error('Session expired — sign in again');
         return;
       }
-      const html = buildServiceReportPrintHTML(report);
+      const html = buildServiceReportPrintHTML({ ...report, theme, themeScope: 'email' });
       const result = await sendBillingDocEmail({
         kind: 'report',
         accessToken: session.access_token,
@@ -226,6 +238,25 @@ export default function ReportDetail() {
         {viewOnly && (
           <div className="mb-4 text-sm px-3 py-2 rounded border border-[var(--border)] bg-[var(--surface3)] text-[var(--text3)]">
             View-only (facility account). Contact your service provider to request changes.
+          </div>
+        )}
+
+        {theme.branded && (
+          <div
+            className="mb-4 flex items-center justify-between gap-4 rounded-xl px-4 py-3"
+            style={{ background: theme.primary, color: theme.onPrimary, borderBottom: `3px solid ${theme.accent}` }}
+          >
+            <div className="flex items-center gap-3">
+              {theme.logoUrl ? (
+                <img
+                  src={theme.logoUrl}
+                  alt=""
+                  className="max-h-12 max-w-[120px] rounded bg-white p-1 object-contain"
+                />
+              ) : null}
+              <div className="font-bold">{theme.companyName}</div>
+            </div>
+            <div className="text-sm font-semibold">Service Report</div>
           </div>
         )}
 

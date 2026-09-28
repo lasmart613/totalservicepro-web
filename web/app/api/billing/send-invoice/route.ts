@@ -12,6 +12,7 @@ import {
   wrapCustomerFacingDocumentEmail,
 } from '@/lib/customer-invite';
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
+import { getCompanyTheme } from '@/lib/company-theme';
 
 const INV_SELECT_FULL =
   'id, created_by, organization_id, customer_name, customer_organization_id, total, amount_paid, invoice_data, invoice_number, status';
@@ -364,12 +365,14 @@ export async function POST(req: NextRequest) {
       companyName,
       customerOrgId: custOrgId,
     });
+    const theme = callerOrgId != null ? await getCompanyTheme(callerOrgId, supabase) : null;
     const wrapped = wrapCustomerFacingDocumentEmail({
       subject,
       documentHtml: html,
       signupUrl,
       loginUrl,
       companyName,
+      theme,
     });
 
     const rr = await fetch('https://api.resend.com/emails', {
