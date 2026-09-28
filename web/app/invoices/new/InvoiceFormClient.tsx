@@ -389,7 +389,7 @@ export default function InvoiceFormClient() {
         const { data: profile } = await supabase
           .from('user_profiles')
           .select(
-            'organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url, slogan)'
+            'organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url)'
           )
           .eq('id', user.id)
           .maybeSingle();

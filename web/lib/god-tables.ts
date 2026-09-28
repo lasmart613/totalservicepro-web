@@ -253,8 +253,8 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Models',
     group: 'equipment',
     description: 'Model dropdown + optional perf JSON (wavelengths / params).',
-    listColumns: ['id', 'name', 'label', 'manufacturer_id'],
-    searchColumns: ['name', 'label'],
+    listColumns: ['id', 'name', 'manufacturer_id'],
+    searchColumns: ['name'],
     relatedKeys: ['manufacturers', 'equipment'],
   }),
   crud({

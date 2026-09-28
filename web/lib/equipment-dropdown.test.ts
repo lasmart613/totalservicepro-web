@@ -434,6 +434,31 @@ test('service tickets join models by manufacturer id or name without a label col
   assert.match(schedule, /listModelChoices/);
 });
 
+test('company page reads laser_models by name and org lookups omit missing columns', () => {
+  const company = readFileSync(join(here, '../app/company/page.tsx'), 'utf8');
+  assert.match(company, /from\('laser_models'\)\s*\.select\('id, name, manufacturer_id'\)/);
+  assert.doesNotMatch(company, /from\('laser_models'\)[\s\S]{0,180}label/);
+  assert.match(company, /label:\s*m\.name\s*\|\|\s*m\.label/);
+
+  const god = readFileSync(join(here, './god-tables.ts'), 'utf8');
+  const modelsBlock = god.slice(god.indexOf("key: 'laser_models'"), god.indexOf("key: 'test_equipment'"));
+  assert.match(modelsBlock, /listColumns:\s*\['id', 'name', 'manufacturer_id'\]/);
+  assert.doesNotMatch(modelsBlock, /'label'/);
+
+  for (const rel of [
+    '../app/estimates/new/EstimateFormClient.tsx',
+    '../app/invoices/new/InvoiceFormClient.tsx',
+    '../app/purchase-orders/new/PurchaseOrderFormClient.tsx',
+  ]) {
+    const src = readFileSync(join(here, rel), 'utf8');
+    assert.doesNotMatch(src, /organizations\([^)]*slogan|select\('[^']*slogan/, rel);
+  }
+
+  const award = readFileSync(join(here, './award.ts'), 'utf8');
+  assert.doesNotMatch(award, /alt_phone/);
+  assert.match(award, /select\('name, address, city, state, zip, phone, email, contact_name, website'\)/);
+});
+
 test('internal codes display a human label and duplicate spellings collapse', () => {
   assert.equal(catalogChoiceLabel('alex_trivantage'), 'Alex Trivantage');
   assert.equal(catalogChoiceLabel('candela_core', 'Candela Core'), 'Candela Core');
