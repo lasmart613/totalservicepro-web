@@ -7,6 +7,9 @@ import {
   asManualId,
   assistantManualPicker,
   buildGrokChatPayload,
+  collectionSearchRequiresManualMatch,
+  manualDisplayLabel,
+  selectedManualContext,
   humanizeDeviceCode,
   humanizeGeneralGuidanceDisplay,
   excerptManualSearchText,
@@ -34,6 +37,8 @@ import {
   normalizeManualPath as edgeNormalizeManualPath,
   pdfPathsForAiAttach as edgePdfPathsForAiAttach,
   prefixGeneralGuidance as edgePrefixGeneralGuidance,
+  collectionSearchRequiresManualMatch as edgeCollectionSearchRequiresManualMatch,
+  selectedManualContext as edgeSelectedManualContext,
 } from '../../../supabase/functions/grok-assistant/manual-scope.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -98,6 +103,44 @@ test('resolveManualFromCatalog prefers id, then exact path, and never picks MPX 
   assert.equal(resolveManualFromCatalog(CATALOG, { manualId: 721 })?.id, 721);
   assert.equal(asManualId('721'), 721);
   assert.equal(asManualId('nope'), null);
+});
+
+test('open manual 1086 is scoped by id with its title and model, even with an empty label', () => {
+  const ritter = {
+    id: 1086,
+    brand: 'Midmark',
+    title: 'Midmark Ritter 112/113 Special Procedure Table Service Manual',
+    model: 'ritter_112_113',
+    storagePath: 'shared/midmark/ritter_112_113/Midmark_ritter_112_113_Service_Manual.pdf',
+  };
+  const prompt = selectedManualContext(ritter);
+  assert.equal(edgeSelectedManualContext(ritter), prompt);
+  assert.match(prompt, /Midmark Ritter 112\/113 Special Procedure Table Service Manual/);
+  assert.match(prompt, /ritter_112_113/);
+  assert.match(prompt, /id: 1086/);
+  assert.match(prompt, /indexed text before any other book/);
+  assert.doesNotMatch(prompt, /None selected/);
+  assert.equal(
+    manualDisplayLabel(ritter.brand, ritter.title),
+    'Midmark Ritter 112/113 Special Procedure Table Service Manual'
+  );
+  assert.equal(collectionSearchRequiresManualMatch({ manualId: 1086, manualLabel: '' }), true);
+  assert.equal(edgeCollectionSearchRequiresManualMatch({ manualId: '1086' }), true);
+  assert.equal(collectionSearchRequiresManualMatch({ manualId: null, manualLabel: '' }), false);
+  assert.match(selectedManualContext({}), /None selected/);
+
+  const payload = buildGrokChatPayload({
+    messages: [{ role: 'user', content: 'The back actuator is leaking hydraulic fluid.' }],
+    manualId: '1086',
+    manualPath: ritter.storagePath,
+    manualTitle: ritter.title,
+    manualBrand: ritter.brand,
+    manualModel: ritter.model,
+  });
+  assert.equal(payload.manualId, 1086);
+  assert.equal(payload.manualTitle, ritter.title);
+  assert.equal(payload.manualBrand, 'Midmark');
+  assert.equal(payload.manualModel, 'ritter_112_113');
 });
 
 test('changing the dropdown sends the new id/path and drops the previous manual’s turns', () => {
@@ -391,6 +434,19 @@ test('large manuals are not attached, and a missing corpus still gets general gu
   assert.match(client, /assistantManualPicker/);
   assert.match(client, /fetchAllPages/);
   assert.match(client, /eq\('id', urlManualId\)/);
+  assert.match(client, /manualTitle/);
+  assert.match(client, /manualModel/);
+  const chatLookup = chat.slice(chat.indexOf('const rawId'), chat.indexOf('const nonSys'));
+  assert.match(chatLookup, /\.eq\('id', rawId\)/);
+  assert.doesNotMatch(chatLookup, /resolveManualFromCatalog\(manuals/);
+  assert.match(chat, /selectedManualContext\(/);
+  assert.match(chat, /collectionSearchRequiresManualMatch/);
+  const rail = readFileSync(join(here, '../../components/ViewerAiPanel.tsx'), 'utf8');
+  const viewer = readFileSync(join(here, '../../components/ManualPdfViewer.tsx'), 'utf8');
+  assert.match(rail, /manualTitle: title/);
+  assert.match(rail, /manualModel: model/);
+  assert.match(viewer, /model=\{catalogModel\}/);
+  assert.match(viewer, /brand,title,model/);
   assert.doesNotMatch(chat, /manualCorpusFallbackMessage\(/);
 });
 

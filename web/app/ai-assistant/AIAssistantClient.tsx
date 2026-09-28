@@ -36,6 +36,7 @@ type ManualRow = {
   title: string;
   storage_path: string;
   brand: string | null;
+  model?: string | null;
 };
 
 const QUICK_CHIPS: { label: string; prompt: string }[] = [
@@ -203,7 +204,7 @@ export default function AIAssistantClient() {
       // Manuals catalog. Default PostgREST page is 1000 rows; Zeiss (manual 76)
       // sorts after that, so page through and still fetch the URL id directly.
       const loaded = await fetchAllPages<ManualRow>((from, to) =>
-        supabase.from('manuals').select('id,title,storage_path,brand').order('brand').order('title').range(from, to)
+        supabase.from('manuals').select('id,title,storage_path,brand,model').order('brand').order('title').range(from, to)
       );
       if (loaded.error) {
         console.warn('manuals load', loaded.error);
@@ -213,7 +214,7 @@ export default function AIAssistantClient() {
       if (urlManualId != null && !rows.some((r) => asManualId(r.id) === urlManualId)) {
         const { data: one, error: oneErr } = await supabase
           .from('manuals')
-          .select('id,title,storage_path,brand')
+          .select('id,title,storage_path,brand,model')
           .eq('id', urlManualId)
           .maybeSingle();
         if (oneErr) console.warn('manual by id', oneErr);
@@ -316,6 +317,9 @@ export default function AIAssistantClient() {
       messages: nextMsgs,
       manualId: currentId,
       manualPath: currentPath,
+      manualTitle: selectedManual ? catalogManualTitle(selectedManual) : '',
+      manualBrand: selectedManual?.brand || brand,
+      manualModel: selectedManual?.model || '',
       lastSentManualId: lastSentRef.current.id,
       lastSentManualPath: lastSentRef.current.path,
     });
@@ -326,6 +330,9 @@ export default function AIAssistantClient() {
       messages: payload.messages,
       manualPath: payload.manualPath,
       manualId: payload.manualId,
+      manualTitle: payload.manualTitle,
+      manualBrand: payload.manualBrand,
+      manualModel: payload.manualModel,
       scopeChanged: payload.scopeChanged,
     });
 

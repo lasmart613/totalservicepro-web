@@ -16,10 +16,13 @@ import { serve } from 'https://deno.land/std@0.168.0/http/server.ts'
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   asManualId,
+  collectionSearchRequiresManualMatch,
   folderPrefixForAiAttach,
+  normalizeManualPath,
   pdfPageCountFromBytes,
   pdfPathsForAiAttach,
   resolveManualFromCatalog,
+  selectedManualContext,
   WHOLE_PDF_ATTACH_MAX_BYTES,
   wholePdfAttachAllowed,
   type PdfAttachStat,
@@ -1785,13 +1788,54 @@ serve(async (req) => {
       let manualMeta: any = null
       const rawPath = String(manualPath || '').trim()
       const rawId = asManualId(manualId)
+      const hintedTitle = String(body.manualTitle || body.title || '').trim()
+      const hintedBrand = String(body.manualBrand || body.brand || '').trim()
+      const hintedModel = String(body.manualModel || body.model || '').trim()
+      // PostgREST returns at most 1000 rows. An unbounded manuals select dropped
+      // id 1086 (catalog has 1151 rows), so the prompt said no manual was selected
+      // and collection search ran unscoped. Look up the open id directly.
+      const manualCols =
+        'id,title,brand,model,storage_path,entry_file_path,chapter_metadata,is_incomplete,is_folder'
       try {
-        const { data: manuals } = await db
-          .from('manuals')
-          .select('id,title,brand,model,storage_path,entry_file_path,chapter_metadata,is_incomplete,is_folder')
-        manualMeta = resolveManualFromCatalog(manuals || [], { manualId: rawId, manualPath: rawPath })
+        if (rawId != null) {
+          const { data } = await db.from('manuals').select(manualCols).eq('id', rawId).maybeSingle()
+          if (data) manualMeta = data
+        }
+        if (!manualMeta) {
+          const path = normalizeManualPath(rawPath)
+          if (path) {
+            const { data: exact } = await db.from('manuals').select(manualCols).eq('storage_path', path).limit(8)
+            manualMeta = resolveManualFromCatalog(exact || [], { manualId: rawId, manualPath: path })
+            if (!manualMeta && path.includes('/')) {
+              const folder = path.replace(/\/[^/]+$/, '')
+              if (folder && folder !== path) {
+                const { data: parent } = await db
+                  .from('manuals')
+                  .select(manualCols)
+                  .eq('storage_path', folder)
+                  .limit(8)
+                manualMeta = resolveManualFromCatalog(parent || [], { manualId: rawId, manualPath: path })
+              }
+            }
+          }
+        }
+        if (!manualMeta && rawId != null && (hintedTitle || hintedBrand || hintedModel)) {
+          manualMeta = {
+            id: rawId,
+            title: hintedTitle,
+            brand: hintedBrand,
+            model: hintedModel,
+            storage_path: rawPath,
+          }
+        }
         if (manualMeta) {
-          manualLabel = `${manualMeta.brand || ''} ${manualMeta.title || ''}`.trim()
+          if (!manualMeta.model && hintedModel) manualMeta.model = hintedModel
+          if (!manualMeta.brand && hintedBrand) manualMeta.brand = hintedBrand
+          if (!manualMeta.title && hintedTitle) manualMeta.title = hintedTitle
+          const brand = String(manualMeta.brand || '').trim()
+          const title = String(manualMeta.title || '').trim()
+          manualLabel =
+            brand && title.toLowerCase().startsWith(brand.toLowerCase()) ? title : `${brand} ${title}`.trim()
         }
       } catch (_e) {}
 
@@ -1859,12 +1903,16 @@ serve(async (req) => {
       if (userText) {
         try {
           const sq = buildSearchQuery(userText, manualLabel, faultCodes)
-          const wantResolve = !!(manageKey && (manualLabel || expectedFilenames.length))
+          const manualScoped = collectionSearchRequiresManualMatch({
+            manualId: manualMeta?.id ?? rawId,
+            manualLabel,
+          })
+          const wantResolve = !!(manageKey && manualScoped && (manualLabel || expectedFilenames.length))
           const searchP = searchManualCollection(
             XAI_KEY,
             sq,
             matchTokens,
-            !!manualLabel,
+            manualScoped,
             chapterKeys,
             undefined,
             'hybrid',
@@ -1925,7 +1973,7 @@ serve(async (req) => {
               chapterKeys,
               fileIds: selectedCollectionFileIds,
               expectedFilenames,
-              requireMatch: !!manualLabel,
+              requireMatch: manualScoped,
             })
             searched = {
               parts: retrievedFromHits(filtered.parts, expectedFilenames),
@@ -1942,7 +1990,7 @@ serve(async (req) => {
               XAI_KEY,
               sq,
               matchTokens,
-              !!manualLabel,
+              manualScoped,
               chapterKeys,
               selectedCollectionFileIds,
               'keyword',
@@ -2007,11 +2055,13 @@ serve(async (req) => {
         temperature = 0.2
       }
 
-      const manualCtx = manualLabel
-        ? `\n\n## SELECTED MANUAL\n"${manualLabel}" is selected (id: ${manualMeta?.id ?? 'n/a'}; path: ${
-            manualMeta?.storage_path || rawPath || 'n/a'
-          }). Unless the question clearly references a different device, answer only for this device.`
-        : `\n\n## SELECTED MANUAL\nNone selected. Prefer asking which system if the question is device-specific.`
+      const manualCtx = selectedManualContext({
+        id: manualMeta?.id ?? rawId,
+        title: manualMeta?.title || manualLabel,
+        brand: manualMeta?.brand,
+        model: manualMeta?.model,
+        storagePath: manualMeta?.storage_path || rawPath,
+      })
       const voiceCtx = voiceMode ? '\n\n## VOICE FORMAT\n4-7 sentences. No markdown.' : ''
       const composeSystem = () => {
         const depthCtx =

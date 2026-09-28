@@ -96,6 +96,9 @@ export type GrokChatPayload = {
   voiceMode: boolean;
   manualPath: string | null;
   manualId: number | null;
+  manualTitle: string | null;
+  manualBrand: string | null;
+  manualModel: string | null;
   messages: ChatMessage[];
   scopeChanged: boolean;
 };
@@ -105,10 +108,21 @@ export type GrokChatPayload = {
  * previously saved path. Changing brand/manual drops prior turns so the
  * model cannot keep citing the last book.
  */
+function cleanManualHint(value: unknown): string | null {
+  const s = String(value ?? '')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, 200);
+  return s || null;
+}
+
 export function buildGrokChatPayload(opts: {
   messages: ChatMessage[];
   manualId?: unknown;
   manualPath?: unknown;
+  manualTitle?: unknown;
+  manualBrand?: unknown;
+  manualModel?: unknown;
   lastSentManualId?: unknown;
   lastSentManualPath?: unknown;
   voiceMode?: boolean;
@@ -134,9 +148,68 @@ export function buildGrokChatPayload(opts: {
     voiceMode: opts.voiceMode === true,
     manualPath,
     manualId,
+    manualTitle: cleanManualHint(opts.manualTitle),
+    manualBrand: cleanManualHint(opts.manualBrand),
+    manualModel: cleanManualHint(opts.manualModel),
     messages,
     scopeChanged,
   };
+}
+
+/**
+ * A known catalog id is enough to scope RAG. An empty title must not fall
+ * through to an unscoped collection search (PostgREST's 1000-row page used
+ * to drop manuals such as id 1086, which then looked "unselected").
+ */
+export function collectionSearchRequiresManualMatch(opts: {
+  manualId?: unknown;
+  manualLabel?: unknown;
+}): boolean {
+  if (asManualId(opts.manualId) != null) return true;
+  return String(opts.manualLabel ?? '').trim().length > 0;
+}
+
+/** Brand + title, without repeating the brand when the title already starts with it. */
+export function manualDisplayLabel(brand: unknown, title: unknown): string {
+  const b = String(brand ?? '').trim();
+  const t = String(title ?? '').trim();
+  if (!b) return t;
+  if (!t) return b;
+  if (t.toLowerCase().startsWith(b.toLowerCase())) return t;
+  return `${b} ${t}`;
+}
+
+/**
+ * System-prompt block for the open manual. Includes the catalog title and model
+ * so the assistant does not ask which chair is selected.
+ */
+export function selectedManualContext(opts: {
+  id?: unknown;
+  title?: unknown;
+  brand?: unknown;
+  model?: unknown;
+  storagePath?: unknown;
+}): string {
+  const id = asManualId(opts.id);
+  const brand = String(opts.brand ?? '').trim();
+  const title = String(opts.title ?? '').trim();
+  const modelRaw = String(opts.model ?? '').trim();
+  const model = humanizeDeviceCode(modelRaw);
+  const label = manualDisplayLabel(brand, title);
+  const path = normalizeManualPath(opts.storagePath) || 'n/a';
+  if (id == null && !label && !model) {
+    return '\n\n## SELECTED MANUAL\nNone selected. Prefer asking which system if the question is device-specific.';
+  }
+  const who = label || (id != null ? `manual ${id}` : 'Selected manual');
+  const device = [brand, model].filter(Boolean).join(' ') || model;
+  const modelBit = model
+    ? ` Model: ${device} (catalog model ${modelRaw}).`
+    : '';
+  return (
+    `\n\n## SELECTED MANUAL\n"${who}" is selected (id: ${id ?? 'n/a'}; path: ${path}).${modelBit} ` +
+    `Answer only for this device. Use this manual's indexed text before any other book. ` +
+    `Do not cite a different manual's pages.`
+  );
 }
 
 const EXCERPT_STOPWORDS = new Set([

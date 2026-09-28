@@ -321,6 +321,7 @@ export function ManualPdfViewer({
   const [title, setTitle] = useState(titleFromQuery || 'Service Manual');
   const [catalogPath, setCatalogPath] = useState(storagePathFromQuery || '');
   const [catalogBrand, setCatalogBrand] = useState<string | null>(null);
+  const [catalogModel, setCatalogModel] = useState<string | null>(null);
   const [isIncomplete, setIsIncomplete] = useState(false);
   const [showRail, setShowRail] = useState(true);
   const [chapters, setChapters] = useState<ManualChapter[]>([]);
@@ -471,14 +472,14 @@ export function ManualPdfViewer({
             const supabase = getSupabaseClient();
             let row = await supabase
               .from('manuals')
-              .select('is_incomplete,storage_path,brand,title')
+              .select('is_incomplete,storage_path,brand,title,model')
               .eq('id', payload.manualId)
               .maybeSingle();
             if (row.error && /is_incomplete|schema cache|column/i.test(row.error.message || '')) {
               incomplete = payload.isIncomplete === true;
               row = await supabase
                 .from('manuals')
-                .select('storage_path,brand,title')
+                .select('storage_path,brand,title,model')
                 .eq('id', payload.manualId)
                 .maybeSingle();
             } else if (row.data && (row.data as { is_incomplete?: unknown }).is_incomplete === true) {
@@ -486,9 +487,15 @@ export function ManualPdfViewer({
             } else if (row.data) {
               incomplete = false;
             }
-            const data = row.data as { storage_path?: string; brand?: string | null; title?: string | null } | null;
+            const data = row.data as {
+              storage_path?: string;
+              brand?: string | null;
+              title?: string | null;
+              model?: string | null;
+            } | null;
             if (data?.storage_path && !cancelled) setCatalogPath(data.storage_path);
             if (data?.brand && !cancelled) setCatalogBrand(data.brand);
+            if (data?.model && !cancelled) setCatalogModel(data.model);
             if (data?.title && !cancelled && !titleFromQuery) setTitle(data.title);
           } catch {
             /* keep stashed flag */
@@ -822,6 +829,7 @@ export function ManualPdfViewer({
             title={title}
             storagePath={catalogPath || storagePathFromQuery}
             brand={catalogBrand}
+            model={catalogModel}
           />
         </aside>
 
