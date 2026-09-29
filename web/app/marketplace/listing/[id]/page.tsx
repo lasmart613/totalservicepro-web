@@ -10,6 +10,7 @@ import { ShareButton } from '@/components/ShareButton';
 import { listingShareText } from '@/lib/share';
 import { isPartListing, partsDetailPath } from '@/lib/marketplace/parts';
 import { useGuestSignupRedirect } from '@/lib/use-signed-in';
+import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
 
 export default function ListingDetail() {
   const params = useParams();
@@ -222,7 +223,20 @@ export default function ListingDetail() {
           )}
 
           {/* Bid Form */}
-          <div className="border-t pt-6">
+          <div className="border-t pt-6 space-y-3">
+            <AddListingToInvoiceButton
+              listing={{
+                id: listing.id || id,
+                title: listing.title,
+                part_number: listing.part_number,
+                price: listing.price,
+                price_type: listing.price_type,
+                manufacturer: listing.manufacturer,
+                model: listing.model,
+                serial_number: listing.serial_number,
+                details: listing.details,
+              }}
+            />
             {!userId ? (
               <div className="space-y-3">
                 <p className="text-sm text-[var(--text3)] text-center">

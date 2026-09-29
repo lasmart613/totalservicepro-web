@@ -85,6 +85,9 @@ export async function GET(
         images: listingImages(row),
         quantity: listingQuantity(row),
         price_label: formatListingPrice(row),
+        price: signedIn ? row.price : null,
+        price_type: signedIn ? row.price_type : null,
+        serial_number: signedIn ? row.serial_number : null,
         availability: listingAvailability(row),
       }));
 

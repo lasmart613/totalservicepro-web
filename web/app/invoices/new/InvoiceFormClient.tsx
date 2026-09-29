@@ -30,6 +30,7 @@ import {
   resolveInvoiceCollectable,
 } from '@/lib/billing/invoice-collectable';
 import { invoiceDataForSave } from '@/lib/billing/invoice-form-data';
+import { lineItemFromStored } from '@/lib/billing/listing-invoice';
 
 type CustomerOpt = LinkedCustomerOpt;
 
@@ -250,18 +251,7 @@ export default function InvoiceFormClient() {
       if (idata.custContact) setCustContact(idata.custContact);
       const lines = idata.line_items || [];
       if (Array.isArray(lines) && lines.length) {
-        setLineItems(
-          lines.map((li: any, i: number) =>
-            recomputeExt({
-              id: li.id || `LI${i + 1}`,
-              part_number: li.part_number || '',
-              description: li.description || '',
-              qty: Number(li.qty) || 0,
-              unit_price: Number(li.unit_price) || 0,
-              ext: Number(li.ext) || 0,
-            })
-          )
-        );
+        setLineItems(lines.map((li: unknown, i: number) => lineItemFromStored(li, i)));
       }
     },
     [supabase]
@@ -1052,6 +1042,14 @@ export default function InvoiceFormClient() {
                         onChange={(e) => updateLine(li.id, { description: e.target.value })}
                         placeholder="Description"
                       />
+                      {li.marketplace_listing_id ? (
+                        <Link
+                          href={`/marketplace/listing/${encodeURIComponent(li.marketplace_listing_id)}`}
+                          className="mt-1 inline-block text-xs text-[var(--gold)] hover:underline"
+                        >
+                          Marketplace listing
+                        </Link>
+                      ) : null}
                     </td>
                     <td className="py-1.5 pr-2">
                       <input

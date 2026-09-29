@@ -11,6 +11,7 @@ import { listingHref } from '@/lib/marketplace/guest';
 import { formatListingPrice, partsDetailPath } from '@/lib/marketplace/parts';
 import { GUEST_SIGNUP_HREF } from '@/lib/marketplace/guest';
 import { useSignedIn } from '@/lib/use-signed-in';
+import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
 
 type Seller = {
   name: string;
@@ -37,6 +38,9 @@ type ListingCard = {
   images?: string[];
   quantity?: number | null;
   price_label?: string;
+  price?: number | string | null;
+  price_type?: string | null;
+  serial_number?: string | null;
   availability?: { soldOut?: boolean };
 };
 
@@ -191,6 +195,19 @@ export default function SellerStorefrontPage() {
                   <Link href={href} className="btn btn-primary w-full text-sm">
                     {signedIn ? 'View details' : 'Sign up to view'}
                   </Link>
+                  <AddListingToInvoiceButton
+                    listing={{
+                      id: l.id,
+                      title: l.title,
+                      part_number: l.part_number,
+                      price: l.price,
+                      price_type: l.price_type,
+                      manufacturer: l.manufacturer,
+                      model: l.model,
+                      serial_number: l.serial_number,
+                    }}
+                    className="btn btn-secondary w-full text-sm mt-2"
+                  />
                 </div>
               );
             })}

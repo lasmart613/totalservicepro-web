@@ -47,6 +47,11 @@ export type LineItem = {
   qty: number;
   unit_price: number;
   ext: number;
+  /**
+   * marketplace_listings.id when this line was added from a listing.
+   * Stored inside invoice_data JSON — no column of its own.
+   */
+  marketplace_listing_id?: string;
 };
 
 export function emptyLineItem(prefix = 'LI'): LineItem {
