@@ -23,6 +23,7 @@ import {
 import { toast } from 'sonner';
 import { ArrowLeft, Image as ImageIcon, Package } from 'lucide-react';
 import { useGuestSignupRedirect } from '@/lib/use-signed-in';
+import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
 
 function PartDetail() {
   const params = useParams();
@@ -481,6 +482,19 @@ function PartDetail() {
                 <p className="text-xs text-center text-[var(--text3)]">
                   Secure Stripe Checkout on RepairPlanet. Login is not required to buy.
                 </p>
+                <AddListingToInvoiceButton
+                  listing={{
+                    id: listing.id || id,
+                    title: listing.title,
+                    part_number: listing.part_number,
+                    price: listing.price,
+                    price_type: listing.price_type,
+                    manufacturer: listing.manufacturer,
+                    model: listing.model,
+                    serial_number: listing.serial_number,
+                    details: listing.details,
+                  }}
+                />
               </div>
 
               <div className="border-t border-[var(--border)] mt-8 pt-6">

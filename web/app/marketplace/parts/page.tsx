@@ -26,6 +26,7 @@ import {
 import { listingHref } from '@/lib/marketplace/guest';
 import { GuestAwarePrice } from '@/components/marketplace/GuestAwarePrice';
 import { useSignedIn } from '@/lib/use-signed-in';
+import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
 import { toast } from 'sonner';
 
 export default function PartsMarketplace() {
@@ -333,6 +334,7 @@ export default function PartsMarketplace() {
                       Sign up to offer
                     </Link>
                   )}
+                  <AddListingToInvoiceButton listing={l} className="btn btn-secondary w-full text-sm mt-2" />
 
                   {biddingOn?.id === l.id && (
                     <div className="mt-3 p-3 bg-[var(--surface3)] rounded">
