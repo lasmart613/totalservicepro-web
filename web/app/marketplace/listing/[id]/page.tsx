@@ -10,6 +10,7 @@ import { ShareButton } from '@/components/ShareButton';
 import { listingShareText } from '@/lib/share';
 import { isPartListing, partsDetailPath } from '@/lib/marketplace/parts';
 import { useGuestSignupRedirect } from '@/lib/use-signed-in';
+import { marketplaceAuthHeaders } from '@/lib/marketplace/client-auth';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
 
 export default function ListingDetail() {
@@ -48,9 +49,11 @@ export default function ListingDetail() {
       data = direct;
     } else {
       try {
+        const headers = await marketplaceAuthHeaders();
         const res = await fetch(`/api/share/listing/${encodeURIComponent(id)}`, {
           method: 'GET',
           cache: 'no-store',
+          headers,
         });
         const json = await res.json().catch(() => ({}));
         if (res.ok && json?.listing) data = json.listing;
@@ -235,6 +238,7 @@ export default function ListingDetail() {
                 model: listing.model,
                 serial_number: listing.serial_number,
                 details: listing.details,
+                organization_id: listing.organization_id,
               }}
             />
             {!userId ? (

@@ -4,24 +4,23 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
-import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import {
-  buildNewListingInvoicePayload,
+  canShowAddListingToInvoice,
   draftInvoiceOptionLabel,
   invoiceEditPath,
   isDraftInvoiceStatus,
   listingToInvoiceLine,
-  mergeListingOntoDraft,
   parseInvoiceQty,
   type ListingInvoiceSource,
 } from '@/lib/billing/listing-invoice';
-import { money, writeWithColumnRetry } from '@/lib/billing/save-helpers';
+import { money } from '@/lib/billing/save-helpers';
 import {
   filterLinkedCustomers,
   loadLinkedCustomerOrgs,
   matchLinkedCustomer,
   type LinkedCustomerOpt,
 } from '@/lib/customer-form';
+import { marketplaceAuthHeaders } from '@/lib/marketplace/client-auth';
 import { formatListingPrice } from '@/lib/marketplace/parts';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { useServiceCompanyOrg } from '@/lib/use-service-company-org';
@@ -48,7 +47,8 @@ export function AddListingToInvoiceButton({
 }: Props) {
   const org = useServiceCompanyOrg();
   const [open, setOpen] = useState(false);
-  if (!org.ready || org.orgId == null || !org.userId) return null;
+  if (!org.ready || !org.userId || org.orgId == null) return null;
+  if (!canShowAddListingToInvoice(org.orgType, listing, org.orgId)) return null;
   return (
     <>
       <button type="button" className={className} onClick={() => setOpen(true)}>
@@ -58,7 +58,6 @@ export function AddListingToInvoiceButton({
         <AddListingToInvoiceDialog
           listing={listing}
           orgId={org.orgId}
-          userId={org.userId}
           onClose={() => setOpen(false)}
         />
       )}
@@ -69,12 +68,10 @@ export function AddListingToInvoiceButton({
 function AddListingToInvoiceDialog({
   listing,
   orgId,
-  userId,
   onClose,
 }: {
   listing: ListingInvoiceSource;
   orgId: string | number;
-  userId: string;
   onClose: () => void;
 }) {
   const router = useRouter();
@@ -154,27 +151,15 @@ function AddListingToInvoiceDialog({
     setSaving(true);
     try {
       let id: string | number | null = null;
+      const headers = await marketplaceAuthHeaders();
+      let body: Record<string, unknown>;
       if (mode === 'existing') {
         if (!draftId) {
           toast.error('Choose a draft invoice');
           setSaving(false);
           return;
         }
-        const { data, error } = await supabase
-          .from('service_invoices')
-          .select('id, status, tax, total, amount_paid, invoice_data')
-          .eq('id', draftId)
-          .maybeSingle();
-        if (error || !data) throw new Error(error?.message || 'Could not load that invoice');
-        if (!isDraftInvoiceStatus(data.status)) {
-          toast.error('That invoice is no longer a draft. Pick another one or create a new invoice.');
-          setSaving(false);
-          return;
-        }
-        const patch = mergeListingOntoDraft(data, listingToInvoiceLine(listing, qty));
-        const result = await writeWithColumnRetry(supabase, 'service_invoices', patch, data.id);
-        if (result.error) throw result.error;
-        id = result.id || data.id;
+        body = { listing_id: listing.id, qty, mode, invoice_id: draftId };
       } else {
         const chosen = customer || matchLinkedCustomer(customers, custSearch);
         if (!chosen || !chosen.name.trim()) {
@@ -182,24 +167,16 @@ function AddListingToInvoiceDialog({
           setSaving(false);
           return;
         }
-        const invoiceNumber = await allocateDocNumber(supabase, {
-          orgId,
-          kind: 'INV',
-          date: new Date(),
-        });
-        if (!invoiceNumber) throw new Error('Could not allocate an invoice number. Try again.');
-        const payload = buildNewListingInvoicePayload({
-          orgId,
-          userId,
-          customer: chosen,
-          listing,
-          qty,
-          invoiceNumber,
-        });
-        const result = await writeWithColumnRetry(supabase, 'service_invoices', payload, null);
-        if (result.error) throw result.error;
-        id = result.id;
+        body = { listing_id: listing.id, qty, mode, customer_id: chosen.id };
       }
+      const res = await fetch('/api/billing/listing-invoice', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(body),
+      });
+      const json = (await res.json().catch(() => ({}))) as { id?: string | number; error?: string };
+      if (!res.ok || json.id == null) throw new Error(json.error || 'Could not add this item to an invoice');
+      id = json.id;
       if (id == null) throw new Error('Invoice was not saved');
       toast.success('Added to invoice');
       router.push(invoiceEditPath(id));

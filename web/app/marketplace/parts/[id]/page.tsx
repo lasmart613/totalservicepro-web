@@ -50,6 +50,7 @@ function PartDetail() {
     views?: number;
     details?: Record<string, unknown> | null;
     seller_name?: string | null;
+    organization_id?: string | number | null;
   })>(null);
   const [loading, setLoading] = useState(true);
   const [selectedPhoto, setSelectedPhoto] = useState(0);
@@ -115,9 +116,11 @@ function PartDetail() {
 
     if (!data) {
       try {
+        const headers = await marketplaceAuthHeaders();
         const res = await fetch(`/api/share/listing/${encodeURIComponent(id)}`, {
           method: 'GET',
           cache: 'no-store',
+          headers,
         });
         const json = await res.json().catch(() => ({}));
         if (res.ok && json?.listing && isPartListing(json.listing)) data = json.listing;
@@ -493,6 +496,7 @@ function PartDetail() {
                     model: listing.model,
                     serial_number: listing.serial_number,
                     details: listing.details,
+                    organization_id: listing.organization_id,
                   }}
                 />
               </div>

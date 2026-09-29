@@ -10,6 +10,7 @@ import {
   listingSellerName,
   type MarketplaceListingLike,
 } from '@/lib/marketplace/parts';
+import { listingOrgIdVisibleToViewer } from '@/lib/billing/listing-invoice';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
@@ -49,7 +50,11 @@ async function loadPartRows(): Promise<{ rows: MarketplaceListingLike[]; error: 
   return { rows, error };
 }
 
-function publicize(row: MarketplaceListingLike, canManage: boolean) {
+function publicize(
+  row: MarketplaceListingLike,
+  canManage: boolean,
+  viewerOrgId?: string | number | null
+) {
   const details =
     row.details && typeof row.details === 'object' ? { ...row.details } : row.details;
   if (details && typeof details === 'object') {
@@ -65,7 +70,9 @@ function publicize(row: MarketplaceListingLike, canManage: boolean) {
     images: listingImages(row),
     seller_id: canManage ? row.seller_id : undefined,
     created_by: canManage ? row.created_by : undefined,
-    organization_id: canManage ? row.organization_id : undefined,
+    organization_id: canManage
+      ? row.organization_id
+      : listingOrgIdVisibleToViewer(row.organization_id, viewerOrgId),
     seller_name: listingSellerName(row),
     quantity: listingQuantity(row),
     price_label: formatListingPrice(row),
@@ -87,7 +94,7 @@ export async function GET(req: NextRequest) {
       );
     }
     const mine = req.nextUrl.searchParams.get('mine') === '1';
-    const caller = mine ? await getMarketplaceCaller(req) : null;
+    const caller = await getMarketplaceCaller(req);
     if (mine && !caller) {
       return NextResponse.json({ error: 'Sign in required', listings: [] }, { status: 401 });
     }
@@ -103,7 +110,9 @@ export async function GET(req: NextRequest) {
         if (mine && caller) return canManageMarketplaceListing(row, caller);
         return isPublicListingStatus(row.status);
       })
-      .map((row) => publicize(row, !!(mine && caller && canManageMarketplaceListing(row, caller))));
+      .map((row) =>
+        publicize(row, !!(mine && caller && canManageMarketplaceListing(row, caller)), caller?.orgId)
+      );
 
     return NextResponse.json({ listings, mine: !!mine });
   } catch (e: unknown) {

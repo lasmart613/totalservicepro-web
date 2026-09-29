@@ -9,9 +9,10 @@ export type ServiceCompanyOrg = {
   ready: boolean;
   orgId: string | number | null;
   userId: string | null;
+  orgType: string | null;
 };
 
-const empty: ServiceCompanyOrg = { ready: false, orgId: null, userId: null };
+const empty: ServiceCompanyOrg = { ready: false, orgId: null, userId: null, orgType: null };
 
 let snapshot: ServiceCompanyOrg = empty;
 let pending: Promise<void> | null = null;
@@ -31,7 +32,7 @@ function refresh(): Promise<void> {
         data: { user },
       } = await supabase.auth.getUser();
       if (!user) {
-        publish({ ready: true, orgId: null, userId: null });
+        publish({ ready: true, orgId: null, userId: null, orgType: null });
         return;
       }
       const { data: profile } = await supabase
@@ -41,7 +42,7 @@ function refresh(): Promise<void> {
         .maybeSingle();
       const orgId = coerceOrgId(profile?.organization_id);
       if (orgId == null) {
-        publish({ ready: true, orgId: null, userId: user.id });
+        publish({ ready: true, orgId: null, userId: user.id, orgType: null });
         return;
       }
       const { data: org } = await supabase
@@ -53,9 +54,10 @@ function refresh(): Promise<void> {
         ready: true,
         orgId: canAddListingToInvoice(org?.type) ? orgId : null,
         userId: user.id,
+        orgType: org?.type ?? null,
       });
     } catch {
-      publish({ ready: true, orgId: null, userId: null });
+      publish({ ready: true, orgId: null, userId: null, orgType: null });
     }
   })().finally(() => {
     pending = null;

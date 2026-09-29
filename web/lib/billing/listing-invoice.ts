@@ -6,8 +6,14 @@
  * Writes go through the same service_invoices insert/update the invoice form
  * uses (writeWithColumnRetry + allocateDocNumber). Send and Stripe pay are
  * unchanged; the shop reviews the draft on the existing edit page.
+ *
+ * Only the seller organization may invoice a listing. That check compares
+ * marketplace_listings.organization_id to the signed-in member's active
+ * organization (user_profiles.organization_id) and runs again on the server
+ * before any invoice row is written.
  */
 
+import { sameOrg } from '../org-membership.ts';
 import { isServiceOrgType } from '../org-types.ts';
 import { listingPriceDollars, type MarketplaceListingLike } from '../marketplace/parts.ts';
 import {
@@ -32,6 +38,8 @@ export type ListingInvoiceSource = {
   model?: string | null;
   serial_number?: string | null;
   details?: Record<string, unknown> | null;
+  /** Seller organization. Compared to the viewer's active organization. */
+  organization_id?: string | number | null;
 };
 
 export type ListingInvoiceCustomer = {
@@ -49,6 +57,61 @@ export type ListingInvoiceCustomer = {
 /** Active organization is a service company. Role is not consulted. */
 export function canAddListingToInvoice(orgType?: string | null): boolean {
   return isServiceOrgType(orgType);
+}
+
+export const FOREIGN_LISTING_INVOICE_ERROR =
+  'You can only add listings posted by your organization';
+
+/**
+ * The listing's seller organization is marketplace_listings.organization_id.
+ * The viewer's active organization is user_profiles.organization_id.
+ * Other memberships do not count — only the active org.
+ */
+export function listingOwnedByActiveOrg(
+  listing: { organization_id?: string | number | null } | null | undefined,
+  activeOrgId: string | number | null | undefined
+): boolean {
+  if (!listing || activeOrgId == null || activeOrgId === '') return false;
+  return sameOrg(listing.organization_id, activeOrgId);
+}
+
+/** Show Add to invoice only for a service company's own listings. */
+export function canShowAddListingToInvoice(
+  orgType: string | null | undefined,
+  listing: { organization_id?: string | number | null } | null | undefined,
+  activeOrgId: string | number | null | undefined
+): boolean {
+  return canAddListingToInvoice(orgType) && listingOwnedByActiveOrg(listing, activeOrgId);
+}
+
+/**
+ * Organization id safe to put on a public listing card.
+ * Returned only when it is the viewer's active org, so other sellers stay omitted.
+ */
+export function listingOrgIdVisibleToViewer(
+  listingOrgId: string | number | null | undefined,
+  viewerOrgId: string | number | null | undefined
+): string | number | undefined {
+  if (!listingOwnedByActiveOrg({ organization_id: listingOrgId }, viewerOrgId)) return undefined;
+  return listingOrgId == null ? undefined : listingOrgId;
+}
+
+export type ListingInvoiceFailure = { ok: false; status: number; error: string };
+
+export function listingInvoiceBlockReason(
+  actor: { activeOrgId?: string | number | null; orgType?: string | null },
+  listing: ListingInvoiceSource | null | undefined
+): ListingInvoiceFailure | null {
+  if (!canAddListingToInvoice(actor.orgType)) {
+    return { ok: false, status: 403, error: 'Only a service company can add a listing to an invoice' };
+  }
+  if (!listing || listing.id == null || !String(listing.id).trim()) {
+    return { ok: false, status: 404, error: 'Listing not found' };
+  }
+  if (!listingOwnedByActiveOrg(listing, actor.activeOrgId)) {
+    return { ok: false, status: 403, error: FOREIGN_LISTING_INVOICE_ERROR };
+  }
+  return null;
 }
 
 export function invoiceEditPath(id: string | number): string {
@@ -305,4 +368,118 @@ export function draftInvoiceOptionLabel(row: {
   const num = String(row.invoice_number || data.invoice_number || data.invNumber || '').trim();
   const who = String(row.customer_name || 'No customer').trim() || 'No customer';
   return [num || 'Draft', who, money(Number(row.total) || 0)].join(' · ');
+}
+
+export type ListingInvoiceActor = {
+  userId: string;
+  activeOrgId: string | number | null;
+  orgType?: string | null;
+};
+
+export type ListingInvoiceRequest = {
+  listingId?: string | number | null;
+  qty?: unknown;
+  mode?: string | null;
+  invoiceId?: string | number | null;
+  customerId?: string | number | null;
+};
+
+export type ListingInvoiceDraftRow = {
+  id?: string | number | null;
+  status?: unknown;
+  organization_id?: string | number | null;
+  invoice_data?: unknown;
+  tax?: unknown;
+  amount_paid?: unknown;
+  total?: unknown;
+};
+
+export type ListingInvoiceIo = {
+  loadListing: (id: string) => Promise<ListingInvoiceSource | null>;
+  loadDraft: (id: string | number, orgId: string | number) => Promise<ListingInvoiceDraftRow | null>;
+  loadCustomer: (orgId: string | number, customerId: string | number) => Promise<ListingInvoiceCustomer | null>;
+  allocateInvoiceNumber: (orgId: string | number) => Promise<string | null>;
+  writeInvoice: (
+    payload: Record<string, unknown>,
+    existingId: string | number | null
+  ) => Promise<{ id: string | number | null; error: { message?: string } | null }>;
+};
+
+export type ListingInvoiceResult = { ok: true; id: string | number } | ListingInvoiceFailure;
+
+/**
+ * Create or update an invoice line from a marketplace listing.
+ * The listing row comes from loadListing (the database), never from the client.
+ * A listing whose organization_id is not the actor's active org is rejected
+ * before any invoice read or write.
+ */
+export async function runAddListingToInvoice(
+  actor: ListingInvoiceActor,
+  request: ListingInvoiceRequest,
+  io: ListingInvoiceIo,
+  now?: Date
+): Promise<ListingInvoiceResult> {
+  const listingId = String(request.listingId ?? '').trim();
+  if (!listingId) return { ok: false, status: 400, error: 'Missing listing' };
+
+  const listing = await io.loadListing(listingId);
+  const blocked = listingInvoiceBlockReason(actor, listing);
+  if (blocked) return blocked;
+
+  const qty = parseInvoiceQty(request.qty);
+  if (qty == null) return { ok: false, status: 400, error: 'Enter a quantity of at least 1' };
+
+  const mode = String(request.mode || '').trim();
+  let existingId: string | number | null = null;
+  let payload: Record<string, unknown>;
+
+  if (mode === 'existing') {
+    if (request.invoiceId == null || String(request.invoiceId).trim() === '') {
+      return { ok: false, status: 400, error: 'Choose a draft invoice' };
+    }
+    const draft = await io.loadDraft(request.invoiceId, actor.activeOrgId as string | number);
+    if (!draft || draft.id == null) return { ok: false, status: 404, error: 'Invoice not found' };
+    if (!sameOrg(draft.organization_id, actor.activeOrgId)) {
+      return { ok: false, status: 403, error: 'That invoice belongs to another organization' };
+    }
+    if (!isDraftInvoiceStatus(draft.status)) {
+      return {
+        ok: false,
+        status: 409,
+        error: 'That invoice is no longer a draft. Pick another one or create a new invoice.',
+      };
+    }
+    existingId = draft.id;
+    payload = mergeListingOntoDraft(draft, listingToInvoiceLine(listing as ListingInvoiceSource, qty));
+  } else if (mode === 'new') {
+    if (request.customerId == null || String(request.customerId).trim() === '') {
+      return { ok: false, status: 400, error: 'Choose a customer' };
+    }
+    const customer = await io.loadCustomer(actor.activeOrgId as string | number, request.customerId);
+    if (!customer || !String(customer.name || '').trim()) {
+      return { ok: false, status: 400, error: 'Choose a customer' };
+    }
+    const invoiceNumber = await io.allocateInvoiceNumber(actor.activeOrgId as string | number);
+    if (!invoiceNumber) {
+      return { ok: false, status: 500, error: 'Could not allocate an invoice number. Try again.' };
+    }
+    payload = buildNewListingInvoicePayload({
+      orgId: actor.activeOrgId as string | number,
+      userId: actor.userId,
+      customer,
+      listing: listing as ListingInvoiceSource,
+      qty,
+      invoiceNumber,
+      now,
+    });
+  } else {
+    return { ok: false, status: 400, error: 'Choose an existing draft or a new invoice' };
+  }
+
+  const written = await io.writeInvoice(payload, existingId);
+  if (written.error) {
+    return { ok: false, status: 500, error: written.error.message || 'Could not save the invoice' };
+  }
+  if (written.id == null) return { ok: false, status: 500, error: 'Invoice was not saved' };
+  return { ok: true, id: written.id };
 }
