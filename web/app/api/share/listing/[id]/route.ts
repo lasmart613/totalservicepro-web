@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { listingOrgIdVisibleToViewer } from '@/lib/billing/listing-invoice';
+import { getMarketplaceCaller } from '@/lib/marketplace/caller';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
@@ -50,6 +52,12 @@ export async function GET(
       return NextResponse.json({ error: 'Not found' }, { status: 404 });
     }
 
+    const caller = await getMarketplaceCaller(_req);
+    const organizationId = listingOrgIdVisibleToViewer(
+      data.organization_id as string | number | null | undefined,
+      caller?.orgId
+    );
+
     const st = String(data.status || 'active').toLowerCase();
     if (!['active', 'open', 'published'].includes(st)) {
       return NextResponse.json(
@@ -75,7 +83,7 @@ export async function GET(
         details,
         seller_id: undefined,
         created_by: undefined,
-        organization_id: undefined,
+        organization_id: organizationId,
         _public_share: true,
       },
     });

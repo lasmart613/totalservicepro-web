@@ -18,6 +18,7 @@ import {
   supplierGetsFeaturedPlacement,
 } from '@/lib/marketplace/storefront';
 import { loadPublicStorefrontBySlug } from '@/lib/marketplace/storefront-server';
+import { listingOrgIdVisibleToViewer } from '@/lib/billing/listing-invoice';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
@@ -89,6 +90,7 @@ export async function GET(
         price_type: signedIn ? row.price_type : null,
         serial_number: signedIn ? row.serial_number : null,
         availability: listingAvailability(row),
+        organization_id: listingOrgIdVisibleToViewer(row.organization_id ?? org.id, caller?.orgId),
       }));
 
     return NextResponse.json({

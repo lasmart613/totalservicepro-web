@@ -42,6 +42,7 @@ type ListingCard = {
   price_type?: string | null;
   serial_number?: string | null;
   availability?: { soldOut?: boolean };
+  organization_id?: string | number | null;
 };
 
 export default function SellerStorefrontPage() {
@@ -205,6 +206,7 @@ export default function SellerStorefrontPage() {
                       manufacturer: l.manufacturer,
                       model: l.model,
                       serial_number: l.serial_number,
+                      organization_id: l.organization_id,
                     }}
                     className="btn btn-secondary w-full text-sm mt-2"
                   />

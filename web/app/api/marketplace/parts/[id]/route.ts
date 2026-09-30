@@ -22,6 +22,7 @@ import {
 } from '@/lib/marketplace/parts';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { resolveListingStorefront } from '@/lib/marketplace/storefront-server';
+import { listingOrgIdVisibleToViewer } from '@/lib/billing/listing-invoice';
 
 export const dynamic = 'force-dynamic';
 
@@ -38,14 +39,21 @@ async function listingParams(ctx: { params: Promise<{ id: string }> | { id: stri
   return raw?.id || '';
 }
 
-function publicListingPayload(listing: ListingRow, sellerName: string | null, canManage: boolean) {
+function publicListingPayload(
+  listing: ListingRow,
+  sellerName: string | null,
+  canManage: boolean,
+  viewerOrgId?: string | number | null
+) {
   return {
     ...listing,
     details: sanitizeListingDetails(listing.details),
     images: listingImages(listing),
     seller_id: canManage ? listing.seller_id : undefined,
     created_by: canManage ? listing.created_by : undefined,
-    organization_id: canManage ? listing.organization_id : undefined,
+    organization_id: canManage
+      ? listing.organization_id
+      : listingOrgIdVisibleToViewer(listing.organization_id, viewerOrgId),
     seller_name: sellerName,
     quantity: listingQuantity(listing),
   };
@@ -83,7 +91,7 @@ export async function GET(
     const sellerStorefront = await resolveListingStorefront(listing.organization_id);
 
     return NextResponse.json({
-      listing: publicListingPayload(listing, sellerName, canManage),
+      listing: publicListingPayload(listing, sellerName, canManage, caller?.orgId),
       availability,
       price_label: formatListingPrice(listing),
       path: partsDetailPath(id),

@@ -7,14 +7,20 @@ import {
   appendListingLine,
   buildNewListingInvoicePayload,
   canAddListingToInvoice,
+  canShowAddListingToInvoice,
   draftInvoiceOptionLabel,
+  FOREIGN_LISTING_INVOICE_ERROR,
   invoiceEditPath,
   isDraftInvoiceStatus,
   isPlaceholderInvoiceLine,
   lineItemFromStored,
+  listingOrgIdVisibleToViewer,
   listingToInvoiceLine,
   mergeListingOntoDraft,
   parseInvoiceQty,
+  runAddListingToInvoice,
+  type ListingInvoiceIo,
+  type ListingInvoiceSource,
 } from './listing-invoice.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -26,6 +32,15 @@ const flashlamp = {
   price: 250,
   manufacturer: 'Candela',
   model: 'GentleMax',
+};
+
+const ownListing: ListingInvoiceSource = { ...flashlamp, organization_id: 7 };
+const foreignListing: ListingInvoiceSource = {
+  id: 'lst_other',
+  title: 'Someone else flashlamp',
+  part_number: 'FL-9',
+  price: 80,
+  organization_id: 99,
 };
 
 test('service-company orgs can add a listing to an invoice', () => {
@@ -240,6 +255,181 @@ test('draft labels and qty parsing', () => {
   assert.equal(parseInvoiceQty('0'), null);
   assert.equal(parseInvoiceQty('-1'), null);
   assert.equal(parseInvoiceQty(''), null);
+});
+
+test('Add to invoice shows only when the listing organization is the active org', () => {
+  assert.equal(canShowAddListingToInvoice('service_company', ownListing, 7), true);
+  assert.equal(canShowAddListingToInvoice('service', ownListing, '7'), true);
+  assert.equal(canShowAddListingToInvoice('service_company', foreignListing, 7), false);
+  assert.equal(canShowAddListingToInvoice('service_company', { organization_id: 42 }, 7), false);
+  assert.equal(canShowAddListingToInvoice('service_company', { organization_id: null }, 7), false);
+  assert.equal(canShowAddListingToInvoice('service_company', ownListing, null), false);
+  assert.equal(canShowAddListingToInvoice('laser_clinic', ownListing, 7), false);
+  assert.equal(canShowAddListingToInvoice('parts_supplier', ownListing, 7), false);
+  assert.equal(listingOrgIdVisibleToViewer(7, 7), 7);
+  assert.equal(listingOrgIdVisibleToViewer(99, 7), undefined);
+});
+
+test('own listing invoice write succeeds and stores the listing id', async () => {
+  const writes: Array<{ payload: Record<string, unknown>; existingId: string | number | null }> = [];
+  const io: ListingInvoiceIo = {
+    loadListing: async (id) => ({ ...ownListing, id }),
+    loadDraft: async () => {
+      throw new Error('draft should not load for a new invoice');
+    },
+    loadCustomer: async () => ({ id: 99, name: 'North Clinic', email: 'billing@north.example' }),
+    allocateInvoiceNumber: async () => 'LPX-INV-20260929-01',
+    writeInvoice: async (payload, existingId) => {
+      writes.push({ payload, existingId });
+      return { id: 15, error: null };
+    },
+  };
+  const result = await runAddListingToInvoice(
+    { userId: 'user-1', activeOrgId: 7, orgType: 'service_company' },
+    { listingId: 'lst_flash', qty: 1, mode: 'new', customerId: 99 },
+    io,
+    new Date('2026-09-29T15:04:05.000Z')
+  );
+  assert.equal(result.ok, true);
+  if (!result.ok) return;
+  assert.equal(result.id, 15);
+  assert.equal(writes.length, 1);
+  assert.equal(writes[0].existingId, null);
+  assert.equal(writes[0].payload.organization_id, 7);
+  assert.equal(writes[0].payload.status, 'draft');
+  const data = writes[0].payload.invoice_data as { line_items: Array<Record<string, unknown>>; dueNow?: number };
+  assert.equal(data.line_items[0].marketplace_listing_id, 'lst_flash');
+  assert.equal(data.line_items[0].description, 'Candela GentleMax flashlamp');
+  assert.equal(data.line_items[0].unit_price, 250);
+  assert.equal(data.line_items[0].qty, 1);
+  assert.equal(data.dueNow, 250);
+});
+
+test('another organization listing is hidden from the action and the server rejects it', async () => {
+  assert.equal(canShowAddListingToInvoice('service_company', foreignListing, 7), false);
+  let writes = 0;
+  let drafts = 0;
+  const io: ListingInvoiceIo = {
+    loadListing: async () => foreignListing,
+    loadDraft: async () => {
+      drafts += 1;
+      return null;
+    },
+    loadCustomer: async () => {
+      throw new Error('customer should not load');
+    },
+    allocateInvoiceNumber: async () => {
+      throw new Error('number should not allocate');
+    },
+    writeInvoice: async () => {
+      writes += 1;
+      return { id: 1, error: null };
+    },
+  };
+  const result = await runAddListingToInvoice(
+    { userId: 'user-1', activeOrgId: 7, orgType: 'service_company' },
+    { listingId: 'lst_other', qty: 1, mode: 'new', customerId: 99 },
+    io
+  );
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.status, 403);
+  assert.equal(result.error, FOREIGN_LISTING_INVOICE_ERROR);
+  assert.equal(writes, 0);
+  assert.equal(drafts, 0);
+});
+
+test('updating a draft also rejects a foreign listing before the invoice is touched', async () => {
+  let writes = 0;
+  const result = await runAddListingToInvoice(
+    { userId: 'user-1', activeOrgId: 7, orgType: 'service_company' },
+    { listingId: 'lst_other', qty: 2, mode: 'existing', invoiceId: 4 },
+    {
+      loadListing: async () => ({ ...foreignListing, organization_id: '99' }),
+      loadDraft: async () => {
+        throw new Error('draft should not load');
+      },
+      loadCustomer: async () => null,
+      allocateInvoiceNumber: async () => null,
+      writeInvoice: async () => {
+        writes += 1;
+        return { id: 4, error: null };
+      },
+    }
+  );
+  assert.equal(result.ok, false);
+  if (result.ok) return;
+  assert.equal(result.status, 403);
+  assert.equal(writes, 0);
+});
+
+test('own listing can be appended to an existing draft and keeps the deposit split', async () => {
+  const writes: Array<Record<string, unknown>> = [];
+  const result = await runAddListingToInvoice(
+    { userId: 'user-1', activeOrgId: 7, orgType: 'service' },
+    { listingId: 'lst_flash', qty: 1, mode: 'existing', invoiceId: 4 },
+    {
+      loadListing: async () => ownListing,
+      loadDraft: async () => ({
+        id: 4,
+        status: 'draft',
+        organization_id: 7,
+        tax: 0,
+        amount_paid: 0,
+        total: 100,
+        invoice_data: {
+          line_items: [{ id: 'old', description: 'Labor', qty: 1, unit_price: 100, ext: 100 }],
+          dueNow: 40,
+          deferred: 60,
+          partsDeposit: 40,
+        },
+      }),
+      loadCustomer: async () => null,
+      allocateInvoiceNumber: async () => null,
+      writeInvoice: async (payload) => {
+        writes.push(payload);
+        return { id: 4, error: null };
+      },
+    }
+  );
+  assert.equal(result.ok, true);
+  const data = writes[0].invoice_data as {
+    line_items: Array<Record<string, unknown>>;
+    dueNow?: number;
+    deferred?: number;
+  };
+  assert.equal(data.line_items[1].marketplace_listing_id, 'lst_flash');
+  assert.equal(data.dueNow, 40);
+  assert.equal(data.deferred, 310);
+  assert.equal(writes[0].total, 350);
+});
+
+test('listing invoice route compares the stored organization and ignores the client', () => {
+  const route = readFileSync(join(here, '../../app/api/billing/listing-invoice/route.ts'), 'utf8');
+  const button = readFileSync(join(here, '../../components/marketplace/AddListingToInvoice.tsx'), 'utf8');
+  assert.match(route, /from\('user_profiles'\)/);
+  assert.match(route, /organization_id/);
+  assert.match(route, /from\('marketplace_listings'\)/);
+  assert.match(route, /runAddListingToInvoice/);
+  assert.doesNotMatch(route, /body\.organization_id/);
+  assert.match(route, /if \(!result\.ok\)/);
+  assert.match(route, /status: result\.status/);
+  assert.match(button, /if \(!canShowAddListingToInvoice\([\s\S]*?\)\) return null;/);
+  assert.match(button, /\/api\/billing\/listing-invoice/);
+  assert.doesNotMatch(button, /writeWithColumnRetry/);
+  assert.doesNotMatch(button, /disabled=\{!canShowAddListingToInvoice/);
+});
+
+test('detail and storefront cards pass the listing organization into Add to invoice', () => {
+  for (const rel of [
+    '../../app/marketplace/listing/[id]/page.tsx',
+    '../../app/marketplace/parts/[id]/page.tsx',
+  ]) {
+    const src = readFileSync(join(here, rel), 'utf8');
+    assert.match(src, /organization_id: listing\.organization_id/);
+  }
+  const storefront = readFileSync(join(here, '../../app/marketplace/sellers/[slug]/page.tsx'), 'utf8');
+  assert.match(storefront, /organization_id: l\.organization_id/);
 });
 
 test('invoice edit page reloads listing ids instead of dropping them', () => {

@@ -23,6 +23,7 @@ import {
   type MarketplaceListingLike,
   type PartsCatalogFilters,
 } from '@/lib/marketplace/parts';
+import { marketplaceAuthHeaders } from '@/lib/marketplace/client-auth';
 import { listingHref } from '@/lib/marketplace/guest';
 import { GuestAwarePrice } from '@/components/marketplace/GuestAwarePrice';
 import { useSignedIn } from '@/lib/use-signed-in';
@@ -65,7 +66,8 @@ export default function PartsMarketplace() {
         : [];
       if (rows.length === 0) {
         try {
-          const res = await fetch('/api/marketplace/parts', { cache: 'no-store' });
+          const headers = await marketplaceAuthHeaders();
+          const res = await fetch('/api/marketplace/parts', { cache: 'no-store', headers });
           const json = await res.json().catch(() => ({}));
           if (res.ok && Array.isArray(json?.listings)) {
             rows = (json.listings as MarketplaceListingLike[]).filter(
