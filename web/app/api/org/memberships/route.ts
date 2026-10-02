@@ -34,7 +34,7 @@ export async function GET(req: NextRequest) {
 
     const { data: profile } = await userClient
       .from('user_profiles')
-      .select('organization_id, active_organization_id, role, email')
+      .select('organization_id, active_organization_id, role')
       .eq('id', user.id)
       .maybeSingle();
 
@@ -44,7 +44,7 @@ export async function GET(req: NextRequest) {
 
     if (hasServiceRole()) {
       const admin = getSupabaseAdmin();
-      const email = (profile?.email || user.email || '').toLowerCase().trim();
+      const email = (user.email || '').toLowerCase().trim();
       if (email) {
         const { data: invRows } = await admin
           .from('engineer_invitations')

@@ -29,13 +29,23 @@ test('env allowlist replaces the default and ignores junk', () => {
   assert.deepEqual(godAllowlistUserIds({ GOD_ADMIN_USER_IDS: 'abc-1 abc-1, xyz' }), ['abc-1', 'xyz']);
 });
 
-test('only the allowlisted identity is God', () => {
+test('only the allowlisted auth identity is God', () => {
   assert.equal(isGodIdentity({ email: 'larrysmart@gmail.com' }, {}), true);
-  assert.equal(isGodIdentity({ profileEmail: 'LarrySmart@gmail.com' }, {}), true);
   assert.equal(isGodIdentity({ email: 'tony@shop.test' }, {}), false);
   assert.equal(isGodIdentity({ email: 'admin@example.com', id: 'u1' }, {}), false);
   assert.equal(isGodIdentity({ id: 'larry-id' }, { GOD_ADMIN_USER_IDS: 'larry-id' }), true);
   assert.equal(isGodIdentity(null, {}), false);
+});
+
+test('a profile email cannot grant God', () => {
+  const god = readFileSync(join(here, './god.ts'), 'utf8');
+  const auth = readFileSync(join(here, './god-auth.ts'), 'utf8');
+  assert.doesNotMatch(god, /profileEmail/);
+  assert.doesNotMatch(auth, /profileEmail/);
+  assert.doesNotMatch(auth, /from\('user_profiles'\)/);
+  assert.match(auth, /isGodIdentity\(\{ id: user\.id, email: user\.email \}\)/);
+  assert.equal(isGodIdentity({ email: 'tony@shop.test' }, {}), false);
+  assert.equal(isGodIdentity({ email: '  LarrySmart@Gmail.com ' }, {}), true);
 });
 
 test('God is not a Stripe plan or /plans tile', () => {
