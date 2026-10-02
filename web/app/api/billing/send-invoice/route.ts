@@ -188,7 +188,7 @@ export async function POST(req: NextRequest) {
         : 'Balance due is under $0.50 — no Stripe pay link added.';
     }
 
-    const subject = ownedDocumentSubject('invoice', inv.invoice_number);
+    const subject = ownedDocumentSubject('invoice', inv.invoice_number, company.company_name);
     const html = buildOwnedInvoiceMessage({ row: inv, company, theme, paymentUrl });
     const { signupUrl, loginUrl } = documentAccountLinks(publicSiteOrigin(req));
     const wrapped = wrapCustomerFacingDocumentEmail({

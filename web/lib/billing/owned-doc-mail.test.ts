@@ -12,6 +12,7 @@ import {
   documentOwnedByOrganization,
   loadOwnedDocument,
   loadSenderCompany,
+  ownedDocumentSubject,
   ownedSendRequest,
   resendMessage,
   resolveOwnedRecipient,
@@ -203,6 +204,28 @@ test('server-built estimate and report ignore a stored HTML blob', () => {
   );
   assert.match(report, /SR-4/);
   assert.doesNotMatch(report, /PWNED|attacker body/);
+});
+
+test('document subjects use the owning shop name', () => {
+  const shop = 'Cedar Laser Service';
+  assert.equal(ownedDocumentSubject('invoice', 'INV-9', shop), 'Invoice INV-9 from Cedar Laser Service');
+  assert.equal(ownedDocumentSubject('invoice', '', shop), 'Invoice from Cedar Laser Service');
+  assert.equal(ownedDocumentSubject('estimate', 'EST-3', shop), 'Estimate EST-3 from Cedar Laser Service');
+  assert.equal(ownedDocumentSubject('estimate', '', shop), 'Service estimate from Cedar Laser Service');
+  assert.equal(ownedDocumentSubject('report', 'SR-4', shop), 'Service Report SR-4 from Cedar Laser Service');
+  assert.equal(ownedDocumentSubject('report', '', shop), 'Service report from Cedar Laser Service');
+  for (const kind of ['invoice', 'estimate', 'report'] as const) {
+    const subject = ownedDocumentSubject(kind, '100', shop);
+    assert.match(subject, /Cedar Laser Service/);
+    assert.doesNotMatch(subject, /Total Service Pro/);
+  }
+  assert.equal(ownedDocumentSubject('invoice', 'INV-9', '   '), 'Invoice INV-9');
+  assert.equal(ownedDocumentSubject('estimate', '', null), 'Service estimate');
+  assert.equal(ownedDocumentSubject('report', '', ''), 'Service report');
+  assert.doesNotMatch(ownedDocumentSubject('invoice', '', undefined), /Total Service Pro/);
+  const start = libSrc.indexOf('export function ownedDocumentSubject');
+  const fn = libSrc.slice(start, libSrc.indexOf('export function', start + 10));
+  assert.doesNotMatch(fn, /Total Service Pro/);
 });
 
 test('resend payload uses the document recipient only', () => {
@@ -410,6 +433,8 @@ test('send routes stay locked to owned-document mail', () => {
     assert.match(src, /documentOwnedByOrganization\(/, rel);
     assert.match(src, /resolveOwnedRecipient\(/, rel);
     assert.match(src, /documentAccountLinks\(/, rel);
+    assert.match(src, /ownedDocumentSubject\([^)]*company\.company_name\s*\)/, rel);
+    assert.doesNotMatch(src, /from Total Service Pro/, rel);
     assert.match(src, /sanitizeMailResponse\(/, rel);
     assert.match(src, /fetchDirectoryContactSources\(\s*supabase/, rel);
     assert.match(src, /id is required/, rel);

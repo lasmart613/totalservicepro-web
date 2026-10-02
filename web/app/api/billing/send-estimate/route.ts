@@ -136,7 +136,7 @@ export async function POST(req: NextRequest) {
       console.warn('could not persist estimate action token', e);
     }
 
-    const subject = ownedDocumentSubject('estimate', est.estimate_number);
+    const subject = ownedDocumentSubject('estimate', est.estimate_number, company.company_name);
     let html = buildOwnedEstimateMessage({
       row: est,
       company,

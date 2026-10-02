@@ -114,18 +114,25 @@ export function documentAccountLinks(
   };
 }
 
+/**
+ * Subject keeps the existing wording. The only brand is the owning shop's name.
+ * A blank name is left off — nothing is substituted.
+ */
 export function ownedDocumentSubject(
   kind: 'invoice' | 'estimate' | 'report',
-  docNumber: unknown
+  docNumber: unknown,
+  shopName: unknown
 ): string {
   const num = String(docNumber || '').trim();
+  const shop = String(shopName ?? '').trim();
+  const fromShop = shop ? ` from ${shop}` : '';
   if (kind === 'invoice') {
-    return num ? `Invoice ${num} from Total Service Pro` : 'Invoice from Total Service Pro';
+    return num ? `Invoice ${num}${fromShop}` : `Invoice${fromShop}`;
   }
   if (kind === 'estimate') {
-    return num ? `Estimate ${num} from Total Service Pro` : 'Service estimate from Total Service Pro';
+    return num ? `Estimate ${num}${fromShop}` : `Service estimate${fromShop}`;
   }
-  return num ? `Service Report ${num} from Total Service Pro` : 'Service report from Total Service Pro';
+  return num ? `Service Report ${num}${fromShop}` : `Service report${fromShop}`;
 }
 
 export function senderCompanyFromOrg(

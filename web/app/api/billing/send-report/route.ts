@@ -120,7 +120,7 @@ export async function POST(req: NextRequest) {
         ? await loadSenderCompany(supabase, callerOrgId, techName)
         : senderCompanyFromOrg(null, techName);
     const theme = callerOrgId != null ? await getCompanyTheme(callerOrgId, supabase) : null;
-    const subject = ownedDocumentSubject('report', report.report_number);
+    const subject = ownedDocumentSubject('report', report.report_number, company.company_name);
     const html = buildOwnedReportMessage(report, theme);
     const { signupUrl, loginUrl } = documentAccountLinks(publicSiteOrigin(req));
     const wrapped = wrapCustomerFacingDocumentEmail({
