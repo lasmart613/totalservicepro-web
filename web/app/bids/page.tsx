@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { OPEN_SERVICE_REQUEST_COLUMNS } from '@/lib/org-scoped-read';
 
 type BidRow = {
   id: string;
@@ -101,9 +102,9 @@ export default function MyBidsPage() {
     query = query.or(orParts.join(','));
 
     const { data, error } = await query;
-    if (!error && data) {
-      setBids(data as BidRow[]);
-    } else {
+    const list = (!error && data ? data : null) as BidRow[] | null;
+    let rows: BidRow[] = list || [];
+    if (!list) {
       // Fallback without joins
       let q2 = supabase
         .from('bids')
@@ -114,20 +115,20 @@ export default function MyBidsPage() {
       q2 = q2.or(orParts.join(','));
       const { data: bidRows, error: e2 } = await q2;
       if (e2) toast.error(e2.message);
-      const list = (bidRows || []) as BidRow[];
-      // Attach request titles
-      for (const b of list) {
-        if (b.request_id) {
-          const { data: req } = await supabase
-            .from('service_requests')
-            .select('id, title, description, urgency, manufacturer, model, status')
-            .eq('id', b.request_id)
-            .maybeSingle();
-          if (req) b.service_requests = req;
-        }
-      }
-      setBids(list);
+      rows = (bidRows || []) as BidRow[];
     }
+    // Membership RLS hides another shop's full service_requests row. Titles for
+    // open bids come from the bid-list view, which has no equipment or photos.
+    for (const b of rows) {
+      if (b.service_requests || !b.request_id) continue;
+      const { data: req } = await supabase
+        .from('open_service_requests')
+        .select(OPEN_SERVICE_REQUEST_COLUMNS)
+        .eq('id', b.request_id)
+        .maybeSingle();
+      if (req) b.service_requests = req;
+    }
+    setBids(rows);
     setLoading(false);
   };
 
