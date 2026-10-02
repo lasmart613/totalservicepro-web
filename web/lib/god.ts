@@ -44,8 +44,8 @@ export function godAllowlistUserIds(env: NodeJS.ProcessEnv = process.env): strin
 
 export type GodIdentity = {
   id?: string | null;
+  /** Auth login email from the session. Not user_profiles.email. */
   email?: string | null;
-  profileEmail?: string | null;
 };
 
 export function isGodIdentity(
@@ -57,9 +57,9 @@ export function isGodIdentity(
   const userId = String(identity.id || '').trim();
   if (userId && ids.includes(userId)) return true;
 
-  const emails = godAllowlistEmails(env);
-  const candidates = [identity.email, identity.profileEmail].map(normalizeGodEmail).filter(Boolean);
-  return candidates.some((email) => emails.includes(email));
+  const email = normalizeGodEmail(identity.email);
+  if (!email) return false;
+  return godAllowlistEmails(env).includes(email);
 }
 
 /** Never treat God as a subscription / Stripe SKU. */

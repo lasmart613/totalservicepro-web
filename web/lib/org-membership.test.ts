@@ -231,4 +231,25 @@ test('creating your own shop after an FSE invite still adds a home membership', 
   const membershipsRoute = readFileSync(join(here, '../app/api/org/memberships/route.ts'), 'utf8');
   assert.match(membershipsRoute, /created_by/);
   assert.match(membershipsRoute, /isHome:\s*true/);
+  assert.match(membershipsRoute, /const email = \(user\.email \|\| ''\)/);
+  assert.doesNotMatch(membershipsRoute, /profile\?\.email/);
+});
+
+test('invite acceptance and membership inserts follow the Auth login, not profile email', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const sql = readFileSync(
+    join(here, '../supabase/migrations/20261002_000000_auth_account_identity.sql'),
+    'utf8'
+  );
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.auth_login_email\(\)/);
+  assert.match(sql, /FROM auth\.users/);
+  assert.match(sql, /Never user_profiles\.email/);
+  assert.match(sql, /actor_email := public\.auth_login_email\(\)/);
+  assert.doesNotMatch(sql, /SELECT email INTO actor_email FROM public\.user_profiles/);
+  assert.match(sql, /lower\(btrim\(i\.email\)\) = public\.auth_login_email\(\)/);
+  assert.doesNotMatch(sql, /lower\(i\.email\) = lower\(COALESCE\(NEW\.email/);
+  assert.match(sql, /NOT IN \('admin', 'company_admin'\)/);
+  assert.match(sql, /COALESCE\(p_is_home, false\) = false/);
+  assert.match(sql, /membership_insert_allowed\(user_id, organization_id, role, is_home\)/);
+  assert.match(sql, /home := false/);
 });

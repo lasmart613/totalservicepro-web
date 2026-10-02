@@ -4,7 +4,6 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { isGodIdentity } from '@/lib/god';
 
 export type GodCaller = {
@@ -51,23 +50,10 @@ export async function requireGodCaller(
     return { ok: false, response: godDenied(401, 'Invalid session') };
   }
 
-  let profileEmail: string | null = null;
-  try {
-    const client = hasServiceRole() ? getSupabaseAdmin() : supabase;
-    const { data: profile } = await client
-      .from('user_profiles')
-      .select('email')
-      .eq('id', user.id)
-      .maybeSingle();
-    profileEmail = profile?.email || null;
-  } catch {
-    /* allowlist can still match auth email */
-  }
-
-  const email = user.email || profileEmail || '';
-  if (!isGodIdentity({ id: user.id, email: user.email, profileEmail })) {
+  // Auth session only. user_profiles.email is client-writable and must not open /api/god/*.
+  if (!isGodIdentity({ id: user.id, email: user.email })) {
     return { ok: false, response: godDenied(404, 'Not found') };
   }
 
-  return { ok: true, caller: { userId: user.id, email } };
+  return { ok: true, caller: { userId: user.id, email: user.email || '' } };
 }
