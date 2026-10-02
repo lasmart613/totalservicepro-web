@@ -18,6 +18,7 @@ import {
   ArrowUpCircle,
 } from 'lucide-react';
 import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
+import { financialReportingNavLink } from '@/lib/financial-reporting-access';
 import { loadOwnNavProfile } from '@/lib/profile-nav';
 import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
@@ -308,6 +309,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         (profile?.role || '').toLowerCase()
       ));
   const canAdminPortal = isAdmin(profile?.role);
+  const financialNav = financialReportingNavLink({ role: profile?.role, god: isGod });
 
   /** Primary hub dropdown — role-aware */
   const hubGroup: NavGroup = ownerMode
@@ -383,6 +385,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
           { href: '/invoices', label: 'Invoices' },
           { href: '/purchase-orders', label: 'Purchase Orders' },
           { href: '/company', label: 'Company Profile' },
+          ...(financialNav ? [financialNav] : []),
         ],
       }
     : null;
@@ -433,6 +436,11 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
               {canAdminPortal && (
                 <Link href="/admin" className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
                   Admin Portal
+                </Link>
+              )}
+              {financialNav && !businessGroup && (
+                <Link href={financialNav.href} className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
+                  {financialNav.label}
                 </Link>
               )}
               {isGod && (
@@ -681,6 +689,15 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 onClick={closeMobileMenu}
               >
                 Admin Portal
+              </Link>
+            )}
+            {financialNav && !businessGroup && (
+              <Link
+                href={financialNav.href}
+                className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+                onClick={closeMobileMenu}
+              >
+                {financialNav.label}
               </Link>
             )}
             {isGod && (

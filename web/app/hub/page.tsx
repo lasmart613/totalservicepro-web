@@ -6,6 +6,8 @@ import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isAdmin, isOwnerish, isSupplier } from '@/lib/roles';
+import { canAccessFinancialReporting } from '@/lib/financial-reporting-access';
+import { fetchGodMe } from '@/lib/god-client';
 import { ownerLabelKind } from '@/lib/labels';
 
 type HubCard = { href: string; icon: string; label: string; desc: string };
@@ -16,6 +18,7 @@ export default function TechHub() {
   const [role, setRole] = useState<string>('');
   const [orgType, setOrgType] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
+  const [god, setGod] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -38,6 +41,7 @@ export default function TechHub() {
           meta.organization_type ||
           null;
         setOrgType(ot);
+        setGod(await fetchGodMe());
       } catch {
         /* ignore */
       }
@@ -98,6 +102,16 @@ export default function TechHub() {
     { href: '/estimates', icon: '📝', label: 'Estimates', desc: 'Quotes & service estimates' },
     { href: '/invoices', icon: '🧾', label: 'Invoices', desc: 'Billing & collections' },
     { href: '/company', icon: '🏢', label: 'Company Profile', desc: 'Org settings, team & branding' },
+    ...(canAccessFinancialReporting({ role, god })
+      ? [
+          {
+            href: '/business/financial-reporting',
+            icon: '📊',
+            label: 'Financial Reporting',
+            desc: 'Income, collections, and unpaid invoices',
+          },
+        ]
+      : []),
   ];
 
   if (!loaded) {

@@ -116,6 +116,7 @@ export const ROBOTS_DISALLOW = [
   '/invoices',
   '/invoice-paid',
   '/purchase-orders',
+  '/business',
   '/manuals',
   '/ai-assistant',
   '/auth',
