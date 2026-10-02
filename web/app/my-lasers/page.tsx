@@ -9,6 +9,7 @@ import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { toast } from 'sonner';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
+import { equipmentPhotoDisplayUrl } from '@/lib/org-scoped-read';
 
 type LaserRow = {
   id: number;
@@ -90,7 +91,13 @@ export default function MyLasersPage() {
       setRows([]);
       return;
     }
-    setRows((data || []) as LaserRow[]);
+    const withPhotos = await Promise.all(
+      ((data || []) as LaserRow[]).map(async (row) => ({
+        ...row,
+        photo_url: await equipmentPhotoDisplayUrl(supabase, row.photo_url),
+      }))
+    );
+    setRows(withPhotos);
   }
 
   function openAdd() {

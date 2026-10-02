@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { loadServiceHistoryForLaser } from '@/lib/equipment-ensure';
+import { equipmentPhotoDisplayUrl } from '@/lib/org-scoped-read';
 
 type Laser = {
   id: number;
@@ -83,7 +84,8 @@ export default function LaserProfilePage() {
       setLoading(false);
       return;
     }
-    setLaser(data as Laser);
+    const photo = await equipmentPhotoDisplayUrl(supabase, (data as Laser).photo_url);
+    setLaser({ ...(data as Laser), photo_url: photo });
     await loadHistory(data as Laser);
     setLoading(false);
   }

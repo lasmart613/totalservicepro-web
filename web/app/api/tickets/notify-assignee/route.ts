@@ -4,6 +4,7 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { publicSiteOrigin } from '@/lib/customer-invite';
 import { sendTicketAssignedEmail } from '@/lib/ticket-assign-email';
 import { ticketAssigneeId } from '@/lib/ticket-assignees';
+import { refuseForeignShopRead } from '@/lib/org-scoped-read';
 
 function sameId(a: unknown, b: unknown): boolean {
   return a != null && b != null && String(a) === String(b);
@@ -96,7 +97,8 @@ export async function POST(req: NextRequest) {
       onShop = !!mem;
     }
     if (!onShop) {
-      return NextResponse.json({ error: 'Not a member of this ticket’s shop' }, { status: 403 });
+      const refused = refuseForeignShopRead();
+      return NextResponse.json(refused.body, { status: refused.status });
     }
 
     const assigneeId = String(
