@@ -272,9 +272,8 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
       let openServiceRequests = 0;
       try {
         const { data: openJobs, error: jobErr } = await supabase
-          .from('service_requests')
+          .from('open_service_requests')
           .select('id, status, category')
-          .in('status', ['open', 'bidding'])
           .or('category.eq.service,category.is.null')
           .limit(500);
         if (jobErr) {
@@ -419,7 +418,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
 
     try {
       const { data: dem } = await supabase
-        .from('service_requests')
+        .from('open_service_requests')
         .select('id, status, category')
         .eq('status', 'open')
         .in('category', ['parts', 'consumables']);
