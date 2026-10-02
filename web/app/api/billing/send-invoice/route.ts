@@ -6,54 +6,54 @@ import {
   resolveInvoiceCollectable,
 } from '@/lib/billing/invoice-collectable';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import {
-  publicSiteOrigin,
-  resolveFreeAccountUrls,
-  wrapCustomerFacingDocumentEmail,
-} from '@/lib/customer-invite';
+import { publicSiteOrigin, wrapCustomerFacingDocumentEmail } from '@/lib/customer-invite';
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 import { getCompanyTheme } from '@/lib/company-theme';
 import { loadInvoiceRow, mergePaymentFieldsIntoInvoiceData } from '@/lib/billing/invoice-row-load';
+import {
+  buildOwnedInvoiceMessage,
+  documentAccountLinks,
+  documentCustomerOrgId,
+  documentOwnedByOrganization,
+  loadOwnedDocument,
+  loadSenderCompany,
+  ownedDocumentSubject,
+  ownedSendRequest,
+  resendMessage,
+  resolveOwnedRecipient,
+  sanitizeMailResponse,
+  senderCompanyFromOrg,
+  storedCustomerEmail,
+} from '@/lib/billing/owned-doc-mail';
 
 /**
  * POST /api/billing/send-invoice
- * Body: {
- *   invoice_id?, to_email?, subject?, html?, invoice_number?,
- *   due_now?, balance_due?, total?, customer_organization_id?, reply_to?,
- *   include_payment_link?: boolean (default true)
- * }
- * Resolves customer email from CRM org profile when possible.
- * Stripe pay link uses due-now (parts/travel deposit) only — never the deferred remainder.
+ * Body: { invoice_id, include_payment_link? }
+ * Mail is sent only for an invoice the caller's organization owns.
+ * The HTML and recipient come from that invoice. The body cannot supply them.
+ * No customer-invite claim token is minted.
  */
 export async function POST(req: NextRequest) {
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
-    if (!token) {
-      return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
-    }
+    if (!token) return respond({ error: 'Sign in required' }, 401);
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
     const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    if (!url || !anon) {
-      return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
-    }
+    if (!url || !anon) return respond({ error: 'Server misconfigured' }, 500);
 
     const supabase = createClient(url, anon, {
       global: { headers: { Authorization: `Bearer ${token}` } },
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    // Prefer getUser(token) so JWT is validated even if header wiring is flaky
     const {
       data: { user },
       error: userErr,
     } = await supabase.auth.getUser(token);
-    if (userErr || !user) {
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
-    }
+    if (userErr || !user) return respond({ error: 'Invalid session' }, 401);
 
-    // Caller's org (for ownership checks when using service role)
     let callerOrgId: string | number | null = null;
     try {
       const { data: prof } = await supabase
@@ -63,164 +63,72 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
       callerOrgId = prof?.organization_id ?? null;
     } catch {
-      /* ignore */
+      callerOrgId = null;
     }
 
-    const body = await req.json().catch(() => ({}));
-    const bodyEmail = String(body.to_email || body.to || '').trim();
-    let toEmail = '';
-    let emailSource: 'crm_org' | 'crm_contact' | 'invoice_form' | 'invoice_data' | 'none' = 'none';
-    let html = String(body.html || '').trim();
-    const invoiceNumber = body.invoice_number ? String(body.invoice_number) : '';
-    // Normalize id (URL/params often strings; DB is bigserial)
-    const rawId = body.invoice_id ?? null;
-    const invoiceId =
-      rawId == null || rawId === '' || rawId === 'new'
-        ? null
-        : /^\d+$/.test(String(rawId))
-          ? Number(rawId)
-          : rawId;
-    const includePay = body.include_payment_link !== false;
+    const raw = await req.json().catch(() => ({}));
+    const request = ownedSendRequest(raw, 'invoice_id');
+    const invoiceId = request.documentId;
+    if (invoiceId == null) return respond({ error: 'Invoice id is required.' }, 400);
 
-    // Load invoice — user client first, then service role (RLS often blocks RETURNING/select)
-    let inv: any = null;
-    let invLoadNote: string | null = null;
-    if (invoiceId != null) {
-      const userLoad = await loadInvoiceRow(supabase, invoiceId);
-      inv = userLoad.row;
-
-      if (!inv && hasServiceRole()) {
-        try {
-          const admin = getSupabaseAdmin();
-          const adminLoad = await loadInvoiceRow(admin, invoiceId);
-          if (adminLoad.row) {
-            const row = adminLoad.row;
-            const owns =
-              (row.created_by && String(row.created_by) === String(user.id)) ||
-              (callerOrgId != null &&
-                row.organization_id != null &&
-                String(row.organization_id) === String(callerOrgId));
-            if (owns) {
-              inv = row;
-              invLoadNote = 'loaded_via_service_role';
-            } else {
-              invLoadNote = 'service_role_row_not_owned';
-            }
-          } else {
-            invLoadNote = adminLoad.errorMsg || 'not_found_service_role';
-          }
-        } catch (e: any) {
-          invLoadNote = e?.message || 'service_role_load_failed';
-        }
-      } else if (!inv) {
-        invLoadNote = userLoad.errorMsg || 'not_found_user_rls';
-      }
-
-      if (!inv) {
-        console.warn('send-invoice: invoice row not loaded', {
-          invoiceId,
-          invLoadNote,
-          userId: user.id,
-          callerOrgId,
-        });
-        const status = invLoadNote === 'service_role_row_not_owned' ? 403 : 404;
-        return NextResponse.json(
-          {
-            error:
-              status === 403
-                ? 'This invoice belongs to another organization.'
-                : 'Invoice not found.',
-            invLoadNote,
-          },
-          { status }
-        );
-      }
+    const loaded = await loadOwnedDocument({
+      userClient: supabase,
+      adminClient: hasServiceRole() ? getSupabaseAdmin() : null,
+      table: 'service_invoices',
+      id: invoiceId,
+      callerOrgId,
+      readNarrow: async (client) => (await loadInvoiceRow(client, invoiceId)).row,
+      notFoundError: 'Invoice not found.',
+      forbiddenError: 'This invoice belongs to another organization.',
+    });
+    if (!loaded.ok) return respond({ error: loaded.error }, loaded.status);
+    const inv = loaded.row;
+    if (!documentOwnedByOrganization(inv, callerOrgId)) {
+      return respond({ error: 'This invoice belongs to another organization.' }, 403);
     }
 
-    const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
-
-    // Prefer customer CRM profile email when linked (org profile, then primary contact)
-    let custOrgId =
-      body.customer_organization_id ?? inv?.customer_organization_id ?? null;
-
-    // invoice_data may carry customer_organization_id if column was missing on older rows
-    if (!custOrgId && inv?.invoice_data) {
-      let idata = inv.invoice_data;
-      if (typeof idata === 'string') {
-        try {
-          idata = JSON.parse(idata);
-        } catch {
-          idata = {};
-        }
-      }
-      if (idata?.customer_organization_id) custOrgId = idata.customer_organization_id;
-    }
-
-    // Prefer service-role for CRM reads when available (customer org may be outside caller's RLS)
-    const crmClient: SupabaseClient =
-      hasServiceRole() ? getSupabaseAdmin() : supabase;
-
+    let crm: { email: string; source: 'crm_org' | 'crm_contact' | 'form' | 'none' } | null = null;
+    const custOrgId = documentCustomerOrgId(inv, 'invoice_data');
     if (custOrgId) {
       try {
-        const sources = await fetchDirectoryContactSources(crmClient, custOrgId);
-        const pick = pickCrmReachEmail({
+        const sources = await fetchDirectoryContactSources(supabase, custOrgId);
+        crm = pickCrmReachEmail({
           directoryContacts: sources.directoryContacts,
           contactRows: sources.contactRows,
           officeEmail: sources.officeEmail,
         });
-        if (pick.email) {
-          toEmail = pick.email;
-          emailSource = pick.source === 'form' ? 'invoice_form' : pick.source;
-        }
       } catch {
-        /* fall through to invoice form / saved data */
+        crm = null;
       }
     }
-
-    // Fall back to typed invoice form / request body
-    if (!toEmail && bodyEmail && isValidEmail(bodyEmail)) {
-      toEmail = bodyEmail;
-      emailSource = 'invoice_form';
-    }
-
-    // Fall back to saved invoice_data.custEmail
-    if ((!toEmail || !isValidEmail(toEmail)) && inv?.invoice_data) {
-      let idata = inv.invoice_data;
-      if (typeof idata === 'string') {
-        try {
-          idata = JSON.parse(idata);
-        } catch {
-          idata = {};
-        }
-      }
-      if (idata?.custEmail && isValidEmail(String(idata.custEmail).trim())) {
-        toEmail = String(idata.custEmail).trim();
-        emailSource = 'invoice_data';
-      }
-    }
-
-    if (!toEmail || !isValidEmail(toEmail)) {
-      return NextResponse.json(
+    const recipient = resolveOwnedRecipient({
+      crm,
+      storedEmail: storedCustomerEmail(inv, 'invoice'),
+    });
+    if (!recipient.email) {
+      return respond(
         {
           error:
             'No valid customer email. Add an email on the customer profile (CRM company email or a contact), or on the invoice form.',
         },
-        { status: 400 }
+        400
       );
     }
-    if (!html || html.length < 40) {
-      return NextResponse.json({ error: 'Invoice HTML body is required' }, { status: 400 });
-    }
 
-    // Stripe charges due-now only (parts/travel deposit). Deferred remainder
-    // stays on the invoice until the shop releases it.
+    const techName = await readTechName(supabase, user.id);
+    const company =
+      callerOrgId != null
+        ? await loadSenderCompany(supabase, callerOrgId, techName)
+        : senderCompanyFromOrg(null, techName);
+    const theme = callerOrgId != null ? await getCompanyTheme(callerOrgId, supabase) : null;
+
     const collectable = resolveInvoiceCollectable({
-      total: inv?.total ?? body.total,
-      amountPaid: inv?.amount_paid,
-      invoice_data: inv?.invoice_data,
-      fallbackDueNow: body.due_now ?? body.amount_due_now,
+      total: inv.total,
+      amountPaid: inv.amount_paid,
+      invoice_data: inv.invoice_data,
     });
     const payAmount = collectable.stripeAmount;
+    const includePay = request.includePaymentLink;
 
     let paymentUrl: string | null = null;
     let stripeSessionId: string | null = null;
@@ -234,39 +142,17 @@ export async function POST(req: NextRequest) {
           amountCents: Math.round(payAmount * 100),
           description: invoiceCheckoutDescription(
             collectable,
-            invoiceNumber || inv?.invoice_number || `Invoice #${invoiceId || ''}`
+            String(inv.invoice_number || `Invoice #${invoiceId}`)
           ),
-          invoiceId: invoiceId || inv?.id,
-          invoiceNumber: invoiceNumber || inv?.invoice_number,
-          customerEmail: toEmail,
-          companyName: body.company_name || null,
+          invoiceId,
+          invoiceNumber: inv.invoice_number ? String(inv.invoice_number) : null,
+          customerEmail: recipient.email,
+          companyName: company.company_name || null,
           paymentKind: collectable.paymentKind,
         });
         if (pay) {
           paymentUrl = pay.url;
           stripeSessionId = pay.sessionId;
-          // Inject pay button into email HTML if not already present
-          if (!html.includes(pay.url) && !html.includes('635BFF')) {
-            const payLabel =
-              collectable.paymentKind === 'deposit'
-                ? `Pay deposit $${payAmount.toFixed(2)} securely with Stripe`
-                : `Pay $${payAmount.toFixed(2)} securely with Stripe`;
-            const payBlock =
-              `<div style="margin:22px 0;text-align:center;">` +
-              `<a href="${pay.url}" style="display:inline-block;background:#635BFF;color:#fff;padding:14px 28px;` +
-              `border-radius:8px;text-decoration:none;font-weight:700;font-size:14px;">` +
-              `${payLabel}</a>` +
-              `<div style="font-size:10px;color:#666;margin-top:8px;">Secure card payment · Powered by Stripe</div></div>`;
-            if (html.includes('Thank you for choosing')) {
-              html = html.replace('Thank you for choosing', payBlock + 'Thank you for choosing');
-            } else {
-              html = html + payBlock;
-            }
-          }
-          // Persist link only on an invoice this caller already owns.
-          // Merge into the loaded invoice_data. If that JSON was not read,
-          // skip the write — replacing the column with only these four fields
-          // wipes line items on Resend or a retry after an email error.
           if (invoiceId && inv) {
             try {
               const merged = mergePaymentFieldsIntoInvoiceData(inv, {
@@ -281,9 +167,7 @@ export async function POST(req: NextRequest) {
                   .from('service_invoices')
                   .update({ invoice_data: merged, updated_at: new Date().toISOString() })
                   .eq('id', invoiceId);
-                if (upErr) {
-                  console.warn('could not persist payment_url', upErr.message);
-                }
+                if (upErr) console.warn('could not persist payment_url', upErr.message);
               } else {
                 console.warn('send-invoice: skipped payment_url persist; invoice_data was not loaded');
               }
@@ -304,21 +188,25 @@ export async function POST(req: NextRequest) {
         : 'Balance due is under $0.50 — no Stripe pay link added.';
     }
 
-    const subject =
-      String(body.subject || '').trim() ||
-      (invoiceNumber
-        ? `Invoice ${invoiceNumber} from Total Service Pro`
-        : 'Invoice from Total Service Pro');
+    const subject = ownedDocumentSubject('invoice', inv.invoice_number);
+    const html = buildOwnedInvoiceMessage({ row: inv, company, theme, paymentUrl });
+    const { signupUrl, loginUrl } = documentAccountLinks(publicSiteOrigin(req));
+    const wrapped = wrapCustomerFacingDocumentEmail({
+      subject,
+      documentHtml: html,
+      signupUrl,
+      loginUrl,
+      companyName: String(inv.customer_name || '').trim(),
+      theme,
+    });
 
     const resendKey = process.env.RESEND_API_KEY;
-    // Prefer verified domain from-address when configured
     const from =
       process.env.NOTIFY_FROM_EMAIL ||
       process.env.RESEND_FROM ||
       'Total Service Pro <contact@medicalrepairnetwork.com>';
-
     if (!resendKey) {
-      return NextResponse.json(
+      return respond(
         {
           ok: false,
           emailSent: false,
@@ -327,26 +215,10 @@ export async function POST(req: NextRequest) {
           needsConfig: true,
           paymentUrl,
         },
-        { status: 503 }
+        503,
+        [recipient.email]
       );
     }
-
-    const companyName = String(inv?.customer_name || '').trim();
-    const { signupUrl, loginUrl } = resolveFreeAccountUrls({
-      origin: publicSiteOrigin(req),
-      email: toEmail,
-      companyName,
-      customerOrgId: custOrgId,
-    });
-    const theme = callerOrgId != null ? await getCompanyTheme(callerOrgId, supabase) : null;
-    const wrapped = wrapCustomerFacingDocumentEmail({
-      subject,
-      documentHtml: html,
-      signupUrl,
-      loginUrl,
-      companyName,
-      theme,
-    });
 
     const rr = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -354,52 +226,67 @@ export async function POST(req: NextRequest) {
         Authorization: `Bearer ${resendKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        from,
-        to: [toEmail],
-        subject,
-        html: wrapped,
-        reply_to: body.reply_to || undefined,
-      }),
+      body: JSON.stringify(
+        resendMessage({
+          from,
+          to: recipient.email,
+          subject,
+          html: wrapped,
+          replyTo: company.email,
+        })
+      ),
     });
 
     const result = await rr.json().catch(() => ({}));
     if (!rr.ok) {
       console.error('Resend invoice send failed', result);
       const msg = result?.message || `Email provider error (${rr.status})`;
-      // Friendlier copy for domain restriction
       const friendly =
         /verify a domain|own email address|testing emails|not verified/i.test(msg)
           ? `${msg} — Verify medicalrepairnetwork.com in Resend (DNS: resend._domainkey + send MX/TXT). Until verified, delivery may be limited to your Resend account email.`
           : msg;
-      return NextResponse.json(
-        {
-          ok: false,
-          emailSent: false,
-          error: friendly,
-          paymentUrl,
-          attemptedTo: toEmail,
-        },
-        { status: 502 }
+      return respond(
+        { ok: false, emailSent: false, error: friendly, paymentUrl },
+        502,
+        [recipient.email]
       );
     }
 
-    return NextResponse.json({
-      ok: true,
-      emailSent: true,
-      id: result?.id || null,
-      to: toEmail,
-      emailSource,
-      customerOrganizationId: custOrgId,
-      invoiceId,
-      invoiceLoaded: !!inv,
-      invLoadNote,
-      paymentUrl,
-      stripeSessionId,
-      stripeSkippedReason: paymentUrl ? null : stripeSkippedReason,
-    });
+    return respond(
+      {
+        ok: true,
+        emailSent: true,
+        id: result?.id || null,
+        to: recipient.email,
+        emailSource: recipient.source,
+        invoiceId,
+        invoiceLoaded: true,
+        paymentUrl,
+        stripeSessionId,
+        stripeSkippedReason: paymentUrl ? null : stripeSkippedReason,
+      },
+      200,
+      [recipient.email]
+    );
   } catch (e: any) {
     console.error('send-invoice', e);
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
+    return respond({ error: e?.message || 'Server error' }, 500);
+  }
+}
+
+function respond(body: Record<string, unknown>, status = 200, allowedEmails: string[] = []) {
+  return NextResponse.json(sanitizeMailResponse(body, allowedEmails), { status });
+}
+
+async function readTechName(supabase: SupabaseClient, userId: string): Promise<string> {
+  try {
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('first_name, last_name')
+      .eq('id', userId)
+      .maybeSingle();
+    return [data?.first_name, data?.last_name].filter(Boolean).join(' ');
+  } catch {
+    return '';
   }
 }
