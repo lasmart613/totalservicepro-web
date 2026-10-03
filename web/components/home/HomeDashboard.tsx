@@ -11,6 +11,8 @@ import {
   getDashboardPersona,
   type DashboardPersona,
 } from '@/lib/roles';
+import { canAccessJobCosting } from '@/lib/job-costing-access';
+import { fetchGodMe } from '@/lib/god-client';
 import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { destAfterInviteClaim, inviteInPlay } from '@/lib/invite-claim';
@@ -57,9 +59,24 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
   });
   const [fseStats, setFseStats] = useState<any[]>([]);
   const [upcoming, setUpcoming] = useState<any[]>([]);
+  const [god, setGod] = useState(false);
 
   const supabase = getSupabaseClient();
   const upgrade = useUpgradeEntry();
+
+  useEffect(() => {
+    if (!user) {
+      setGod(false);
+      return;
+    }
+    let cancelled = false;
+    fetchGodMe().then((value) => {
+      if (!cancelled) setGod(value);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [user]);
 
   useEffect(() => {
     const loadData = async () => {
@@ -778,6 +795,13 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
                     <div className="font-bold">Company Profile</div>
                     <div className="text-xs text-[var(--text3)] mt-1">Org, team & branding</div>
                   </Link>
+                  {canAccessJobCosting({ role, god }) && (
+                    <Link href="/business/job-costing" className="card p-6 text-center hover:border-[var(--gold)]">
+                      <div className="text-3xl mb-2">🧮</div>
+                      <div className="font-bold">Job Costing</div>
+                      <div className="text-xs text-[var(--text3)] mt-1">Labor, parts, and margin per repair order</div>
+                    </Link>
+                  )}
                 </div>
               </div>
             )}
