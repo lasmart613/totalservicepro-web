@@ -13,6 +13,7 @@ import {
   canAccessCompanyProfile,
 } from '@/lib/roles';
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
+import { useT } from '@/lib/fa/locale';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
 import {
   modelBelongsToManufacturer,
@@ -96,6 +97,7 @@ async function ensureServiceCreatorLinked(supabase: any, orgId: any, orgType?: s
 }
 
 function CompanyProfile() {
+  const t = useT();
   const [org, setOrg] = useState<any>({});
   const [members, setMembers] = useState<any[]>([]);
   const [pendingInvites, setPendingInvites] = useState<any[]>([]);
@@ -753,8 +755,8 @@ function CompanyProfile() {
       <div className="min-h-screen flex flex-col">
         <Header />
         <div className="max-w-xl mx-auto p-8 text-center">
-          <h1 className="text-2xl font-bold mb-2">Access denied</h1>
-          <p className="text-[var(--text3)]">Company profile is for org admins, facility owners, or suppliers.</p>
+          <h1 className="text-2xl font-bold mb-2">{t('Access denied')}</h1>
+          <p className="text-[var(--text3)]">{t('Company profile is for org admins, facility owners, or suppliers.')}</p>
         </div>
       </div>
     );
@@ -764,7 +766,7 @@ function CompanyProfile() {
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="max-w-7xl mx-auto w-full p-6 space-y-8">
-        {loadingOrg && <div className="mb-4 text-center text-xs py-1.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text3)]">Loading company profile…</div>}
+        {loadingOrg && <div className="mb-4 text-center text-xs py-1.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text3)]">{t('Loading company profile…')}</div>}
         {justSetup && (
           <div className="mb-4 p-4 rounded bg-green-900/20 border border-green-600 text-sm">
             {ownerMode
@@ -773,28 +775,28 @@ function CompanyProfile() {
           </div>
         )}
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <h1 className="text-2xl font-extrabold">🏢 {profileTitle}</h1>
+          <h1 className="text-2xl font-extrabold">🏢 {t(profileTitle)}</h1>
           {orgCanUpgrade(org) && org?.id ? (
             <UpgradePlanLink
               className="btn btn-secondary text-sm px-4 py-1.5"
               target={upgradeTargetForOrg(org) || 'plans'}
             >
-              Upgrade plan
+              {t('Upgrade plan')}
             </UpgradePlanLink>
           ) : null}
         </div>
 
         {/* Company Details Form - FULLY RESTORED */}
         <div className="card p-6">
-          <h2 className="font-bold mb-4">{detailsTitle}</h2>
+          <h2 className="font-bold mb-4">{t(detailsTitle)}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
               <div>
-                <label className="label">Company Name</label>
+                <label className="label">{t('Company Name')}</label>
                 <input className="input" value={org.name || ''} onChange={e => setOrg({ ...org, name: e.target.value })} />
               </div>
               <div>
-                <label className="label">Address</label>
+                <label className="label">{t('Address')}</label>
                 <input className="input" value={org.address || ''} onChange={e => setOrg({ ...org, address: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -1240,8 +1242,8 @@ function CompanyProfile() {
         {(ownerMode || supplierMode) && (
           <p className="text-sm text-[var(--text3)]">
             {ownerMode
-              ? 'You can only edit this facility. Add lasers on My Lasers. Post service needs on the Marketplace.'
-              : 'Manage catalog items from Parts and list inventory on the Marketplace. Premium / Team suppliers can enable an optional storefront and bulk-upload CSV or Excel from Seller storefront.'}
+              ? t('You can only edit this facility. Add lasers on My Lasers. Post service needs on the Marketplace.')
+              : t('Manage catalog items from Parts and list inventory on the Marketplace. Premium / Team suppliers can enable an optional storefront and bulk-upload CSV or Excel from Seller storefront.')}
           </p>
         )}
       </div>
@@ -1249,16 +1251,19 @@ function CompanyProfile() {
   );
 }
 
+function CompanyProfileFallback() {
+  const t = useT();
+  return (
+    <div className="min-h-screen flex items-center justify-center text-[var(--text3)]">
+      {t('Loading company profile…')}
+    </div>
+  );
+}
+
 /** Next.js requires Suspense around useSearchParams for static generation */
 export default function CompanyProfilePage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center text-[var(--text3)]">
-          Loading company profile…
-        </div>
-      }
-    >
+    <Suspense fallback={<CompanyProfileFallback />}>
       <CompanyProfile />
     </Suspense>
   );
