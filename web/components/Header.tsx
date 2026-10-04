@@ -18,6 +18,7 @@ import {
   ArrowUpCircle,
 } from 'lucide-react';
 import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
+import { financialReportingNavLink } from '@/lib/financial-reporting-access';
 import { jobCostingNavLink } from '@/lib/job-costing-access';
 import { loadOwnNavProfile } from '@/lib/profile-nav';
 import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
@@ -27,6 +28,8 @@ import { OrgSwitcher } from '@/components/OrgSwitcher';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
 import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
 import { isUnreadPollBackoffError, startDocumentUnreadPoll } from '@/lib/unread-poll';
+import { useFa } from '@/lib/fa/locale';
+import { FaPublicHeader } from '@/components/fa/FaPublicHeader';
 
 type NavLink = { href: string; label: string };
 type NavGroup = { id: string; label: string; href?: string; items: NavLink[] };
@@ -108,6 +111,7 @@ function NavDropdown({
 }
 
 export function Header({ authPending = false }: { authPending?: boolean }) {
+  const faPreview = useFa();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -309,6 +313,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         (profile?.role || '').toLowerCase()
       ));
   const canAdminPortal = isAdmin(profile?.role);
+  const financialNav = financialReportingNavLink({ role: profile?.role, god: isGod });
   const jobCostingNav = jobCostingNavLink({ role: profile?.role, god: isGod });
 
   /** Primary hub dropdown — role-aware */
@@ -385,10 +390,13 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
           { href: '/invoices', label: 'Invoices' },
           { href: '/purchase-orders', label: 'Purchase Orders' },
           { href: '/company', label: 'Company Profile' },
+          ...(financialNav ? [financialNav] : []),
           ...(jobCostingNav ? [jobCostingNav] : []),
         ],
       }
     : null;
+
+  if (faPreview) return <FaPublicHeader />;
 
   if (loading || authPending) {
     return (
@@ -436,6 +444,11 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
               {canAdminPortal && (
                 <Link href="/admin" className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
                   Admin Portal
+                </Link>
+              )}
+              {financialNav && !businessGroup && (
+                <Link href={financialNav.href} className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
+                  {financialNav.label}
                 </Link>
               )}
               {jobCostingNav && !businessGroup && (
@@ -689,6 +702,15 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 onClick={closeMobileMenu}
               >
                 Admin Portal
+              </Link>
+            )}
+            {financialNav && !businessGroup && (
+              <Link
+                href={financialNav.href}
+                className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+                onClick={closeMobileMenu}
+              >
+                {financialNav.label}
               </Link>
             )}
             {jobCostingNav && !businessGroup && (

@@ -143,7 +143,7 @@ test('logged-out landing pairs each hero title with a unique matching still', ()
   assert.doesNotMatch(heroBlock, /Bid on open service requests/);
   assert.doesNotMatch(heroBlock, /Receive multiple bids on service requests/);
   assert.doesNotMatch(heroBlock, /\/landing\/login\.webp|\/landing\/signup\.webp|\/landing\/app-reports\.webp|\/landing\/app-hub\.webp/);
-  const galleryBlock = source.split('aria-label="Product screens"')[1].split('id="features"')[0];
+  const galleryBlock = source.split("t('Product screens')")[1].split('id="features"')[0];
   assert.match(galleryBlock, /\/landing\/dashboard\.webp/);
   assert.doesNotMatch(galleryBlock, /\/landing\/app-calcs\.webp/);
   assert.match(source, /What you get/);
@@ -276,7 +276,7 @@ test('/plans tiles: Premium 15, Team 50, Free does not claim a full library', ()
   assert.doesNotMatch(source, /Unlimited service manuals/i);
   assert.doesNotMatch(source, /Full manual library/i);
   assert.doesNotMatch(source, /full digital bookshelf/i);
-  const freeBlocks = source.split(/<h[23][^>]*>Free/).slice(1);
+  const freeBlocks = source.split(/<h[23][^>]*>(?:\{t\('Free|Free)/).slice(1);
   assert.equal(freeBlocks.length, 2);
   for (const block of freeBlocks) {
     const tile = block.slice(0, block.search(/<h[23][^>]*>|<\/article>/) || block.length);

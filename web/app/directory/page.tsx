@@ -11,7 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import Link from 'next/link';
+import { PublicLink, useFa, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { GuestDirectoryCard } from '@/components/directory/GuestDirectoryCard';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -77,6 +77,8 @@ function guestFilters(signedIn: boolean): { key: FilterKey; label: string }[] {
 
 export default function DirectoryPage() {
   const supabase = getSupabaseClient();
+  const fa = useFa();
+  const t = useT();
   const { ready: authReady, signedIn } = useSignedIn();
   const [loading, setLoading] = useState(true);
   const [allListed, setAllListed] = useState<OrgRow[]>([]);
@@ -232,20 +234,22 @@ export default function DirectoryPage() {
     [applyGuestPayload, filter]
   );
 
-  useEffect(() => {
-    if (!authReady || !signedIn) return;
-    setGuestCards([]);
-    void loadSignedIn();
-  }, [authReady, signedIn, loadSignedIn]);
+  const previewGuest = fa || !signedIn;
 
   useEffect(() => {
-    if (!authReady || signedIn) return;
+    if (!authReady || previewGuest) return;
+    setGuestCards([]);
+    void loadSignedIn();
+  }, [authReady, previewGuest, loadSignedIn]);
+
+  useEffect(() => {
+    if (!authReady || !previewGuest) return;
     setSearch('');
     setAllListed([]);
     setMyClinics([]);
     setGuestPage(1);
     void loadGuestPage(1, false);
-  }, [authReady, signedIn, filter, loadGuestPage]);
+  }, [authReady, previewGuest, filter, loadGuestPage]);
 
   const visible = useMemo(() => {
     let source: OrgRow[];
@@ -282,25 +286,24 @@ export default function DirectoryPage() {
     });
   }, [guestCards, search]);
 
-  const filters = guestFilters(signedIn);
-  const showingGuest = authReady && !signedIn;
+  const filters = guestFilters(signedIn && !fa);
+  const showingGuest = authReady && previewGuest;
 
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="max-w-3xl mx-auto w-full px-4 py-6">
         <div className="flex items-center gap-3 mb-1">
-          <Link href="/" className="text-[var(--gold)] text-xl font-bold" aria-label="Back">
-            ←
-          </Link>
-          <h1 className="text-2xl font-extrabold">Company directory</h1>
+          <PublicLink href="/" className="text-[var(--gold)] text-xl font-bold" aria-label={t('Back')}>
+            {fa ? t('Back') : '←'}
+          </PublicLink>
+          <h1 className="text-2xl font-extrabold">{t('Company directory')}</h1>
         </div>
         <p className="text-sm text-[var(--text3)] mb-4">
-          Discover repair companies, clinics, resellers, and suppliers listed in Total Service Pro.
-          Listings are free.
+          {t('Discover repair companies, clinics, resellers, and suppliers listed in Total Service Pro. Listings are free.')}
         </p>
 
-        <div className="card p-3 text-xs text-[var(--text3)] mb-4 leading-relaxed">{note}</div>
+        <div className="card p-3 text-xs text-[var(--text3)] mb-4 leading-relaxed">{t(note)}</div>
 
         <div className="mb-3">
           <input
@@ -308,8 +311,8 @@ export default function DirectoryPage() {
             className="input w-full rounded-full"
             placeholder={
               showingGuest
-                ? 'Filter by type or region… Sign up to search names'
-                : 'Search by name, city, state…'
+                ? t('Filter by type or region… Sign up to search names')
+                : t('Search by name, city, state…')
             }
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -328,21 +331,21 @@ export default function DirectoryPage() {
                   : 'border-[var(--border2)] text-[var(--text3)] bg-[var(--surface3)]'
               }`}
             >
-              {f.label}
+              {t(f.label)}
             </button>
           ))}
         </div>
 
         {!authReady || loading ? (
-          <div className="text-center text-[var(--text3)] py-12">Loading directory…</div>
+          <div className="text-center text-[var(--text3)] py-12">{t('Loading directory…')}</div>
         ) : showingGuest ? (
           visibleGuests.length === 0 ? (
             <div className="text-center text-[var(--text3)] py-12 px-4">
-              Sign up to browse the company directory.
+              {t('Sign up to browse the company directory.')}
               <div className="mt-4">
-                <Link href={GUEST_SIGNUP_HREF} className="btn btn-primary text-sm px-4 py-2">
-                  Create a free account
-                </Link>
+                <PublicLink href={GUEST_SIGNUP_HREF} className="btn btn-primary text-sm px-4 py-2">
+                  {t('Create a free account')}
+                </PublicLink>
               </div>
             </div>
           ) : (
@@ -365,14 +368,14 @@ export default function DirectoryPage() {
                     disabled={guestLoadingMore}
                     onClick={() => void loadGuestPage(guestPage + 1, true)}
                   >
-                    {guestLoadingMore ? 'Loading…' : 'Load more'}
+                    {guestLoadingMore ? t('Loading…') : t('Load more')}
                   </button>
                 </div>
               )}
               <div className="flex justify-center mt-4">
-                <Link href={GUEST_SIGNUP_HREF} className="btn btn-primary text-sm px-4 py-2">
-                  Sign up to see names and contact details
-                </Link>
+                <PublicLink href={GUEST_SIGNUP_HREF} className="btn btn-primary text-sm px-4 py-2">
+                  {t('Sign up to see names and contact details')}
+                </PublicLink>
               </div>
             </>
           )
@@ -433,17 +436,17 @@ export default function DirectoryPage() {
         )}
 
         <p className="text-center text-xs text-[var(--text3)] mt-8">
-          Want to appear here?{' '}
+          {t('Want to appear here?')}{' '}
           {showingGuest ? (
-            <Link href={GUEST_SIGNUP_HREF} className="text-[var(--gold)] hover:underline">
-              Create a free account
-            </Link>
+            <PublicLink href={GUEST_SIGNUP_HREF} className="text-[var(--gold)] hover:underline">
+              {t('Create a free account')}
+            </PublicLink>
           ) : (
-            <Link href="/company" className="text-[var(--gold)] hover:underline">
+            <PublicLink href="/company" className="text-[var(--gold)] hover:underline">
               Company Profile
-            </Link>
+            </PublicLink>
           )}{' '}
-          → enable free directory listing.
+          {t('→ enable free directory listing.')}
         </p>
       </div>
     </div>

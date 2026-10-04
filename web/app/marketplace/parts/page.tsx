@@ -2,6 +2,7 @@
 
 import React, { useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
+import { PublicLink, usePublicHref, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { ListingDescriptionSnippet } from '@/components/ListingDescription';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -43,6 +44,8 @@ export default function PartsMarketplace() {
   const [bidQuestion, setBidQuestion] = useState('');
   const { signedIn } = useSignedIn();
   const supabase = getSupabaseClient();
+  const t = useT();
+  const toPublic = usePublicHref();
 
   useEffect(() => {
     const fetchListings = async () => {
@@ -140,25 +143,24 @@ export default function PartsMarketplace() {
       <div className="max-w-7xl mx-auto w-full px-4 py-8">
         <div className="flex flex-col md:flex-row md:justify-between md:items-center gap-4 mb-6">
           <div>
-            <h1 className="text-3xl font-extrabold">Parts for sale</h1>
+            <h1 className="text-3xl font-extrabold">{t('Parts for sale')}</h1>
             <p className="text-[var(--text3)]">
-              Parts listed for sale by suppliers and repair companies. Biomedical service parts — lasers,
-              lithotriptors, and C-arms.
+              {t('Parts listed for sale by suppliers and repair companies. Biomedical service parts — lasers, lithotriptors, and C-arms.')}
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link href="/marketplace/storefront" className="btn btn-secondary whitespace-nowrap">
-              Seller storefront
-            </Link>
-            <Link href="/marketplace/list?type=part" className="btn btn-primary whitespace-nowrap">
-              + Create New Listing
-            </Link>
+            <PublicLink href="/marketplace/storefront" className="btn btn-secondary whitespace-nowrap">
+              {t('Seller storefront')}
+            </PublicLink>
+            <PublicLink href="/marketplace/list?type=part" className="btn btn-primary whitespace-nowrap">
+              {t('+ Create New Listing')}
+            </PublicLink>
           </div>
         </div>
 
         {featuredSellers.length > 0 && (
           <div className="card p-4 md:p-5 mb-6 text-left">
-            <h2 className="font-bold mb-3">Featured sellers</h2>
+            <h2 className="font-bold mb-3">{t('Featured sellers')}</h2>
             {signedIn ? (
               <div className="flex flex-wrap gap-3">
                 {featuredSellers.map((seller) => (
@@ -169,131 +171,131 @@ export default function PartsMarketplace() {
                   >
                     <span className="font-semibold">{seller.name}</span>
                     <span className="ml-2 text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-[var(--gold)] text-black">
-                      Featured
+                      {t('Featured')}
                     </span>
                   </Link>
                 ))}
               </div>
             ) : (
-              <Link href="/signup" className="text-sm text-[var(--gold)] hover:underline">
-                Sign up to browse featured supplier storefronts
-              </Link>
+              <PublicLink href="/signup" className="text-sm text-[var(--gold)] hover:underline">
+                {t('Sign up to browse featured supplier storefronts')}
+              </PublicLink>
             )}
           </div>
         )}
 
         <div className="card p-4 md:p-5 mb-6 text-left">
-          <label className="label" htmlFor="parts-search">Search</label>
+          <label className="label" htmlFor="parts-search">{t('Search')}</label>
           <input
             id="parts-search"
             className="input mb-4"
             type="search"
-            placeholder="Search title, SKU, brand, or description"
+            placeholder={t('Search title, SKU, brand, or description')}
             value={filters.query}
             onChange={(e) => setFilter('query', e.target.value)}
           />
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">
             <div>
-              <label className="label" htmlFor="parts-brand">Brand</label>
+              <label className="label" htmlFor="parts-brand">{t('Brand')}</label>
               <select
                 id="parts-brand"
                 className="input"
                 value={filters.brand}
                 onChange={(e) => setFilter('brand', e.target.value)}
               >
-                <option value="">All brands</option>
+                <option value="">{t('All brands')}</option>
                 {brands.map((b) => (
                   <option key={b} value={b}>{b}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="label" htmlFor="parts-category">Category</label>
+              <label className="label" htmlFor="parts-category">{t('Category')}</label>
               <select
                 id="parts-category"
                 className="input"
                 value={filters.category}
                 onChange={(e) => setFilter('category', e.target.value)}
               >
-                <option value="">All categories</option>
+                <option value="">{t('All categories')}</option>
                 {categories.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="label" htmlFor="parts-condition">Condition</label>
+              <label className="label" htmlFor="parts-condition">{t('Condition')}</label>
               <select
                 id="parts-condition"
                 className="input"
                 value={filters.condition}
                 onChange={(e) => setFilter('condition', e.target.value)}
               >
-                <option value="">All conditions</option>
+                <option value="">{t('All conditions')}</option>
                 {conditions.map((c) => (
                   <option key={c} value={c}>{c}</option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="label" htmlFor="parts-price">Price</label>
+              <label className="label" htmlFor="parts-price">{t('Price')}</label>
               <select
                 id="parts-price"
                 className="input"
                 value={filters.price}
                 onChange={(e) => setFilter('price', e.target.value as PartsCatalogFilters['price'])}
               >
-                <option value="all">Any price</option>
-                <option value="lt250">Under $250</option>
-                <option value="250to1000">$250 – $1,000</option>
-                <option value="1000to5000">$1,000 – $5,000</option>
-                <option value="gt5000">$5,000+</option>
+                <option value="all">{t('Any price')}</option>
+                <option value="lt250">{t('Under $250')}</option>
+                <option value="250to1000">{t('$250 – $1,000')}</option>
+                <option value="1000to5000">{t('$1,000 – $5,000')}</option>
+                <option value="gt5000">{t('$5,000+')}</option>
               </select>
             </div>
             <div>
-              <label className="label" htmlFor="parts-avail">Availability</label>
+              <label className="label" htmlFor="parts-avail">{t('Availability')}</label>
               <select
                 id="parts-avail"
                 className="input"
                 value={filters.availability}
                 onChange={(e) => setFilter('availability', e.target.value as PartsCatalogFilters['availability'])}
               >
-                <option value="all">All listings</option>
-                <option value="in_stock">In stock</option>
-                <option value="sold_out">Sold out</option>
+                <option value="all">{t('All listings')}</option>
+                <option value="in_stock">{t('In stock')}</option>
+                <option value="sold_out">{t('Sold out')}</option>
               </select>
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-2 mt-4 text-sm text-[var(--text3)]">
             <span>
               {loading
-                ? 'Loading listings...'
+                ? t('Loading listings...')
                 : listings.length === 0
-                ? 'No listings yet'
-                : `Showing ${filtered.length} of ${listings.length}`}
+                ? t('No listings yet')
+                : t('Showing {shown} of {total}').replace('{shown}', String(filtered.length)).replace('{total}', String(listings.length))}
             </span>
             {filtersOn && (
               <button type="button" className="btn btn-secondary text-sm py-1 px-3" onClick={() => setFilters(EMPTY_PARTS_FILTERS)}>
-                Clear filters
+                {t('Clear filters')}
               </button>
             )}
           </div>
         </div>
 
         {loading ? (
-          <div className="card p-8 text-center text-[var(--text3)]">Loading listings...</div>
+          <div className="card p-8 text-center text-[var(--text3)]">{t('Loading listings...')}</div>
         ) : (
         <div className="card p-8 text-center">
           {listings.length === 0 ? (
-          <p className="text-lg mb-4">No listings yet.</p>
+          <p className="text-lg mb-4">{t('No listings yet.')}</p>
         ) : filtered.length === 0 ? (
-          <p className="text-lg mb-4">No parts match that search or filter.</p>
+          <p className="text-lg mb-4">{t('No parts match that search or filter.')}</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
             {filtered.map((l) => {
               const imgs = listingImages(l);
               const featured = imgs[0];
-              const href = listingHref(signedIn, partsDetailPath(l.id!));
+              const href = toPublic(listingHref(signedIn, partsDetailPath(l.id!)));
               const avail = listingAvailability(l);
               const qty = listingQuantity(l);
               const category = listingPartCategory(l);
@@ -311,29 +313,29 @@ export default function PartsMarketplace() {
                     <p className="text-xs font-semibold uppercase tracking-wide text-[var(--gold)] mb-1">{category}</p>
                   )}
                   <ListingDescriptionSnippet text={l.description} className="mb-1" />
-                  <p className="text-sm text-[var(--text3)] mb-2">PN: {l.part_number || l.serial_number || 'N/A'}</p>
+                  <p className="text-sm text-[var(--text3)] mb-2 fa-ltr">{t('PN:')} {l.part_number || l.serial_number || t('N/A')}</p>
                   <p className="text-sm mb-1">{l.manufacturer} {l.model} • {l.condition}</p>
                   <GuestAwarePrice signedIn={signedIn} priceLabel={formatListingPrice(l)} className="font-semibold text-[var(--gold)] mb-1" />
                   {avail.soldOut ? (
-                    <div className="text-xs text-red-400 mb-3">Sold out</div>
+                    <div className="text-xs text-red-400 mb-3">{t('Sold out')}</div>
                   ) : qty != null ? (
-                    <div className="text-xs text-[var(--text3)] mb-3">{qty} available</div>
+                    <div className="text-xs text-[var(--text3)] mb-3">{t('{qty} available').replace('{qty}', String(qty))}</div>
                   ) : (
                     <div className="mb-3" />
                   )}
                   <Link href={href} className="btn btn-primary w-full text-sm mb-2">
-                    {signedIn ? 'View details' : 'Sign up to view'}
+                    {signedIn ? t('View details') : t('Sign up to view')}
                   </Link>
                   {signedIn ? (
                   <button 
                     onClick={() => { setBiddingOn(l); setBidPrice(''); setBidNotes(''); setBidQuestion(''); }} 
                     className="btn btn-secondary w-full text-sm"
                   >
-                    Make Offer / Bid
+                    {t('Make Offer / Bid')}
                   </button>
                   ) : (
                     <Link href={href} className="btn btn-secondary w-full text-sm">
-                      Sign up to offer
+                      {t('Sign up to offer')}
                     </Link>
                   )}
                   <AddListingToInvoiceButton listing={l} className="btn btn-secondary w-full text-sm mt-2" />

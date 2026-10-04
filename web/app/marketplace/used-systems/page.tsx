@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
+import { PublicLink, usePublicHref, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { GuestAwarePrice } from '@/components/marketplace/GuestAwarePrice';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -20,6 +21,8 @@ export default function UsedSystemsMarketplace() {
   const [bidQuestion, setBidQuestion] = useState('');
   const { signedIn } = useSignedIn();
   const supabase = getSupabaseClient();
+  const t = useT();
+  const toPublic = usePublicHref();
 
   useEffect(() => {
     fetchListings();
@@ -69,28 +72,28 @@ export default function UsedSystemsMarketplace() {
       <div className="max-w-7xl mx-auto w-full px-4 py-8">
         <div className="flex justify-between items-center mb-8">
           <div>
-            <h1 className="text-3xl font-extrabold">Used systems</h1>
+            <h1 className="text-3xl font-extrabold">{t('Used systems')}</h1>
             <p className="text-[var(--text3)]">
-              Buy or sell pre-owned biomedical equipment — lasers, lithotriptors, C-arms, and more.
+              {t('Buy or sell pre-owned biomedical equipment — lasers, lithotriptors, C-arms, and more.')}
             </p>
           </div>
-          <Link href="/marketplace/list?type=used" className="btn btn-primary">
-            + Create New Listing
-          </Link>
+          <PublicLink href="/marketplace/list?type=used" className="btn btn-primary">
+            {t('+ Create New Listing')}
+          </PublicLink>
         </div>
 
         {loading ? (
-          <div className="card p-8 text-center text-[var(--text3)]">Loading listings...</div>
+          <div className="card p-8 text-center text-[var(--text3)]">{t('Loading listings...')}</div>
         ) : (
         <div className="card p-8 text-center">
           {listings.length === 0 ? (
-          <p className="text-lg mb-4">No used systems listed yet.</p>
+          <p className="text-lg mb-4">{t('No used systems listed yet.')}</p>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 text-left">
             {listings.map((l) => {
               const imgs = Array.isArray(l.images) ? l.images : (l.images ? [l.images] : []);
               const featured = imgs[0];
-              const href = listingHref(signedIn, `/marketplace/listing/${l.id}`);
+              const href = toPublic(listingHref(signedIn, `/marketplace/listing/${l.id}`));
               return (
                 <div key={l.id} className="card p-6">
                   {featured && (
@@ -102,7 +105,7 @@ export default function UsedSystemsMarketplace() {
                     <h3 className="font-bold text-xl mb-1 hover:text-[var(--gold)] cursor-pointer">{l.title}</h3>
                   </Link>
                   <p className="text-sm text-[var(--text3)] mb-1">{l.description}</p>
-                  <p className="text-sm text-[var(--text3)] mb-2">S/N: {l.serial_number || l.part_number || 'N/A'}</p>
+                  <p className="text-sm text-[var(--text3)] mb-2 fa-ltr">{t('S/N:')} {l.serial_number || l.part_number || t('N/A')}</p>
                   <p className="text-sm mb-1">{l.manufacturer} {l.model} • {l.condition} {l.year_manufactured ? '• ' + l.year_manufactured : ''}</p>
                   <GuestAwarePrice signedIn={signedIn} priceLabel={formatListingPrice(l)} className="font-semibold text-[var(--gold)] mb-2" />
                   {signedIn ? (
@@ -110,11 +113,11 @@ export default function UsedSystemsMarketplace() {
                     onClick={() => { setBiddingOn(l); setBidPrice(''); setBidNotes(''); setBidQuestion(''); }} 
                     className="btn btn-primary w-full text-sm"
                   >
-                    Make Offer / Bid
+                    {t('Make Offer / Bid')}
                   </button>
                   ) : (
                     <Link href={href} className="btn btn-primary w-full text-sm">
-                      Sign up to view
+                      {t('Sign up to view')}
                     </Link>
                   )}
                   <AddListingToInvoiceButton listing={l} className="btn btn-secondary w-full text-sm mt-2" />

@@ -9,6 +9,7 @@ import {
   parsePlanAudience,
   type PlanAudience,
 } from '@/lib/billing/plan-tiles';
+import { useT } from '@/lib/fa/locale';
 
 const SWIPE_PX = 48;
 
@@ -83,6 +84,7 @@ export function PlanAudienceSelector({
 }) {
   const swipe = useHorizontalSwipe(value, onChange);
   const landing = variant === 'landing';
+  const t = useT();
 
   return (
     <div
@@ -94,7 +96,7 @@ export function PlanAudienceSelector({
       <div
         className={landing ? 'lp-audience-pills' : 'flex flex-wrap gap-2'}
         role="radiogroup"
-        aria-label="Who these plans are for"
+        aria-label={t('Who these plans are for')}
         tabIndex={0}
         onKeyDown={swipe.onKeyDown}
       >
@@ -117,13 +119,13 @@ export function PlanAudienceSelector({
               }
               onClick={() => onChange(opt.id)}
             >
-              {opt.label}
+              {t(opt.label)}
             </button>
           );
         })}
       </div>
       <p className={landing ? 'lp-sr' : 'sr-only'} aria-live="polite">
-        Showing plans for {PLAN_AUDIENCE_OPTIONS.find((a) => a.id === value)?.label}.
+        {t('Showing plans for')} {t(PLAN_AUDIENCE_OPTIONS.find((a) => a.id === value)?.label || '')}.
       </p>
       {children}
     </div>

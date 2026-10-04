@@ -1,4 +1,6 @@
-import Link from 'next/link';
+'use client';
+
+import { PublicLink, usePublicHref, useT } from '@/lib/fa/locale';
 import { GuestRedactedText } from '@/components/directory/GuestRedactedText';
 import {
   GUEST_ADDRESS_PLACEHOLDER,
@@ -22,9 +24,11 @@ export function GuestDirectoryCard({
   signedIn: boolean;
   card: GuestDirectoryCardData;
 }) {
-  const href = directoryHref(signedIn, `/directory/${card.id}`);
+  const t = useT();
+  const to = usePublicHref();
+  const href = to(directoryHref(signedIn, `/directory/${card.id}`));
   return (
-    <Link href={href} className="card p-4 block hover:border-[var(--gold)] transition-colors">
+    <PublicLink href={href} className="card p-4 block hover:border-[var(--gold)] transition-colors">
       <div className="flex gap-3 items-center">
         <div className="w-12 h-12 rounded-xl bg-[var(--gold)] text-[#111] font-extrabold flex items-center justify-center overflow-hidden shrink-0">
           <GuestRedactedText
@@ -41,7 +45,7 @@ export function GuestDirectoryCard({
               label="organization name"
             />
           </div>
-          <div className="text-[11px] font-bold text-[var(--gold)] mt-0.5">{card.typeLabel}</div>
+          <div className="text-[11px] font-bold text-[var(--gold)] mt-0.5">{t(card.typeLabel)}</div>
           <div className="text-xs text-[var(--text3)] mt-0.5">
             📍{' '}
             {card.region ? (
@@ -74,9 +78,9 @@ export function GuestDirectoryCard({
             />
           )}
           {(card.hasPhone || card.hasEmail) && card.hasWebsite && <span> · </span>}
-          {card.hasWebsite && <span className="text-[var(--gold)]">Website</span>}
+          {card.hasWebsite && <span className="text-[var(--gold)]">{t('Website')}</span>}
         </div>
       )}
-    </Link>
+    </PublicLink>
   );
 }

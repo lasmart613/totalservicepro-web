@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isAdmin, isOwnerish, isSupplier } from '@/lib/roles';
+import { canAccessFinancialReporting } from '@/lib/financial-reporting-access';
 import { canAccessJobCosting } from '@/lib/job-costing-access';
 import { fetchGodMe } from '@/lib/god-client';
 import { ownerLabelKind } from '@/lib/labels';
@@ -102,6 +103,16 @@ export default function TechHub() {
     { href: '/estimates', icon: '📝', label: 'Estimates', desc: 'Quotes & service estimates' },
     { href: '/invoices', icon: '🧾', label: 'Invoices', desc: 'Billing & collections' },
     { href: '/company', icon: '🏢', label: 'Company Profile', desc: 'Org settings, team & branding' },
+    ...(canAccessFinancialReporting({ role, god })
+      ? [
+          {
+            href: '/business/financial-reporting',
+            icon: '📊',
+            label: 'Financial Reporting',
+            desc: 'Income, collections, and unpaid invoices',
+          },
+        ]
+      : []),
     ...(canAccessJobCosting({ role, god })
       ? [
           {
