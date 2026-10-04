@@ -3,7 +3,7 @@ import { FaProvider } from '@/lib/fa/locale';
 import './fa-preview.css';
 
 export const metadata: Metadata = {
-  title: 'پیش‌نمایش فارسی · RepairPlanet',
+  title: { absolute: 'پیش‌نمایش فارسی · RepairPlanet' },
   robots: { index: false, follow: false },
 };
 
