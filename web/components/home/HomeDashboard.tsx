@@ -28,8 +28,10 @@ import {
 } from '@/lib/tickets';
 import { isEstimateAwaitingCustomerAction } from '@/lib/billing/save-helpers';
 import { TicketAddressLink } from '@/components/AddressLink';
+import { useT } from '@/lib/fa/locale';
 
 export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
+  const t = useT();
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
@@ -466,7 +468,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
       <div className="min-h-screen flex flex-col">
         <Header authPending />
         <div className="flex-1 flex items-center justify-center text-[var(--text3)]">
-          Loading dashboard...
+            {t('Loading dashboard...')}
         </div>
       </div>
     );
@@ -486,11 +488,11 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
         <div className="flex items-start justify-between gap-4 flex-wrap">
           <div>
             <h1 className="text-4xl font-extrabold tracking-tight">
-              Welcome back, {greetName}!
+              {t('Welcome back,')} {greetName}!
             </h1>
             <p className="text-[var(--text3)]">
-              Role: {roleLabel(role)}
-              {displayOrgType ? <span> · Org: {orgTypeLabel(displayOrgType)}</span> : null}
+              {t('Role:')} {t(roleLabel(role))}
+              {displayOrgType ? <span> · {t('Org:')} {t(orgTypeLabel(displayOrgType))}</span> : null}
             </p>
           </div>
           {upgrade.show && (
@@ -498,7 +500,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
               className="btn btn-secondary text-sm px-4 py-1.5 shrink-0"
               target={upgrade.target}
             >
-              Upgrade plan
+              {t('Upgrade plan')}
             </UpgradePlanLink>
           )}
         </div>
@@ -509,61 +511,61 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-8">
               <Link href="/my-lasers" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-[var(--gold)]">{ownerStats.lasers}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">MY LASERS</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('MY LASERS')}</div>
               </Link>
               <Link href="/service-requests" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-[var(--blue)]">{ownerStats.openRequests}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">OPEN REQUESTS</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('OPEN REQUESTS')}</div>
               </Link>
               <Link href="/estimates" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-amber-300">{ownerStats.pendingEstimates}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">ESTIMATES TO REVIEW</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('ESTIMATES TO REVIEW')}</div>
               </Link>
               <Link href="/reports" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-green-400">{ownerStats.serviceHistory}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">SERVICE HISTORY</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('SERVICE HISTORY')}</div>
               </Link>
               <Link href="/service-requests" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-purple-400">{ownerStats.bidsReceived}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">BIDS RECEIVED</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('BIDS RECEIVED')}</div>
               </Link>
             </div>
 
             <div className="mt-12">
               <h3 className="font-bold text-lg mb-4">
-                {ownerDashboardHeading(orgType, facilityType, user?.user_metadata?.organization_type)}
+                {t(ownerDashboardHeading(orgType, facilityType, user?.user_metadata?.organization_type))}
               </h3>
               <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <Link href="/my-lasers" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Zap size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">My Lasers</div>
+                  <div className="font-bold">{t('My Lasers')}</div>
                 </Link>
                 <Link href="/estimates" className="card p-6 text-center hover:border-[var(--gold)]">
                   <FileText size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Estimates</div>
-                  <div className="text-xs text-[var(--text3)] mt-1">Approve, reject, or modify</div>
+                  <div className="font-bold">{t('Estimates')}</div>
+                  <div className="text-xs text-[var(--text3)] mt-1">{t('Approve, reject, or modify')}</div>
                 </Link>
                 <Link href="/service-requests" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Wrench size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Service Requests</div>
+                  <div className="font-bold">{t('Service Requests')}</div>
                 </Link>
                 <Link href="/marketplace" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Marketplace</div>
+                  <div className="font-bold">{t('Marketplace')}</div>
                 </Link>
                 <Link href="/reports" className="card p-6 text-center hover:border-[var(--gold)]">
                   <FileText size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Service History</div>
+                  <div className="font-bold">{t('Service History')}</div>
                 </Link>
                 <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />
                   <div className="font-bold">
-                    {ownerProfileLabel(orgType, facilityType, user?.user_metadata?.organization_type)}
+                    {t(ownerProfileLabel(orgType, facilityType, user?.user_metadata?.organization_type))}
                   </div>
                 </Link>
                 <Link href="/settings" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Settings size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Settings</div>
+                  <div className="font-bold">{t('Settings')}</div>
                 </Link>
               </div>
             </div>
@@ -576,40 +578,40 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-8">
               <Link href="/parts" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-[var(--gold)]">{supplierStats.catalog}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">CATALOG ITEMS</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('CATALOG ITEMS')}</div>
               </Link>
               <Link href="/marketplace/my-listings" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-[var(--blue)]">{supplierStats.listings}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">MY LISTINGS</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('MY LISTINGS')}</div>
               </Link>
               <Link href="/marketplace" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-purple-400">{supplierStats.openDemand}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">OPEN DEMAND</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('OPEN DEMAND')}</div>
               </Link>
               <Link href="/company" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-green-400">{supplierStats.brands}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">BRANDS STOCKED</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('BRANDS STOCKED')}</div>
               </Link>
             </div>
 
             <div className="mt-12">
-              <h3 className="font-bold text-lg mb-4">Supplier Dashboard</h3>
+              <h3 className="font-bold text-lg mb-4">{t('Supplier Dashboard')}</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Link href="/parts" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Parts Catalog</div>
+                  <div className="font-bold">{t('Parts Catalog')}</div>
                 </Link>
                 <Link href="/marketplace" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Marketplace</div>
+                  <div className="font-bold">{t('Marketplace')}</div>
                 </Link>
                 <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Supplier Profile</div>
+                  <div className="font-bold">{t('Supplier Profile')}</div>
                 </Link>
                 <Link href="/settings" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Settings size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Settings</div>
+                  <div className="font-bold">{t('Settings')}</div>
                 </Link>
               </div>
             </div>
@@ -621,45 +623,45 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
           <>
             {statsError && (
               <div className="mt-4 p-3 rounded-lg border border-amber-500/40 bg-amber-500/10 text-xs text-amber-200">
-                Some dashboard data could not load: {statsError}
+                {t('Some dashboard data could not load:')} {statsError}
               </div>
             )}
             <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mt-8">
               <Link href="/service-schedule" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-[var(--gold)]">{stats.openTickets}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">OPEN TICKETS</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('OPEN TICKETS')}</div>
               </Link>
               <Link href="/service-schedule" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-[var(--blue)]">{stats.todayCalls}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">TODAY&apos;S CALLS</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t("TODAY'S CALLS")}</div>
               </Link>
               <Link href="/service-requests" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-orange-400">{stats.openServiceRequests}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">REPAIR REQUESTS</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('REPAIR REQUESTS')}</div>
               </Link>
               <Link href="/reports" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-green-400">{stats.completedReports}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">COMPLETED REPORTS</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('COMPLETED REPORTS')}</div>
               </Link>
               <Link href="/reports" className="card p-5 text-center hover:border-[var(--gold)]">
                 <div className="text-4xl font-extrabold text-purple-400">{stats.totalReports}</div>
-                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">TOTAL REPORTS</div>
+                <div className="text-xs tracking-widest mt-1 text-[var(--text3)]">{t('TOTAL REPORTS')}</div>
               </Link>
             </div>
 
             {isAdmin(role) && fseStats.length > 0 && (
               <div className="mt-10">
-                <h3 className="font-bold text-lg mb-4">FSE Performance (Organization)</h3>
+                <h3 className="font-bold text-lg mb-4">{t('FSE Performance (Organization)')}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {fseStats.map((fse, index) => (
                     <div key={index} className="card p-5">
-                      <div className="font-semibold mb-2">{fse.name || 'Unassigned FSE'}</div>
+                      <div className="font-semibold mb-2">{fse.name || t('Unassigned FSE')}</div>
                       <div className="flex justify-between text-sm">
-                        <span>Open reports:</span>
+                        <span>{t('Open reports:')}</span>
                         <span className="font-bold text-[var(--gold)]">{fse.open}</span>
                       </div>
                       <div className="flex justify-between text-sm">
-                        <span>Completed reports:</span>
+                        <span>{t('Completed reports:')}</span>
                         <span className="font-bold text-green-400">{fse.completed}</span>
                       </div>
                     </div>
@@ -670,14 +672,14 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
 
             <div className="mt-10">
               <h3 className="font-bold text-lg mb-4 flex items-center gap-2">
-                <Calendar size={20} /> Upcoming Service Calls
+                <Calendar size={20} /> {t('Upcoming Service Calls')}
               </h3>
               <div className="card p-0 overflow-hidden">
                 {upcoming.length === 0 ? (
                   <div className="p-6">
-                    <p className="text-[var(--text3)]">No upcoming scheduled calls.</p>
+                    <p className="text-[var(--text3)]">{t('No upcoming scheduled calls.')}</p>
                     <Link href="/service-schedule" className="text-[var(--gold)] mt-4 inline-block hover:underline">
-                      View Full Schedule →
+                      {t('View Full Schedule →')}
                     </Link>
                   </div>
                 ) : (
@@ -710,7 +712,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
                 {upcoming.length > 0 && (
                   <div className="px-5 py-3">
                     <Link href="/service-schedule" className="text-sm text-[var(--gold)] hover:underline">
-                      View Full Schedule →
+                      {t('View Full Schedule →')}
                     </Link>
                   </div>
                 )}
@@ -718,37 +720,37 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
             </div>
 
             <div className="mt-12">
-              <h3 className="font-bold text-lg mb-4">Quick Access · Tech</h3>
+              <h3 className="font-bold text-lg mb-4">{t('Quick Access · Tech')}</h3>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <Link href="/calculators" className="card p-6 text-center hover:border-[var(--gold)]">
                   <div className="text-3xl mb-2">🔬</div>
-                  <div className="font-bold">Photometry Tools</div>
+                  <div className="font-bold">{t('Photometry Tools')}</div>
                 </Link>
 
                 <Link href="/hub" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Wrench size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Tech Hub</div>
+                  <div className="font-bold">{t('Tech Hub')}</div>
                 </Link>
 
                 <Link href="/service-schedule" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Calendar size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Service Schedule</div>
+                  <div className="font-bold">{t('Service Schedule')}</div>
                 </Link>
 
                 <Link href="/marketplace" className="card p-6 text-center hover:border-[var(--gold)]">
                   <Package size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Marketplace</div>
+                  <div className="font-bold">{t('Marketplace')}</div>
                 </Link>
 
                 <Link href="/directory" className="card p-6 text-center hover:border-[var(--gold)]">
                   <div className="text-3xl mb-2">📒</div>
-                  <div className="font-bold">TSP Directory</div>
-                  <div className="text-xs text-[var(--text3)] mt-1">Free listings</div>
+                  <div className="font-bold">{t('TSP Directory')}</div>
+                  <div className="text-xs text-[var(--text3)] mt-1">{t('Free listings')}</div>
                 </Link>
 
                 <Link href="/reports" className="card p-6 text-center hover:border-[var(--gold)]">
                   <FileText size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                  <div className="font-bold">Reports</div>
+                  <div className="font-bold">{t('Reports')}</div>
                 </Link>
 
                 {isAdmin(role) && (
@@ -757,8 +759,8 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
                     className="card p-6 text-center hover:border-[var(--gold)] border-2 border-[var(--gold)]/50"
                   >
                     <div className="text-3xl mb-2">🛡️</div>
-                    <div className="font-bold">Admin Portal</div>
-                    <div className="text-xs text-[var(--text3)] mt-1">Team & Settings</div>
+                    <div className="font-bold">{t('Admin Portal')}</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">{t('Team & Settings')}</div>
                   </Link>
                 )}
               </div>
@@ -769,45 +771,45 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
                 (role || '').toLowerCase()
               )) && (
               <div className="mt-12">
-                <h3 className="font-bold text-lg mb-4">💼 Business Management</h3>
+                <h3 className="font-bold text-lg mb-4">💼 {t('Business Management')}</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                   <Link href="/customers" className="card p-6 text-center hover:border-[var(--gold)]">
                     <div className="text-3xl mb-2">👥</div>
-                    <div className="font-bold">Customers</div>
-                    <div className="text-xs text-[var(--text3)] mt-1">Directory & profiles</div>
+                    <div className="font-bold">{t('Customers')}</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">{t('Directory & profiles')}</div>
                   </Link>
                   <Link href="/estimates" className="card p-6 text-center hover:border-[var(--gold)]">
                     <div className="text-3xl mb-2">📝</div>
-                    <div className="font-bold">Estimates</div>
-                    <div className="text-xs text-[var(--text3)] mt-1">Quotes & service estimates</div>
+                    <div className="font-bold">{t('Estimates')}</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">{t('Quotes & service estimates')}</div>
                   </Link>
                   <Link href="/invoices" className="card p-6 text-center hover:border-[var(--gold)]">
                     <div className="text-3xl mb-2">🧾</div>
-                    <div className="font-bold">Invoices</div>
-                    <div className="text-xs text-[var(--text3)] mt-1">Billing & collections</div>
+                    <div className="font-bold">{t('Invoices')}</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">{t('Billing & collections')}</div>
                   </Link>
                   <Link href="/purchase-orders" className="card p-6 text-center hover:border-[var(--gold)]">
                     <div className="text-3xl mb-2">📦</div>
-                    <div className="font-bold">Purchase Orders</div>
-                    <div className="text-xs text-[var(--text3)] mt-1">Email POs to parts suppliers</div>
+                    <div className="font-bold">{t('Purchase Orders')}</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">{t('Email POs to parts suppliers')}</div>
                   </Link>
                   <Link href="/company" className="card p-6 text-center hover:border-[var(--gold)]">
                     <Building2 size={32} className="mx-auto mb-3 text-[var(--gold)]" />
-                    <div className="font-bold">Company Profile</div>
-                    <div className="text-xs text-[var(--text3)] mt-1">Org, team & branding</div>
+                    <div className="font-bold">{t('Company Profile')}</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">{t('Org, team & branding')}</div>
                   </Link>
                   {canAccessFinancialReporting({ role, god }) && (
                     <Link href="/business/financial-reporting" className="card p-6 text-center hover:border-[var(--gold)]">
                       <div className="text-3xl mb-2">📊</div>
-                      <div className="font-bold">Financial Reporting</div>
-                      <div className="text-xs text-[var(--text3)] mt-1">Income, collections, and unpaid invoices</div>
+                      <div className="font-bold">{t('Financial Reporting')}</div>
+                      <div className="text-xs text-[var(--text3)] mt-1">{t('Income, collections, and unpaid invoices')}</div>
                     </Link>
                   )}
                   {canAccessJobCosting({ role, god }) && (
                     <Link href="/business/job-costing" className="card p-6 text-center hover:border-[var(--gold)]">
                       <div className="text-3xl mb-2">🧮</div>
-                      <div className="font-bold">Job Costing</div>
-                      <div className="text-xs text-[var(--text3)] mt-1">Labor, parts, and margin per repair order</div>
+                      <div className="font-bold">{t('Job Costing')}</div>
+                      <div className="text-xs text-[var(--text3)] mt-1">{t('Labor, parts, and margin per repair order')}</div>
                     </Link>
                   )}
                 </div>
@@ -816,34 +818,34 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
 
             <div className="mt-12">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="font-bold text-lg">Marketplace</h3>
-                <Link href="/marketplace" className="text-sm text-[var(--gold)] hover:underline">Browse all →</Link>
+                <h3 className="font-bold text-lg">{t('Marketplace')}</h3>
+                <Link href="/marketplace" className="text-sm text-[var(--gold)] hover:underline">{t('Browse all →')}</Link>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <Link href="/marketplace/parts" className="card p-6 hover:border-[var(--gold)] group">
                   <div className="text-3xl mb-3">🔩</div>
-                  <div className="font-bold text-lg mb-1">Parts</div>
-                  <div className="text-sm text-[var(--text3)]">Parts listed for sale by suppliers</div>
+                  <div className="font-bold text-lg mb-1">{t('Parts')}</div>
+                  <div className="text-sm text-[var(--text3)]">{t('Parts listed for sale by suppliers')}</div>
                 </Link>
 
                 <Link href="/marketplace/used-systems" className="card p-6 hover:border-[var(--gold)] group">
                   <div className="text-3xl mb-3">🖥️</div>
-                  <div className="font-bold text-lg mb-1">Used Laser Systems</div>
-                  <div className="text-sm text-[var(--text3)]">Buy or sell pre-owned equipment</div>
+                  <div className="font-bold text-lg mb-1">{t('Used Laser Systems')}</div>
+                  <div className="text-sm text-[var(--text3)]">{t('Buy or sell pre-owned equipment')}</div>
                 </Link>
 
                 <Link href="/marketplace/consumables" className="card p-6 hover:border-[var(--gold)] group">
                   <div className="text-3xl mb-3">🧴</div>
                   <div className="font-bold text-lg mb-1">Consumables</div>
-                  <div className="text-sm text-[var(--text3)]">Handpieces, fibers, tips & more</div>
+                  <div className="text-sm text-[var(--text3)]">{t('Handpieces, fibers, tips & more')}</div>
                 </Link>
 
                 <Link href="/service-requests" className="card p-6 hover:border-[var(--gold)] group">
                   <div className="text-3xl mb-3">🛠️</div>
-                  <div className="font-bold text-lg mb-1">Laser Repair Jobs</div>
+                  <div className="font-bold text-lg mb-1">{t('Laser Repair Jobs')}</div>
                   <div className="text-sm text-[var(--text3)]">
-                    Open repair requests ({stats.openServiceRequests}) — bid from here
+                    {t('Open repair requests')} ({stats.openServiceRequests}) — {t('bid from here')}
                   </div>
                 </Link>
               </div>
