@@ -10,10 +10,12 @@ import { canAccessFinancialReporting } from '@/lib/financial-reporting-access';
 import { canAccessJobCosting } from '@/lib/job-costing-access';
 import { fetchGodMe } from '@/lib/god-client';
 import { ownerLabelKind } from '@/lib/labels';
+import { useT } from '@/lib/fa/locale';
 
 type HubCard = { href: string; icon: string; label: string; desc: string };
 
 export default function TechHub() {
+  const t = useT();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [role, setRole] = useState<string>('');
@@ -129,7 +131,7 @@ export default function TechHub() {
     return (
       <div className="min-h-screen flex flex-col">
         <Header />
-        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">Loading…</div>
+        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">{t('Loading…')}</div>
       </div>
     );
   }
@@ -139,40 +141,40 @@ export default function TechHub() {
       <Header />
       <div className="max-w-7xl mx-auto w-full px-4 py-6">
         <h1 className="text-2xl font-extrabold mb-1">
-          {owner ? (rentalOwner ? 'My Lasers' : 'Owner Hub') : supplier ? 'Supplier Hub' : '🛠️ Tech Hub'}
+          {owner ? (rentalOwner ? t('My Lasers') : t('Owner Hub')) : supplier ? t('Supplier Hub') : `🛠️ ${t('Tech Hub')}`}
         </h1>
         <p className="text-sm text-[var(--text3)] mb-6">
           {owner
             ? rentalOwner
-              ? 'Fleet lasers, service requests, and history'
-              : 'Facility tools & service history'
+              ? t('Fleet lasers, service requests, and history')
+              : t('Facility tools & service history')
             : supplier
-              ? 'Supplier catalog & marketplace tools'
-              : 'Professional laser service resources & reference tools'}
+              ? t('Supplier catalog & marketplace tools')
+              : t('Professional laser service resources & reference tools')}
         </p>
 
         <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4">
           {techCards.map((c, i) => (
             <Link key={i} href={c.href} className="card p-5 text-center hover:border-[var(--gold)]">
               <div className="text-4xl mb-2">{c.icon}</div>
-              <div className="font-bold">{c.label}</div>
-              <div className="text-xs text-[var(--text3)] mt-1">{c.desc}</div>
+              <div className="font-bold">{t(c.label)}</div>
+              <div className="text-xs text-[var(--text3)] mt-1">{t(c.desc)}</div>
             </Link>
           ))}
         </div>
 
         {canBusiness && (
           <div className="mt-10">
-            <h2 className="text-lg font-extrabold mb-1">💼 Business Management</h2>
+            <h2 className="text-lg font-extrabold mb-1">💼 {t('Business Management')}</h2>
             <p className="text-xs text-[var(--text3)] mb-4">
-              CRM and company operations (admins, managers, dispatchers, billing)
+              {t('CRM and company operations (admins, managers, dispatchers, billing)')}
             </p>
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
               {businessCards.map((c, i) => (
                 <Link key={i} href={c.href} className="card p-5 text-center hover:border-[var(--gold)]">
                   <div className="text-4xl mb-2">{c.icon}</div>
-                  <div className="font-bold">{c.label}</div>
-                  <div className="text-xs text-[var(--text3)] mt-1">{c.desc}</div>
+                  <div className="font-bold">{t(c.label)}</div>
+                  <div className="text-xs text-[var(--text3)] mt-1">{t(c.desc)}</div>
                 </Link>
               ))}
             </div>
@@ -180,7 +182,7 @@ export default function TechHub() {
         )}
 
         <div className="mt-8 text-xs text-center text-[var(--text3)]">
-          Tech Hub = field &amp; reference tools. Customers live under Business Management for authorized roles.
+          {t('Tech Hub = field & reference tools. Customers live under Business Management for authorized roles.')}
         </div>
       </div>
     </div>

@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { mapAndroidHtmlPath } from '@/lib/android-html-routes';
+import { useT } from '@/lib/fa/locale';
 
 type Notif = {
   id: number | string;
@@ -92,6 +93,7 @@ export function resolveNotificationHref(link: string | null | undefined, type?: 
 }
 
 export default function NotificationsPage() {
+  const t = useT();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [rows, setRows] = useState<Notif[]>([]);
@@ -156,19 +158,19 @@ export default function NotificationsPage() {
         <div className="flex justify-between items-center mb-4">
           <div>
             <Link href="/" className="text-sm text-[var(--gold)] hover:underline">
-              ← Dashboard
+              {t('← Dashboard')}
             </Link>
-            <h1 className="text-3xl font-extrabold mt-1">Notifications</h1>
+            <h1 className="text-3xl font-extrabold mt-1">{t('Notifications')}</h1>
           </div>
           <button type="button" className="btn btn-secondary text-sm" onClick={markAllRead}>
-            Mark all read
+            {t('Mark all read')}
           </button>
         </div>
 
         {loading ? (
-          <div className="card p-8 text-center text-[var(--text3)]">Loading…</div>
+          <div className="card p-8 text-center text-[var(--text3)]">{t('Loading…')}</div>
         ) : rows.length === 0 ? (
-          <div className="card p-10 text-center text-[var(--text3)]">No notifications yet.</div>
+          <div className="card p-10 text-center text-[var(--text3)]">{t('No notifications yet.')}</div>
         ) : (
           <ul className="space-y-2">
             {rows.map((n) => {
@@ -184,7 +186,7 @@ export default function NotificationsPage() {
                   <div className="flex justify-between gap-2">
                     <div className="text-sm font-medium">{n.message || n.type}</div>
                     {!n.is_read && (
-                      <span className="text-[10px] font-bold text-[var(--gold)] uppercase">New</span>
+                      <span className="text-[10px] font-bold text-[var(--gold)] uppercase">{t('New')}</span>
                     )}
                   </div>
                   <div className="text-xs text-[var(--text3)] mt-1">
@@ -200,7 +202,7 @@ export default function NotificationsPage() {
                           markRead(n.id);
                         }}
                       >
-                        Open
+                        {t('Open')}
                       </Link>
                     )}
                     {!n.is_read && (
@@ -209,7 +211,7 @@ export default function NotificationsPage() {
                         className="btn btn-secondary text-sm"
                         onClick={() => markRead(n.id)}
                       >
-                        Mark read
+                        {t('Mark read')}
                       </button>
                     )}
                   </div>

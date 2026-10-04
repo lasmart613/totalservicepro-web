@@ -4,6 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Building2, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { roleLabel } from '@/lib/labels';
+import { useT } from '@/lib/fa/locale';
 import {
   acceptTeamInvite,
   fetchMemberships,
@@ -20,6 +21,7 @@ export function OrgSwitcher({
   compact?: boolean;
   variant?: 'chip' | 'menu';
 }) {
+  const t = useT();
   const [memberships, setMemberships] = useState<OrgMembership[]>([]);
   const [pending, setPending] = useState<PendingOrgInvite[]>([]);
   const [open, setOpen] = useState(false);
@@ -99,8 +101,8 @@ export function OrgSwitcher({
             >
               <div className="font-semibold truncate">{m.name}</div>
               <div className="text-[11px] text-[var(--text3)]">
-                {roleLabel(m.role)}
-                {m.isHome ? ' · Home shop' : ''}
+                {t(roleLabel(m.role))}
+                {m.isHome ? ` · ${t('Home shop')}` : ''}
                 {m.isActive ? ' · Active' : ''}
               </div>
             </button>
@@ -114,7 +116,7 @@ export function OrgSwitcher({
                 <div key={inv.id} className="rounded border border-[var(--border)] p-2">
                   <div className="font-semibold">{inv.name}</div>
                   <div className="text-[11px] text-[var(--text3)] mb-2">
-                    {roleLabel(inv.role)}
+                    {t(roleLabel(inv.role))}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     <button
@@ -172,6 +174,7 @@ export function OrgSwitcher({
 }
 
 export function MembershipsSettings() {
+  const t = useT();
   const [memberships, setMemberships] = useState<OrgMembership[]>([]);
   const [pending, setPending] = useState<PendingOrgInvite[]>([]);
   const [busy, setBusy] = useState(false);
@@ -221,10 +224,9 @@ export function MembershipsSettings() {
 
   return (
     <div>
-      <div className="font-semibold mb-2">Companies</div>
+      <div className="font-semibold mb-2">{t('Companies')}</div>
       <p className="text-xs text-[var(--text3)] mb-3">
-        Same login on the website and Android app. Switch which shop you are working as —
-        jobs stay in their own company.
+        {t('Same login on the website and Android app. Switch which shop you are working as — jobs stay in their own company.')}
       </p>
       <div className="space-y-2">
         {memberships.map((m) => (
@@ -235,8 +237,8 @@ export function MembershipsSettings() {
             <div>
               <div className="font-medium">{m.name}</div>
               <div className="text-[11px] text-[var(--text3)]">
-                {roleLabel(m.role)}
-                {m.isHome ? ' · Home shop' : ''}
+                {t(roleLabel(m.role))}
+                {m.isHome ? ` · ${t('Home shop')}` : ''}
                 {m.isActive ? ' · Active' : ''}
               </div>
             </div>
@@ -274,7 +276,7 @@ export function MembershipsSettings() {
       </div>
       {pending.length > 0 && (
         <div className="mt-3 space-y-2">
-          <div className="text-xs font-semibold">Pending invites</div>
+          <div className="text-xs font-semibold">{t('Pending invites')}</div>
           {pending.map((inv) => (
             <div key={inv.id} className="rounded border border-[var(--gold)] px-3 py-2">
               <div className="font-medium">{inv.name}</div>

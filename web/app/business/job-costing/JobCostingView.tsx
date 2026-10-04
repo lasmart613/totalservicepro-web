@@ -1,6 +1,9 @@
+'use client';
+
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import type { HoursFigure, JobCostReport, MoneyFigure, RevenueFigure } from '@/lib/job-costing';
+import { useT } from '@/lib/fa/locale';
 
 function formatMoney(amount: number): string {
   const sign = amount < 0 ? '-' : '';
@@ -8,10 +11,11 @@ function formatMoney(amount: number): string {
 }
 
 function MoneyCell({ figure }: { figure: MoneyFigure }) {
+  const t = useT();
   if (!figure.available || figure.amount == null) {
     return (
       <span className="text-[var(--text3)]" title={figure.reason || undefined}>
-        Unavailable
+        {t('Unavailable')}
       </span>
     );
   }
@@ -19,10 +23,11 @@ function MoneyCell({ figure }: { figure: MoneyFigure }) {
 }
 
 function HoursCell({ figure }: { figure: HoursFigure }) {
+  const t = useT();
   if (!figure.available || figure.hours == null) {
     return (
       <span className="text-[var(--text3)]" title={figure.reason || undefined}>
-        Unavailable
+        {t('Unavailable')}
       </span>
     );
   }
@@ -30,12 +35,13 @@ function HoursCell({ figure }: { figure: HoursFigure }) {
 }
 
 function RevenueCell({ figure }: { figure: RevenueFigure }) {
+  const t = useT();
   return (
     <div>
       <MoneyCell figure={figure} />
       {figure.available && figure.detail && (
         <div className="text-[11px] text-[var(--text3)]">
-          {figure.basis === 'estimate' ? 'Estimate quote' : 'Invoice'} · {figure.detail}
+          {figure.basis === 'estimate' ? t('Estimate quote') : t('Invoice')} · {figure.detail}
         </div>
       )}
     </div>
@@ -43,31 +49,31 @@ function RevenueCell({ figure }: { figure: RevenueFigure }) {
 }
 
 function Rollup({ label, children }: { label: string; children: ReactNode }) {
+  const t = useT();
   return (
     <article className="card p-4">
-      <h2 className="text-sm font-semibold text-[var(--text2)]">{label}</h2>
+      <h2 className="text-sm font-semibold text-[var(--text2)]">{t(label)}</h2>
       <div className="text-xl font-extrabold mt-1">{children}</div>
     </article>
   );
 }
 
 export function JobCostingView({ report }: { report: JobCostReport }) {
+  const t = useT();
   const org =
     report.organizationName ||
-    (report.organizationId ? `Organization ${report.organizationId}` : 'No active organization');
+    (report.organizationId ? `Organization ${report.organizationId}` : t('No active organization'));
 
   return (
     <div className="max-w-6xl mx-auto w-full px-4 py-6">
-      <h1 className="text-2xl font-extrabold">Job Costing</h1>
+      <h1 className="text-2xl font-extrabold">{t('Job Costing')}</h1>
       <p className="text-sm text-[var(--text3)] mt-1">
         {org}
         {report.organizationId ? ` · org ${report.organizationId}` : ''}
-        {' · '}as of {report.asOfDate} UTC
+        {' · '}{t('as of')} {report.asOfDate} UTC
       </p>
       <p className="text-sm text-[var(--text2)] mt-3 max-w-3xl">
-        Each repair order shows labor and parts taken from stored rows. A figure with no
-        source says unavailable and is left out of totals. Quoted estimate labor is shown
-        beside the job and is not added into cost or margin.
+        {t('Each repair order shows labor and parts taken from stored rows. A figure with no source says unavailable and is left out of totals. Quoted estimate labor is shown beside the job and is not added into cost or margin.')}
       </p>
       <p className="text-xs text-[var(--text3)] mt-2">
         Repair orders read: {report.ticketCount == null ? 'unavailable' : report.ticketCount}
@@ -98,9 +104,9 @@ export function JobCostingView({ report }: { report: JobCostReport }) {
       </div>
 
       <section className="mt-8">
-        <h2 className="text-lg font-extrabold mb-1">Repair orders</h2>
+        <h2 className="text-lg font-extrabold mb-1">{t('Repair orders')}</h2>
         <p className="text-xs text-[var(--text3)] mb-3">
-          Shop totals above are the sum of these rows only when every repair order has that figure.
+          {t('Shop totals above are the sum of these rows only when every repair order has that figure.')}
         </p>
         {report.ticketCount == null ? (
           <div className="card p-4 text-sm text-[var(--text3)]">
@@ -108,23 +114,23 @@ export function JobCostingView({ report }: { report: JobCostReport }) {
           </div>
         ) : report.jobs.length === 0 ? (
           <div className="card p-4 text-sm text-[var(--text3)]">
-            No repair orders were read for this organization.
+            {t('No repair orders were read for this organization.')}
           </div>
         ) : (
           <div className="card overflow-x-auto">
             <table className="w-full text-sm min-w-[960px]">
-              <thead className="text-left text-[var(--text3)]">
+              <thead className="text-start text-[var(--text3)]">
                 <tr>
-                  <th className="px-3 py-2 font-semibold">Repair order</th>
-                  <th className="px-3 py-2 font-semibold">Customer</th>
-                  <th className="px-3 py-2 font-semibold">Status</th>
-                  <th className="px-3 py-2 font-semibold text-right">Labor hours</th>
-                  <th className="px-3 py-2 font-semibold text-right">Labor cost</th>
-                  <th className="px-3 py-2 font-semibold text-right">Parts</th>
-                  <th className="px-3 py-2 font-semibold text-right">Total cost</th>
-                  <th className="px-3 py-2 font-semibold text-right">Revenue</th>
-                  <th className="px-3 py-2 font-semibold text-right">Margin</th>
-                  <th className="px-3 py-2 font-semibold text-right">Quoted labor</th>
+                  <th className="px-3 py-2 font-semibold">{t('Repair order')}</th>
+                  <th className="px-3 py-2 font-semibold">{t('Customer')}</th>
+                  <th className="px-3 py-2 font-semibold">{t('Status')}</th>
+                  <th className="px-3 py-2 font-semibold text-end">{t('Labor hours')}</th>
+                  <th className="px-3 py-2 font-semibold text-end">{t('Labor cost')}</th>
+                  <th className="px-3 py-2 font-semibold text-end">{t('Parts')}</th>
+                  <th className="px-3 py-2 font-semibold text-end">{t('Total cost')}</th>
+                  <th className="px-3 py-2 font-semibold text-end">{t('Revenue')}</th>
+                  <th className="px-3 py-2 font-semibold text-end">{t('Margin')}</th>
+                  <th className="px-3 py-2 font-semibold text-end">{t('Quoted labor')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -177,11 +183,11 @@ export function JobCostingView({ report }: { report: JobCostReport }) {
       </section>
 
       <section className="mt-10">
-        <h2 className="text-lg font-extrabold mb-1">Where each figure comes from</h2>
+        <h2 className="text-lg font-extrabold mb-1">{t('Where each figure comes from')}</h2>
         <dl className="card divide-y divide-[var(--border)]">
           {report.figures.map((item) => (
             <div key={item.figure} className="px-4 py-3">
-              <dt className="text-sm font-semibold">{item.figure}</dt>
+              <dt className="text-sm font-semibold">{t(item.figure)}</dt>
               <dd className="text-xs text-[var(--text3)] mt-1">{item.source}</dd>
             </div>
           ))}

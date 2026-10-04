@@ -8,8 +8,10 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { chunkIds, fetchAllPages, uniqueLinkedIds } from '@/lib/supabase/paginate';
 import { applyDirectoryContactToLinked, type DirectoryContactRow } from '@/lib/customer-contacts';
 import { canAddCustomers, isOwnerish, isServiceCompany, isSupplier } from '@/lib/roles';
+import { useT } from '@/lib/fa/locale';
 
 export default function CustomersDirectory() {
+  const t = useT();
   const [customers, setCustomers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -191,16 +193,15 @@ export default function CustomersDirectory() {
       <div className="min-h-screen flex flex-col">
         <Header />
         <div className="max-w-2xl mx-auto w-full px-4 py-8">
-          <h1 className="text-2xl font-extrabold mb-2">👥 Customers</h1>
+          <h1 className="text-2xl font-extrabold mb-2">👥 {t('Customers')}</h1>
           <div className="card p-8 text-center">
             <div className="text-5xl mb-4">🔒</div>
-            <div className="font-bold text-xl mb-3">Access Restricted</div>
+            <div className="font-bold text-xl mb-3">{t('Access Restricted')}</div>
             <p className="text-[var(--text3)]">
-              The Customer Directory is only available for{' '}
-              <strong>Service Companies</strong> and <strong>Parts Suppliers</strong>.
+              {t('The Customer Directory is only available for Service Companies and Parts Suppliers.')}
             </p>
             <Link href="/" className="btn btn-primary mt-6 inline-block">
-              Go to Dashboard
+              {t('Go to Dashboard')}
             </Link>
           </div>
         </div>
@@ -214,8 +215,8 @@ export default function CustomersDirectory() {
       <div className="max-w-7xl mx-auto w-full px-4 py-6">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-6">
           <div>
-            <h1 className="text-2xl font-extrabold">👥 Customer Directory</h1>
-            <p className="text-sm text-[var(--text3)]">Customers managed by your organization</p>
+            <h1 className="text-2xl font-extrabold">👥 {t('Customer Directory')}</h1>
+            <p className="text-sm text-[var(--text3)]">{t('Customers managed by your organization')}</p>
           </div>
           {allowAdd && (
             <button type="button" className="btn btn-primary text-sm" onClick={() => setShowAdd(true)}>
@@ -230,7 +231,7 @@ export default function CustomersDirectory() {
         <div className="mb-4">
           <input
             type="text"
-            placeholder="Search by name, city or state..."
+            placeholder={t('Search by name, city or state...')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             className="input w-full md:w-80"
@@ -243,7 +244,7 @@ export default function CustomersDirectory() {
           <div className="card p-8 text-center">
             <div className="text-4xl mb-3">👥</div>
             <p className="font-semibold mb-1">
-              {search.trim() ? 'No customers match your search' : 'No customers yet'}
+              {search.trim() ? t('No customers match your search') : t('No customers yet')}
             </p>
             <p className="text-sm text-[var(--text3)] mb-4">
               {search.trim()

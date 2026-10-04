@@ -9,6 +9,7 @@ import { toast } from 'sonner';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { canSeeAllShopTickets, isAdmin, isFieldEngineer, isPro } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
+import { useT } from '@/lib/fa/locale';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { ticketDateYmd, toLocalYmd } from '@/lib/tickets';
 import {
@@ -132,6 +133,7 @@ const EMPTY_FORM = (presetDate?: string): TicketForm => ({
 });
 
 export default function ServiceSchedule() {
+  const t = useT();
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
   // Keep full date so Day view and month→day click land on the correct day
   const [cursor, setCursor] = useState(() => {
@@ -769,7 +771,7 @@ export default function ServiceSchedule() {
         <div className="flex items-center justify-between mb-8 flex-wrap gap-3">
           <div className="flex items-center gap-3">
             <CalendarIcon size={32} className="text-[var(--gold)]" />
-            <h1 className="text-4xl font-extrabold">Service Schedule</h1>
+            <h1 className="text-4xl font-extrabold">{t('Service Schedule')}</h1>
           </div>
           <div className="flex items-center gap-3 flex-wrap">
             {canCreate && (
@@ -778,14 +780,14 @@ export default function ServiceSchedule() {
                 onClick={() => openNewModal()}
                 className="btn btn-primary text-sm inline-flex items-center gap-1.5"
               >
-                <Plus size={16} /> New Service Call
+                <Plus size={16} /> {t('New Service Call')}
               </button>
             )}
             <button type="button" onClick={goToday} className="btn btn-secondary text-sm">
-              Today
+              {t('Today')}
             </button>
             <Link href="/" className="text-[var(--gold)] hover:underline">
-              ← Back to Dashboard
+              {t('← Back to Dashboard')}
             </Link>
           </div>
         </div>
@@ -795,7 +797,7 @@ export default function ServiceSchedule() {
             {loadError}
           </div>
         )}
-        {loading && <div className="mb-4 text-sm text-[var(--text3)]">Loading tickets…</div>}
+        {loading && <div className="mb-4 text-sm text-[var(--text3)]">{t('Loading tickets…')}</div>}
         {!loading && (
           <div className="mb-4 text-xs text-[var(--text3)] flex flex-wrap items-center gap-2">
             <span>
@@ -805,7 +807,7 @@ export default function ServiceSchedule() {
               {datedThisMonth} dated this month
               {' · '}
               {unscheduledCalls.length} unscheduled
-              {userRole ? ` · ${roleLabel(userRole)}` : ''}
+              {userRole ? ` · ${t(roleLabel(userRole))}` : ''}
               {fseOnlyView ? ' · your assignments only' : ' · full shop'}
               {!canCreate && userId ? ' · read-only' : ''}
             </span>
@@ -814,7 +816,7 @@ export default function ServiceSchedule() {
               className="text-[var(--gold)] underline-offset-2 hover:underline"
               onClick={() => fetchServiceCalls()}
             >
-              Refresh
+              {t('Refresh')}
             </button>
           </div>
         )}
@@ -828,7 +830,7 @@ export default function ServiceSchedule() {
                 className={`btn text-xs ${legendFilter == null ? 'btn-primary' : 'btn-secondary'}`}
                 onClick={() => setLegendFilter(null)}
               >
-                All
+                {t('All')}
               </button>
             </div>
             <div className="flex flex-wrap gap-2">
@@ -884,25 +886,25 @@ export default function ServiceSchedule() {
             onClick={() => setView('month')}
             className={`btn ${view === 'month' ? 'btn-primary' : ''}`}
           >
-            Month
+            {t('Month')}
           </button>
           <button
             onClick={() => setView('week')}
             className={`btn ${view === 'week' ? 'btn-primary' : ''}`}
           >
-            Week
+            {t('Week')}
           </button>
           <button
             onClick={() => setView('day')}
             className={`btn ${view === 'day' ? 'btn-primary' : ''}`}
           >
-            Day
+            {t('Day')}
           </button>
           <button
             onClick={() => setView('agenda')}
             className={`btn ${view === 'agenda' ? 'btn-primary' : ''}`}
           >
-            Agenda
+            {t('Agenda')}
           </button>
         </div>
 
@@ -1131,7 +1133,7 @@ export default function ServiceSchedule() {
             <div className="space-y-2">
               {visibleCalls.filter((c) => c.date === dayYmd).length === 0 && (
                 <div className="text-[var(--text3)] text-sm py-8 text-center">
-                  No tickets scheduled this day.
+                  {t('No tickets scheduled this day.')}
                 </div>
               )}
               {visibleCalls
@@ -1178,7 +1180,7 @@ export default function ServiceSchedule() {
               )}
             </div>
             {visibleAgenda.length === 0 && (
-              <div className="text-[var(--text3)] text-sm py-8 text-center">No upcoming tickets.</div>
+              <div className="text-[var(--text3)] text-sm py-8 text-center">{t('No upcoming tickets.')}</div>
             )}
             <div className="space-y-2">
               {visibleAgenda.map((call) => (

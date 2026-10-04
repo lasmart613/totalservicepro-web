@@ -1,14 +1,18 @@
+'use client';
+
 import Link from 'next/link';
 import { money } from '@/lib/billing/save-helpers';
 import type { FinancialMetric, FinancialReport } from '@/lib/financial-reporting';
+import { useT } from '@/lib/fa/locale';
 
 function MetricCard({ metric }: { metric: FinancialMetric }) {
+  const t = useT();
   const unavailable = metric.availability !== 'available';
   return (
     <article className="card p-4 flex flex-col gap-2 min-h-[9.5rem]">
-      <h2 className="text-sm font-semibold text-[var(--text2)]">{metric.label}</h2>
+      <h2 className="text-sm font-semibold text-[var(--text2)]">{t(metric.label)}</h2>
       <div className={`text-2xl font-extrabold ${unavailable ? 'text-[var(--text3)]' : 'text-[var(--text)]'}`}>
-        {unavailable ? 'Unavailable' : money(metric.amount || 0)}
+        {unavailable ? t('Unavailable') : money(metric.amount || 0)}
       </div>
       {metric.count != null && !unavailable && (
         <div className="text-xs text-[var(--text3)]">{metric.count} row{metric.count === 1 ? '' : 's'}</div>
@@ -24,20 +28,19 @@ function MetricCard({ metric }: { metric: FinancialMetric }) {
 }
 
 export function FinancialReportingView({ report }: { report: FinancialReport }) {
-  const org = report.organizationName || (report.organizationId ? `Organization ${report.organizationId}` : 'No active organization');
+  const t = useT();
+  const org = report.organizationName || (report.organizationId ? `Organization ${report.organizationId}` : t('No active organization'));
 
   return (
     <div className="max-w-6xl mx-auto w-full px-4 py-6">
-      <h1 className="text-2xl font-extrabold">Financial Reporting</h1>
+      <h1 className="text-2xl font-extrabold">{t('Financial Reporting')}</h1>
       <p className="text-sm text-[var(--text3)] mt-1">
         {org}
         {report.organizationId ? ` · org ${report.organizationId}` : ''}
-        {' · '}as of {report.asOfDate} UTC
+        {' · '}{t('as of')} {report.asOfDate} UTC
       </p>
       <p className="text-sm text-[var(--text2)] mt-3 max-w-3xl">
-        Figures are sums of stored rows for this organization. Amounts are shown in dollars,
-        the same way invoices and purchase orders are. A metric that has no table or column
-        says unavailable and has no total.
+        {t('Figures are sums of stored rows for this organization. Amounts are shown in dollars, the same way invoices and purchase orders are. A metric that has no table or column says unavailable and has no total.')}
       </p>
       <p className="text-xs text-[var(--text3)] mt-2">
         Invoices read: {report.invoiceRowCount == null ? 'unavailable' : report.invoiceRowCount}
@@ -52,7 +55,7 @@ export function FinancialReportingView({ report }: { report: FinancialReport }) 
       </div>
 
       <section className="mt-10">
-        <h2 className="text-lg font-extrabold mb-1">Outstanding unpaid invoices</h2>
+        <h2 className="text-lg font-extrabold mb-1">{t('Outstanding unpaid invoices')}</h2>
         <p className="text-xs text-[var(--text3)] mb-3">
           Source: service_invoices. Issued invoices with total minus recorded payment still above zero.
           Drafts, voided, and cancelled invoices are omitted.
@@ -61,21 +64,21 @@ export function FinancialReportingView({ report }: { report: FinancialReport }) 
           <div className="card p-4 text-sm text-[var(--text3)]">
             {report.invoiceRowCount == null
               ? 'Outstanding invoices are unavailable because service_invoices could not be read.'
-              : 'No issued invoice has a remaining balance from the rows that were read.'}
+              : t('No issued invoice has a remaining balance from the rows that were read.')}
           </div>
         ) : (
           <div className="card overflow-x-auto">
             <table className="w-full text-sm">
-              <thead className="text-left text-[var(--text3)]">
+              <thead className="text-start text-[var(--text3)]">
                 <tr>
-                  <th className="px-3 py-2 font-semibold">Invoice</th>
-                  <th className="px-3 py-2 font-semibold">Customer</th>
-                  <th className="px-3 py-2 font-semibold">Status</th>
-                  <th className="px-3 py-2 font-semibold">Invoice date</th>
-                  <th className="px-3 py-2 font-semibold">Due</th>
-                  <th className="px-3 py-2 font-semibold text-right">Total</th>
-                  <th className="px-3 py-2 font-semibold text-right">Paid</th>
-                  <th className="px-3 py-2 font-semibold text-right">Balance</th>
+                  <th className="px-3 py-2 font-semibold">{t('Invoice')}</th>
+                  <th className="px-3 py-2 font-semibold">{t('Customer')}</th>
+                  <th className="px-3 py-2 font-semibold">{t('Status')}</th>
+                  <th className="px-3 py-2 font-semibold">{t('Invoice date')}</th>
+                  <th className="px-3 py-2 font-semibold">{t('Due')}</th>
+                  <th className="px-3 py-2 font-semibold text-end">{t('Total')}</th>
+                  <th className="px-3 py-2 font-semibold text-end">{t('Paid')}</th>
+                  <th className="px-3 py-2 font-semibold text-end">{t('Balance')}</th>
                 </tr>
               </thead>
               <tbody>
@@ -107,7 +110,7 @@ export function FinancialReportingView({ report }: { report: FinancialReport }) 
 
       {report.unpricedInvoices.length > 0 && (
         <section className="mt-8">
-          <h2 className="text-lg font-extrabold mb-1">Invoices missing an amount</h2>
+          <h2 className="text-lg font-extrabold mb-1">{t('Invoices missing an amount')}</h2>
           <p className="text-xs text-[var(--text3)] mb-3">
             These rows were read and left out of a total because the source field was empty.
           </p>

@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
+import Link from 'next/link';
 import { PublicLink, useLocalizedPublic, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -172,9 +173,9 @@ export default function Marketplace() {
           {isSupplier(userRole, orgType) && (
             <Link href="/marketplace/storefront" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
               <div className="text-4xl mb-4">🏪</div>
-              <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Seller storefront</h3>
+              <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">{t('Seller storefront')}</h3>
               <p className="text-sm text-[var(--text3)] flex-1">
-                Optional public shop page and CSV / Excel inventory upload (Premium / Team)
+                {t('Optional public shop page and CSV / Excel inventory upload (Premium / Team)')}
               </p>
             </Link>
           )}

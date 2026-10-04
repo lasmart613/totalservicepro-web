@@ -383,9 +383,9 @@ export default function DirectoryPage() {
           <div className="text-center text-[var(--text3)] py-12 px-4">
             {filter === 'clinics'
               ? myOrgId
-                ? 'No customers linked to your organization yet.'
-                : 'Sign in with a repair company to see your linked clinics.'
-              : 'No organizations match this filter. Orgs appear when they opt into the free directory listing.'}
+                ? t('No customers linked to your organization yet.')
+                : t('Sign in with a repair company to see your linked clinics.')
+              : t('No organizations match this filter. Orgs appear when they opt into the free directory listing.')}
           </div>
         ) : (
           <div className="space-y-2.5">
