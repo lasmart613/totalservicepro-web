@@ -91,6 +91,64 @@ html.landing-mode body {
   color: #FBBF24;
 }
 
+.lp-lang {
+  position: relative;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.lp-lang-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+  cursor: pointer;
+}
+
+.lp-lang-btn:hover {
+  color: #FBBF24;
+}
+
+.lp-lang-menu {
+  position: absolute;
+  z-index: 40;
+  top: calc(100% + 10px);
+  inset-inline-start: 0;
+  min-width: 11rem;
+  margin: 0;
+  padding: 4px;
+  list-style: none;
+  background: #1f2937;
+  border: 1px solid #fbbf24;
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.lp-lang-menu a {
+  display: block;
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: #f3e8d8;
+  text-decoration: none;
+  text-transform: none;
+  letter-spacing: 0;
+  font-weight: 600;
+}
+
+.lp-lang-menu a:hover,
+.lp-lang-menu a[aria-current='page'] {
+  color: #fbbf24;
+}
+
 .lp-nav-cta {
   display: flex;
   align-items: center;

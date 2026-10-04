@@ -1,7 +1,7 @@
 'use client';
 
 import React, { Suspense, useEffect, useState } from 'react';
-import { PublicLink, useFa, useT } from '@/lib/fa/locale';
+import { PublicLink, useLocalizedPublic, useT } from '@/lib/fa/locale';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
@@ -92,7 +92,7 @@ function PublicPlansStatic() {
 
 function PlansIntro({ audience, cards }: { audience: PlanAudience; cards: React.ReactNode }) {
   const t = useT();
-  const fa = useFa();
+  const localized = useLocalizedPublic();
   const audienceName = planAudienceLabel(audience);
   return (
     <LandingShell>
@@ -100,7 +100,7 @@ function PlansIntro({ audience, cards }: { audience: PlanAudience; cards: React.
         <p className="lp-kicker">Total Service Pro</p>
         <h1 className="lp-h2">{t('Free Plan, Premium, and Team')}</h1>
         <p className="lp-lede">
-          {fa ? (
+          {localized ? (
             <>
               {t('Register for a Free Plan. Compare Free, Premium, and Team for a ')}
               {t(audienceName)}
@@ -383,7 +383,7 @@ function SignedInPlans() {
 }
 
 function PlansGate() {
-  const fa = useFa();
+  const localized = useLocalizedPublic();
   const [auth, setAuth] = useState<AuthState>('loading');
 
   useEffect(() => {
@@ -403,7 +403,7 @@ function PlansGate() {
     };
   }, []);
 
-  if (fa) {
+  if (localized) {
     return (
       <Suspense fallback={<PublicPlansStatic />}>
         <PublicPlans />

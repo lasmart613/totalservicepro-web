@@ -2,7 +2,8 @@
 
 import React, { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
-import { PublicLink, useFa, useT } from '@/lib/fa/locale';
+import { PublicLink, usePublicLocale, useT } from '@/lib/fa/locale';
+import { prefixLocaleHref } from '@/lib/i18n/locales';
 import { LandingShell } from './LandingShell';
 import { FindRepControl } from './FindRepControl';
 import { FindRepForm } from './FindRepForm';
@@ -257,7 +258,7 @@ const HERO_COVER_ID: Record<string, string> = {
 function HeroCarousel() {
   const router = useRouter();
   const t = useT();
-  const fa = useFa();
+  const locale = usePublicLocale();
   const n = HERO_SLIDES.length;
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -283,9 +284,9 @@ function HeroCarousel() {
     const el = document.getElementById('find-a-rep');
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (new URLSearchParams(window.location.search).has('find')) {
-      router.replace(fa ? '/fa#find-a-rep' : '/#find-a-rep', { scroll: false });
+      router.replace(prefixLocaleHref(locale, '/#find-a-rep'), { scroll: false });
     }
-  }, [router, fa]);
+  }, [router, locale]);
 
   useEffect(() => {
     if (paused || hold) return;

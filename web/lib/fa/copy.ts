@@ -11,6 +11,7 @@ export const FA_COPY: Record<string, string> = {
   'Sign in': 'ورود',
   'Sign Up': 'ثبت‌نام',
   'Sign up': 'ثبت‌نام',
+  Language: 'زبان',
   'Open menu': 'باز کردن منو',
   'Close menu': 'بستن منو',
   'Loading dashboard...': 'در حال بارگذاری داشبورد…',

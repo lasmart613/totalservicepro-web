@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { PublicLink, useFa, useT } from '@/lib/fa/locale';
+import { PublicLink, useLocalizedPublic, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { canPostMarketplaceNeed, isPro, isSupplier } from '@/lib/roles';
@@ -11,7 +11,7 @@ export default function Marketplace() {
   const [userRole, setUserRole] = useState('');
   const [orgType, setOrgType] = useState<string | null>(null);
   const supabase = getSupabaseClient();
-  const fa = useFa();
+  const localized = useLocalizedPublic();
   const t = useT();
 
   useEffect(() => {
@@ -104,7 +104,7 @@ export default function Marketplace() {
             </p>
           </div>
 
-          {!fa && (isPro(userRole) || isSupplier(userRole, orgType)) && (
+          {!localized && (isPro(userRole) || isSupplier(userRole, orgType)) && (
             <PublicLink
               href={
                 isSupplier(userRole, orgType)
@@ -116,7 +116,7 @@ export default function Marketplace() {
               {t('+ Create New Listing')}
             </PublicLink>
           )}
-          {!fa && canPostMarketplaceNeed(userRole, orgType) && !isPro(userRole) && (
+          {!localized && canPostMarketplaceNeed(userRole, orgType) && !isPro(userRole) && (
             <PublicLink href="/service-requests" className="btn btn-primary whitespace-nowrap">
               {t('Post Service Request')}
             </PublicLink>
