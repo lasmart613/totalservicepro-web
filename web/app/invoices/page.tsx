@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { Header } from '@/components/Header';
+import { useT } from '@/lib/fa/locale';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
   coerceOrgId,
@@ -53,6 +54,7 @@ function docNumber(inv: InvoiceRow): string {
 }
 
 export default function InvoicesListPage() {
+  const t = useT();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [rows, setRows] = useState<InvoiceRow[]>([]);
@@ -260,11 +262,11 @@ export default function InvoicesListPage() {
       <div className="page max-w-7xl mx-auto w-full px-4 py-6 pb-24">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-extrabold">🧾 Invoices</h1>
-            <p className="text-[var(--text3)] text-sm">Billing &amp; collections</p>
+            <h1 className="text-2xl font-extrabold">🧾 {t('Invoices')}</h1>
+            <p className="text-[var(--text3)] text-sm">{t('Billing & collections')}</p>
           </div>
           <Link href="/invoices/new" className="btn btn-primary hidden sm:flex items-center gap-2">
-            <Plus size={18} /> New Invoice
+            <Plus size={18} /> {t('New Invoice')}
           </Link>
         </div>
 
@@ -272,25 +274,25 @@ export default function InvoicesListPage() {
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-[var(--gold)]">{loading ? '—' : drafts}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              DRAFTS
+              {t('DRAFTS')}
             </div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-blue-300">{loading ? '—' : sent}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              SENT
+              {t('SENT')}
             </div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-amber-300">{loading ? '—' : partial}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              PARTIAL
+              {t('PARTIAL')}
             </div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-[var(--green)]">{loading ? '—' : paid}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              PAID
+              {t('PAID')}
             </div>
           </div>
         </div>
@@ -298,7 +300,7 @@ export default function InvoicesListPage() {
         <div className="mb-4">
           <input
             className="input"
-            placeholder="Search customer, invoice #..."
+            placeholder={t('Search customer, invoice #...')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -332,12 +334,12 @@ export default function InvoicesListPage() {
         ) : filtered.length === 0 ? (
           <div className="empty-state card p-8 text-center">
             <div className="text-4xl mb-3">🧾</div>
-            <div className="font-semibold">No invoices yet</div>
+            <div className="font-semibold">{t('No invoices yet')}</div>
             <p className="text-sm mt-1 text-[var(--text3)]">
               Create an invoice or convert from an estimate.
             </p>
             <Link href="/invoices/new" className="btn btn-primary mt-4 inline-flex">
-              + New Invoice
+              + {t('New Invoice')}
             </Link>
           </div>
         ) : (
@@ -455,7 +457,7 @@ export default function InvoicesListPage() {
         )}
       </div>
 
-      <Link href="/invoices/new" className="fab sm:hidden" title="New Invoice">
+      <Link href="/invoices/new" className="fab sm:hidden" title={t('New Invoice')}>
         <Plus size={28} />
       </Link>
 
