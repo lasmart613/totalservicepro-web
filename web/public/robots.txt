@@ -30,6 +30,7 @@ Disallow: /estimates
 Disallow: /invoices
 Disallow: /invoice-paid
 Disallow: /purchase-orders
+Disallow: /business
 Disallow: /manuals
 Disallow: /ai-assistant
 Disallow: /auth
