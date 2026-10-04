@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { Header } from '@/components/Header';
+import { useT } from '@/lib/fa/locale';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
   coerceOrgId,
@@ -117,6 +118,7 @@ export default function EstimatesPage() {
 }
 
 function ShopEstimatesList() {
+  const t = useT();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [rows, setRows] = useState<EstimateRow[]>([]);
@@ -397,11 +399,11 @@ function ShopEstimatesList() {
       <div className="page max-w-7xl mx-auto w-full px-4 py-6 pb-24">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-extrabold">📝 Estimates</h1>
-            <p className="text-[var(--text3)] text-sm">Quotes &amp; service estimates</p>
+            <h1 className="text-2xl font-extrabold">📝 {t('Estimates')}</h1>
+            <p className="text-[var(--text3)] text-sm">{t('Quotes & service estimates')}</p>
           </div>
           <Link href="/estimates/new" className="btn btn-primary hidden sm:flex items-center gap-2">
-            <Plus size={18} /> New Estimate
+            <Plus size={18} /> {t('New Estimate')}
           </Link>
         </div>
 
@@ -442,7 +444,7 @@ function ShopEstimatesList() {
         <div className="mb-4">
           <input
             className="input"
-            placeholder="Search customer, estimate #, device..."
+            placeholder={t('Search customer, estimate #, device...')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -478,11 +480,11 @@ function ShopEstimatesList() {
           <div className="empty-state card p-8 text-center">
             <div className="text-4xl mb-3">📝</div>
             <div className="font-semibold">
-              {activeFilter === 'expired' ? 'No expired estimates.' : 'No estimates in this view'}
+              {activeFilter === 'expired' ? t('No expired estimates.') : t('No estimates in this view')}
             </div>
             <p className="text-sm mt-1 text-[var(--text3)]">Create your first estimate to get started.</p>
             <Link href="/estimates/new" className="btn btn-primary mt-4 inline-flex">
-              + New Estimate
+              + {t('New Estimate')}
             </Link>
           </div>
         ) : (
@@ -651,7 +653,7 @@ function ShopEstimatesList() {
         )}
       </div>
 
-      <Link href="/estimates/new" className="fab sm:hidden" title="New Estimate">
+      <Link href="/estimates/new" className="fab sm:hidden" title={t('New Estimate')}>
         <Plus size={28} />
       </Link>
     </div>
