@@ -15,6 +15,7 @@ import {
 import { acceptServiceBid } from '@/lib/award';
 import { ShareButton } from '@/components/ShareButton';
 import { serviceRequestShareText } from '@/lib/share';
+import { OPEN_SERVICE_REQUEST_COLUMNS } from '@/lib/org-scoped-read';
 
 function money(n: number | null | undefined) {
   if (n == null || Number.isNaN(Number(n))) return '—';
@@ -133,10 +134,19 @@ export default function ServiceRequestDetail() {
       if (!directErr && direct) {
         reqData = direct;
       } else {
-        const shareResult = await loadViaShareApi();
-        if (shareResult === 'closed') {
-          setLoading(false);
-          return;
+        const { data: board } = await supabase
+          .from('open_service_requests')
+          .select(OPEN_SERVICE_REQUEST_COLUMNS)
+          .eq('id', id)
+          .maybeSingle();
+        if (board) {
+          reqData = board;
+        } else {
+          const shareResult = await loadViaShareApi();
+          if (shareResult === 'closed') {
+            setLoading(false);
+            return;
+          }
         }
       }
     }

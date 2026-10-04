@@ -11,6 +11,7 @@ import { listManufacturers, listModelsForManufacturer, OTHER_MODEL, OTHER_LASER 
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { ShareButton } from '@/components/ShareButton';
 import { serviceRequestShareText } from '@/lib/share';
+import { OPEN_SERVICE_REQUEST_COLUMNS } from '@/lib/org-scoped-read';
 
 type Laser = {
   id: number;
@@ -129,17 +130,36 @@ function ServiceRequestsInner() {
     }
 
     const owner = isOwnerish(role, oType);
-    // Owners see open + awarded (so accepting a bid still shows on the list).
-    // Pros browse open/bidding jobs; awarded wins are on /accepted-bids.
-    let q = supabase
-      .from('service_requests')
-      .select('*')
-      .or('category.eq.service,category.is.null')
-      .in('status', owner ? ['open', 'bidding', 'awarded'] : ['open', 'bidding', 'awarded'])
-      .order('created_at', { ascending: false })
-      .limit(100);
-    if (owner && oId != null) q = q.eq('organization_id', oId);
-    else if (owner && user.id) q = q.or(`posted_by.eq.${user.id},created_by.eq.${user.id}`);
+    // Owners read their own shop's requests (full row, membership RLS).
+    // Other shops' open requests come from the bid-list view, which has no
+    // equipment, photos, serials, contacts, or logos. Do not fall back to select *.
+    let q;
+    if (owner && oId != null) {
+      q = supabase
+        .from('service_requests')
+        .select('*')
+        .eq('organization_id', oId)
+        .or('category.eq.service,category.is.null')
+        .in('status', ['open', 'bidding', 'awarded'])
+        .order('created_at', { ascending: false })
+        .limit(100);
+    } else if (owner && user.id) {
+      q = supabase
+        .from('service_requests')
+        .select('*')
+        .or(`posted_by.eq.${user.id},created_by.eq.${user.id}`)
+        .or('category.eq.service,category.is.null')
+        .in('status', ['open', 'bidding', 'awarded'])
+        .order('created_at', { ascending: false })
+        .limit(100);
+    } else {
+      q = supabase
+        .from('open_service_requests')
+        .select(OPEN_SERVICE_REQUEST_COLUMNS)
+        .or('category.eq.service,category.is.null')
+        .order('created_at', { ascending: false })
+        .limit(100);
+    }
 
     const { data, error } = await q;
     if (error) {

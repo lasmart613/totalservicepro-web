@@ -8,32 +8,48 @@ import {
   readExistingActionToken,
 } from '@/lib/billing/estimate-action';
 import { estimateActionUrl, estimateCustomerPath } from '@/lib/share';
-import {
-  publicSiteOrigin,
-  resolveFreeAccountUrls,
-  wrapCustomerFacingDocumentEmail,
-} from '@/lib/customer-invite';
+import { publicSiteOrigin, wrapCustomerFacingDocumentEmail } from '@/lib/customer-invite';
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 import { getCompanyTheme } from '@/lib/company-theme';
+import {
+  buildOwnedEstimateMessage,
+  documentAccountLinks,
+  documentCustomerOrgId,
+  documentOwnedByOrganization,
+  loadOwnedDocument,
+  loadSenderCompany,
+  ownedDocumentSubject,
+  ownedSendRequest,
+  resendMessage,
+  resolveOwnedRecipient,
+  sanitizeMailResponse,
+  senderCompanyFromOrg,
+  storedCustomerEmail,
+} from '@/lib/billing/owned-doc-mail';
+
+const EST_SELECTS = [
+  'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action_token, services, issues, created_at',
+  'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action_token',
+  'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status',
+];
 
 /**
  * POST /api/billing/send-estimate
- * Body: { estimate_id?, to_email?, subject?, html?, estimate_number?, reply_to?,
- *         customer_organization_id? }
+ * Body: { estimate_id }
+ * Mail is sent only for an estimate the caller's organization owns.
+ * The HTML and recipient come from that estimate. The body cannot supply them.
+ * No customer-invite claim token is minted. Approve / reject links use the
+ * estimate action token already stored on that estimate.
  */
 export async function POST(req: NextRequest) {
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
-    if (!token) {
-      return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
-    }
+    if (!token) return respond({ error: 'Sign in required' }, 401);
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
     const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    if (!url || !anon) {
-      return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
-    }
+    if (!url || !anon) return respond({ error: 'Server misconfigured' }, 500);
 
     const supabase = createClient(url, anon, {
       global: { headers: { Authorization: `Bearer ${token}` } },
@@ -44,9 +60,7 @@ export async function POST(req: NextRequest) {
       data: { user },
       error: userErr,
     } = await supabase.auth.getUser(token);
-    if (userErr || !user) {
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
-    }
+    if (userErr || !user) return respond({ error: 'Invalid session' }, 401);
 
     let callerOrgId: string | number | null = null;
     try {
@@ -57,146 +71,97 @@ export async function POST(req: NextRequest) {
         .maybeSingle();
       callerOrgId = prof?.organization_id ?? null;
     } catch {
-      /* ignore */
+      callerOrgId = null;
     }
 
-    const body = await req.json().catch(() => ({}));
-    const bodyEmail = String(body.to_email || body.to || '').trim();
-    let toEmail = '';
-    let emailSource: 'crm_org' | 'crm_contact' | 'form' | 'estimate_data' | 'none' = 'none';
-    let html = String(body.html || '').trim();
-    const estimateNumber = body.estimate_number ? String(body.estimate_number) : '';
-    const rawId = body.estimate_id ?? null;
-    const estimateId =
-      rawId == null || rawId === '' || rawId === 'new'
-        ? null
-        : /^\d+$/.test(String(rawId))
-          ? Number(rawId)
-          : rawId;
+    const raw = await req.json().catch(() => ({}));
+    const request = ownedSendRequest(raw, 'estimate_id');
+    const estimateId = request.documentId;
+    if (estimateId == null) return respond({ error: 'Estimate id is required.' }, 400);
 
-    const EST_SELECTS = [
-      'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action_token',
-      'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status',
-    ];
-
-    async function loadEstimateRow(
-      client: SupabaseClient,
-      id: string | number
-    ): Promise<Record<string, any> | null> {
-      for (const cols of EST_SELECTS) {
-        const { data, error } = await client
-          .from('service_estimates')
-          .select(cols)
-          .eq('id', id)
-          .maybeSingle();
-        if (!error && data) return data as Record<string, any>;
-        if (error && !/column|schema cache|does not exist/i.test(error.message || '')) break;
-      }
-      return null;
+    const loaded = await loadOwnedDocument({
+      userClient: supabase,
+      adminClient: hasServiceRole() ? getSupabaseAdmin() : null,
+      table: 'service_estimates',
+      id: estimateId,
+      callerOrgId,
+      narrowSelects: EST_SELECTS,
+      notFoundError: 'Estimate not found.',
+      forbiddenError: 'This estimate belongs to another organization.',
+    });
+    if (!loaded.ok) return respond({ error: loaded.error }, loaded.status);
+    const est = loaded.row;
+    if (!documentOwnedByOrganization(est, callerOrgId)) {
+      return respond({ error: 'This estimate belongs to another organization.' }, 403);
     }
 
-    let est: any = null;
-    if (estimateId != null) {
-      est = await loadEstimateRow(supabase, estimateId);
-      if (!est && hasServiceRole()) {
-        try {
-          const row = await loadEstimateRow(getSupabaseAdmin(), estimateId);
-          if (row) {
-            const owns =
-              (row.created_by && String(row.created_by) === String(user.id)) ||
-              (callerOrgId != null &&
-                row.organization_id != null &&
-                String(row.organization_id) === String(callerOrgId));
-            if (owns) est = row;
-          }
-        } catch {
-          /* ignore */
-        }
-      }
-    }
-
-    const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
-
-    let custOrgId =
-      body.customer_organization_id ?? est?.customer_organization_id ?? null;
-    if (!custOrgId && est?.estimate_data) {
-      let ed = est.estimate_data;
-      if (typeof ed === 'string') {
-        try {
-          ed = JSON.parse(ed);
-        } catch {
-          ed = {};
-        }
-      }
-      if (ed?.customer_organization_id) custOrgId = ed.customer_organization_id;
-    }
-
-    const crmClient: SupabaseClient = hasServiceRole() ? getSupabaseAdmin() : supabase;
-
+    let crm: { email: string; source: 'crm_org' | 'crm_contact' | 'form' | 'none' } | null = null;
+    const custOrgId = documentCustomerOrgId(est, 'estimate_data');
     if (custOrgId) {
       try {
-        const sources = await fetchDirectoryContactSources(crmClient, custOrgId);
-        const pick = pickCrmReachEmail({
+        const sources = await fetchDirectoryContactSources(supabase, custOrgId);
+        crm = pickCrmReachEmail({
           directoryContacts: sources.directoryContacts,
           contactRows: sources.contactRows,
           officeEmail: sources.officeEmail,
         });
-        if (pick.email) {
-          toEmail = pick.email;
-          emailSource = pick.source === 'form' ? 'form' : pick.source;
-        }
       } catch {
-        /* fall through to form / estimate_data */
+        crm = null;
       }
     }
-
-    if (!toEmail && bodyEmail && isValidEmail(bodyEmail)) {
-      toEmail = bodyEmail;
-      emailSource = 'form';
-    }
-
-    if ((!toEmail || !isValidEmail(toEmail)) && est?.estimate_data) {
-      let ed = est.estimate_data;
-      if (typeof ed === 'string') {
-        try {
-          ed = JSON.parse(ed);
-        } catch {
-          ed = {};
-        }
-      }
-      if (ed?.custEmail && isValidEmail(String(ed.custEmail).trim())) {
-        toEmail = String(ed.custEmail).trim();
-        emailSource = 'estimate_data';
-      }
-    }
-
-    if (!toEmail || !isValidEmail(toEmail)) {
-      return NextResponse.json(
-        {
-          error:
-            'No valid customer email. Add email on the customer profile or estimate form.',
-        },
-        { status: 400 }
+    const recipient = resolveOwnedRecipient({
+      crm,
+      storedEmail: storedCustomerEmail(est, 'estimate'),
+    });
+    if (!recipient.email) {
+      return respond(
+        { error: 'No valid customer email. Add email on the customer profile or estimate form.' },
+        400
       );
     }
-    if (!html || html.length < 40) {
-      return NextResponse.json({ error: 'Estimate HTML body is required' }, { status: 400 });
+
+    const techName = await readTechName(supabase, user.id);
+    const company =
+      callerOrgId != null
+        ? await loadSenderCompany(supabase, callerOrgId, techName)
+        : senderCompanyFromOrg(null, techName);
+    const theme = callerOrgId != null ? await getCompanyTheme(callerOrgId, supabase) : null;
+
+    let actionToken = readExistingActionToken(est);
+    if (!actionToken) actionToken = generateEstimateActionToken();
+    const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
+    try {
+      await persistEstimateActionToken(writer, estimateId, actionToken, est.estimate_data);
+    } catch (e) {
+      console.warn('could not persist estimate action token', e);
     }
 
-    const subject =
-      String(body.subject || '').trim() ||
-      (estimateNumber
-        ? `Estimate ${estimateNumber} from Total Service Pro`
-        : 'Service estimate from Total Service Pro');
+    const subject = ownedDocumentSubject('estimate', est.estimate_number, company.company_name);
+    let html = buildOwnedEstimateMessage({
+      row: est,
+      company,
+      theme,
+      actionUrl: estimateActionUrl(actionToken),
+    });
+    html = ensureEstimateActionCtas(html, estimateActionUrl(actionToken));
+    const origin = publicSiteOrigin(req);
+    const { signupUrl, loginUrl } = documentAccountLinks(origin, estimateCustomerPath(estimateId));
+    const wrapped = wrapCustomerFacingDocumentEmail({
+      subject,
+      documentHtml: html,
+      signupUrl,
+      loginUrl,
+      companyName: String(est.customer_name || '').trim(),
+      theme,
+    });
 
     const resendKey = process.env.RESEND_API_KEY;
     const from =
       process.env.NOTIFY_FROM_EMAIL ||
       process.env.RESEND_FROM ||
       'Total Service Pro <contact@medicalrepairnetwork.com>';
-
     if (!resendKey) {
-      return NextResponse.json(
+      return respond(
         {
           ok: false,
           emailSent: false,
@@ -204,44 +169,9 @@ export async function POST(req: NextRequest) {
             'Email delivery is not configured (RESEND_API_KEY). Save as draft or mark sent without email.',
           needsConfig: true,
         },
-        { status: 503 }
+        503
       );
     }
-
-    let actionToken: string | null = null;
-    if (estimateId != null && est) {
-      actionToken = readExistingActionToken(est);
-      if (!actionToken) actionToken = generateEstimateActionToken();
-      const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
-      try {
-        await persistEstimateActionToken(writer, estimateId, actionToken, est.estimate_data);
-      } catch (e) {
-        console.warn('could not persist estimate action token', e);
-      }
-      html = ensureEstimateActionCtas(html, estimateActionUrl(actionToken));
-    }
-
-    const companyName = String(est?.customer_name || '').trim();
-    const { signupUrl, loginUrl: claimLoginUrl } = resolveFreeAccountUrls({
-      origin: publicSiteOrigin(req),
-      email: toEmail,
-      companyName,
-      customerOrgId: custOrgId,
-    });
-    const origin = publicSiteOrigin(req);
-    const loginUrl =
-      estimateId != null
-        ? `${origin}/login?next=${encodeURIComponent(estimateCustomerPath(estimateId))}`
-        : claimLoginUrl;
-    const theme = callerOrgId != null ? await getCompanyTheme(callerOrgId, supabase) : null;
-    const wrapped = wrapCustomerFacingDocumentEmail({
-      subject,
-      documentHtml: html,
-      signupUrl,
-      loginUrl,
-      companyName,
-      theme,
-    });
 
     const rr = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -249,13 +179,15 @@ export async function POST(req: NextRequest) {
         Authorization: `Bearer ${resendKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        from,
-        to: [toEmail],
-        subject,
-        html: wrapped,
-        reply_to: body.reply_to || undefined,
-      }),
+      body: JSON.stringify(
+        resendMessage({
+          from,
+          to: recipient.email,
+          subject,
+          html: wrapped,
+          replyTo: company.email,
+        })
+      ),
     });
 
     const result = await rr.json().catch(() => ({}));
@@ -264,30 +196,42 @@ export async function POST(req: NextRequest) {
       const msg = result?.message || `Email provider error (${rr.status})`;
       const friendly =
         /verify a domain|own email address|testing emails|not verified/i.test(msg)
-          ? `${msg} — Verify medicalrepairnetwork.com DNS in Resend before sending to arbitrary customers.`
+          ? `${msg} — Verify medicalrepairnetwork.com DNS in Resend before sending to customers.`
           : msg;
-      return NextResponse.json(
-        {
-          ok: false,
-          emailSent: false,
-          error: friendly,
-          attemptedTo: toEmail,
-        },
-        { status: 502 }
-      );
+      return respond({ ok: false, emailSent: false, error: friendly }, 502, [recipient.email]);
     }
 
-    return NextResponse.json({
-      ok: true,
-      emailSent: true,
-      id: result?.id || null,
-      to: toEmail,
-      emailSource,
-      estimateId,
-      actionToken,
-    });
+    return respond(
+      {
+        ok: true,
+        emailSent: true,
+        id: result?.id || null,
+        to: recipient.email,
+        emailSource: recipient.source,
+        estimateId,
+      },
+      200,
+      [recipient.email]
+    );
   } catch (e: any) {
     console.error('send-estimate', e);
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
+    return respond({ error: e?.message || 'Server error' }, 500);
+  }
+}
+
+function respond(body: Record<string, unknown>, status = 200, allowedEmails: string[] = []) {
+  return NextResponse.json(sanitizeMailResponse(body, allowedEmails), { status });
+}
+
+async function readTechName(supabase: SupabaseClient, userId: string): Promise<string> {
+  try {
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('first_name, last_name')
+      .eq('id', userId)
+      .maybeSingle();
+    return [data?.first_name, data?.last_name].filter(Boolean).join(' ');
+  } catch {
+    return '';
   }
 }
