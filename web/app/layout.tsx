@@ -50,7 +50,7 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              '(function(){try{var p=location.pathname||"";if(p==="/fa"||p.indexOf("/fa/")===0){var d=document.documentElement;d.lang="fa";d.dir="rtl";d.classList.add("fa-preview");}}catch(e){}})();',
+              '(function(){try{var p=location.pathname||"";var d=document.documentElement;if(p==="/fa"||p.indexOf("/fa/")===0){d.lang="fa";d.dir="rtl";d.classList.add("fa-preview");}else if(p==="/es"||p.indexOf("/es/")===0){d.lang="es";d.dir="ltr";}else if(p==="/fr"||p.indexOf("/fr/")===0){d.lang="fr";d.dir="ltr";}}catch(e){}})();',
           }}
         />
         <ThemeScript />

@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { PublicLink, useFa, useT } from '@/lib/fa/locale';
+import { PublicLink, useLocalizedPublic, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { toast } from 'sonner';
 
@@ -727,7 +727,7 @@ function AvgPowerCalculator() {
 // ===== MAIN PAGE =====
 export default function CalculatorsPage() {
   const t = useT();
-  const fa = useFa();
+  const localized = useLocalizedPublic();
   const [selected, setSelected] = useState<null | 'density-fluence' | 'density-irradiance' | 'duty' | 'wavelength' | 'avgpower'>(null);
 
   function handleSelect(tool: typeof selected) {
@@ -756,7 +756,7 @@ export default function CalculatorsPage() {
             <h1 className="text-2xl font-extrabold tracking-tight">{t('Calculators')}</h1>
             <p className="text-sm text-[var(--text3)]">{t('Photometry tools — ported from Android')}</p>
           </div>
-          {fa ? (
+          {localized ? (
             <PublicLink href="/" className="text-sm font-medium text-[var(--gold)] hover:underline">{t('← Home')}</PublicLink>
           ) : (
             <Link href="/hub" className="text-sm font-medium text-[var(--gold)] hover:underline">← Back to Hub</Link>
@@ -812,7 +812,7 @@ export default function CalculatorsPage() {
             <button onClick={backToMenu} className="btn btn-ghost mb-4 text-sm px-0">{t('← Back to Calculators menu')}</button>
             {renderCalculator()}
             <div className="mt-4 text-center">
-              {fa ? (
+              {localized ? (
                 <PublicLink href="/" className="text-xs text-[var(--text3)] hover:text-[var(--gold)]">{t('Return to Tech Hub')}</PublicLink>
               ) : (
                 <Link href="/hub" className="text-xs text-[var(--text3)] hover:text-[var(--gold)]">Return to Tech Hub</Link>

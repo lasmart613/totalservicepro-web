@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { FaProvider } from '@/lib/fa/locale';
+import { PublicLocaleFrame } from '@/components/i18n/PublicLocaleFrame';
 import './fa-preview.css';
 
 export const metadata: Metadata = {
@@ -9,14 +9,12 @@ export const metadata: Metadata = {
 
 export default function FaLayout({ children }: { children: React.ReactNode }) {
   return (
-    <div lang="fa" dir="rtl" className="fa-preview-root">
-      <FaProvider>
-        <p className="fa-draft-banner">
-          این متن پیش‌نویس است و برای اصلاح نوشته شده. نام‌های RepairPlanet، Total Service Pro، Premium و
-          Team، و همین‌طور قیمت‌ها، همان نسخهٔ انگلیسی است.
-        </p>
-        {children}
-      </FaProvider>
-    </div>
+    <PublicLocaleFrame locale="fa">
+      <p className="fa-draft-banner">
+        این متن پیش‌نویس است و برای اصلاح نوشته شده. نام‌های RepairPlanet، Total Service Pro، Premium و
+        Team، و همین‌طور قیمت‌ها، همان نسخهٔ انگلیسی است.
+      </p>
+      {children}
+    </PublicLocaleFrame>
   );
 }
