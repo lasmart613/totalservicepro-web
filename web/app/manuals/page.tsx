@@ -422,9 +422,9 @@ export default function ManualsLibrary() {
       return false;
     }
     const confirmAdd = window.confirm(
-      `Add \"${shownTitle}\" to your company library?\\n\\n` +
+      `Add "${shownTitle}" to your company library?\n\n` +
         `Slots used: ${used} of ${isUnlimitedManualSlots(limit) ? 'unlimited' : limit}` +
-        `${isUnlimitedManualSlots(limit) ? '' : ` (${remaining} left)`}.\\n` +
+        `${isUnlimitedManualSlots(limit) ? '' : ` (${remaining} left)`}.\n` +
         `Everyone in your service company can open it after you add it.`
     );
     if (!confirmAdd) return false;
@@ -501,7 +501,7 @@ export default function ManualsLibrary() {
       ) {
         toast.error(
           json.error ||
-            `No PDF uploaded yet for \"${shownTitle}\". The catalog entry exists, but files are missing under ${m.storage_path || 'storage'}.`
+            `No PDF uploaded yet for "${shownTitle}". The catalog entry exists, but files are missing under ${m.storage_path || 'storage'}.`
         );
         return;
       }
@@ -695,7 +695,7 @@ export default function ManualsLibrary() {
     const raw: string[] = Array.isArray(manual?.wavelengths)
       ? manual.wavelengths.map((w: any) => String(w).toLowerCase().trim())
       : [];
-    // Prefer concrete wavelengths; ignore bare \"multi\" when specifics exist
+    // Prefer concrete wavelengths; ignore bare "multi" when specifics exist
     const concrete = raw.filter((w) => w && w !== 'multi' && WL_STRIPE_COLORS[w]);
     let keys = concrete.length ? concrete : raw.filter((w) => WL_STRIPE_COLORS[w]);
     // Deduplicate + sort by spectral order
@@ -719,77 +719,77 @@ export default function ManualsLibrary() {
 
   /**
    * Spine label = model / trim only (never brand).
-   * Shelf header already shows the manufacturer (e.g. OmniGuide → spine \"FELS-25A\").
+   * Shelf header already shows the manufacturer (e.g. OmniGuide → spine "FELS-25A").
    */
   const getSpineTitle = (fullTitle: string | null | undefined, brand?: string | null) => {
     if (!fullTitle) return 'Manual';
     let t = String(fullTitle)
-      .replace(/\\bService\\s+Manuals?\\b/gi, ' ')
-      .replace(/\\bOperator'?s?\\s+Manuals?\\b/gi, ' ')
-      .replace(/\\bUser\\s+Manuals?\\b/gi, ' ')
-      .replace(/\\bInstructions?\\s+for\\s+Use\\b/gi, ' ')
-      .replace(/\\bIFU\\b/gi, ' ')
-      .replace(/\\bTechnical\\s+Manuals?\\b/gi, ' ')
-      .replace(/\\bParts\\s*(?:and|&)\\s*Service\\b/gi, ' ')
-      .replace(/\\s{2,}/g, ' ')
+      .replace(/\bService\s+Manuals?\b/gi, ' ')
+      .replace(/\bOperator'?s?\s+Manuals?\b/gi, ' ')
+      .replace(/\bUser\s+Manuals?\b/gi, ' ')
+      .replace(/\bInstructions?\s+for\s+Use\b/gi, ' ')
+      .replace(/\bIFU\b/gi, ' ')
+      .replace(/\bTechnical\s+Manuals?\b/gi, ' ')
+      .replace(/\bParts\s*(?:and|&)\s*Service\b/gi, ' ')
+      .replace(/\s{2,}/g, ' ')
       .trim();
-    t = t.replace(/\\b(Service|Manuals?|Instructions?)\\b$/gi, '').trim();
+    t = t.replace(/\b(Service|Manuals?|Instructions?)\b$/gi, '').trim();
 
     const brandRes: RegExp[] = [
       ...(brand
-        ? [new RegExp(`^\\\\s*${String(brand).replace(/[.*+?^${}()|[\\\\]\\\\\\\\]/g, '\\\\$&')}\\\\b[\\\\s\\\\-/:]*`, 'i')]
+        ? [new RegExp(`^\\s*${String(brand).replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\b[\\s\\-/:]*`, 'i')]
         : []),
-      /\\bomni\\s*guide\\b[\\s\\-/:]*|\\bomniguide\\b[\\s\\-/:]*|\\bo\\s*mini\\s*guide\\b[\\s\\-/:]*/gi,
-      /\\bcandela\\b[\\s\\-/:]*|\\bsyneron(?:\\s*candela)?\\b[\\s\\-/:]*/gi,
-      /\\blumenis\\b[\\s\\-/:]*|\\bcoherent\\b[\\s\\-/:]*|\\bcynosure\\b[\\s\\-/:]*|\\bpalomar\\b[\\s\\-/:]*/gi,
-      /\\bcutera\\b[\\s\\-/:]*|\\balma\\b[\\s\\-/:]*|\\bdeka\\b[\\s\\-/:]*|\\bzeiss\\b[\\s\\-/:]*|\\bnidek\\b[\\s\\-/:]*/gi,
-      /\\bquanta(?:\\s*system)?\\b[\\s\\-/:]*|\\biridex\\b[\\s\\-/:]*|\\blutronic\\b[\\s\\-/:]*|\\bjeisys\\b[\\s\\-/:]*/gi,
-      /\\bdornier(?:\\s*med(?:tech|ilas))?\\b[\\s\\-/:]*|\\bmedilas\\b[\\s\\-/:]*/gi,
-      /\\bsciton\\b[\\s\\-/:]*|\\bfotona\\b[\\s\\-/:]*|\\bellex\\b[\\s\\-/:]*|\\blightmed\\b[\\s\\-/:]*/gi,
-      /\\brohrer(?:\\s*aesthetics)?\\b[\\s\\-/:]*/gi,
+      /\bomni\s*guide\b[\s\-/:]*|\bomniguide\b[\s\-/:]*|\bo\s*mini\s*guide\b[\s\-/:]*/gi,
+      /\bcandela\b[\s\-/:]*|\bsyneron(?:\s*candela)?\b[\s\-/:]*/gi,
+      /\blumenis\b[\s\-/:]*|\bcoherent\b[\s\-/:]*|\bcynosure\b[\s\-/:]*|\bpalomar\b[\s\-/:]*/gi,
+      /\bcutera\b[\s\-/:]*|\balma\b[\s\-/:]*|\bdeka\b[\s\-/:]*|\bzeiss\b[\s\-/:]*|\bnidek\b[\s\-/:]*/gi,
+      /\bquanta(?:\s*system)?\b[\s\-/:]*|\biridex\b[\s\-/:]*|\blutronic\b[\s\-/:]*|\bjeisys\b[\s\-/:]*/gi,
+      /\bdornier(?:\s*med(?:tech|ilas))?\b[\s\-/:]*|\bmedilas\b[\s\-/:]*/gi,
+      /\bsciton\b[\s\-/:]*|\bfotona\b[\s\-/:]*|\bellex\b[\s\-/:]*|\blightmed\b[\s\-/:]*/gi,
+      /\brohrer(?:\s*aesthetics)?\b[\s\-/:]*/gi,
     ];
     for (const re of brandRes) t = t.replace(re, ' ');
-    t = t.replace(/\\s{2,}/g, ' ').replace(/^[\\s\\-–—:/|]+|[\\s\\-–—:/|]+$/g, '').trim();
-    if (!t) t = String(fullTitle).replace(/\\bService\\s+Manuals?\\b/gi, '').trim() || 'Manual';
+    t = t.replace(/\s{2,}/g, ' ').replace(/^[\s\-–—:/|]+|[\s\-–—:/|]+$/g, '').trim();
+    if (!t) t = String(fullTitle).replace(/\bService\s+Manuals?\b/gi, '').trim() || 'Manual';
 
     // Model shortcuts (no brand)
-    if (/fels[-\\s]?25a|intelliguide/i.test(t) || /fels[-\\s]?25a|intelliguide/i.test(fullTitle)) return 'FELS-25A';
+    if (/fels[-\s]?25a|intelliguide/i.test(t) || /fels[-\s]?25a|intelliguide/i.test(fullTitle)) return 'FELS-25A';
     if (/v-?beam.*perfecta/i.test(t)) return 'VBEAM PF';
-    if (/gentlemax\\s*pro/i.test(t)) return 'GENTLEMAX PRO';
-    if (/excel\\s*hr/i.test(t)) return 'EXCEL HR';
-    if (/litho\\s*evo/i.test(t)) return 'LITHO EVO';
-    if (/litho\\s*100|cyber\\s*ho\\s*100/i.test(t)) return 'LITHO 100';
-    if (/litho\\s*60|cyber\\s*ho\\s*60/i.test(t)) return 'LITHO 60';
-    if (/\\blitho\\b/i.test(t) && !/litho\\s*(60|100|evo)/i.test(t)) return 'LITHO';
-    if (/\\b9900\\b/i.test(t) || /oec\\s*9900/i.test(t)) return 'OEC 9900';
-    if (/\\bh[- ]?20\\b/i.test(t) && /\\bh[- ]?30\\b/i.test(t)) return 'H20/H30';
-    if (/\\bh[- ]?20\\b/i.test(t)) return 'H20';
-    if (/\\bh[- ]?30\\b/i.test(t)) return 'H30';
+    if (/gentlemax\s*pro/i.test(t)) return 'GENTLEMAX PRO';
+    if (/excel\s*hr/i.test(t)) return 'EXCEL HR';
+    if (/litho\s*evo/i.test(t)) return 'LITHO EVO';
+    if (/litho\s*100|cyber\s*ho\s*100/i.test(t)) return 'LITHO 100';
+    if (/litho\s*60|cyber\s*ho\s*60/i.test(t)) return 'LITHO 60';
+    if (/\blitho\b/i.test(t) && !/litho\s*(60|100|evo)/i.test(t)) return 'LITHO';
+    if (/\b9900\b/i.test(t) || /oec\s*9900/i.test(t)) return 'OEC 9900';
+    if (/\bh[- ]?20\b/i.test(t) && /\bh[- ]?30\b/i.test(t)) return 'H20/H30';
+    if (/\bh[- ]?20\b/i.test(t)) return 'H20';
+    if (/\bh[- ]?30\b/i.test(t)) return 'H30';
 
     if (t.length > 32) t = t.slice(0, 30).trimEnd() + '…';
     return t;
   };
 
   return (
-    <div className=\"min-h-screen flex flex-col bg-[var(--bg)] text-[var(--text)]\">
+    <div className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--text)]">
       <Header />
 
-      <div className=\"max-w-7xl mx-auto w-full px-4 py-6\">
-        <div className=\"manual-libraries mb-5\" role=\"tablist\" aria-label=\"Manual libraries\">
+      <div className="max-w-7xl mx-auto w-full px-4 py-6">
+        <div className="manual-libraries mb-5" role="tablist" aria-label="Manual libraries">
           {canService !== false && (
           <button
-            type=\"button\"
-            role=\"tab\"
+            type="button"
+            role="tab"
             aria-selected={library === 'service'}
             onClick={() => selectLibrary('service')}
             className={`manual-library ${library === 'service' ? 'is-selected' : ''}`}
           >
-            <span className=\"manual-library-icon\" aria-hidden>
+            <span className="manual-library-icon" aria-hidden>
               📚
             </span>
-            <span className=\"manual-library-copy\">
-              <span className=\"manual-library-label\">Service Manuals</span>
-              <span className=\"manual-library-meta\">
+            <span className="manual-library-copy">
+              <span className="manual-library-label">Service Manuals</span>
+              <span className="manual-library-meta">
                 {loading
                   ? '…'
                   : `${libraryCounts.service} ${libraryCounts.service === 1 ? 'manual' : 'manuals'}`}
@@ -798,18 +798,18 @@ export default function ManualsLibrary() {
           </button>
           )}
           <button
-            type=\"button\"
-            role=\"tab\"
+            type="button"
+            role="tab"
             aria-selected={library === 'operators'}
             onClick={() => selectLibrary('operators')}
             className={`manual-library ${library === 'operators' ? 'is-selected' : ''}`}
           >
-            <span className=\"manual-library-icon\" aria-hidden>
+            <span className="manual-library-icon" aria-hidden>
               📖
             </span>
-            <span className=\"manual-library-copy\">
-              <span className=\"manual-library-label\">Operators Manuals</span>
-              <span className=\"manual-library-meta\">
+            <span className="manual-library-copy">
+              <span className="manual-library-label">Operators Manuals</span>
+              <span className="manual-library-meta">
                 {loading
                   ? '…'
                   : `${libraryCounts.operators} ${libraryCounts.operators === 1 ? 'manual' : 'manuals'}`}
@@ -818,30 +818,30 @@ export default function ManualsLibrary() {
           </button>
         </div>
 
-        <div className=\"manuals-layout\">
-        <aside className=\"manuals-rail card hover:transform-none\" aria-label=\"Manuals search and filters\">
-          <label className=\"label\" htmlFor=\"manuals-search\">
+        <div className="manuals-layout">
+        <aside className="manuals-rail card hover:transform-none" aria-label="Manuals search and filters">
+          <label className="label" htmlFor="manuals-search">
             Search manuals
           </label>
           <input
-            id=\"manuals-search\"
-            className=\"input\"
-            type=\"search\"
-            placeholder=\"Title, make, model, or PDF text\"
+            id="manuals-search"
+            className="input"
+            type="search"
+            placeholder="Title, make, model, or PDF text"
             value={query}
             onChange={(e) => {
               const next = e.target.value;
               setQuery(next);
               syncFilterUrl({ query: next });
             }}
-            autoComplete=\"off\"
+            autoComplete="off"
           />
-          <label className=\"label\" htmlFor=\"manuals-make\">
+          <label className="label" htmlFor="manuals-make">
             Manufacturer
           </label>
           <select
-            id=\"manuals-make\"
-            className=\"input\"
+            id="manuals-make"
+            className="input"
             value={selectedBrand}
             onChange={(e) => {
               const next = e.target.value;
@@ -849,16 +849,16 @@ export default function ManualsLibrary() {
               syncFilterUrl({ brand: next });
             }}
           >
-            <option value=\"\">All manufacturers</option>
+            <option value="">All manufacturers</option>
             {makeOptions.map((brand) => (
               <option key={brand} value={brand}>
                 {brand}
               </option>
             ))}
           </select>
-          <label className=\"flex items-center gap-2 text-sm text-[var(--text2)]\">
+          <label className="flex items-center gap-2 text-sm text-[var(--text2)]">
             <input
-              type=\"checkbox\"
+              type="checkbox"
               checked={incompleteOnly}
               onChange={(e) => {
                 const next = e.target.checked;
@@ -868,22 +868,22 @@ export default function ManualsLibrary() {
             />
             Incomplete PDFs only
           </label>
-          <div className=\"manuals-rail-label\">Room</div>
-          <div className=\"manual-rooms\" role=\"tablist\" aria-label=\"Equipment rooms\">
+          <div className="manuals-rail-label">Room</div>
+          <div className="manual-rooms" role="tablist" aria-label="Equipment rooms">
             <button
-              type=\"button\"
-              role=\"tab\"
+              type="button"
+              role="tab"
               aria-selected={room === ALL_MANUAL_ROOMS}
               onClick={() => selectRoom(ALL_MANUAL_ROOMS)}
               className={`manual-room ${room === ALL_MANUAL_ROOMS ? 'is-selected' : ''}`}
-              title=\"Search every equipment room\"
+              title="Search every equipment room"
             >
-              <span className=\"manual-room-icon\" aria-hidden>
+              <span className="manual-room-icon" aria-hidden>
                 📚
               </span>
-              <span className=\"manual-room-copy\">
-                <span className=\"manual-room-label\">All</span>
-                <span className=\"manual-room-meta\">
+              <span className="manual-room-copy">
+                <span className="manual-room-label">All</span>
+                <span className="manual-room-meta">
                   {loading
                     ? '…'
                     : `${Object.values(roomCounts).reduce((n, c) => n + c, 0)} ${
@@ -898,19 +898,19 @@ export default function ManualsLibrary() {
               return (
                 <button
                   key={t.value}
-                  type=\"button\"
-                  role=\"tab\"
+                  type="button"
+                  role="tab"
                   aria-selected={selected}
                   onClick={() => selectRoom(t.value)}
                   className={`manual-room ${selected ? 'is-selected' : ''}`}
                   title={t.blurb}
                 >
-                  <span className=\"manual-room-icon\" aria-hidden>
+                  <span className="manual-room-icon" aria-hidden>
                     {t.icon}
                   </span>
-                  <span className=\"manual-room-copy\">
-                    <span className=\"manual-room-label\">{t.label}</span>
-                    <span className=\"manual-room-meta\">
+                  <span className="manual-room-copy">
+                    <span className="manual-room-label">{t.label}</span>
+                    <span className="manual-room-meta">
                       {loading ? '…' : `${count} ${count === 1 ? 'manual' : 'manuals'}`}
                     </span>
                   </span>
@@ -919,12 +919,12 @@ export default function ManualsLibrary() {
             })}
           </div>
           {room === 'laser' && (
-            <div className=\"manuals-rail-wavelengths\">
-              <div className=\"manuals-rail-label\">Wavelength</div>
+            <div className="manuals-rail-wavelengths">
+              <div className="manuals-rail-label">Wavelength</div>
               {WAVELENGTH_OPTIONS.map((option) => (
                 <button
                   key={option.value}
-                  type=\"button\"
+                  type="button"
                   onClick={() => setSelectedWavelength(option.value)}
                   className={`manuals-rail-chip ${selectedWavelength === option.value ? 'is-selected' : ''}`}
                 >
@@ -933,7 +933,7 @@ export default function ManualsLibrary() {
               ))}
             </div>
           )}
-          <p className=\"manuals-rail-count\">
+          <p className="manuals-rail-count">
             {loading
               ? t('Loading catalog…')
               : !bodySearchReady && query.trim()
@@ -942,18 +942,18 @@ export default function ManualsLibrary() {
             {discoveryActive && tab === 'library' ? ' • full catalog' : ''}
           </p>
           {filtersOn && (
-            <button type=\"button\" className=\"btn btn-secondary text-sm py-1 px-3 w-full\" onClick={clearLibraryFilters}>
+            <button type="button" className="btn btn-secondary text-sm py-1 px-3 w-full" onClick={clearLibraryFilters}>
               {t('Clear filters')}
             </button>
           )}
         </aside>
 
-        <div className=\"manuals-shelf-col\">
-        <div className=\"mb-6\">
-          <h1 className=\"text-3xl font-extrabold\">
+        <div className="manuals-shelf-col">
+        <div className="mb-6">
+          <h1 className="text-3xl font-extrabold">
             {library === 'operators' ? `📖 ${t('Operators Manuals')}` : `📚 ${t('Service Manuals')}`}
           </h1>
-          <p className=\"text-sm text-[var(--text3)]\">
+          <p className="text-sm text-[var(--text3)]">
             {library === 'operators'
               ? t('Operators, IFU, and user manuals — separate from the service shelf')
               : t('Service, technical, and parts manuals')}
@@ -963,14 +963,14 @@ export default function ManualsLibrary() {
         </div>
 
         {/* Tabs */}
-        <div className=\"flex border-b border-[var(--border)] mb-8\">
+        <div className="flex border-b border-[var(--border)] mb-8">
           <button
             onClick={() => setTab('browse')}
             className={`px-6 py-2 text-sm font-semibold ${tab === 'browse' ? 'border-b-2 border-[var(--gold)] text-[var(--gold)]' : 'text-[var(--text3)]'}`}
             title={`${manuals.length} manuals in the catalog`}
           >
             {t('Browse All')}{' '}
-            <span className=\"ml-1 inline-flex min-w-[1.5rem] items-center justify-center rounded-full bg-[var(--surface3)] px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-[var(--text2,#ccc)] border border-[var(--border2)]\">
+            <span className="ml-1 inline-flex min-w-[1.5rem] items-center justify-center rounded-full bg-[var(--surface3)] px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-[var(--text2,#ccc)] border border-[var(--border2)]">
               {loading ? '…' : manuals.length}
             </span>
           </button>
@@ -983,46 +983,46 @@ export default function ManualsLibrary() {
         </div>
 
         {tab === 'browse' && (
-          <p className=\"text-sm text-[var(--text3)] mb-4\">
-            Tap a manual to <strong className=\"text-[var(--text)]\">add it to your company library</strong>
+          <p className="text-sm text-[var(--text3)] mb-4">
+            Tap a manual to <strong className="text-[var(--text)]">add it to your company library</strong>
             {!isUnlimitedManualSlots(slotLimit) ? ` (${Math.max(0, slotLimit - ownedIds.size)} slots left)` : ''}, then open the PDF.
             Manuals are shared with everyone in your service company.
           </p>
         )}
         {tab === 'library' && ownedIds.size === 0 && !discoveryActive && (
-          <p className=\"text-sm text-[var(--text3)] mb-4\">
+          <p className="text-sm text-[var(--text3)] mb-4">
             {t('Your company library is empty. Switch to Browse All and tap a book to add it.')}
           </p>
         )}
 
         {loading ? (
-          <div className=\"p-12 text-center text-[var(--text3)]\">{t('Loading bookshelf...')}</div>
+          <div className="p-12 text-center text-[var(--text3)]">{t('Loading bookshelf...')}</div>
         ) : (
-          <div className=\"space-y-12\">
+          <div className="space-y-12">
             {brandShelves.length === 0 && (
-              <div className=\"text-center py-12 px-4 text-[var(--text3)]\">
+              <div className="text-center py-12 px-4 text-[var(--text3)]">
                 {filtersOn || query.trim() ? (
                   <>
-                    <p className=\"text-lg font-semibold text-[var(--text)] mb-2\">{t('No manuals match')}</p>
-                    <p className=\"mb-4\">
+                    <p className="text-lg font-semibold text-[var(--text)] mb-2">{t('No manuals match')}</p>
+                    <p className="mb-4">
                       Nothing in {manualLibraryShelfLabel(library)} matches that search and filter
                       combination. Try a different string, another manufacturer, or All rooms.
                     </p>
                     {otherLibraryHits.length > 0 && (
-                      <p className=\"mb-4\">
+                      <p className="mb-4">
                         {otherLibraryHits.length}{' '}
                         {otherLibraryHits.length === 1 ? 'manual' : 'manuals'} in{' '}
                         {manualLibraryShelfLabel(library === 'operators' ? 'service' : 'operators')}.
                         <button
-                          type=\"button\"
-                          className=\"ml-2 text-[var(--gold)] font-semibold underline\"
+                          type="button"
+                          className="ml-2 text-[var(--gold)] font-semibold underline"
                           onClick={() => selectLibrary(library === 'operators' ? 'service' : 'operators')}
                         >
                           Switch library
                         </button>
                       </p>
                     )}
-                    <button type=\"button\" className=\"btn btn-secondary\" onClick={clearLibraryFilters}>
+                    <button type="button" className="btn btn-secondary" onClick={clearLibraryFilters}>
                       {t('Clear filters')}
                     </button>
                   </>
@@ -1030,7 +1030,7 @@ export default function ManualsLibrary() {
                   <p>No manuals found for this wavelength in the Laser room.</p>
                 ) : (
                   <>
-                    <p className=\"text-lg font-semibold text-[var(--text)] mb-2\">
+                    <p className="text-lg font-semibold text-[var(--text)] mb-2">
                       This room&apos;s bookshelf is empty
                     </p>
                     <p>
@@ -1039,13 +1039,13 @@ export default function ManualsLibrary() {
                       by manufacturer after they&apos;re added to the catalog.
                     </p>
                     {otherLibraryHits.length > 0 && (
-                      <p className=\"mt-3\">
+                      <p className="mt-3">
                         {otherLibraryHits.length}{' '}
                         {otherLibraryHits.length === 1 ? 'manual' : 'manuals'} in{' '}
                         {manualLibraryShelfLabel(library === 'operators' ? 'service' : 'operators')}.
                         <button
-                          type=\"button\"
-                          className=\"ml-2 text-[var(--gold)] font-semibold underline\"
+                          type="button"
+                          className="ml-2 text-[var(--gold)] font-semibold underline"
                           onClick={() => selectLibrary(library === 'operators' ? 'service' : 'operators')}
                         >
                           Switch library
@@ -1058,16 +1058,16 @@ export default function ManualsLibrary() {
             )}
 
             {brandShelves.map(({ brand, manuals: brandManuals }) => (
-              <div key={brand} className=\"space-y-2\">
-                <div className=\"text-xs font-bold uppercase tracking-wider text-[var(--gold)] px-1\">
+              <div key={brand} className="space-y-2">
+                <div className="text-xs font-bold uppercase tracking-wider text-[var(--gold)] px-1">
                   {brand}
-                  <span className=\"ml-2 font-semibold normal-case tracking-normal text-[var(--text3)]\">
+                  <span className="ml-2 font-semibold normal-case tracking-normal text-[var(--text3)]">
                     {brandManuals.length} manuals
                   </span>
                 </div>
 
                 {/* Books sit on the wood ledge; carets scroll the row (no scrollbar) */}
-                <div className=\"shelf\">
+                <div className="shelf">
                   <ShelfScroller>
                     {brandManuals.map((m, index) => {
                       const stripes = getWavelengthStripes(m);
@@ -1079,33 +1079,33 @@ export default function ManualsLibrary() {
                       <div
                         key={m.id != null ? String(m.id) : index}
                         onClick={() => openManual(m)}
-                        className=\"book relative w-12 flex-shrink-0 cursor-pointer active:scale-[0.98]\"
+                        className="book relative w-12 flex-shrink-0 cursor-pointer active:scale-[0.98]"
                         title={
                           (isOwned(m)
                             ? `${shownTitle} (in library — tap to open)`
                             : `${shownTitle} (tap to add to company library)`) +
-                          `\\n${kindLabel}` +
-                          (showIncompleteBadge(m) ? '\\nIncomplete document' : '') +
-                          (wlHint ? `\\n${wlHint}` : '')
+                          `\n${kindLabel}` +
+                          (showIncompleteBadge(m) ? '\nIncomplete document' : '') +
+                          (wlHint ? `\n${wlHint}` : '')
                         }
                         style={{ width: 50 + (index % 4) * 2 }}
                       >
                         <div
-                          className=\"book-spine w-full\"
+                          className="book-spine w-full"
                           style={{
                             background: getBookColor(m),
                             height: 138 + (index % 5) * 6,
                           }}
                         >
-                          <div className=\"book-title relative z-10 px-0.5 text-neutral-900\">
+                          <div className="book-title relative z-10 px-0.5 text-neutral-900">
                             {getSpineTitle(shownTitle, m.brand)}
                           </div>
                           {stripes.length > 0 && (
-                            <div className=\"wl-stripes\" aria-hidden>
+                            <div className="wl-stripes" aria-hidden>
                               {stripes.map((s) => (
                                 <span
                                   key={s.key}
-                                  className=\"wl-stripe\"
+                                  className="wl-stripe"
                                   style={{ background: s.color }}
                                   title={s.label}
                                 />
@@ -1115,7 +1115,7 @@ export default function ManualsLibrary() {
                         </div>
                         {showOperatorBadge(m) && (
                           <div
-                            className=\"absolute -top-1 -left-1 z-10 rounded-full bg-amber-700 text-white text-[8px] font-extrabold px-1 py-0.5 shadow\"
+                            className="absolute -top-1 -left-1 z-10 rounded-full bg-amber-700 text-white text-[8px] font-extrabold px-1 py-0.5 shadow"
                             title={kindLabel}
                           >
                             OP
@@ -1123,14 +1123,14 @@ export default function ManualsLibrary() {
                         )}
                         {showIncompleteBadge(m) && (
                           <div
-                            className=\"absolute -bottom-1 -left-1 z-10 rounded-full bg-stone-700 text-white text-[7px] font-extrabold px-1 py-0.5 shadow\"
-                            title=\"This document is incomplete\"
+                            className="absolute -bottom-1 -left-1 z-10 rounded-full bg-stone-700 text-white text-[7px] font-extrabold px-1 py-0.5 shadow"
+                            title="This document is incomplete"
                           >
                             Incomplete
                           </div>
                         )}
                         {isOwned(m) && (
-                          <div className=\"absolute -top-1 -right-1 z-10 rounded-full bg-green-600 text-white text-[9px] font-bold px-1.5 py-0.5 shadow\">
+                          <div className="absolute -top-1 -right-1 z-10 rounded-full bg-green-600 text-white text-[9px] font-bold px-1.5 py-0.5 shadow">
                             ✓
                           </div>
                         )}
@@ -1138,7 +1138,7 @@ export default function ManualsLibrary() {
                       );
                     })}
                   </ShelfScroller>
-                  <div className=\"shelf-ledge\" aria-hidden />
+                  <div className="shelf-ledge" aria-hidden />
                 </div>
               </div>
             ))}
