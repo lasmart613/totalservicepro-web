@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import React, { useEffect, useId, useRef, useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { usePublicLocale, useT } from '@/lib/fa/locale';
+import { useSetSiteLanguage, useSiteLocale, useT } from '@/lib/fa/locale';
 import { hrefForLocale, PUBLIC_LOCALES, type PublicLocale } from '@/lib/i18n/locales';
 
 type Variant = 'landing' | 'header' | 'drawer';
@@ -29,7 +29,8 @@ export function LanguageSelector({
   onNavigate?: () => void;
 }) {
   const t = useT();
-  const current = usePublicLocale();
+  const current = useSiteLocale();
+  const setSiteLanguage = useSetSiteLanguage();
   const hrefFor = useLocaleHrefs();
   const menuId = useId();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -67,7 +68,11 @@ export function LanguageSelector({
                   selected ? 'text-[var(--gold)] font-semibold' : 'text-[var(--text2)]'
                 }`
           }
-          onClick={() => {
+          onClick={(event) => {
+            const modified = event.metaKey || event.ctrlKey || event.shiftKey || event.altKey;
+            if (modified) return;
+            event.preventDefault();
+            setSiteLanguage(item.id);
             setOpen(false);
             onNavigate?.();
           }}
