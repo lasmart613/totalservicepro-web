@@ -1,12 +1,13 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
+import { PublicLink, useT } from '@/lib/fa/locale';
 import { FindRepControl } from './FindRepControl';
 import './landing.css';
 
 export function LandingShell({ children }: { children: React.ReactNode }) {
+  const t = useT();
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -23,26 +24,26 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="lp-root">
       <header className={`lp-nav ${scrolled ? 'is-scrolled' : ''}`}>
-        <Link href="/" className="lp-brand">
-          <span className="lp-brand-biz">Medical Repair Network</span>
+        <PublicLink href="/" className="lp-brand">
+          <span className="lp-brand-biz">{t('Medical Repair Network')}</span>
           <span className="lp-brand-name">RepairPlanet</span>
           <span className="lp-brand-sub">Total Service Pro</span>
-        </Link>
-        <nav className="lp-nav-links" aria-label="Public">
-          <Link href="/directory">Directory</Link>
-          <Link href="/marketplace">Marketplace</Link>
-          <Link href="/marketplace/parts">Parts</Link>
-          <Link href="/plans">Free Plan</Link>
+        </PublicLink>
+        <nav className="lp-nav-links" aria-label={t('Public')}>
+          <PublicLink href="/directory">{t('Directory')}</PublicLink>
+          <PublicLink href="/marketplace">{t('Marketplace')}</PublicLink>
+          <PublicLink href="/marketplace/parts">{t('Parts')}</PublicLink>
+          <PublicLink href="/plans">{t('Free Plan')}</PublicLink>
         </nav>
         <div className="lp-nav-cta">
           <ReportIssueControl variant="landing" />
           <FindRepControl variant="nav" />
-          <Link href="/login" className="lp-btn lp-btn-ghost">
-            Sign in
-          </Link>
-          <Link href="/signup" className="lp-btn lp-btn-outline">
-            Register for Total Service Pro
-          </Link>
+          <PublicLink href="/login" className="lp-btn lp-btn-ghost">
+            {t('Sign in')}
+          </PublicLink>
+          <PublicLink href="/signup" className="lp-btn lp-btn-outline">
+            {t('Register for Total Service Pro')}
+          </PublicLink>
         </div>
       </header>
       {children}
@@ -50,23 +51,23 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
         <div>
           <strong style={{ color: '#FBBF24' }}>RepairPlanet</strong>
           {' · '}
-          Medical Repair Network
+          {t('Medical Repair Network')}
           {' · '}
           Total Service Pro
           {' · '}
-          Soft beta — no paid ads
+          {t('Soft beta — no paid ads')}
         </div>
         <div className="lp-footer-links">
-          <Link href="/">Home</Link>
-          <Link href="/#find-a-rep">Find a service rep</Link>
-          <Link href="/signup/company">Register your shop</Link>
-          <Link href="/plans">Free Plan</Link>
-          <Link href="/directory">Directory</Link>
-          <Link href="/marketplace">Marketplace</Link>
-          <Link href="/marketplace/parts">Parts</Link>
-          <Link href="/login">Sign in</Link>
-          <Link href="/signup">Register for Total Service Pro</Link>
-          <Link href="/forgot-password">Forgot password</Link>
+          <PublicLink href="/">{t('Home')}</PublicLink>
+          <PublicLink href="/#find-a-rep">{t('Find a service rep')}</PublicLink>
+          <PublicLink href="/signup/company">{t('Register your shop')}</PublicLink>
+          <PublicLink href="/plans">{t('Free Plan')}</PublicLink>
+          <PublicLink href="/directory">{t('Directory')}</PublicLink>
+          <PublicLink href="/marketplace">{t('Marketplace')}</PublicLink>
+          <PublicLink href="/marketplace/parts">{t('Parts')}</PublicLink>
+          <PublicLink href="/login">{t('Sign in')}</PublicLink>
+          <PublicLink href="/signup">{t('Register for Total Service Pro')}</PublicLink>
+          <PublicLink href="/forgot-password">{t('Forgot password')}</PublicLink>
         </div>
       </footer>
     </div>

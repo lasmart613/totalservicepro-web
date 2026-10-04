@@ -13,7 +13,7 @@ import {
   type OwnerOrgType,
 } from '@/lib/org-types';
 import AuthOtpBox from '@/components/AuthOtpBox';
-import Link from 'next/link';
+import { PublicLink, useT } from '@/lib/fa/locale';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 const FACILITY_TYPES = [
@@ -88,6 +88,7 @@ function OwnerSignupInner() {
   const [claimToken, setClaimToken] = useState<string | null>(null);
   const [claimLocked, setClaimLocked] = useState(false);
   const router = useRouter();
+  const t = useT();
   const searchParams = useSearchParams();
   const supabase = getSupabaseClient();
 
@@ -293,17 +294,17 @@ function OwnerSignupInner() {
     <div className="min-h-screen flex flex-col bg-[var(--bg)]">
       <div className="max-w-lg mx-auto w-full px-4 py-8">
         <div className="text-center mb-6">
-          <Link href="/signup" className="text-sm text-[var(--gold)] hover:underline">← All sign up options</Link>
+          <PublicLink href="/signup" className="text-sm text-[var(--gold)] hover:underline">{t('← All sign up options')}</PublicLink>
           <div className="mt-2">
             <span className="font-extrabold text-2xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </div>
           <h1 className="text-2xl font-bold mt-1">
-            {claimLocked ? 'Claim your clinic profile' : 'Sign up as a clinic or equipment owner'}
+            {claimLocked ? t('Claim your clinic profile') : t('Sign up as a clinic or equipment owner')}
           </h1>
           <p className="text-sm text-[var(--text3)]">
             {claimLocked
               ? `Create a free account for ${facilityName || 'this clinic'} to view service history, upcoming service, and your equipment list.`
-              : 'Hospitals, clinics, rental companies, and resellers — equipment list, service needs, and marketplace awards'}
+              : t('Hospitals, clinics, rental companies, and resellers — equipment list, service needs, and marketplace awards')}
           </p>
         </div>
 
@@ -342,7 +343,7 @@ function OwnerSignupInner() {
 
           <form onSubmit={handleSubmit} className={`space-y-4 ${awaitingConfirm ? 'opacity-60 pointer-events-none' : ''}`}>
             <div>
-              <label className="label">Organization type *</label>
+              <label className="label">{t('Organization type *')}</label>
               <div className="space-y-2">
                 {OWNER_ORG_TYPE_SIGNUP_OPTIONS.map((opt) => (
                   <label
@@ -373,8 +374,8 @@ function OwnerSignupInner() {
                       }}
                     />
                     <span>
-                      <span className="font-semibold text-sm block">{opt.label}</span>
-                      <span className="text-xs text-[var(--text3)]">{opt.description}</span>
+                      <span className="font-semibold text-sm block">{t(opt.label)}</span>
+                      <span className="text-xs text-[var(--text3)]">{t(opt.description)}</span>
                     </span>
                   </label>
                 ))}
@@ -382,7 +383,7 @@ function OwnerSignupInner() {
             </div>
 
             <div>
-              <label className="label">{nameLabel} *</label>
+              <label className="label">{t(nameLabel)} *</label>
               <input
                 className="input"
                 value={facilityName}
@@ -394,17 +395,17 @@ function OwnerSignupInner() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Contact First Name *</label>
+                <label className="label">{t('Contact First Name *')}</label>
                 <input className="input" value={firstName} onChange={e => setFirstName(e.target.value)} required />
               </div>
               <div>
-                <label className="label">Contact Last Name *</label>
+                <label className="label">{t('Contact Last Name *')}</label>
                 <input className="input" value={lastName} onChange={e => setLastName(e.target.value)} required />
               </div>
             </div>
 
             <div>
-              <label className="label">Contact Email *</label>
+              <label className="label">{t('Contact Email *')}</label>
               <input
                 type="email"
                 className="input"
@@ -422,50 +423,50 @@ function OwnerSignupInner() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Password * (min 6)</label>
+                <label className="label">{t('Password * (min 6)')}</label>
                 <input type="password" className="input" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} />
               </div>
               <div>
-                <label className="label">Confirm Password *</label>
+                <label className="label">{t('Confirm Password *')}</label>
                 <input type="password" className="input" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required minLength={8} />
               </div>
             </div>
 
             <div>
-              <label className="label">Phone</label>
+              <label className="label">{t('Phone')}</label>
               <input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} />
             </div>
 
             <div>
-              <label className="label">Address</label>
+              <label className="label">{t('Address')}</label>
               <input className="input" value={address} onChange={e => setAddress(e.target.value)} />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">City</label>
+                <label className="label">{t('City')}</label>
                 <input className="input" value={city} onChange={e => setCity(e.target.value)} />
               </div>
               <div>
-                <label className="label">State</label>
+                <label className="label">{t('State')}</label>
                 <input className="input" value={state} onChange={e => setState(e.target.value)} />
               </div>
             </div>
 
             <div>
-              <label className="label">Facility Type</label>
+              <label className="label">{t('Facility Type')}</label>
               <select className="select" value={facilityType} onChange={e => setFacilityType(e.target.value)}>
-                {FACILITY_TYPES.map(t => <option key={t} value={t}>{t}</option>)}
+                {FACILITY_TYPES.map((kind) => <option key={kind} value={kind}>{t(kind)}</option>)}
               </select>
             </div>
 
             {/* NEW: Equipment Entry with Dropdowns + Serial Number */}
             <div>
-              <label className="label">Equipment You Own</label>
+              <label className="label">{t('Equipment You Own')}</label>
               <div className="border border-[var(--border)] rounded p-4 bg-[var(--surface3)] space-y-3">
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div>
-                    <label className="text-xs text-[var(--text3)]">Model</label>
+                    <label className="text-xs text-[var(--text3)]">{t('Model')}</label>
                     <select 
                       className="select" 
                       value={currentModel} 
@@ -521,7 +522,7 @@ function OwnerSignupInner() {
             </div>
 
             <div>
-              <label className="label">Preferred Service Types</label>
+              <label className="label">{t('Preferred Service Types')}</label>
               <div className="flex flex-wrap gap-2 mb-2">
                 {preferredServiceOptions.map(svc => (
                   <button
@@ -530,14 +531,14 @@ function OwnerSignupInner() {
                     onClick={() => toggleService(svc)}
                     className={`filter-chip text-xs py-1 px-3 ${selectedServices.includes(svc) ? 'active' : ''}`}
                   >
-                    {svc}
+                    {t(svc)}
                   </button>
                 ))}
               </div>
             </div>
 
             <div>
-              <label className="label">Notes / Bio (optional)</label>
+              <label className="label">{t('Notes / Bio (optional)')}</label>
               <textarea className="input" rows={2} value={bio} onChange={e => setBio(e.target.value)} placeholder="Current service provider, contract details..." />
             </div>
 
@@ -547,18 +548,18 @@ function OwnerSignupInner() {
                 disabled={loading}
                 className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
               >
-                {loading ? 'Creating account...' : claimLocked ? 'Create free account & claim profile' : 'Create Owner Account'}
+                {loading ? t('Creating account...') : claimLocked ? t('Create free account & claim profile') : t('Create Owner Account')}
               </button>
             )}
           </form>
 
           <div className="mt-5 text-center text-sm">
-            <Link
+            <PublicLink
               href={claimToken ? `/login?claim=${encodeURIComponent(claimToken)}&next=${encodeURIComponent('/company?justSetup=1')}` : '/login'}
               className="text-[var(--gold)] hover:underline"
             >
-              Already have an account? Sign in
-            </Link>
+              {t('Already have an account? Sign in')}
+            </PublicLink>
           </div>
         </div>
       </div>
@@ -567,16 +568,16 @@ function OwnerSignupInner() {
 }
 
 function OwnerSignupStatic() {
+  const t = useT();
   return (
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] p-6">
       <div className="w-full max-w-md">
         <p className="text-sm font-semibold" style={{ color: 'var(--gold)' }}>Total Service Pro</p>
-        <h1 className="text-2xl font-bold mt-1">Sign up as a clinic or equipment owner</h1>
+        <h1 className="text-2xl font-bold mt-1">{t('Sign up as a clinic or equipment owner')}</h1>
         <p className="text-sm text-[var(--text3)] mt-2">
-          Hospitals, clinics, rental companies, and resellers. Track medical devices and find biomedical
-          service — lasers, lithotriptors, C-arms, and more.
+          {t('Hospitals, clinics, rental companies, and resellers. Track medical devices and find biomedical service — lasers, lithotriptors, C-arms, and more.')}
         </p>
-        <p className="text-[var(--text3)] mt-4">Loading sign up…</p>
+        <p className="text-[var(--text3)] mt-4">{t('Loading sign up…')}</p>
       </div>
     </div>
   );

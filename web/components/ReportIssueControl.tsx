@@ -5,6 +5,7 @@ import { CircleAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { WHAT_HAPPENED_MAX, WHAT_HAPPENED_MIN } from '@/lib/product-issues';
+import { useT } from '@/lib/fa/locale';
 
 type Variant = 'app' | 'landing';
 
@@ -15,6 +16,7 @@ export function ReportIssueControl({
   variant?: Variant;
   showLabel?: boolean;
 }) {
+  const t = useT();
   const titleId = useId();
   const [open, setOpen] = useState(false);
   const [whatHappened, setWhatHappened] = useState('');
@@ -61,15 +63,15 @@ export function ReportIssueControl({
       });
       const json = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
       if (!res.ok) {
-        toast.error(json.error || 'Could not send the report');
+        toast.error(t(json.error || 'Could not send the report'));
         return;
       }
-      toast.success(json.message || 'Thanks — the Total Service Pro team has your report.');
+      toast.success(t(json.message || 'Thanks — the Total Service Pro team has your report.'));
       setWhatHappened('');
       setGuestEmail('');
       setOpen(false);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? err.message : 'Could not send the report');
+      toast.error(err instanceof Error ? t(err.message) : t('Could not send the report'));
     } finally {
       setSending(false);
     }
@@ -88,12 +90,12 @@ export function ReportIssueControl({
         onClick={() => setOpen(true)}
         aria-haspopup="dialog"
         aria-expanded={open}
-        title="Report an Issue"
-        aria-label="Report an Issue"
+        title={t('Report an Issue')}
+        aria-label={t('Report an Issue')}
       >
         <CircleAlert size={16} aria-hidden className={variant === 'landing' ? undefined : 'shrink-0'} />
         <span className={variant === 'app' && !showLabel ? 'hidden xl:inline' : undefined}>
-          Report an Issue
+          {t('Report an Issue')}
         </span>
       </button>
 
@@ -102,7 +104,7 @@ export function ReportIssueControl({
           <button
             type="button"
             className="absolute inset-0 bg-black/35 pointer-events-auto"
-            aria-label="Close report form"
+            aria-label={t('Close report form')}
             onClick={() => setOpen(false)}
           />
           <div
@@ -114,17 +116,17 @@ export function ReportIssueControl({
             <div className="flex items-start justify-between gap-3 px-4 pt-4 pb-2">
               <div>
                 <h2 id={titleId} className="text-base font-bold text-[var(--gold,#FBBF24)]">
-                  Report an Issue
+                  {t('Report an Issue')}
                 </h2>
                 <p className="text-xs text-[var(--text3,#9CA3AF)] mt-0.5">
-                  Sends a short note to the Total Service Pro product team. A screenshot is optional.
+                  {t('Sends a short note to the Total Service Pro product team. A screenshot is optional.')}
                 </p>
               </div>
               <button
                 type="button"
                 className="p-1 rounded text-[var(--text2)] hover:text-[var(--gold)]"
                 onClick={() => setOpen(false)}
-                aria-label="Close"
+                aria-label={t('Close')}
               >
                 <X size={18} />
               </button>
@@ -132,7 +134,7 @@ export function ReportIssueControl({
 
             <form onSubmit={submit} className="px-4 pb-4 flex flex-col gap-3">
               <label className="block text-sm">
-                <span className="block text-xs font-semibold mb-1">What happened</span>
+                <span className="block text-xs font-semibold mb-1">{t('What happened')}</span>
                 <textarea
                   required
                   minLength={WHAT_HAPPENED_MIN}
@@ -140,12 +142,12 @@ export function ReportIssueControl({
                   rows={4}
                   value={whatHappened}
                   onChange={(e) => setWhatHappened(e.target.value)}
-                  placeholder="What did you expect, and what did you see instead?"
+                  placeholder={t('What did you expect, and what did you see instead?')}
                   className="w-full rounded-lg border border-[var(--border,#4B5563)] bg-[var(--surface,#111827)] px-3 py-2 text-sm"
                 />
               </label>
               <label className="block text-sm">
-                <span className="block text-xs font-semibold mb-1">Page / URL</span>
+                <span className="block text-xs font-semibold mb-1">{t('Page / URL')}</span>
                 <input
                   type="text"
                   value={pageUrl}
@@ -155,30 +157,31 @@ export function ReportIssueControl({
               </label>
               {sessionEmail ? (
                 <p className="text-[11px] text-[var(--text3,#9CA3AF)]">
-                  We will email a confirmation to {sessionEmail}.
+                  {t('We will email a confirmation to')} <bdi className="fa-ltr">{sessionEmail}</bdi>.
                 </p>
               ) : (
                 <label className="block text-sm">
-                  <span className="block text-xs font-semibold mb-1">Email (optional)</span>
+                  <span className="block text-xs font-semibold mb-1">{t('Email (optional)')}</span>
                   <input
                     type="email"
                     value={guestEmail}
                     onChange={(e) => setGuestEmail(e.target.value)}
-                    placeholder="So we can confirm we received your report"
+                    placeholder={t('So we can confirm we received your report')}
+                    dir="ltr"
                     autoComplete="email"
                     className="w-full rounded-lg border border-[var(--border,#4B5563)] bg-[var(--surface,#111827)] px-3 py-2 text-sm"
                   />
                 </label>
               )}
               <p className="text-[11px] text-[var(--text3,#9CA3AF)]">
-                Optional screenshot: a short description is enough. Add your email if you want a confirmation.
+                {t('Optional screenshot: a short description is enough. Add your email if you want a confirmation.')}
               </p>
               <div className="flex items-center justify-end gap-2">
                 <button type="button" className="btn btn-secondary text-sm px-3 py-1.5" onClick={() => setOpen(false)}>
-                  Cancel
+                  {t('Cancel')}
                 </button>
                 <button type="submit" className="btn btn-primary text-sm px-3 py-1.5" disabled={sending}>
-                  {sending ? 'Sending…' : 'Send report'}
+                  {sending ? t('Sending…') : t('Send report')}
                 </button>
               </div>
             </form>

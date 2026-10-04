@@ -2,8 +2,8 @@
 
 import React, { useState, Suspense } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { PublicLink, usePublicHref, useT } from '@/lib/fa/locale';
 import { nextPathFromSearchParams } from '@/lib/login-next';
 import { claimCustomerInvite } from '@/lib/customer-invite-client';
 import { clearPendingSignup } from '@/lib/pending-signup';
@@ -26,6 +26,8 @@ function LoginInner() {
   const [otpMode, setOtpMode] = useState<'signup' | 'magic'>('signup');
   const router = useRouter();
   const searchParams = useSearchParams();
+  const t = useT();
+  const to = usePublicHref();
   const nextPath = nextPathFromSearchParams(searchParams);
   const claimToken = (searchParams.get('claim') || '').trim();
   const supabase = getSupabaseClient();
@@ -375,17 +377,17 @@ function LoginInner() {
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] p-6">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <Link href="/" className="inline-block">
+          <PublicLink href="/" className="inline-block">
             <span className="font-extrabold text-3xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
-          </Link>
+          </PublicLink>
           <p className="text-[var(--text3)] mt-1 text-sm tracking-wide">
-            Field service tools for biomedical equipment — lasers, lithotriptors, C-arms, and more.
+            {t('Field service tools for biomedical equipment — lasers, lithotriptors, C-arms, and more.')}
           </p>
         </div>
 
         <div className="card p-8">
           <h1 className="text-2xl font-bold mb-6" style={{ color: 'var(--gold)' }}>
-            {isSignUp ? 'Create Account' : 'Sign In'}
+            {isSignUp ? t('Create Account') : t('Sign In')}
           </h1>
 
           {message && (
@@ -396,7 +398,7 @@ function LoginInner() {
                   : 'bg-red-900/30 text-red-400'
               }`}
             >
-              {message}
+              {t(message)}
             </div>
           )}
 
@@ -412,12 +414,12 @@ function LoginInner() {
               <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/>
               <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/>
             </svg>
-            Continue with Google
+            {t('Continue with Google')}
           </button>
 
           <div className="flex items-center gap-3 mb-5 text-xs text-[var(--text3)]">
             <div className="flex-1 h-px bg-[var(--border2)]" />
-            or with email
+            {t('or with email')}
             <div className="flex-1 h-px bg-[var(--border2)]" />
           </div>
 
@@ -425,23 +427,23 @@ function LoginInner() {
             {isSignUp && (
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <label className="label">First Name</label>
+                  <label className="label">{t('First Name')}</label>
                   <input className="input" value={firstName} onChange={e => setFirstName(e.target.value)} required autoCapitalize="words" />
                 </div>
                 <div>
-                  <label className="label">Last Name</label>
+                  <label className="label">{t('Last Name')}</label>
                   <input className="input" value={lastName} onChange={e => setLastName(e.target.value)} required autoCapitalize="words" />
                 </div>
               </div>
             )}
 
             <div>
-              <label className="label">Email</label>
+              <label className="label">{t('Email')}</label>
               <input type="email" className="input" value={email} onChange={e => setEmail(e.target.value)} required autoCapitalize="off" />
             </div>
 
             <div>
-              <label className="label">Password</label>
+              <label className="label">{t('Password')}</label>
               <input
                 type="password"
                 className="input"
@@ -452,13 +454,13 @@ function LoginInner() {
                 autoComplete={isSignUp ? 'new-password' : 'current-password'}
               />
               {isSignUp && (
-                <p className="text-[10px] text-[var(--text3)] mt-1">At least 8 characters</p>
+                <p className="text-[10px] text-[var(--text3)] mt-1">{t('At least 8 characters')}</p>
               )}
             </div>
 
             {isSignUp && (
               <div>
-                <label className="label">Confirm password</label>
+                <label className="label">{t('Confirm password')}</label>
                 <input
                   type="password"
                   className="input"
@@ -476,17 +478,17 @@ function LoginInner() {
               disabled={loading}
               className="btn btn-primary w-full py-3 text-base disabled:opacity-60"
             >
-              {loading ? 'Please wait...' : (isSignUp ? 'Create Account' : 'Sign In')}
+              {loading ? t('Please wait...') : (isSignUp ? t('Create Account') : t('Sign In'))}
             </button>
           </form>
 
           {showOtp && (
             <div className="mt-5 p-4 rounded-lg border border-[var(--gold-border,#FBBF2444)] bg-[var(--surface2)] space-y-3">
               <div className="text-sm font-semibold" style={{ color: 'var(--gold)' }}>
-                Enter verification code
+                {t('Enter verification code')}
               </div>
               <p className="text-xs text-[var(--text3)]">
-                Use the 6–8 digit code from your email (same as the mobile app). You can also open the link in the email.
+                {t('Use the 6–8 digit code from your email (same as the mobile app). You can also open the link in the email.')}
               </p>
               <input
                 type="text"
@@ -504,11 +506,11 @@ function LoginInner() {
                 disabled={loading}
                 className="btn btn-primary w-full py-2.5 disabled:opacity-60"
               >
-                {loading ? 'Verifying…' : 'Verify & continue'}
+                {loading ? t('Verifying…') : t('Verify & continue')}
               </button>
               <div className="flex justify-between text-xs">
                 <button type="button" onClick={resendCode} className="text-[var(--gold)] hover:underline">
-                  Resend code
+                  {t('Resend code')}
                 </button>
                 <button
                   type="button"
@@ -518,7 +520,7 @@ function LoginInner() {
                   }}
                   className="text-[var(--text3)] hover:underline"
                 >
-                  Hide
+                  {t('Hide')}
                 </button>
               </div>
             </div>
@@ -537,17 +539,17 @@ function LoginInner() {
                 }}
                 className="text-[var(--gold)] hover:underline"
               >
-                Already have an account? Sign In
+                {t('Already have an account? Sign In')}
               </button>
             ) : (
-              <Link href="/signup" className="text-[var(--gold)] hover:underline">
-                Don&apos;t have an account? Sign Up
-              </Link>
+              <PublicLink href="/signup" className="text-[var(--gold)] hover:underline">
+                {t("Don't have an account? Sign Up")}
+              </PublicLink>
             )}
 
             <div>
               <button onClick={sendMagic} className="text-[var(--text3)] hover:text-[var(--gold)] underline">
-                Email me a sign-in code
+                {t('Email me a sign-in code')}
               </button>
             </div>
             <div>
@@ -555,44 +557,43 @@ function LoginInner() {
                 type="button"
                 onClick={() => {
                   if (!isValidEmail(email.trim().toLowerCase())) {
-                    router.push('/forgot-password');
+                    router.push(to('/forgot-password'));
                     return;
                   }
                   forgot();
                 }}
                 className="text-[var(--text3)] hover:text-[var(--gold)] underline"
               >
-                Forgot password?
+                {t('Forgot password?')}
               </button>
             </div>
           </div>
         </div>
 
         <p className="text-center text-xs text-[var(--text3)] mt-6">
-          Web version of Total Service Pro • Shares data with the mobile app via Supabase
+          {t('Web version of Total Service Pro • Shares data with the mobile app via Supabase')}
         </p>
 
         <div className="mt-8 card p-5 text-sm">
           <div className="font-bold mb-3 text-center" style={{ color: 'var(--gold)' }}>
-            Join as a Repair company, Clinic, or Parts seller
+            {t('Join as a Repair company, Clinic, or Parts seller')}
           </div>
           <p className="text-center text-xs text-[var(--text3)] mb-4">
-            BMETs, laser service engineers, and field techs are added by their repair company through Team.
-            There is no individual technician signup.
+            {t('BMETs, laser service engineers, and field techs are added by their repair company through Team. There is no individual technician signup.')}
           </p>
           <div className="grid grid-cols-1 gap-2">
-            <Link href="/signup/company" className="btn btn-secondary w-full justify-center text-sm py-2">
-              Sign up as Repair company
-            </Link>
-            <Link href="/signup/owner" className="btn btn-secondary w-full justify-center text-sm py-2">
-              Sign up as Clinic / equipment owner
-            </Link>
-            <Link href="/signup/supplier" className="btn btn-secondary w-full justify-center text-sm py-2">
-              Sign up as Parts seller
-            </Link>
+            <PublicLink href="/signup/company" className="btn btn-secondary w-full justify-center text-sm py-2">
+              {t('Sign up as Repair company')}
+            </PublicLink>
+            <PublicLink href="/signup/owner" className="btn btn-secondary w-full justify-center text-sm py-2">
+              {t('Sign up as Clinic / equipment owner')}
+            </PublicLink>
+            <PublicLink href="/signup/supplier" className="btn btn-secondary w-full justify-center text-sm py-2">
+              {t('Sign up as Parts seller')}
+            </PublicLink>
           </div>
           <div className="text-center mt-3">
-            <Link href="/signup" className="text-[var(--gold)] text-xs hover:underline">View all options →</Link>
+            <PublicLink href="/signup" className="text-[var(--gold)] text-xs hover:underline">{t('View all options →')}</PublicLink>
           </div>
         </div>
       </div>
@@ -601,24 +602,24 @@ function LoginInner() {
 }
 
 function LoginStaticIntro() {
+  const t = useT();
   return (
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] p-6">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <Link href="/" className="inline-block">
+          <PublicLink href="/" className="inline-block">
             <span className="font-extrabold text-3xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
-          </Link>
+          </PublicLink>
           <p className="text-[var(--text3)] mt-1 text-sm tracking-wide">
-            Field service tools for biomedical equipment — lasers, lithotriptors, C-arms, and more.
+            {t('Field service tools for biomedical equipment — lasers, lithotriptors, C-arms, and more.')}
           </p>
         </div>
         <div className="card p-8">
-          <h1 className="text-2xl font-bold mb-4" style={{ color: 'var(--gold)' }}>Sign in</h1>
+          <h1 className="text-2xl font-bold mb-4" style={{ color: 'var(--gold)' }}>{t('Sign in')}</h1>
           <p className="text-sm text-[var(--text3)] mb-4">
-            Sign in to Total Service Pro on RepairPlanet — shop schedule, directory, and marketplace for
-            biomedical and laser repair companies.
+            {t('Sign in to Total Service Pro on RepairPlanet — shop schedule, directory, and marketplace for biomedical and laser repair companies.')}
           </p>
-          <p className="text-[var(--text3)]">Loading…</p>
+          <p className="text-[var(--text3)]">{t('Loading…')}</p>
         </div>
       </div>
     </div>

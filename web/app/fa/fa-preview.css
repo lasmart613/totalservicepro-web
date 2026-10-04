@@ -1,0 +1,100 @@
+@font-face {
+  font-family: "Vazirmatn";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/vazirmatn.woff2") format("woff2");
+  unicode-range: U+0000-00FF, U+0600-06FF, U+0750-077F, U+0870-088E, U+200C-200E, U+2010-2011,
+    U+FB50-FDFF, U+FE70-FEFF;
+}
+
+html.fa-preview,
+html.fa-preview body,
+.fa-preview-root,
+.fa-preview-root .lp-root {
+  font-family: "Vazirmatn", "Noto Naskh Arabic", "Noto Sans Arabic", Tahoma, sans-serif;
+}
+
+.fa-draft-banner {
+  margin: 0;
+  padding: 8px 16px;
+  background: #1f2937;
+  color: #f3e8d8;
+  border-bottom: 1px solid #fbbf24;
+  text-align: center;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+html.fa-preview .lp-nav {
+  flex-wrap: wrap;
+  padding-inline: 1.25rem;
+}
+
+html.fa-preview .lp-nav-links,
+html.fa-preview .lp-nav-cta {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+html.fa-preview .lp-nav-links,
+html.fa-preview .lp-btn,
+html.fa-preview .lp-brand-biz,
+html.fa-preview .lp-brand-sub,
+html.fa-preview .lp-kicker,
+html.fa-preview .lp-hero-tagline,
+html.fa-preview .lp-title,
+html.fa-preview .lp-h2,
+html.fa-preview .lp-hero-subhead {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html.fa-preview .lp-hero-track,
+html.fa-preview .lp-hero-controls {
+  direction: ltr;
+}
+
+html.fa-preview .lp-hero-slide,
+html.fa-preview .lp-hero-copy,
+html.fa-preview .lp-hero-cta {
+  direction: rtl;
+}
+
+html.fa-preview header.header nav {
+  margin-left: 0 !important;
+  margin-inline-start: 1rem;
+  flex-wrap: wrap;
+}
+
+html.fa-preview input[type="email"],
+html.fa-preview input[type="password"],
+html.fa-preview input[type="tel"],
+html.fa-preview input[type="url"],
+html.fa-preview input[type="number"],
+html.fa-preview input[inputmode="numeric"],
+html.fa-preview .fa-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: start;
+}
+
+html.fa-preview .text-left {
+  text-align: start;
+}
+
+html.fa-preview .uppercase,
+html.fa-preview .label {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+html.fa-preview h1,
+html.fa-preview h2,
+html.fa-preview h3,
+html.fa-preview .lp-title,
+html.fa-preview .lp-hero-subhead,
+html.fa-preview .lp-lede {
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}

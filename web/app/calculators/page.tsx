@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { PublicLink, useFa, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { toast } from 'sonner';
 
@@ -725,6 +726,8 @@ function AvgPowerCalculator() {
 
 // ===== MAIN PAGE =====
 export default function CalculatorsPage() {
+  const t = useT();
+  const fa = useFa();
   const [selected, setSelected] = useState<null | 'density-fluence' | 'density-irradiance' | 'duty' | 'wavelength' | 'avgpower'>(null);
 
   function handleSelect(tool: typeof selected) {
@@ -750,62 +753,70 @@ export default function CalculatorsPage() {
       <div className="max-w-7xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-2">
           <div>
-            <h1 className="text-2xl font-extrabold tracking-tight">Calculators</h1>
-            <p className="text-sm text-[var(--text3)]">Photometry tools — ported from Android</p>
+            <h1 className="text-2xl font-extrabold tracking-tight">{t('Calculators')}</h1>
+            <p className="text-sm text-[var(--text3)]">{t('Photometry tools — ported from Android')}</p>
           </div>
-          <Link href="/hub" className="text-sm font-medium text-[var(--gold)] hover:underline">← Back to Hub</Link>
+          {fa ? (
+            <PublicLink href="/" className="text-sm font-medium text-[var(--gold)] hover:underline">{t('← Home')}</PublicLink>
+          ) : (
+            <Link href="/hub" className="text-sm font-medium text-[var(--gold)] hover:underline">← Back to Hub</Link>
+          )}
         </div>
 
         {!selected && (
           <>
             <div style={{ marginBottom: 16 }}>
-              <div style={{ fontSize: 13, color: 'var(--text3)' }}>Select a calculator</div>
+              <div style={{ fontSize: 13, color: 'var(--text3)' }}>{t('Select a calculator')}</div>
             </div>
 
             <div className="calc-grid">
               <button onClick={() => handleSelect('density-fluence')} className="card p-5 text-center hover:border-[var(--gold)] active:scale-[0.985] transition">
                 <div className="text-4xl mb-2">⚡</div>
-                <div className="font-bold">Fluence</div>
-                <div className="text-xs text-[var(--text3)] mt-1">Energy Density<br /><span style={{ fontWeight: 500 }}>J/cm²</span></div>
+                <div className="font-bold">{t('Fluence')}</div>
+                <div className="text-xs text-[var(--text3)] mt-1">{t('Energy Density')}<br /><span style={{ fontWeight: 500 }}>J/cm²</span></div>
               </button>
 
               <button onClick={() => handleSelect('density-irradiance')} className="card p-5 text-center hover:border-[var(--gold)] active:scale-[0.985] transition">
                 <div className="text-4xl mb-2">💡</div>
-                <div className="font-bold">Irradiance</div>
-                <div className="text-xs text-[var(--text3)] mt-1">Power Density<br /><span style={{ fontWeight: 500 }}>W/cm²</span></div>
+                <div className="font-bold">{t('Irradiance')}</div>
+                <div className="text-xs text-[var(--text3)] mt-1">{t('Power Density')}<br /><span style={{ fontWeight: 500 }}>W/cm²</span></div>
               </button>
 
               <button onClick={() => handleSelect('duty')} className="card p-5 text-center hover:border-[var(--gold)] active:scale-[0.985] transition">
                 <div className="text-4xl mb-2">🔄</div>
-                <div className="font-bold">Duty Cycle</div>
-                <div className="text-xs text-[var(--text3)] mt-1">Pulse Cycle<br /><span style={{ fontWeight: 500 }}>Pulse Width × Freq</span></div>
+                <div className="font-bold">{t('Duty Cycle')}</div>
+                <div className="text-xs text-[var(--text3)] mt-1">{t('Pulse Cycle')}<br /><span style={{ fontWeight: 500 }}>{t('Pulse Width × Freq')}</span></div>
               </button>
 
               <button onClick={() => handleSelect('wavelength')} className="card p-5 text-center hover:border-[var(--gold)] active:scale-[0.985] transition">
                 <div className="text-4xl mb-2">📏</div>
-                <div className="font-bold">Wavelength</div>
-                <div className="text-xs text-[var(--text3)] mt-1">VBeam WL<br /><span style={{ fontWeight: 500 }}>Filter method</span></div>
+                <div className="font-bold">{t('Wavelength')}</div>
+                <div className="text-xs text-[var(--text3)] mt-1">{t('VBeam WL')}<br /><span style={{ fontWeight: 500 }}>{t('Filter method')}</span></div>
               </button>
 
               <button onClick={() => handleSelect('avgpower')} className="card p-5 text-center hover:border-[var(--gold)] active:scale-[0.985] transition">
                 <div className="text-4xl mb-2">📊</div>
-                <div className="font-bold">Avg Power</div>
-                <div className="text-xs text-[var(--text3)] mt-1">Energy × Freq<br /><span style={{ fontWeight: 500 }}>Bidirectional</span></div>
+                <div className="font-bold">{t('Avg Power')}</div>
+                <div className="text-xs text-[var(--text3)] mt-1">{t('Energy × Freq')}<br /><span style={{ fontWeight: 500 }}>{t('Bidirectional')}</span></div>
               </button>
             </div>
 
             <div className="mt-8 text-xs text-center text-[var(--text3)]">
-              All formulas, beam area calculations (circular/rect/square), CW/Pulsed modes and result details match the Android photometry tools 1:1.
+              {t('All formulas, beam area calculations (circular/rect/square), CW/Pulsed modes and result details match the Android photometry tools 1:1.')}
             </div>
           </>
         )}
 
         {selected && (
           <>
-            <button onClick={backToMenu} className="btn btn-ghost mb-4 text-sm px-0">← Back to Calculators menu</button>
+            <button onClick={backToMenu} className="btn btn-ghost mb-4 text-sm px-0">{t('← Back to Calculators menu')}</button>
             {renderCalculator()}
             <div className="mt-4 text-center">
-              <Link href="/hub" className="text-xs text-[var(--text3)] hover:text-[var(--gold)]">Return to Tech Hub</Link>
+              {fa ? (
+                <PublicLink href="/" className="text-xs text-[var(--text3)] hover:text-[var(--gold)]">{t('Return to Tech Hub')}</PublicLink>
+              ) : (
+                <Link href="/hub" className="text-xs text-[var(--text3)] hover:text-[var(--gold)]">Return to Tech Hub</Link>
+              )}
             </div>
           </>
         )}
