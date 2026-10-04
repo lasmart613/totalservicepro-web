@@ -6,7 +6,7 @@ export const DEFAULT_GA_MEASUREMENT_ID = 'G-GNBJQ2DMQB';
 const GA_MEASUREMENT_ID_RE = /^G-[A-Z0-9]+$/;
 
 /** Internal admin / God surfaces — skip so staff work stays out of marketing reports. */
-const GA_SKIP_PREFIXES = ['/admin', '/god', '/business/financial-reporting'];
+const GA_SKIP_PREFIXES = ['/admin', '/god', '/business/financial-reporting', '/business/job-costing'];
 
 export function getGaMeasurementId(
   env: Record<string, string | undefined> = process.env as Record<string, string | undefined>,

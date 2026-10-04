@@ -35,6 +35,7 @@ test('GA skips admin/god routes and allows public marketing paths', () => {
   assert.equal(gaSkipsPath('/god'), true);
   assert.equal(gaSkipsPath('/god/crm'), true);
   assert.equal(gaSkipsPath('/business/financial-reporting'), true);
+  assert.equal(gaSkipsPath('/business/job-costing'), true);
   assert.equal(gaSkipsPath('/'), false);
   assert.equal(gaSkipsPath('/plans'), false);
   assert.equal(gaSkipsPath('/marketplace'), false);

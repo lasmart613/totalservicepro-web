@@ -8,6 +8,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { clearPendingSignup } from '@/lib/pending-signup';
 import { FINANCIAL_REPORTING_API } from '@/lib/financial-reporting-access';
+import { JOB_COSTING_API } from '@/lib/job-costing-access';
 
 export const AUTH_STORAGE_KEY = 'tsp-auth-token';
 
@@ -42,6 +43,13 @@ export async function signOutAndClearIdentity(supabase: SupabaseClient): Promise
   try {
     if (typeof fetch !== 'undefined') {
       await fetch(FINANCIAL_REPORTING_API, { method: 'DELETE', cache: 'no-store' });
+    }
+  } catch {
+    /* cookie clear is best-effort */
+  }
+  try {
+    if (typeof fetch !== 'undefined') {
+      await fetch(JOB_COSTING_API, { method: 'DELETE', cache: 'no-store' });
     }
   } catch {
     /* cookie clear is best-effort */

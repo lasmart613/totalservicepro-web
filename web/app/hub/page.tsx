@@ -7,6 +7,7 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isAdmin, isOwnerish, isSupplier } from '@/lib/roles';
 import { canAccessFinancialReporting } from '@/lib/financial-reporting-access';
+import { canAccessJobCosting } from '@/lib/job-costing-access';
 import { fetchGodMe } from '@/lib/god-client';
 import { ownerLabelKind } from '@/lib/labels';
 
@@ -109,6 +110,16 @@ export default function TechHub() {
             icon: '📊',
             label: 'Financial Reporting',
             desc: 'Income, collections, and unpaid invoices',
+          },
+        ]
+      : []),
+    ...(canAccessJobCosting({ role, god })
+      ? [
+          {
+            href: '/business/job-costing',
+            icon: '🧮',
+            label: 'Job Costing',
+            desc: 'Labor, parts, and margin per repair order',
           },
         ]
       : []),

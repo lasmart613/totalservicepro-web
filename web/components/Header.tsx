@@ -19,6 +19,7 @@ import {
 } from 'lucide-react';
 import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
 import { financialReportingNavLink } from '@/lib/financial-reporting-access';
+import { jobCostingNavLink } from '@/lib/job-costing-access';
 import { loadOwnNavProfile } from '@/lib/profile-nav';
 import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
@@ -313,6 +314,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       ));
   const canAdminPortal = isAdmin(profile?.role);
   const financialNav = financialReportingNavLink({ role: profile?.role, god: isGod });
+  const jobCostingNav = jobCostingNavLink({ role: profile?.role, god: isGod });
 
   /** Primary hub dropdown — role-aware */
   const hubGroup: NavGroup = ownerMode
@@ -389,6 +391,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
           { href: '/purchase-orders', label: 'Purchase Orders' },
           { href: '/company', label: 'Company Profile' },
           ...(financialNav ? [financialNav] : []),
+          ...(jobCostingNav ? [jobCostingNav] : []),
         ],
       }
     : null;
@@ -446,6 +449,11 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
               {financialNav && !businessGroup && (
                 <Link href={financialNav.href} className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
                   {financialNav.label}
+                </Link>
+              )}
+              {jobCostingNav && !businessGroup && (
+                <Link href={jobCostingNav.href} className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
+                  {jobCostingNav.label}
                 </Link>
               )}
               {isGod && (
@@ -703,6 +711,15 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 onClick={closeMobileMenu}
               >
                 {financialNav.label}
+              </Link>
+            )}
+            {jobCostingNav && !businessGroup && (
+              <Link
+                href={jobCostingNav.href}
+                className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
+                onClick={closeMobileMenu}
+              >
+                {jobCostingNav.label}
               </Link>
             )}
             {isGod && (

@@ -12,6 +12,7 @@ import {
   type DashboardPersona,
 } from '@/lib/roles';
 import { canAccessFinancialReporting } from '@/lib/financial-reporting-access';
+import { canAccessJobCosting } from '@/lib/job-costing-access';
 import { fetchGodMe } from '@/lib/god-client';
 import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
@@ -800,6 +801,13 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
                       <div className="text-3xl mb-2">📊</div>
                       <div className="font-bold">Financial Reporting</div>
                       <div className="text-xs text-[var(--text3)] mt-1">Income, collections, and unpaid invoices</div>
+                    </Link>
+                  )}
+                  {canAccessJobCosting({ role, god }) && (
+                    <Link href="/business/job-costing" className="card p-6 text-center hover:border-[var(--gold)]">
+                      <div className="text-3xl mb-2">🧮</div>
+                      <div className="font-bold">Job Costing</div>
+                      <div className="text-xs text-[var(--text3)] mt-1">Labor, parts, and margin per repair order</div>
                     </Link>
                   )}
                 </div>
