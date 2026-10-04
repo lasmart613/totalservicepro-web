@@ -47,6 +47,12 @@ export default function RootLayout({
     >
       <head>
         <link rel="preconnect" href="https://www.googletagmanager.com" />
+        <script
+          dangerouslySetInnerHTML={{
+            __html:
+              '(function(){try{var p=location.pathname||"";if(p==="/fa"||p.indexOf("/fa/")===0){var d=document.documentElement;d.lang="fa";d.dir="rtl";d.classList.add("fa-preview");}}catch(e){}})();',
+          }}
+        />
         <ThemeScript />
         <JsonLd />
       </head>

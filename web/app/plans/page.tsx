@@ -1,7 +1,7 @@
 'use client';
 
 import React, { Suspense, useEffect, useState } from 'react';
-import Link from 'next/link';
+import { PublicLink, useFa, useT } from '@/lib/fa/locale';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
@@ -35,49 +35,51 @@ function TileLines({
   tile: PlanTileId;
   className?: string;
 }) {
+  const t = useT();
   return (
     <ul className={className}>
       {planTileLines(audience, tile).map((line) => (
-        <li key={line}>{line}</li>
+        <li key={line}>{t(line)}</li>
       ))}
     </ul>
   );
 }
 
 function PlanCards({ audience }: { audience: PlanAudience }) {
+  const t = useT();
   return (
     <div className="lp-paths">
       <article className="lp-path" style={{ cursor: 'default' }}>
-        <h3>Free Plan</h3>
+        <h3>{t('Free Plan')}</h3>
         <p className="lp-lede" style={{ margin: '0 0 12px' }}>
-          <strong>$0</strong> / month
+          <strong className="fa-ltr">$0</strong> {t('/ month')}
         </p>
         <TileLines audience={audience} tile="free" />
-        <Link href="/signup" className="lp-btn lp-btn-primary">
-          Register for Total Service Pro
-        </Link>
+        <PublicLink href="/signup" className="lp-btn lp-btn-primary">
+          {t('Register for Total Service Pro')}
+        </PublicLink>
       </article>
       <article className="lp-path" style={{ cursor: 'default' }}>
         <h3>Premium</h3>
         <p className="lp-lede" style={{ margin: '0 0 12px' }}>
-          <strong>{PLAN_OFFERS.premium_monthly.displayAmount}</strong>{' '}
-          {PLAN_OFFERS.premium_monthly.displayPeriod}
+          <strong className="fa-ltr">{PLAN_OFFERS.premium_monthly.displayAmount}</strong>{' '}
+          {t(PLAN_OFFERS.premium_monthly.displayPeriod)}
         </p>
         <TileLines audience={audience} tile="premium" />
-        <Link href="/signup" className="lp-btn lp-btn-ghost">
-          Register for Total Service Pro
-        </Link>
+        <PublicLink href="/signup" className="lp-btn lp-btn-ghost">
+          {t('Register for Total Service Pro')}
+        </PublicLink>
       </article>
       <article className="lp-path" style={{ cursor: 'default' }}>
         <h3>Team</h3>
         <p className="lp-lede" style={{ margin: '0 0 12px' }}>
-          <strong>{PLAN_OFFERS.team_monthly.displayAmount}</strong>{' '}
-          {PLAN_OFFERS.team_monthly.displayPeriod}
+          <strong className="fa-ltr">{PLAN_OFFERS.team_monthly.displayAmount}</strong>{' '}
+          {t(PLAN_OFFERS.team_monthly.displayPeriod)}
         </p>
         <TileLines audience={audience} tile="team" />
-        <Link href="/signup" className="lp-btn lp-btn-ghost">
-          Register for Total Service Pro
-        </Link>
+        <PublicLink href="/signup" className="lp-btn lp-btn-ghost">
+          {t('Register for Total Service Pro')}
+        </PublicLink>
       </article>
     </div>
   );
@@ -89,24 +91,37 @@ function PublicPlansStatic() {
 }
 
 function PlansIntro({ audience, cards }: { audience: PlanAudience; cards: React.ReactNode }) {
+  const t = useT();
+  const fa = useFa();
+  const audienceName = planAudienceLabel(audience);
   return (
     <LandingShell>
       <section className="lp-section" style={{ marginTop: 0, borderTop: 'none' }}>
         <p className="lp-kicker">Total Service Pro</p>
-        <h1 className="lp-h2">Free Plan, Premium, and Team</h1>
+        <h1 className="lp-h2">{t('Free Plan, Premium, and Team')}</h1>
         <p className="lp-lede">
-          Register for a Free Plan. Compare Free, Premium, and Team for a{' '}
-          {planAudienceLabel(audience).toLowerCase()}, then create your account.
-          Signed-in companies upgrade from this page without registering again.
+          {fa ? (
+            <>
+              {t('Register for a Free Plan. Compare Free, Premium, and Team for a ')}
+              {t(audienceName)}
+              {t(', then create your account. Signed-in companies upgrade from this page without registering again.')}
+            </>
+          ) : (
+            <>
+              Register for a Free Plan. Compare Free, Premium, and Team for a{' '}
+              {audienceName.toLowerCase()}, then create your account.
+              Signed-in companies upgrade from this page without registering again.
+            </>
+          )}
         </p>
         {cards}
         <div className="lp-actions" style={{ marginTop: 28 }}>
-          <Link href="/signup" className="lp-btn lp-btn-primary">
-            Register for a Free Plan
-          </Link>
-          <Link href="/login" className="lp-btn lp-btn-ghost">
-            Already registered? Sign in
-          </Link>
+          <PublicLink href="/signup" className="lp-btn lp-btn-primary">
+            {t('Register for a Free Plan')}
+          </PublicLink>
+          <PublicLink href="/login" className="lp-btn lp-btn-ghost">
+            {t('Already registered? Sign in')}
+          </PublicLink>
         </div>
       </section>
     </LandingShell>
@@ -368,6 +383,7 @@ function SignedInPlans() {
 }
 
 function PlansGate() {
+  const fa = useFa();
   const [auth, setAuth] = useState<AuthState>('loading');
 
   useEffect(() => {
@@ -387,6 +403,13 @@ function PlansGate() {
     };
   }, []);
 
+  if (fa) {
+    return (
+      <Suspense fallback={<PublicPlansStatic />}>
+        <PublicPlans />
+      </Suspense>
+    );
+  }
   if (auth === 'loading') {
     return <PublicPlansStatic />;
   }

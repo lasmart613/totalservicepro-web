@@ -27,6 +27,8 @@ import { OrgSwitcher } from '@/components/OrgSwitcher';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
 import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
 import { isUnreadPollBackoffError, startDocumentUnreadPoll } from '@/lib/unread-poll';
+import { useFa } from '@/lib/fa/locale';
+import { FaPublicHeader } from '@/components/fa/FaPublicHeader';
 
 type NavLink = { href: string; label: string };
 type NavGroup = { id: string; label: string; href?: string; items: NavLink[] };
@@ -108,6 +110,7 @@ function NavDropdown({
 }
 
 export function Header({ authPending = false }: { authPending?: boolean }) {
+  const faPreview = useFa();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -389,6 +392,8 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         ],
       }
     : null;
+
+  if (faPreview) return <FaPublicHeader />;
 
   if (loading || authPending) {
     return (

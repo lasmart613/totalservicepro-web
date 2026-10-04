@@ -402,17 +402,17 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
   assert.match(page, /Soft beta — no paid ads/);
   assert.match(form, /Equipment type/);
   assert.match(form, /Choose one/);
-  assert.match(form, />Brand</);
-  assert.match(form, />Model</);
+  assert.match(form, /\{t\('Brand'\)\}/);
+  assert.match(form, /\{t\('Model'\)\}/);
   assert.match(form, /Service type/);
   assert.match(form, /Emergency Repair/);
   assert.match(form, /serialNumber/);
   assert.ok(
-    form.indexOf('Equipment type') < form.indexOf('>Brand<'),
+    form.indexOf('Equipment type') < form.indexOf("{t('Brand')}"),
     'equipment type must come before brand'
   );
   assert.ok(
-    form.indexOf('>Brand<') < form.indexOf('>Model<'),
+    form.indexOf("{t('Brand')}") < form.indexOf("{t('Model')}"),
     'brand must come before model'
   );
   assert.ok(

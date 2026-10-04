@@ -7,7 +7,7 @@ import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib
 import { prepareFreshSignup } from '@/lib/auth-session';
 import { useRedirectSignedInOrgToPlans } from '@/lib/use-redirect-signed-in-org';
 import AuthOtpBox from '@/components/AuthOtpBox';
-import Link from 'next/link';
+import { PublicLink, useT } from '@/lib/fa/locale';
 import { useRouter } from 'next/navigation';
 
 const PARTS_OPTIONS = [
@@ -44,6 +44,7 @@ export default function SupplierSignup() {
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const router = useRouter();
+  const t = useT();
   const supabase = getSupabaseClient();
   useRedirectSignedInOrgToPlans();
 
@@ -174,12 +175,12 @@ export default function SupplierSignup() {
     <div className="min-h-screen flex flex-col bg-[var(--bg)]">
       <div className="max-w-lg mx-auto w-full px-4 py-8">
         <div className="text-center mb-6">
-          <Link href="/signup" className="text-sm text-[var(--gold)] hover:underline">← All sign up options</Link>
+          <PublicLink href="/signup" className="text-sm text-[var(--gold)] hover:underline">{t('← All sign up options')}</PublicLink>
           <div className="mt-2">
             <span className="font-extrabold text-2xl" style={{ color: 'var(--gold)' }}>Total Service Pro</span>
           </div>
-          <h1 className="text-2xl font-bold mt-1">Sign Up as Parts Supplier</h1>
-          <p className="text-sm text-[var(--text3)]">Suppliers of parts, consumables, handpieces, optics & more. Creates organization.</p>
+          <h1 className="text-2xl font-bold mt-1">{t('Sign Up as Parts Supplier')}</h1>
+          <p className="text-sm text-[var(--text3)]">{t('Suppliers of parts, consumables, handpieces, optics & more. Creates organization.')}</p>
         </div>
 
         <div className="card p-6">
@@ -217,64 +218,64 @@ export default function SupplierSignup() {
 
           <form onSubmit={handleSubmit} className={`space-y-4 ${awaitingConfirm ? 'opacity-60 pointer-events-none' : ''}`}>
             <div>
-              <label className="label">Company / Supplier Name *</label>
+              <label className="label">{t('Company / Supplier Name *')}</label>
               <input className="input" value={companyName} onChange={e => setCompanyName(e.target.value)} required />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Contact First Name *</label>
+                <label className="label">{t('Contact First Name *')}</label>
                 <input className="input" value={firstName} onChange={e => setFirstName(e.target.value)} required />
               </div>
               <div>
-                <label className="label">Contact Last Name *</label>
+                <label className="label">{t('Contact Last Name *')}</label>
                 <input className="input" value={lastName} onChange={e => setLastName(e.target.value)} required />
               </div>
             </div>
 
             <div>
-              <label className="label">Email *</label>
+              <label className="label">{t('Email *')}</label>
               <input type="email" className="input" value={email} onChange={e => setEmail(e.target.value)} required />
             </div>
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label">Password * (min 6)</label>
+                <label className="label">{t('Password * (min 6)')}</label>
                 <input type="password" className="input" value={password} onChange={e => setPassword(e.target.value)} required minLength={8} />
               </div>
               <div>
-                <label className="label">Confirm Password *</label>
+                <label className="label">{t('Confirm Password *')}</label>
                 <input type="password" className="input" value={confirmPassword} onChange={e => setConfirmPassword(e.target.value)} required minLength={8} />
               </div>
             </div>
 
             <div>
-              <label className="label">Phone</label>
+              <label className="label">{t('Phone')}</label>
               <input className="input" type="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="(555) 123-4567" />
             </div>
 
             <div className="grid grid-cols-3 gap-3">
               <div className="col-span-3">
-                <label className="label">Address</label>
+                <label className="label">{t('Address')}</label>
                 <input className="input" value={address} onChange={e => setAddress(e.target.value)} />
               </div>
               <div>
-                <label className="label">City</label>
+                <label className="label">{t('City')}</label>
                 <input className="input" value={city} onChange={e => setCity(e.target.value)} />
               </div>
               <div>
-                <label className="label">State / Province</label>
+                <label className="label">{t('State / Province')}</label>
                 <input className="input" value={state} onChange={e => setState(e.target.value)} />
               </div>
             </div>
 
             <div>
-              <label className="label">Website</label>
+              <label className="label">{t('Website')}</label>
               <input className="input" type="url" value={website} onChange={e => setWebsite(e.target.value)} placeholder="https://yourparts.com" />
             </div>
 
             <div>
-              <label className="label">Parts Categories Supplied</label>
+              <label className="label">{t('Parts Categories Supplied')}</label>
               <div className="flex flex-wrap gap-2 mb-2">
                 {PARTS_OPTIONS.map(part => (
                   <button
@@ -283,7 +284,7 @@ export default function SupplierSignup() {
                     onClick={() => togglePart(part)}
                     className={`filter-chip text-xs py-1 px-3 ${selectedParts.includes(part) ? 'active' : ''}`}
                   >
-                    {part}
+                    {t(part)}
                   </button>
                 ))}
               </div>
@@ -292,17 +293,17 @@ export default function SupplierSignup() {
 
             <div className="grid grid-cols-2 gap-3">
               <div>
-                <label className="label"># of Staff / Techs</label>
+                <label className="label">{t('# of Staff / Techs')}</label>
                 <input className="input" type="number" min="1" value={numStaff} onChange={e => setNumStaff(e.target.value)} placeholder="5" />
               </div>
               <div>
-                <label className="label">Tax ID / EIN (optional)</label>
+                <label className="label">{t('Tax ID / EIN (optional)')}</label>
                 <input className="input" value={taxId} onChange={e => setTaxId(e.target.value)} placeholder="XX-XXXXXXX" />
               </div>
             </div>
 
             <div>
-              <label className="label">Company Bio / About</label>
+              <label className="label">{t('Company Bio / About')}</label>
               <textarea className="input" rows={3} value={bio} onChange={e => setBio(e.target.value)} placeholder="Years supplying laser parts, specialties, coverage areas, notable OEMs..." />
             </div>
 
@@ -312,13 +313,13 @@ export default function SupplierSignup() {
                 disabled={loading}
                 className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
               >
-                {loading ? 'Creating supplier account...' : 'Create Parts Supplier Account & Organization'}
+                {loading ? t('Creating supplier account...') : t('Create Parts Supplier Account & Organization')}
               </button>
             )}
           </form>
 
           <div className="mt-5 text-center text-sm">
-            <Link href="/login" className="text-[var(--gold)] hover:underline">Already have an account? Sign in</Link>
+            <PublicLink href="/login" className="text-[var(--gold)] hover:underline">{t('Already have an account? Sign in')}</PublicLink>
           </div>
         </div>
 

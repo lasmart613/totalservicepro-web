@@ -1,8 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
+import { PublicLink, useFa, useT } from '@/lib/fa/locale';
 import { LandingShell } from './LandingShell';
 import { FindRepControl } from './FindRepControl';
 import { FindRepForm } from './FindRepForm';
@@ -18,10 +18,11 @@ const LANDING_PLAN_ROLE: Record<'shop' | 'clinic' | 'parts', PlanAudience> = {
 };
 
 export function LandingSplash() {
+  const t = useT();
   return (
     <div className="lp-splash">
       <div className="text-center">
-        <div className="lp-brand-biz">Medical Repair Network</div>
+        <div className="lp-brand-biz">{t('Medical Repair Network')}</div>
         <div className="lp-brand-name" style={{ fontSize: 28 }}>
           RepairPlanet
         </div>
@@ -255,6 +256,8 @@ const HERO_COVER_ID: Record<string, string> = {
 
 function HeroCarousel() {
   const router = useRouter();
+  const t = useT();
+  const fa = useFa();
   const n = HERO_SLIDES.length;
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -280,9 +283,9 @@ function HeroCarousel() {
     const el = document.getElementById('find-a-rep');
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (new URLSearchParams(window.location.search).has('find')) {
-      router.replace('/#find-a-rep', { scroll: false });
+      router.replace(fa ? '/fa#find-a-rep' : '/#find-a-rep', { scroll: false });
     }
-  }, [router]);
+  }, [router, fa]);
 
   useEffect(() => {
     if (paused || hold) return;
@@ -325,7 +328,7 @@ function HeroCarousel() {
     <section
       className="lp-hero-carousel"
       aria-roledescription="carousel"
-      aria-label="Who RepairPlanet and Total Service Pro are for"
+      aria-label={t('Who RepairPlanet and Total Service Pro are for')}
       onMouseEnter={() => setHold(true)}
       onMouseLeave={() => setHold(false)}
       onFocusCapture={() => setHold(true)}
@@ -336,13 +339,16 @@ function HeroCarousel() {
       }}
     >
       <h1 className="lp-hero-tagline">
-        Field service software for independent biomedical and aesthetic-laser repair companies
+        {t(
+          'Field service software for independent biomedical and aesthetic-laser repair companies',
+        )}
       </h1>
       <p className="lp-hero-intro">
-        For BMETs, laser service engineers, and medical-device owners. Dispatch, service history, and a
-        parts marketplace for lasers, lithotriptors, C-arms, and other biomedical equipment.
+        {t(
+          'For BMETs, laser service engineers, and medical-device owners. Dispatch, service history, and a parts marketplace for lasers, lithotriptors, C-arms, and other biomedical equipment.',
+        )}
       </p>
-      <aside className="lp-hero-find" id="find-a-rep" aria-label="Find a service or repair company">
+      <aside className="lp-hero-find" id="find-a-rep" aria-label={t('Find a service or repair company')}>
         <FindRepForm variant="hero" />
       </aside>
       <div
@@ -365,7 +371,7 @@ function HeroCarousel() {
               className="lp-hero-slide"
               role="group"
               aria-roledescription="slide"
-              aria-label={`${idx + 1} of ${n}: ${s.audience}. ${s.title}`}
+              aria-label={`${idx + 1} of ${n}: ${t(s.audience)}. ${t(s.title)}`}
               aria-hidden={idx !== i}
               inert={idx !== i ? true : undefined}
             >
@@ -381,14 +387,14 @@ function HeroCarousel() {
                     : undefined
                 }
               >
-                <p className="lp-kicker">{s.audience}</p>
-                <p className="lp-title">{s.title}</p>
-                <p className="lp-hero-subhead">{s.sub}</p>
+                <p className="lp-kicker">{t(s.audience)}</p>
+                <p className="lp-title">{t(s.title)}</p>
+                <p className="lp-hero-subhead">{t(s.sub)}</p>
               </div>
               <Shot
                 src={s.shot.src}
-                alt={s.shot.alt}
-                caption={s.shot.caption}
+                alt={t(s.shot.alt)}
+                caption={t(s.shot.caption)}
                 frame={s.shot.frame}
                 sizesKind="hero"
                 priority={idx === 0}
@@ -400,7 +406,7 @@ function HeroCarousel() {
       </div>
 
       <p className="lp-sr" aria-live="polite">
-        {slide.audience}. {slide.title}. {slide.sub}
+        {t(slide.audience)}. {t(slide.title)}. {t(slide.sub)}
       </p>
 
       <div className="lp-hero-bar">
@@ -408,18 +414,18 @@ function HeroCarousel() {
           <button
             type="button"
             className="lp-hero-arrow"
-            aria-label="Previous slide"
+            aria-label={t('Previous slide')}
             onClick={() => go(-1)}
           >
             <span aria-hidden="true">‹</span>
           </button>
-          <div className="lp-hero-dots" role="group" aria-label="Slides">
+          <div className="lp-hero-dots" role="group" aria-label={t('Slides')}>
             {HERO_SLIDES.map((s, idx) => (
               <button
                 key={`${s.audience}-${s.title}-dot`}
                 type="button"
                 className={`lp-hero-dot${idx === i ? ' is-on' : ''}`}
-                aria-label={`${s.audience}: ${s.title}`}
+                aria-label={`${t(s.audience)}: ${t(s.title)}`}
                 aria-current={idx === i ? 'true' : undefined}
                 onClick={() => goTo(idx)}
               />
@@ -428,7 +434,7 @@ function HeroCarousel() {
           <button
             type="button"
             className="lp-hero-arrow"
-            aria-label="Next slide"
+            aria-label={t('Next slide')}
             onClick={() => go(1)}
           >
             <span aria-hidden="true">›</span>
@@ -437,31 +443,31 @@ function HeroCarousel() {
             type="button"
             className="lp-hero-pause"
             aria-pressed={paused}
-            aria-label={paused ? 'Play slides' : 'Pause slides'}
+            aria-label={paused ? t('Play slides') : t('Pause slides')}
             onClick={() => setPaused((p) => !p)}
           >
-            {paused ? 'Play' : 'Pause'}
+            {paused ? t('Play') : t('Pause')}
           </button>
         </div>
         <div className="lp-hero-cta">
           <div className="lp-actions">
-            <Link href="/plans" className="lp-btn lp-btn-outline">
-              Start on the free plan
-            </Link>
-            <Link href="/login" className="lp-btn lp-btn-ghost">
-              Sign in
-            </Link>
+            <PublicLink href="/plans" className="lp-btn lp-btn-outline">
+              {t('Start on the free plan')}
+            </PublicLink>
+            <PublicLink href="/login" className="lp-btn lp-btn-ghost">
+              {t('Sign in')}
+            </PublicLink>
           </div>
           <p className="lp-hero-note">
-            A free plan is included. Upgrade when you need more.
+            {t('A free plan is included. Upgrade when you need more.')}
           </p>
           <p className="lp-hero-note">
-            Service company?{' '}
-            <Link href="/signup/company">Jobs near you — register your shop</Link>
-            . BMETs and laser service engineers join through their shop.{' '}
-            <Link href="/signup">Register for Total Service Pro</Link>
+            {t('Service company? ')}
+            <PublicLink href="/signup/company">{t('Jobs near you — register your shop')}</PublicLink>
+            {t('. BMETs and laser service engineers join through their shop. ')}
+            <PublicLink href="/signup">{t('Register for Total Service Pro')}</PublicLink>
           </p>
-          <p className="lp-hero-note">Soft beta — no paid ads.</p>
+          <p className="lp-hero-note">{t('Soft beta — no paid ads')}</p>
         </div>
       </div>
     </section>
@@ -469,82 +475,82 @@ function HeroCarousel() {
 }
 
 export function LandingPage() {
+  const t = useT();
   return (
     <LandingShell>
       <HeroCarousel />
 
-      <section className="lp-gallery" aria-label="Product screens">
+      <section className="lp-gallery" aria-label={t('Product screens')}>
         <Shot
           src="/landing/dashboard.webp"
-          alt="Shop dashboard for Alex Lee with open tickets, today’s calls, and upcoming service calls"
-          caption="Shop dashboard"
+          alt={t('Shop dashboard for Alex Lee with open tickets, today’s calls, and upcoming service calls')}
+          caption={t('Shop dashboard')}
           sizesKind="gallery"
         />
         <Shot
           src="/landing/schedule.webp"
-          alt="Color-coded shop schedule with assigned field engineer legend"
-          caption="Shop schedule"
+          alt={t('Color-coded shop schedule with assigned field engineer legend')}
+          caption={t('Shop schedule')}
           sizesKind="gallery"
         />
         <Shot
           src="/landing/ticket-assign.webp"
-          alt="Edit Ticket assigning a field engineer"
-          caption="Assign to field engineer"
+          alt={t('Edit Ticket assigning a field engineer')}
+          caption={t('Assign to field engineer')}
           sizesKind="gallery"
         />
         <Shot
           src="/landing/team-equipment.webp"
-          alt="Team Management test equipment assigned to a field engineer"
-          caption="Test equipment"
+          alt={t('Team Management test equipment assigned to a field engineer')}
+          caption={t('Test equipment')}
           sizesKind="gallery"
         />
         <Shot
           src="/landing/directory.webp"
-          alt="Directory search to find a repair company among service companies, clinics, resellers, and suppliers"
-          caption="Directory"
+          alt={t('Directory search to find a repair company among service companies, clinics, resellers, and suppliers')}
+          caption={t('Directory')}
           sizesKind="gallery"
         />
         <Shot
           src="/landing/reports.webp"
-          alt="Service reports list with drafts and completed work"
-          caption="Service history"
+          alt={t('Service reports list with drafts and completed work')}
+          caption={t('Service history')}
           sizesKind="gallery"
         />
         <Shot
           src="/landing/parts.webp"
-          alt="Parts for sale form for a used Alma Harmony XL handpiece, with one active listing priced at $1,850"
-          caption="Parts for sale"
+          alt={t('Parts for sale form for a used Alma Harmony XL handpiece, with one active listing priced at $1,850')}
+          caption={t('Parts for sale')}
           sizesKind="gallery"
         />
         <Shot
           src="/landing/marketplace.webp"
-          alt="Marketplace home for parts, used systems, and service needs"
-          caption="Marketplace"
+          alt={t('Marketplace home for parts, used systems, and service needs')}
+          caption={t('Marketplace')}
           sizesKind="gallery"
         />
       </section>
 
       <section className="lp-section" id="features">
-        <h2 className="lp-h2">What you get</h2>
+        <h2 className="lp-h2">{t('What you get')}</h2>
         <p className="lp-lede">
-          RepairPlanet is the medical-device service network. Total Service Pro is
-          built for BMETs, laser service engineers, clinics, and parts sellers —
-          lasers stay core, alongside lithotriptors, C-arms, and other biomedical
-          equipment.
+          {t(
+            'RepairPlanet is the medical-device service network. Total Service Pro is built for BMETs, laser service engineers, clinics, and parts sellers — lasers stay core, alongside lithotriptors, C-arms, and other biomedical equipment.',
+          )}
         </p>
         <div className="lp-role-cols">
           {AUDIENCES.map((r) => (
             <article key={r.id} className="lp-role-col">
-              <h3>{r.label}</h3>
+              <h3>{t(r.label)}</h3>
               <ul className="lp-features">
                 {r.lines.map((line) => (
-                  <li key={line}>{line}</li>
+                  <li key={line}>{t(line)}</li>
                 ))}
               </ul>
               <Shot
                 src={r.shot.src}
-                alt={r.shot.alt}
-                caption={r.shot.caption}
+                alt={t(r.shot.alt)}
+                caption={t(r.shot.caption)}
                 sizesKind="role"
               />
               <div className="lp-actions">
@@ -552,22 +558,22 @@ export function LandingPage() {
                   <FindRepControl variant="column" label="Find a service rep near me" />
                 ) : null}
                 {r.id === 'shop' ? (
-                  <Link href={r.signup} className="lp-btn lp-btn-primary">
-                    Get jobs near you
-                  </Link>
+                  <PublicLink href={r.signup} className="lp-btn lp-btn-primary">
+                    {t('Get jobs near you')}
+                  </PublicLink>
                 ) : null}
-                <Link
+                <PublicLink
                   href={r.signup}
                   className={r.id === 'parts' ? 'lp-btn lp-btn-primary' : 'lp-btn lp-btn-ghost'}
                 >
-                  Register for Total Service Pro
-                </Link>
-                <Link
+                  {t('Register for Total Service Pro')}
+                </PublicLink>
+                <PublicLink
                   href={plansHrefForAudience(LANDING_PLAN_ROLE[r.id])}
                   className="lp-btn lp-btn-outline"
                 >
-                  Free Plan
-                </Link>
+                  {t('Free Plan')}
+                </PublicLink>
               </div>
             </article>
           ))}
@@ -576,14 +582,14 @@ export function LandingPage() {
 
       <section className="lp-section lp-phones" id="app">
         <div className="lp-phones-copy">
-          <h2 className="lp-h2">Same account for BMETs and laser engineers</h2>
-          <p className="lp-lede">BMETs and laser service engineers can view or edit Schedule, find parts, search service manuals, and create service reports on Android or iOS.</p>
-          <p className="lp-kicker">Coming soon</p>
-          <div className="lp-store-badges" role="group" aria-label="Mobile apps coming soon">
+          <h2 className="lp-h2">{t('Same account for BMETs and laser engineers')}</h2>
+          <p className="lp-lede">{t('BMETs and laser service engineers can view or edit Schedule, find parts, search service manuals, and create service reports on Android or iOS.')}</p>
+          <p className="lp-kicker">{t('Coming soon')}</p>
+          <div className="lp-store-badges" role="group" aria-label={t('Mobile apps coming soon')}>
             <span className="lp-store-badge lp-store-badge-play">
               <img
                 src="/landing/badge-google-play.png"
-                alt="Google Play — coming soon"
+                alt={t('Google Play — coming soon')}
                 width={646}
                 height={250}
                 loading="lazy"
@@ -593,7 +599,7 @@ export function LandingPage() {
             <span className="lp-store-badge lp-store-badge-apple">
               <img
                 src="/landing/badge-app-store.svg"
-                alt="App Store — coming soon"
+                alt={t('App Store — coming soon')}
                 width={120}
                 height={40}
                 loading="lazy"
@@ -601,13 +607,13 @@ export function LandingPage() {
               />
             </span>
           </div>
-          <p className="lp-store-platforms">Android and iOS</p>
+          <p className="lp-store-platforms">{t('Android and iOS')}</p>
         </div>
         <div className="lp-phone-wrap">
           <div className="lp-phone">
             <img
               src="/landing/app-hub.webp"
-              alt="Android Service Hub"
+              alt={t('Android Service Hub')}
               width={390}
               height={844}
               loading="lazy"
@@ -617,7 +623,7 @@ export function LandingPage() {
           <div className="lp-phone">
             <img
               src="/landing/app-calcs.webp"
-              alt="Photometry tools on Android"
+              alt={t('Photometry tools on Android')}
               width={390}
               height={844}
               loading="lazy"

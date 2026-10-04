@@ -153,17 +153,17 @@ test('public shells include a static H1 before client data loads', () => {
   const marketplace = readFileSync(join(webDir, 'app', 'marketplace', 'page.tsx'), 'utf8');
   const forgot = readFileSync(join(webDir, 'app', 'forgot-password', 'page.tsx'), 'utf8');
   assert.match(plans, /function PublicPlansStatic/);
-  assert.match(plans, /<h1 className="lp-h2">Free Plan, Premium, and Team<\/h1>/);
+  assert.match(plans, /<h1 className="lp-h2">\{t\('Free Plan, Premium, and Team'\)\}<\/h1>/);
   assert.match(plans, /planTileLines|TileLines/);
   assert.doesNotMatch(plans, /Loading plans…/);
-  assert.match(parts, /<h1 className="text-3xl font-extrabold">Parts for sale<\/h1>/);
-  assert.match(used, /<h1 className="text-3xl font-extrabold">Used systems<\/h1>/);
-  assert.match(consumables, /<h1 className="text-3xl font-extrabold">Consumables<\/h1>/);
+  assert.match(parts, /<h1 className="text-3xl font-extrabold">\{t\('Parts for sale'\)\}<\/h1>/);
+  assert.match(used, /<h1 className="text-3xl font-extrabold">\{t\('Used systems'\)\}<\/h1>/);
+  assert.match(consumables, /<h1 className="text-3xl font-extrabold">\{t\('Consumables'\)\}<\/h1>/);
   for (const src of [parts, used, consumables]) {
     assert.doesNotMatch(src, /if \(loading\) \{\s*return/);
   }
   assert.match(login, /function LoginStaticIntro/);
-  assert.match(login, /<h1[^>]*>Sign in<\/h1>/);
+  assert.match(login, /<h1[^>]*>\{t\('Sign in'\)\}<\/h1>/);
   assert.match(landing, /<h1 className="lp-hero-tagline">/);
   assert.match(landing, /biomedical and aesthetic-laser repair companies/);
   assert.doesNotMatch(landing, /<h1 className="lp-title">/);

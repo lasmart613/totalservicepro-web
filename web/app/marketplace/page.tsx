@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import Link from 'next/link';
+import { PublicLink, useFa, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { canPostMarketplaceNeed, isPro, isSupplier } from '@/lib/roles';
@@ -11,6 +11,8 @@ export default function Marketplace() {
   const [userRole, setUserRole] = useState('');
   const [orgType, setOrgType] = useState<string | null>(null);
   const supabase = getSupabaseClient();
+  const fa = useFa();
+  const t = useT();
 
   useEffect(() => {
     const fetchNotifications = async () => {
@@ -96,14 +98,14 @@ export default function Marketplace() {
       <div className="max-w-7xl mx-auto w-full px-4 py-8">
         <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4 mb-8">
           <div>
-            <h1 className="text-3xl font-extrabold">Marketplace</h1>
+            <h1 className="text-3xl font-extrabold">{t('Marketplace')}</h1>
             <p className="text-[var(--text3)]">
-              Buy, sell, and connect across biomedical equipment — lasers, lithotriptors, C-arms, and more.
+              {t('Buy, sell, and connect across biomedical equipment — lasers, lithotriptors, C-arms, and more.')}
             </p>
           </div>
 
-          {(isPro(userRole) || isSupplier(userRole, orgType)) && (
-            <Link
+          {!fa && (isPro(userRole) || isSupplier(userRole, orgType)) && (
+            <PublicLink
               href={
                 isSupplier(userRole, orgType)
                   ? '/marketplace/list?type=part'
@@ -111,61 +113,61 @@ export default function Marketplace() {
               }
               className="btn btn-primary whitespace-nowrap"
             >
-              + Create New Listing
-            </Link>
+              {t('+ Create New Listing')}
+            </PublicLink>
           )}
-          {canPostMarketplaceNeed(userRole, orgType) && !isPro(userRole) && (
-            <Link href="/service-requests" className="btn btn-primary whitespace-nowrap">
-              Post Service Request
-            </Link>
+          {!fa && canPostMarketplaceNeed(userRole, orgType) && !isPro(userRole) && (
+            <PublicLink href="/service-requests" className="btn btn-primary whitespace-nowrap">
+              {t('Post Service Request')}
+            </PublicLink>
           )}
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
           {/* Parts */}
-          <Link href="/marketplace/parts" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+          <PublicLink href="/marketplace/parts" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
             <div className="text-4xl mb-4">🔩</div>
-            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Parts</h3>
-            <p className="text-sm text-[var(--text3)] flex-1">Parts listed for sale by suppliers and companies</p>
-          </Link>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">{t('Parts')}</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">{t('Parts listed for sale by suppliers and companies')}</p>
+          </PublicLink>
 
-          <Link href="/marketplace/used-systems" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+          <PublicLink href="/marketplace/used-systems" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
             <div className="text-4xl mb-4">🖥️</div>
-            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Used systems</h3>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">{t('Used systems')}</h3>
             <p className="text-sm text-[var(--text3)] flex-1">
-              Buy or sell pre-owned biomedical equipment — lasers, lithotriptors, C-arms, and more
+              {t('Buy or sell pre-owned biomedical equipment — lasers, lithotriptors, C-arms, and more')}
             </p>
-          </Link>
+          </PublicLink>
 
           {/* Consumables */}
-          <Link href="/marketplace/consumables" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+          <PublicLink href="/marketplace/consumables" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
             <div className="text-4xl mb-4">🧴</div>
-            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Consumables</h3>
-            <p className="text-sm text-[var(--text3)] flex-1">Handpieces, fibers, tips, gels, and common consumables</p>
-          </Link>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">{t('Consumables')}</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">{t('Handpieces, fibers, tips, gels, and common consumables')}</p>
+          </PublicLink>
 
           {/* Service section lives outside marketplace sales lanes */}
-          <Link href="/service-requests" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+          <PublicLink href="/service-requests" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
             <div className="text-4xl mb-4">🛠️</div>
-            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Service Requests</h3>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">{t('Service Requests')}</h3>
             <p className="text-sm text-[var(--text3)] flex-1">
-              Dedicated repair / PM board (not a marketplace listing). Owners post from My Lasers or here.
+              {t('Dedicated repair / PM board (not a marketplace listing). Owners post from My Lasers or here.')}
             </p>
-          </Link>
+          </PublicLink>
 
           {/* My Bids - New */}
-          <Link href="/bids" className="card p-6 hover:border-[var(--gold)] group flex flex-col border-2 border-[var(--gold)]/30">
+          <PublicLink href="/bids" className="card p-6 hover:border-[var(--gold)] group flex flex-col border-2 border-[var(--gold)]/30">
             <div className="text-4xl mb-4">📋</div>
-            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">My Bids</h3>
-            <p className="text-sm text-[var(--text3)] flex-1">View and manage all bids you have submitted</p>
-          </Link>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">{t('My Bids')}</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">{t('View and manage all bids you have submitted')}</p>
+          </PublicLink>
 
           {/* My Listings */}
-          <Link href="/marketplace/my-listings" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
+          <PublicLink href="/marketplace/my-listings" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
             <div className="text-4xl mb-4">📝</div>
-            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">My Listings</h3>
-            <p className="text-sm text-[var(--text3)] flex-1">View and manage your own listings</p>
-          </Link>
+            <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">{t('My Listings')}</h3>
+            <p className="text-sm text-[var(--text3)] flex-1">{t('View and manage your own listings')}</p>
+          </PublicLink>
 
           {isSupplier(userRole, orgType) && (
             <Link href="/marketplace/storefront" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
@@ -180,9 +182,9 @@ export default function Marketplace() {
 
         {/* Notifications Area under the cards. Easy to extend new ones. */}
         <div className="mt-8">
-          <h2 className="text-xl font-semibold mb-3">Notifications</h2>
+          <h2 className="text-xl font-semibold mb-3">{t('Notifications')}</h2>
           {notifications.length === 0 ? (
-            <p className="text-sm text-[var(--text3)]">No notifications yet.</p>
+            <p className="text-sm text-[var(--text3)]">{t('No notifications yet.')}</p>
           ) : (
             <ul className="space-y-2">
               {notifications.map((n, idx) => (
@@ -195,8 +197,7 @@ export default function Marketplace() {
         </div>
 
         <div className="mt-10 text-xs text-[var(--text3)]">
-          Only items that have been actively listed for sale appear in the Marketplace.  
-          The full Parts Catalog (reference) is available in the Tech Hub.
+          {t('Only items that have been actively listed for sale appear in the Marketplace. The full Parts Catalog (reference) is available in the Tech Hub.')}
         </div>
       </div>
     </div>

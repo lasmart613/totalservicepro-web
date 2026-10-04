@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState } from 'react';
-import Link from 'next/link';
+import { PublicLink, useT } from '@/lib/fa/locale';
 import { getSupabaseClient } from '@/lib/supabase/client';
 
 export default function ForgotPasswordPage() {
@@ -10,6 +10,7 @@ export default function ForgotPasswordPage() {
   const [message, setMessage] = useState('');
   const [ok, setOk] = useState(false);
   const [loading, setLoading] = useState(false);
+  const t = useT();
 
   function isValidEmail(s: string) {
     const e = (s || '').trim();
@@ -47,22 +48,22 @@ export default function ForgotPasswordPage() {
     <div className="min-h-screen flex items-center justify-center bg-[var(--bg)] p-6">
       <div className="w-full max-w-md">
         <div className="text-center mb-8">
-          <Link href="/" className="inline-block">
+          <PublicLink href="/" className="inline-block">
             <span className="font-extrabold text-3xl" style={{ color: 'var(--gold)' }}>
               Total Service Pro
             </span>
-          </Link>
+          </PublicLink>
           <p className="text-[var(--text3)] mt-1 text-sm tracking-wide">
-            Field service tools for biomedical equipment — lasers, lithotriptors, C-arms, and more.
+            {t('Field service tools for biomedical equipment — lasers, lithotriptors, C-arms, and more.')}
           </p>
         </div>
 
         <div className="card p-8">
           <h1 className="text-2xl font-bold mb-2" style={{ color: 'var(--gold)' }}>
-            Forgot password
+            {t('Forgot password')}
           </h1>
           <p className="text-sm text-[var(--text3)] mb-6">
-            Enter the email on your account. We will send a link to set a new password.
+            {t('Enter the email on your account. We will send a link to set a new password.')}
           </p>
 
           {message && (
@@ -71,13 +72,13 @@ export default function ForgotPasswordPage() {
                 ok ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'
               }`}
             >
-              {message}
+              {t(message)}
             </div>
           )}
 
           <form onSubmit={submit} className="space-y-5">
             <div>
-              <label className="label">Email</label>
+              <label className="label">{t('Email')}</label>
               <input
                 type="email"
                 className="input"
@@ -93,14 +94,14 @@ export default function ForgotPasswordPage() {
               disabled={loading}
               className="btn btn-primary w-full py-3 text-base disabled:opacity-60"
             >
-              {loading ? 'Please wait...' : 'Send reset link'}
+              {loading ? t('Please wait...') : t('Send reset link')}
             </button>
           </form>
 
           <div className="mt-6 text-center text-sm">
-            <Link href="/login" className="text-[var(--gold)] hover:underline">
-              Back to Sign In
-            </Link>
+            <PublicLink href="/login" className="text-[var(--gold)] hover:underline">
+              {t('Back to Sign In')}
+            </PublicLink>
           </div>
         </div>
       </div>
