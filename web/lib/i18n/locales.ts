@@ -1,9 +1,10 @@
 /**
- * Public-site languages. English has no prefix. Farsi, Spanish, and French
- * mirror the logged-out pages. Signed-in app paths are not in this set.
+ * Public-site languages. English has no prefix. Farsi, Spanish, French,
+ * Hebrew, Italian, German, Brazilian Portuguese, and Arabic mirror the
+ * logged-out pages. Signed-in app paths are not in this set.
  */
 
-export type PublicLocale = 'en' | 'fa' | 'es' | 'fr';
+export type PublicLocale = 'en' | 'fa' | 'es' | 'fr' | 'he' | 'it' | 'de' | 'pt' | 'ar';
 
 export const PUBLIC_LOCALES: ReadonlyArray<{
   id: PublicLocale;
@@ -16,11 +17,16 @@ export const PUBLIC_LOCALES: ReadonlyArray<{
   { id: 'fa', label: 'فارسی', htmlLang: 'fa', dir: 'rtl' },
   { id: 'es', label: 'Español', htmlLang: 'es', dir: 'ltr' },
   { id: 'fr', label: 'Français', htmlLang: 'fr', dir: 'ltr' },
+  { id: 'he', label: 'עברית', htmlLang: 'he', dir: 'rtl' },
+  { id: 'it', label: 'Italiano', htmlLang: 'it', dir: 'ltr' },
+  { id: 'de', label: 'Deutsch', htmlLang: 'de', dir: 'ltr' },
+  { id: 'pt', label: 'Português', htmlLang: 'pt-BR', dir: 'ltr' },
+  { id: 'ar', label: 'العربية', htmlLang: 'ar', dir: 'rtl' },
 ];
 
-const PREFIXED: ReadonlyArray<Exclude<PublicLocale, 'en'>> = ['fa', 'es', 'fr'];
+const PREFIXED: ReadonlyArray<Exclude<PublicLocale, 'en'>> = ['fa', 'es', 'fr', 'he', 'it', 'de', 'pt', 'ar'];
 
-/** Logged-out routes mirrored under /fa, /es, and /fr. */
+/** Logged-out routes mirrored under each public language prefix. */
 export const PUBLIC_PATHS = new Set([
   '/',
   '/plans',

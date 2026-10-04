@@ -6,6 +6,11 @@ import { fileURLToPath } from 'node:url';
 import { FA_COPY } from '../fa/copy.ts';
 import { ES_COPY } from '../es/copy.ts';
 import { FR_COPY } from '../fr/copy.ts';
+import { HE_COPY } from '../he/copy.ts';
+import { IT_COPY } from '../it/copy.ts';
+import { DE_COPY } from '../de/copy.ts';
+import { PT_COPY } from '../pt/copy.ts';
+import { AR_COPY } from '../ar/copy.ts';
 import {
   hrefForLocale,
   prefixLocaleHref,
@@ -44,20 +49,33 @@ const ALLOW_SAME = new Set([
 
 const PRODUCT_TOKENS = ['RepairPlanet', 'Total Service Pro', 'Premium', 'Team'];
 
-test('Spanish and French dictionaries cover the same public strings as Farsi', () => {
+const LOCALIZED = [
+  ['es', ES_COPY],
+  ['fr', FR_COPY],
+  ['he', HE_COPY],
+  ['it', IT_COPY],
+  ['de', DE_COPY],
+  ['pt', PT_COPY],
+  ['ar', AR_COPY],
+] as const;
+
+test('public dictionaries cover the same strings as Farsi', () => {
   const faKeys = Object.keys(FA_COPY);
-  assert.deepEqual(Object.keys(ES_COPY).sort(), [...faKeys].sort());
-  assert.deepEqual(Object.keys(FR_COPY).sort(), [...faKeys].sort());
+  for (const [label, copy] of LOCALIZED) {
+    assert.deepEqual(Object.keys(copy).sort(), [...faKeys].sort(), label);
+  }
   assert.equal(ES_COPY.Language, 'Idioma');
   assert.equal(FR_COPY.Language, 'Langue');
   assert.equal(FA_COPY.Language, 'زبان');
+  assert.equal(HE_COPY.Language, 'שפה');
+  assert.equal(IT_COPY.Language, 'Lingua');
+  assert.equal(DE_COPY.Language, 'Sprache');
+  assert.equal(PT_COPY.Language, 'Idioma');
+  assert.equal(AR_COPY.Language, 'اللغة');
 });
 
 test('translations keep product names, prices, and placeholders', () => {
-  for (const [label, copy] of [
-    ['es', ES_COPY],
-    ['fr', FR_COPY],
-  ] as const) {
+  for (const [label, copy] of LOCALIZED) {
     for (const key of Object.keys(FA_COPY)) {
       const value = copy[key];
       assert.equal(typeof value, 'string', `${label} missing ${key}`);
@@ -79,6 +97,25 @@ test('translations keep product names, prices, and placeholders', () => {
   }
   assert.equal(ES_COPY['What did you expect, and what did you see instead?'].startsWith('¿'), true);
   assert.doesNotMatch(Object.values(FR_COPY).join('\n'), /[\u0152\u0153]/);
+  assert.match(Object.values(HE_COPY).join('\n'), /[\u0590-\u05FF]/);
+  assert.match(Object.values(AR_COPY).join('\n'), /[\u0600-\u06FF]/);
+  assert.match(Object.values(IT_COPY).join('\n'), /[àèéìòù]/);
+  assert.match(Object.values(DE_COPY).join('\n'), /[äöüÄÖÜß]/);
+  assert.match(Object.values(PT_COPY).join('\n'), /você/);
+  assert.match(Object.values(PT_COPY).join('\n'), /[ãõçáéíóú]/);
+  assert.doesNotMatch(
+    Object.values(PT_COPY).join('\n'),
+    /ecrã|utilizador|palavra-passe|telemóvel|ficheiro|autocarro|equipa\b/i,
+  );
+  for (const [label, copy] of [
+    ['he', HE_COPY],
+    ['ar', AR_COPY],
+  ] as const) {
+    const script = label === 'he' ? /[\u0590-\u05FF]/ : /[\u0600-\u06FF]/;
+    for (const key of Object.keys(FA_COPY)) {
+      if (key.length > 40) assert.match(copy[key], script, `${label} left a long English string: ${key}`);
+    }
+  }
 });
 
 test('public locale links stay on the mirrored pages', () => {
@@ -96,19 +133,34 @@ test('public locale links stay on the mirrored pages', () => {
   assert.equal(hrefForLocale('/fa/directory', 'en'), '/directory');
   assert.equal(hrefForLocale('/es/plans', 'fr', '?role=owner'), '/fr/plans?role=owner');
   assert.equal(hrefForLocale('/hub', 'es'), '/es');
+  assert.equal(prefixLocaleHref('he', '/plans'), '/he/plans');
+  assert.equal(prefixLocaleHref('it', '/'), '/it');
+  assert.equal(prefixLocaleHref('de', '/signup/company'), '/de/signup/company');
+  assert.equal(prefixLocaleHref('pt', '/marketplace/parts'), '/pt/marketplace/parts');
+  assert.equal(prefixLocaleHref('ar', '/#find-a-rep'), '/ar#find-a-rep');
+  assert.equal(hrefForLocale('/it/directory', 'de'), '/de/directory');
+  assert.equal(hrefForLocale('/pt/plans', 'en'), '/plans');
+  assert.equal(hrefForLocale('/he/login', 'ar', '?role=owner'), '/ar/login?role=owner');
   assert.equal(PUBLIC_PATHS.has('/calculators'), true);
   assert.equal(PUBLIC_PATHS.has('/business/job-costing'), false);
+  assert.equal(PUBLIC_PATHS.has('/business/financial-reporting'), false);
 });
 
-test('Spanish and French read left to right; Farsi stays right to left', () => {
+test('Hebrew and Arabic read right to left; Italian, German, and Portuguese stay left to right', () => {
   const byId = Object.fromEntries(PUBLIC_LOCALES.map((item) => [item.id, item]));
   assert.equal(byId.es.dir, 'ltr');
   assert.equal(byId.fr.dir, 'ltr');
   assert.equal(byId.fa.dir, 'rtl');
   assert.equal(byId.en.dir, 'ltr');
+  assert.equal(byId.he.dir, 'rtl');
+  assert.equal(byId.ar.dir, 'rtl');
+  assert.equal(byId.it.dir, 'ltr');
+  assert.equal(byId.de.dir, 'ltr');
+  assert.equal(byId.pt.dir, 'ltr');
+  assert.equal(byId.pt.htmlLang, 'pt-BR');
   assert.deepEqual(
     PUBLIC_LOCALES.map((item) => item.label),
-    ['English', 'فارسی', 'Español', 'Français'],
+    ['English', 'فارسی', 'Español', 'Français', 'עברית', 'Italiano', 'Deutsch', 'Português', 'العربية'],
   );
 });
 
@@ -138,6 +190,17 @@ test('English fonts stay Geist, Geist Mono, and DM Sans', () => {
   assert.match(layout, /d\.lang="es";d\.dir="ltr"/);
   assert.match(layout, /d\.lang="fr";d\.dir="ltr"/);
   assert.match(layout, /d\.lang="fa";d\.dir="rtl"/);
+  assert.match(layout, /d\.lang="he";d\.dir="rtl"/);
+  assert.match(layout, /d\.lang="ar";d\.dir="rtl"/);
+  assert.match(layout, /d\.lang="it";d\.dir="ltr"/);
+  assert.match(layout, /d\.lang="de";d\.dir="ltr"/);
+  assert.match(layout, /d\.lang="pt-BR";d\.dir="ltr"/);
   assert.doesNotMatch(layout, /vazirmatn/i);
+  assert.doesNotMatch(layout, /noto-sans-hebrew/i);
+  assert.doesNotMatch(layout, /noto-sans-arabic/i);
   assert.match(read('app/fa/fa-preview.css'), /vazirmatn/i);
+  assert.match(read('app/he/he-preview.css'), /noto-sans-hebrew/i);
+  assert.match(read('app/ar/ar-preview.css'), /noto-sans-arabic/i);
+  assert.match(read('public/fonts/noto-sans-hebrew.woff2'), /./);
+  assert.match(read('public/fonts/noto-sans-arabic.woff2'), /./);
 });

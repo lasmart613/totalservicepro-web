@@ -2,7 +2,13 @@ import { PublicLocaleProvider } from '@/lib/fa/locale';
 import { PUBLIC_LOCALES, type PublicLocale } from '@/lib/i18n/locales';
 import { LocaleHtml } from './LocaleHtml';
 
-/** Wraps /fa, /es, and /fr. English pages do not use this frame. */
+const SCRIPT_FONT: Partial<Record<Exclude<PublicLocale, 'en'>, string>> = {
+  fa: 'fa-preview',
+  he: 'he-preview',
+  ar: 'ar-preview',
+};
+
+/** Wraps every prefixed public language. English pages do not use this frame. */
 export function PublicLocaleFrame({
   locale,
   children,
@@ -11,8 +17,8 @@ export function PublicLocaleFrame({
   children: React.ReactNode;
 }) {
   const meta = PUBLIC_LOCALES.find((item) => item.id === locale) ?? PUBLIC_LOCALES[0];
-  const rootClass = locale === 'fa' ? 'fa-preview-root' : undefined;
-  const htmlClass = locale === 'fa' ? 'fa-preview' : undefined;
+  const htmlClass = SCRIPT_FONT[locale];
+  const rootClass = htmlClass ? `${htmlClass}-root` : undefined;
   return (
     <div lang={meta.htmlLang} dir={meta.dir} className={rootClass}>
       <LocaleHtml lang={meta.htmlLang} dir={meta.dir} htmlClass={htmlClass} />

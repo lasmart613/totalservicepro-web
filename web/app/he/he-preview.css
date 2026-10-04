@@ -1,0 +1,88 @@
+@font-face {
+  font-family: "Noto Sans Hebrew";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/noto-sans-hebrew.woff2") format("woff2");
+  unicode-range: U+0307-0308, U+0590-05FF, U+200C-2010, U+20AA, U+25CC, U+FB1D-FB4F;
+}
+
+html.he-preview,
+html.he-preview body,
+.he-preview-root,
+.he-preview-root .lp-root {
+  font-family: "Noto Sans Hebrew", var(--font-dm-sans), var(--font-geist-sans), Tahoma, sans-serif;
+}
+
+html.he-preview .lp-nav {
+  flex-wrap: wrap;
+  padding-inline: 1.25rem;
+}
+
+html.he-preview .lp-nav-links,
+html.he-preview .lp-nav-cta {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+html.he-preview .lp-nav-links,
+html.he-preview .lp-btn,
+html.he-preview .lp-brand-biz,
+html.he-preview .lp-brand-sub,
+html.he-preview .lp-kicker,
+html.he-preview .lp-hero-tagline,
+html.he-preview .lp-title,
+html.he-preview .lp-h2,
+html.he-preview .lp-hero-subhead {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html.he-preview .lp-hero-track,
+html.he-preview .lp-hero-controls {
+  direction: ltr;
+}
+
+html.he-preview .lp-hero-slide,
+html.he-preview .lp-hero-copy,
+html.he-preview .lp-hero-cta {
+  direction: rtl;
+}
+
+html.he-preview header.header nav {
+  margin-left: 0 !important;
+  margin-inline-start: 1rem;
+  flex-wrap: wrap;
+}
+
+html.he-preview input[type="email"],
+html.he-preview input[type="password"],
+html.he-preview input[type="tel"],
+html.he-preview input[type="url"],
+html.he-preview input[type="number"],
+html.he-preview input[inputmode="numeric"],
+html.he-preview .fa-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: start;
+}
+
+html.he-preview .text-left {
+  text-align: start;
+}
+
+html.he-preview .uppercase,
+html.he-preview .label {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+html.he-preview h1,
+html.he-preview h2,
+html.he-preview h3,
+html.he-preview .lp-title,
+html.he-preview .lp-hero-subhead,
+html.he-preview .lp-lede {
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}
