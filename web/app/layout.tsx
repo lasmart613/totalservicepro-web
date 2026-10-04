@@ -50,7 +50,7 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              '(function(){try{var p=location.pathname||"";var d=document.documentElement;if(p==="/fa"||p.indexOf("/fa/")===0){d.lang="fa";d.dir="rtl";d.classList.add("fa-preview");}else if(p==="/es"||p.indexOf("/es/")===0){d.lang="es";d.dir="ltr";}else if(p==="/fr"||p.indexOf("/fr/")===0){d.lang="fr";d.dir="ltr";}}catch(e){}})();',
+              '(function(){try{var p=location.pathname||"";var d=document.documentElement;if(p==="/fa"||p.indexOf("/fa/")===0){d.lang="fa";d.dir="rtl";d.classList.add("fa-preview");}else if(p==="/es"||p.indexOf("/es/")===0){d.lang="es";d.dir="ltr";}else if(p==="/fr"||p.indexOf("/fr/")===0){d.lang="fr";d.dir="ltr";}else if(p==="/he"||p.indexOf("/he/")===0){d.lang="he";d.dir="rtl";d.classList.add("he-preview");}else if(p==="/ar"||p.indexOf("/ar/")===0){d.lang="ar";d.dir="rtl";d.classList.add("ar-preview");}else if(p==="/it"||p.indexOf("/it/")===0){d.lang="it";d.dir="ltr";}else if(p==="/de"||p.indexOf("/de/")===0){d.lang="de";d.dir="ltr";}else if(p==="/pt"||p.indexOf("/pt/")===0){d.lang="pt-BR";d.dir="ltr";}}catch(e){}})();',
           }}
         />
         <ThemeScript />

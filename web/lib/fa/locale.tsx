@@ -7,11 +7,21 @@ import { prefixLocaleHref, type PublicLocale } from '@/lib/i18n/locales';
 import { FA_COPY } from './copy';
 import { ES_COPY } from '../es/copy';
 import { FR_COPY } from '../fr/copy';
+import { HE_COPY } from '../he/copy';
+import { IT_COPY } from '../it/copy';
+import { DE_COPY } from '../de/copy';
+import { PT_COPY } from '../pt/copy';
+import { AR_COPY } from '../ar/copy';
 
 const COPY: Record<Exclude<PublicLocale, 'en'>, Record<string, string>> = {
   fa: FA_COPY,
   es: ES_COPY,
   fr: FR_COPY,
+  he: HE_COPY,
+  it: IT_COPY,
+  de: DE_COPY,
+  pt: PT_COPY,
+  ar: AR_COPY,
 };
 
 const LocaleContext = createContext<PublicLocale>('en');
@@ -39,7 +49,7 @@ export function useFa(): boolean {
   return usePublicLocale() === 'fa';
 }
 
-/** True on the Farsi, Spanish, and French public pages. English stays false. */
+/** True on a translated public page. English stays false. */
 export function useLocalizedPublic(): boolean {
   return usePublicLocale() !== 'en';
 }
