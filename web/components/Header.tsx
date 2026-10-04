@@ -431,7 +431,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         </Link>
 
         {/* Desktop / large tablet: inline groups. Phones + small tablets use the drawer. */}
-        <nav className="ml-4 xl:ml-6 hidden lg:flex items-center gap-3 xl:gap-5 text-sm xl:text-base font-medium text-[var(--text2)] min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        <nav className={`ml-4 xl:ml-6 hidden lg:flex items-center gap-3 xl:gap-5 text-sm xl:text-base font-medium text-[var(--text2)] min-w-0 ${user ? 'overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'overflow-visible'}`}>
           {user ? (
             <>
               <Link href="/" className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">

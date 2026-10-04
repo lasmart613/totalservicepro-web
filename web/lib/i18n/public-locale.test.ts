@@ -121,6 +121,7 @@ test('merged job costing and financial reporting stay in the signed-in chrome', 
   assert.match(header, /jobCostingNavLink/);
   assert.match(header, /financialReportingNavLink/);
   assert.match(header, /LanguageSelector variant="header"/);
+  assert.match(header, /user \? 'overflow-x-auto \[scrollbar-width:none\] \[&::-webkit-scrollbar\]:hidden' : 'overflow-visible'/);
   assert.match(hub, /\/business\/job-costing/);
   assert.match(hub, /\/business\/financial-reporting/);
   assert.match(home, /\/business\/job-costing/);
