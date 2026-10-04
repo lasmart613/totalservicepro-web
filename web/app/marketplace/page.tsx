@@ -58,7 +58,7 @@ export default function Marketplace() {
             const listing = myListings.find(l => l.id === bid.listing_id);
             notifs.push({
               id: `bid-${bid.id}`,
-              message: `You received a bid of $${bid.price} on \"${listing?.title || 'your listing'}\"!`,
+              message: `You received a bid of $${bid.price} on "${listing?.title || 'your listing'}"!`,
               time: new Date(bid.created_at).toLocaleDateString()
             });
           });
@@ -79,7 +79,7 @@ export default function Marketplace() {
           if (v > 0) {
             notifs.push({
               id: `viewed-${l.id}`,
-              message: `Your listing \"${l.title}\" was viewed ${v} time${v === 1 ? '' : 's'}!`,
+              message: `Your listing "${l.title}" was viewed ${v} time${v === 1 ? '' : 's'}!`,
               time: 'total'
             });
           }
