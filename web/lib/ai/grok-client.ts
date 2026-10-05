@@ -1,6 +1,8 @@
 /**
  * Client for Supabase edge function `grok-assistant` (shared with Android AI).
  * Text chat only on web for Sprint A — voice/TTS remains mobile.
+ * Mobile voice calls Supabase `grok-tts` with the user JWT. The xAI key stays
+ * a Supabase function secret (same XAI_API_KEY as grok-assistant).
  */
 
 import { getSupabaseUrl } from '@/lib/supabase/client';
