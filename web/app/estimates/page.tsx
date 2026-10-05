@@ -69,7 +69,6 @@ function docNumber(est: EstimateRow): string {
 }
 
 export default function EstimatesPage() {
-  const { money } = useOrgMoney();
   const supabase = getSupabaseClient();
   const [persona, setPersona] = useState<DashboardPersona | null>(null);
 
@@ -120,6 +119,7 @@ export default function EstimatesPage() {
 
 function ShopEstimatesList() {
   const t = useT();
+  const { money } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [rows, setRows] = useState<EstimateRow[]>([]);

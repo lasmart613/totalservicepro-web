@@ -15,11 +15,14 @@ export function OrgMoneySettings({
   currencyCode,
   numberFormat,
   disabled,
+  startOpen = false,
   onChange,
 }: {
   currencyCode: string;
   numberFormat: string;
   disabled?: boolean;
+  /** Opens the currency list on first paint. Used by the local preview. */
+  startOpen?: boolean;
   onChange: (next: { currency_code: string; number_format: string }) => void;
 }) {
   const t = useT();
@@ -27,7 +30,7 @@ export function OrgMoneySettings({
   const locale = PUBLIC_LOCALES.find((item) => item.id === siteLocale)?.htmlLang || 'en';
   const listId = useId();
   const [query, setQuery] = useState('');
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(startOpen);
   const selected = useMemo(
     () => listCurrencies().find((row) => row.code === currencyCode) || { code: currencyCode || 'USD', name: '' },
     [currencyCode]

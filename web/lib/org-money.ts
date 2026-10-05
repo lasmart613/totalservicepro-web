@@ -17,16 +17,12 @@ export type { OrgMoneyPrefs };
 
 type QueryError = { message?: string } | null;
 
-type MaybeSingle = Promise<{ data: Record<string, unknown> | null; error: QueryError }>;
-
+/**
+ * Structural client. The query chain is `any` so a Supabase client
+ * (a thenable builder, not a Promise) does not fail type instantiation.
+ */
 export type OrgMoneyClient = {
-  from: (table: string) => {
-    select: (columns: string) => {
-      eq: (column: string, value: string | number) => {
-        maybeSingle: () => MaybeSingle;
-      };
-    };
-  };
+  from: (table: string) => any;
 };
 
 const COLUMN_MISSING = /column|schema cache|does not exist|PGRST204/i;
