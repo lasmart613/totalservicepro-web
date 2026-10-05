@@ -16,6 +16,7 @@ import {
   type CompanyTheme,
   type ThemeScope,
 } from '../company-theme.ts';
+import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
 
 export type DocThemeScope = ThemeScope;
 
@@ -53,8 +54,12 @@ function esc(s: any) {
     .replace(/"/g, '&quot;');
 }
 
-function money(n: number | undefined | null) {
-  return `$${Number(n || 0).toFixed(2)}`;
+function money(
+  n: number | undefined | null,
+  prefs?: OrgMoneyPrefs | null,
+  locale?: string | null
+) {
+  return formatOrgMoney(n, prefs, locale);
 }
 
 function estimateEmailActionHref(actionUrl: string, action: 'approve' | 'reject' | 'modify'): string {
@@ -290,9 +295,13 @@ export type InvoiceHtmlInput = {
   theme?: CompanyTheme | null;
   /** document = header + accent rules. email = header and logo only. */
   themeScope?: DocThemeScope;
+  /** Organization display currency. Omitted values stay USD in the locale format. */
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
 };
 
 export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
+  const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
   const dateLabel = input.invoiceDate
     ? (() => {
         try {
@@ -496,9 +505,12 @@ export type PurchaseOrderHtmlInput = {
   subtotal: number;
   tax: number;
   total: number;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
 };
 
 export function buildPurchaseOrderHtml(input: PurchaseOrderHtmlInput): string {
+  const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
   const dateLabel = input.poDate
     ? (() => {
         try {
@@ -637,9 +649,12 @@ export type EstimateHtmlInput = {
   actionUrl?: string | null;
   theme?: CompanyTheme | null;
   themeScope?: DocThemeScope;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
 };
 
 export function buildEstimateHtml(input: EstimateHtmlInput): string {
+  const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
   const services = input.services?.length ? input.services : ['Not specified'];
   const rule = documentRuleColor(input.theme, input.themeScope);
   const deposit = Number(input.deposit) || 0;

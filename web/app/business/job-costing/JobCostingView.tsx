@@ -3,14 +3,18 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import type { HoursFigure, JobCostReport, MoneyFigure, RevenueFigure } from '@/lib/job-costing';
-import { useT } from '@/lib/fa/locale';
+import { formatOrgMoney } from '@/lib/money-format';
+import { useSiteLocale, useT } from '@/lib/fa/locale';
+import { PUBLIC_LOCALES } from '@/lib/i18n/locales';
 
-function formatMoney(amount: number): string {
-  const sign = amount < 0 ? '-' : '';
-  return `${sign}$${Math.abs(amount).toFixed(2)}`;
+function useReportMoney(report: { currencyCode?: string; numberFormat?: string }) {
+  const siteLocale = useSiteLocale();
+  const locale = PUBLIC_LOCALES.find((item) => item.id === siteLocale)?.htmlLang || 'en';
+  return (amount: number) =>
+    formatOrgMoney(amount, { currencyCode: report.currencyCode, numberFormat: report.numberFormat }, locale);
 }
 
-function MoneyCell({ figure }: { figure: MoneyFigure }) {
+function MoneyCell({ figure, money }: { figure: MoneyFigure; money: (amount: number) => string }) {
   const t = useT();
   if (!figure.available || figure.amount == null) {
     return (
@@ -19,7 +23,7 @@ function MoneyCell({ figure }: { figure: MoneyFigure }) {
       </span>
     );
   }
-  return <span>{formatMoney(figure.amount)}</span>;
+  return <span dir="ltr">{money(figure.amount)}</span>;
 }
 
 function HoursCell({ figure }: { figure: HoursFigure }) {
@@ -34,11 +38,11 @@ function HoursCell({ figure }: { figure: HoursFigure }) {
   return <span>{figure.hours.toFixed(2)} h</span>;
 }
 
-function RevenueCell({ figure }: { figure: RevenueFigure }) {
+function RevenueCell({ figure, money }: { figure: RevenueFigure; money: (amount: number) => string }) {
   const t = useT();
   return (
     <div>
-      <MoneyCell figure={figure} />
+      <MoneyCell figure={figure} money={money} />
       {figure.available && figure.detail && (
         <div className="text-[11px] text-[var(--text3)]">
           {figure.basis === 'estimate' ? t('Estimate quote') : t('Invoice')} · {figure.detail}
@@ -60,6 +64,7 @@ function Rollup({ label, children }: { label: string; children: ReactNode }) {
 
 export function JobCostingView({ report }: { report: JobCostReport }) {
   const t = useT();
+  const money = useReportMoney(report);
   const org =
     report.organizationName ||
     (report.organizationId ? `Organization ${report.organizationId}` : t('No active organization'));
@@ -87,19 +92,19 @@ export function JobCostingView({ report }: { report: JobCostReport }) {
           <HoursCell figure={report.rollups.laborHours} />
         </Rollup>
         <Rollup label="Labor cost">
-          <MoneyCell figure={report.rollups.laborCost} />
+          <MoneyCell figure={report.rollups.laborCost} money={money} />
         </Rollup>
         <Rollup label="Parts and materials">
-          <MoneyCell figure={report.rollups.partsCost} />
+          <MoneyCell figure={report.rollups.partsCost} money={money} />
         </Rollup>
         <Rollup label="Total cost">
-          <MoneyCell figure={report.rollups.totalCost} />
+          <MoneyCell figure={report.rollups.totalCost} money={money} />
         </Rollup>
         <Rollup label="Revenue">
-          <MoneyCell figure={report.rollups.revenue} />
+          <MoneyCell figure={report.rollups.revenue} money={money} />
         </Rollup>
         <Rollup label="Margin">
-          <MoneyCell figure={report.rollups.margin} />
+          <MoneyCell figure={report.rollups.margin} money={money} />
         </Rollup>
       </div>
 
@@ -157,22 +162,22 @@ export function JobCostingView({ report }: { report: JobCostReport }) {
                       <HoursCell figure={job.laborHours} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <MoneyCell figure={job.laborCost} />
+                      <MoneyCell figure={job.laborCost} money={money} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <MoneyCell figure={job.partsCost} />
+                      <MoneyCell figure={job.partsCost} money={money} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <MoneyCell figure={job.totalCost} />
+                      <MoneyCell figure={job.totalCost} money={money} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <RevenueCell figure={job.revenue} />
+                      <RevenueCell figure={job.revenue} money={money} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <MoneyCell figure={job.margin} />
+                      <MoneyCell figure={job.margin} money={money} />
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <MoneyCell figure={job.quotedLabor} />
+                      <MoneyCell figure={job.quotedLabor} money={money} />
                     </td>
                   </tr>
                 ))}

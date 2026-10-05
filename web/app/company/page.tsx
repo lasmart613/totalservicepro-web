@@ -26,7 +26,9 @@ import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
 import { orgCanUpgrade, orgIsPaid, upgradeTargetForOrg } from '@/lib/org-plan';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import { CompanyBrandingEditor } from '@/components/CompanyBrandingEditor';
+import { OrgMoneySettings } from '@/components/OrgMoneySettings';
 import { applyBrandColorPair, normalizeHex } from '@/lib/company-theme';
+import { canEditOrgCurrency } from '@/lib/org-money';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -484,6 +486,10 @@ function CompanyProfile() {
         updateData.brand_primary_color = normalizeHex(currentOrg.brand_primary_color);
         updateData.brand_accent_color = normalizeHex(currentOrg.brand_accent_color);
       }
+      if (canEditOrgCurrency(userRole)) {
+        updateData.currency_code = currentOrg.currency_code || 'USD';
+        updateData.number_format = currentOrg.number_format || 'auto';
+      }
 
       // Claimed owners: client PATCH is a silent RLS no-op (204, 0 rows).
       // Same service-role path as invite/claim — only the caller's linked org.
@@ -493,7 +499,12 @@ function CompanyProfile() {
       const saved = await saveOwnOrganizationProfile(access, updateData);
       if (!saved.ok || !saved.org) throw new Error(saved.error || 'Save did not persist.');
       setOrg({ ...currentOrg, ...saved.org, id: saved.org.id ?? saveId });
-      toast.success('Details saved.');
+      const omitted = saved.omittedColumns || [];
+      if (omitted.includes('currency_code') || omitted.includes('number_format')) {
+        toast.success('Details saved. Currency will stay on US dollars until the organization currency columns are added.');
+      } else {
+        toast.success('Details saved.');
+      }
       if (serviceAdminMode) setShowTeamPrompt(true);
     } catch (err: any) {
       toast.error('Save failed: ' + (err.message || err));
@@ -734,6 +745,7 @@ function CompanyProfile() {
     }
   }
 
+  const canEditMoney = canEditOrgCurrency(userRole);
   const ownerMode = isOwnerish(userRole, org?.type);
   const supplierMode = isSupplier(userRole, org?.type);
   const serviceAdminMode =
@@ -952,6 +964,15 @@ function CompanyProfile() {
                   Save company details to keep color changes. Colors apply on Premium, Team, and Enterprise.
                 </p>
               ) : null}
+            </div>
+
+            <div className="md:col-span-2 border-t border-[var(--border)] pt-4">
+              <OrgMoneySettings
+                currencyCode={org.currency_code || 'USD'}
+                numberFormat={org.number_format || 'auto'}
+                disabled={!canEditMoney}
+                onChange={(next) => setOrg({ ...org, ...next })}
+              />
             </div>
           </div>
 

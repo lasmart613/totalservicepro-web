@@ -3,12 +3,12 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { Header } from '@/components/Header';
+import { formatOrgMoney } from '@/lib/money-format';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
   customerActionConfirmationTitle,
   customerActionLabel,
   isEstimateExpired,
-  money,
   parseCustomerActionKind,
   validUntilLabel,
   type CustomerActionKind,
@@ -31,6 +31,8 @@ type InboxRow = {
   status?: string | null;
   deviceModel?: string | null;
   awaitingAction: boolean;
+  currencyCode?: string | null;
+  numberFormat?: string | null;
 };
 
 export default function CustomerEstimatesInbox() {
@@ -311,7 +313,7 @@ function InboxCard({
             <div className="text-xs text-[var(--text2)] mt-2">Note: {row.customerActionNote}</div>
           )}
         </div>
-        <div className="font-extrabold text-[var(--gold)] text-lg whitespace-nowrap">{money(row.total)}</div>
+        <div className="font-extrabold text-[var(--gold)] text-lg whitespace-nowrap">{formatOrgMoney(row.total, { currencyCode: row.currencyCode, numberFormat: row.numberFormat })}</div>
       </div>
 
       {!readOnly && !expired && (

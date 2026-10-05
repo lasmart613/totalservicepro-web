@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { JOB_COSTING_API, JOB_COSTING_PATH } from '@/lib/job-costing-access';
 import type { JobCostReport } from '@/lib/job-costing';
+import { ReportUpgradeLock } from '@/components/ReportUpgradeLock';
 import { JobCostingView } from './JobCostingView';
 import { useT } from '@/lib/fa/locale';
 
@@ -20,7 +21,7 @@ function isReport(value: unknown): value is JobCostReport {
 export function JobCostingGate() {
   const t = useT();
   const router = useRouter();
-  const [phase, setPhase] = useState<'checking' | 'denied' | 'error' | 'ready'>('checking');
+  const [phase, setPhase] = useState<'checking' | 'denied' | 'upgrade' | 'error' | 'ready'>('checking');
   const [message, setMessage] = useState('');
   const [report, setReport] = useState<JobCostReport | null>(null);
 
@@ -52,6 +53,10 @@ export function JobCostingGate() {
         setPhase('denied');
         return;
       }
+      if (res.status === 402) {
+        setPhase('upgrade');
+        return;
+      }
       if (!res.ok || !isReport(json)) {
         setMessage(typeof json?.error === 'string' ? json.error : 'Job costing could not be loaded');
         setPhase('error');
@@ -73,6 +78,15 @@ export function JobCostingGate() {
 
   if (phase === 'ready' && report) {
     return <JobCostingView report={report} />;
+  }
+
+  if (phase === 'upgrade') {
+    return (
+      <div className="max-w-3xl mx-auto w-full px-4 py-8">
+        <h1 className="text-2xl font-extrabold">{t('Job Costing')}</h1>
+        <ReportUpgradeLock feature="Job Costing" sections={['Repair orders', 'Labor cost', 'Parts and materials', 'Margin']} />
+      </div>
+    );
   }
 
   if (phase === 'denied') {

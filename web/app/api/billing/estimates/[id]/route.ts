@@ -14,6 +14,8 @@ import {
 } from '@/lib/billing/estimate-action';
 import { isEstimateExpired, parseCustomerActionKind } from '@/lib/billing/save-helpers';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { loadOrgMoneyPrefs } from '@/lib/org-money';
+import type { OrgMoneyPrefs } from '@/lib/money-format';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,12 +61,17 @@ async function callerContext(req: NextRequest) {
   return { user, supabase, orgId };
 }
 
-function viewerPayload(estimate: any, companyName: string, role: 'shop' | 'customer') {
+function viewerPayload(
+  estimate: any,
+  companyName: string,
+  role: 'shop' | 'customer',
+  money?: OrgMoneyPrefs | null
+) {
   const ticket = approvedTicketRefFromEstimate(estimate);
   return {
     role,
     estimate: {
-      ...publicEstimatePayload(estimate, companyName),
+      ...publicEstimatePayload(estimate, companyName, money),
       estimateId: estimate.id,
       customerOrgLinked: customerOrgIdFromEstimate(estimate) != null,
     },
@@ -113,7 +120,8 @@ export async function GET(
     }
 
     const { companyName } = await resolveOrgNotifyEmails(admin, est);
-    return NextResponse.json(viewerPayload(est, companyName, role));
+    const moneyPrefs = await loadOrgMoneyPrefs(admin, est.organization_id);
+    return NextResponse.json(viewerPayload(est, companyName, role, moneyPrefs));
   } catch (e: any) {
     console.error('estimate GET', e);
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
@@ -172,7 +180,8 @@ export async function POST(
     }
 
     const { companyName } = await resolveOrgNotifyEmails(admin, est);
-    const payload = publicEstimatePayload(est, companyName);
+    const moneyPrefs = await loadOrgMoneyPrefs(admin, est.organization_id);
+    const payload = publicEstimatePayload(est, companyName, moneyPrefs);
 
     if (payload.expired || isEstimateExpired(est)) {
       return NextResponse.json(

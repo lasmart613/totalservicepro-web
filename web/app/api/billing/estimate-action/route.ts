@@ -13,6 +13,7 @@ import {
   isEstimateExpired,
   parseCustomerActionKind,
 } from '@/lib/billing/save-helpers';
+import { loadOrgMoneyPrefs } from '@/lib/org-money';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +47,8 @@ export async function GET(req: NextRequest) {
     }
 
     const { companyName } = await resolveOrgNotifyEmails(admin, est);
-    return NextResponse.json({ estimate: publicEstimatePayload(est, companyName) });
+    const moneyPrefs = await loadOrgMoneyPrefs(admin, est.organization_id);
+    return NextResponse.json({ estimate: publicEstimatePayload(est, companyName, moneyPrefs) });
   } catch (e: any) {
     console.error('estimate-action GET', e);
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
@@ -86,7 +88,8 @@ export async function POST(req: NextRequest) {
     }
 
     const { companyName } = await resolveOrgNotifyEmails(admin, est);
-    const payload = publicEstimatePayload(est, companyName);
+    const moneyPrefs = await loadOrgMoneyPrefs(admin, est.organization_id);
+    const payload = publicEstimatePayload(est, companyName, moneyPrefs);
 
     if (payload.expired || isEstimateExpired(est)) {
       return NextResponse.json(

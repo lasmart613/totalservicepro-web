@@ -6,10 +6,10 @@ import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { useOrgMoney } from '@/lib/use-org-money';
 import {
   coerceOrgId,
   isValidOrgId,
-  money,
   parseJsonField,
 } from '@/lib/billing/save-helpers';
 
@@ -40,6 +40,7 @@ function docNumber(row: PoRow): string {
 }
 
 export default function PurchaseOrdersListPage() {
+  const { money } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [rows, setRows] = useState<PoRow[]>([]);
