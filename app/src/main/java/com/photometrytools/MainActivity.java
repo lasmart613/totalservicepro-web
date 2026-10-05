@@ -391,7 +391,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/1.4");
+        settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/0.5.0-beta");
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
         CookieManager cookies = CookieManager.getInstance();
