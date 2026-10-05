@@ -207,7 +207,10 @@ function viewerAnchor(c: ManualCitation, label: string): string {
   if (!href.startsWith(`${VIEWER_PATH}?`) && href !== VIEWER_PATH) {
     return escapeHtml(label);
   }
-  return `<a class="ai-cite-link" href="${escapeHtml(href)}">${escapeHtml(label)}</a>`;
+  const id = Number(c.manualId);
+  const idAttr = Number.isSafeInteger(id) && id >= 1 ? ` data-cite-manual="${id}"` : '';
+  const pageAttr = c.page ? ` data-cite-page="${c.page}"` : '';
+  return `<a class="ai-cite-link" href="${escapeHtml(href)}"${idAttr}${pageAttr}>${escapeHtml(label)}</a>`;
 }
 
 function hasPhysicalPageStamp(sources: Array<string | undefined>, page: number): boolean {

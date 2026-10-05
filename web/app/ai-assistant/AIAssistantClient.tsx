@@ -32,6 +32,8 @@ import { catalogManualTitle } from '@/lib/manual-catalog';
 import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
 import { canAccessRepairAi } from '@/lib/roles';
 import { useSiteLocale } from '@/lib/fa/locale';
+import { AssistantCitedManual } from '@/components/AssistantCitedManual';
+import { useAssistantCitationOpen } from '@/components/useAssistantCitationOpen';
 
 type ManualRow = {
   id: number;
@@ -61,6 +63,10 @@ const QUICK_CHIPS: { label: string; prompt: string }[] = [
   { label: '⚠️ Safety', prompt: 'What are the laser safety precautions?' },
 ];
 
+function answerTimestamp(): number {
+  return Date.now();
+}
+
 function defaultUsage(): AiUsage {
   return {
     text: { used: 0, limit: 5 },
@@ -89,6 +95,10 @@ export default function AIAssistantClient() {
   const [sending, setSending] = useState(false);
   const [usage, setUsage] = useState<AiUsage>(defaultUsage());
   const [limitBanner, setLimitBanner] = useState('');
+  const [caller, setCaller] = useState<{ role: string | null; orgType: string | null }>({
+    role: null,
+    orgType: null,
+  });
 
   const brands = useMemo(() => {
     const set = new Set<string>();
@@ -151,6 +161,8 @@ export default function AIAssistantClient() {
 
       // Resolve org for isolation — chat history must not cross organizations
       let resolvedOrg: string | number | null = null;
+      let callerRole: string | null = null;
+      let callerOrgType: string | null = null;
       try {
         const { data: prof } = await supabase
           .from('user_profiles')
@@ -161,6 +173,8 @@ export default function AIAssistantClient() {
           (prof?.organizations as { type?: string } | null)?.type ||
           session.user.user_metadata?.organization_type ||
           null;
+        callerRole = typeof prof?.role === 'string' ? prof.role : null;
+        callerOrgType = orgType;
         if (!canAccessRepairAi(prof?.role, orgType)) {
           toast.error('Repair AI is for service companies.');
           router.replace('/hub');
@@ -172,6 +186,7 @@ export default function AIAssistantClient() {
       }
       if (cancelled) return;
       setOrgId(resolvedOrg);
+      setCaller({ role: callerRole, orgType: callerOrgType });
 
       let urlManualId: number | null = null;
       let urlPrompt = '';
@@ -305,6 +320,15 @@ export default function AIAssistantClient() {
     el.scrollTop = el.scrollHeight;
   }, [messages, sending]);
 
+  const citedManual = useAssistantCitationOpen({
+    messages,
+    sending,
+    ready,
+    manuals,
+    caller,
+    listRef,
+  });
+
   function onBrandChange(v: string) {
     setBrand(v);
     setManualPath('');
@@ -390,10 +414,12 @@ export default function AIAssistantClient() {
     }
 
     const citations = mergeCitations(result.citations, parseCitationMarkers(result.content));
+    const answerTs = answerTimestamp();
     const withReply: ChatMessage[] = [
       ...nextMsgs,
-      { role: 'assistant', content: result.content, citations, ts: Date.now() },
+      { role: 'assistant', content: result.content, citations, ts: answerTs },
     ];
+    citedManual.markFresh(String(answerTs));
     setMessages(withReply);
     saveState(withReply, currentPath, brand, currentId);
     if (result.usage) {
@@ -411,6 +437,8 @@ export default function AIAssistantClient() {
 
   function clearHistory() {
     if (!confirm('Clear conversation history?')) return;
+    citedManual.cancelPending();
+    citedManual.close();
     setMessages([]);
     saveState([], manualPath, brand, manualId);
   }
@@ -427,12 +455,14 @@ export default function AIAssistantClient() {
   }
 
   const textLimitHit = usage.text.used >= usage.text.limit;
+  const split = citedManual.open && citedManual.presentation === 'panel' && !!citedManual.cited;
 
   return (
     <div className="fixed inset-0 z-30 flex flex-col bg-[var(--bg)]">
       <Header />
 
-      <div className="max-w-3xl mx-auto w-full px-4 py-3 flex flex-col flex-1 min-h-0">
+      <div className={`flex-1 min-h-0 flex ${split ? 'flex-row' : 'justify-center'}`}>
+      <div className={`w-full px-4 py-3 flex flex-col flex-1 min-h-0 min-w-0 ${split ? 'max-w-[40rem] border-r border-[var(--border)]' : 'max-w-3xl'}`}>
         <div className="shrink-0 flex items-start justify-between gap-3 mb-3">
           <div>
             <h1 className="text-2xl font-extrabold text-[var(--text)]">🤖 AI Assistant</h1>
@@ -465,6 +495,17 @@ export default function AIAssistantClient() {
             🎙️ Voice {usage.voice.used}/{usage.voice.limit}
             <span className="hidden sm:inline">(mobile)</span>
           </span>
+          <button
+            type="button"
+            onClick={citedManual.toggleAutoOpen}
+            aria-pressed={citedManual.autoOpen}
+            aria-label="Auto-open cited manual page"
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface2)] hover:border-[var(--gold)] ${
+              citedManual.autoOpen ? 'text-[var(--gold)]' : ''
+            }`}
+          >
+            Auto-open page {citedManual.autoOpen ? 'ON' : 'OFF'}
+          </button>
         </div>
 
         {/* Manual context */}
@@ -558,6 +599,7 @@ export default function AIAssistantClient() {
           tabIndex={0}
           role="log"
           aria-label="AI Assistant conversation"
+          onClick={citedManual.onThreadClick}
         >
           {messages.length === 0 && (
             <div className="text-center text-sm text-[var(--text3)] py-10 leading-relaxed">
@@ -635,6 +677,14 @@ export default function AIAssistantClient() {
             Manual library
           </Link>
         </div>
+      </div>
+      {citedManual.open && citedManual.cited && (
+        <AssistantCitedManual
+          cited={citedManual.cited}
+          presentation={citedManual.presentation}
+          onClose={citedManual.close}
+        />
+      )}
       </div>
     </div>
   );
