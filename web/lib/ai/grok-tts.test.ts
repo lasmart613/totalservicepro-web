@@ -22,16 +22,18 @@ const fn = readFileSync(join(here, '../../../supabase/functions/grok-tts/index.t
 const assistant = readFileSync(join(here, '../../../supabase/functions/grok-assistant/index.ts'), 'utf8');
 
 test('daily voice limits match grok-assistant', () => {
-  assert.equal(VOICE_DAILY_LIMITS.free, 1);
-  assert.equal(VOICE_DAILY_LIMITS.premium, 10);
-  assert.equal(VOICE_DAILY_LIMITS.team, 10);
-  assert.equal(VOICE_DAILY_LIMITS.enterprise, 10);
-  assert.match(assistant, /free:\s*\{\s*text:\s*5,\s*voice:\s*1\s*\}/);
-  assert.match(assistant, /premium:\s*\{\s*text:\s*50,\s*voice:\s*10\s*\}/);
-  assert.equal(dailyVoiceLimit('premium'), 10);
-  assert.equal(dailyVoiceLimit('unknown'), 1);
-  assert.equal(dailyLimitMessage('free', 1), 'Free limit: 1 voice/day.');
-  assert.equal(dailyLimitMessage('premium', 10), 'Daily voice limit: 10/day.');
+  assert.equal(VOICE_DAILY_LIMITS.free, 5);
+  assert.equal(VOICE_DAILY_LIMITS.premium, 50);
+  assert.equal(VOICE_DAILY_LIMITS.team, 50);
+  assert.equal(VOICE_DAILY_LIMITS.enterprise, 50);
+  assert.match(assistant, /free:\s*\{\s*text:\s*5,\s*voice:\s*5\s*\}/);
+  assert.match(assistant, /premium:\s*\{\s*text:\s*50,\s*voice:\s*50\s*\}/);
+  assert.match(assistant, /team:\s*\{\s*text:\s*50,\s*voice:\s*50\s*\}/);
+  assert.match(assistant, /enterprise:\s*\{\s*text:\s*50,\s*voice:\s*50\s*\}/);
+  assert.equal(dailyVoiceLimit('premium'), 50);
+  assert.equal(dailyVoiceLimit('unknown'), 5);
+  assert.equal(dailyLimitMessage('free', 5), 'Free limit: 5 voice/day.');
+  assert.equal(dailyLimitMessage('premium', 50), 'Daily voice limit: 50/day.');
 });
 
 test('expired or inactive subscriptions fall back to the free voice tier', () => {

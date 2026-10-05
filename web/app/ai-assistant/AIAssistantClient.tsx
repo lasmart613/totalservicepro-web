@@ -50,7 +50,7 @@ const QUICK_CHIPS: { label: string; prompt: string }[] = [
 function defaultUsage(): AiUsage {
   return {
     text: { used: 0, limit: 5 },
-    voice: { used: 0, limit: 1 },
+    voice: { used: 0, limit: 5 },
     tier: 'free',
   };
 }

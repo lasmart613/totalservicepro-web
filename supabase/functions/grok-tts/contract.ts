@@ -14,12 +14,12 @@ export const DEFAULT_LANGUAGE = 'en'
 export const TTS_REQUEST_TYPE = 'grok_tts'
 export const VOICES_REQUEST_TYPE = 'grok_tts_voices'
 
-/** Same voice budgets as grok-assistant (free 1/day, paid 10/day). */
+/** Same voice budgets as grok-assistant (free 5/day, paid 50/day). */
 export const VOICE_DAILY_LIMITS: Record<string, number> = {
-  free: 1,
-  premium: 10,
-  team: 10,
-  enterprise: 10,
+  free: 5,
+  premium: 50,
+  team: 50,
+  enterprise: 50,
 }
 
 const LANGUAGE_RE = /^(auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2})$/
