@@ -16,6 +16,9 @@ import {
   type StripeObject,
 } from '@/lib/billing/stripe-subscription';
 import { applyInvoiceCheckoutSession } from '@/lib/billing/persist-invoice-payment';
+import { applyPartCheckoutSession } from '@/lib/billing/apply-part-order';
+import { webhookCheckoutAction } from '@/lib/billing/stripe-connect';
+import { syncConnectedAccount } from '@/lib/billing/stripe-connect-api';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,11 +57,35 @@ export async function POST(req: NextRequest) {
   const writer = getSupabaseAdmin();
 
   try {
+    if (event.type === 'account.updated') {
+      const synced = await syncConnectedAccount(writer, stripeWebhookObject(event));
+      return NextResponse.json({ ok: true, kind: 'connect_account', ...synced });
+    }
+
     if (isCheckoutSessionCompleted(event.type)) {
       const obj = stripeWebhookObject(event);
       const sessionId = obj && typeof obj.id === 'string' ? obj.id : '';
       if (!sessionId) return NextResponse.json({ ok: true, ignored: 'missing_session_id' });
       const session = await retrieveCheckoutSession(sessionId);
+      const action = webhookCheckoutAction(session);
+      if (action === 'part') {
+        const part = await applyPartCheckoutSession({ writer, session });
+        if (!part.ok) {
+          if (part.retry) {
+            return NextResponse.json({ error: part.reason }, { status: 500 });
+          }
+          return NextResponse.json({ ok: true, ignored: part.reason, kind: 'part' });
+        }
+        return NextResponse.json({
+          ok: true,
+          applied: true,
+          kind: 'part',
+          orderId: part.applied.orderId,
+          listingId: part.applied.listingId,
+          payoutStatus: part.applied.payoutStatus,
+          alreadyApplied: part.applied.alreadyApplied,
+        });
+      }
       const invoicePay = await applyInvoiceCheckoutSession({ writer, session });
       if (invoicePay.ok) {
         return NextResponse.json({

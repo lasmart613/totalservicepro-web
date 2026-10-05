@@ -1,7 +1,10 @@
 /**
  * Create a one-time Stripe Checkout Session URL for an invoice balance.
  *
- * Invoice pay links and marketplace parts Purchase share one Stripe account.
+ * The platform secret creates the session. The charge is a destination charge
+ * to the selling organization's Stripe Connect account. There is no silent
+ * fallback that leaves the money on the platform account.
+ *
  * Production (repairplanet.net / Netlify CONTEXT=production) must use the
  * existing live RepairPlanet / TSP invoice secret — never a sandbox key.
  *
@@ -9,6 +12,16 @@
  *   STRIPE_SECRET_KEY  (preferred)
  *   STRIPE_SECRET      (fallback alias)
  */
+
+import {
+  CONNECT_REQUIRED_CODE,
+  destinationChargeFields,
+  normalizeStripeAccountId,
+  partnerReferralFromEnv,
+  sellerConnectPrompt,
+  type PayoutStatus,
+  type StripeConnectPrompt,
+} from './stripe-connect.ts';
 
 export const STRIPE_SECRET_ENV_NAMES = ['STRIPE_SECRET_KEY', 'STRIPE_SECRET'] as const;
 
@@ -106,32 +119,38 @@ export type InvoicePayLinkInput = {
   customerEmail?: string | null;
   companyName?: string | null;
   paymentKind?: 'deposit' | 'balance' | 'full';
+  /** Connected account that receives the charge. Required. */
+  destinationAccountId: string;
+  payoutStatus: PayoutStatus;
+  applicationFeeCents?: number;
+  organizationId?: string | number | null;
 };
 
+export type InvoiceCheckoutOutcome =
+  | { ok: true; url: string; sessionId: string; livemode: boolean | null }
+  | {
+      ok: false;
+      code: string;
+      message: string;
+      prompt: StripeConnectPrompt | null;
+    };
+
+/** @deprecated Use InvoiceCheckoutOutcome. Kept so older imports still type-check. */
 export type InvoicePayLinkResult = {
   url: string;
   sessionId: string;
   livemode: boolean | null;
 };
 
-export async function createInvoiceCheckoutSession(
-  input: InvoicePayLinkInput
-): Promise<InvoicePayLinkResult | null> {
-  const resolved = resolveStripeSecret();
-  const secret = resolved.secret;
-  if (!secret) {
-    console.warn('createInvoiceCheckoutSession: STRIPE_SECRET_KEY not set');
-    return null;
-  }
-  if (stripeLiveRequired() && resolved.livemode === false) {
-    console.error('createInvoiceCheckoutSession: refusing sk_test_ on production');
-    return null;
-  }
+/**
+ * Checkout form fields for an invoice. Returns null when there is no connected
+ * account — callers must not POST those fields to Stripe.
+ */
+export function buildInvoiceCheckoutParams(input: InvoicePayLinkInput): URLSearchParams | null {
+  const accountId = normalizeStripeAccountId(input.destinationAccountId);
+  if (!accountId) return null;
   const amount = Math.round(Number(input.amountCents) || 0);
-  if (amount < 50) {
-    // Stripe minimum is typically $0.50 USD
-    return null;
-  }
+  if (amount < 50) return null;
 
   const site = stripeSiteOrigin();
   const currency = (input.currency || 'usd').toLowerCase();
@@ -139,6 +158,8 @@ export async function createInvoiceCheckoutSession(
     input.description ||
     `Invoice ${input.invoiceNumber || ''}`.trim() ||
     'Service invoice';
+  const fee = Math.max(0, Math.round(Number(input.applicationFeeCents) || 0));
+  const applicationFeeCents = fee > 0 && fee < amount ? fee : 0;
 
   const params = new URLSearchParams();
   params.set('mode', 'payment');
@@ -164,12 +185,66 @@ export async function createInvoiceCheckoutSession(
   }
   if (input.invoiceId != null) {
     params.set('metadata[invoice_id]', String(input.invoiceId));
+    params.set('payment_intent_data[metadata][invoice_id]', String(input.invoiceId));
   }
   if (input.invoiceNumber) {
     params.set('metadata[invoice_number]', String(input.invoiceNumber));
   }
-  params.set('payment_intent_data[metadata][invoice_id]', String(input.invoiceId || ''));
   params.set('payment_intent_data[metadata][invoice_number]', String(input.invoiceNumber || ''));
+  if (input.organizationId != null && input.organizationId !== '') {
+    params.set('metadata[seller_organization_id]', String(input.organizationId));
+    params.set('payment_intent_data[metadata][seller_organization_id]', String(input.organizationId));
+  }
+  const routed = destinationChargeFields({
+    accountId,
+    applicationFeeCents,
+    payoutStatus: input.payoutStatus,
+  });
+  for (const [key, value] of Object.entries(routed)) {
+    params.set(key, String(value));
+  }
+  return params;
+}
+
+function connectRefusal(destinationAccountId: string): InvoiceCheckoutOutcome {
+  const prompt = sellerConnectPrompt({
+    partnerUrl: partnerReferralFromEnv(),
+    hasAccount: Boolean(normalizeStripeAccountId(destinationAccountId)),
+    chargesEnabled: false,
+  });
+  return { ok: false, code: CONNECT_REQUIRED_CODE, message: prompt.message, prompt };
+}
+
+export async function createInvoiceCheckoutSession(
+  input: InvoicePayLinkInput
+): Promise<InvoiceCheckoutOutcome> {
+  const amount = Math.round(Number(input.amountCents) || 0);
+  if (amount < 50) {
+    return {
+      ok: false,
+      code: 'amount_too_small',
+      message: 'Amount due now is under $0.50 — no Stripe pay link added.',
+      prompt: null,
+    };
+  }
+  const params = buildInvoiceCheckoutParams(input);
+  if (!params) return connectRefusal(input.destinationAccountId);
+
+  const resolved = resolveStripeSecret();
+  const secret = resolved.secret;
+  if (!secret) {
+    console.warn('createInvoiceCheckoutSession: STRIPE_SECRET_KEY not set');
+    return { ok: false, code: 'stripe_unavailable', message: stripeMissingSecretMessage(), prompt: null };
+  }
+  if (stripeLiveRequired() && resolved.livemode === false) {
+    console.error('createInvoiceCheckoutSession: refusing sk_test_ on production');
+    return {
+      ok: false,
+      code: 'stripe_unavailable',
+      message: stripeTestKeyOnProductionMessage(),
+      prompt: null,
+    };
+  }
 
   const res = await fetch('https://api.stripe.com/v1/checkout/sessions', {
     method: 'POST',
@@ -183,12 +258,20 @@ export async function createInvoiceCheckoutSession(
   const data = await res.json().catch(() => ({}));
   if (!res.ok || !data?.url) {
     console.error('Stripe checkout session failed', data);
-    return null;
+    const message =
+      data?.error?.message ||
+      'Stripe Checkout session could not be created — check STRIPE_SECRET_KEY and the connected account.';
+    return { ok: false, code: 'stripe_error', message, prompt: null };
   }
   const livemode = typeof data.livemode === 'boolean' ? data.livemode : resolved.livemode;
   if (stripeLiveRequired() && livemode === false) {
     console.error('createInvoiceCheckoutSession: Stripe returned a test session on production');
-    return null;
+    return {
+      ok: false,
+      code: 'stripe_unavailable',
+      message: stripeTestKeyOnProductionMessage(),
+      prompt: null,
+    };
   }
-  return { url: data.url as string, sessionId: data.id as string, livemode };
+  return { ok: true, url: data.url as string, sessionId: data.id as string, livemode };
 }

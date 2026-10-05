@@ -29,6 +29,7 @@ import { CompanyBrandingEditor } from '@/components/CompanyBrandingEditor';
 import { OrgMoneySettings } from '@/components/OrgMoneySettings';
 import { applyBrandColorPair, normalizeHex } from '@/lib/company-theme';
 import { canEditOrgCurrency } from '@/lib/org-money';
+import { StripeConnectCard } from '@/components/StripeConnectCard';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -797,6 +798,8 @@ function CompanyProfile() {
             </UpgradePlanLink>
           ) : null}
         </div>
+
+        {!ownerMode && <StripeConnectCard returnTo="/company" />}
 
         {/* Company Details Form - FULLY RESTORED */}
         <div className="card p-6">

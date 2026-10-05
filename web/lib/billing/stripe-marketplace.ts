@@ -1,7 +1,8 @@
 /**
- * Sync marketplace parts listings to Stripe Products + Prices on the existing
- * RepairPlanet / TSP Stripe account. Uses the same secret as invoice pay
- * (STRIPE_SECRET_KEY, fallback STRIPE_SECRET). Reuses IDs when present.
+ * Sync marketplace parts listings to Stripe Products + Prices on the platform
+ * account, then charge the buyer with a destination transfer to the seller's
+ * connected account. Uses the same secret as invoice pay. Reuses product IDs
+ * when present. Does not charge the platform account when Connect is missing.
  */
 
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
@@ -23,6 +24,12 @@ import {
   stripeSiteOrigin,
   stripeTestKeyOnProductionMessage,
 } from '@/lib/billing/stripe-pay';
+import { loadSellerPayoutAccount } from '@/lib/billing/stripe-connect-api';
+import {
+  buyerConnectBlockedMessage,
+  routeSellerCardPayment,
+  type StripeConnectPrompt,
+} from '@/lib/billing/stripe-connect';
 
 const LISTING_META = 'marketplace_listing_id';
 const KIND_META = 'marketplace_kind';
@@ -74,6 +81,19 @@ export class StripeMarketplaceError extends Error {
     super(message);
     this.name = 'StripeMarketplaceError';
     this.status = status;
+  }
+}
+
+/** Buyer-facing refusal. The seller prompt stays off the public checkout response. */
+export class StripeConnectRequiredError extends StripeMarketplaceError {
+  code = 'stripe_connect_required' as const;
+  buyerMessage: string;
+  prompt: StripeConnectPrompt;
+  constructor(prompt: StripeConnectPrompt, buyerMessage = buyerConnectBlockedMessage()) {
+    super(buyerMessage, 409);
+    this.name = 'StripeConnectRequiredError';
+    this.buyerMessage = buyerMessage;
+    this.prompt = prompt;
   }
 }
 
@@ -340,8 +360,16 @@ export async function createPartCheckoutSession(input: {
   }
   const maxQty = listingQuantity(input.listing);
   const qty = Math.max(1, Math.min(input.quantity || 1, maxQty == null ? 1 : maxQty));
+  const adjustable = maxQty != null && maxQty > 1;
+  const feeBaseCents = adjustable ? catalog.amountCents : catalog.amountCents * qty;
+  const loaded = await loadSellerPayoutAccount(input.listing.organization_id);
+  const route = routeSellerCardPayment({ account: loaded.account, amountCents: feeBaseCents });
+  if (!route.ok) {
+    throw new StripeConnectRequiredError(route.prompt);
+  }
   const site = stripeSiteOrigin();
   const id = String(input.listing.id);
+  const orgId = input.listing.organization_id != null ? String(input.listing.organization_id) : '';
   const success = `${site}/marketplace/parts/${encodeURIComponent(id)}?paid=1&session_id={CHECKOUT_SESSION_ID}`;
   const cancel = `${site}/marketplace/parts/${encodeURIComponent(id)}?paid=0`;
   const email = input.customerEmail ? String(input.customerEmail).trim() : '';
@@ -354,11 +382,19 @@ export async function createPartCheckoutSession(input: {
     'line_items[0][quantity]': qty,
     [`metadata[${LISTING_META}]`]: id,
     [`metadata[${KIND_META}]`]: 'part',
+    'metadata[quantity]': qty,
+    'metadata[application_fee_cents]': route.applicationFeeCents,
     'payment_intent_data[metadata][marketplace_listing_id]': id,
     'payment_intent_data[metadata][marketplace_kind]': 'part',
+    'payment_intent_data[metadata][quantity]': qty,
     'shipping_address_collection[allowed_countries][0]': 'US',
     'billing_address_collection': 'auto',
+    ...route.fields,
   };
+  if (orgId) {
+    fields['metadata[seller_organization_id]'] = orgId;
+    fields['payment_intent_data[metadata][seller_organization_id]'] = orgId;
+  }
   if (maxQty != null && maxQty > 1) {
     fields['line_items[0][adjustable_quantity][enabled]'] = 'true';
     fields['line_items[0][adjustable_quantity][minimum]'] = 1;

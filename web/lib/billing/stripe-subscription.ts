@@ -220,7 +220,7 @@ export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe
     throw new StripeSubscriptionError('Invalid Checkout session id', 400);
   }
   return stripeRequest(
-    `checkout/sessions/${encodeURIComponent(id)}?expand[]=invoice`,
+    `checkout/sessions/${encodeURIComponent(id)}?expand[]=invoice&expand[]=line_items`,
     'GET'
   );
 }
