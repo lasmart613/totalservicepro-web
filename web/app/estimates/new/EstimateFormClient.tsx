@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { useOrgMoney } from '@/lib/use-org-money';
+import { applyCurrencySymbol } from '@/lib/money-format';
+import { useT } from '@/lib/fa/locale';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { buildEstimateHtml, type DocCompany, type DocThemeScope } from '@/lib/billing/doc-html';
@@ -36,7 +38,9 @@ import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt }
 type CustomerOpt = LinkedCustomerOpt;
 
 export default function EstimateFormClient() {
-  const { money, prefs, locale } = useOrgMoney();
+  const t = useT();
+  const { money, prefs, locale, symbol } = useOrgMoney();
+  const moneyLabel = (key: string) => applyCurrencySymbol(t(key), symbol);
   const supabase = getSupabaseClient();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -538,7 +542,7 @@ export default function EstimateFormClient() {
                   {
                     id: 'labor',
                     part_number: '',
-                    description: `Labor (${laborHours} hrs @ $${laborRate}/hr)`,
+                    description: `Labor (${laborHours} hrs @ ${symbol}${laborRate}/hr)`,
                     qty: 1,
                     unit_price: totals.labor,
                     ext: totals.labor,
@@ -550,7 +554,7 @@ export default function EstimateFormClient() {
                   {
                     id: 'travel',
                     part_number: '',
-                    description: `Travel mileage (${miles} mi @ $${travelRate}/mi)`,
+                    description: `Travel mileage (${miles} mi @ ${symbol}${travelRate}/mi)`,
                     qty: 1,
                     unit_price: totals.mileage,
                     ext: totals.mileage,
@@ -1076,15 +1080,15 @@ export default function EstimateFormClient() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {(
               [
-                ['Labor rate ($/hr)', laborRate, setLaborRate],
-                ['Labor hours', laborHours, setLaborHours],
-                ['Travel rate ($/mi)', travelRate, setTravelRate],
-                ['Diagnostic fee', diagFee, setDiagFee],
-                ['Tax rate (%)', taxRate, setTaxRate],
-              ] as [string, number, (n: number) => void][]
-            ).map(([label, val, set]) => (
-              <div key={label}>
-                <label className="text-xs text-[var(--text3)]">{label}</label>
+                ['labor-rate', 'Labor rate ({symbol}/hr)', laborRate, setLaborRate],
+                ['labor-hours', 'Labor hours', laborHours, setLaborHours],
+                ['travel-rate', 'Travel rate ({symbol}/mi)', travelRate, setTravelRate],
+                ['diag-fee', 'Diagnostic fee', diagFee, setDiagFee],
+                ['tax-rate', 'Tax rate (%)', taxRate, setTaxRate],
+              ] as [string, string, number, (n: number) => void][]
+            ).map(([id, label, val, set]) => (
+              <div key={id}>
+                <label className="text-xs text-[var(--text3)]">{label.includes('{symbol}') ? moneyLabel(label) : label}</label>
                 <input
                   className="input mt-1"
                   type="number"
@@ -1101,16 +1105,16 @@ export default function EstimateFormClient() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {(
               [
-                ['Airfare / tickets', reimbTravel, setReimbTravel],
-                ['Lodging', reimbLodging, setReimbLodging],
-                ['Ground transport', reimbGround, setReimbGround],
-                ['Other', reimbOther, setReimbOther],
-                ['Per diem $/day', perDiemRate, setPerDiemRate],
-                ['Per diem days', perDiemDays, setPerDiemDays],
-              ] as [string, number, (n: number) => void][]
-            ).map(([label, val, set]) => (
-              <div key={label}>
-                <label className="text-xs text-[var(--text3)]">{label}</label>
+                ['airfare', 'Airfare / tickets', reimbTravel, setReimbTravel],
+                ['lodging', 'Lodging', reimbLodging, setReimbLodging],
+                ['ground', 'Ground transport', reimbGround, setReimbGround],
+                ['other', 'Other', reimbOther, setReimbOther],
+                ['per-diem-rate', 'Per diem {symbol}/day', perDiemRate, setPerDiemRate],
+                ['per-diem-days', 'Per diem days', perDiemDays, setPerDiemDays],
+              ] as [string, string, number, (n: number) => void][]
+            ).map(([id, label, val, set]) => (
+              <div key={id}>
+                <label className="text-xs text-[var(--text3)]">{label.includes('{symbol}') ? moneyLabel(label) : label}</label>
                 <input
                   className="input mt-1"
                   type="number"
@@ -1257,7 +1261,7 @@ export default function EstimateFormClient() {
             </label>
             {depositRequired && (
               <div className="mt-2">
-                <label className="text-xs text-[var(--text3)]">Deposit amount ($)</label>
+                <label className="text-xs text-[var(--text3)]">{moneyLabel('Deposit amount ({symbol})')}</label>
                 <input
                   className="input mt-1 font-bold text-lg"
                   type="number"

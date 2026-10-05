@@ -6,6 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { useOrgMoney } from '@/lib/use-org-money';
+import { applyCurrencySymbol } from '@/lib/money-format';
+import { useT } from '@/lib/fa/locale';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { buildInvoiceHtml, type DocCompany, type DocThemeScope } from '@/lib/billing/doc-html';
@@ -40,7 +42,9 @@ function todayYmd() {
 }
 
 export default function InvoiceFormClient() {
-  const { money, prefs, locale } = useOrgMoney();
+  const t = useT();
+  const { money, prefs, locale, symbol } = useOrgMoney();
+  const moneyLabel = (key: string) => applyCurrencySymbol(t(key), symbol);
   const supabase = getSupabaseClient();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -1197,7 +1201,7 @@ export default function InvoiceFormClient() {
           <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Amount received</h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
-              <label className="text-xs text-[var(--text3)]">Amount received ($)</label>
+              <label className="text-xs text-[var(--text3)]">{moneyLabel('Amount received ({symbol})')}</label>
               <input
                 className="input mt-1"
                 type="number"
