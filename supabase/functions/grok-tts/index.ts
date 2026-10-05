@@ -64,11 +64,18 @@ async function countUsage(
   return { count: Array.isArray(data) ? data.length : 0, error: false }
 }
 
-async function logUsage(db: any, uid: string, requestType: string, n: number) {
+/** supabase-js returns `{ error }` and does not throw. A failed insert must not count as recorded usage. */
+async function logUsage(db: any, uid: string, requestType: string, n: number): Promise<boolean> {
   try {
-    await db.from('api_usage').insert({ user_id: uid, request_type: requestType, tokens_used: n })
-  } catch (_e) {
-    console.warn('api_usage insert failed', requestType)
+    const { error } = await db.from('api_usage').insert({ user_id: uid, request_type: requestType, tokens_used: n })
+    if (error) {
+      console.warn('api_usage insert failed', requestType, error.message || error)
+      return false
+    }
+    return true
+  } catch (e) {
+    console.warn('api_usage insert failed', requestType, (e as Error)?.message || e)
+    return false
   }
 }
 
@@ -139,7 +146,13 @@ serve(async (req) => {
       } catch (_e) {
         return json(502, { error: 'TTS voices error', message: 'Voice list was not JSON.' })
       }
-      await logUsage(db, uid, VOICES_REQUEST_TYPE, 0)
+      const voicesLogged = await logUsage(db, uid, VOICES_REQUEST_TYPE, 0)
+      if (!voicesLogged) {
+        return json(503, {
+          error: 'usage_unavailable',
+          message: 'Could not record voice usage. Try again.',
+        })
+      }
       return json(200, parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : { voices: parsed })
     }
 
@@ -254,7 +267,13 @@ serve(async (req) => {
     if (!audio.byteLength) {
       return json(502, { error: 'TTS error', message: 'Voice service returned empty audio.' })
     }
-    await logUsage(db, uid, TTS_REQUEST_TYPE, Math.min(text.length, MAX_TTS_CHARS))
+    const logged = await logUsage(db, uid, TTS_REQUEST_TYPE, Math.min(text.length, MAX_TTS_CHARS))
+    if (!logged) {
+      return json(503, {
+        error: 'usage_unavailable',
+        message: 'Could not record voice usage. Try again.',
+      })
+    }
     return new Response(audio, {
       status: 200,
       headers: {

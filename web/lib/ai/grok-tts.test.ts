@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import {
   dailyLimitMessage,
   dailyVoiceLimit,
+  ALLOWED_VOICE_IDS,
   DEFAULT_LANGUAGE,
   DEFAULT_VOICE_ID,
   effectiveTier,
@@ -40,7 +41,7 @@ test('expired or inactive subscriptions fall back to the free voice tier', () =>
   assert.equal(effectiveTier(null), 'free');
 });
 
-test('parse accepts the mobile body and applies eve / en defaults', () => {
+test('parse accepts the mobile body and applies sage / en defaults', () => {
   const ok = parseTtsBody({ text: 'Check the simmer pot.', voice_id: 'ara', language: 'en' });
   assert.equal(ok.ok, true);
   if (!ok.ok) return;
@@ -53,13 +54,21 @@ test('parse accepts the mobile body and applies eve / en defaults', () => {
   if (!defaults.ok) return;
   assert.equal(defaults.value.voiceId, DEFAULT_VOICE_ID);
   assert.equal(defaults.value.language, DEFAULT_LANGUAGE);
-  assert.equal(DEFAULT_VOICE_ID, 'eve');
+  assert.equal(DEFAULT_VOICE_ID, 'sage');
   assert.equal(DEFAULT_LANGUAGE, 'en');
+  assert.deepEqual([...ALLOWED_VOICE_IDS], ['eve', 'ara', 'rex', 'sal', 'leo', 'sage']);
 
-  const alias = parseTtsBody({ text: 'Hello', voiceId: 'sage' });
+  for (const id of ALLOWED_VOICE_IDS) {
+    const parsed = parseTtsBody({ text: 'Hello', voice_id: id.toUpperCase() });
+    assert.equal(parsed.ok, true);
+    if (!parsed.ok) return;
+    assert.equal(parsed.value.voiceId, id);
+  }
+
+  const alias = parseTtsBody({ text: 'Hello', voiceId: 'leo' });
   assert.equal(alias.ok, true);
   if (!alias.ok) return;
-  assert.equal(alias.value.voiceId, 'sage');
+  assert.equal(alias.value.voiceId, 'leo');
 
   const regional = parseTtsBody({ text: 'Hola', language: 'es-MX' });
   assert.equal(regional.ok, true);
@@ -80,6 +89,7 @@ test('rejects missing text, over-long text, and bad voice or language', () => {
   const long = parseTtsBody({ text: 'a'.repeat(MAX_TTS_CHARS + 1) });
   assert.equal(long.ok, false);
   if (long.ok) return;
+  assert.equal(long.error.status, 413);
   assert.equal(long.error.body.error, 'text_too_long');
   assert.equal(long.error.body.max_characters, 4000);
   assert.equal(long.error.body.length, 4001);
@@ -87,9 +97,10 @@ test('rejects missing text, over-long text, and bad voice or language', () => {
   const cap = parseTtsBody({ text: 'a'.repeat(MAX_TTS_CHARS) });
   assert.equal(cap.ok, true);
 
-  const voice = parseTtsBody({ text: 'Hi', voice_id: 'eve!' });
+  const voice = parseTtsBody({ text: 'Hi', voice_id: 'nova' });
   assert.equal(voice.ok, false);
   if (voice.ok) return;
+  assert.equal(voice.error.status, 400);
   assert.equal(voice.error.body.error, 'invalid_voice_id');
 
   const language = parseTtsBody({ text: 'Hi', language: 'english' });
@@ -119,6 +130,11 @@ test('grok-tts uses the same JWT check and never returns the xAI key', () => {
   assert.match(fn, /https:\/\/api\.x\.ai\/v1\/tts\/voices'/);
   assert.match(fn, /'Content-Type': 'audio\/mpeg'/);
   assert.match(fn, /request_type: requestType/);
+  assert.match(fn, /if \(error\)/);
+  assert.match(fn, /console\.warn\('api_usage insert failed'/);
+  assert.match(fn, /Could not record voice usage/);
+  assert.match(fn, /json\(\s*413/);
+  assert.match(fn, /error: 'text_too_long'/);
   assert.match(fn, /TTS_REQUESTS_PER_MINUTE/);
   assert.match(fn, /daily_limit_reached/);
   assert.match(fn, /rate_limited/);

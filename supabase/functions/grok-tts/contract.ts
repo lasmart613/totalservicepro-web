@@ -7,7 +7,9 @@ export const MAX_TTS_CHARS = 4000
 export const TTS_REQUESTS_PER_MINUTE = 8
 export const VOICES_REQUESTS_PER_MINUTE = 30
 export const RATE_WINDOW_MS = 60_000
-export const DEFAULT_VOICE_ID = 'eve'
+/** Same built-in voices as grok-assistant TTS. Unknown ids are rejected. */
+export const ALLOWED_VOICE_IDS = ['eve', 'ara', 'rex', 'sal', 'leo', 'sage'] as const
+export const DEFAULT_VOICE_ID = 'sage'
 export const DEFAULT_LANGUAGE = 'en'
 export const TTS_REQUEST_TYPE = 'grok_tts'
 export const VOICES_REQUEST_TYPE = 'grok_tts_voices'
@@ -20,7 +22,6 @@ export const VOICE_DAILY_LIMITS: Record<string, number> = {
   enterprise: 10,
 }
 
-const VOICE_ID_RE = /^[A-Za-z0-9_-]{1,128}$/
 const LANGUAGE_RE = /^(auto|[A-Za-z]{2,3}(?:-[A-Za-z0-9]{2,8}){0,2})$/
 
 export type SubscriptionRow = {
@@ -73,7 +74,7 @@ export function parseTtsBody(input: unknown): { ok: true; value: TtsRequest } | 
     return {
       ok: false,
       error: {
-        status: 400,
+        status: 413,
         body: {
           error: 'text_too_long',
           message: `Text exceeds ${MAX_TTS_CHARS} characters.`,
@@ -85,21 +86,22 @@ export function parseTtsBody(input: unknown): { ok: true; value: TtsRequest } | 
   }
 
   const rawVoice = rec.voice_id !== undefined ? rec.voice_id : rec.voiceId
-  let voiceId = DEFAULT_VOICE_ID
+  let voiceId: string = DEFAULT_VOICE_ID
   if (rawVoice != null && rawVoice !== '') {
-    if (typeof rawVoice !== 'string' || !VOICE_ID_RE.test(rawVoice)) {
+    const candidate = typeof rawVoice === 'string' ? rawVoice.trim().toLowerCase() : ''
+    if (!ALLOWED_VOICE_IDS.includes(candidate as (typeof ALLOWED_VOICE_IDS)[number])) {
       return {
         ok: false,
         error: {
           status: 400,
           body: {
             error: 'invalid_voice_id',
-            message: 'voice_id must be 1–128 letters, numbers, "_" or "-".',
+            message: `voice_id must be one of: ${ALLOWED_VOICE_IDS.join(', ')}.`,
           },
         },
       }
     }
-    voiceId = rawVoice
+    voiceId = candidate
   }
 
   const rawLang = rec.language
