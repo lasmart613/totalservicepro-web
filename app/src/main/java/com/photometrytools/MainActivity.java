@@ -1,8 +1,10 @@
 package com.photometrytools;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -14,6 +16,11 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.speech.RecognitionListener;
+import android.speech.RecognizerIntent;
+import android.speech.SpeechRecognizer;
+import android.speech.tts.TextToSpeech;
+import android.speech.tts.UtteranceProgressListener;
 import android.util.Base64;
 import android.util.Log;
 import android.view.View;
@@ -37,12 +44,14 @@ import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.constraintlayout.widget.ConstraintSet;
+import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
 import java.io.File;
 import java.io.FileOutputStream;
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
 import java.util.Map;
@@ -62,6 +71,7 @@ public class MainActivity extends AppCompatActivity {
     private static final String PREFS_SESSION_KEY = "storedSession";
     private static final String PREFS_LAST_URL = "last_url";
     private static final String PREFS_BIOMETRIC_KEY = "biometricEnabled";
+    private static final int RECORD_AUDIO_PERMISSION_CODE = 2108;
 
     private static final Map<String, String> ASSET_TO_PATH = new HashMap<>();
     static {
@@ -103,6 +113,15 @@ public class MainActivity extends AppCompatActivity {
 
     private WebView webView;
     private BottomNavigationView bottomNav;
+    private TextToSpeech textToSpeech;
+    private SpeechRecognizer speechRecognizer;
+    private boolean ttsReady = false;
+    private String activeUtteranceId = null;
+    private boolean ttsCancelled = false;
+    private int ttsEpoch = 0;
+    private int listenGen = 0;
+    private boolean voiceCancelRequested = false;
+    private boolean pendingVoiceStart = false;
     private String storedSession = null;
     private boolean biometricEnabled = false;
     private BiometricPrompt biometricPrompt;
@@ -330,6 +349,55 @@ public class MainActivity extends AppCompatActivity {
                 showToast("PDF export failed: " + e.getMessage());
             }
         }
+
+        /** Device TextToSpeech fallback when grok-tts is off or unreachable. */
+        @JavascriptInterface
+        public void speak(String text) {
+            runOnUiThread(() -> speakWithDeviceTts(text));
+        }
+
+        @JavascriptInterface
+        public void stopSpeaking() {
+            runOnUiThread(() -> stopDeviceTts());
+        }
+
+        @JavascriptInterface
+        public void startVoiceRecognition() {
+            runOnUiThread(() -> {
+                stopDeviceTts();
+                if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
+                        != PackageManager.PERMISSION_GRANTED) {
+                    pendingVoiceStart = true;
+                    ActivityCompat.requestPermissions(
+                            MainActivity.this,
+                            new String[]{Manifest.permission.RECORD_AUDIO},
+                            RECORD_AUDIO_PERMISSION_CODE);
+                    return;
+                }
+                beginListening();
+            });
+        }
+
+        @JavascriptInterface
+        public void stopVoiceRecognition() {
+            runOnUiThread(() -> stopListening(true));
+        }
+
+        /**
+         * Observe-only. assistant:citation-open is web → native after the page
+         * already opened the citation. Do not load a viewer from here.
+         */
+        @JavascriptInterface
+        public void onCitationObserved(String manualId, String page) {
+            Log.i(TAG, "assistant:citation-open manualId=" + manualId + " page=" + page);
+        }
+
+        @JavascriptInterface
+        public void goBack() {
+            runOnUiThread(() -> {
+                if (webView != null && webView.canGoBack()) webView.goBack();
+            });
+        }
     }
 
     private boolean canAuthenticateWithBiometrics() {
@@ -374,6 +442,7 @@ public class MainActivity extends AppCompatActivity {
 
     @SuppressLint("SetJavaScriptEnabled")
     private void loadApp() {
+        ensureDeviceTts();
         webView = findViewById(R.id.webView);
         WebSettings settings = webView.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -391,7 +460,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/0.5.0-beta");
+        settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/0.5.1-beta");
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
         CookieManager cookies = CookieManager.getInstance();
@@ -481,6 +550,7 @@ public class MainActivity extends AppCompatActivity {
                 super.onPageFinished(view, url);
                 updateBottomNavVisibilityAndSelection(url);
                 injectStoredSession(view);
+                injectCitationOpenBridge(view);
             }
 
             @Override
@@ -847,5 +917,254 @@ public class MainActivity extends AppCompatActivity {
             Log.w(TAG, "Could not build _s session param for direct nav", e);
             return null;
         }
+    }
+
+    private void ensureDeviceTts() {
+        if (textToSpeech != null) return;
+        textToSpeech = new TextToSpeech(this, status -> {
+            if (status == TextToSpeech.SUCCESS && textToSpeech != null) {
+                textToSpeech.setLanguage(Locale.US);
+                textToSpeech.setOnUtteranceProgressListener(new UtteranceProgressListener() {
+                    @Override
+                    public void onStart(String utteranceId) { }
+
+                    @Override
+                    public void onDone(String utteranceId) {
+                        if (ttsCancelled) return;
+                        if (utteranceId != null && utteranceId.equals(activeUtteranceId)) {
+                            signalAssistantVoice(false);
+                            notifyVoiceJs("if(window.onDeviceTtsDone)window.onDeviceTtsDone();");
+                        }
+                    }
+
+                    @Override
+                    public void onError(String utteranceId) {
+                        if (ttsCancelled) return;
+                        if (utteranceId != null && utteranceId.equals(activeUtteranceId)) {
+                            signalAssistantVoice(false);
+                            notifyDeviceTtsError(utteranceId);
+                        }
+                    }
+
+                    @Override
+                    public void onError(String utteranceId, int errorCode) {
+                        if (ttsCancelled) return;
+                        if (utteranceId != null && utteranceId.equals(activeUtteranceId)) {
+                            signalAssistantVoice(false);
+                            notifyDeviceTtsError(utteranceId);
+                        }
+                    }
+
+                    @Override
+                    public void onStop(String utteranceId, boolean interrupted) {
+                        // User interrupt. JS already moved the speech generation forward.
+                    }
+                });
+                ttsReady = true;
+            }
+        });
+    }
+
+    /** Device reader used when Grok speech is turned off or the grok-tts call fails. */
+    private void speakWithDeviceTts(String text) {
+        if (text == null || text.trim().isEmpty() || !ttsReady || textToSpeech == null) {
+            notifyVoiceJs("if(window.onDeviceTtsError)window.onDeviceTtsError();");
+            return;
+        }
+        ttsCancelled = false;
+        String id = "tts-" + (++ttsEpoch);
+        activeUtteranceId = id;
+        signalAssistantVoice(true);
+        textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, null, id);
+    }
+
+    private void stopDeviceTts() {
+        ttsCancelled = true;
+        activeUtteranceId = null;
+        signalAssistantVoice(false);
+        if (textToSpeech != null) {
+            try { textToSpeech.stop(); } catch (Exception ignored) {}
+        }
+    }
+
+    /**
+     * Tells the loaded page (repairplanet.net assistant, or the offline asset)
+     * that device speech started or ended. Does not open a manual.
+     */
+    private void signalAssistantVoice(boolean speaking) {
+        String flag = speaking ? "true" : "false";
+        String dataset = speaking
+                ? "root.dataset.assistantVoice='speaking';"
+                : "if(root.dataset.assistantVoice==='speaking')delete root.dataset.assistantVoice;";
+        notifyVoiceJs(
+                "window.__tspNativeVoiceSpeaking=" + flag + ";"
+                        + "if(!window.TSP)window.TSP={};"
+                        + "if(typeof window.TSP.isVoiceSpeaking!=='function'||window.TSP.isVoiceSpeaking.__tspNative){"
+                        + "window.TSP.isVoiceSpeaking=function(){return window.__tspNativeVoiceSpeaking===true;};"
+                        + "window.TSP.isVoiceSpeaking.__tspNative=true;}"
+                        + "var root=document.documentElement;"
+                        + dataset
+                        + "window.dispatchEvent(new CustomEvent('assistant:voice-state',{detail:{speaking:" + flag + "}}));"
+        );
+    }
+
+    private void notifyDeviceTtsError(String utteranceId) {
+        if (ttsCancelled) return;
+        if (utteranceId != null && utteranceId.equals(activeUtteranceId)) {
+            notifyVoiceJs("if(window.onDeviceTtsError)window.onDeviceTtsError();");
+        }
+    }
+
+    private void notifyVoiceJs(String js) {
+        runOnUiThread(() -> {
+            if (webView == null) return;
+            webView.evaluateJavascript("(function(){try{" + js + "}catch(e){}})();", null);
+        });
+    }
+
+    private void beginListening() {
+        if (!SpeechRecognizer.isRecognitionAvailable(this)) {
+            deliverVoiceResult(null, "Speech recognition is not available on this device");
+            return;
+        }
+        if (speechRecognizer == null) {
+            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
+        }
+        try { speechRecognizer.cancel(); } catch (Exception ignored) {}
+        final int gen = ++listenGen;
+        voiceCancelRequested = false;
+        speechRecognizer.setRecognitionListener(new RecognitionListener() {
+            @Override public void onReadyForSpeech(Bundle params) {}
+            @Override public void onBeginningOfSpeech() {}
+            @Override public void onRmsChanged(float rmsdB) {}
+            @Override public void onBufferReceived(byte[] buffer) {}
+            @Override public void onEndOfSpeech() {}
+            @Override public void onPartialResults(Bundle partialResults) {}
+            @Override public void onEvent(int eventType, Bundle params) {}
+
+            @Override
+            public void onError(int error) {
+                if (gen != listenGen) return;
+                listenGen++;
+                if (voiceCancelRequested
+                        || error == SpeechRecognizer.ERROR_CLIENT
+                        || error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                    deliverVoiceResult("", "cancelled");
+                    return;
+                }
+                if (error == SpeechRecognizer.ERROR_NO_MATCH
+                        || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                    deliverVoiceResult("", "no_match");
+                    return;
+                }
+                deliverVoiceResult("", "recognition_error_" + error);
+            }
+
+            @Override
+            public void onResults(Bundle results) {
+                if (gen != listenGen) return;
+                listenGen++;
+                ArrayList<String> matches = results == null
+                        ? null
+                        : results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
+                String text = (matches != null && !matches.isEmpty()) ? matches.get(0) : "";
+                deliverVoiceResult(text, null);
+            }
+        });
+        Intent intent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+        intent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.US.toString());
+        intent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, false);
+        intent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 3);
+        try {
+            speechRecognizer.startListening(intent);
+        } catch (Exception e) {
+            Log.w(TAG, "startListening", e);
+            deliverVoiceResult(null, "Could not start listening");
+        }
+    }
+
+    private void stopListening(boolean notifyCancelled) {
+        voiceCancelRequested = true;
+        listenGen++;
+        if (speechRecognizer != null) {
+            try { speechRecognizer.stopListening(); } catch (Exception ignored) {}
+        }
+        if (notifyCancelled) deliverVoiceResult("", "cancelled");
+    }
+
+    private void deliverVoiceResult(String text, String error) {
+        runOnUiThread(() -> {
+            if (webView == null) return;
+            if (error != null) {
+                webView.evaluateJavascript(
+                        "(function(){try{if(window.onSpeechError)window.onSpeechError("
+                                + jsonForJs(error) + ");}catch(e){}})();",
+                        null);
+            } else {
+                webView.evaluateJavascript(
+                        "(function(){try{if(window.onSpeechResult)window.onSpeechResult("
+                                + jsonForJs(text == null ? "" : text) + ");}catch(e){}})();",
+                        null);
+            }
+        });
+    }
+
+    private String jsonForJs(String value) {
+        return org.json.JSONObject.quote(value == null ? "" : value);
+    }
+
+    /**
+     * assistant:citation-open is web → native only, after the page has opened
+     * the citation. This listener records that. It does not call openCitation
+     * and it does not load a viewer.
+     */
+    private void injectCitationOpenBridge(WebView view) {
+        if (view == null) return;
+        view.evaluateJavascript(
+                "(function(){try{"
+                        + "if(!window.TSP)window.TSP={};"
+                        + "if(typeof window.TSP.isVoiceSpeaking!=='function'){"
+                        + "window.TSP.isVoiceSpeaking=function(){return window.__tspNativeVoiceSpeaking===true;};"
+                        + "window.TSP.isVoiceSpeaking.__tspNative=true;}"
+                        + "if(window.__tspCitationListener)return;"
+                        + "window.__tspCitationListener=true;"
+                        + "window.addEventListener('assistant:citation-open',function(ev){"
+                        + "var d=(ev&&ev.detail)||{};"
+                        + "var id=d.manualId!=null?String(d.manualId):'';"
+                        + "var page=d.page!=null?String(d.page):'';"
+                        + "if(typeof Android!=='undefined'&&Android.onCitationObserved){Android.onCitationObserved(id,page);}"
+                        + "});"
+                        + "}catch(e){}})();",
+                null);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != RECORD_AUDIO_PERMISSION_CODE) return;
+        boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        if (granted && pendingVoiceStart) {
+            pendingVoiceStart = false;
+            beginListening();
+        } else if (pendingVoiceStart) {
+            pendingVoiceStart = false;
+            deliverVoiceResult(null, "Microphone permission is required");
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        stopDeviceTts();
+        if (speechRecognizer != null) {
+            try { speechRecognizer.destroy(); } catch (Exception ignored) {}
+            speechRecognizer = null;
+        }
+        if (textToSpeech != null) {
+            try { textToSpeech.shutdown(); } catch (Exception ignored) {}
+            textToSpeech = null;
+        }
+        ttsReady = false;
+        super.onDestroy();
     }
 }

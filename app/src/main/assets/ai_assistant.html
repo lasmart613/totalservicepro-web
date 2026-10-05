@@ -414,6 +414,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <script src="service-company-gate.js"></script>
+<script src="grok-voice.js"></script>
 <script>
     const supabaseClient = supabase.createClient(
         'https://yljztfajyvjzqikxdddf.supabase.co',
@@ -422,24 +423,54 @@
     );
 
     const GROK_URL = 'https://yljztfajyvjzqikxdddf.supabase.co/functions/v1/grok-assistant';
+    const GROK_TTS_URL = (window.TSPGrokVoice && TSPGrokVoice.ttsUrlFromAssistant(GROK_URL))
+        || GROK_URL.replace(/\/grok-assistant\/?$/, '/grok-tts');
 
     function getAIPrefs() {
+        const voiceApi = window.TSPGrokVoice;
+        const fallbackVoice = voiceApi ? voiceApi.DEFAULT_VOICE_ID : 'sage';
         try {
             const raw = localStorage.getItem('tsp_settings');
             if (raw) {
                 const s = JSON.parse(raw);
                 return {
                     zappPersona:    s.zappPersona !== false,
-                    zappVoice:      s.zappVoice || 'sage',
+                    zappVoice:      voiceApi ? voiceApi.normalizeVoiceId(s.zappVoice) : (s.zappVoice || fallbackVoice),
+                    zappVoiceEngine: s.zappVoiceEngine === 'device' ? 'device' : 'grok',
+                    autoOpenCitedManual: readAutoOpenCitedManual(),
                 };
             }
         } catch(e) {}
-        return { zappPersona: true, zappVoice: 'sage' };
+        return { zappPersona: true, zappVoice: fallbackVoice, zappVoiceEngine: 'grok', autoOpenCitedManual: readAutoOpenCitedManual() };
+    }
+
+    /** Dedicated localStorage key wins; otherwise tsp_settings.autoOpenCitedManual. Default ON. */
+    function readAutoOpenCitedManual() {
+        try {
+            const direct = localStorage.getItem('autoOpenCitedManual');
+            if (direct === 'false') return false;
+            if (direct === 'true') return true;
+            const raw = localStorage.getItem('tsp_settings');
+            if (raw) {
+                const s = JSON.parse(raw);
+                if (s.autoOpenCitedManual === false || s.autoOpenCitedManual === 'false') return false;
+                if (s.autoOpenCitedManual === true || s.autoOpenCitedManual === 'true') return true;
+            }
+        } catch (e) {}
+        return true;
     }
 
     let messages = [], selectedManualPath = '', selectedManualId = null, lastSentManualId = null, lastSentManualPath = '', isTyping = false;
     let currentUserId = null, isListening = false;
     let voiceMode = false;
+    let zappListening = false, zappSpeaking = false, zappThinking = false;
+    let speechGen = 0;
+    let deviceTtsGen = 0;
+    let lastTopCitation = null;
+    let citationAnnounced = false;
+    let assistantVoiceSpeaking = false;
+    let currentAudioUrl = null;
+    let grokVoiceCatalog = null;
     let currentAudio = null;
     let usage = { text: { used: 0, limit: 5 }, voice: { used: 0, limit: 1 } };
     let allManuals = [];
@@ -595,10 +626,32 @@
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
                         <div>
                             <div style="font-size:13px;font-weight:700;color:#c4b5fd;">Voice</div>
+                            <div style="font-size:11px;color:#4b4b6b;margin-top:2px;">Sage, Rex, Sal, Leo, Eve, Ara</div>
                         </div>
                         <select id="vVoice" onchange="saveVoiceSettings()"
                             style="background:#1a1a2e;border:1px solid #2d2d4e;border-radius:8px;color:#c4b5fd;font-size:12px;padding:6px 10px;outline:none;min-width:150px;">
                         </select>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                        <div>
+                            <div style="font-size:13px;font-weight:700;color:#c4b5fd;">Voice engine</div>
+                            <div style="font-size:11px;color:#4b4b6b;margin-top:2px;">Grok speech, or this phone's reader</div>
+                        </div>
+                        <select id="vVoiceEngine" onchange="saveVoiceSettings()"
+                            style="background:#1a1a2e;border:1px solid #2d2d4e;border-radius:8px;color:#c4b5fd;font-size:12px;padding:6px 10px;outline:none;">
+                            <option value="grok">Grok voice</option>
+                            <option value="device">Device voice</option>
+                        </select>
+                    </div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                        <div>
+                            <div style="font-size:13px;font-weight:700;color:#c4b5fd;">Auto-open cited manual page</div>
+                            <div style="font-size:11px;color:#4b4b6b;margin-top:2px;">After speech, open the top citation</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" id="vOpenCitation" onchange="saveVoiceSettings()" checked>
+                            <span class="toggle-track"></span>
+                        </label>
                     </div>
                 </div>
 
@@ -961,6 +1014,7 @@
         if (typeof Android === 'undefined' || !Android.startVoiceRecognition) {
             showToast('Voice input requires the TSP Android app'); return;
         }
+        interruptSpeech();
         if (isListening) { Android.stopVoiceRecognition(); setMicState(false); }
         else { Android.startVoiceRecognition(); setMicState(true); }
     }
@@ -973,8 +1027,17 @@
     }
     window.onSpeechResult = function(text) {
         setMicState(false);
+        setZappMicState(false);
         if (!text?.trim()) return;
         const normalized = normalizeSpokenText(text.trim());
+        if (voiceMode && window.TSPGrokVoice && TSPGrokVoice.isOpenCommand(normalized)) {
+            interruptSpeech();
+            const target = lastTopCitation;
+            const opened = target && window.TSP && typeof window.TSP.openCitation === 'function'
+                && window.TSP.openCitation(target.manualId, target.page);
+            if (!opened) showToast('No cited page to open yet');
+            return;
+        }
         if (voiceMode) {
             handleZappSpeech(normalized);
         } else {
@@ -986,7 +1049,7 @@
     window.onSpeechError = function(err) {
         setMicState(false);
         setZappMicState(false);
-        if (err && err !== 'cancelled') showToast('Voice error: ' + err);
+        if (err && err !== 'cancelled' && err !== 'no_match') showToast('Voice error: ' + err);
     };
 
     const VOICE_OPTIONS = {
@@ -1016,41 +1079,78 @@
         const prefs = getAIPrefs();
         const personaEl = document.getElementById('vZappPersona');
         const genderEl  = document.getElementById('vVoiceGender');
+        const engineEl = document.getElementById('vVoiceEngine');
+        const openEl = document.getElementById('vOpenCitation');
         if (personaEl) personaEl.checked = prefs.zappPersona;
+        if (engineEl) engineEl.value = prefs.zappVoiceEngine;
+        if (openEl) openEl.checked = prefs.autoOpenCitedManual;
         if (genderEl) {
             const isFemale = ['eve','ara'].includes(prefs.zappVoice);
             genderEl.value = isFemale ? 'female' : 'male';
             populateVoiceDropdown(isFemale ? 'female' : 'male', prefs.zappVoice);
         }
+        refreshGrokVoices();
+    }
+
+    function voiceChoices(gender) {
+        const api = window.TSPGrokVoice;
+        if (api) return api.voicesForGender(grokVoiceCatalog || api.allowlistVoices(), gender);
+        return VOICE_OPTIONS[gender] || VOICE_OPTIONS.male;
     }
 
     function populateVoiceDropdown(gender, selectedId) {
         const sel = document.getElementById('vVoice');
         if (!sel) return;
-        const voices = VOICE_OPTIONS[gender] || VOICE_OPTIONS.male;
+        const voices = voiceChoices(gender);
         sel.innerHTML = voices.map(v => `<option value="${v.id}">${v.label}</option>`).join('');
-        const match = voices.find(v => v.id === selectedId);
-        sel.value = match ? selectedId : voices[0].id;
+        const wanted = window.TSPGrokVoice ? TSPGrokVoice.normalizeVoiceId(selectedId) : selectedId;
+        const match = voices.find(v => v.id === wanted);
+        sel.value = match ? wanted : (voices[0] ? voices[0].id : 'sage');
+    }
+
+    async function refreshGrokVoices() {
+        if (!window.TSPGrokVoice || !GROK_TTS_URL) return;
+        try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const token = session?.access_token || '';
+            if (!token) return;
+            const resp = await fetch(GROK_TTS_URL, {
+                method: 'GET',
+                headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const list = TSPGrokVoice.parseVoiceList(data);
+            if (!list || !list.length) return;
+            grokVoiceCatalog = list;
+            const gender = document.getElementById('vVoiceGender')?.value || 'male';
+            const selected = document.getElementById('vVoice')?.value || getAIPrefs().zappVoice;
+            populateVoiceDropdown(gender, selected);
+        } catch (e) {}
     }
 
     function onVoiceGenderChange() {
         const gender = document.getElementById('vVoiceGender')?.value || 'male';
-        const voices = VOICE_OPTIONS[gender] || VOICE_OPTIONS.male;
-        populateVoiceDropdown(gender, voices[0].id);
+        const voices = voiceChoices(gender);
+        populateVoiceDropdown(gender, voices[0] ? voices[0].id : 'sage');
         saveVoiceSettings();
     }
 
     function saveVoiceSettings() {
         try {
             const persona = document.getElementById('vZappPersona')?.checked ?? true;
-            const voice   = document.getElementById('vVoice')?.value || 'sage';
+            const voiceRaw = document.getElementById('vVoice')?.value || 'sage';
+            const voice = window.TSPGrokVoice ? TSPGrokVoice.normalizeVoiceId(voiceRaw) : voiceRaw;
             const raw = localStorage.getItem('tsp_settings');
             const s = raw ? JSON.parse(raw) : {};
             const gender = ['eve','ara'].includes(voice) ? 'female' : 'male';
             s.zappPersona     = persona;
             s.zappVoice       = voice;
             s.zappVoiceGender = gender;
+            s.zappVoiceEngine = document.getElementById('vVoiceEngine')?.value === 'device' ? 'device' : 'grok';
+            s.autoOpenCitedManual = document.getElementById('vOpenCitation')?.checked !== false;
             localStorage.setItem('tsp_settings', JSON.stringify(s));
+            localStorage.setItem('autoOpenCitedManual', s.autoOpenCitedManual ? 'true' : 'false');
             showToast('Voice settings saved', '');
         } catch(e) {}
     }
@@ -1145,15 +1245,11 @@
             if (data._usage) updateUsage(data._usage);
             messages.push({ role: 'assistant', content: reply });
             saveState();
+            lastTopCitation = window.TSPGrokVoice ? TSPGrokVoice.topCitation(data, reply) : null;
+            citationAnnounced = false;
 
-            if (usage.voice.used >= usage.voice.limit) {
-                if (responseEl) { responseEl.textContent = reply; responseEl.style.display = 'block'; }
-                if (status) { status.textContent = 'Text only (voice limit reached)'; status.className = 'zapp-status'; }
-                showLimitBanner(`Voice limit reached (${usage.voice.used}/${usage.voice.limit}). Response shown as text.`);
-                return;
-            }
-
-            if (responseEl) { responseEl.textContent = reply; responseEl.style.display = 'block'; }
+            const shown = reply.replace(/\[\[cite:[^\]]*\]\]/gi, '').trim();
+            if (responseEl) { responseEl.textContent = shown; responseEl.style.display = shown ? 'block' : 'none'; }
             await zapSpeak(reply, token);
 
         } catch(e) {
@@ -1172,62 +1268,287 @@
         if (vmb) vmb.disabled = on;
     }
 
-    async function zapSpeak(text, token) {
+    function zapTap() {
+        if (zappSpeaking) {
+            interruptSpeech();
+            return;
+        }
+        if (zappListening) {
+            if (typeof Android !== 'undefined' && Android.stopVoiceRecognition) Android.stopVoiceRecognition();
+            setZappMicState(false);
+            return;
+        }
+        if (typeof Android === 'undefined' || !Android.startVoiceRecognition) {
+            showToast('Voice input requires the TSP Android app');
+            return;
+        }
+        interruptSpeech();
+        Android.startVoiceRecognition();
+        setZappMicState(true);
+    }
+
+    function setAssistantVoiceSpeaking(speaking) {
+        assistantVoiceSpeaking = !!speaking;
+        const root = document.documentElement;
+        if (assistantVoiceSpeaking) root.dataset.assistantVoice = 'speaking';
+        else if (root.dataset.assistantVoice === 'speaking') delete root.dataset.assistantVoice;
+        if (!window.TSP) window.TSP = {};
+        window.TSP.isVoiceSpeaking = function () { return assistantVoiceSpeaking; };
+        window.dispatchEvent(new CustomEvent('assistant:voice-state', {
+            detail: { speaking: assistantVoiceSpeaking }
+        }));
+    }
+
+    function markSpeaking() {
+        zappSpeaking = true;
+        setAssistantVoiceSpeaking(true);
         const orb = document.getElementById('zappOrb');
         const status = document.getElementById('zappStatus');
         const vmb = document.getElementById('voiceMicBtn');
         const hint = document.getElementById('voiceHint');
-
-        zappSpeaking = true;
         if (orb) orb.className = 'zapp-orb speaking';
         if (status) { status.textContent = 'Speaking...'; status.className = 'zapp-status speaking'; }
         if (vmb) vmb.disabled = true;
         if (hint) hint.textContent = 'Tap orb to stop';
-
-        try {
-            let ttsText = text;
-            if (ttsText.length > 600) {
-                const cut = ttsText.lastIndexOf('.', 600);
-                ttsText = cut > 200 ? ttsText.substring(0, cut + 1) : ttsText.substring(0, 600);
-            }
-            ttsText = ttsText.replace(/\*\*(.*?)\*\*/g, '$1').replace(/\n— Source:.*$/s, '').trim();
-
-            const resp = await fetch(GROK_URL, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'Authorization': 'Bearer ' + token },
-                body: JSON.stringify({ action: 'tts', text: ttsText, voiceId: getAIPrefs().zappVoice })
-            });
-
-            if (resp.status === 429) {
-                const errData = await resp.json();
-                showLimitBanner(errData.message || 'Voice limit reached.');
-                stopAudio(); return;
-            }
-
-            if (!resp.ok) { stopAudio(); return; }
-
-            await refreshUsage();
-
-            const blob = await resp.blob();
-            const url = URL.createObjectURL(blob);
-            currentAudio = new Audio(url);
-            currentAudio.onended = stopAudio;
-            currentAudio.onerror = stopAudio;
-            currentAudio.play();
-        } catch(e) { stopAudio(); }
     }
 
-    function stopAudio() {
-        if (currentAudio) { try { currentAudio.pause(); currentAudio = null; } catch(e) {} }
+    function resetSpeakingChrome() {
         zappSpeaking = false;
+        setAssistantVoiceSpeaking(false);
         const orb = document.getElementById('zappOrb');
         const status = document.getElementById('zappStatus');
         const vmb = document.getElementById('voiceMicBtn');
         const hint = document.getElementById('voiceHint');
         if (orb) orb.className = 'zapp-orb idle';
         if (status) { status.textContent = 'Tap to ask Zapp'; status.className = 'zapp-status'; }
-        if (vmb) vmb.disabled = false;
+        if (vmb) { vmb.disabled = false; vmb.classList.remove('listening'); vmb.textContent = '🎤'; }
         if (hint) hint.textContent = 'Tap to speak · Tap again to stop';
+        scheduleBundledAutoOpen();
+    }
+
+    function interruptSpeech() {
+        speechGen++;
+        if (currentAudio) {
+            try {
+                currentAudio.onended = null;
+                currentAudio.onerror = null;
+                currentAudio.pause();
+                currentAudio.src = '';
+            } catch (e) {}
+            currentAudio = null;
+        }
+        if (currentAudioUrl) {
+            try { URL.revokeObjectURL(currentAudioUrl); } catch (e) {}
+            currentAudioUrl = null;
+        }
+        if (typeof Android !== 'undefined' && Android.stopSpeaking) {
+            try { Android.stopSpeaking(); } catch (e) {}
+        }
+        if (window.speechSynthesis) {
+            try { window.speechSynthesis.cancel(); } catch (e) {}
+        }
+        resetSpeakingChrome();
+    }
+    window.__tspInterruptSpeech = interruptSpeech;
+
+    function finishSpeech(gen) {
+        if (gen !== speechGen) return;
+        resetSpeakingChrome();
+        scheduleBundledAutoOpen();
+    }
+
+    function bundledCanView(manualId) {
+        const id = Number(manualId);
+        if (!id || id < 1) return false;
+        const row = (allManuals || []).find(function (m) { return Number(m.id) === id; });
+        return !!(row && row.storage_path);
+    }
+
+    /**
+     * Offline assistant owns the open. announce=true emits assistant:citation-open
+     * after the viewer navigation is requested (web → native notice only).
+     * announce=false is the explicit "open" command and does not emit that event.
+     */
+    function openBundledCitation(manualId, page, announce) {
+        const voiceApi = window.TSPGrokVoice;
+        const target = voiceApi ? voiceApi.normalizeCitationTarget(manualId, page) : null;
+        if (!target || !bundledCanView(target.manualId)) return false;
+        if (announce) {
+            window.dispatchEvent(new CustomEvent('assistant:citation-open', {
+                detail: { manualId: target.manualId, page: target.page }
+            }));
+        }
+        navigateTo('pdf_viewer.html?manual_id=' + encodeURIComponent(String(target.manualId))
+            + '&id=' + encodeURIComponent(String(target.manualId))
+            + '&page=' + encodeURIComponent(String(target.page))
+            + '&from=assistant');
+        return true;
+    }
+
+    function scheduleBundledAutoOpen() {
+        const pending = lastTopCitation;
+        setTimeout(function () {
+            if (assistantVoiceSpeaking) return;
+            if (citationAnnounced) return;
+            if (!readAutoOpenCitedManual()) {
+                citationAnnounced = true;
+                return;
+            }
+            if (!pending) return;
+            citationAnnounced = true;
+            openBundledCitation(pending.manualId, pending.page, true);
+        }, 0);
+    }
+
+    if (!window.TSP) window.TSP = {};
+    window.TSP.openCitation = function (manualId, page) {
+        const voiceApi = window.TSPGrokVoice;
+        const target = voiceApi ? voiceApi.normalizeCitationTarget(manualId, page) : null;
+        if (!target) return false;
+        citationAnnounced = true;
+        return openBundledCitation(target.manualId, target.page, false);
+    };
+    window.TSP.isVoiceSpeaking = function () { return assistantVoiceSpeaking; };
+    window.addEventListener('assistant:open-citation', function (ev) {
+        const d = (ev && ev.detail) || {};
+        if (window.TSP && window.TSP.openCitation) window.TSP.openCitation(d.manualId, d.page);
+    });
+
+    window.onDeviceTtsDone = function () { finishSpeech(deviceTtsGen, true); };
+    window.onDeviceTtsError = function () { finishSpeech(deviceTtsGen, false); };
+
+    function speakWithDevice(text, gen) {
+        deviceTtsGen = gen;
+        if (typeof Android !== 'undefined' && Android.speak) {
+            Android.speak(text);
+            return;
+        }
+        if (window.speechSynthesis) {
+            const utter = new SpeechSynthesisUtterance(text);
+            utter.lang = 'en-US';
+            utter.onend = function () { finishSpeech(gen, true); };
+            utter.onerror = function () { finishSpeech(gen, false); };
+            window.speechSynthesis.cancel();
+            window.speechSynthesis.speak(utter);
+            return;
+        }
+        finishSpeech(gen, false);
+    }
+
+    function playAudioBlob(blob, gen) {
+        return new Promise(function (resolve) {
+            let settled = false;
+            function settle(value) {
+                if (settled) return;
+                settled = true;
+                resolve(value);
+            }
+            if (gen !== speechGen) { settle('failed'); return; }
+            const url = URL.createObjectURL(blob);
+            currentAudioUrl = url;
+            const audio = new Audio(url);
+            currentAudio = audio;
+            audio.onended = function () {
+                if (currentAudioUrl === url) {
+                    try { URL.revokeObjectURL(url); } catch (e) {}
+                    currentAudioUrl = null;
+                }
+                finishSpeech(gen, true);
+                settle('played');
+            };
+            audio.onerror = function () { settle('failed'); };
+            const started = audio.play();
+            if (started && started.catch) started.catch(function () { settle('failed'); });
+        });
+    }
+
+    async function readTtsError(resp) {
+        try { return await resp.json(); } catch (e) { return null; }
+    }
+
+    /**
+     * POST grok-tts. Returns 'played', 'limited' (device TTS + limit notice), or 'failed'.
+     * HTTP 400 and 413 text_too_long shorten the text and retry once.
+     * HTTP 503 usage_unavailable is 'failed': device TTS, same as other non-audio errors.
+     */
+    async function playGrokTts(text, token, voiceId, gen, retried) {
+        if (gen !== speechGen) return 'failed';
+        const voiceApi = window.TSPGrokVoice;
+        const spoken = voiceApi ? voiceApi.clipSpeechText(text, voiceApi.MAX_TTS_CHARS) : text;
+        let resp;
+        try {
+            resp = await fetch(GROK_TTS_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': 'Bearer ' + token
+                },
+                body: JSON.stringify({
+                    text: spoken,
+                    voice_id: voiceApi ? voiceApi.normalizeVoiceId(voiceId) : (voiceId || 'sage'),
+                    language: 'en'
+                })
+            });
+        } catch (e) {
+            return 'failed';
+        }
+        if (gen !== speechGen) return 'played';
+        const ctype = (resp.headers.get('content-type') || '').toLowerCase();
+        if (resp.ok && ctype.indexOf('json') < 0) {
+            const blob = await resp.blob();
+            if (!blob || blob.size < 64 || (blob.type && blob.type.indexOf('json') >= 0)) return 'failed';
+            try { await refreshUsage(); } catch (e) {}
+            return playAudioBlob(blob, gen);
+        }
+        const errBody = await readTtsError(resp);
+        if (voiceApi && voiceApi.isGrokVoiceLimit(resp.status, errBody)) {
+            return 'limited';
+        }
+        if (voiceApi && voiceApi.isUsageUnavailable(resp.status, errBody)) {
+            return 'failed';
+        }
+        if (voiceApi && voiceApi.isTextTooLong(resp.status, errBody) && !retried) {
+            const max = Number(errBody && errBody.max_characters) || voiceApi.MAX_TTS_CHARS;
+            const shorter = voiceApi.clipSpeechText(spoken, Math.min(max, spoken.length - 1));
+            if (shorter && shorter.length < spoken.length) {
+                showToast('Shortened the answer for Grok voice');
+                return playGrokTts(shorter, token, voiceId, gen, true);
+            }
+        }
+        return 'failed';
+    }
+
+    async function zapSpeak(text, token) {
+        interruptSpeech();
+        const gen = speechGen;
+        const voiceApi = window.TSPGrokVoice;
+        const spoken = voiceApi ? voiceApi.prepareSpeechText(text) : String(text || '').trim();
+        if (!spoken) {
+            finishSpeech(gen, true);
+            return;
+        }
+        markSpeaking();
+        const prefs = getAIPrefs();
+        if (prefs.zappVoiceEngine === 'device') {
+            speakWithDevice(spoken, gen);
+            return;
+        }
+        const result = await playGrokTts(spoken, token, prefs.zappVoice, gen, false);
+        if (gen !== speechGen) return;
+        if (result === 'played') return;
+        if (result === 'limited') {
+            showToast('Grok voice limit reached today');
+            markSpeaking();
+            speakWithDevice(spoken, gen);
+            return;
+        }
+        showToast('Grok voice unavailable — using device voice');
+        markSpeaking();
+        speakWithDevice(spoken, gen);
+    }
+
+    function stopAudio() {
+        interruptSpeech();
     }
 
     function clearHistory() {
