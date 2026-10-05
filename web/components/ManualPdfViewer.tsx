@@ -16,6 +16,7 @@ import {
 import { asPositivePage } from '@/lib/ai/citations';
 import { fittedPageBoxHeight, viewerPhysicalPage } from '@/lib/pdf-viewer-page';
 import { ViewerAiPanel } from '@/components/ViewerAiPanel';
+import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
 
 type PdfTextRun = {
   str?: string;
@@ -323,6 +324,7 @@ export function ManualPdfViewer({
   const [catalogBrand, setCatalogBrand] = useState<string | null>(null);
   const [catalogModel, setCatalogModel] = useState<string | null>(null);
   const [isIncomplete, setIsIncomplete] = useState(false);
+  const [languageCode, setLanguageCode] = useState<string | null>(null);
   const [showRail, setShowRail] = useState(true);
   const [chapters, setChapters] = useState<ManualChapter[]>([]);
   const [showChapters, setShowChapters] = useState(false);
@@ -464,17 +466,26 @@ export function ManualPdfViewer({
           dataBase64: stashed?.dataBase64,
           chapters: stashed?.chapters,
           isIncomplete: stashed?.isIncomplete,
+          language: stashed?.language,
         };
         if (payload.title) setTitle(payload.title);
+        if (!cancelled) setLanguageCode(resolveManualLanguage(payload));
         let incomplete = payload.isIncomplete === true;
         if (payload.manualId) {
           try {
             const supabase = getSupabaseClient();
             let row = await supabase
               .from('manuals')
-              .select('is_incomplete,storage_path,brand,title,model')
+              .select('is_incomplete,storage_path,brand,title,model,language')
               .eq('id', payload.manualId)
               .maybeSingle();
+            if (row.error && /language|schema cache|column/i.test(row.error.message || '')) {
+              row = await supabase
+                .from('manuals')
+                .select('is_incomplete,storage_path,brand,title,model')
+                .eq('id', payload.manualId)
+                .maybeSingle();
+            }
             if (row.error && /is_incomplete|schema cache|column/i.test(row.error.message || '')) {
               incomplete = payload.isIncomplete === true;
               row = await supabase
@@ -492,11 +503,15 @@ export function ManualPdfViewer({
               brand?: string | null;
               title?: string | null;
               model?: string | null;
+              language?: string | null;
             } | null;
             if (data?.storage_path && !cancelled) setCatalogPath(data.storage_path);
             if (data?.brand && !cancelled) setCatalogBrand(data.brand);
             if (data?.model && !cancelled) setCatalogModel(data.model);
             if (data?.title && !cancelled && !titleFromQuery) setTitle(data.title);
+            if (data && !cancelled) {
+              setLanguageCode(resolveManualLanguage({ language: data.language, title: data.title || payload.title }));
+            }
           } catch {
             /* keep stashed flag */
           }
@@ -685,6 +700,7 @@ export function ManualPdfViewer({
 
   const pdf = pdfRef.current;
   const pages = pageCount && pdf ? Array.from({ length: pageCount }, (_, i) => i + 1) : [];
+  const languageBadge = manualLanguageBadge(languageCode);
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-[#0d1117] text-[#E5E7EB]">
@@ -702,6 +718,14 @@ export function ManualPdfViewer({
             title="This document is incomplete"
           >
             Incomplete
+          </span>
+        )}
+        {languageBadge && (
+          <span
+            className="shrink-0 rounded-full bg-sky-900 text-white text-[10px] font-extrabold px-2 py-0.5"
+            title={languageBadge.label}
+          >
+            {languageBadge.label}
           </span>
         )}
         <div className="flex flex-wrap items-center gap-1 text-sm">

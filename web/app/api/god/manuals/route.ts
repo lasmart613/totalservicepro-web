@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   }
 
   const admin = getSupabaseAdmin();
-  const payload = {
+  const payload: Record<string, unknown> = {
     brand: parsed.row.brand,
     model: parsed.row.model,
     title: parsed.row.title,
@@ -34,19 +34,24 @@ export async function POST(req: NextRequest) {
     doc_kind: parsed.row.doc_kind,
     equipment_type: parsed.row.equipment_type,
     is_incomplete: parsed.row.is_incomplete,
+    language: parsed.row.language,
   };
 
-  let { data, error } = await admin.from('manuals').insert(payload).select('id, title').maybeSingle();
-  // Live manuals has equipment_type / is_incomplete but not doc_kind.
-  if (error && /doc_kind|schema cache|column/i.test(error.message || '')) {
-    const { doc_kind: _kind, ...withoutKind } = payload;
-    const retry = await admin.from('manuals').insert(withoutKind).select('id, title').maybeSingle();
-    data = retry.data;
-    error = retry.error;
-  }
-  if (error && /equipment_type|is_incomplete|schema cache|column/i.test(error.message || '')) {
-    const { equipment_type: _type, is_incomplete: _inc, doc_kind: _kind, ...legacy } = payload;
-    const retry = await admin.from('manuals').insert(legacy).select('id, title').maybeSingle();
+  const schemaMiss = (message?: string) =>
+    /schema cache|column|does not exist|PGRST204/i.test(message || '');
+
+  // Drop only the optional column PostgREST names, so a missing doc_kind does not
+  // also throw away language. A vague schema error drops the next optional column.
+  const optionalColumns = ['language', 'doc_kind', 'equipment_type', 'is_incomplete'] as const;
+  const working = { ...payload };
+  let { data, error } = await admin.from('manuals').insert(working).select('id, title').maybeSingle();
+  for (let attempt = 0; attempt < optionalColumns.length && error && schemaMiss(error.message); attempt++) {
+    const message = error.message || '';
+    const named = optionalColumns.filter((col) => col in working && new RegExp(col, 'i').test(message));
+    const drop = named.length ? named : optionalColumns.filter((col) => col in working).slice(0, 1);
+    if (!drop.length) break;
+    for (const col of drop) delete working[col];
+    const retry = await admin.from('manuals').insert(working).select('id, title').maybeSingle();
     data = retry.data;
     error = retry.error;
   }

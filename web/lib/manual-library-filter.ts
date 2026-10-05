@@ -18,6 +18,11 @@ import {
   inferEquipmentType,
   type EquipmentType,
 } from './equipment-types.ts';
+import {
+  ALL_MANUAL_LANGUAGES,
+  manualLanguageLabel,
+  resolveManualLanguage,
+} from './manual-language.ts';
 import { normalizeManualSearchText } from './manual-search-text.ts';
 
 export type ManualLibraryRow = {
@@ -33,6 +38,8 @@ export type ManualLibraryRow = {
   isIncomplete?: unknown;
   completeness_note?: string | null;
   doc_kind?: string | null;
+  /** ISO 639-1. Missing means English once the column exists; title suffixes still resolve. */
+  language?: string | null;
 };
 
 export type ManualLibraryRoom = EquipmentType | 'all';
@@ -49,6 +56,8 @@ export type ManualLibraryFilters = {
   incompleteOnly?: boolean;
   /** Which public library shelf. Default is Service Manuals. */
   library?: ManualLibraryShelf;
+  /** ISO 639-1, or All. Empty and "all" do not restrict the catalog. */
+  language?: string;
 };
 
 export const ALL_MANUAL_ROOMS: ManualLibraryRoom = 'all';
@@ -89,6 +98,7 @@ export function manualSearchHaystack(manual: ManualLibraryRow): string {
       meta.label,
       meta.roomLabel,
       wls,
+      resolveManualLanguage(manual) === 'en' ? '' : manualLanguageLabel(resolveManualLanguage(manual)),
     ].join(' ')
   );
 }
@@ -204,11 +214,15 @@ export function groupManualsByBrand(rows: ManualLibraryRow[]): Record<string, Ma
 }
 
 export function manualLibraryFiltersActive(filters: ManualLibraryFilters): boolean {
+  const language = String(filters.language || '')
+    .trim()
+    .toLowerCase();
   return Boolean(
     sanitizeManualSearchQuery(filters.query || '') ||
       String(filters.brand || '').trim() ||
       filters.incompleteOnly ||
-      String(filters.wavelength || '').trim()
+      String(filters.wavelength || '').trim() ||
+      (language && language !== ALL_MANUAL_LANGUAGES)
   );
 }
 
@@ -230,6 +244,10 @@ export function filterManualLibrary(
   const wavelength = String(filters.wavelength || '').trim();
   const incompleteOnly = !!filters.incompleteOnly;
   const library: ManualLibraryShelf = filters.library === 'operators' ? 'operators' : 'service';
+  const language = String(filters.language || '')
+    .trim()
+    .toLowerCase();
+  const applyLanguage = !!language && language !== ALL_MANUAL_LANGUAGES;
   const applyWavelength = room === 'laser' || (!room && !!wavelength);
 
   return rows.filter((m) => {
@@ -243,6 +261,7 @@ export function filterManualLibrary(
     });
     if (room && inferred !== room) return false;
     if (brand && String(m.brand || '').trim().toLowerCase() !== brand) return false;
+    if (applyLanguage && resolveManualLanguage(m) !== language) return false;
     if (incompleteOnly && !isManualIncomplete(m)) return false;
     if (applyWavelength && !matchesWavelength(m, wavelength)) return false;
     if (!tokens.length) return true;
@@ -258,12 +277,16 @@ export function parseManualLibrarySearchParams(search: string): ManualLibraryFil
   const room: ManualLibraryRoom | undefined =
     roomRaw === 'all' ? 'all' : roomRaw ? (roomRaw as EquipmentType) : DEFAULT_EQUIPMENT_TYPE;
   const libRaw = String(qs.get('lib') || '').trim().toLowerCase();
+  const langRaw = String(qs.get('lang') || '')
+    .trim()
+    .toLowerCase();
   return {
     query: sanitizeManualSearchQuery(qs.get('q') || ''),
     brand: String(qs.get('make') || '').trim(),
     room,
     incompleteOnly: qs.get('incomplete') === '1',
     library: libRaw === 'operators' || libRaw === 'operator' ? 'operators' : DEFAULT_MANUAL_LIBRARY,
+    language: langRaw && langRaw !== ALL_MANUAL_LANGUAGES ? langRaw : '',
   };
 }
 
@@ -277,6 +300,10 @@ export function manualLibrarySearchParams(filters: ManualLibraryFilters): string
   else if (filters.room && filters.room !== DEFAULT_EQUIPMENT_TYPE) qs.set('room', filters.room);
   if (filters.incompleteOnly) qs.set('incomplete', '1');
   if (filters.library === 'operators') qs.set('lib', 'operators');
+  const language = String(filters.language || '')
+    .trim()
+    .toLowerCase();
+  if (language && language !== ALL_MANUAL_LANGUAGES) qs.set('lang', language);
   return qs.toString();
 }
 
@@ -294,6 +321,9 @@ export const MANUAL_LIBRARY_SELECT =
 /** Prefer doc_kind when the live column exists; fall back if PostgREST 400s. */
 export const MANUAL_LIBRARY_SELECT_WITH_KIND = `${MANUAL_LIBRARY_SELECT}, doc_kind`;
 
+/** Prefer language when the live column exists; fall back to doc_kind if it is missing. */
+export const MANUAL_LIBRARY_SELECT_WITH_LANGUAGE = `${MANUAL_LIBRARY_SELECT_WITH_KIND}, language`;
+
 /** Folder-era catalogs before equipment rooms / wavelengths. */
 export const MANUAL_LIBRARY_SELECT_LEGACY = 'id, brand, title, model, storage_path, is_folder';
 
@@ -301,6 +331,7 @@ export const MANUAL_LIBRARY_SELECT_LEGACY = 'id, brand, title, model, storage_pa
 export const MANUAL_LIBRARY_SELECT_MINIMAL = 'id, brand, title, model, storage_path';
 
 export const MANUAL_LIBRARY_SELECT_CANDIDATES = [
+  MANUAL_LIBRARY_SELECT_WITH_LANGUAGE,
   MANUAL_LIBRARY_SELECT_WITH_KIND,
   MANUAL_LIBRARY_SELECT,
   MANUAL_LIBRARY_SELECT_LEGACY,
@@ -308,7 +339,7 @@ export const MANUAL_LIBRARY_SELECT_CANDIDATES = [
 ] as const;
 
 export function isManualsSelectSchemaError(message?: string | null): boolean {
-  return /schema cache|column|does not exist|PGRST204|doc_kind|description|completeness|equipment_type|wavelengths|chapter_metadata|is_folder|is_incomplete/i.test(
+  return /schema cache|column|does not exist|PGRST204|language|doc_kind|description|completeness|equipment_type|wavelengths|chapter_metadata|is_folder|is_incomplete/i.test(
     String(message || '')
   );
 }

@@ -49,6 +49,12 @@ import {
   uniqueManualBrands,
   type ManualLibraryRoom,
 } from '@/lib/manual-library-filter';
+import {
+  ALL_MANUAL_LANGUAGES,
+  manualLanguageBadge,
+  manualLanguageFilterOptions,
+  resolveManualLanguage,
+} from '@/lib/manual-language';
 
 const WAVELENGTH_OPTIONS = [
   { label: 'All Wavelengths', value: '' },
@@ -75,6 +81,7 @@ export default function ManualsLibrary() {
   const [selectedWavelength, setSelectedWavelength] = useState('');
   const [query, setQuery] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
+  const [selectedLanguage, setSelectedLanguage] = useState('');
   const [incompleteOnly, setIncompleteOnly] = useState(false);
   const [bodyMatchIds, setBodyMatchIds] = useState<Set<string> | null>(null);
   const [bodySearchReady, setBodySearchReady] = useState(true);
@@ -91,6 +98,7 @@ export default function ManualsLibrary() {
     else if (parsed.room) setRoom(equipmentTypeOrDefault(parsed.room));
     if (parsed.query) setQuery(parsed.query);
     if (parsed.brand) setSelectedBrand(parsed.brand);
+    if (parsed.language) setSelectedLanguage(parsed.language);
     if (parsed.incompleteOnly) setIncompleteOnly(true);
     loadData();
   }, []);
@@ -99,6 +107,7 @@ export default function ManualsLibrary() {
     room?: ManualLibraryRoom;
     query?: string;
     brand?: string;
+    language?: string;
     incompleteOnly?: boolean;
     library?: ManualLibraryShelf;
   }) {
@@ -106,6 +115,7 @@ export default function ManualsLibrary() {
       room: next.room ?? room,
       query: next.query ?? query,
       brand: next.brand ?? selectedBrand,
+      language: next.language ?? selectedLanguage,
       incompleteOnly: next.incompleteOnly ?? incompleteOnly,
       library: next.library ?? library,
     });
@@ -128,10 +138,11 @@ export default function ManualsLibrary() {
   function clearLibraryFilters() {
     setQuery('');
     setSelectedBrand('');
+    setSelectedLanguage('');
     setIncompleteOnly(false);
     setSelectedWavelength('');
     setBodyMatchIds(null);
-    syncFilterUrl({ query: '', brand: '', incompleteOnly: false });
+    syncFilterUrl({ query: '', brand: '', language: '', incompleteOnly: false });
   }
 
   function manualRoom(m: any): EquipmentType {
@@ -388,6 +399,7 @@ export default function ManualsLibrary() {
       contentType: json?.content_type || null,
       chapters: Array.isArray(json?.chapters) ? json.chapters : null,
       isIncomplete: showIncompleteBadge(manual),
+      language: resolveManualLanguage(manual),
     };
     stashManualView(payload);
     router.push(manualViewHref({ id: payload.manualId, title: payload.title }));
@@ -516,6 +528,7 @@ export default function ManualsLibrary() {
   const discoveryActive = manualLibraryFiltersActive({
     query,
     brand: selectedBrand,
+    language: selectedLanguage,
     incompleteOnly,
     wavelength: selectedWavelength,
   });
@@ -579,6 +592,7 @@ export default function ManualsLibrary() {
         {
           query,
           brand: selectedBrand,
+          language: selectedLanguage,
           room,
           wavelength: selectedWavelength,
           incompleteOnly,
@@ -586,7 +600,7 @@ export default function ManualsLibrary() {
         },
         bodyMatchIds
       ),
-    [sourceManuals, query, selectedBrand, room, selectedWavelength, incompleteOnly, library, bodyMatchIds]
+    [sourceManuals, query, selectedBrand, selectedLanguage, room, selectedWavelength, incompleteOnly, library, bodyMatchIds]
   );
 
   const otherLibraryHits = useMemo(
@@ -596,6 +610,7 @@ export default function ManualsLibrary() {
         {
           query,
           brand: selectedBrand,
+          language: selectedLanguage,
           room,
           wavelength: selectedWavelength,
           incompleteOnly,
@@ -603,7 +618,7 @@ export default function ManualsLibrary() {
         },
         bodyMatchIds
       ),
-    [sourceManuals, query, selectedBrand, room, selectedWavelength, incompleteOnly, library, bodyMatchIds]
+    [sourceManuals, query, selectedBrand, selectedLanguage, room, selectedWavelength, incompleteOnly, library, bodyMatchIds]
   );
 
   const libraryCounts = useMemo(() => {
@@ -624,6 +639,7 @@ export default function ManualsLibrary() {
       {
         query,
         brand: selectedBrand,
+        language: selectedLanguage,
         room: ALL_MANUAL_ROOMS,
         incompleteOnly,
         library,
@@ -638,11 +654,15 @@ export default function ManualsLibrary() {
       counts[manualRoom(m)] += 1;
     });
     return counts;
-  }, [sourceManuals, query, selectedBrand, incompleteOnly, library, bodyMatchIds]);
+  }, [sourceManuals, query, selectedBrand, selectedLanguage, incompleteOnly, library, bodyMatchIds]);
 
   const brandShelves = useMemo(() => manufacturerShelves(filteredManuals), [filteredManuals]);
   const makeOptions = useMemo(
     () => uniqueManualBrands(manuals.filter((m) => manualLibraryShelf(m) === library)),
+    [manuals, library]
+  );
+  const languageOptions = useMemo(
+    () => manualLanguageFilterOptions(manuals.filter((m) => manualLibraryShelf(m) === library)),
     [manuals, library]
   );
   const filtersOn = discoveryActive || selectedWavelength !== '';
@@ -853,6 +873,25 @@ export default function ManualsLibrary() {
             {makeOptions.map((brand) => (
               <option key={brand} value={brand}>
                 {brand}
+              </option>
+            ))}
+          </select>
+          <label className="label" htmlFor="manuals-language">
+            Language
+          </label>
+          <select
+            id="manuals-language"
+            className="input"
+            value={selectedLanguage || ALL_MANUAL_LANGUAGES}
+            onChange={(e) => {
+              const next = e.target.value === ALL_MANUAL_LANGUAGES ? '' : e.target.value;
+              setSelectedLanguage(next);
+              syncFilterUrl({ language: next });
+            }}
+          >
+            {languageOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
               </option>
             ))}
           </select>
@@ -1075,6 +1114,7 @@ export default function ManualsLibrary() {
                       const shownTitle = catalogManualTitle(m);
                       const kind = catalogManualKind(m);
                       const kindLabel = catalogManualKindLabel(kind);
+                      const languageBadge = manualLanguageBadge(resolveManualLanguage(m));
                       return (
                       <div
                         key={m.id != null ? String(m.id) : index}
@@ -1086,6 +1126,7 @@ export default function ManualsLibrary() {
                             : `${shownTitle} (tap to add to company library)`) +
                           `\n${kindLabel}` +
                           (showIncompleteBadge(m) ? '\nIncomplete document' : '') +
+                          (languageBadge ? `\n${languageBadge.label}` : '') +
                           (wlHint ? `\n${wlHint}` : '')
                         }
                         style={{ width: 50 + (index % 4) * 2 }}
@@ -1127,6 +1168,14 @@ export default function ManualsLibrary() {
                             title="This document is incomplete"
                           >
                             Incomplete
+                          </div>
+                        )}
+                        {languageBadge && (
+                          <div
+                            className="absolute -bottom-1 -right-1 z-10 rounded-full bg-sky-900 text-white text-[8px] font-extrabold px-1 py-0.5 shadow"
+                            title={languageBadge.label}
+                          >
+                            {languageBadge.code}
                           </div>
                         )}
                         {isOwned(m) && (

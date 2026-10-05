@@ -107,6 +107,8 @@ export async function grokChat(opts: {
   manualTitle?: string | null;
   manualBrand?: string | null;
   manualModel?: string | null;
+  manualLanguage?: string | null;
+  replyLanguage?: string | null;
   scopeChanged?: boolean;
 }): Promise<GrokChatResult | GrokErrorResult> {
   const nonSys = opts.messages
@@ -123,6 +125,8 @@ export async function grokChat(opts: {
       manualTitle: opts.manualTitle || null,
       manualBrand: opts.manualBrand || null,
       manualModel: opts.manualModel || null,
+      manualLanguage: opts.manualLanguage || null,
+      replyLanguage: opts.replyLanguage || null,
       scopeChanged: opts.scopeChanged === true,
       messages: nonSys,
     });

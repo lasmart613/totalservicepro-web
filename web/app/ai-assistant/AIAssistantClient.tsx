@@ -29,7 +29,9 @@ import {
 } from '@/lib/ai/citations';
 import { toast } from 'sonner';
 import { catalogManualTitle } from '@/lib/manual-catalog';
+import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
 import { canAccessRepairAi } from '@/lib/roles';
+import { useSiteLocale } from '@/lib/fa/locale';
 
 type ManualRow = {
   id: number;
@@ -37,7 +39,19 @@ type ManualRow = {
   storage_path: string;
   brand: string | null;
   model?: string | null;
+  language?: string | null;
 };
+
+const AI_MANUAL_SELECT = 'id,title,storage_path,brand,model,language';
+const AI_MANUAL_SELECT_LEGACY = 'id,title,storage_path,brand,model';
+
+function assistantManualOptionLabel(row: ManualRow): string {
+  const title = catalogManualTitle(row);
+  const badge = manualLanguageBadge(resolveManualLanguage(row));
+  if (!badge) return title;
+  if (new RegExp(`\\(${badge.label}\\)\\s*$`, 'i').test(title)) return title;
+  return `${title} · ${badge.code}`;
+}
 
 const QUICK_CHIPS: { label: string; prompt: string }[] = [
   { label: '⚡ Fault codes', prompt: 'What are the most common fault codes for this system?' },
@@ -57,6 +71,7 @@ function defaultUsage(): AiUsage {
 
 export default function AIAssistantClient() {
   const router = useRouter();
+  const siteLanguage = useSiteLocale();
   const supabase = getSupabaseClient();
   const listRef = useRef<HTMLDivElement | null>(null);
 
@@ -203,20 +218,33 @@ export default function AIAssistantClient() {
 
       // Manuals catalog. Default PostgREST page is 1000 rows; Zeiss (manual 76)
       // sorts after that, so page through and still fetch the URL id directly.
-      const loaded = await fetchAllPages<ManualRow>((from, to) =>
-        supabase.from('manuals').select('id,title,storage_path,brand,model').order('brand').order('title').range(from, to)
+      let loaded = await fetchAllPages<ManualRow>(async (from, to) =>
+        supabase.from('manuals').select(AI_MANUAL_SELECT).order('brand').order('title').range(from, to)
       );
+      if (loaded.error && /language|schema cache|column/i.test(loaded.error.message || '')) {
+        loaded = await fetchAllPages<ManualRow>(async (from, to) =>
+          supabase.from('manuals').select(AI_MANUAL_SELECT_LEGACY).order('brand').order('title').range(from, to)
+        );
+      }
       if (loaded.error) {
         console.warn('manuals load', loaded.error);
         toast.error('Could not load manuals list');
       }
       let rows = (loaded.data || []).filter((m) => m.storage_path && m.title && m.id != null);
       if (urlManualId != null && !rows.some((r) => asManualId(r.id) === urlManualId)) {
-        const { data: one, error: oneErr } = await supabase
+        let oneRes = await supabase
           .from('manuals')
-          .select('id,title,storage_path,brand,model')
+          .select(AI_MANUAL_SELECT)
           .eq('id', urlManualId)
           .maybeSingle();
+        if (oneRes.error && /language|schema cache|column/i.test(oneRes.error.message || '')) {
+          oneRes = await supabase
+            .from('manuals')
+            .select(AI_MANUAL_SELECT_LEGACY)
+            .eq('id', urlManualId)
+            .maybeSingle();
+        }
+        const { data: one, error: oneErr } = oneRes;
         if (oneErr) console.warn('manual by id', oneErr);
         if (one?.storage_path && one?.title && one?.id != null) rows = [...rows, one as ManualRow];
       }
@@ -320,6 +348,8 @@ export default function AIAssistantClient() {
       manualTitle: selectedManual ? catalogManualTitle(selectedManual) : '',
       manualBrand: selectedManual?.brand || brand,
       manualModel: selectedManual?.model || '',
+      manualLanguage: selectedManual ? resolveManualLanguage(selectedManual) : '',
+      replyLanguage: siteLanguage,
       lastSentManualId: lastSentRef.current.id,
       lastSentManualPath: lastSentRef.current.path,
     });
@@ -333,6 +363,8 @@ export default function AIAssistantClient() {
       manualTitle: payload.manualTitle,
       manualBrand: payload.manualBrand,
       manualModel: payload.manualModel,
+      manualLanguage: payload.manualLanguage,
+      replyLanguage: payload.replyLanguage,
       scopeChanged: payload.scopeChanged,
     });
 
@@ -467,7 +499,7 @@ export default function AIAssistantClient() {
               <option value="">{brand ? 'Select model / manual…' : 'Pick a brand first'}</option>
               {manualsForBrand.map((m) => (
                 <option key={m.id} value={String(m.id)}>
-                  {catalogManualTitle(m)}
+                  {assistantManualOptionLabel(m)}
                 </option>
               ))}
             </select>

@@ -22,6 +22,8 @@ import {
   pdfPageCountFromBytes,
   pdfPathsForAiAttach,
   resolveManualFromCatalog,
+  assistantLanguageDirective,
+  normalizeReplyLanguage,
   selectedManualContext,
   WHOLE_PDF_ATTACH_MAX_BYTES,
   wholePdfAttachAllowed,
@@ -1310,7 +1312,7 @@ const EXCERPT_STOPWORDS = new Set([
 function excerptQueryTerms(query: string): string[] {
   const tokens = String(query || '')
     .toLowerCase()
-    .split(/[^a-z0-9+]+/)
+    .split(/[^\p{L}\p{N}+]+/u)
     .filter(Boolean)
   const terms: string[] = []
   const seen = new Set<string>()
@@ -1335,7 +1337,7 @@ function termAt(hay: string, term: string, from: number): number {
     if (at < 0) return -1
     const before = at > 0 ? hay.charAt(at - 1) : ''
     const after = hay.charAt(at + term.length)
-    const edge = (ch: string) => ch === '' || /[^a-z0-9+]/.test(ch)
+    const edge = (ch: string) => ch === '' || !/[\p{L}\p{N}+]/u.test(ch)
     if (edge(before) && edge(after)) return at
     i = at + 1
   }
@@ -1687,6 +1689,22 @@ function prefixGeneralGuidance(
   return `${prefix}\n\n${body}`
 }
 
+const MANUAL_ROW_COLUMNS =
+  'id,title,brand,model,storage_path,entry_file_path,chapter_metadata,is_incomplete,is_folder'
+
+/** language is optional until the manuals migration is applied. A missing column must not drop the row. */
+async function selectManualRows(
+  db: any,
+  apply: (query: any) => Promise<{ data: any; error: { message?: string } | null }>
+): Promise<{ data: any; error: { message?: string } | null }> {
+  const first = await apply(db.from('manuals').select(`${MANUAL_ROW_COLUMNS},language`))
+  if (!first?.error) return first
+  if (/language/i.test(String(first.error.message || ''))) {
+    return apply(db.from('manuals').select(MANUAL_ROW_COLUMNS))
+  }
+  return first
+}
+
 function formatManualContext(parts: Retrieved[], selectedLabel: string, emptyHint: string): string {
   if (!parts.length) {
     return (
@@ -1791,29 +1809,29 @@ serve(async (req) => {
       const hintedTitle = String(body.manualTitle || body.title || '').trim()
       const hintedBrand = String(body.manualBrand || body.brand || '').trim()
       const hintedModel = String(body.manualModel || body.model || '').trim()
+      const replyLanguage = normalizeReplyLanguage(body.replyLanguage || body.siteLanguage || body.language)
       // PostgREST returns at most 1000 rows. An unbounded manuals select dropped
       // id 1086 (catalog has 1151 rows), so the prompt said no manual was selected
       // and collection search ran unscoped. Look up the open id directly.
-      const manualCols =
-        'id,title,brand,model,storage_path,entry_file_path,chapter_metadata,is_incomplete,is_folder'
+      // Language does not exclude a manual: a German PDF is still retrieved and cited.
       try {
         if (rawId != null) {
-          const { data } = await db.from('manuals').select(manualCols).eq('id', rawId).maybeSingle()
+          const { data } = await selectManualRows(db, (query) => query.eq('id', rawId).maybeSingle())
           if (data) manualMeta = data
         }
         if (!manualMeta) {
           const path = normalizeManualPath(rawPath)
           if (path) {
-            const { data: exact } = await db.from('manuals').select(manualCols).eq('storage_path', path).limit(8)
+            const { data: exact } = await selectManualRows(db, (query) =>
+              query.eq('storage_path', path).limit(8)
+            )
             manualMeta = resolveManualFromCatalog(exact || [], { manualId: rawId, manualPath: path })
             if (!manualMeta && path.includes('/')) {
               const folder = path.replace(/\/[^/]+$/, '')
               if (folder && folder !== path) {
-                const { data: parent } = await db
-                  .from('manuals')
-                  .select(manualCols)
-                  .eq('storage_path', folder)
-                  .limit(8)
+                const { data: parent } = await selectManualRows(db, (query) =>
+                  query.eq('storage_path', folder).limit(8)
+                )
                 manualMeta = resolveManualFromCatalog(parent || [], { manualId: rawId, manualPath: path })
               }
             }
@@ -2062,13 +2080,17 @@ serve(async (req) => {
         model: manualMeta?.model,
         storagePath: manualMeta?.storage_path || rawPath,
       })
+      const languageCtx = assistantLanguageDirective({
+        replyLanguage,
+        manualLanguage: manualMeta?.language || body.manualLanguage,
+      })
       const voiceCtx = voiceMode ? '\n\n## VOICE FORMAT\n4-7 sentences. No markdown.' : ''
       const composeSystem = () => {
         const depthCtx =
           !voiceMode && (hasManualPassages || hasFaultDBHit || hasCollectionPdfs)
             ? '\n\n## DEPTH\nBe thorough for field service: ordered steps, expected values, cautions found in the source. Do not pad with invented content.'
             : ''
-        return basePrompt + manualCtx + voiceCtx + depthCtx + contextBlock
+        return basePrompt + languageCtx + manualCtx + voiceCtx + depthCtx + contextBlock
       }
       let systemContent = composeSystem()
 
@@ -2442,7 +2464,7 @@ serve(async (req) => {
         body: JSON.stringify({
           text: text.substring(0, 4096),
           voice_id: voice,
-          language: 'en',
+          language: normalizeReplyLanguage(body.replyLanguage || body.language || 'en'),
         }),
       })
       if (!tr.ok) {

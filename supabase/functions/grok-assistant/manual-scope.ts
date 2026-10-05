@@ -99,6 +99,10 @@ export type GrokChatPayload = {
   manualTitle: string | null;
   manualBrand: string | null;
   manualModel: string | null;
+  /** ISO 639-1 site language. The assistant answers in this language. */
+  replyLanguage: string | null;
+  /** ISO 639-1 of the selected manual. Null when no manual is selected. */
+  manualLanguage: string | null;
   messages: ChatMessage[];
   scopeChanged: boolean;
 };
@@ -123,6 +127,8 @@ export function buildGrokChatPayload(opts: {
   manualTitle?: unknown;
   manualBrand?: unknown;
   manualModel?: unknown;
+  manualLanguage?: unknown;
+  replyLanguage?: unknown;
   lastSentManualId?: unknown;
   lastSentManualPath?: unknown;
   voiceMode?: boolean;
@@ -151,6 +157,8 @@ export function buildGrokChatPayload(opts: {
     manualTitle: cleanManualHint(opts.manualTitle),
     manualBrand: cleanManualHint(opts.manualBrand),
     manualModel: cleanManualHint(opts.manualModel),
+    replyLanguage: cleanManualHint(opts.replyLanguage),
+    manualLanguage: cleanManualHint(opts.manualLanguage),
     messages,
     scopeChanged,
   };
@@ -212,6 +220,77 @@ export function selectedManualContext(opts: {
   );
 }
 
+const REPLY_LANGUAGE_NAMES: Record<string, string> = {
+  en: 'English',
+  fa: 'Farsi',
+  es: 'Spanish',
+  fr: 'French',
+  he: 'Hebrew',
+  it: 'Italian',
+  de: 'German',
+  pt: 'Brazilian Portuguese',
+  ar: 'Arabic',
+  ja: 'Japanese',
+  zh: 'Chinese',
+  nl: 'Dutch',
+  ko: 'Korean',
+  ru: 'Russian',
+  pl: 'Polish',
+  sv: 'Swedish',
+  da: 'Danish',
+  no: 'Norwegian',
+  fi: 'Finnish',
+  tr: 'Turkish',
+  el: 'Greek',
+  cs: 'Czech',
+  hu: 'Hungarian',
+  ro: 'Romanian',
+  th: 'Thai',
+  vi: 'Vietnamese',
+  id: 'Indonesian',
+  ms: 'Malay',
+  hi: 'Hindi',
+  fa: 'Farsi',
+  uk: 'Ukrainian',
+};
+
+/** Site or catalog language. Unknown values stay English so the prompt does not invent a locale. */
+export function normalizeReplyLanguage(raw: unknown): string {
+  const primary = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-')
+    .split('-')[0];
+  if (/^[a-z]{2}$/.test(primary)) return primary;
+  return 'en';
+}
+
+function replyLanguageName(code: string): string {
+  return REPLY_LANGUAGE_NAMES[code] || code.toUpperCase();
+}
+
+/**
+ * Tell the model to answer in the technician's site language and still cite
+ * the selected manual when that PDF is in another language.
+ */
+export function assistantLanguageDirective(opts: {
+  replyLanguage?: unknown;
+  manualLanguage?: unknown;
+}): string {
+  const reply = normalizeReplyLanguage(opts.replyLanguage);
+  const manual = normalizeReplyLanguage(opts.manualLanguage ?? 'en');
+  const replyName = replyLanguageName(reply);
+  const manualName = replyLanguageName(manual);
+  return (
+    `\n\n## ANSWER LANGUAGE\n` +
+    `The technician's site language is ${replyName} (${reply}). Write the answer in ${replyName}.\n` +
+    `The selected manual's catalog language is ${manualName} (${manual}). ` +
+    `Still retrieve and cite this manual when it is not ${replyName}. ` +
+    `Translate the explanation into ${replyName}. ` +
+    `Keep fault codes, part numbers, and short procedure labels in the manual's original wording.`
+  );
+}
+
 const EXCERPT_STOPWORDS = new Set([
   'the', 'and', 'for', 'are', 'was', 'were', 'what', 'does', 'did', 'mean', 'means',
   'how', 'why', 'when', 'where', 'which', 'who', 'with', 'from', 'this', 'that',
@@ -224,7 +303,7 @@ const EXCERPT_STOPWORDS = new Set([
 function excerptQueryTerms(query: string): string[] {
   const tokens = String(query || '')
     .toLowerCase()
-    .split(/[^a-z0-9+]+/)
+    .split(/[^\p{L}\p{N}+]+/u)
     .filter(Boolean);
   const terms: string[] = [];
   const seen = new Set<string>();
@@ -249,7 +328,7 @@ function termAt(hay: string, term: string, from: number): number {
     if (at < 0) return -1;
     const before = at > 0 ? hay.charAt(at - 1) : '';
     const after = hay.charAt(at + term.length);
-    const edge = (ch: string) => ch === '' || /[^a-z0-9+]/.test(ch);
+    const edge = (ch: string) => ch === '' || !/[\p{L}\p{N}+]/u.test(ch);
     if (edge(before) && edge(after)) return at;
     i = at + 1;
   }

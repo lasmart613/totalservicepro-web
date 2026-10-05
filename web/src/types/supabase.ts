@@ -1043,6 +1043,7 @@ export type Database = {
           id: number
           is_folder: boolean
           is_incomplete: boolean
+          language: string | null
           model: string
           storage_path: string
           tier_required: string | null
@@ -1059,6 +1060,7 @@ export type Database = {
           id?: never
           is_folder?: boolean
           is_incomplete?: boolean
+          language?: string | null
           model: string
           storage_path: string
           tier_required?: string | null
@@ -1075,6 +1077,7 @@ export type Database = {
           id?: never
           is_folder?: boolean
           is_incomplete?: boolean
+          language?: string | null
           model?: string
           storage_path?: string
           tier_required?: string | null
