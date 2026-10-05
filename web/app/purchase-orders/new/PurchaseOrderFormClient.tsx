@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
+import { useOrgMoney } from '@/lib/use-org-money';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { buildPurchaseOrderHtml, type DocCompany } from '@/lib/billing/doc-html';
@@ -15,7 +16,6 @@ import {
   emptyLineItem,
   isValidOrgId,
   lineItemsSubtotal,
-  money,
   parseJsonField,
   recomputeExt,
   writeWithColumnRetry,
@@ -49,6 +49,7 @@ function todayYmd() {
 }
 
 export default function PurchaseOrderFormClient() {
+  const { money, prefs, locale } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -451,6 +452,8 @@ export default function PurchaseOrderFormClient() {
       subtotal,
       tax: Number(tax) || 0,
       total,
+      moneyPrefs: prefs,
+      locale,
     });
   }
 

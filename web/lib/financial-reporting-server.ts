@@ -10,13 +10,16 @@ import { decideFinancialAccess } from './financial-reporting-auth.ts';
 import {
   assembleFinancialReport,
   EMPTY_INVOICE_COLUMNS,
+  presentFinancialReport,
   type FinancialReport,
 } from './financial-reporting.ts';
 import { loadShopFinancialSources, type FinanceClient } from './financial-reporting-load.ts';
+import { loadOrganizationFinanceSettings } from './org-money.ts';
+import { gateFinancialDetail } from './report-tier.ts';
 
 export type AuthorizedFinancialReport =
   | { ok: true; report: FinancialReport }
-  | { ok: false; status: 401 | 403 | 500; error: string };
+  | { ok: false; status: 401 | 402 | 403 | 500 | 503; error: string };
 
 function supabaseUrl(): string {
   return process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
@@ -36,21 +39,10 @@ export function userClientForToken(token: string): SupabaseClient | null {
   });
 }
 
-async function organizationName(
-  client: SupabaseClient,
-  organizationId: string | number
-): Promise<string | null> {
-  const { data, error } = await client
-    .from('organizations')
-    .select('name')
-    .eq('id', organizationId)
-    .maybeSingle();
-  if (error || !data) return null;
-  const name = String((data as { name?: string | null }).name || '').trim();
-  return name || null;
-}
-
-export async function loadAuthorizedFinancialReport(token: string): Promise<AuthorizedFinancialReport> {
+export async function loadAuthorizedFinancialReport(
+  token: string,
+  options?: { detailRequested?: boolean }
+): Promise<AuthorizedFinancialReport> {
   const client = userClientForToken(token);
   if (!client) {
     return { ok: false, status: 500, error: 'Server misconfigured' };
@@ -103,17 +95,28 @@ export async function loadAuthorizedFinancialReport(token: string): Promise<Auth
     };
   }
 
-  const [name, sources] = await Promise.all([
-    organizationName(client, access.organizationId),
-    loadShopFinancialSources(client as unknown as FinanceClient, access.organizationId),
-  ]);
+  const settings = await loadOrganizationFinanceSettings(client, access.organizationId);
+  const gate = gateFinancialDetail({
+    plan: settings.plan,
+    planKnown: settings.planKnown,
+    god: access.god,
+    detailRequested: options?.detailRequested === true,
+  });
+  if (!gate.ok) return { ok: false, status: gate.status, error: gate.error };
+
+  const sources = await loadShopFinancialSources(client as unknown as FinanceClient, access.organizationId);
 
   return {
     ok: true,
-    report: assembleFinancialReport({
-      organizationId: access.organizationId,
-      organizationName: name,
-      ...sources,
-    }),
+    report: presentFinancialReport(
+      assembleFinancialReport({
+        organizationId: access.organizationId,
+        organizationName: settings.name,
+        currencyCode: settings.prefs.currencyCode,
+        numberFormat: settings.prefs.numberFormat,
+        ...sources,
+      }),
+      gate.detail
+    ),
   };
 }

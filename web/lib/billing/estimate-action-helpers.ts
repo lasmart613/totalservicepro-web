@@ -4,6 +4,7 @@
 
 import { randomBytes } from 'crypto';
 import { SITE_ORIGIN } from '../share.ts';
+import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
 import { parseJsonField, type CustomerActionKind } from './save-helpers.ts';
 
 export const CUSTOMER_ACTION_APPROVED = 'approved' as const;
@@ -63,9 +64,11 @@ export function buildOrgNotifyEmail(opts: {
   total: number;
   note: string | null;
   estimateId: string | number;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
 }): { subject: string; html: string } {
   const num = opts.estimateNumber || String(opts.estimateId);
-  const total = `$${(Number(opts.total) || 0).toFixed(2)}`;
+  const total = formatOrgMoney(opts.total, opts.moneyPrefs, opts.locale);
   const approved = opts.action === CUSTOMER_ACTION_APPROVED;
   const rejected = opts.action === CUSTOMER_ACTION_REJECTED;
   const subject = approved

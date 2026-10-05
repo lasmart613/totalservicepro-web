@@ -11,6 +11,8 @@ import {
   type InvoicePaymentRow,
 } from './apply-invoice-payment.ts';
 import type { StripeObject } from './stripe-subscription.ts';
+import { formatOrgMoney } from '../money-format.ts';
+import { loadOrgMoneyPrefs } from '../org-money.ts';
 
 export type AppliedInvoicePayment = {
   invoiceId: string;
@@ -134,7 +136,14 @@ export async function notifyShopOfPayment(
   const num = inv.invoice_number || `#${inv.id}`;
   const who = inv.customer_name || 'A customer';
   const label = status === 'paid' ? 'paid in full' : 'sent a partial payment';
-  const message = `${who} ${label} on invoice ${num} ($${money2(amountPaid).toFixed(2)}).`;
+  let shown = formatOrgMoney(money2(amountPaid));
+  try {
+    const prefs = await loadOrgMoneyPrefs(writer, inv.organization_id);
+    shown = formatOrgMoney(money2(amountPaid), prefs);
+  } catch {
+    /* USD locale format */
+  }
+  const message = `${who} ${label} on invoice ${num} (${shown}).`;
   const link = `/invoices/new?id=${inv.id}`;
   for (const userId of ids) {
     try {

@@ -12,6 +12,7 @@ import {
   type CustomerActionKind,
   type EstimateEmailAction,
 } from '@/lib/billing/save-helpers';
+import { formatOrgMoney } from '@/lib/money-format';
 
 type EstimateView = {
   estimateId?: string | number | null;
@@ -27,12 +28,14 @@ type EstimateView = {
   customerActionAt: string | null;
   customerActionNote: string | null;
   customerOrgLinked?: boolean;
+  currencyCode?: string | null;
+  numberFormat?: string | null;
 };
 
 type RequestRef = { id?: string | number | null; number?: string | null } | null;
 
-function money(n: number) {
-  return `$${(Number(n) || 0).toFixed(2)}`;
+function money(n: number, currencyCode?: string | null, numberFormat?: string | null) {
+  return formatOrgMoney(n, { currencyCode, numberFormat });
 }
 
 function formatDate(iso: string | null) {
@@ -202,7 +205,7 @@ export default function EstimateCustomerClient({
                 </p>
                 {est.estimateNumber && (
                   <p className="text-sm text-[var(--text3)] mt-4">
-                    {est.estimateNumber} · {money(est.total)}
+                    {est.estimateNumber} · {money(est.total, est.currencyCode, est.numberFormat)}
                   </p>
                 )}
               </div>
@@ -221,7 +224,7 @@ export default function EstimateCustomerClient({
                   </div>
                   <div>
                     <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Total</div>
-                    <div className="font-extrabold text-[var(--gold)] text-lg">{money(est.total)}</div>
+                    <div className="font-extrabold text-[var(--gold)] text-lg">{money(est.total, est.currencyCode, est.numberFormat)}</div>
                   </div>
                   <div className="col-span-2">
                     <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Validity</div>

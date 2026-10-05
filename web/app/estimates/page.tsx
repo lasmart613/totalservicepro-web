@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { useT } from '@/lib/fa/locale';
+import { useOrgMoney } from '@/lib/use-org-money';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
   coerceOrgId,
@@ -13,7 +14,6 @@ import {
   customerActionLabel,
   isEstimateExpired,
   isValidOrgId,
-  money,
   parseJsonField,
   validUntilLabel,
   type CustomerActionKind,
@@ -119,6 +119,7 @@ export default function EstimatesPage() {
 
 function ShopEstimatesList() {
   const t = useT();
+  const { money } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [rows, setRows] = useState<EstimateRow[]>([]);

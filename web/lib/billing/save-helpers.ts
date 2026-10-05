@@ -1,5 +1,7 @@
 /** Shared helpers for estimates / invoices Supabase writes (schema-drift tolerant). */
 
+import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
+
 export function isValidOrgId(val: unknown): boolean {
   if (val == null) return false;
   if (typeof val === 'number' && Number.isFinite(val) && val > 0) return true;
@@ -36,8 +38,12 @@ export function parseJsonField(val: unknown): Record<string, any> {
   return {};
 }
 
-export function money(n: number): string {
-  return `$${(Number(n) || 0).toFixed(2)}`;
+export function money(
+  n: number,
+  prefs?: OrgMoneyPrefs | { currencyCode?: string | null; numberFormat?: string | null } | null,
+  locale?: string | null
+): string {
+  return formatOrgMoney(n, prefs, locale);
 }
 
 export type LineItem = {

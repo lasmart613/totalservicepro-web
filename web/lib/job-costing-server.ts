@@ -9,10 +9,12 @@ import { membershipRoleForActiveOrg } from './job-costing-access.ts';
 import { decideJobCostingAccess } from './job-costing-auth.ts';
 import { assembleJobCostReport, type JobCostReport } from './job-costing.ts';
 import { loadJobCostSources, type JobCostClient } from './job-costing-load.ts';
+import { loadOrganizationFinanceSettings } from './org-money.ts';
+import { gateJobCostingPlan } from './report-tier.ts';
 
 export type AuthorizedJobCostReport =
   | { ok: true; report: JobCostReport }
-  | { ok: false; status: 401 | 403 | 500; error: string };
+  | { ok: false; status: 401 | 402 | 403 | 500 | 503; error: string };
 
 function supabaseUrl(): string {
   return process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL || '';
@@ -30,20 +32,6 @@ export function userClientForToken(token: string): SupabaseClient | null {
     global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { persistSession: false, autoRefreshToken: false },
   });
-}
-
-async function organizationName(
-  client: SupabaseClient,
-  organizationId: string | number
-): Promise<string | null> {
-  const { data, error } = await client
-    .from('organizations')
-    .select('name')
-    .eq('id', organizationId)
-    .maybeSingle();
-  if (error || !data) return null;
-  const name = String((data as { name?: string | null }).name || '').trim();
-  return name || null;
 }
 
 const NO_ORG = 'This login has no active organization, so shop rows cannot be scoped.';
@@ -105,16 +93,23 @@ export async function loadAuthorizedJobCostReport(token: string): Promise<Author
     };
   }
 
-  const [name, sources] = await Promise.all([
-    organizationName(client, access.organizationId),
-    loadJobCostSources(client as unknown as JobCostClient, access.organizationId),
-  ]);
+  const settings = await loadOrganizationFinanceSettings(client, access.organizationId);
+  const planGate = gateJobCostingPlan({
+    plan: settings.plan,
+    planKnown: settings.planKnown,
+    god: access.god,
+  });
+  if (!planGate.ok) return { ok: false, status: planGate.status, error: planGate.error };
+
+  const sources = await loadJobCostSources(client as unknown as JobCostClient, access.organizationId);
 
   return {
     ok: true,
     report: assembleJobCostReport({
       organizationId: access.organizationId,
-      organizationName: name,
+      organizationName: settings.name,
+      currencyCode: settings.prefs.currencyCode,
+      numberFormat: settings.prefs.numberFormat,
       ...sources,
     }),
   };

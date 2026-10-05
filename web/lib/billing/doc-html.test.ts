@@ -70,7 +70,7 @@ test('invoice HTML shows due-now deposit vs deferred remainder; pay button is de
     collectableAmount: 650,
     paymentUrl: 'https://checkout.stripe.com/c/pay/cs_test_deposit',
   });
-  assert.match(html, /Invoice Total: \$1555\.00/);
+  assert.match(html, /Invoice Total: \$1,555\.00/);
   assert.match(html, /Due now \(parts\/travel deposit\)/);
   assert.match(html, /Remaining \(due on completion\)/);
   assert.match(html, /Pay deposit \$650\.00 securely with Stripe/);

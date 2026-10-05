@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
+import { useOrgMoney } from '@/lib/use-org-money';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { buildEstimateHtml, type DocCompany, type DocThemeScope } from '@/lib/billing/doc-html';
@@ -15,7 +16,6 @@ import {
   emptyLineItem,
   isValidOrgId,
   lineItemsSubtotal,
-  money,
   parseJsonField,
   recomputeExt,
   SERVICE_TYPE_LABELS,
@@ -36,6 +36,7 @@ import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt }
 type CustomerOpt = LinkedCustomerOpt;
 
 export default function EstimateFormClient() {
+  const { money, prefs, locale } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -697,6 +698,8 @@ export default function EstimateFormClient() {
       validDays: 30,
       theme: companyTheme,
       themeScope,
+      moneyPrefs: prefs,
+      locale,
     });
   }
 

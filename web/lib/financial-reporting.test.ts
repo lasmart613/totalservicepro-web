@@ -12,6 +12,7 @@ import { decideFinancialAccess } from './financial-reporting-auth.ts';
 import {
   assembleFinancialReport,
   invoiceColumnFlags,
+  presentFinancialReport,
   type InvoiceColumnFlags,
 } from './financial-reporting.ts';
 import { loadShopFinancialSources, type FinanceClient } from './financial-reporting-load.ts';
@@ -393,4 +394,48 @@ test('nav and page keep financial reporting in Business Management and enforce i
   assert.match(readFileSync(join(webDir, 'lib/auth-session.ts'), 'utf8'), /method: 'DELETE'/);
   assert.match(server, /email: user\.email/);
   assert.doesNotMatch(server, /getSupabaseAdmin/);
+  assert.match(server, /gateFinancialDetail/);
+  assert.match(readFileSync(join(webDir, 'lib/job-costing-server.ts'), 'utf8'), /gateJobCostingPlan/);
+});
+
+test('summary KPIs use the same invoice rows and free presentation drops line items', () => {
+  const report = sample();
+  const revenue = report.summary.kpis.find((row) => row.id === 'revenue_this_month');
+  const outstanding = report.summary.kpis.find((row) => row.id === 'outstanding_invoices');
+  const paid = report.summary.kpis.find((row) => row.id === 'paid_invoices');
+  const average = report.summary.kpis.find((row) => row.id === 'average_job_value');
+  const margin = report.summary.kpis.find((row) => row.id === 'gross_margin');
+  const open = report.summary.kpis.find((row) => row.id === 'open_estimates');
+  assert.equal(revenue?.amount, 400);
+  assert.equal(revenue?.compareAmount, 1500);
+  assert.equal(outstanding?.amount, 1300);
+  assert.equal(paid?.amount, 300);
+  assert.equal(paid?.count, 1);
+  assert.equal(average?.amount, 475);
+  assert.equal(margin?.availability, 'unavailable');
+  assert.equal(open?.amount, 400);
+  assert.equal(report.summary.monthlyRevenue?.find((point) => point.month === '2026-10')?.amount, 400);
+  assert.equal(report.currencyCode, 'USD');
+  assert.equal(report.detailIncluded, true);
+  assert.ok(report.outstanding.length > 0);
+
+  const free = presentFinancialReport(report, false);
+  assert.equal(free.detailIncluded, false);
+  assert.equal(free.outstanding.length, 0);
+  assert.equal(free.paymentMethods.length, 0);
+  assert.equal(free.aging, null);
+  assert.equal(free.metrics.length, 0);
+  assert.equal(free.summary.kpis.find((row) => row.id === 'outstanding_invoices')?.amount, 1300);
+
+  const eur = assembleFinancialReport({
+    organizationId: 1,
+    currencyCode: 'eur',
+    numberFormat: 'dot_comma_after',
+    invoices: [],
+    invoiceColumns: columns,
+    purchaseOrders: [],
+    estimates: [],
+  });
+  assert.equal(eur.currencyCode, 'EUR');
+  assert.equal(eur.numberFormat, 'dot_comma_after');
 });

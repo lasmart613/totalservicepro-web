@@ -5,6 +5,7 @@
  */
 
 import { money2, parseInvoiceData } from './billing/apply-invoice-payment.ts';
+import { resolveOrgMoneyPrefs } from './money-format.ts';
 
 export type InvoiceSourceRow = {
   id?: string | number | null;
@@ -110,14 +111,46 @@ export type AgingBucket = {
   source: string;
 };
 
+export type MoneyKpi = {
+  id: string;
+  label: string;
+  availability: 'available' | 'unavailable';
+  amount?: number;
+  count?: number;
+  note?: string;
+  reason?: string;
+  /** Prior-period amount, when this KPI is a comparison. */
+  compareAmount?: number;
+  /** Percent change versus compareAmount. Null when the prior period is zero. */
+  deltaPercent?: number | null;
+};
+
+export type MonthlyRevenuePoint = {
+  month: string;
+  amount: number;
+};
+
+export type FinancialSummary = {
+  kpis: MoneyKpi[];
+  monthlyRevenue: MonthlyRevenuePoint[] | null;
+  monthlyRevenueReason: string | null;
+  collectedThisMonth: number | null;
+  outstandingAmount: number | null;
+};
+
 export type FinancialReport = {
   organizationId: string | null;
   organizationName: string | null;
+  currencyCode: string;
+  numberFormat: string;
+  /** False on the free plan: line-item tables are omitted. */
+  detailIncluded: boolean;
   generatedAt: string;
   asOfDate: string;
   invoiceRowCount: number | null;
   purchaseOrderRowCount: number | null;
   estimateRowCount: number | null;
+  summary: FinancialSummary;
   metrics: FinancialMetric[];
   outstanding: OutstandingInvoice[];
   unpricedInvoices: UnpricedInvoice[];
@@ -298,9 +331,22 @@ function isOpenEstimate(status: string): boolean {
   return !CLOSED_ESTIMATE.has(status);
 }
 
+function shiftMonth(ym: string, delta: number): string {
+  const [year, month] = ym.split('-').map(Number);
+  const next = new Date(Date.UTC(year, month - 1 + delta, 1));
+  return next.toISOString().slice(0, 7);
+}
+
+function deltaPercent(current: number, previous: number): number | null {
+  if (previous === 0) return current === 0 ? 0 : null;
+  return Math.round(((current - previous) / Math.abs(previous)) * 1000) / 10;
+}
+
 export function assembleFinancialReport(input: {
   organizationId: string | number | null;
   organizationName?: string | null;
+  currencyCode?: string | null;
+  numberFormat?: string | null;
   asOf?: Date;
   invoices: InvoiceSourceRow[] | null;
   invoiceIssue?: string | null;
@@ -313,6 +359,11 @@ export function assembleFinancialReport(input: {
   const asOf = input.asOf || new Date();
   const asOfDate = asOf.toISOString().slice(0, 10);
   const month = asOfDate.slice(0, 7);
+  const lastMonth = shiftMonth(month, -1);
+  const moneyPrefs = resolveOrgMoneyPrefs({
+    currencyCode: input.currencyCode,
+    numberFormat: input.numberFormat,
+  });
   const columns = input.invoiceColumns;
   const invoiceIssue = input.invoiceIssue || null;
   const invoicesKnown = input.invoices != null && !invoiceIssue;
@@ -340,6 +391,11 @@ export function assembleFinancialReport(input: {
   let stripeCount = 0;
   let unknownPaid = 0;
   let draftPayments = 0;
+  let pricedBilledCount = 0;
+  let lastMonthBilledCents = 0;
+  let paidInvoiceCents = 0;
+  let paidInvoiceCount = 0;
+  const monthlyBilled = new Map<string, number>();
   const outstanding: OutstandingInvoice[] = [];
   const unpriced: UnpricedInvoice[] = [];
   const methods = new Map<string, { cents: number; count: number }>();
@@ -382,8 +438,14 @@ export function assembleFinancialReport(input: {
       }
 
       billedCount += 1;
-      if (total != null) billedCents += centsOf(total);
-      else {
+      if (total != null) {
+        billedCents += centsOf(total);
+        pricedBilledCount += 1;
+        if (paid.known && paid.amount > 0 && centsOf(total) <= centsOf(paid.amount)) {
+          paidInvoiceCents += centsOf(total);
+          paidInvoiceCount += 1;
+        }
+      } else {
         unpriced.push({
           id: String(row.id ?? ''),
           number: docNumber(row, columns),
@@ -396,9 +458,15 @@ export function assembleFinancialReport(input: {
       if (columns.invoice_date) {
         const invoiceDay = ymd(row.invoice_date);
         if (!invoiceDay) monthBilledUndated += 1;
-        else if (invoiceDay.startsWith(month) && total != null) {
-          monthBilledCents += centsOf(total);
-          monthBilledCount += 1;
+        else if (total != null) {
+          const ym = invoiceDay.slice(0, 7);
+          monthlyBilled.set(ym, (monthlyBilled.get(ym) || 0) + centsOf(total));
+          if (ym === month) {
+            monthBilledCents += centsOf(total);
+            monthBilledCount += 1;
+          } else if (ym === lastMonth) {
+            lastMonthBilledCents += centsOf(total);
+          }
         }
       }
 
@@ -759,7 +827,10 @@ export function assembleFinancialReport(input: {
     );
   }
 
-  if (input.estimates == null || input.estimateIssue) {
+  let pipelineCents = 0;
+  let pipelineCount = 0;
+  const estimatesKnown = input.estimates != null && !input.estimateIssue;
+  if (!estimatesKnown) {
     metrics.push(
       unavailable(
         'estimate_pipeline',
@@ -769,9 +840,7 @@ export function assembleFinancialReport(input: {
       )
     );
   } else {
-    let pipelineCents = 0;
-    let pipelineCount = 0;
-    for (const row of input.estimates) {
+    for (const row of input.estimates || []) {
       if (!isOpenEstimate(statusOf(row.status))) continue;
       pipelineCount += 1;
       const total = num(row.total);
@@ -842,11 +911,134 @@ export function assembleFinancialReport(input: {
         })
       : null;
 
+  const monthlyRevenue = columns.invoice_date
+    ? Array.from({ length: 6 }, (_, index) => {
+        const ym = shiftMonth(month, index - 5);
+        return { month: ym, amount: fromCents(monthlyBilled.get(ym) || 0) };
+      })
+    : null;
+
+  const revenueThis = fromCents(monthBilledCents);
+  const revenueLast = fromCents(lastMonthBilledCents);
+  const outstandingAmount = fromCents(outstandingCents);
+  const collectedMonthAmount = fromCents(monthCollectedCents);
+  const average =
+    pricedBilledCount > 0 ? fromCents(Math.round(billedCents / pricedBilledCount)) : null;
+
+  const summary: FinancialSummary = {
+    kpis: [],
+    monthlyRevenue,
+    monthlyRevenueReason: columns.invoice_date
+      ? null
+      : invoicesKnown
+        ? 'invoice_date was not returned, so monthly revenue cannot be charted.'
+        : invoiceIssue || 'service_invoices could not be read',
+    collectedThisMonth: invoicesKnown && (columns.paid_at || columns.invoice_data) ? collectedMonthAmount : null,
+    outstandingAmount: invoicesKnown ? outstandingAmount : null,
+  };
+
+  if (!invoicesKnown || !columns.invoice_date) {
+    summary.kpis.push({
+      id: 'revenue_this_month',
+      label: 'Revenue this month',
+      availability: 'unavailable',
+      reason: !invoicesKnown
+        ? invoiceIssue || 'service_invoices could not be read'
+        : 'invoice_date was not returned, so this month cannot be split out.',
+    });
+  } else {
+    summary.kpis.push({
+      id: 'revenue_this_month',
+      label: 'Revenue this month',
+      availability: 'available',
+      amount: revenueThis,
+      count: monthBilledCount,
+      compareAmount: revenueLast,
+      deltaPercent: deltaPercent(revenueThis, revenueLast),
+      note: `Compared with ${lastMonth}. Billed invoice totals, UTC.`,
+    });
+  }
+
+  summary.kpis.push(
+    invoicesKnown
+      ? {
+          id: 'outstanding_invoices',
+          label: 'Outstanding invoices',
+          availability: 'available',
+          amount: outstandingAmount,
+          count: outstanding.length,
+          note: 'Issued invoices that still have a balance.',
+        }
+      : {
+          id: 'outstanding_invoices',
+          label: 'Outstanding invoices',
+          availability: 'unavailable',
+          reason: invoiceIssue || 'service_invoices could not be read',
+        },
+    invoicesKnown
+      ? {
+          id: 'paid_invoices',
+          label: 'Paid invoices',
+          availability: 'available',
+          amount: fromCents(paidInvoiceCents),
+          count: paidInvoiceCount,
+          note: 'Issued invoices whose recorded payment covers the total.',
+        }
+      : {
+          id: 'paid_invoices',
+          label: 'Paid invoices',
+          availability: 'unavailable',
+          reason: invoiceIssue || 'service_invoices could not be read',
+        },
+    invoicesKnown && average != null
+      ? {
+          id: 'average_job_value',
+          label: 'Average job value',
+          availability: 'available',
+          amount: average,
+          count: pricedBilledCount,
+          note: 'Issued invoice total divided by issued invoices that have a total.',
+        }
+      : {
+          id: 'average_job_value',
+          label: 'Average job value',
+          availability: 'unavailable',
+          reason: invoicesKnown
+            ? 'No issued invoice has a total.'
+            : invoiceIssue || 'service_invoices could not be read',
+        },
+    {
+      id: 'gross_margin',
+      label: 'Gross margin',
+      availability: 'unavailable',
+      reason: 'Invoices do not store labor or parts cost, so gross margin is not computed on this report.',
+    },
+    estimatesKnown
+      ? {
+          id: 'open_estimates',
+          label: 'Open estimates',
+          availability: 'available',
+          amount: fromCents(pipelineCents),
+          count: pipelineCount,
+          note: 'Open estimate totals. Not income and not cash.',
+        }
+      : {
+          id: 'open_estimates',
+          label: 'Open estimates',
+          availability: 'unavailable',
+          reason: input.estimateIssue || 'service_estimates could not be read',
+        }
+  );
+
   return {
     organizationId: input.organizationId == null ? null : String(input.organizationId),
     organizationName: input.organizationName || null,
+    currencyCode: moneyPrefs.currencyCode,
+    numberFormat: moneyPrefs.numberFormat,
+    detailIncluded: true,
     generatedAt: asOf.toISOString(),
     asOfDate,
+    summary,
     invoiceRowCount: invoicesKnown ? (input.invoices || []).length : null,
     purchaseOrderRowCount:
       input.purchaseOrders != null && !input.purchaseOrderIssue ? input.purchaseOrders.length : null,
@@ -862,5 +1054,20 @@ export function assembleFinancialReport(input: {
         : columns.due_date
           ? null
           : 'service_invoices.due_date was not returned, so aging is unavailable.',
+  };
+}
+
+/** Drop line-item tables for the free plan. KPI summary stays. */
+export function presentFinancialReport(report: FinancialReport, detail: boolean): FinancialReport {
+  if (detail) return { ...report, detailIncluded: true };
+  return {
+    ...report,
+    detailIncluded: false,
+    metrics: [],
+    outstanding: [],
+    unpricedInvoices: [],
+    paymentMethods: [],
+    aging: null,
+    agingReason: null,
   };
 }

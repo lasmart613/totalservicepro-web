@@ -11,6 +11,7 @@ import { estimateActionUrl, estimateCustomerPath } from '@/lib/share';
 import { publicSiteOrigin, wrapCustomerFacingDocumentEmail } from '@/lib/customer-invite';
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 import { getCompanyTheme } from '@/lib/company-theme';
+import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import {
   buildOwnedEstimateMessage,
   documentAccountLinks,
@@ -137,11 +138,13 @@ export async function POST(req: NextRequest) {
     }
 
     const subject = ownedDocumentSubject('estimate', est.estimate_number, company.company_name);
+    const moneyPrefs = callerOrgId != null ? await loadOrgMoneyPrefs(supabase, callerOrgId) : null;
     let html = buildOwnedEstimateMessage({
       row: est,
       company,
       theme,
       actionUrl: estimateActionUrl(actionToken),
+      moneyPrefs,
     });
     html = ensureEstimateActionCtas(html, estimateActionUrl(actionToken));
     const origin = publicSiteOrigin(req);

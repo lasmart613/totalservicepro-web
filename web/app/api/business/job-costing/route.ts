@@ -24,6 +24,7 @@ function clearAccessCookie(res: NextResponse) {
 /**
  * GET/POST /api/business/job-costing
  * Admin (admin / company_admin) or God only. Non-admins receive 403 and no figures.
+ * Free plans receive 402 and no figures. Premium, Team, and Enterprise receive the report.
  * POST stores an httpOnly cookie so the page can render on the server afterward.
  */
 async function handle(req: NextRequest, persistCookie: boolean) {

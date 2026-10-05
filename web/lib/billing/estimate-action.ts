@@ -5,6 +5,8 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { loadOrgMoneyPrefs } from '@/lib/org-money';
+import { resolveOrgMoneyPrefs, type OrgMoneyPrefs } from '@/lib/money-format';
 import { estimateActionUrl } from '@/lib/share';
 import { approveEstimateCreatingUnscheduledRequest } from '@/lib/billing/approve-estimate';
 import {
@@ -287,7 +289,8 @@ export async function notifyShopOfCustomerAction(
   note: string | null
 ): Promise<void> {
   const { companyName, emails } = await resolveOrgNotifyEmails(client, estimate);
-  const payload = publicEstimatePayload(estimate, companyName);
+  const moneyPrefs = await loadOrgMoneyPrefs(client, estimate?.organization_id);
+  const payload = publicEstimatePayload(estimate, companyName, moneyPrefs);
   const ed = parseJsonField(estimate.estimate_data);
   const customerEmail = ed.custEmail || ed.email || null;
   const mail = buildOrgNotifyEmail({
@@ -297,6 +300,7 @@ export async function notifyShopOfCustomerAction(
     estimateNumber: payload.estimateNumber,
     total: payload.total,
     note: action === CUSTOMER_ACTION_CHANGES ? note : null,
+    moneyPrefs,
     estimateId: estimate.id,
   });
   if (!emails.length) {
@@ -312,7 +316,8 @@ export async function notifyShopOfCustomerAction(
   if (!sent.ok) console.warn('org notify email skipped', sent.error);
 }
 
-export function publicEstimatePayload(estimate: any, companyName: string) {
+export function publicEstimatePayload(estimate: any, companyName: string, money?: OrgMoneyPrefs | null) {
+  const prefs = resolveOrgMoneyPrefs(money);
   const ed = parseJsonField(estimate.estimate_data);
   const action = customerActionFromEstimate(estimate);
   const expired = isEstimateExpired(estimate);
@@ -338,5 +343,7 @@ export function publicEstimatePayload(estimate: any, companyName: string) {
     customerAction: action.action,
     customerActionAt: action.at,
     customerActionNote: action.note,
+    currencyCode: prefs.currencyCode,
+    numberFormat: prefs.numberFormat,
   };
 }

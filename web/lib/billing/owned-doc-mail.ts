@@ -5,6 +5,7 @@
  */
 
 import type { CompanyTheme } from '../company-theme.ts';
+import type { OrgMoneyPrefs } from '../money-format.ts';
 import { buildEstimateHtml, buildInvoiceHtml, type DocCompany } from './doc-html.ts';
 import { resolveInvoiceCollectable } from './invoice-collectable.ts';
 import { parseJsonField, SERVICE_TYPE_LABELS } from './save-helpers.ts';
@@ -188,6 +189,8 @@ export function buildOwnedInvoiceMessage(input: {
   company: DocCompany;
   theme: CompanyTheme | null;
   paymentUrl?: string | null;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
 }): string {
   const data = parseJsonField(input.row.invoice_data);
   const lines = Array.isArray(data.line_items) ? data.line_items : [];
@@ -236,6 +239,8 @@ export function buildOwnedInvoiceMessage(input: {
     paymentUrl: input.paymentUrl || null,
     theme: input.theme,
     themeScope: 'email',
+    moneyPrefs: input.moneyPrefs,
+    locale: input.locale,
   });
 }
 
@@ -244,6 +249,8 @@ export function buildOwnedEstimateMessage(input: {
   company: DocCompany;
   theme: CompanyTheme | null;
   actionUrl?: string | null;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
 }): string {
   const data = parseJsonField(input.row.estimate_data);
   const servicesRaw = Array.isArray(input.row.services)
@@ -305,6 +312,8 @@ export function buildOwnedEstimateMessage(input: {
     actionUrl: input.actionUrl || null,
     theme: input.theme,
     themeScope: 'email',
+    moneyPrefs: input.moneyPrefs,
+    locale: input.locale,
   });
 }
 

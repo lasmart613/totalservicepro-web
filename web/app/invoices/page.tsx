@@ -6,11 +6,11 @@ import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { useT } from '@/lib/fa/locale';
+import { useOrgMoney } from '@/lib/use-org-money';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
   coerceOrgId,
   isValidOrgId,
-  money,
   parseJsonField,
 } from '@/lib/billing/save-helpers';
 import { buildInvoicePaymentPatch, existingPaidAmount } from '@/lib/billing/apply-invoice-payment';
@@ -54,6 +54,7 @@ function docNumber(inv: InvoiceRow): string {
 }
 
 export default function InvoicesListPage() {
+  const { money } = useOrgMoney();
   const t = useT();
   const supabase = getSupabaseClient();
   const router = useRouter();
