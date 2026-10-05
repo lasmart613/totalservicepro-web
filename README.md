@@ -1,5 +1,7 @@
 # Photometry Tools - Version 1.1
 
+Current soft beta: **0.5.0-beta** (Android `versionName` `0.5.0-beta`, `versionCode` 6). Web Settings and the Android About screen show `0.5.0-beta`, aligned with iOS PhotometryTools MARKETING 0.5.0. No paid ads.
+
 Professional Android app for photometry calculations with integrated service manual viewer.
 
 ## What's New in v1.1
@@ -125,7 +127,8 @@ Output: `app/build/outputs/apk/release/app-release.apk`
 - [ ] Cloud sync for user preferences
 
 ## Version History
-- **v1.1** (Current) - Added Service Manuals feature with Lumenis AcuPulse
+- **0.5.0-beta** (current soft beta) — Marketing version aligned with iOS PhotometryTools (MARKETING 0.5.0 / build 2; Settings shows `0.5.0-beta`). Android `versionName` `0.5.0-beta`, `versionCode` 6. Web `APP_VERSION` and Android About use the same label. User-Agent token remains `TSPAndroid/0.5.0-beta`.
+- **v1.1** - Added Service Manuals feature with Lumenis AcuPulse
 - **v1.0** - Initial release with 4 photometry calculators
 
 ## License

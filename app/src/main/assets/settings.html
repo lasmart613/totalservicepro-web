@@ -515,7 +515,7 @@
     </div>
     <div class="about-row">
         <span class="about-key">Version</span>
-        <span class="about-val gold">1.3</span>
+        <span class="about-val gold" id="aboutVersion">0.5.0-beta</span>
     </div>
     <div class="about-row">
         <span class="about-key">Build</span>
@@ -718,6 +718,11 @@
         const isIOS     = /iPhone|iPad/.test(navigator.userAgent);
         document.getElementById('platformVal').textContent =
             isAndroid ? 'Android' : isIOS ? 'iOS' : 'Web Browser';
+
+        const aboutVersion = document.getElementById('aboutVersion');
+        if (aboutVersion && window.TSP_ANDROID_VERSION_NAME) {
+            aboutVersion.textContent = window.TSP_ANDROID_VERSION_NAME;
+        }
 
         // Timezone
         document.getElementById('tzDisplay').textContent =
@@ -1014,7 +1019,8 @@
     }
 
     function checkForUpdates() {
-        showToast('You\'re on the latest version (1.3)', 'success');
+        const versionName = window.TSP_ANDROID_VERSION_NAME || '0.5.0-beta';
+        showToast('You\'re on the latest version (' + versionName + ')', 'success');
     }
 
     // ═══════════════════════════════════════════════════
