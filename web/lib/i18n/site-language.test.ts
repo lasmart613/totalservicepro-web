@@ -77,6 +77,18 @@ test('signed-in dictionaries cover the same chrome in every language', () => {
   assert.ok(keys.includes('Job Costing'));
   assert.ok(keys.includes('Financial Reporting'));
   assert.ok(keys.includes('Settings'));
+  for (const key of [
+    'Labor rate ({symbol}/hr)',
+    'Travel rate ({symbol}/mi)',
+    'Per diem {symbol}/day',
+    'Deposit amount ({symbol})',
+    'Amount received ({symbol})',
+  ]) {
+    assert.ok(keys.includes(key), key);
+    for (const locale of LOCALES) {
+      assert.match(appStrings(locale)[key], /\{symbol\}/, `${locale} dropped the currency token from ${key}`);
+    }
+  }
   assert.ok(keys.includes('Estimates'));
   const joined: Record<string, string> = {};
   for (const locale of LOCALES) {

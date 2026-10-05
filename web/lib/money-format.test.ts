@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   COMMON_CURRENCY_CODES,
+  applyCurrencySymbol,
   formatOrgMoney,
   isAllowedCurrencyCode,
+  orgCurrencySymbol,
   listCurrencies,
   parseCurrencyCode,
   parseNumberFormat,
@@ -56,6 +58,15 @@ test('presets set separators and symbol position without converting the amount',
   assert.doesNotMatch(yen, /\.00/);
   const spaced = formatOrgMoney(1234.5, { currencyCode: 'EUR', numberFormat: 'space_comma_after' }, 'fr');
   assert.match(spaced, /1[\s\u00a0]234,50/);
+});
+
+test('currency symbol for labels falls back to $ when the code is unknown', () => {
+  assert.equal(orgCurrencySymbol(null, 'en-US'), '$');
+  assert.equal(orgCurrencySymbol({ currency_code: 'nope' }, 'en'), '$');
+  assert.equal(orgCurrencySymbol({ currencyCode: 'EUR' }, 'en-US'), '€');
+  assert.equal(orgCurrencySymbol({ currencyCode: 'GBP' }, 'en-GB'), '£');
+  assert.equal(applyCurrencySymbol('Labor rate ({symbol}/hr)', '€'), 'Labor rate (€/hr)');
+  assert.equal(applyCurrencySymbol('Amount received ({symbol})', ''), 'Amount received ($)');
 });
 
 test('automatic format follows the caller locale', () => {

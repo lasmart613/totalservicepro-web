@@ -321,6 +321,32 @@ function formatPreset(amount: number, currency: string, formatId: Exclude<Number
 }
 
 /**
+ * Narrow currency symbol for input labels ($ , €, £).
+ * Unknown or missing currency falls back to USD, whose symbol is $.
+ */
+export function orgCurrencySymbol(
+  prefs?: {
+    currencyCode?: unknown;
+    currency_code?: unknown;
+    numberFormat?: unknown;
+    number_format?: unknown;
+  } | null,
+  locale?: string | null
+): string {
+  const resolved = resolveOrgMoneyPrefs(prefs);
+  const loc = locale && String(locale).trim() ? String(locale) : 'en';
+  const symbol = narrowSymbol(resolved.currencyCode, loc);
+  if (symbol && symbol !== resolved.currencyCode) return symbol;
+  return resolved.currencyCode === 'USD' ? '$' : resolved.currencyCode;
+}
+
+/** Replace `{symbol}` in a translated label. An empty symbol stays `$`. */
+export function applyCurrencySymbol(label: string, symbol: string | null | undefined): string {
+  const mark = symbol && String(symbol).trim() ? String(symbol) : '$';
+  return String(label).split('{symbol}').join(mark);
+}
+
+/**
  * Format an amount in the organization currency.
  * `auto` uses Intl.NumberFormat with the caller's locale.
  * Invalid currency or format falls back to USD and the locale format.

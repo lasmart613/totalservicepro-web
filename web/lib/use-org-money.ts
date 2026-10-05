@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { useSiteLocale } from '@/lib/fa/locale';
 import { PUBLIC_LOCALES } from '@/lib/i18n/locales';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { DEFAULT_ORG_MONEY, formatOrgMoney, type OrgMoneyPrefs } from '@/lib/money-format';
+import { DEFAULT_ORG_MONEY, formatOrgMoney, orgCurrencySymbol, type OrgMoneyPrefs } from '@/lib/money-format';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
 
 export function localeToBcp47(locale: string | null | undefined): string {
@@ -17,6 +17,7 @@ export function useOrgMoney(): {
   prefs: OrgMoneyPrefs;
   locale: string;
   money: (amount: unknown) => string;
+  symbol: string;
 } {
   const siteLocale = useSiteLocale();
   const locale = localeToBcp47(siteLocale);
@@ -63,6 +64,7 @@ export function useOrgMoney(): {
   const money = useMemo(() => {
     return (amount: unknown) => formatOrgMoney(amount, prefs, locale);
   }, [prefs, locale]);
+  const symbol = useMemo(() => orgCurrencySymbol(prefs, locale), [prefs, locale]);
 
-  return { prefs, locale, money };
+  return { prefs, locale, money, symbol };
 }
