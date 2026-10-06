@@ -8,6 +8,7 @@ import {
   buildTeamInviteHtml,
   buildTeamInviteText,
   teamInviteEmailError,
+  resolveInviteSiteOrigin,
   teamInviteLoginUrl,
   teamInviteNeedsPasswordSetup,
   teamInviteRoleLabel,
@@ -32,12 +33,20 @@ type InviteBody = {
 };
 
 function siteUrl(req: NextRequest): string {
-  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.URL || process.env.DEPLOY_PRIME_URL;
-  if (env) return env.replace(/\/$/, '');
   const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
   const proto = req.headers.get('x-forwarded-proto') || 'https';
-  if (host) return `${proto}://${host}`;
-  return 'https://repairplanet.net';
+  const requestOrigin = host ? `${proto}://${host}` : '';
+  return resolveInviteSiteOrigin(
+    {
+      NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
+      URL: process.env.URL,
+      DEPLOY_PRIME_URL: process.env.DEPLOY_PRIME_URL,
+      DEPLOY_URL: process.env.DEPLOY_URL,
+      CONTEXT: process.env.CONTEXT,
+      NETLIFY_CONTEXT: process.env.NETLIFY_CONTEXT,
+    },
+    requestOrigin,
+  );
 }
 
 function isRateLimitError(msg: string): boolean {

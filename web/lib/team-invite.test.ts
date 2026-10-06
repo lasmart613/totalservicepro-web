@@ -11,6 +11,7 @@ import {
   isFounderLockedRole,
   isValidTeamInviteEmail,
   teamInviteEmailError,
+  resolveInviteSiteOrigin,
   teamInviteLoginUrl,
   teamInviteNeedsPasswordSetup,
   teamInviteRoleLabel,
@@ -292,4 +293,53 @@ test('team invite API uses the builders and does not send the generic Supabase i
   const page = readFileSync(join(here, '../app/admin/team/page.tsx'), 'utf8');
   assert.match(page, /teamInviteEmailError/);
   assert.match(page, /noValidate/);
+  assert.match(source, /resolveInviteSiteOrigin/);
+});
+
+test('team invite links use the preview origin and stay on repairplanet.net in production', () => {
+  const preview = 'https://deploy-preview-206--totalservicepro.netlify.app';
+  assert.equal(
+    resolveInviteSiteOrigin({
+      CONTEXT: 'deploy-preview',
+      NEXT_PUBLIC_SITE_URL: 'https://repairplanet.net',
+      URL: 'https://repairplanet.net',
+      DEPLOY_PRIME_URL: preview,
+    }),
+    preview,
+  );
+  assert.equal(
+    resolveInviteSiteOrigin({
+      CONTEXT: 'branch-deploy',
+      DEPLOY_PRIME_URL: 'https://branch--totalservicepro.netlify.app/',
+    }),
+    'https://branch--totalservicepro.netlify.app',
+  );
+  assert.equal(
+    resolveInviteSiteOrigin({
+      CONTEXT: 'production',
+      NEXT_PUBLIC_SITE_URL: 'https://repairplanet.net',
+      URL: 'https://totalservicepro.netlify.app',
+      DEPLOY_PRIME_URL: 'https://totalservicepro.netlify.app',
+    }),
+    'https://repairplanet.net',
+  );
+  assert.equal(
+    resolveInviteSiteOrigin({
+      NETLIFY_CONTEXT: 'production',
+      URL: 'https://something.netlify.app',
+      DEPLOY_PRIME_URL: 'https://something.netlify.app',
+    }),
+    'https://repairplanet.net',
+  );
+  assert.equal(
+    resolveInviteSiteOrigin({}, 'http://localhost:3000'),
+    'http://localhost:3000',
+  );
+  assert.equal(
+    teamInviteLoginUrl(resolveInviteSiteOrigin({
+      CONTEXT: 'deploy-preview',
+      DEPLOY_PRIME_URL: preview,
+    })),
+    `${preview}/login`,
+  );
 });

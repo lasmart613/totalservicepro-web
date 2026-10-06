@@ -19,8 +19,10 @@ import {
   planConsentWrite,
   runEmailSignup,
   safeSignupRedirect,
+  shouldStampInviteConsent,
   shouldStampOAuthConsent,
   stampGoogleConsent,
+  stampInviteConsent,
 } from './signup-consent.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -302,6 +304,12 @@ test('signup pages send consent and the migration only adds nullable columns', (
   assert.match(read('lib/legal/consent.ts'), /export const LEGAL_VERSION = '2026-10-draft'/);
   assert.match(read('lib/legal/consent.ts'), /export const LEGAL_CONSENT_STAMP_FROM = '2026-10-07T00:00:00Z'/);
   assert.match(read('app/api/auth/consent/route.ts'), /createdAt: user\.created_at/);
+  assert.match(read('app/api/auth/invite-consent/route.ts'), /stampInviteConsent/);
+  assert.match(read('app/api/auth/invite-consent/route.ts'), /writeUserLegalConsent/);
+  assert.match(read('app/auth/set-password/page.tsx'), /ContinuingConsent/);
+  assert.match(read('app/auth/set-password/page.tsx'), /recordInviteConsent/);
+  assert.match(read('app/onboarding/member/page.tsx'), /ContinuingConsent/);
+  assert.match(read('app/onboarding/member/page.tsx'), /recordInviteConsent/);
 
   for (const copy of LOCALES) {
     const pieces = consentPieces(copy[CONTINUE_CONSENT_TEMPLATE]);
@@ -313,4 +321,68 @@ test('signup pages send consent and the migration only adds nullable columns', (
     safeSignupRedirect('https://repairplanet.net/auth/callback?next=/onboarding', 'http://localhost:3000'),
     'https://repairplanet.net/auth/callback?next=/onboarding',
   );
+});
+
+test('invite consent stamps a new invited account and skips existing users', async () => {
+  const created = '2026-10-07T12:00:00.000Z';
+  const old = '2026-01-01T00:00:00.000Z';
+  assert.equal(
+    shouldStampInviteConsent({ invited: true, createdAt: created, existingConsentAt: null }),
+    true,
+  );
+  assert.equal(
+    shouldStampInviteConsent({ invited: true, createdAt: old, existingConsentAt: null }),
+    false,
+  );
+  assert.equal(
+    shouldStampInviteConsent({ invited: false, createdAt: created, existingConsentAt: null }),
+    false,
+  );
+  assert.equal(
+    shouldStampInviteConsent({
+      invited: true,
+      createdAt: created,
+      existingConsentAt: '2026-10-07T12:05:00.000Z',
+    }),
+    false,
+  );
+
+  const writes: string[] = [];
+  const fresh = await stampInviteConsent({
+    invited: true,
+    createdAt: created,
+    readConsentAt: async () => ({ at: null, error: null }),
+    writeConsent: async () => {
+      writes.push('stamp');
+      return { stored: true, continued: true };
+    },
+  });
+  assert.deepEqual(fresh, { recorded: true, continued: true });
+
+  const existing = await stampInviteConsent({
+    invited: true,
+    createdAt: old,
+    readConsentAt: async () => {
+      throw new Error('existing invitee must not be read or stamped');
+    },
+    writeConsent: async () => {
+      writes.push('existing');
+      return { stored: true, continued: true };
+    },
+  });
+  assert.equal(existing.recorded, false);
+  assert.equal(existing.reason, 'existing_account');
+
+  const again = await stampInviteConsent({
+    invited: true,
+    createdAt: created,
+    readConsentAt: async () => ({ at: '2026-10-07T12:05:00.000Z', error: null }),
+    writeConsent: async () => {
+      writes.push('again');
+      return { stored: true, continued: true };
+    },
+  });
+  assert.equal(again.recorded, false);
+  assert.equal(again.reason, 'already_recorded');
+  assert.deepEqual(writes, ['stamp']);
 });

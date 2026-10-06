@@ -5,6 +5,9 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
 import { destAfterInviteClaim, inviteInPlay } from '@/lib/invite-claim';
+import { ContinuingConsent } from '@/components/legal/ContinuingConsent';
+import { accountCreatedOnOrAfterLegalStamp } from '@/lib/legal/signup-consent';
+import { recordInviteConsent } from '@/lib/legal/signup-client';
 
 /**
  * Invited / recovery users land here after the email link establishes a session.
@@ -22,6 +25,7 @@ function SetPasswordInner() {
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [noSession, setNoSession] = useState(false);
+  const [showConsent, setShowConsent] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -66,6 +70,7 @@ function SetPasswordInner() {
 
         if (!cancelled) {
           setEmail(user.email || '');
+          setShowConsent(accountCreatedOnOrAfterLegalStamp(user.created_at));
           setReady(true);
           setMessage('Create a password for your account, then you can sign in anytime.');
         }
@@ -101,6 +106,11 @@ function SetPasswordInner() {
 
       const { error: upErr } = await supabase.auth.updateUser({ password });
       if (upErr) throw upErr;
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session?.access_token) {
+        await recordInviteConsent(sessionData.session.access_token);
+      }
 
       // Profile + claim team invitation (server uses service role so RLS cannot block org assign)
       const meta = user.user_metadata || {};
@@ -225,6 +235,7 @@ function SetPasswordInner() {
                   autoComplete="new-password"
                 />
               </div>
+              {showConsent && <ContinuingConsent />}
               <button type="submit" disabled={saving} className="btn btn-primary w-full py-3">
                 {saving ? 'Saving…' : 'Save password & continue'}
               </button>

@@ -68,6 +68,23 @@ export async function signUpWithConsent(input: {
   return { data: { user: json?.user ?? null, session }, error: null };
 }
 
+/** Asks the server to stamp a brand-new invited account. The route decides. Failures do not block navigation. */
+export async function recordInviteConsent(accessToken: string): Promise<void> {
+  if (!accessToken) return;
+  try {
+    const res = await fetch('/api/auth/invite-consent', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        'Content-Type': 'application/json',
+      },
+    });
+    if (!res.ok) console.warn('legal consent', res.status);
+  } catch (err) {
+    console.warn('legal consent', err);
+  }
+}
+
 /** Asks the server to stamp a brand-new Google account. The route decides. Failures do not block navigation. */
 export async function recordGoogleConsentIfNeeded(
   supabase: {

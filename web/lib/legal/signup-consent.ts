@@ -278,6 +278,82 @@ export async function stampGoogleConsent(input: {
   }
 }
 
+/** True when auth.users.created_at is on or after the deploy cutoff. */
+export function accountCreatedOnOrAfterLegalStamp(createdAt: string | null | undefined): boolean {
+  const created = Date.parse(createdAt ?? '');
+  const from = Date.parse(LEGAL_CONSENT_STAMP_FROM);
+  return Number.isFinite(created) && Number.isFinite(from) && created >= from;
+}
+
+/**
+ * Invite set-password / member onboarding. New accounts only.
+ * No 15-minute window: the invite email can be opened later.
+ * An existing stamp is left alone.
+ */
+export function shouldStampInviteConsent(input: {
+  invited: boolean;
+  createdAt: string | null | undefined;
+  existingConsentAt: string | null | undefined;
+}): boolean {
+  if (!input.invited || input.existingConsentAt) return false;
+  return accountCreatedOnOrAfterLegalStamp(input.createdAt);
+}
+
+export async function stampInviteConsent(input: {
+  invited: boolean;
+  createdAt: string | null | undefined;
+  readConsentAt: () => Promise<{
+    at: string | null;
+    error: { code?: string; message?: string } | null;
+  }>;
+  writeConsent: () => Promise<ConsentWriteOutcome>;
+  log?: (message: string, detail?: unknown) => void;
+}): Promise<{
+  recorded: boolean;
+  reason?: 'not_invite' | 'existing_account' | 'already_recorded';
+  missingColumn?: boolean;
+  continued?: boolean;
+}> {
+  if (!input.invited) return { recorded: false, reason: 'not_invite' };
+  if (!accountCreatedOnOrAfterLegalStamp(input.createdAt)) {
+    return { recorded: false, reason: 'existing_account' };
+  }
+  let existing: string | null = null;
+  try {
+    const read = await input.readConsentAt();
+    if (read.error) {
+      if (isMissingConsentColumn(read.error)) {
+        input.log?.('legal consent columns are not on user_profiles yet; signup continues', read.error);
+        return { recorded: false, missingColumn: true, continued: true };
+      }
+      input.log?.('legal consent read failed; signup continues', read.error);
+      return { recorded: false, continued: true };
+    }
+    existing = read.at;
+  } catch (err) {
+    input.log?.('legal consent read failed; signup continues', err);
+    return { recorded: false, continued: true };
+  }
+  if (!shouldStampInviteConsent({
+    invited: true,
+    createdAt: input.createdAt,
+    existingConsentAt: existing,
+  })) {
+    return { recorded: false, reason: 'already_recorded' };
+  }
+  try {
+    const outcome = await input.writeConsent();
+    if (outcome.missingColumn) {
+      input.log?.('legal consent columns are not on user_profiles yet; signup continues');
+      return { recorded: false, missingColumn: true, continued: true };
+    }
+    return { recorded: outcome.stored, continued: outcome.continued };
+  } catch (err) {
+    input.log?.('legal consent write failed; signup continues', err);
+    return { recorded: false, continued: true };
+  }
+}
+
 export function safeSignupRedirect(raw: string | undefined, requestOrigin: string): string {
   const fallbackOrigin = 'https://repairplanet.net';
   let origin: URL;

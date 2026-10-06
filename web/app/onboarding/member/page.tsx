@@ -6,6 +6,9 @@ import { useRouter } from 'next/navigation';
 import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { roleLabel } from '@/lib/labels';
+import { ContinuingConsent } from '@/components/legal/ContinuingConsent';
+import { accountCreatedOnOrAfterLegalStamp } from '@/lib/legal/signup-consent';
+import { recordInviteConsent } from '@/lib/legal/signup-client';
 
 /**
  * Light onboarding for team invitees.
@@ -25,6 +28,7 @@ export default function MemberOnboardingPage() {
   const [phone, setPhone] = useState('');
   const [jobTitle, setJobTitle] = useState('');
   const [error, setError] = useState('');
+  const [showConsent, setShowConsent] = useState(false);
 
   useEffect(() => {
     (async () => {
@@ -71,6 +75,7 @@ export default function MemberOnboardingPage() {
         return;
       }
 
+      setShowConsent(accountCreatedOnOrAfterLegalStamp(user.created_at));
       const meta = user.user_metadata || {};
       setEmail(user.email || profile.email || '');
       setRole(profile.role || meta.role || 'fse');
@@ -111,6 +116,11 @@ export default function MemberOnboardingPage() {
         .eq('id', user.id);
 
       if (upErr) throw upErr;
+
+      const { data: sessionData } = await supabase.auth.getSession();
+      if (sessionData.session?.access_token) {
+        await recordInviteConsent(sessionData.session.access_token);
+      }
 
       await supabase.auth.updateUser({
         data: {
@@ -224,6 +234,7 @@ export default function MemberOnboardingPage() {
               />
             </div>
 
+            {showConsent && <ContinuingConsent />}
             <button type="submit" disabled={saving || !!error} className="btn btn-primary w-full py-3">
               {saving ? 'Saving…' : 'Join team & continue'}
             </button>

@@ -124,6 +124,76 @@ export function teamInviteLoginUrl(origin?: string | null): string {
   return `${base}/login`;
 }
 
+const PRODUCTION_SITE_ORIGIN = 'https://repairplanet.net';
+
+export type InviteSiteOriginEnv = {
+  NEXT_PUBLIC_SITE_URL?: string | null;
+  URL?: string | null;
+  DEPLOY_PRIME_URL?: string | null;
+  DEPLOY_URL?: string | null;
+  CONTEXT?: string | null;
+  NETLIFY_CONTEXT?: string | null;
+};
+
+function originOf(raw?: string | null): string {
+  const value = String(raw || '').trim();
+  if (!value) return '';
+  try {
+    const url = new URL(value);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return '';
+    return url.origin;
+  } catch {
+    return '';
+  }
+}
+
+function hostOf(origin: string): string {
+  try {
+    return new URL(origin).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+function isNetlifyAppOrigin(origin: string): boolean {
+  return hostOf(origin).endsWith('.netlify.app');
+}
+
+function isLocalOrigin(origin: string): boolean {
+  const host = hostOf(origin);
+  return host === 'localhost' || host === '127.0.0.1';
+}
+
+/**
+ * Absolute origin for team-invite links.
+ * Preview and branch deploys use DEPLOY_PRIME_URL so the email opens that preview.
+ * Production resolves to the configured site, or https://repairplanet.net.
+ * A *.netlify.app host is never used when the deploy context is production.
+ */
+export function resolveInviteSiteOrigin(env: InviteSiteOriginEnv, requestOrigin?: string | null): string {
+  const context = String(env.CONTEXT || env.NETLIFY_CONTEXT || '').trim().toLowerCase();
+  const production = context === 'production';
+  const preview = context === 'deploy-preview' || context === 'branch-deploy';
+  const configured = originOf(env.NEXT_PUBLIC_SITE_URL) || originOf(env.URL);
+  const deployPrime = originOf(env.DEPLOY_PRIME_URL) || originOf(env.DEPLOY_URL);
+  const request = originOf(requestOrigin);
+
+  if (production) {
+    if (configured && !isNetlifyAppOrigin(configured)) return configured;
+    return PRODUCTION_SITE_ORIGIN;
+  }
+
+  if (preview) {
+    if (deployPrime) return deployPrime;
+    if (request && !isLocalOrigin(request)) return request;
+  }
+
+  if (request && isLocalOrigin(request)) return request;
+  if (request && isNetlifyAppOrigin(request)) return request;
+  if (configured && !isNetlifyAppOrigin(configured)) return configured;
+  return PRODUCTION_SITE_ORIGIN;
+}
+
 export type TeamInviteCopy = {
   organizationName: string;
   firstName?: string | null;
