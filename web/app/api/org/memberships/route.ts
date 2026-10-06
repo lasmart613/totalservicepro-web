@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { listMembershipsWithOrgs, upsertMembership } from '@/lib/org-membership-server';
+import { invitationIsOpen } from '@/lib/org-membership';
+import { listMembershipsWithOrgs } from '@/lib/org-membership-server';
 
 /**
  * GET /api/org/memberships
@@ -45,43 +46,9 @@ export async function GET(req: NextRequest) {
     if (hasServiceRole()) {
       const admin = getSupabaseAdmin();
       const email = (user.email || '').toLowerCase().trim();
-      if (email) {
-        const { data: invRows } = await admin
-          .from('engineer_invitations')
-          .select('id, organization_id, role, accepted, email')
-          .ilike('email', email)
-          .order('created_at', { ascending: false })
-          .limit(50);
-        for (const inv of invRows || []) {
-          if (!inv.organization_id || !inv.accepted) continue;
-          await upsertMembership(admin, {
-            userId: user.id,
-            organizationId: inv.organization_id,
-            role: inv.role || 'fse',
-            isHome: false,
-          });
-        }
-      }
 
-      const { data: ownShops } = await admin
-        .from('organizations')
-        .select('id, type')
-        .eq('created_by', user.id)
-        .in('type', ['service_company', 'parts_supplier', 'supplier', 'vendor']);
-      for (const shop of ownShops || []) {
-        const shopType = String(shop.type || '').toLowerCase();
-        const shopRole =
-          shopType === 'parts_supplier' || shopType === 'supplier' || shopType === 'vendor'
-            ? 'parts_supplier'
-            : 'company_admin';
-        await upsertMembership(admin, {
-          userId: user.id,
-          organizationId: shop.id,
-          role: shopRole,
-          isHome: true,
-        });
-      }
-
+      // Read existing memberships only. Accepted invites and shops this login
+      // created must not be turned back into memberships here — leaving stays gone.
       const rows = await listMembershipsWithOrgs(admin, user.id);
       memberships = rows.map((row) => ({
         organizationId: row.organization_id,
@@ -95,14 +62,17 @@ export async function GET(req: NextRequest) {
       if (email) {
         const { data: invites } = await admin
           .from('engineer_invitations')
-          .select('id, organization_id, role, first_name, last_name, created_at, accepted')
+          .select('id, organization_id, role, first_name, last_name, created_at, expires_at, accepted')
           .ilike('email', email)
           .eq('accepted', false)
           .order('created_at', { ascending: false })
           .limit(20);
         const memberOrgIds = new Set(memberships.map((m) => String(m.organizationId)));
         const pendingRaw = (invites || []).filter(
-          (inv: any) => inv.organization_id && !memberOrgIds.has(String(inv.organization_id))
+          (inv: any) =>
+            inv.organization_id &&
+            !memberOrgIds.has(String(inv.organization_id)) &&
+            invitationIsOpen(inv)
         );
         const orgIds = Array.from(
           new Set(pendingRaw.map((inv: any) => inv.organization_id).filter(Boolean))

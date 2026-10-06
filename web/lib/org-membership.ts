@@ -47,8 +47,30 @@ export function sameOrg(
   return left != null && right != null && left === right;
 }
 
+const INVITE_NULL_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
+
+/** Org invite role stored on a membership. Platform admin never comes from an invite. */
 export function membershipRoleForInvite(inviteRole?: string | null): string {
-  return normalizeRole(inviteRole) || DEFAULT_STAFF_ROLE;
+  const role = normalizeRole(inviteRole) || DEFAULT_STAFF_ROLE;
+  return role === 'admin' ? 'company_admin' : role;
+}
+
+/**
+ * Unaccepted invite that has not expired.
+ * NULL expires_at is expired unless created_at is within the last 14 days.
+ */
+export function invitationIsOpen(
+  row: { accepted?: boolean | null; expires_at?: string | null; created_at?: string | null },
+  now = Date.now()
+): boolean {
+  if (row.accepted === true) return false;
+  if (row.expires_at) {
+    const exp = Date.parse(row.expires_at);
+    return Number.isFinite(exp) && exp > now;
+  }
+  if (!row.created_at) return false;
+  const created = Date.parse(row.created_at);
+  return Number.isFinite(created) && created > now - INVITE_NULL_EXPIRY_MS;
 }
 
 export type InviteDecision =

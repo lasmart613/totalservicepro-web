@@ -10,6 +10,7 @@ import { clearPendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session';
 import { postTeamClaim, routeAfterTeamClaim } from '@/lib/invite-claim';
 import { publicAuthMessage } from '@/lib/auth-errors';
+import { clientAuthOrigin } from '@/lib/site-origin';
 
 function LoginInner() {
   const [email, setEmail] = useState('');
@@ -68,8 +69,7 @@ function LoginInner() {
   }
 
   function authRedirect(path: string) {
-    if (typeof window === 'undefined') return `https://repairplanet.net${path}`;
-    return `${window.location.origin}${path}`;
+    return `${clientAuthOrigin()}${path}`;
   }
 
   /**
@@ -77,7 +77,7 @@ function LoginInner() {
    * Supabase only sends this when "Confirm email" is ON and the user is not already confirmed.
    */
   async function requestSignupConfirmEmail(cleanEmail: string): Promise<string | null> {
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+    const origin = clientAuthOrigin();
     const { error } = await supabase.auth.resend({
       type: 'signup',
       email: cleanEmail,
@@ -117,51 +117,32 @@ function LoginInner() {
           setLoading(false);
           return;
         }
-        const origin =
-          typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+        const origin = clientAuthOrigin();
         await prepareFreshSignup(supabase);
-        const { data, error } = await supabase.auth.signUp({
-          email: cleanEmail,
-          password,
-          options: {
-            data: { first_name: firstName, last_name: lastName },
+        const signupRes = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            email: cleanEmail,
+            password,
+            firstName,
+            lastName,
             emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
               nextPath && nextPath !== '/' ? nextPath : '/onboarding'
             )}`,
-          },
+          }),
         });
-        if (error) {
-          if (/already|registered|exists/i.test(error.message || '')) {
-            throw new Error(
-              'An account with this email already exists. Use Sign In, or “Forgot password” if you never set a password. You can also use “Email me a sign-in code”.'
-            );
-          }
-          throw error;
+        const signupJson = await signupRes.json().catch(() => ({}));
+        if (!signupRes.ok) {
+          throw new Error(signupJson.error || 'Could not create account.');
         }
 
-        // Fake success / empty identities = email already registered (Supabase privacy behavior)
-        if (data.user && Array.isArray((data.user as any).identities) && (data.user as any).identities.length === 0) {
-          throw new Error(
-            'An account with this email already exists. Use Sign In, or “Forgot password” / “Email me a sign-in code”.'
-          );
-        }
-
-        if (data.user?.id) {
-          await supabase.from('user_profiles').upsert(
-            {
-              id: data.user.id,
-              first_name: firstName,
-              last_name: lastName,
-              email: cleanEmail,
-              onboarding_completed: false,
-            },
-            { onConflict: 'id' }
-          );
-        }
-
-        // Session returned = Confirm email is OFF (mailer_autoconfirm) — account is already active.
-        // No confirmation email is sent by Supabase in this mode.
-        if (data.session) {
+        if (signupJson.session?.access_token && signupJson.session?.refresh_token) {
+          const { error: sessionErr } = await supabase.auth.setSession({
+            access_token: signupJson.session.access_token,
+            refresh_token: signupJson.session.refresh_token,
+          });
+          if (sessionErr) throw sessionErr;
           setShowOtp(false);
           setMsg(
             'Account created and ready. You are signed in — no confirmation email is required (Confirm email is currently off in project settings).',
@@ -171,8 +152,6 @@ function LoginInner() {
           return;
         }
 
-        // Confirm email ON: signUp already sent the confirmation email.
-        // Do NOT call resend here — it hits "only request this after N seconds" and looks like failure.
         setOtpMode('signup');
         setShowOtp(true);
         setOtpCode('');
@@ -232,7 +211,7 @@ function LoginInner() {
     setLoading(true);
     setMsg('');
     try {
-      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+      const origin = clientAuthOrigin();
       const { error } = await supabase.auth.signInWithOtp({
         email: cleanEmail,
         options: {
@@ -338,7 +317,7 @@ function LoginInner() {
   const forgot = async () => {
     const cleanEmail = email.trim().toLowerCase();
     if (!isValidEmail(cleanEmail)) return setMsg('Enter a valid email address first.');
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+    const origin = clientAuthOrigin();
     const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
       redirectTo: `${origin}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`,
     });
@@ -354,7 +333,7 @@ function LoginInner() {
     setMsg('');
     setLoading(true);
     try {
-      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+      const origin = clientAuthOrigin();
       const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(nextPath || '/')}`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',

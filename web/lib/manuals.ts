@@ -28,6 +28,8 @@ export type ManualViewPayload = {
   contentType?: string | null;
   chapters?: ManualChapter[] | null;
   isIncomplete?: boolean;
+  /** ISO 639-1. English is stored but not badged in the viewer. */
+  language?: string | null;
 };
 
 export type ManualUrlResult = {

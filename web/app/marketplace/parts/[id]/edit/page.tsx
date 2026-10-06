@@ -14,6 +14,7 @@ import {
 } from '@/lib/marketplace/parts';
 import { listManufacturers } from '@/lib/laser-catalog';
 import { toast } from 'sonner';
+import { StorageImage } from '@/components/StorageImage';
 
 const PART_CATEGORIES = [
   'Optical / Handpiece',
@@ -388,7 +389,7 @@ export default function EditPartListingPage() {
               {allPreviews.map((src, i) => (
                 <div key={`${src}-${i}`} className="relative w-20 h-20 rounded-lg overflow-hidden border border-[var(--border)]">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={src} alt="" className="w-full h-full object-cover" />
+                  <StorageImage src={src} alt="" className="w-full h-full object-cover" width={160} />
                   <button
                     type="button"
                     className="absolute top-0.5 right-0.5 bg-black/70 text-white w-5 h-5 rounded-full text-xs"

@@ -15,6 +15,7 @@ import {
 } from '@/lib/marketplace/parts';
 import { toast } from 'sonner';
 import { StripeConnectCard } from '@/components/StripeConnectCard';
+import { StorageImage } from '@/components/StorageImage';
 
 type SellerListing = MarketplaceListingLike & {
   id: string;
@@ -211,7 +212,7 @@ export default function MyListings() {
                   {photos.length > 0 && (
                     <div className="flex gap-3 mt-4">
                       {photos.slice(0, 4).map((url, idx) => (
-                        <img key={`${url}-${idx}`} src={url} alt="listing" className="w-20 h-20 object-cover rounded border" />
+                        <StorageImage key={`${url}-${idx}`} src={url} alt="listing" className="w-20 h-20 object-cover rounded border" width={160} />
                       ))}
                     </div>
                   )}

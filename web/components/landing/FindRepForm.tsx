@@ -137,6 +137,7 @@ export function FindRepForm({
             type="text"
             tabIndex={-1}
             autoComplete="off"
+            aria-hidden="true"
             value={website}
             onChange={(e) => setWebsite(e.target.value)}
           />

@@ -15,7 +15,7 @@ import {
 const here = dirname(fileURLToPath(import.meta.url));
 
 test('TSP Android user agent is detected and auth callback skips in-app handoff', () => {
-  assert.equal(isTspAndroidWebView('Mozilla/5.0 TSPAndroid/1.4'), true);
+  assert.equal(isTspAndroidWebView('Mozilla/5.0 TSPAndroid/0.5.0-beta'), true);
   assert.equal(isTspAndroidWebView('Mozilla/5.0 (Linux; Android 14) Chrome/120'), false);
   assert.equal(ANDROID_AUTH_SCHEME, 'totalservicepro');
   assert.equal(ANDROID_AUTH_HOST, 'auth-callback');

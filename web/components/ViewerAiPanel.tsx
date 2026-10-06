@@ -23,7 +23,7 @@ type Props = {
 };
 
 function defaultUsage(): AiUsage {
-  return { text: { used: 0, limit: 5 }, voice: { used: 0, limit: 1 }, tier: 'free' };
+  return { text: { used: 0, limit: 5 }, voice: { used: 0, limit: 5 }, tier: 'free' };
 }
 
 export function ViewerAiPanel({ manualId, title, storagePath, brand, model }: Props) {

@@ -3,6 +3,14 @@
 -- marketplace_orders records every paid parts checkout, including a held
 -- payout when the money is not a completed transfer.
 --
+-- Sorts after 20261006_000801 so it runs after 20261006_000400 and
+-- 20261006_000401. Those files revoke table UPDATE on organizations and
+-- user_profiles, then re-grant a safe column list, and attach
+-- guard_tenant_owner_cols to marketplace_listings. This file must not
+-- GRANT anything those migrations revoked, and must not GRANT the new
+-- Stripe columns to anon or authenticated. The Connect route and the
+-- Stripe webhook write them with the service role.
+--
 -- Do not apply this file to production from the app. Ship the SQL only.
 
 alter table public.organizations
@@ -16,7 +24,16 @@ create unique index if not exists organizations_stripe_account_id_uidx
   where stripe_account_id is not null;
 
 comment on column public.organizations.stripe_account_id is
-  'Stripe Connect account (acct_...) that receives this organization''s invoice and parts card payments.';
+  'Stripe Connect account that receives this organization''s invoice and parts card payments.';
+
+-- Column revoke only. Do not REVOKE or GRANT table UPDATE on organizations:
+-- a table revoke would wipe the safe column list from 20261006_000400.
+revoke update (
+  stripe_account_id,
+  stripe_charges_enabled,
+  stripe_payouts_enabled,
+  stripe_details_submitted
+) on table public.organizations from public, anon, authenticated;
 
 create table if not exists public.marketplace_orders (
   id uuid primary key default gen_random_uuid(),
@@ -54,5 +71,10 @@ create policy "Sellers read own marketplace orders"
 
 create index if not exists marketplace_orders_seller_idx
   on public.marketplace_orders (seller_organization_id, created_at desc);
+
+-- New table. Sellers may read their own rows. Clients do not insert or update
+-- orders; the webhook does that with the service role.
+revoke insert, update, delete, truncate on table public.marketplace_orders from public, anon, authenticated;
+grant select on table public.marketplace_orders to authenticated;
 
 notify pgrst, 'reload schema';

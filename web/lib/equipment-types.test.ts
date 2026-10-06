@@ -300,8 +300,8 @@ test('god catalog form requires equipment type and does not commit PDFs', () => 
   assert.match(api, /requireGodCaller/);
   assert.match(api, /parseManualCatalogInsert/);
   assert.match(api, /equipment_type/);
-  assert.match(api, /doc_kind: _kind/);
-  assert.match(api, /withoutKind/);
+  assert.match(api, /optionalColumns = \['language', 'doc_kind', 'equipment_type', 'is_incomplete'\]/);
+  assert.match(api, /language: parsed\.row\.language/);
   assert.match(page, /reindex|Index missing PDF text/);
   assert.match(page, /Index this manual/);
   assert.match(page, /Attach to Grok collection/);

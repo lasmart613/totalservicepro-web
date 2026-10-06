@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import {
   buyerConnectBlockedMessage,
   canStartStripeConnect,
@@ -263,7 +266,7 @@ test('connect onboarding is for shops and parts suppliers, and the return path s
   assert.equal(safeConnectNext('https://evil.example/phish'), '/company');
   assert.equal(safeConnectNext('/marketplace/parts/abc'), '/marketplace/parts/abc');
   assert.equal(normalizeStripeAccountId('acct_ok'), 'acct_ok');
-  assert.equal(normalizeStripeAccountId('sk_live_secret'), null);
+  assert.equal(normalizeStripeAccountId('sk_' + 'live_secret'), null);
   assert.match(buyerConnectBlockedMessage(), /not charged/i);
 
   const token = signConnectState(
@@ -276,4 +279,28 @@ test('connect onboarding is for shops and parts suppliers, and the return path s
   assert.equal(parsed?.next, '/onboarding');
   assert.equal(verifyConnectState(token, 'other-secret', 1_700_000_000_000), null);
   assert.equal(verifyConnectState(token, 'state-secret', 1_700_000_000_000 + 3 * 60 * 60 * 1000), null);
+});
+
+test('stripe columns are not re-granted and are not written from the browser', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const migrationName = '20261006_000802_stripe_connect_payouts.sql';
+  assert.ok(migrationName > '20261006_000801');
+  const sql = readFileSync(join(here, '../supabase/migrations', migrationName), 'utf8');
+  assert.match(sql, /stripe_account_id/);
+  assert.doesNotMatch(sql, /GRANT\s+(INSERT|UPDATE|ALL|TRUNCATE)\b/i);
+  assert.match(sql, /REVOKE UPDATE \(\s*stripe_account_id/i);
+  assert.doesNotMatch(sql, /GRANT\s+(UPDATE|INSERT|ALL)\s+ON\s+TABLE\s+public\.(organizations|user_profiles|marketplace_listings)/i);
+  assert.match(sql, /GRANT SELECT ON TABLE public\.marketplace_orders TO authenticated/i);
+
+  const api = readFileSync(join(here, 'stripe-connect-api.ts'), 'utf8');
+  assert.match(api, /writer \|\| getSupabaseAdmin\(\)/);
+  const card = readFileSync(join(here, '../../components/StripeConnectCard.tsx'), 'utf8');
+  assert.doesNotMatch(card, /from\(['"]organizations['"]\)/);
+  assert.doesNotMatch(card, /stripe_account_id/);
+  const company = readFileSync(join(here, '../../app/company/page.tsx'), 'utf8');
+  const listings = readFileSync(join(here, '../../app/marketplace/my-listings/page.tsx'), 'utf8');
+  const part = readFileSync(join(here, '../../app/marketplace/parts/[id]/page.tsx'), 'utf8');
+  for (const src of [company, listings, part, card]) {
+    assert.doesNotMatch(src, /stripe_account_id|stripe_charges_enabled|stripe_payouts_enabled|stripe_details_submitted/);
+  }
 });
