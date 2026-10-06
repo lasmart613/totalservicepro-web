@@ -13,6 +13,7 @@ import {
   canAccessCompanyProfile,
 } from '@/lib/roles';
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
+import { invitationIsOpen } from '@/lib/org-membership';
 import { useT } from '@/lib/fa/locale';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
 import { displayModelName } from '@/lib/model-display';
@@ -271,7 +272,7 @@ function CompanyProfile() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) {
-        // Sync links first, then list
+        // Read-only status, then the roster. Sync does not add members.
         await fetch('/api/team/sync', {
           method: 'POST',
           headers: {
@@ -347,7 +348,7 @@ function CompanyProfile() {
     try {
       const { data: invs } = await supabase
         .from('engineer_invitations')
-        .select('id, email, role, first_name, last_name, created_at, accepted')
+        .select('id, email, role, first_name, last_name, created_at, expires_at, accepted')
         .eq('organization_id', orgId)
         .eq('accepted', false)
         .order('created_at', { ascending: false });
@@ -1181,7 +1182,7 @@ function CompanyProfile() {
                             {inv.created_at
                               ? ` · invited ${new Date(inv.created_at).toLocaleDateString()}`
                               : ''}
-                            {inv.accepted ? ' · marked accepted' : ' · waiting'}
+                            {inv.accepted ? ' · marked accepted' : invitationIsOpen(inv) ? ' · waiting' : ' · expired'}
                           </div>
                         </div>
                         <button
@@ -1220,7 +1221,9 @@ function CompanyProfile() {
                               ? 'on team'
                               : inv.accepted
                                 ? 'accepted'
-                                : 'pending'}
+                                : invitationIsOpen(inv)
+                                  ? 'pending'
+                                  : 'expired'}
                             {' · '}
                             {inv.created_at
                               ? new Date(inv.created_at).toLocaleDateString()
