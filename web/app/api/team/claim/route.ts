@@ -4,9 +4,9 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { ensureTeamMemberProfile } from '@/lib/team-profile';
 import {
   decideClaim,
-  invitationIsOpen,
   inviteMustNotLeaveHome,
 } from '@/lib/org-membership';
+import { teamInviteJoinGate } from '@/lib/team-invite-guard';
 import { authorizeInviteAccept } from '@/lib/tenant-lockdown';
 import {
   deleteMembership,
@@ -78,6 +78,7 @@ export async function POST(req: NextRequest) {
     const admin = getSupabaseAdmin();
     const memberships = await listMembershipsForUser(admin, user.id);
 
+    const emailConfirmedAt = user.email_confirmed_at ?? null;
     let inv: any = null;
     if (body.inviteId) {
       const { data: byId, error: byIdError } = await admin
@@ -88,8 +89,7 @@ export async function POST(req: NextRequest) {
       if (byIdError) {
         return NextResponse.json({ ok: false, error: 'Could not look up the team invite.' }, { status: 500 });
       }
-      const invEmail = String(byId?.email || '').toLowerCase().trim();
-      if (byId && (!invEmail || invEmail === email)) inv = byId;
+      inv = byId;
     }
     if (!inv) {
       const { data: openInv, error: openError } = await admin
@@ -116,14 +116,35 @@ export async function POST(req: NextRequest) {
       if (anyError) {
         return NextResponse.json({ ok: false, error: 'Could not look up the team invite.' }, { status: 500 });
       }
-      inv = anyInv;
+      // Accepted or expired history must not reattach someone who already left.
+      if (anyInv) {
+        const historical = teamInviteJoinGate({
+          accepted: anyInv.accepted,
+          expires_at: anyInv.expires_at,
+          created_at: anyInv.created_at,
+          inviteEmail: anyInv.email,
+          callerEmail: email,
+          emailConfirmedAt,
+        });
+        if (historical.ok) inv = anyInv;
+      }
     }
 
-    if (inv?.organization_id && inv.accepted !== true && !invitationIsOpen(inv)) {
-      if (body.inviteId) {
-        return NextResponse.json({ ok: false, error: 'This invitation has expired.' }, { status: 410 });
+    if (inv?.organization_id) {
+      const gate = teamInviteJoinGate({
+        accepted: inv.accepted,
+        expires_at: inv.expires_at,
+        created_at: inv.created_at,
+        inviteEmail: inv.email,
+        callerEmail: email,
+        emailConfirmedAt,
+      });
+      if (!gate.ok) {
+        if (body.inviteId || gate.code === 'unconfirmed') {
+          return NextResponse.json({ ok: false, error: gate.error }, { status: gate.status });
+        }
+        inv = null;
       }
-      inv = null;
     }
 
     if (!inv?.organization_id) {
