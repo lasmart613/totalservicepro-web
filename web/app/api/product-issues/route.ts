@@ -12,6 +12,7 @@ import {
   productIssueText,
   productIssuesFromAddress,
   PRODUCT_ISSUE_CONFIRM_REPLY_TO,
+  PRODUCT_ISSUE_LATER_MESSAGE,
 } from '@/lib/product-issues';
 
 export const dynamic = 'force-dynamic';
@@ -107,15 +108,20 @@ async function confirmationAlreadySent(opts: {
   if (!hasServiceRole()) return false;
   try {
     const admin = getSupabaseAdmin();
-    const { data } = await admin
+    const { data, error } = await admin
       .from('product_issue_reports')
       .select('id')
       .eq('reporter_email', opts.email)
       .eq('what_happened', opts.whatHappened)
       .eq('confirmation_sent', true)
       .limit(1);
+    if (error) {
+      console.error('[product-issues] confirmation lookup', error.message);
+      return false;
+    }
     return Array.isArray(data) && data.length > 0;
-  } catch {
+  } catch (err) {
+    console.error('[product-issues] confirmation lookup', err);
     return false;
   }
 }
@@ -197,17 +203,8 @@ export async function POST(req: NextRequest) {
         if (!error) {
           stored = true;
           storedId = data?.id ? String(data.id) : null;
-        } else if (!/schema cache|does not exist|relation|confirmation_sent/i.test(error.message || '')) {
-          console.error('[product-issues] persist', error.message);
         } else {
-          const retry = await admin.from('product_issue_reports').insert({
-            what_happened: parsed.report.whatHappened,
-            page_url: parsed.report.pageUrl || null,
-            user_agent: parsed.report.userAgent || null,
-            reporter_user_id: caller.userId || null,
-            reporter_email: plan.reporterEmail || null,
-          });
-          if (!retry.error) stored = true;
+          console.error('[product-issues] persist', error.message);
         }
       } catch (e) {
         console.error('[product-issues] persist', e);
@@ -237,13 +234,7 @@ export async function POST(req: NextRequest) {
         what: parsed.report.whatHappened.slice(0, 200),
         inboxError: delivered.error,
       });
-      return NextResponse.json(
-        {
-          error:
-            'Could not reach the product team inbox yet. Try again, or write contact@medicalrepairnetwork.com.',
-        },
-        { status: 503 }
-      );
+      return NextResponse.json({ error: PRODUCT_ISSUE_LATER_MESSAGE }, { status: 503 });
     }
 
     let confirmed = false;

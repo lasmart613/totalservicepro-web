@@ -13,7 +13,6 @@ import {
   PART_UNITS,
 } from '@/components/AddPartModal';
 import {
-  CATALOG_SAVE_ERROR,
   PART_ARCHIVE_ERROR,
   STOCK_SAVE_ERROR,
   VENDOR_PREFER_ERROR,
@@ -22,6 +21,8 @@ import {
   changedRowCount,
   postPartsJson,
 } from '@/lib/part-catalog-manage';
+import { partCatalogSaveMessage, partsCatalogManufacturerLabel, partsCatalogWritePayload } from '@/lib/parts-catalog-columns';
+import { StorageImage } from '@/components/StorageImage';
 
 type PartRow = Record<string, any>;
 type VendorRow = {
@@ -186,13 +187,10 @@ export default function PartDetailPage() {
       } = await supabase.auth.getSession();
       const token = session?.access_token;
       if (!token) throw new Error('Sign in required');
-      const result = await postPartsJson('/api/parts/catalog', token, {
-        action: 'edit',
-        id: part.id,
+      const payload = partsCatalogWritePayload({
         name: String(form.name || '').trim(),
         part_number: String(form.part_number || '').trim(),
-        brand: String(form.brand || '').trim() || null,
-        manufacturer: String(form.brand || '').trim() || null,
+        brand: String(form.brand || form.manufacturer || '').trim() || null,
         description: String(form.description || '').trim() || null,
         category: String(form.category || '').trim() || null,
         unit_of_measure: String(form.unit_of_measure || '').trim() || null,
@@ -203,9 +201,15 @@ export default function PartDetailPage() {
         quantity_on_hand: stockQty(form.quantity_on_hand),
         in_stock: !!form.in_stock || stockQty(form.quantity_on_hand) > 0,
         image_url: images[0] || null,
-        image_urls: images.length ? images : null,
+        updated_at: new Date().toISOString(),
       });
-      if (!result.ok) throw new Error(result.error || CATALOG_SAVE_ERROR);
+      delete payload.created_by;
+      const result = await postPartsJson('/api/parts/catalog', token, {
+        action: 'edit',
+        id: part.id,
+        ...payload,
+      });
+      if (!result.ok) throw new Error(result.error || 'Save failed');
       toast.success('Part updated.');
       setEditing(false);
       setImageFiles([]);
@@ -213,8 +217,9 @@ export default function PartDetailPage() {
       setPreviews([]);
       await load();
     } catch (e: unknown) {
-      console.error('[parts-catalog] save', e);
-      toast.error(e instanceof Error && e.message === 'Sign in required' ? e.message : CATALOG_SAVE_ERROR);
+      const raw = e instanceof Error ? e.message : 'Save failed';
+      console.error('[parts-catalog] save', raw);
+      toast.error(partCatalogSaveMessage(raw));
     } finally {
       setSaving(false);
     }
@@ -337,7 +342,7 @@ export default function PartDetailPage() {
             {part.is_active === false && <p className="text-sm text-[var(--text3)]">Archived</p>}
             <p className="text-[var(--text3)]">
               {part.part_number}
-              {part.brand ? ` • ${part.brand}` : ''}
+              {partsCatalogManufacturerLabel(part) ? ` • ${partsCatalogManufacturerLabel(part)}` : ''}
               {part.category ? ` • ${part.category}` : ''}
               {part.in_stock || stockQty(part.quantity_on_hand) > 0
                 ? ` • In stock${stockQty(part.quantity_on_hand) > 0 ? ` (${stockQty(part.quantity_on_hand)})` : ''}`
@@ -385,7 +390,7 @@ export default function PartDetailPage() {
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-8">
           <div className="card overflow-hidden hover:transform-none p-0">
             {photos[hero] || previews[0] ? (
-              <img src={previews[0] || photos[hero]} alt={part.name} className="w-full h-72 object-contain bg-[var(--surface3)]" />
+              <StorageImage src={previews[0] || photos[hero]} alt={part.name || ''} className="w-full h-72 object-contain bg-[var(--surface3)]" width={960} loading="eager" />
             ) : (
               <div className="w-full h-72 bg-[var(--surface3)] flex items-center justify-center text-5xl font-extrabold text-[var(--gold)]/40">
                 {(part.brand || part.name || 'P').toString().charAt(0).toUpperCase()}
@@ -395,9 +400,10 @@ export default function PartDetailPage() {
               <div className="flex gap-2 p-3 overflow-x-auto">
                 {photos.map((src, i) => (
                   <button key={src} type="button" onClick={() => setHero(i)} className="shrink-0">
-                    <img
+                    <StorageImage
                       src={src}
                       alt=""
+                      width={160}
                       className={`h-14 w-14 object-cover rounded border ${i === hero ? 'border-[var(--gold)]' : 'border-[var(--border)]'}`}
                     />
                   </button>

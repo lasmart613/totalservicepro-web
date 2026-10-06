@@ -1756,7 +1756,13 @@ serve(async (req) => {
     const db = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '')
     const body = await req.json()
     const uid = user.id
-    const { data: sub } = await db.from('subscriptions').select('tier,status,expires_at').eq('user_id', uid).single()
+    // .single() is HTTP 406 when the user has no subscriptions row. No row is the free tier.
+    const { data: sub, error: subError } = await db
+      .from('subscriptions')
+      .select('tier,status,expires_at')
+      .eq('user_id', uid)
+      .maybeSingle()
+    if (subError) console.error('[grok-assistant] subscription', subError.message)
     const tier = sub?.status === 'active' && sub?.tier ? sub.tier : 'free'
     const effectiveTier = sub?.expires_at && new Date(sub.expires_at) < new Date() ? 'free' : tier
     const limits = LIMITS[effectiveTier] || LIMITS.free

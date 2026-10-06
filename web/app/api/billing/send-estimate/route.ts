@@ -12,6 +12,7 @@ import { publicSiteOrigin, wrapCustomerFacingDocumentEmail } from '@/lib/custome
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 import { getCompanyTheme } from '@/lib/company-theme';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
+import { resolveNumberingTimeZone } from '@/lib/org-timezone';
 import {
   finalizeEstimateDelivery,
   isEstimateMarkedSent,
@@ -32,9 +33,10 @@ import {
   senderCompanyFromOrg,
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
+import { rejectedEstimateChangeRefusal } from '@/lib/billing/estimate-display';
 
 const EST_SELECTS = [
-  'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action_token, services, issues, created_at',
+  'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action, customer_action_token, services, issues, created_at',
   'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action_token',
   'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status',
 ];
@@ -102,6 +104,10 @@ export async function POST(req: NextRequest) {
     if (!documentOwnedByOrganization(est, callerOrgId)) {
       return respond({ error: 'This estimate belongs to another organization.' }, 403);
     }
+    const rejected = rejectedEstimateChangeRefusal(est);
+    if (rejected) {
+      return respond({ ok: false, emailSent: false, error: rejected.error }, rejected.status);
+    }
 
     let crm: { email: string; source: 'crm_org' | 'crm_contact' | 'form' | 'none' } | null = null;
     const custOrgId = documentCustomerOrgId(est, 'estimate_data');
@@ -161,6 +167,7 @@ export async function POST(req: NextRequest) {
 
     const subject = ownedDocumentSubject('estimate', est.estimate_number, company.company_name);
     const moneyPrefs = callerOrgId != null ? await loadOrgMoneyPrefs(supabase, callerOrgId) : null;
+    const zone = await resolveNumberingTimeZone(supabase, callerOrgId, { allowBrowser: false });
     const actionUrl = estimateActionUrl(actionToken);
     const mailInput = {
       row: est,
@@ -168,6 +175,7 @@ export async function POST(req: NextRequest) {
       theme,
       actionUrl,
       moneyPrefs,
+      timeZone: zone.timeZone,
     };
     const html = ensureEstimateActionCtas(buildOwnedEstimateMessage(mailInput), actionUrl);
     const origin = publicSiteOrigin(req);

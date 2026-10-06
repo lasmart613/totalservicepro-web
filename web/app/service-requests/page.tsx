@@ -8,6 +8,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { canBidMarketplace, isOwnerish, isPro, isServiceCompany } from '@/lib/roles';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL, OTHER_LASER } from '@/lib/laser-catalog';
+import { displayModelName } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { ShareButton } from '@/components/ShareButton';
 import { serviceRequestShareText } from '@/lib/share';
@@ -119,13 +120,21 @@ function ServiceRequestsInner() {
     setOrgState(org?.state || '');
 
     if (oId) {
-      let eqList: Laser[] = [];
-      const { data: eq } = await supabase
+      const withRoom = await supabase
         .from('equipment')
         .select('id, manufacturer, model, serial_number, room')
         .eq('customer_organization_id', oId)
         .order('manufacturer');
-      eqList = (eq || []) as Laser[];
+      let eqList: Laser[] = (withRoom.data || []) as Laser[];
+      if (withRoom.error && /room|column|schema cache/i.test(withRoom.error.message || '')) {
+        console.error('[service-requests] equipment.room', withRoom.error.message);
+        const withoutRoom = await supabase
+          .from('equipment')
+          .select('id, manufacturer, model, serial_number')
+          .eq('customer_organization_id', oId)
+          .order('manufacturer');
+        eqList = (withoutRoom.data || []) as Laser[];
+      }
       setLasers(eqList);
     }
 
@@ -193,7 +202,7 @@ function ServiceRequestsInner() {
     const L = lasers.find((x) => String(x.id) === String(id));
     if (!L) return;
     setDesc(
-      `Service needed on ${L.manufacturer || ''} ${L.model || ''}` +
+      `Service needed on ${L.manufacturer || ''} ${displayModelName(L.model || '')}` +
         (L.serial_number ? ` (SN ${L.serial_number})` : '') +
         (L.room ? ` in ${L.room}` : '') +
         '.'
@@ -404,7 +413,7 @@ function ServiceRequestsInner() {
                   <div>
                     <h3 className="font-bold text-lg text-[var(--gold)]">{r.title || r.service_type || 'Service request'}</h3>
                     <p className="text-xs text-[var(--text3)] mt-1">
-                      {[r.manufacturer, r.model].filter(Boolean).join(' ')}
+                      {[r.manufacturer, displayModelName(r.model)].filter(Boolean).join(' ')}
                       {r.serial_number ? ` · SN ${r.serial_number}` : ''}
                       {(r.city || r.state || r.location)
                         ? ` · ${[r.city, r.state].filter(Boolean).join(', ') || r.location}`
@@ -486,7 +495,7 @@ function ServiceRequestsInner() {
                 >
                   {lasers.map((L) => (
                     <option key={L.id} value={String(L.id)}>
-                      {[L.manufacturer, L.model].filter(Boolean).join(' ')}
+                      {[L.manufacturer, displayModelName(L.model)].filter(Boolean).join(' ')}
                       {L.serial_number ? ` · SN ${L.serial_number}` : ''}
                       {L.room ? ` · ${L.room}` : ''}
                     </option>
@@ -532,7 +541,7 @@ function ServiceRequestsInner() {
                         <select className="input" value={model} onChange={(e) => setModel(e.target.value)} disabled={!mfr}>
                           <option value="">Select model…</option>
                           {modelOptions.map((m) => (
-                            <option key={m} value={m}>{m}</option>
+                            <option key={m} value={m}>{displayModelName(m)}</option>
                           ))}
                           <option value={OTHER_MODEL}>Other / not listed…</option>
                         </select>

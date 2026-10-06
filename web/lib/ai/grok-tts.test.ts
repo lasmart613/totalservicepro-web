@@ -9,6 +9,7 @@ import {
   ALLOWED_VOICE_IDS,
   DEFAULT_LANGUAGE,
   DEFAULT_VOICE_ID,
+  filterListedVoices,
   effectiveTier,
   MAX_TTS_CHARS,
   parseTtsBody,
@@ -43,7 +44,45 @@ test('expired or inactive subscriptions fall back to the free voice tier', () =>
   assert.equal(effectiveTier(null), 'free');
 });
 
-test('parse accepts the mobile body and applies sage / en defaults', () => {
+const DOCUMENTED_XAI_TTS_VOICES = [
+  'carina',
+  'zagan',
+  'helix',
+  'orion',
+  'luna',
+  'iris',
+  'altair',
+  'zenith',
+  'perseus',
+  'helios',
+  'lux',
+  'kepler',
+  'rigel',
+  'cosmo',
+  'celeste',
+  'ursa',
+  'sirius',
+  'lumen',
+  'castor',
+  'naksh',
+  'atlas',
+  'aurora',
+  'liora',
+  'ara',
+  'eve',
+  'leo',
+  'rex',
+  'sal',
+];
+
+test('default voice is eve and every allowed voice matches the xAI docs list', () => {
+  assert.equal(DEFAULT_VOICE_ID, 'eve');
+  assert.ok(ALLOWED_VOICE_IDS.includes(DEFAULT_VOICE_ID));
+  assert.deepEqual([...ALLOWED_VOICE_IDS], DOCUMENTED_XAI_TTS_VOICES);
+  assert.equal(DOCUMENTED_XAI_TTS_VOICES.includes('sage' as (typeof DOCUMENTED_XAI_TTS_VOICES)[number]), false);
+});
+
+test('parse accepts the mobile body and applies eve / en defaults', () => {
   const ok = parseTtsBody({ text: 'Check the simmer pot.', voice_id: 'ara', language: 'en' });
   assert.equal(ok.ok, true);
   if (!ok.ok) return;
@@ -56,9 +95,9 @@ test('parse accepts the mobile body and applies sage / en defaults', () => {
   if (!defaults.ok) return;
   assert.equal(defaults.value.voiceId, DEFAULT_VOICE_ID);
   assert.equal(defaults.value.language, DEFAULT_LANGUAGE);
-  assert.equal(DEFAULT_VOICE_ID, 'sage');
+  assert.equal(DEFAULT_VOICE_ID, 'eve');
   assert.equal(DEFAULT_LANGUAGE, 'en');
-  assert.deepEqual([...ALLOWED_VOICE_IDS], ['eve', 'ara', 'rex', 'sal', 'leo', 'sage']);
+  assert.deepEqual([...ALLOWED_VOICE_IDS], DOCUMENTED_XAI_TTS_VOICES);
 
   for (const id of ALLOWED_VOICE_IDS) {
     const parsed = parseTtsBody({ text: 'Hello', voice_id: id.toUpperCase() });
@@ -99,6 +138,12 @@ test('rejects missing text, over-long text, and bad voice or language', () => {
   const cap = parseTtsBody({ text: 'a'.repeat(MAX_TTS_CHARS) });
   assert.equal(cap.ok, true);
 
+  const sage = parseTtsBody({ text: 'Hi', voice_id: 'sage' });
+  assert.equal(sage.ok, false);
+  if (sage.ok) return;
+  assert.equal(sage.error.status, 400);
+  assert.equal(sage.error.body.error, 'invalid_voice_id');
+
   const voice = parseTtsBody({ text: 'Hi', voice_id: 'nova' });
   assert.equal(voice.ok, false);
   if (voice.ok) return;
@@ -112,6 +157,21 @@ test('rejects missing text, over-long text, and bad voice or language', () => {
 
   const junk = parseTtsBody(null);
   assert.equal(junk.ok, false);
+});
+
+test('voice list drops sage and keeps documented voices', () => {
+  const listed = filterListedVoices({
+    voices: [
+      { voice_id: 'sage', name: 'Sage' },
+      { voice_id: 'Eve', name: 'Eve' },
+      { voice_id: 'rex', name: 'Rex' },
+      { name: 'missing id' },
+    ],
+  });
+  assert.deepEqual(
+    (listed.voices as Array<{ voice_id: string }>).map((row) => row.voice_id),
+    ['Eve', 'rex']
+  );
 });
 
 test('redacts the xAI key before any upstream detail is returned', () => {

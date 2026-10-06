@@ -6,6 +6,7 @@
 
 import type { CompanyTheme } from '../company-theme.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
+import { DEFAULT_ORG_TIMEZONE, formatDateInTimeZone } from '../org-timezone.ts';
 import {
   buildEstimateHtml,
   buildEstimatePlainText,
@@ -13,6 +14,10 @@ import {
   type DocCompany,
   type EstimateHtmlInput,
 } from './doc-html.ts';
+import {
+  isEstimateDepositEnabled,
+  printableEstimateDeposit,
+} from './estimate-deposit.ts';
 import { resolveInvoiceCollectable } from './invoice-collectable.ts';
 import { parseJsonField, SERVICE_TYPE_LABELS } from './save-helpers.ts';
 import { buildServiceReportPrintHTML } from '../service-report-print.ts';
@@ -197,6 +202,7 @@ export function buildOwnedInvoiceMessage(input: {
   paymentUrl?: string | null;
   moneyPrefs?: OrgMoneyPrefs | null;
   locale?: string | null;
+  timeZone?: string | null;
 }): string {
   const data = parseJsonField(input.row.invoice_data);
   const lines = Array.isArray(data.line_items) ? data.line_items : [];
@@ -247,6 +253,7 @@ export function buildOwnedInvoiceMessage(input: {
     themeScope: 'email',
     moneyPrefs: input.moneyPrefs,
     locale: input.locale,
+    timeZone: input.timeZone,
   });
 }
 
@@ -257,6 +264,7 @@ export function buildOwnedEstimateMessage(input: {
   actionUrl?: string | null;
   moneyPrefs?: OrgMoneyPrefs | null;
   locale?: string | null;
+  timeZone?: string | null;
 }): string {
   return buildEstimateHtml(ownedEstimateHtmlInput(input));
 }
@@ -268,6 +276,7 @@ export function buildOwnedEstimatePlainText(input: {
   actionUrl?: string | null;
   moneyPrefs?: OrgMoneyPrefs | null;
   locale?: string | null;
+  timeZone?: string | null;
 }): string {
   return buildEstimatePlainText(ownedEstimateHtmlInput(input));
 }
@@ -279,6 +288,7 @@ function ownedEstimateHtmlInput(input: {
   actionUrl?: string | null;
   moneyPrefs?: OrgMoneyPrefs | null;
   locale?: string | null;
+  timeZone?: string | null;
 }): EstimateHtmlInput {
   const data = parseJsonField(input.row.estimate_data);
   const servicesRaw = Array.isArray(input.row.services)
@@ -289,6 +299,9 @@ function ownedEstimateHtmlInput(input: {
   const services = servicesRaw.map((item: unknown) => SERVICE_TYPE_LABELS[String(item)] || String(item));
   const pricing =
     data.pricing && typeof data.pricing === 'object' ? (data.pricing as Record<string, unknown>) : {};
+  const jobTotal = num(input.row.total ?? data.total);
+  const depositOn = isEstimateDepositEnabled(data);
+  const depositAmount = printableEstimateDeposit(data);
   return {
     company: input.company,
     customer: {
@@ -302,7 +315,7 @@ function ownedEstimateHtmlInput(input: {
       email: String(data.custEmail || ''),
     },
     estNumber: String(input.row.estimate_number || data.estimate_number || data.estNumber || ''),
-    dateStr: formatDocDate(input.row.created_at),
+    dateStr: formatDocDate(input.row.created_at, input.timeZone),
     manufacturer: String(data.manufacturer || ''),
     model: String(data.model || ''),
     serial: String(data.serial || ''),
@@ -329,9 +342,10 @@ function ownedEstimateHtmlInput(input: {
     subtotal: num(data.subtotal),
     taxRate: num(pricing.taxRate),
     tax: num(data.tax),
-    total: num(input.row.total ?? data.total),
-    deposit: num(data.deposit),
-    balanceDue: num(data.balanceDue),
+    total: jobTotal,
+    deposit: depositAmount,
+    depositRequired: depositOn,
+    balanceDue: depositOn ? num(data.balanceDue) : jobTotal,
     validDays: 30,
     actionUrl: input.actionUrl || null,
     theme: input.theme,
@@ -527,9 +541,7 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function formatDocDate(value: unknown): string {
-  if (!value) return new Date().toLocaleDateString();
-  const parsed = new Date(String(value));
-  if (Number.isNaN(parsed.getTime())) return String(value);
-  return parsed.toLocaleDateString();
+function formatDocDate(value: unknown, timeZone?: string | null): string {
+  const zone = String(timeZone || '').trim() || DEFAULT_ORG_TIMEZONE;
+  return formatDateInTimeZone(value == null || value === '' ? new Date() : String(value), zone);
 }

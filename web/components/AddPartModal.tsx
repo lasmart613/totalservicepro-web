@@ -3,19 +3,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import {
+  PARTS_CATALOG_CATEGORIES,
+  partCatalogSaveMessage,
+  partsCatalogWritePayload,
+} from '@/lib/parts-catalog-columns';
 import { listManufacturers } from '@/lib/laser-catalog';
 import { VENDOR_ADD_ERROR, postPartsJson } from '@/lib/part-catalog-manage';
 
-export const PART_CATEGORIES = [
-  'Optical Components',
-  'Handpiece Components',
-  'Cooling System',
-  'Electronics/Boards',
-  'Power Supplies',
-  'Mechanical/Frame',
-  'Consumables',
-  'Other',
-] as const;
+export const PART_CATEGORIES = PARTS_CATALOG_CATEGORIES;
 
 export const PART_UNITS = ['Each', 'Pair', 'Set', 'Box', 'Foot', 'Roll'] as const;
 
@@ -239,22 +235,20 @@ export function AddPartModal({ onClose, onCreated }: Props) {
         .map((m) => m.trim())
         .filter(Boolean);
 
-      const payload: Record<string, unknown> = {
+      const payload: Record<string, unknown> = partsCatalogWritePayload({
         part_number: pn,
         brand: resolvedBrand,
-        manufacturer: resolvedBrand,
         name: partName,
         description: description.trim() || partName,
         category,
         unit_of_measure: unit,
         compatible_models: compatible.length ? compatible : null,
-        is_consumable: consumable || category === 'Consumables',
+        is_consumable: consumable,
         is_active: true,
         created_by: user.id,
         image_url: imageUrls[0] || null,
-        image_urls: imageUrls.length ? imageUrls : null,
         sale_price: salePrice.trim() ? Number(salePrice) : null,
-      };
+      });
 
       let created: { id: number | string } | null = null;
       let lastError: { message?: string } | null = null;
@@ -307,7 +301,9 @@ export function AddPartModal({ onClose, onCreated }: Props) {
       onCreated(created.id);
       onClose();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Failed to add part');
+      const raw = e instanceof Error ? e.message : 'Failed to add part';
+      console.error('[parts-catalog] save', raw);
+      toast.error(partCatalogSaveMessage(raw));
     } finally {
       setSaving(false);
     }

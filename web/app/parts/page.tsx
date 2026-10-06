@@ -6,13 +6,18 @@ import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { AddPartModal } from '@/components/AddPartModal';
+import { StorageImage } from '@/components/StorageImage';
+import { partsCatalogManufacturerLabel } from '@/lib/parts-catalog-columns';
 import { chunkIds } from '@/lib/supabase/paginate';
 
 type CatalogPart = {
   id: number | string;
   name?: string | null;
   part_number?: string | null;
+  /** Live column. */
   brand?: string | null;
+  /** UI alias of brand. Not a parts_catalog column. */
+  manufacturer?: string | null;
   description?: string | null;
   image_url?: string | null;
   compatible_models?: string[] | null;
@@ -63,7 +68,10 @@ export default function PartsCatalog() {
         .or('is_active.eq.true,is_active.is.null')
         .order('name', { ascending: true });
       if (error) throw error;
-      const list = (data || []) as CatalogPart[];
+      const list = ((data || []) as CatalogPart[]).map((part) => ({
+        ...part,
+        manufacturer: partsCatalogManufacturerLabel(part),
+      }));
       setParts(list);
       const ids = list.map((p) => p.id).filter(Boolean);
       if (ids.length) {
@@ -189,7 +197,7 @@ export default function PartsCatalog() {
                   className="card overflow-hidden hover:border-[var(--gold)] transition-colors hover:transform-none block"
                 >
                   {img ? (
-                    <img src={img} alt={part.name || ''} className="w-full h-48 object-cover" />
+                    <StorageImage src={img} alt={part.name || ''} className="w-full h-48 object-cover" width={480} />
                   ) : (
                     <div className="w-full h-48 bg-[var(--surface3)] flex items-center justify-center">
                       <span className="text-4xl font-extrabold text-[var(--gold)]/40">

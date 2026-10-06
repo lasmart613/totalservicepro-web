@@ -30,6 +30,8 @@ import { GuestAwarePrice } from '@/components/marketplace/GuestAwarePrice';
 import { useSignedIn } from '@/lib/use-signed-in';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
 import { toast } from 'sonner';
+import { displayModelName } from '@/lib/model-display';
+import { StorageImage } from '@/components/StorageImage';
 
 export default function PartsMarketplace() {
   const [listings, setListings] = useState<MarketplaceListingLike[]>([]);
@@ -303,7 +305,7 @@ export default function PartsMarketplace() {
                 <div key={l.id} className="card p-6 text-left">
                   {featured && (
                     <Link href={href}>
-                      <img src={featured} alt={l.title || 'Part'} className="w-full h-40 object-cover rounded mb-3 cursor-pointer" />
+                      <StorageImage src={featured} alt={l.title || 'Part'} className="w-full h-40 object-cover rounded mb-3 cursor-pointer" width={480} />
                     </Link>
                   )}
                   <Link href={href}>
@@ -314,7 +316,7 @@ export default function PartsMarketplace() {
                   )}
                   <ListingDescriptionSnippet text={l.description} className="mb-1" />
                   <p className="text-sm text-[var(--text3)] mb-2 fa-ltr">{t('PN:')} {l.part_number || l.serial_number || t('N/A')}</p>
-                  <p className="text-sm mb-1">{l.manufacturer} {l.model} • {l.condition}</p>
+                  <p className="text-sm mb-1">{l.manufacturer} {displayModelName(l.model)} • {l.condition}</p>
                   <GuestAwarePrice signedIn={signedIn} priceLabel={formatListingPrice(l)} className="font-semibold text-[var(--gold)] mb-1" />
                   {avail.soldOut ? (
                     <div className="text-xs text-red-400 mb-3">{t('Sold out')}</div>

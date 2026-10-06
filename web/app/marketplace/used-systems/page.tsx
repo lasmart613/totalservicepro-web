@@ -10,7 +10,9 @@ import { listingHref } from '@/lib/marketplace/guest';
 import { formatListingPrice } from '@/lib/marketplace/parts';
 import { useSignedIn } from '@/lib/use-signed-in';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
+import { displayModelName } from '@/lib/model-display';
 import { toast } from 'sonner';
+import { StorageImage } from '@/components/StorageImage';
 
 export default function UsedSystemsMarketplace() {
   const [listings, setListings] = useState<any[]>([]);
@@ -98,7 +100,7 @@ export default function UsedSystemsMarketplace() {
                 <div key={l.id} className="card p-6">
                   {featured && (
                     <Link href={href}>
-                      <img src={featured} alt="Featured" className="w-full h-32 object-cover rounded mb-3 cursor-pointer" />
+                      <StorageImage src={featured} alt="Featured" className="w-full h-32 object-cover rounded mb-3 cursor-pointer" width={480} />
                     </Link>
                   )}
                   <Link href={href}>
@@ -106,7 +108,7 @@ export default function UsedSystemsMarketplace() {
                   </Link>
                   <p className="text-sm text-[var(--text3)] mb-1">{l.description}</p>
                   <p className="text-sm text-[var(--text3)] mb-2 fa-ltr">{t('S/N:')} {l.serial_number || l.part_number || t('N/A')}</p>
-                  <p className="text-sm mb-1">{l.manufacturer} {l.model} • {l.condition} {l.year_manufactured ? '• ' + l.year_manufactured : ''}</p>
+                  <p className="text-sm mb-1">{l.manufacturer} {displayModelName(l.model)} • {l.condition} {l.year_manufactured ? '• ' + l.year_manufactured : ''}</p>
                   <GuestAwarePrice signedIn={signedIn} priceLabel={formatListingPrice(l)} className="font-semibold text-[var(--gold)] mb-2" />
                   {signedIn ? (
                   <button 

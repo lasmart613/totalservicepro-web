@@ -7,9 +7,10 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { displayModelName, displayModelText } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { loadServiceHistoryForLaser } from '@/lib/equipment-ensure';
-import { equipmentPhotoDisplayUrl } from '@/lib/org-scoped-read';
+import { StorageImage } from '@/components/StorageImage';
 
 type Laser = {
   id: number;
@@ -84,8 +85,7 @@ export default function LaserProfilePage() {
       setLoading(false);
       return;
     }
-    const photo = await equipmentPhotoDisplayUrl(supabase, (data as Laser).photo_url);
-    setLaser({ ...(data as Laser), photo_url: photo });
+    setLaser(data as Laser);
     await loadHistory(data as Laser);
     setLoading(false);
   }
@@ -108,7 +108,7 @@ export default function LaserProfilePage() {
           title:
             (r.report_number ? `${r.report_number} · ` : '') + (r.service_type || 'Service report'),
           date: r.date_out || r.created_at,
-          detail: [r.equipment_name || r.model_type || '', r.service_engineer ? `FSE: ${r.service_engineer}` : '']
+          detail: [displayModelText(r.equipment_name || r.model_type || ''), r.service_engineer ? `FSE: ${r.service_engineer}` : '']
             .filter(Boolean)
             .join(' · '),
         });
@@ -288,15 +288,14 @@ export default function LaserProfilePage() {
 
         <div className="mt-4 rounded-2xl overflow-hidden border border-[var(--border2)] bg-[var(--surface3)] h-52 flex items-center justify-center">
           {laser.photo_url ? (
-            // eslint-disable-next-line @next/next/no-img-element
-            <img src={laser.photo_url} alt="" className="w-full h-full object-cover" />
+            <StorageImage src={laser.photo_url} alt="" width={960} loading="eager" className="w-full h-full object-cover" />
           ) : (
             <span className="text-5xl opacity-50">📷</span>
           )}
         </div>
 
         <h1 className="text-3xl font-extrabold text-[var(--gold)] mt-4">
-          {laser.manufacturer} {laser.model}
+          {laser.manufacturer} {displayModelName(laser.model)}
         </h1>
         <p className="text-sm text-[var(--text3)] mt-1">
           {laser.serial_number ? `SN ${laser.serial_number}` : 'No serial on file'}
@@ -403,7 +402,7 @@ export default function LaserProfilePage() {
                 <select className="input" value={model} onChange={(e) => setModel(e.target.value)} disabled={!mfr}>
                   <option value="">Select model…</option>
                   {modelOptions.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m} value={m}>{displayModelName(m)}</option>
                   ))}
                   <option value={OTHER_MODEL}>Other / not listed…</option>
                 </select>

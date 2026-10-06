@@ -16,7 +16,9 @@ import {
 } from '@/lib/marketplace/parts';
 import { useSignedIn } from '@/lib/use-signed-in';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
+import { displayModelName } from '@/lib/model-display';
 import { toast } from 'sonner';
+import { StorageImage } from '@/components/StorageImage';
 
 
 export default function ConsumablesMarketplace() {
@@ -114,7 +116,7 @@ export default function ConsumablesMarketplace() {
                 <div key={l.id} className="card p-6 text-left">
                   {featured && (
                     <Link href={href}>
-                      <img src={featured} alt="" className="w-full h-32 object-cover rounded mb-3 cursor-pointer" />
+                      <StorageImage src={featured} alt="" className="w-full h-32 object-cover rounded mb-3 cursor-pointer" width={480} />
                     </Link>
                   )}
                   <Link href={href}>
@@ -125,7 +127,7 @@ export default function ConsumablesMarketplace() {
                   )}
                   <p className="text-sm text-[var(--text3)] mb-1">{l.description || l.notes}</p>
                   <p className="text-sm text-[var(--text3)] mb-2 fa-ltr">{t('PN:')} {l.part_number || l.serial_number || t('N/A')}</p>
-                  <p className="text-sm mb-2">{l.manufacturer} {l.model} • {l.condition}</p>
+                  <p className="text-sm mb-2">{l.manufacturer} {displayModelName(l.model)} • {l.condition}</p>
                   <GuestAwarePrice signedIn={signedIn} priceLabel={formatListingPrice(l)} className="font-semibold text-[var(--gold)] mb-2" />
                   {signedIn ? (
                   <button 

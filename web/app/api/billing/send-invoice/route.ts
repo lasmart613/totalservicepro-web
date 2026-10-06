@@ -10,6 +10,8 @@ import { publicSiteOrigin, wrapCustomerFacingDocumentEmail } from '@/lib/custome
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 import { getCompanyTheme } from '@/lib/company-theme';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
+import { resolveNumberingTimeZone } from '@/lib/org-timezone';
+import { isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
 import { loadInvoiceRow, mergePaymentFieldsIntoInvoiceData } from '@/lib/billing/invoice-row-load';
 import {
   buildOwnedInvoiceMessage,
@@ -135,7 +137,9 @@ export async function POST(req: NextRequest) {
     let stripeSessionId: string | null = null;
     let stripeSkippedReason: string | null = null;
     const stripeProblem = stripeSecretProblem();
-    if (includePay && payAmount >= 0.5) {
+    if (isVoidInvoiceStatus(inv.status)) {
+      stripeSkippedReason = VOIDED_INVOICE_MESSAGE;
+    } else if (includePay && payAmount >= 0.5) {
       if (stripeProblem) {
         stripeSkippedReason = stripeProblem;
       } else {
@@ -191,7 +195,19 @@ export async function POST(req: NextRequest) {
 
     const subject = ownedDocumentSubject('invoice', inv.invoice_number, company.company_name);
     const moneyPrefs = callerOrgId != null ? await loadOrgMoneyPrefs(supabase, callerOrgId) : null;
-    const html = buildOwnedInvoiceMessage({ row: inv, company, theme, paymentUrl, moneyPrefs });
+    const zone = await resolveNumberingTimeZone(supabase, callerOrgId, { allowBrowser: false });
+    const sitePayUrl =
+      paymentUrl && stripeSessionId && invoiceId != null
+        ? `${publicSiteOrigin(req)}/pay/invoice/${encodeURIComponent(String(invoiceId))}?session=${encodeURIComponent(stripeSessionId)}`
+        : paymentUrl;
+    const html = buildOwnedInvoiceMessage({
+      row: inv,
+      company,
+      theme,
+      paymentUrl: sitePayUrl,
+      moneyPrefs,
+      timeZone: zone.timeZone,
+    });
     const { signupUrl, loginUrl } = documentAccountLinks(publicSiteOrigin(req));
     const wrapped = wrapCustomerFacingDocumentEmail({
       subject,

@@ -13,6 +13,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { insertOmittingCharOverflow, shortTicketPrefix } from './char-overflow.ts';
 import { customerOrgPayload, emptyCustomerForm } from './customer-form.ts';
 import { EQUIPMENT_TYPES, type EquipmentType } from './equipment-types.ts';
+import { displayModelName } from './model-display.ts';
 import { normalizeRegionInput } from './geo.ts';
 import {
   parseSubmittedEmail,
@@ -274,7 +275,7 @@ export function clinicLeadOrgNotes(lead: ClinicLead): string {
     `[${CLINIC_LEAD_ORG_SOURCE}] Guest clinic service request — not a live TSP customer account.`,
     `Equipment: ${equipmentTypeLabel(lead)}`,
     `Brand: ${lead.manufacturer}`,
-    `Model: ${lead.model}`,
+    `Model: ${displayModelName(lead.model)}`,
     lead.serialNumber ? `Serial: ${lead.serialNumber}` : '',
     `Service type: ${lead.serviceType}`,
     `Urgency: ${lead.urgency}`,
@@ -486,7 +487,7 @@ export function clinicLeadText(opts: {
     `Phone: ${lead.phone || '(not provided)'}`,
     `Equipment type: ${equipmentTypeLabel(lead)}`,
     `Brand: ${lead.manufacturer}`,
-    `Model: ${lead.model}`,
+    `Model: ${displayModelName(lead.model)}`,
     `Serial: ${lead.serialNumber || '(not provided)'}`,
     `Service type: ${lead.serviceType}`,
     `Urgency: ${urgencyLabel(lead.urgency)}`,
@@ -533,7 +534,7 @@ export function clinicLeadHtml(opts: {
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Phone</td><td>${esc(lead.phone || '(not provided)')}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Equipment type</td><td>${esc(equipmentTypeLabel(lead))}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Brand</td><td>${esc(lead.manufacturer)}</td></tr>
-    <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Model</td><td>${esc(lead.model)}</td></tr>
+    <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Model</td><td>${esc(displayModelName(lead.model))}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Serial</td><td>${esc(lead.serialNumber || '(not provided)')}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Service type</td><td>${esc(lead.serviceType)}</td></tr>
     <tr><td style="padding:4px 12px 4px 0;color:#6b7280">Urgency</td><td>${esc(urgencyLabel(lead.urgency))}</td></tr>

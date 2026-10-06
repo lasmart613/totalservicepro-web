@@ -15,6 +15,7 @@ import {
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { useT } from '@/lib/fa/locale';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
+import { displayModelName } from '@/lib/model-display';
 import {
   modelBelongsToManufacturer,
   normalizeManufacturerRow,
@@ -29,6 +30,7 @@ import { CompanyBrandingEditor } from '@/components/CompanyBrandingEditor';
 import { OrgMoneySettings } from '@/components/OrgMoneySettings';
 import { applyBrandColorPair, normalizeHex } from '@/lib/company-theme';
 import { canEditOrgCurrency } from '@/lib/org-money';
+import { ORG_TIME_ZONE_CHOICES } from '@/lib/org-timezone';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -490,6 +492,7 @@ function CompanyProfile() {
         updateData.currency_code = currentOrg.currency_code || 'USD';
         updateData.number_format = currentOrg.number_format || 'auto';
       }
+      updateData.timezone = currentOrg.timezone || null;
 
       // Claimed owners: client PATCH is a silent RLS no-op (204, 0 rows).
       // Same service-role path as invite/claim — only the caller's linked org.
@@ -500,11 +503,14 @@ function CompanyProfile() {
       if (!saved.ok || !saved.org) throw new Error(saved.error || 'Save did not persist.');
       setOrg({ ...currentOrg, ...saved.org, id: saved.org.id ?? saveId });
       const omitted = saved.omittedColumns || [];
+      const followUps: string[] = [];
       if (omitted.includes('currency_code') || omitted.includes('number_format')) {
-        toast.success('Details saved. Currency will stay on US dollars until the organization currency columns are added.');
-      } else {
-        toast.success('Details saved.');
+        followUps.push('Currency will stay on US dollars until the organization currency columns are added.');
       }
+      if (omitted.includes('timezone')) {
+        followUps.push('Timezone will use the address state until the organization timezone column is added.');
+      }
+      toast.success(followUps.length ? `Details saved. ${followUps.join(' ')}` : 'Details saved.');
       if (serviceAdminMode) setShowTeamPrompt(true);
     } catch (err: any) {
       toast.error('Save failed: ' + (err.message || err));
@@ -715,7 +721,7 @@ function CompanyProfile() {
         state: newCustomer.state || null,
         phone: newCustomer.contactPhone || null,
         laser_models: newCustomer.selectedEquipment.length 
-          ? newCustomer.selectedEquipment.map((e: any) => `${e.manufacturer} ${e.model}${e.config ? ' ' + e.config : ''}${e.wl ? ' (' + e.wl + 'nm)' : ''}${e.serialNumber ? ' [SN: ' + e.serialNumber + ']' : ''}`).join(' | ')
+          ? newCustomer.selectedEquipment.map((e: any) => `${e.manufacturer} ${displayModelName(e.model)}${e.config ? ' ' + e.config : ''}${e.wl ? ' (' + e.wl + 'nm)' : ''}${e.serialNumber ? ' [SN: ' + e.serialNumber + ']' : ''}`).join(' | ')
           : null,
         facility_type: 'Clinic',
       };
@@ -824,6 +830,27 @@ function CompanyProfile() {
               <div>
                 <label className="label">ZIP</label>
                 <input className="input" value={org.zip || ''} onChange={e => setOrg({ ...org, zip: e.target.value })} />
+              </div>
+              <div>
+                <label className="label">Timezone</label>
+                <select
+                  className="select"
+                  value={org.timezone || ''}
+                  onChange={(e) => setOrg({ ...org, timezone: e.target.value || null })}
+                >
+                  <option value="">Use address state</option>
+                  {org.timezone && !ORG_TIME_ZONE_CHOICES.includes(org.timezone as (typeof ORG_TIME_ZONE_CHOICES)[number]) ? (
+                    <option value={org.timezone}>{org.timezone}</option>
+                  ) : null}
+                  {ORG_TIME_ZONE_CHOICES.map((tz) => (
+                    <option key={tz} value={tz}>
+                      {tz.replace(/_/g, ' ')}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-[var(--text3)] mt-1">
+                  Document numbers, email dates, and financial report dates use this timezone.
+                </p>
               </div>
               <div>
                 <label className="label">Phone</label>
