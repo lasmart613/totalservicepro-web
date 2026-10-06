@@ -6,6 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { LandingShell } from '@/components/landing/LandingShell';
+import { LegalLinks } from '@/components/legal/LegalLinks';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
   currentOrgPlan,
@@ -123,6 +124,7 @@ function PlansIntro({ audience, cards }: { audience: PlanAudience; cards: React.
             {t('Already registered? Sign in')}
           </PublicLink>
         </div>
+        <LegalLinks className="mt-4" />
       </section>
     </LandingShell>
   );
@@ -337,6 +339,7 @@ function SignedInPlans() {
                       ? 'Included'
                       : 'Upgrade to Premium'}
             </button>
+            <LegalLinks className="mt-2 text-center" />
           </article>
 
           <article className="card p-6 flex flex-col">
@@ -367,6 +370,7 @@ function SignedInPlans() {
                     ? 'Current plan'
                     : 'Upgrade to Team'}
             </button>
+            <LegalLinks className="mt-2 text-center" />
           </article>
         </div>
         </PlanAudienceSelector>

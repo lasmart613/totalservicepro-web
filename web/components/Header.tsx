@@ -24,6 +24,7 @@ import { loadOwnNavProfile } from '@/lib/profile-nav';
 import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
+import { LegalLinks } from '@/components/legal/LegalLinks';
 import { OrgSwitcher } from '@/components/OrgSwitcher';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
 import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
@@ -610,6 +611,9 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                   </Link>
                 )}
 
+                <div className="px-4 py-2.5 border-t border-[var(--border)]">
+                  <LegalLinks />
+                </div>
                 <button
                   onClick={handleLogout}
                   className="w-full flex items-center gap-2 px-4 py-2.5 min-h-11 text-start text-red-400 hover:bg-[var(--surface)] border-t border-[var(--border)]"

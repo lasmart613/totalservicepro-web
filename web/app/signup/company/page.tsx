@@ -3,7 +3,10 @@
 import React, { useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import AuthOtpBox from '@/components/AuthOtpBox';
+import { SignupConsent } from '@/components/legal/SignupConsent';
 import { PublicLink, useT } from '@/lib/fa/locale';
+import { CONSENT_REQUIRED } from '@/lib/legal/consent';
+import { signUpWithConsent } from '@/lib/legal/signup-client';
 import { useRouter } from 'next/navigation';
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
 import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
@@ -33,6 +36,7 @@ export default function CompanySignup() {
   const [message, setMessage] = useState('');
   const [messageOk, setMessageOk] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const router = useRouter();
@@ -89,32 +93,35 @@ export default function CompanySignup() {
       setMessage('Passwords do not match.');
       return;
     }
+    if (!agreed) {
+      setMessage(CONSENT_REQUIRED);
+      return;
+    }
     setLoading(true);
 
     try {
       const origin = clientAuthOrigin();
       await prepareFreshSignup(supabase);
       savePendingSignup(pendingPayload());
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const { data: authData, error: authError } = await signUpWithConsent({
         email,
         password,
-        options: {
-          data: {
-            first_name: firstName,
-            last_name: lastName,
-            company: companyName,
-            role: 'company_admin',
-            organization_type: 'service_company',
-            signup_kind: 'company',
-            address: address || '',
-            city: city || '',
-            state: state || '',
-            phone: phone || '',
-            website: website || '',
-            services_offered: selectedServices.length ? selectedServices.join(' | ') : '',
-          },
-          emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
+        consent: agreed,
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+          company: companyName,
+          role: 'company_admin',
+          organization_type: 'service_company',
+          signup_kind: 'company',
+          address: address || '',
+          city: city || '',
+          state: state || '',
+          phone: phone || '',
+          website: website || '',
+          services_offered: selectedServices.length ? selectedServices.join(' | ') : '',
         },
+        emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
       });
       if (authError) throw authError;
 
@@ -274,13 +281,16 @@ export default function CompanySignup() {
             </div>
 
             {!awaitingConfirm && (
-              <button
-                type="submit"
-                disabled={loading}
-                className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
-              >
-                {loading ? t('Creating account…') : t('Create Repair company account')}
-              </button>
+              <>
+                <SignupConsent checked={agreed} onChange={setAgreed} />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
+                >
+                  {loading ? t('Creating account…') : t('Create Repair company account')}
+                </button>
+              </>
             )}
           </form>
 

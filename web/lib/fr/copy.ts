@@ -638,4 +638,13 @@ export const FR_COPY: Record<string, string> = {
   'Sign-in code re-sent. Check inbox and spam.':
     'Le code de connexion a été renvoyé. Vérifiez la boîte de réception et les indésirables.',
   'Sent to': 'Envoyé à',
+
+  'Terms of Service': 'Conditions d’utilisation',
+  'Privacy Policy': 'Politique de confidentialité',
+  'Draft, pending owner review': 'Brouillon, en attente de relecture du propriétaire',
+  'I agree to the {terms} and the {privacy}.': 'J’accepte les {terms} et la {privacy}.',
+  'Please agree to the Terms of Service and Privacy Policy.':
+    'Veuillez accepter les Conditions d’utilisation et la Politique de confidentialité.',
+  'By continuing you agree to the {terms} and {privacy}.':
+    'En continuant, vous acceptez les {terms} et la {privacy}.',
 };

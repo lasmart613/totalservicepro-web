@@ -19,6 +19,7 @@ import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { destAfterInviteClaim, inviteInPlay } from '@/lib/invite-claim';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
+import { LegalLinks } from '@/components/legal/LegalLinks';
 import {
   isClosedTicketStatus,
   isCompleteReport,
@@ -500,12 +501,15 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
             </p>
           </div>
           {upgrade.show && (
-            <UpgradePlanLink
-              className="btn btn-secondary text-sm px-4 py-1.5 shrink-0"
-              target={upgrade.target}
-            >
-              {t('Upgrade plan')}
-            </UpgradePlanLink>
+            <div className="flex flex-col items-end gap-1 shrink-0">
+              <UpgradePlanLink
+                className="btn btn-secondary text-sm px-4 py-1.5 shrink-0"
+                target={upgrade.target}
+              >
+                {t('Upgrade plan')}
+              </UpgradePlanLink>
+              <LegalLinks />
+            </div>
           )}
         </div>
 

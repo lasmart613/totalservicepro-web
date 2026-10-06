@@ -10,6 +10,9 @@ import { clearPendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session';
 import { postTeamClaim, routeAfterTeamClaim } from '@/lib/invite-claim';
 import { publicAuthMessage } from '@/lib/auth-errors';
+import { ContinuingConsent } from '@/components/legal/ContinuingConsent';
+import { SignupConsent } from '@/components/legal/SignupConsent';
+import { CONSENT_REQUIRED, LEGAL_VERSION } from '@/lib/legal/consent';
 import { clientAuthOrigin } from '@/lib/site-origin';
 
 function LoginInner() {
@@ -22,6 +25,7 @@ function LoginInner() {
   const [message, setMessage] = useState('');
   const [messageOk, setMessageOk] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [showOtp, setShowOtp] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [otpMode, setOtpMode] = useState<'signup' | 'magic'>('signup');
@@ -117,6 +121,11 @@ function LoginInner() {
           setLoading(false);
           return;
         }
+        if (!agreed) {
+          setMsg(CONSENT_REQUIRED);
+          setLoading(false);
+          return;
+        }
         const origin = clientAuthOrigin();
         await prepareFreshSignup(supabase);
         const signupRes = await fetch('/api/auth/signup', {
@@ -127,6 +136,8 @@ function LoginInner() {
             password,
             firstName,
             lastName,
+            consent: true,
+            legalVersion: LEGAL_VERSION,
             emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
               nextPath && nextPath !== '/' ? nextPath : '/onboarding'
             )}`,
@@ -134,7 +145,10 @@ function LoginInner() {
         });
         const signupJson = await signupRes.json().catch(() => ({}));
         if (!signupRes.ok) {
-          throw new Error(signupJson.error || 'Could not create account.');
+          const code = signupJson.error;
+          throw new Error(
+            code === 'consent_required' ? CONSENT_REQUIRED : code || 'Could not create account.'
+          );
         }
 
         if (signupJson.session?.access_token && signupJson.session?.refresh_token) {
@@ -381,6 +395,7 @@ function LoginInner() {
             </div>
           )}
 
+          <ContinuingConsent className="mb-3" />
           <button
             type="button"
             onClick={signInWithGoogle}
@@ -451,6 +466,8 @@ function LoginInner() {
                 />
               </div>
             )}
+
+            {isSignUp && <SignupConsent checked={agreed} onChange={setAgreed} />}
 
             <button
               type="submit"

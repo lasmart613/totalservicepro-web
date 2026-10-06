@@ -638,4 +638,13 @@ export const AR_COPY: Record<string, string> = {
   'Sign-in code re-sent. Check inbox and spam.':
     'أُعيد إرسال رمز الدخول. راجعوا الوارد والبريد غير المرغوب فيه.',
   'Sent to': 'أُرسل إلى',
+
+  'Terms of Service': 'شروط الخدمة',
+  'Privacy Policy': 'سياسة الخصوصية',
+  'Draft, pending owner review': 'مسودة، بانتظار مراجعة المالك',
+  'I agree to the {terms} and the {privacy}.': 'أوافق على {terms} وعلى {privacy}.',
+  'Please agree to the Terms of Service and Privacy Policy.':
+    'يُرجى الموافقة على شروط الخدمة وسياسة الخصوصية.',
+  'By continuing you agree to the {terms} and {privacy}.':
+    'بمتابعتكم توافقون على {terms} وعلى {privacy}.',
 };

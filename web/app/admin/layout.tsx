@@ -7,6 +7,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink, UPGRADE_LABEL } from '@/components/UpgradePlanLink';
+import { LegalLinks } from '@/components/legal/LegalLinks';
 import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
 import {
   GOD_ANALYTICS_PATH,
@@ -218,17 +219,20 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               );
             })}
             {upgrade.show && (
-              <UpgradePlanLink
-                className={
-                  'block px-4 py-2.5 rounded-lg hover:bg-[var(--surface3)] ' +
-                  (pathname === '/plans'
-                    ? 'bg-[var(--surface3)] text-[var(--gold)] font-semibold'
-                    : '')
-                }
-                target={upgrade.target}
-              >
-                {UPGRADE_LABEL}
-              </UpgradePlanLink>
+              <>
+                <UpgradePlanLink
+                  className={
+                    'block px-4 py-2.5 rounded-lg hover:bg-[var(--surface3)] ' +
+                    (pathname === '/plans'
+                      ? 'bg-[var(--surface3)] text-[var(--gold)] font-semibold'
+                      : '')
+                  }
+                  target={upgrade.target}
+                >
+                  {UPGRADE_LABEL}
+                </UpgradePlanLink>
+                <LegalLinks className="px-4 pb-2" />
+              </>
             )}
             <div className="pt-4 mt-4 border-t border-[var(--border)]">
               <Link href="/" className="block px-4 py-2.5 rounded-lg hover:bg-[var(--surface3)] text-[var(--text3)]">
@@ -258,6 +262,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
               </UpgradePlanLink>
             )}
           </div>
+          {upgrade.show && <LegalLinks className="lg:hidden mb-4" />}
           {children}
         </main>
       </div>

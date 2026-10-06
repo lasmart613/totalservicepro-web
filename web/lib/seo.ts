@@ -35,6 +35,8 @@ export const PUBLIC_SITEMAP_PATHS = [
   '/signup/company',
   '/signup/owner',
   '/signup/supplier',
+  '/terms',
+  '/privacy',
 ] as const;
 
 /** Reachable but not indexable. Must not appear in the sitemap. */
@@ -139,6 +141,8 @@ export const ROBOTS_ALLOW = [
   '/login',
   '/find-a-rep',
   '/unsubscribe',
+  '/terms',
+  '/privacy',
 ] as const;
 
 export type PublicPageKey =
@@ -156,7 +160,9 @@ export type PublicPageKey =
   | 'login'
   | 'findARep'
   | 'forgotPassword'
-  | 'calculators';
+  | 'calculators'
+  | 'terms'
+  | 'privacy';
 
 type PageSeo = {
   path: string;
@@ -255,6 +261,18 @@ export const PUBLIC_PAGE_SEO: Record<PublicPageKey, PageSeo> = {
     title: 'Photometry tools',
     description:
       'Fluence, irradiance, and power tools for biomedical field service. Photometry calculators on RepairPlanet / Total Service Pro.',
+  },
+  terms: {
+    path: '/terms',
+    title: 'Terms of Service',
+    description:
+      'Terms of Service for Total Service Pro on RepairPlanet, offered by Medical Repair Network. Accounts, Stripe billing, and use of the field-service software.',
+  },
+  privacy: {
+    path: '/privacy',
+    title: 'Privacy Policy',
+    description:
+      'Privacy Policy for Total Service Pro on RepairPlanet. Accounts, service records, Stripe payments, email, and Google Analytics.',
   },
 };
 

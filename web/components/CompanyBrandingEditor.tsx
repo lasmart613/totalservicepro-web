@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
+import { LegalLinks } from '@/components/legal/LegalLinks';
 import { buildDocTopHeader } from '@/lib/billing/doc-html';
 import {
   BRAND_COLOR_PRESETS,
@@ -253,6 +254,7 @@ export function CompanyBrandingEditor({
             Your logo still appears. Upgrade to set a primary and accent color.
           </p>
           <UpgradePlanLink className="btn btn-primary mt-3 inline-flex text-sm">Upgrade to Premium</UpgradePlanLink>
+          <LegalLinks className="mt-2" />
         </div>
       )}
 

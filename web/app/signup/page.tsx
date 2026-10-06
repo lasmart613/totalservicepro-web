@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect } from 'react';
+import { LegalLinks } from '@/components/legal/LegalLinks';
 import { PublicLink, usePublicHref, useT } from '@/lib/fa/locale';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
@@ -119,6 +120,7 @@ export default function SignupIndex() {
           <p className="text-sm text-[var(--text3)]">
             {t('Already registered?')} <PublicLink href="/login" className="text-[var(--gold)] hover:underline">{t('Sign in here')}</PublicLink>
           </p>
+          <LegalLinks className="mt-3" />
         </div>
 
         <div className="mt-8 p-4 bg-[var(--surface3)] border border-[var(--border)] rounded-xl text-xs text-[var(--text3)]">

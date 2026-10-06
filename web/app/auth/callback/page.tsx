@@ -9,6 +9,7 @@ import { claimCustomerInvite } from '@/lib/customer-invite-client';
 import { destAfterInviteClaim, inviteInPlay, type InviteClaimResult } from '@/lib/invite-claim';
 import { isTspAndroidWebView } from '@/lib/android-session';
 import { publicAuthMessage } from '@/lib/auth-errors';
+import { recordGoogleConsentIfNeeded } from '@/lib/legal/signup-client';
 
 function safeNextPath(raw: string | null): string {
   if (!raw) return '';
@@ -103,6 +104,8 @@ function AuthCallbackInner() {
           );
           return;
         }
+
+        await recordGoogleConsentIfNeeded(supabase, user);
 
         const meta = user.user_metadata || {};
         const invitedMember = !!(meta as any).invited_member || authType === 'invite';

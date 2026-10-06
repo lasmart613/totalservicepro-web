@@ -27,6 +27,7 @@ import { persistCustomerLogo, loadLinkedCustomers } from '@/lib/customer-form';
 import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
 import { orgCanUpgrade, orgIsPaid, upgradeTargetForOrg } from '@/lib/org-plan';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
+import { LegalLinks } from '@/components/legal/LegalLinks';
 import { CompanyBrandingEditor } from '@/components/CompanyBrandingEditor';
 import { OrgMoneySettings } from '@/components/OrgMoneySettings';
 import { applyBrandColorPair, normalizeHex } from '@/lib/company-theme';
@@ -797,12 +798,15 @@ function CompanyProfile() {
         <div className="flex items-center justify-between gap-4 flex-wrap">
           <h1 className="text-2xl font-extrabold">🏢 {t(profileTitle)}</h1>
           {orgCanUpgrade(org) && org?.id ? (
-            <UpgradePlanLink
-              className="btn btn-secondary text-sm px-4 py-1.5"
-              target={upgradeTargetForOrg(org) || 'plans'}
-            >
-              {t('Upgrade plan')}
-            </UpgradePlanLink>
+            <div className="flex flex-col items-end gap-1">
+              <UpgradePlanLink
+                className="btn btn-secondary text-sm px-4 py-1.5"
+                target={upgradeTargetForOrg(org) || 'plans'}
+              >
+                {t('Upgrade plan')}
+              </UpgradePlanLink>
+              <LegalLinks />
+            </div>
           ) : null}
         </div>
 

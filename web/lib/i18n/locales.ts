@@ -44,6 +44,8 @@ export const PUBLIC_PATHS = new Set([
   '/signup/fse',
   '/forgot-password',
   '/calculators',
+  '/terms',
+  '/privacy',
 ]);
 
 export function localeFromPathname(pathname: string | null | undefined): PublicLocale {

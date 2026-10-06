@@ -1,6 +1,7 @@
 'use client';
 
 import { Header } from '@/components/Header';
+import { LegalLinks } from '@/components/legal/LegalLinks';
 import { PublicLink, useT } from '@/lib/fa/locale';
 
 /** FSEs are invited via Team — there is no top-level FSE signup. */
@@ -22,6 +23,7 @@ export default function SignupFsePage() {
             {t('Sign in')}
           </PublicLink>
         </div>
+        <LegalLinks className="mt-6" />
       </div>
     </div>
   );

@@ -3,13 +3,18 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { signupAssignsTenant } from '@/lib/tenant-lockdown';
 import { publicSiteOrigin } from '@/lib/site-origin';
+import { LEGAL_VERSION, consentAccepted } from '@/lib/legal/consent';
+import { writeUserLegalConsent } from '@/lib/legal/signup-consent';
 
 /**
  * POST /api/auth/signup
- * { email, password, firstName, lastName, emailRedirectTo? }
+ * { email, password, firstName, lastName, emailRedirectTo?, consent, legalVersion }
  *
- * Creates the Auth user. Profile columns written here are display fields
- * only. organization_id, active_organization_id, and role are rejected.
+ * Creates the Auth user only after consent is present.
+ * Profile columns written here are display fields only.
+ * organization_id, active_organization_id, and role are rejected.
+ * legal_consent_at and legal_consent_version are written with the service role.
+ * A missing column or a missing service-role key is logged and does not fail signup.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -19,6 +24,9 @@ export async function POST(req: NextRequest) {
         { error: 'Signup cannot assign an organization or role.' },
         { status: 400 }
       );
+    }
+    if (!consentAccepted(body)) {
+      return NextResponse.json({ error: 'consent_required' }, { status: 400 });
     }
 
     const email = String(body.email || '').toLowerCase().trim();
@@ -51,7 +59,12 @@ export async function POST(req: NextRequest) {
       email,
       password,
       options: {
-        data: { first_name: firstName, last_name: lastName },
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+          legal_consent: true,
+          legal_consent_version: LEGAL_VERSION,
+        },
         emailRedirectTo:
           emailRedirectTo ||
           `${publicSiteOrigin(req)}/auth/callback?next=${encodeURIComponent('/onboarding')}`,
@@ -88,12 +101,23 @@ export async function POST(req: NextRequest) {
       if (profileError) {
         console.warn('signup profile', profileError.message);
       }
+      const consent = await writeUserLegalConsent(admin, user.id, new Date().toISOString(), (message, detail) => {
+        console.warn(message, detail);
+      });
+      if (consent.missingColumn) {
+        console.warn('legal consent columns are not on user_profiles yet; signup continues');
+      }
+    } else if (user?.id) {
+      console.warn('legal consent not stored; SUPABASE_SERVICE_ROLE_KEY is missing. Signup continues.');
     }
 
     const session = data.session;
     return NextResponse.json({
       ok: true,
       userId: user?.id ?? null,
+      user: user
+        ? { id: user.id, email: user.email, identities: user.identities }
+        : null,
       needsEmailConfirm: !session,
       session: session
         ? { access_token: session.access_token, refresh_token: session.refresh_token }
