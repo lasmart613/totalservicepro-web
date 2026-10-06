@@ -12,6 +12,7 @@ import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { ShareButton } from '@/components/ShareButton';
 import { serviceRequestShareText } from '@/lib/share';
 import { OPEN_SERVICE_REQUEST_COLUMNS } from '@/lib/org-scoped-read';
+import { rememberManufacturerName } from '@/lib/remember-manufacturer';
 
 type Laser = {
   id: number;
@@ -228,10 +229,7 @@ function ServiceRequestsInner() {
   }
 
   async function rememberManufacturer(name: string) {
-    if (!name || name === 'Other') return;
-    try {
-      await supabase.from('manufacturers').upsert({ name }, { onConflict: 'name' });
-    } catch { /* optional table */ }
+    await rememberManufacturerName(supabase, name);
   }
 
   async function submitPost() {

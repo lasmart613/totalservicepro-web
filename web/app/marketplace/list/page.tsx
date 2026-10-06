@@ -9,6 +9,7 @@ import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { toast } from 'sonner';
 import { canPostMarketplaceNeed, isPro, isSupplier, isOwnerish, isServiceCompany } from '@/lib/roles';
+import { rememberManufacturerName } from '@/lib/remember-manufacturer';
 
 type ListingType = 'part' | 'consumable' | 'used' | 'request';
 
@@ -225,14 +226,9 @@ function MarketplaceListContent() {
     return urls;
   };
 
-  /** Best-effort: remember custom brand in manufacturers table for future dropdowns */
+  /** Best-effort: remember custom brand for future dropdowns. Insert-only; never renames. */
   async function rememberManufacturer(name: string) {
-    if (!name || name === 'Other') return;
-    try {
-      await getSupabaseClient().from('manufacturers').upsert({ name }, { onConflict: 'name' });
-    } catch {
-      /* table may not exist / no unique constraint */
-    }
+    await rememberManufacturerName(getSupabaseClient(), name);
   }
 
   const handleSubmit = async (e: React.FormEvent) => {

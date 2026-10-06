@@ -250,10 +250,12 @@ END $$;
 --      manual_search_index     god reindex + search API via service role or
 --                              search_manual_catalog (authenticated RPC)
 --    manufacturers and laser_models are shared catalogs. Signed-in clients
---    SELECT both. Reports, service requests, and marketplace listings insert
---    a manufacturer name when it is not already in the list. Those writes
---    require a signed-in user and a non-empty name. laser_models stays
---    read-only here (000401 revokes client writes).
+--    SELECT both. A signed-in user may INSERT a manufacturer when auth.uid()
+--    is set and the name is non-empty. UPDATE is revoked from authenticated:
+--    renaming any catalog row was vandalism. Remember-name upserts go through
+--    POST /api/catalog/manufacturers (service role, insert-or-ignore). God
+--    table renames already use the service role. laser_models stays read-only
+--    here (000401 revokes client writes).
 --    Any further zero-policy public table is NOTICE'd and loses anon writes.
 --    No policy is invented for an unknown table.
 -- ---------------------------------------------------------------------------
@@ -261,9 +263,9 @@ DO $$
 BEGIN
   IF to_regclass('public.manufacturers') IS NOT NULL THEN
     EXECUTE 'ALTER TABLE public.manufacturers ENABLE ROW LEVEL SECURITY';
-    EXECUTE 'REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.manufacturers FROM PUBLIC, anon';
+    EXECUTE 'REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.manufacturers FROM PUBLIC, anon, authenticated';
     EXECUTE 'GRANT SELECT ON TABLE public.manufacturers TO anon, authenticated';
-    EXECUTE 'GRANT INSERT, UPDATE ON TABLE public.manufacturers TO authenticated';
+    EXECUTE 'GRANT INSERT ON TABLE public.manufacturers TO authenticated';
     EXECUTE 'DROP POLICY IF EXISTS "read manufacturers" ON public.manufacturers';
     EXECUTE 'CREATE POLICY "read manufacturers" ON public.manufacturers FOR SELECT TO authenticated, anon USING (true)';
     EXECUTE 'DROP POLICY IF EXISTS manufacturers_authenticated_insert ON public.manufacturers';
@@ -278,12 +280,6 @@ BEGIN
           auth.uid() IS NOT NULL
           AND nullif(btrim(name), '') IS NOT NULL
         )
-    $policy$;
-    EXECUTE $policy$
-      CREATE POLICY manufacturers_update_name ON public.manufacturers
-        FOR UPDATE TO authenticated
-        USING (auth.uid() IS NOT NULL)
-        WITH CHECK (nullif(btrim(name), '') IS NOT NULL)
     $policy$;
   END IF;
   IF to_regclass('public.laser_models') IS NOT NULL THEN

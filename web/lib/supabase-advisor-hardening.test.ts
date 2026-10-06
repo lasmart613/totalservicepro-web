@@ -67,8 +67,30 @@ test('zero-policy tables stay service-role except catalog reads and issue insert
   assert.match(sql, /CREATE POLICY "read laser_models"/);
   assert.match(sql, /manufacturers_insert_name/);
   assert.match(sql, /nullif\(btrim\(name\), ''\) IS NOT NULL/);
+  assert.match(
+    sql,
+    /REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public\.manufacturers FROM PUBLIC, anon, authenticated/
+  );
+  assert.match(sql, /GRANT INSERT ON TABLE public\.manufacturers TO authenticated/);
+  assert.doesNotMatch(sql, /GRANT INSERT, UPDATE ON TABLE public\.manufacturers/);
+  assert.match(sql, /DROP POLICY IF EXISTS manufacturers_update_name/);
+  assert.doesNotMatch(sql, /CREATE POLICY manufacturers_update_name/);
   assert.doesNotMatch(sql, /FOR INSERT TO authenticated WITH CHECK \(true\)/);
   assert.doesNotMatch(sql, /FOR UPDATE TO authenticated USING \(true\)/);
+
+  const route = readFileSync(join(here, '../app/api/catalog/manufacturers/route.ts'), 'utf8');
+  assert.match(route, /getSupabaseAdmin\(\)/);
+  assert.match(route, /\.insert\(\{ name \}\)/);
+  assert.doesNotMatch(route, /\.update\(/);
+  assert.doesNotMatch(route, /\.upsert\(/);
+  const helper = readFileSync(join(here, 'remember-manufacturer.ts'), 'utf8');
+  assert.match(helper, /\/api\/catalog\/manufacturers/);
+  assert.doesNotMatch(helper, /\.upsert\(|\.update\(/);
+  for (const page of ['../app/service-requests/page.tsx', '../app/marketplace/list/page.tsx']) {
+    const src = readFileSync(join(here, page), 'utf8');
+    assert.match(src, /rememberManufacturerName/);
+    assert.doesNotMatch(src, /from\('manufacturers'\)\.upsert/);
+  }
   assert.match(sql, /RLS enabled with no policy/);
   assert.match(sql, /list_open_service_requests/);
   assert.match(sql, /security_invoker = true/);
