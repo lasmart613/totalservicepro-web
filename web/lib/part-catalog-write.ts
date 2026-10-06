@@ -1,10 +1,10 @@
 /** Whitelist for catalog and vendor writes. created_by is never taken from the client. */
 
+/** Columns 000401 grants for UPDATE. created_by is excluded. manufacturer and image_urls are not live columns. */
 const EDIT_KEYS = [
   'name',
   'part_number',
   'brand',
-  'manufacturer',
   'description',
   'category',
   'unit_of_measure',
@@ -15,7 +15,6 @@ const EDIT_KEYS = [
   'quantity_on_hand',
   'in_stock',
   'image_url',
-  'image_urls',
 ] as const;
 
 export function missingCatalogColumn(message?: string): string | null {

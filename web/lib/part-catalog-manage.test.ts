@@ -60,13 +60,23 @@ test('archived parts are hidden from the catalog list and search load', () => {
   assert.doesNotMatch(sql, /FOR DELETE[\s\S]*ON public\.parts_catalog/);
   assert.doesNotMatch(sql, /CREATE POLICY part_vendors_insert/);
   assert.doesNotMatch(sql, /CREATE POLICY part_vendors_update/);
+  assert.doesNotMatch(sql, /GRANT UPDATE ON TABLE public\.parts_catalog/);
+  assert.match(sql, /GRANT UPDATE \(is_active\) ON TABLE public\.parts_catalog TO authenticated/);
   const archive = catalogWritePatch('archive', { created_by: 'attacker', is_active: true });
   assert.equal(archive && archive.is_active, false);
   assert.equal(archive && 'created_by' in archive, false);
-  const edit = catalogWritePatch('edit', { name: 'Lamp', created_by: 'attacker', sale_price: 12 });
+  const edit = catalogWritePatch('edit', {
+    name: 'Lamp',
+    created_by: 'attacker',
+    sale_price: 12,
+    manufacturer: 'Candela',
+    image_urls: ['https://example.test/a.jpg'],
+  });
   assert.equal(edit && edit.name, 'Lamp');
   assert.equal(edit && edit.sale_price, 12);
   assert.equal(edit && 'created_by' in edit, false);
+  assert.equal(edit && 'manufacturer' in edit, false);
+  assert.equal(edit && 'image_urls' in edit, false);
   const stock = catalogWritePatch('stock', { in_stock: false, quantity_on_hand: 3 });
   assert.equal(stock && stock.in_stock, true);
   assert.equal(stock && stock.quantity_on_hand, 3);

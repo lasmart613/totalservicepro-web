@@ -6,6 +6,9 @@
 -- Same-org admin is organization_memberships.role in (admin, company_admin).
 -- part_vendors INSERT and UPDATE policies are left unchanged (#215 scopes those).
 -- This file only replaces parts_catalog UPDATE and adds part_vendors DELETE.
+-- The CREATE POLICY text matches 20261006_000401 parts_catalog_update_owner.
+-- 000401 revokes table UPDATE and grants every column except created_by.
+-- Do not GRANT UPDATE ON TABLE here: that would include created_by again.
 
 ALTER TABLE public.parts_catalog
   ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true;
@@ -87,7 +90,9 @@ CREATE POLICY part_vendors_delete_owner
     )
   );
 
-GRANT SELECT, INSERT, UPDATE ON TABLE public.parts_catalog TO authenticated;
+GRANT SELECT, INSERT ON TABLE public.parts_catalog TO authenticated;
+-- is_active may be added above, after 000401's column list. Grant that column only.
+GRANT UPDATE (is_active) ON TABLE public.parts_catalog TO authenticated;
 GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.part_vendors TO authenticated;
 
 NOTIFY pgrst, 'reload schema';
