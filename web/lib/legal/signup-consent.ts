@@ -1,4 +1,7 @@
-import { LEGAL_VERSION, consentAccepted } from './consent.ts';
+import { LEGAL_CONSENT_STAMP_FROM, LEGAL_VERSION, consentAccepted } from './consent.ts';
+
+/** First Google return only. A later sign-in is not a fresh agreement. */
+const GOOGLE_FIRST_SIGN_IN_MS = 15 * 60 * 1000;
 
 export type ConsentWriteOutcome = {
   stored: boolean;
@@ -185,16 +188,43 @@ export function isGoogleIdentity(
   return (user.identities || []).some((row) => row.provider === 'google');
 }
 
-/** Stamp only a Google account that has never recorded consent. Existing stamps stay put. */
+/**
+ * Silent Google stamp only for a brand-new account: created on or after
+ * LEGAL_CONSENT_STAMP_FROM, still inside the first 15 minutes, and no stamp yet.
+ * Older Google users are left null. A later sign-in does not overwrite.
+ */
 export function shouldStampOAuthConsent(input: {
   isGoogle: boolean;
   existingConsentAt: string | null | undefined;
+  createdAt: string | null | undefined;
+  now: string;
 }): boolean {
-  return input.isGoogle && !input.existingConsentAt;
+  if (!input.isGoogle || input.existingConsentAt) return false;
+  const created = Date.parse(input.createdAt ?? '');
+  const now = Date.parse(input.now);
+  const from = Date.parse(LEGAL_CONSENT_STAMP_FROM);
+  if (!Number.isFinite(created) || !Number.isFinite(now) || !Number.isFinite(from)) return false;
+  if (created < from) return false;
+  const age = now - created;
+  return age >= 0 && age <= GOOGLE_FIRST_SIGN_IN_MS;
+}
+
+function isFreshGoogleAccount(input: {
+  createdAt: string | null | undefined;
+  now: string;
+}): boolean {
+  return shouldStampOAuthConsent({
+    isGoogle: true,
+    existingConsentAt: null,
+    createdAt: input.createdAt,
+    now: input.now,
+  });
 }
 
 export async function stampGoogleConsent(input: {
   isGoogle: boolean;
+  createdAt: string | null | undefined;
+  now: string;
   readConsentAt: () => Promise<{
     at: string | null;
     error: { code?: string; message?: string } | null;
@@ -203,11 +233,14 @@ export async function stampGoogleConsent(input: {
   log?: (message: string, detail?: unknown) => void;
 }): Promise<{
   recorded: boolean;
-  reason?: 'not_google' | 'already_recorded';
+  reason?: 'not_google' | 'already_recorded' | 'existing_account';
   missingColumn?: boolean;
   continued?: boolean;
 }> {
   if (!input.isGoogle) return { recorded: false, reason: 'not_google' };
+  if (!isFreshGoogleAccount({ createdAt: input.createdAt, now: input.now })) {
+    return { recorded: false, reason: 'existing_account' };
+  }
   let existing: string | null = null;
   try {
     const read = await input.readConsentAt();
@@ -224,7 +257,12 @@ export async function stampGoogleConsent(input: {
     input.log?.('legal consent read failed; signup continues', err);
     return { recorded: false, continued: true };
   }
-  if (!shouldStampOAuthConsent({ isGoogle: true, existingConsentAt: existing })) {
+  if (!shouldStampOAuthConsent({
+    isGoogle: true,
+    existingConsentAt: existing,
+    createdAt: input.createdAt,
+    now: input.now,
+  })) {
     return { recorded: false, reason: 'already_recorded' };
   }
   try {

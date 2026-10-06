@@ -68,7 +68,7 @@ export async function signUpWithConsent(input: {
   return { data: { user: json?.user ?? null, session }, error: null };
 }
 
-/** First Google return records consent when the profile has none. Failures do not block navigation. */
+/** Asks the server to stamp a brand-new Google account. The route decides. Failures do not block navigation. */
 export async function recordGoogleConsentIfNeeded(
   supabase: {
     auth: {

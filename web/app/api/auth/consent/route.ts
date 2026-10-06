@@ -5,8 +5,9 @@ import { getSupabaseAnonKey, getSupabaseUrl } from '@/lib/supabase/client';
 import { isGoogleIdentity, stampGoogleConsent, writeUserLegalConsent } from '@/lib/legal/signup-consent';
 
 /**
- * First Google sign-in. If legal_consent_at is still null, stamp it.
- * A profile that already has consent is left alone (no re-consent wall).
+ * First Google sign-in for an account created at or after LEGAL_CONSENT_STAMP_FROM,
+ * and only while created_at is still within 15 minutes. legal_consent_at must be null.
+ * Older Google users are not stamped. A profile that already has consent is left alone.
  * Password, invite, and email-confirm users are not stamped here.
  * Missing columns are logged and the callback is allowed to continue.
  */
@@ -37,6 +38,8 @@ export async function POST(req: NextRequest) {
   const admin = getSupabaseAdmin();
   const result = await stampGoogleConsent({
     isGoogle: isGoogleIdentity(user),
+    createdAt: user.created_at,
+    now: new Date().toISOString(),
     readConsentAt: async () => {
       const read = await admin
         .from('user_profiles')

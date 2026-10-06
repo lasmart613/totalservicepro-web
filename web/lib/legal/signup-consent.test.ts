@@ -11,7 +11,7 @@ import { FR_COPY } from '../fr/copy.ts';
 import { HE_COPY } from '../he/copy.ts';
 import { IT_COPY } from '../it/copy.ts';
 import { PT_COPY } from '../pt/copy.ts';
-import { CONTINUE_CONSENT_TEMPLATE, LEGAL_VERSION, consentPieces } from './consent.ts';
+import { CONTINUE_CONSENT_TEMPLATE, LEGAL_CONSENT_STAMP_FROM, LEGAL_VERSION, consentPieces } from './consent.ts';
 import {
   applyConsentUpdate,
   isGoogleIdentity,
@@ -125,17 +125,47 @@ test('email signup writes consent for company, clinic, parts, and rental fleet',
   assert.equal(wroteExisting, false);
 });
 
-test('google consent is written once and skipped when already recorded', async () => {
-  assert.equal(shouldStampOAuthConsent({ isGoogle: true, existingConsentAt: null }), true);
-  assert.equal(shouldStampOAuthConsent({ isGoogle: true, existingConsentAt: undefined }), true);
-  assert.equal(shouldStampOAuthConsent({ isGoogle: true, existingConsentAt: '2026-10-06T00:00:00Z' }), false);
-  assert.equal(shouldStampOAuthConsent({ isGoogle: false, existingConsentAt: null }), false);
+test('google consent stamps a new account and skips existing users and later sign-ins', async () => {
+  const created = '2026-10-07T00:05:00.000Z';
+  const now = '2026-10-07T00:06:00.000Z';
+  assert.equal(LEGAL_CONSENT_STAMP_FROM, '2026-10-07T00:00:00Z');
   assert.equal(isGoogleIdentity({ app_metadata: { provider: 'email' }, identities: [{ provider: 'email' }] }), false);
   assert.equal(isGoogleIdentity({ app_metadata: { providers: ['google'] } }), true);
+  assert.equal(
+    shouldStampOAuthConsent({ isGoogle: true, existingConsentAt: null, createdAt: created, now }),
+    true,
+  );
+  assert.equal(
+    shouldStampOAuthConsent({
+      isGoogle: true,
+      existingConsentAt: null,
+      createdAt: '2026-01-01T00:00:00.000Z',
+      now,
+    }),
+    false,
+  );
+  assert.equal(
+    shouldStampOAuthConsent({
+      isGoogle: true,
+      existingConsentAt: null,
+      createdAt: created,
+      now: '2026-10-07T00:21:00.000Z',
+    }),
+    false,
+  );
+  assert.equal(
+    shouldStampOAuthConsent({ isGoogle: false, existingConsentAt: null, createdAt: created, now }),
+    false,
+  );
 
   const writes: string[] = [];
-  const first = await stampGoogleConsent({
+  const fresh = {
     isGoogle: true,
+    createdAt: created,
+    now,
+  };
+  const first = await stampGoogleConsent({
+    ...fresh,
     readConsentAt: async () => ({ at: null, error: null }),
     writeConsent: async () => {
       writes.push('stamp');
@@ -144,9 +174,24 @@ test('google consent is written once and skipped when already recorded', async (
   });
   assert.deepEqual(first, { recorded: true, continued: true });
 
-  const again = await stampGoogleConsent({
+  const existingUser = await stampGoogleConsent({
     isGoogle: true,
-    readConsentAt: async () => ({ at: '2026-10-06T00:00:00.000Z', error: null }),
+    createdAt: '2025-06-01T00:00:00.000Z',
+    now,
+    readConsentAt: async () => {
+      throw new Error('existing Google user must not be read or stamped');
+    },
+    writeConsent: async () => {
+      writes.push('existing');
+      return { stored: true, continued: true };
+    },
+  });
+  assert.equal(existingUser.recorded, false);
+  assert.equal(existingUser.reason, 'existing_account');
+
+  const again = await stampGoogleConsent({
+    ...fresh,
+    readConsentAt: async () => ({ at: '2026-10-07T00:06:00.000Z', error: null }),
     writeConsent: async () => {
       writes.push('again');
       return { stored: true, continued: true };
@@ -158,6 +203,8 @@ test('google consent is written once and skipped when already recorded', async (
 
   const password = await stampGoogleConsent({
     isGoogle: false,
+    createdAt: created,
+    now,
     readConsentAt: async () => ({ at: null, error: null }),
     writeConsent: async () => {
       writes.push('password');
@@ -215,6 +262,8 @@ test('missing consent columns do not break email or google signup', async () => 
 
   const google = await stampGoogleConsent({
     isGoogle: true,
+    createdAt: '2026-10-07T00:05:00.000Z',
+    now: '2026-10-07T00:06:00.000Z',
     readConsentAt: async () => ({ at: null, error: columnError }),
     writeConsent: async () => {
       throw new Error('should not write when the column is missing on read');
@@ -251,6 +300,8 @@ test('signup pages send consent and the migration only adds nullable columns', (
   assert.match(read('app/auth/callback/page.tsx'), /recordGoogleConsentIfNeeded/);
   assert.match(read('app/api/auth/consent/route.ts'), /stampGoogleConsent/);
   assert.match(read('lib/legal/consent.ts'), /export const LEGAL_VERSION = '2026-10-draft'/);
+  assert.match(read('lib/legal/consent.ts'), /export const LEGAL_CONSENT_STAMP_FROM = '2026-10-07T00:00:00Z'/);
+  assert.match(read('app/api/auth/consent/route.ts'), /createdAt: user\.created_at/);
 
   for (const copy of LOCALES) {
     const pieces = consentPieces(copy[CONTINUE_CONSENT_TEMPLATE]);

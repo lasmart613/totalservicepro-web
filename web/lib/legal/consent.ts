@@ -1,8 +1,16 @@
 /**
  * Version stored in user_profiles.legal_consent_version.
  * Bump this one constant when the Terms or Privacy Policy change.
+ * A later PR will add a one-time "We've updated our Terms. Agree to continue"
+ * prompt for users whose stamp is null or older than LEGAL_VERSION.
  */
 export const LEGAL_VERSION = '2026-10-draft';
+
+/**
+ * Google callback stamps consent only for auth.users created at or after this time.
+ * Set this to the deploy time. Accounts created earlier never get a silent stamp.
+ */
+export const LEGAL_CONSENT_STAMP_FROM = '2026-10-07T00:00:00Z';
 
 /** English source for the required signup checkbox. Locales translate this exact key. */
 export const CONSENT_TEMPLATE = 'I agree to the {terms} and the {privacy}.';
