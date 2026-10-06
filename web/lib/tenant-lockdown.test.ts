@@ -178,6 +178,11 @@ test('migration revokes tenant columns and the trigger raises instead of downgra
   assert.match(sql, /BEFORE INSERT OR UPDATE ON public\.user_profiles/);
   assert.match(sql, /NEW\.role := grant_role/);
   assert.doesNotMatch(sql, /NOT IN \('admin', 'company_admin'\)/);
+  assert.match(sql, /invitation_is_open/);
+  assert.match(sql, /profile_role_from_membership/);
+  assert.match(sql, /REVOKE ALL ON TABLE public\.engineer_invitations FROM anon/);
+  assert.match(sql, /GRANT INSERT \(%s\) ON TABLE public\.organizations TO authenticated/);
+  assert.match(sql, /organization_memberships admin -> company_admin/);
 });
 
 test('server routes call the authorizers and do not trust a client role on founder link', () => {
@@ -190,6 +195,11 @@ test('server routes call the authorizers and do not trust a client role on found
   assert.match(founder, /decideFounderLink/);
   assert.match(founder, /hasServiceRole/);
   assert.doesNotMatch(founder, /body\.role/);
+  assert.ok(
+    founder.indexOf('decideFounderLink') < founder.indexOf('applyComplimentarySignupFields'),
+    'complimentary premium runs only after the caller is the org creator'
+  );
+  assert.match(founder, /priorPremium/);
   assert.match(claim, /authorizeInviteAccept/);
   assert.match(role, /decideMemberRoleChange/);
   assert.match(signup, /signupAssignsTenant/);
@@ -217,6 +227,20 @@ test('open write policies are replaced and catalog update is left for 000700', (
   assert.doesNotMatch(sql, /DROP POLICY IF EXISTS parts_catalog_update/);
   assert.doesNotMatch(sql, /DROP POLICY IF EXISTS "public insert waitlist"/);
   assert.match(sql, /REVOKE UPDATE \(%I\) ON TABLE public\.%I FROM PUBLIC, anon/);
+  assert.match(sql, /customer_org_link_allowed/);
+  assert.match(sql, /organization_customers_insert_linked/);
+  assert.match(sql, /forum_bookmarks_read/);
+  assert.match(sql, /user_id = auth\.uid\(\)/);
+  assert.match(sql, /part_vendors_insert_owner/);
+  assert.match(sql, /part_vendors_update_owner/);
+  assert.doesNotMatch(sql, /CREATE POLICY part_vendors_write_owner/);
+  assert.doesNotMatch(sql, /GRANT SELECT ON TABLE public\.parts TO authenticated/);
+  const estimateRules = sql.slice(sql.indexOf('Null organization_id must not'));
+  assert.doesNotMatch(estimateRules, /organization_id IS NULL/);
+
+  const invite = readFileSync(join(here, '../app/api/team/invite/route.ts'), 'utf8');
+  assert.doesNotMatch(invite, /userClient\.from\('engineer_invitations'\)\.insert/);
+  assert.match(invite, /missing service role/);
 
   const award = readFileSync(join(here, 'award.ts'), 'utf8');
   const notify = readFileSync(join(here, '../app/api/marketplace/award-notify/route.ts'), 'utf8');

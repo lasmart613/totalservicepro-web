@@ -2,10 +2,11 @@
 -- Apply after 20261006_000400_user_profiles_tenant_lockdown.sql.
 -- Idempotent. Does not rewrite customer rows.
 --
--- organization_customers, organization_manuals, service_reports, and
--- test_equipment stay on user_profiles.organization_id. 000400 revokes
--- client UPDATE of that column, so those policies are left as they are.
--- parts_catalog_update is left for 20261006_000700 (#217).
+-- organization_manuals, service_reports, and test_equipment stay on
+-- user_profiles.organization_id. 000400 revokes client UPDATE of that column.
+-- organization_customers INSERT/UPDATE must also prove the customer org was
+-- created by a member of the service org, or accepted from that org's invite.
+-- parts_catalog_update and part_vendors DELETE are left for 20261006_000700 (#217).
 -- "public insert waitlist" stays: the waitlist is a public signup.
 
 -- ---------------------------------------------------------------------------
@@ -179,21 +180,16 @@ BEGIN
   EXECUTE 'GRANT SELECT, UPDATE ON TABLE public.notifications TO authenticated';
 END $$;
 
--- parts: no organization_id and no client writer. Service role only.
+-- parts: legacy table, no organization_id and no client reader or writer.
+-- Service role only. An authenticated SELECT true would list every shop's rows.
 DO $$
 BEGIN
   IF to_regclass('public.parts') IS NULL THEN
     RETURN;
   END IF;
   EXECUTE 'ALTER TABLE public.parts ENABLE ROW LEVEL SECURITY';
-  EXECUTE 'REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.parts FROM PUBLIC, anon, authenticated';
-  EXECUTE 'GRANT SELECT ON TABLE public.parts TO authenticated';
+  EXECUTE 'REVOKE ALL ON TABLE public.parts FROM PUBLIC, anon, authenticated';
   EXECUTE 'DROP POLICY IF EXISTS parts_read_authenticated ON public.parts';
-  EXECUTE $policy$
-    CREATE POLICY parts_read_authenticated ON public.parts
-      FOR SELECT TO authenticated
-      USING (true)
-  $policy$;
 END $$;
 
 -- labor_log and parts_used follow the ticket's organization.
@@ -342,16 +338,15 @@ BEGIN
     RETURN;
   END IF;
   EXECUTE 'ALTER TABLE public.forum_bookmarks ENABLE ROW LEVEL SECURITY';
-  EXECUTE 'REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.forum_bookmarks FROM PUBLIC, anon';
-  EXECUTE 'GRANT SELECT ON TABLE public.forum_bookmarks TO anon, authenticated';
-  EXECUTE 'GRANT INSERT, UPDATE, DELETE ON TABLE public.forum_bookmarks TO authenticated';
+  EXECUTE 'REVOKE ALL ON TABLE public.forum_bookmarks FROM PUBLIC, anon';
+  EXECUTE 'GRANT SELECT, INSERT, UPDATE, DELETE ON TABLE public.forum_bookmarks TO authenticated';
   EXECUTE 'REVOKE UPDATE (user_id) ON TABLE public.forum_bookmarks FROM PUBLIC, anon, authenticated';
   EXECUTE 'DROP POLICY IF EXISTS forum_bookmarks_read ON public.forum_bookmarks';
   EXECUTE 'DROP POLICY IF EXISTS forum_bookmarks_write_author ON public.forum_bookmarks';
   EXECUTE $policy$
     CREATE POLICY forum_bookmarks_read ON public.forum_bookmarks
-      FOR SELECT TO anon, authenticated
-      USING (true)
+      FOR SELECT TO authenticated
+      USING (user_id = auth.uid())
   $policy$;
   EXECUTE $policy$
     CREATE POLICY forum_bookmarks_write_author ON public.forum_bookmarks
@@ -518,7 +513,8 @@ BEGIN
   $policy$;
 END $$;
 
--- part_vendors: public read stays. Writes only on a catalog row the caller created.
+-- part_vendors: public read stays. INSERT and UPDATE only on a catalog row
+-- the caller created. DELETE is #217's 000700.
 DO $$
 BEGIN
   IF to_regclass('public.part_vendors') IS NULL THEN
@@ -527,9 +523,22 @@ BEGIN
   EXECUTE 'DROP POLICY IF EXISTS part_vendors_insert ON public.part_vendors';
   EXECUTE 'DROP POLICY IF EXISTS part_vendors_update ON public.part_vendors';
   EXECUTE 'DROP POLICY IF EXISTS part_vendors_write_owner ON public.part_vendors';
+  EXECUTE 'DROP POLICY IF EXISTS part_vendors_insert_owner ON public.part_vendors';
+  EXECUTE 'DROP POLICY IF EXISTS part_vendors_update_owner ON public.part_vendors';
   EXECUTE $policy$
-    CREATE POLICY part_vendors_write_owner ON public.part_vendors
-      FOR ALL TO authenticated
+    CREATE POLICY part_vendors_insert_owner ON public.part_vendors
+      FOR INSERT TO authenticated
+      WITH CHECK (
+        EXISTS (
+          SELECT 1 FROM public.parts_catalog p
+          WHERE p.id = part_vendors.part_id
+            AND p.created_by = auth.uid()
+        )
+      )
+  $policy$;
+  EXECUTE $policy$
+    CREATE POLICY part_vendors_update_owner ON public.part_vendors
+      FOR UPDATE TO authenticated
       USING (
         EXISTS (
           SELECT 1 FROM public.parts_catalog p
@@ -571,6 +580,140 @@ BEGIN
     RETURN;
   END IF;
   EXECUTE 'DROP POLICY IF EXISTS "Authenticated can create customer orgs" ON public.organizations';
+END $$;
+
+-- A service org may link only a customer org its own member created,
+-- or a customer org one of its members invited and that invite was accepted.
+-- customer_organization_id cannot be retargeted.
+CREATE OR REPLACE FUNCTION public.customer_org_link_allowed(
+  p_service bigint,
+  p_customer bigint
+) RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+  SELECT p_service IS NOT NULL
+    AND p_customer IS NOT NULL
+    AND public.caller_in_org(p_service)
+    AND (
+      EXISTS (
+        SELECT 1
+        FROM public.organizations o
+        WHERE o.id = p_customer
+          AND o.created_by IS NOT NULL
+          AND (
+            EXISTS (
+              SELECT 1
+              FROM public.organization_memberships m
+              WHERE m.user_id = o.created_by
+                AND m.organization_id = p_service
+            )
+            OR EXISTS (
+              SELECT 1
+              FROM public.user_profiles p
+              WHERE p.id = o.created_by
+                AND p.organization_id = p_service
+            )
+          )
+      )
+      OR EXISTS (
+        SELECT 1
+        FROM public.engineer_invitations i
+        JOIN public.organization_memberships m
+          ON m.user_id = i.invited_by
+         AND m.organization_id = p_service
+        WHERE i.organization_id = p_customer
+          AND COALESCE(i.accepted, false) = true
+      )
+    );
+$$;
+
+REVOKE ALL ON FUNCTION public.customer_org_link_allowed(bigint, bigint) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.customer_org_link_allowed(bigint, bigint) TO authenticated;
+
+DO $$
+BEGIN
+  IF to_regclass('public.organization_customers') IS NULL THEN
+    RETURN;
+  END IF;
+  EXECUTE 'ALTER TABLE public.organization_customers ENABLE ROW LEVEL SECURITY';
+  EXECUTE 'REVOKE UPDATE (customer_organization_id) ON TABLE public.organization_customers FROM PUBLIC, anon, authenticated';
+  EXECUTE 'REVOKE UPDATE (service_organization_id) ON TABLE public.organization_customers FROM PUBLIC, anon, authenticated';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can create customer links for their service org" ON public.organization_customers';
+  EXECUTE 'DROP POLICY IF EXISTS "Users can update their org''s customer links" ON public.organization_customers';
+  EXECUTE 'DROP POLICY IF EXISTS organization_customers_insert_linked ON public.organization_customers';
+  EXECUTE 'DROP POLICY IF EXISTS organization_customers_update_linked ON public.organization_customers';
+  EXECUTE $policy$
+    CREATE POLICY organization_customers_insert_linked ON public.organization_customers
+      FOR INSERT TO authenticated
+      WITH CHECK (
+        public.customer_org_link_allowed(service_organization_id, customer_organization_id)
+      )
+  $policy$;
+  EXECUTE $policy$
+    CREATE POLICY organization_customers_update_linked ON public.organization_customers
+      FOR UPDATE TO authenticated
+      USING (public.caller_in_org(service_organization_id))
+      WITH CHECK (
+        public.customer_org_link_allowed(service_organization_id, customer_organization_id)
+      )
+  $policy$;
+END $$;
+
+-- Null organization_id must not make every signed-in user able to read
+-- estimates and invoices. The created_by branch stays so the author still
+-- sees a row they wrote.
+DO $$
+BEGIN
+  IF to_regclass('public.service_estimates') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS service_estimates_member_all ON public.service_estimates';
+    EXECUTE $policy$
+      CREATE POLICY service_estimates_member_all ON public.service_estimates
+        FOR ALL TO authenticated
+        USING (
+          organization_id IN (
+            SELECT user_profiles.organization_id
+            FROM public.user_profiles
+            WHERE user_profiles.id = auth.uid()
+          )
+          OR created_by = auth.uid()
+        )
+        WITH CHECK (
+          organization_id IN (
+            SELECT user_profiles.organization_id
+            FROM public.user_profiles
+            WHERE user_profiles.id = auth.uid()
+          )
+          OR created_by = auth.uid()
+        )
+    $policy$;
+  END IF;
+
+  IF to_regclass('public.service_invoices') IS NOT NULL THEN
+    EXECUTE 'DROP POLICY IF EXISTS service_invoices_member_all ON public.service_invoices';
+    EXECUTE $policy$
+      CREATE POLICY service_invoices_member_all ON public.service_invoices
+        FOR ALL TO authenticated
+        USING (
+          organization_id IN (
+            SELECT user_profiles.organization_id
+            FROM public.user_profiles
+            WHERE user_profiles.id = auth.uid()
+          )
+          OR created_by = auth.uid()
+        )
+        WITH CHECK (
+          organization_id IN (
+            SELECT user_profiles.organization_id
+            FROM public.user_profiles
+            WHERE user_profiles.id = auth.uid()
+          )
+          OR created_by = auth.uid()
+        )
+    $policy$;
+  END IF;
 END $$;
 
 -- Anon cannot UPDATE owner or org columns on any public table.

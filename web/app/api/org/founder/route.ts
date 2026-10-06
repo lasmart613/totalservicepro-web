@@ -86,6 +86,12 @@ export async function POST(req: NextRequest) {
     let orgId = body.organizationId ?? null;
     let orgType = '';
     let createdBy: string | null = null;
+    let existingForGrant: {
+      id: number | string;
+      is_premium?: boolean | null;
+      premium_until?: string | null;
+      premium_grant?: string | null;
+    } | null = null;
 
     if (orgId == null || orgId === '') {
       const pending = body.pending;
@@ -115,7 +121,7 @@ export async function POST(req: NextRequest) {
     } else {
       const { data: org, error } = await admin
         .from('organizations')
-        .select('id, type, created_by, is_premium')
+        .select('id, type, created_by, is_premium, premium_until, premium_grant')
         .eq('id', orgId)
         .maybeSingle();
       if (error || !org) {
@@ -123,13 +129,7 @@ export async function POST(req: NextRequest) {
       }
       orgType = String(org.type || '');
       createdBy = org.created_by ? String(org.created_by) : null;
-      if (!org.is_premium && orgType === 'service_company') {
-        const patch: Record<string, unknown> = {};
-        applyComplimentarySignupFields(patch, orgType);
-        if (patch.is_premium === true) {
-          await admin.from('organizations').update(patch).eq('id', org.id);
-        }
-      }
+      existingForGrant = org;
     }
 
     const decision = decideFounderLink({
@@ -139,6 +139,23 @@ export async function POST(req: NextRequest) {
     });
     if (!decision.ok) {
       return NextResponse.json({ error: decision.error }, { status: decision.status });
+    }
+
+    const priorPremium =
+      existingForGrant?.is_premium === true ||
+      !!existingForGrant?.premium_until ||
+      !!existingForGrant?.premium_grant;
+    if (
+      existingForGrant &&
+      createdBy === user.id &&
+      orgType === 'service_company' &&
+      !priorPremium
+    ) {
+      const patch: Record<string, unknown> = {};
+      applyComplimentarySignupFields(patch, orgType);
+      if (patch.is_premium === true) {
+        await admin.from('organizations').update(patch).eq('id', existingForGrant.id);
+      }
     }
 
     const profile = body.profile || {};

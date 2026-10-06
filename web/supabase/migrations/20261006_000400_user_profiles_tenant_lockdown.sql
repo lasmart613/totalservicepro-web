@@ -7,7 +7,9 @@
 -- downgrading admin/company_admin but letting owner and other roles through.
 --
 -- This file is idempotent. Apply it in the Supabase SQL editor or CLI.
--- It does not UPDATE, DELETE, or rewrite customer rows.
+-- The only row rewrite is organization_memberships.role 'admin' ->
+-- 'company_admin' (platform admin must not come from a membership).
+-- It does not UPDATE or DELETE customer, invoice, or profile rows.
 --
 -- Sweep (repo migrations + generated types; privilege columns vs own-row writes):
 --   user_profiles              FIXED  column UPDATE/INSERT revoked; trigger raises
@@ -48,6 +50,56 @@ COMMENT ON FUNCTION public.auth_login_email() IS
 REVOKE ALL ON FUNCTION public.auth_login_email() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.auth_login_email() TO authenticated;
 
+-- NULL expires_at is expired unless created_at is within the last 14 days.
+-- A row with both expires_at and created_at NULL is expired.
+-- accepted = true is never open.
+CREATE OR REPLACE FUNCTION public.invitation_is_open(
+  p_accepted boolean,
+  p_expires_at timestamptz,
+  p_created_at timestamptz
+) RETURNS boolean
+LANGUAGE sql
+STABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT COALESCE(p_accepted, false) = false
+    AND (
+      (p_expires_at IS NOT NULL AND p_expires_at > now())
+      OR (
+        p_expires_at IS NULL
+        AND p_created_at IS NOT NULL
+        AND p_created_at > (now() - interval '14 days')
+      )
+    );
+$$;
+
+COMMENT ON FUNCTION public.invitation_is_open(boolean, timestamptz, timestamptz) IS
+  'Unaccepted invite that has not expired. NULL expires_at counts only when created_at is within 14 days; otherwise it is expired.';
+
+REVOKE ALL ON FUNCTION public.invitation_is_open(boolean, timestamptz, timestamptz) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.invitation_is_open(boolean, timestamptz, timestamptz) TO authenticated;
+
+-- Org-level membership role 'admin' is company_admin on the profile.
+-- is_admin() is user_profiles.role = 'admin' and must not follow a membership.
+CREATE OR REPLACE FUNCTION public.profile_role_from_membership(p_role text)
+RETURNS text
+LANGUAGE sql
+IMMUTABLE
+SET search_path = public, pg_temp
+AS $$
+  SELECT CASE
+    WHEN lower(btrim(coalesce(p_role, ''))) = 'admin' THEN 'company_admin'
+    WHEN nullif(btrim(p_role), '') IS NULL THEN 'fse'
+    ELSE btrim(p_role)
+  END;
+$$;
+
+COMMENT ON FUNCTION public.profile_role_from_membership(text) IS
+  'Role copied from organization_memberships or an invite onto user_profiles. admin becomes company_admin. Never grants platform admin.';
+
+REVOKE ALL ON FUNCTION public.profile_role_from_membership(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.profile_role_from_membership(text) TO authenticated;
+
 -- ---------------------------------------------------------------------------
 -- 2) New-user trigger: metadata cannot mint an org or an elevated role.
 -- ---------------------------------------------------------------------------
@@ -76,15 +128,15 @@ BEGIN
        FROM public.engineer_invitations i
        WHERE i.organization_id = meta_org::bigint
          AND lower(btrim(i.email)) = lower(btrim(NEW.email))
-         AND COALESCE(i.accepted, false) = false
+         AND public.invitation_is_open(i.accepted, i.expires_at, i.created_at)
      ) THEN
     org_id := meta_org::bigint;
-    SELECT COALESCE(NULLIF(TRIM(i.role), ''), 'fse')
+    SELECT public.profile_role_from_membership(COALESCE(NULLIF(TRIM(i.role), ''), 'fse'))
       INTO urole
     FROM public.engineer_invitations i
     WHERE i.organization_id = org_id
       AND lower(btrim(i.email)) = lower(btrim(NEW.email))
-      AND COALESCE(i.accepted, false) = false
+      AND public.invitation_is_open(i.accepted, i.expires_at, i.created_at)
     ORDER BY i.created_at DESC NULLS LAST, i.id DESC
     LIMIT 1;
   END IF;
@@ -226,7 +278,7 @@ BEGIN
       WHERE i.organization_id = NEW.organization_id
         AND public.auth_login_email() IS NOT NULL
         AND lower(btrim(i.email)) = public.auth_login_email()
-        AND COALESCE(i.accepted, false) = false
+        AND public.invitation_is_open(i.accepted, i.expires_at, i.created_at)
     ) INTO invited;
     IF NOT own_created AND NOT member_of_new AND NOT invited THEN
       RAISE EXCEPTION 'cannot join an organization you did not create, are not a member of, and were not invited to';
@@ -250,7 +302,7 @@ BEGIN
           WHERE i.organization_id = NEW.organization_id
             AND public.auth_login_email() IS NOT NULL
             AND lower(btrim(i.email)) = public.auth_login_email()
-            AND COALESCE(i.accepted, false) = false
+            AND public.invitation_is_open(i.accepted, i.expires_at, i.created_at)
             AND lower(btrim(COALESCE(i.role, ''))) = lower(btrim(NEW.role))
         ) THEN
           RAISE EXCEPTION 'cannot self-assign an elevated role';
@@ -366,7 +418,7 @@ BEGIN
   WHERE i.organization_id = NEW.organization_id
     AND public.auth_login_email() IS NOT NULL
     AND lower(btrim(i.email)) = public.auth_login_email()
-    AND COALESCE(i.accepted, false) = false
+    AND public.invitation_is_open(i.accepted, i.expires_at, i.created_at)
   ORDER BY i.created_at DESC NULLS LAST, i.id DESC
   LIMIT 1;
 
@@ -381,7 +433,7 @@ BEGIN
       RAISE EXCEPTION 'cannot self-assign an elevated role';
     END IF;
   ELSIF invite_role IS NOT NULL THEN
-    grant_role := invite_role;
+    grant_role := public.profile_role_from_membership(invite_role);
   ELSE
     RAISE EXCEPTION 'cannot join an organization you did not create, are not a member of, and were not invited to';
   END IF;
@@ -529,20 +581,23 @@ AS $$
       )
       OR (
         COALESCE(p_is_home, false) = false
+        AND lower(btrim(coalesce(p_role, ''))) <> 'admin'
         AND EXISTS (
           SELECT 1 FROM public.engineer_invitations i
           WHERE i.organization_id = p_organization_id
             AND public.auth_login_email() IS NOT NULL
             AND lower(btrim(i.email)) = public.auth_login_email()
-            AND COALESCE(i.accepted, false) = false
-            AND lower(btrim(coalesce(p_role, ''))) = lower(btrim(coalesce(NULLIF(TRIM(i.role), ''), 'fse')))
+            AND public.invitation_is_open(i.accepted, i.expires_at, i.created_at)
+            AND lower(btrim(coalesce(p_role, ''))) = public.profile_role_from_membership(
+              coalesce(NULLIF(TRIM(i.role), ''), 'fse')
+            )
         )
       )
     );
 $$;
 
 COMMENT ON FUNCTION public.membership_insert_allowed(uuid, bigint, text, boolean) IS
-  'Client membership insert: own shop at the founder role for that org type (never platform admin), or an open invite whose role matches exactly. Invite inserts cannot set is_home.';
+  'Client membership insert: own shop at the founder role for that org type (never platform admin), or an unexpired unaccepted invite whose role matches after admin is mapped to company_admin. NULL expires_at is open only when created_at is within 14 days. Invite inserts cannot set is_home.';
 
 REVOKE ALL ON FUNCTION public.membership_insert_allowed(uuid, bigint, text, boolean) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.membership_insert_allowed(uuid, bigint, text, boolean) TO authenticated;
@@ -657,88 +712,99 @@ CREATE TRIGGER organizations_guard_privilege
   FOR EACH ROW
   EXECUTE FUNCTION public.organizations_guard_privilege();
 
+-- Table INSERT/UPDATE revoked, then safe columns only. Column-level REVOKE
+-- does nothing while the table privilege remains, so the table privilege goes
+-- first. Premium and plan columns are not re-granted. created_by may be set
+-- on INSERT (the guard requires it to be the caller) and cannot be UPDATEd.
 DO $$
 DECLARE
   col text;
-  locked text[] := ARRAY['is_premium', 'premium_until', 'premium_grant', 'subscription_tier', 'plan'];
+  insert_cols text[] := ARRAY[
+    'name', 'type', 'address', 'city', 'state', 'zip', 'phone', 'email', 'website',
+    'notes', 'is_active', 'updated_at', 'ticket_prefix', 'logo_url', 'description',
+    'years_in_business', 'supported_brands', 'service_territories', 'biz_type',
+    'specialties', 'created_by', 'services_offered', 'num_techs', 'tax_id',
+    'num_laser_systems', 'laser_models', 'facility_type', 'preferred_services',
+    'bio', 'slogan', 'alt_phone', 'num_locations', 'contact_name', 'list_in_directory',
+    'directory_contacts', 'storefront_enabled', 'storefront_slug', 'storefront_bio',
+    'brand_primary_color', 'brand_accent_color', 'currency_code', 'number_format'
+  ];
+  present_ins text[] := ARRAY[]::text[];
+  present_upd text[] := ARRAY[]::text[];
 BEGIN
   IF to_regclass('public.organizations') IS NULL THEN
     RETURN;
   END IF;
-  FOREACH col IN ARRAY locked LOOP
+
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.organizations FROM PUBLIC;
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.organizations FROM anon;
+  REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.organizations FROM authenticated;
+  GRANT SELECT ON TABLE public.organizations TO authenticated;
+
+  FOREACH col IN ARRAY insert_cols LOOP
     IF EXISTS (
       SELECT 1 FROM information_schema.columns
       WHERE table_schema = 'public' AND table_name = 'organizations' AND column_name = col
     ) THEN
-      EXECUTE format(
-        'REVOKE INSERT (%I), UPDATE (%I) ON TABLE public.organizations FROM PUBLIC, anon, authenticated',
-        col, col
-      );
+      present_ins := array_append(present_ins, format('%I', col));
+      IF col <> 'created_by' THEN
+        present_upd := array_append(present_upd, format('%I', col));
+      END IF;
     END IF;
   END LOOP;
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'organizations' AND column_name = 'created_by'
-  ) THEN
-    EXECUTE 'REVOKE UPDATE (created_by) ON TABLE public.organizations FROM PUBLIC, anon, authenticated';
+
+  IF coalesce(array_length(present_ins, 1), 0) = 0 THEN
+    RAISE EXCEPTION 'organizations safe column list matched no columns';
   END IF;
+
+  EXECUTE format(
+    'GRANT INSERT (%s) ON TABLE public.organizations TO authenticated',
+    array_to_string(present_ins, ', ')
+  );
+  EXECUTE format(
+    'GRANT UPDATE (%s) ON TABLE public.organizations TO authenticated',
+    array_to_string(present_upd, ', ')
+  );
 END $$;
 
 -- ---------------------------------------------------------------------------
--- 8) Invitations: an invitee cannot retarget email, org, or role.
---    Admins of that org may insert. Role platform admin is rejected.
+-- 8) Invitations. Drop every existing policy first. Allow-all is FOR ALL
+--    to public, so any tighter policy is moot until it is gone.
+--    Clients cannot INSERT. Same-org admins can SELECT. Invitees read and
+--    accept through the service role (POST /api/team/claim).
 -- ---------------------------------------------------------------------------
 ALTER TABLE public.engineer_invitations ENABLE ROW LEVEL SECURITY;
 
-REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.engineer_invitations FROM PUBLIC, anon;
-REVOKE UPDATE, DELETE, TRUNCATE ON TABLE public.engineer_invitations FROM authenticated;
+REVOKE ALL ON TABLE public.engineer_invitations FROM PUBLIC;
+REVOKE ALL ON TABLE public.engineer_invitations FROM anon;
+REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.engineer_invitations FROM authenticated;
+GRANT SELECT ON TABLE public.engineer_invitations TO authenticated;
 
 DO $$
 DECLARE
-  col text;
-  locked text[] := ARRAY['email', 'organization_id', 'role', 'invited_by', 'token'];
-  present text[];
+  r record;
 BEGIN
-  present := ARRAY[]::text[];
-  FOREACH col IN ARRAY ARRAY['accepted', 'accepted_at']::text[] LOOP
-    IF EXISTS (
-      SELECT 1 FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'engineer_invitations' AND column_name = col
-    ) THEN
-      present := array_append(present, format('%I', col));
-    END IF;
+  FOR r IN
+    SELECT pol.polname AS name
+    FROM pg_policy pol
+    JOIN pg_class c ON c.oid = pol.polrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    WHERE n.nspname = 'public'
+      AND c.relname = 'engineer_invitations'
+  LOOP
+    EXECUTE format('DROP POLICY IF EXISTS %I ON public.engineer_invitations', r.name);
   END LOOP;
-  IF coalesce(array_length(present, 1), 0) > 0 THEN
-    EXECUTE format(
-      'GRANT UPDATE (%s) ON TABLE public.engineer_invitations TO authenticated',
-      array_to_string(present, ', ')
-    );
-  END IF;
-  FOREACH col IN ARRAY locked LOOP
-    IF EXISTS (
-      SELECT 1 FROM information_schema.columns
-      WHERE table_schema = 'public' AND table_name = 'engineer_invitations' AND column_name = col
-    ) THEN
-      EXECUTE format(
-        'REVOKE UPDATE (%I) ON TABLE public.engineer_invitations FROM PUBLIC, anon, authenticated',
-        col
-      );
-    END IF;
-  END LOOP;
-  GRANT SELECT, INSERT ON TABLE public.engineer_invitations TO authenticated;
 END $$;
 
 DROP POLICY IF EXISTS engineer_invitations_select ON public.engineer_invitations;
 CREATE POLICY engineer_invitations_select ON public.engineer_invitations
   FOR SELECT TO authenticated
   USING (
-    (public.auth_login_email() IS NOT NULL AND lower(btrim(email)) = public.auth_login_email())
-    OR invited_by = auth.uid()
-    OR EXISTS (
+    EXISTS (
       SELECT 1 FROM public.organization_memberships m
       WHERE m.user_id = auth.uid()
         AND m.organization_id = engineer_invitations.organization_id
-        AND lower(m.role) IN ('admin', 'company_admin', 'owner', 'service_manager')
+        AND lower(m.role) IN ('company_admin', 'owner', 'service_manager')
     )
     OR EXISTS (
       SELECT 1 FROM public.user_profiles p
@@ -748,40 +814,186 @@ CREATE POLICY engineer_invitations_select ON public.engineer_invitations
     )
   );
 
-DROP POLICY IF EXISTS engineer_invitations_insert_admin ON public.engineer_invitations;
-CREATE POLICY engineer_invitations_insert_admin ON public.engineer_invitations
-  FOR INSERT TO authenticated
-  WITH CHECK (
-    invited_by = auth.uid()
-    AND COALESCE(accepted, false) = false
-    AND lower(btrim(coalesce(role, ''))) <> 'admin'
-    AND (
-      EXISTS (
-        SELECT 1 FROM public.organization_memberships m
-        WHERE m.user_id = auth.uid()
-          AND m.organization_id = engineer_invitations.organization_id
-          AND lower(m.role) IN ('admin', 'company_admin', 'owner', 'service_manager')
-      )
-      OR EXISTS (
-        SELECT 1 FROM public.user_profiles p
-        WHERE p.id = auth.uid()
-          AND p.organization_id = engineer_invitations.organization_id
-          AND lower(coalesce(p.role, '')) IN ('admin', 'company_admin', 'owner', 'service_manager')
-      )
-    )
-  );
+-- ---------------------------------------------------------------------------
+-- 8b) Copying a membership role onto the profile never grants platform admin.
+--     Live accept_team_invite is recreated with the same behavior, plus an
+--     unaccepted and unexpired invite lookup.
+-- ---------------------------------------------------------------------------
+CREATE OR REPLACE FUNCTION public.switch_active_organization(p_organization_id bigint)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  actor uuid;
+  mem public.organization_memberships%ROWTYPE;
+  profile_role text;
+BEGIN
+  actor := auth.uid();
+  IF actor IS NULL THEN
+    RAISE EXCEPTION 'not signed in';
+  END IF;
 
-DROP POLICY IF EXISTS engineer_invitations_accept_own ON public.engineer_invitations;
-CREATE POLICY engineer_invitations_accept_own ON public.engineer_invitations
-  FOR UPDATE TO authenticated
-  USING (
-    public.auth_login_email() IS NOT NULL
-    AND lower(btrim(email)) = public.auth_login_email()
-  )
-  WITH CHECK (
-    public.auth_login_email() IS NOT NULL
-    AND lower(btrim(email)) = public.auth_login_email()
+  SELECT * INTO mem
+  FROM public.organization_memberships
+  WHERE user_id = actor AND organization_id = p_organization_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'not a member of that organization';
+  END IF;
+
+  profile_role := public.profile_role_from_membership(mem.role);
+
+  UPDATE public.user_profiles
+  SET
+    organization_id = mem.organization_id,
+    active_organization_id = mem.organization_id,
+    role = profile_role,
+    updated_at = now()
+  WHERE id = actor;
+
+  RETURN jsonb_build_object(
+    'ok', true,
+    'organization_id', mem.organization_id,
+    'role', profile_role,
+    'is_home', mem.is_home
   );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.switch_active_organization(bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.switch_active_organization(bigint) TO authenticated;
+
+CREATE OR REPLACE FUNCTION public.accept_team_invite(
+  p_invite_id bigint,
+  p_leave_organization_id bigint DEFAULT NULL
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  actor uuid;
+  actor_email text;
+  inv public.engineer_invitations%ROWTYPE;
+  home_mem public.organization_memberships%ROWTYPE;
+  has_any boolean;
+  mapped_role text;
+BEGIN
+  actor := auth.uid();
+  IF actor IS NULL THEN
+    RAISE EXCEPTION 'not signed in';
+  END IF;
+
+  actor_email := public.auth_login_email();
+  IF actor_email IS NULL THEN
+    RAISE EXCEPTION 'invitation not found';
+  END IF;
+
+  SELECT * INTO inv
+  FROM public.engineer_invitations
+  WHERE id = p_invite_id
+    AND lower(btrim(email)) = actor_email
+    AND public.invitation_is_open(accepted, expires_at, created_at);
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'invitation not found';
+  END IF;
+
+  mapped_role := public.profile_role_from_membership(COALESCE(NULLIF(TRIM(inv.role), ''), 'fse'));
+
+  IF p_leave_organization_id IS NOT NULL THEN
+    SELECT * INTO home_mem
+    FROM public.organization_memberships
+    WHERE user_id = actor AND organization_id = p_leave_organization_id;
+
+    IF FOUND AND (home_mem.is_home OR lower(home_mem.role) IN (
+      'admin', 'company_admin', 'owner', 'parts_supplier', 'supplier'
+    )) THEN
+      RAISE EXCEPTION 'founder/owner of their home shop cannot be removed by another company invite';
+    END IF;
+  END IF;
+
+  INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
+  VALUES (
+    actor,
+    inv.organization_id,
+    mapped_role,
+    false
+  )
+  ON CONFLICT (user_id, organization_id) DO UPDATE
+    SET updated_at = now(),
+        role = CASE
+          WHEN public.organization_memberships.is_home THEN public.organization_memberships.role
+          ELSE EXCLUDED.role
+        END;
+
+  UPDATE public.engineer_invitations
+  SET accepted = true, accepted_at = now()
+  WHERE id = inv.id;
+
+  IF p_leave_organization_id IS NOT NULL THEN
+    DELETE FROM public.organization_memberships
+    WHERE user_id = actor
+      AND organization_id = p_leave_organization_id
+      AND is_home = false
+      AND lower(role) NOT IN ('admin', 'company_admin', 'owner', 'parts_supplier', 'supplier');
+  END IF;
+
+  SELECT EXISTS (
+    SELECT 1 FROM public.organization_memberships WHERE user_id = actor
+  ) INTO has_any;
+
+  IF NOT EXISTS (
+    SELECT 1 FROM public.user_profiles
+    WHERE id = actor AND organization_id IS NOT NULL
+  ) THEN
+    UPDATE public.user_profiles
+    SET
+      organization_id = inv.organization_id,
+      active_organization_id = inv.organization_id,
+      role = mapped_role,
+      updated_at = now()
+    WHERE id = actor;
+  ELSIF p_leave_organization_id IS NOT NULL THEN
+    UPDATE public.user_profiles
+    SET
+      organization_id = inv.organization_id,
+      active_organization_id = inv.organization_id,
+      role = mapped_role,
+      updated_at = now()
+    WHERE id = actor
+      AND organization_id IS NOT DISTINCT FROM p_leave_organization_id;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'ok', true,
+    'organization_id', inv.organization_id,
+    'role', mapped_role,
+    'moonlight', has_any
+  );
+END;
+$$;
+
+COMMENT ON FUNCTION public.accept_team_invite(bigint, bigint) IS
+  'Accept one unexpired invite for auth.users email. Membership role admin is stored as company_admin. NULL expires_at is open only when created_at is within 14 days.';
+
+REVOKE ALL ON FUNCTION public.accept_team_invite(bigint, bigint) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.accept_team_invite(bigint, bigint) TO authenticated;
+
+-- Membership role admin is the org role, not platform admin.
+DO $$
+DECLARE
+  n integer;
+BEGIN
+  UPDATE public.organization_memberships
+  SET role = 'company_admin',
+      updated_at = now()
+  WHERE lower(btrim(role)) = 'admin';
+  GET DIAGNOSTICS n = ROW_COUNT;
+  RAISE NOTICE 'organization_memberships admin -> company_admin: %', n;
+END $$;
 
 -- ---------------------------------------------------------------------------
 -- 9) Subscriptions are written by the service role (Stripe / Play). Clients

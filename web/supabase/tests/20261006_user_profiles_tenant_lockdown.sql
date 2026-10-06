@@ -225,6 +225,88 @@ BEGIN
   IF has_column_privilege('anon', 'public.sites', 'organization_id', 'UPDATE') THEN
     RAISE EXCEPTION 'FAIL anon can still UPDATE sites.organization_id';
   END IF;
+
+  IF has_table_privilege('authenticated', 'public.engineer_invitations', 'INSERT') THEN
+    RAISE EXCEPTION 'FAIL authenticated can still INSERT engineer_invitations';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'engineer_invitations'
+      AND cmd = 'INSERT'
+  ) THEN
+    RAISE EXCEPTION 'FAIL engineer_invitations still has an INSERT policy';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'engineer_invitations'
+      AND policyname = 'engineer_invitations_select'
+      AND qual ILIKE '%auth_login_email%'
+  ) THEN
+    RAISE EXCEPTION 'FAIL invitees can still read invitation tokens';
+  END IF;
+  IF has_table_privilege('anon', 'public.contacts', 'SELECT')
+     OR has_table_privilege('anon', 'public.engineer_invitations', 'SELECT')
+     OR has_table_privilege('anon', 'public.notifications', 'SELECT')
+     OR has_table_privilege('anon', 'public.forum_bookmarks', 'SELECT')
+     OR has_table_privilege('anon', 'public.parts', 'SELECT')
+     OR has_table_privilege('authenticated', 'public.parts', 'SELECT') THEN
+    RAISE EXCEPTION 'FAIL anon or authenticated can still read a revoked open table';
+  END IF;
+  IF public.profile_role_from_membership('admin') IS DISTINCT FROM 'company_admin' THEN
+    RAISE EXCEPTION 'FAIL membership admin is copied onto the profile as platform admin';
+  END IF;
+  IF position('role = ''admin''' IN pg_get_functiondef('public.is_admin()'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'FAIL is_admin() is not user_profiles.role = admin';
+  END IF;
+  IF position('invitation_is_open' IN pg_get_functiondef('public.accept_team_invite(bigint, bigint)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'FAIL an expired invite can still be accepted';
+  END IF;
+  IF position('invitation_is_open' IN pg_get_functiondef('public.membership_insert_allowed(uuid, bigint, text, boolean)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'FAIL an expired invite can still insert a membership';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'service_estimates'
+      AND policyname = 'service_estimates_member_all'
+      AND (coalesce(qual, '') ILIKE '%IS NULL%' OR coalesce(with_check, '') ILIKE '%IS NULL%')
+  ) OR EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'service_invoices'
+      AND policyname = 'service_invoices_member_all'
+      AND (coalesce(qual, '') ILIKE '%IS NULL%' OR coalesce(with_check, '') ILIKE '%IS NULL%')
+  ) THEN
+    RAISE EXCEPTION 'FAIL null-org estimates or invoices are still visible to every member';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'organization_customers'
+      AND policyname = 'organization_customers_insert_linked'
+      AND with_check ILIKE '%customer_org_link_allowed%'
+  ) THEN
+    RAISE EXCEPTION 'FAIL organization_customers can still link an arbitrary customer org';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'forum_bookmarks'
+      AND cmd = 'SELECT'
+      AND coalesce(qual, '') IN ('true', '(true)')
+  ) THEN
+    RAISE EXCEPTION 'FAIL forum bookmarks are still readable by everyone';
+  END IF;
+  IF has_column_privilege('authenticated', 'public.organizations', 'is_premium', 'INSERT')
+     OR has_column_privilege('authenticated', 'public.organizations', 'is_premium', 'UPDATE')
+     OR has_column_privilege('authenticated', 'public.organizations', 'created_by', 'UPDATE') THEN
+    RAISE EXCEPTION 'FAIL authenticated can still write organizations premium or created_by';
+  END IF;
+  IF NOT has_column_privilege('authenticated', 'public.organizations', 'name', 'INSERT') THEN
+    RAISE EXCEPTION 'FAIL authenticated lost INSERT on organizations.name';
+  END IF;
 END $$;
 
 ROLLBACK;

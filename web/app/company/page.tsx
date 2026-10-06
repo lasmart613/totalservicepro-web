@@ -706,9 +706,11 @@ function CompanyProfile() {
     if (!newCustomer.name) { setCustomerMessage('Customer name is required.'); return; }
     if (!org?.id) { setCustomerMessage('Your organization is not loaded yet.'); return; }
     try {
+      const { data: { user: actor } } = await supabase.auth.getUser();
       const customerInsert: any = {
         name: newCustomer.name,
         type: 'customer',
+        created_by: actor?.id || null,
         address: newCustomer.address || null,
         city: newCustomer.city || null,
         state: newCustomer.state || null,

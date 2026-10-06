@@ -4,6 +4,7 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { ensureTeamMemberProfile } from '@/lib/team-profile';
 import {
   decideClaim,
+  invitationIsOpen,
   inviteMustNotLeaveHome,
 } from '@/lib/org-membership';
 import { authorizeInviteAccept } from '@/lib/tenant-lockdown';
@@ -116,6 +117,13 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({ ok: false, error: 'Could not look up the team invite.' }, { status: 500 });
       }
       inv = anyInv;
+    }
+
+    if (inv?.organization_id && inv.accepted !== true && !invitationIsOpen(inv)) {
+      if (body.inviteId) {
+        return NextResponse.json({ ok: false, error: 'This invitation has expired.' }, { status: 410 });
+      }
+      inv = null;
     }
 
     if (!inv?.organization_id) {

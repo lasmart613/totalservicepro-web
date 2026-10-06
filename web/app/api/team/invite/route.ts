@@ -127,26 +127,10 @@ export async function POST(req: NextRequest) {
     const roleLabel = teamInviteRoleLabel(inviteRole);
 
     if (!hasServiceRole()) {
-      const { error: invErr } = await userClient.from('engineer_invitations').insert({
-        organization_id: orgId,
-        email,
-        role: inviteRole,
-        first_name: firstName,
-        last_name: lastName,
-        invited_by: user.id,
-        accepted: false,
-      });
-      if (invErr) {
-        return NextResponse.json({ error: invErr.message }, { status: 400 });
-      }
-      return NextResponse.json({
-        ok: true,
-        emailed: false,
-        message:
-          'Invitation saved, but the server cannot send email (missing SUPABASE_SERVICE_ROLE_KEY). ' +
-          'Contact support to configure email, or share the signup link manually.',
-        signupUrl: `${base}/login`,
-      });
+      return NextResponse.json(
+        { error: 'Server cannot create team invites (missing service role).' },
+        { status: 503 }
+      );
     }
 
     const admin = getSupabaseAdmin();

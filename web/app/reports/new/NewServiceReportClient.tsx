@@ -1120,7 +1120,8 @@ export default function NewServiceReport() {
         phone: newCustomer.phone || null,
         email: newCustomer.email || null,
         contact_name: newCustomer.contactName || null,
-        type: 'customer'
+        type: 'customer',
+        created_by: currentUser?.id || null,
       }).select().single();
       if (error) throw error;
 
