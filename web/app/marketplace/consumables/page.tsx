@@ -18,6 +18,7 @@ import { useSignedIn } from '@/lib/use-signed-in';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
 import { displayModelName } from '@/lib/model-display';
 import { toast } from 'sonner';
+import { StorageImage } from '@/components/StorageImage';
 
 
 export default function ConsumablesMarketplace() {
@@ -115,7 +116,7 @@ export default function ConsumablesMarketplace() {
                 <div key={l.id} className="card p-6 text-left">
                   {featured && (
                     <Link href={href}>
-                      <img src={featured} alt="" className="w-full h-32 object-cover rounded mb-3 cursor-pointer" />
+                      <StorageImage src={featured} alt="" className="w-full h-32 object-cover rounded mb-3 cursor-pointer" width={480} />
                     </Link>
                   )}
                   <Link href={href}>

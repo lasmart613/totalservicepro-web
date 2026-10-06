@@ -401,13 +401,14 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
     let brands = 0;
 
     try {
-      let q = supabase.from('parts_catalog').select('id, brand, manufacturer', { count: 'exact' });
+      let q = supabase.from('parts_catalog').select('id, brand', { count: 'exact' });
       if (userId) q = q.eq('created_by', userId);
-      const { data: parts, count } = await q;
+      const { data: parts, count, error } = await q;
+      if (error) console.error('[supplier] parts_catalog', error.message);
       catalog = count != null ? count : (parts || []).length;
       const brandSet = new Set<string>();
       (parts || []).forEach((p: any) => {
-        const b = p.brand || p.manufacturer;
+        const b = p.brand;
         if (b) brandSet.add(String(b).toLowerCase());
       });
       brands = brandSet.size;

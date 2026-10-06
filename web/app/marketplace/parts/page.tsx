@@ -31,6 +31,7 @@ import { useSignedIn } from '@/lib/use-signed-in';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
 import { toast } from 'sonner';
 import { displayModelName } from '@/lib/model-display';
+import { StorageImage } from '@/components/StorageImage';
 
 export default function PartsMarketplace() {
   const [listings, setListings] = useState<MarketplaceListingLike[]>([]);
@@ -304,7 +305,7 @@ export default function PartsMarketplace() {
                 <div key={l.id} className="card p-6 text-left">
                   {featured && (
                     <Link href={href}>
-                      <img src={featured} alt={l.title || 'Part'} className="w-full h-40 object-cover rounded mb-3 cursor-pointer" />
+                      <StorageImage src={featured} alt={l.title || 'Part'} className="w-full h-40 object-cover rounded mb-3 cursor-pointer" width={480} />
                     </Link>
                   )}
                   <Link href={href}>

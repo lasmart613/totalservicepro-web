@@ -14,6 +14,10 @@ import {
   type DocCompany,
   type EstimateHtmlInput,
 } from './doc-html.ts';
+import {
+  isEstimateDepositEnabled,
+  printableEstimateDeposit,
+} from './estimate-deposit.ts';
 import { resolveInvoiceCollectable } from './invoice-collectable.ts';
 import { parseJsonField, SERVICE_TYPE_LABELS } from './save-helpers.ts';
 import { buildServiceReportPrintHTML } from '../service-report-print.ts';
@@ -295,6 +299,9 @@ function ownedEstimateHtmlInput(input: {
   const services = servicesRaw.map((item: unknown) => SERVICE_TYPE_LABELS[String(item)] || String(item));
   const pricing =
     data.pricing && typeof data.pricing === 'object' ? (data.pricing as Record<string, unknown>) : {};
+  const jobTotal = num(input.row.total ?? data.total);
+  const depositOn = isEstimateDepositEnabled(data);
+  const depositAmount = printableEstimateDeposit(data);
   return {
     company: input.company,
     customer: {
@@ -335,9 +342,10 @@ function ownedEstimateHtmlInput(input: {
     subtotal: num(data.subtotal),
     taxRate: num(pricing.taxRate),
     tax: num(data.tax),
-    total: num(input.row.total ?? data.total),
-    deposit: num(data.deposit),
-    balanceDue: num(data.balanceDue),
+    total: jobTotal,
+    deposit: depositAmount,
+    depositRequired: depositOn,
+    balanceDue: depositOn ? num(data.balanceDue) : jobTotal,
     validDays: 30,
     actionUrl: input.actionUrl || null,
     theme: input.theme,
