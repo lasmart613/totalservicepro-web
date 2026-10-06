@@ -221,7 +221,7 @@ export default function PartsMarketplace() {
               >
                 <option value="">{t('All categories')}</option>
                 {categories.map((c) => (
-                  <option key={c} value={c}>{c}</option>
+                  <option key={c} value={c}>{t(c)}</option>
                 ))}
               </select>
             </div>
@@ -235,7 +235,7 @@ export default function PartsMarketplace() {
               >
                 <option value="">{t('All conditions')}</option>
                 {conditions.map((c) => (
-                  <option key={c} value={c}>{c}</option>
+                  <option key={c} value={c}>{t(c)}</option>
                 ))}
               </select>
             </div>
@@ -316,7 +316,7 @@ export default function PartsMarketplace() {
                   )}
                   <ListingDescriptionSnippet text={l.description} className="mb-1" />
                   <p className="text-sm text-[var(--text3)] mb-2 fa-ltr">{t('PN:')} {l.part_number || l.serial_number || t('N/A')}</p>
-                  <p className="text-sm mb-1">{l.manufacturer} {displayModelName(l.model)} • {l.condition}</p>
+                  <p className="text-sm mb-1">{l.manufacturer} {displayModelName(l.model)} • {l.condition ? t(l.condition) : ''}</p>
                   <GuestAwarePrice signedIn={signedIn} priceLabel={formatListingPrice(l)} className="font-semibold text-[var(--gold)] mb-1" />
                   {avail.soldOut ? (
                     <div className="text-xs text-red-400 mb-3">{t('Sold out')}</div>
@@ -365,7 +365,7 @@ export default function PartsMarketplace() {
                       />
                       <div className="flex gap-2">
                         <button onClick={submitBid} className="btn btn-primary flex-1 text-sm">Submit Offer</button>
-                        <button onClick={() => setBiddingOn(null)} className="btn btn-secondary flex-1 text-sm">Cancel</button>
+                        <button onClick={() => setBiddingOn(null)} className="btn btn-secondary flex-1 text-sm">{t('Cancel')}</button>
                       </div>
                     </div>
                   )}

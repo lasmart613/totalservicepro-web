@@ -5,6 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { customerLinkLang, estimateDocumentLocale } from '@/lib/i18n/stored-org-language';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { resolveOrgMoneyPrefs, type OrgMoneyPrefs } from '@/lib/money-format';
@@ -77,6 +78,52 @@ export async function persistEstimateActionToken(
   }
 }
 
+const MISSING_COLUMN = /column|schema cache|does not exist/i;
+
+/** Best-effort stamp of the shop UI language. A missing column does not fail the send. */
+export async function persistEstimateDocumentLocale(
+  client: SupabaseClient,
+  estimateId: string | number,
+  locale: string | null | undefined
+): Promise<void> {
+  const lang = customerLinkLang(locale);
+  if (!lang) return;
+  const { error } = await client
+    .from('service_estimates')
+    .update({ document_locale: lang })
+    .eq('id', estimateId);
+  if (error && !MISSING_COLUMN.test(error.message || '')) {
+    console.warn('persistEstimateDocumentLocale', error.message);
+  }
+}
+
+/** Column first, then a language saved on estimate_data. Null when neither is present. */
+export async function readEstimateDocumentLocale(
+  client: SupabaseClient,
+  estimateId: unknown
+): Promise<string | null> {
+  if (estimateId == null || String(estimateId).trim() === '') return null;
+  const withColumn = await client
+    .from('service_estimates')
+    .select('document_locale, estimate_data')
+    .eq('id', estimateId)
+    .maybeSingle();
+  if (!withColumn.error && withColumn.data) {
+    return customerLinkLang(estimateDocumentLocale(withColumn.data));
+  }
+  if (withColumn.error && MISSING_COLUMN.test(withColumn.error.message || '')) {
+    const legacy = await client
+      .from('service_estimates')
+      .select('estimate_data')
+      .eq('id', estimateId)
+      .maybeSingle();
+    if (!legacy.error && legacy.data) {
+      return customerLinkLang(estimateDocumentLocale(legacy.data));
+    }
+  }
+  return null;
+}
+
 export async function findEstimateByActionToken(
   client: SupabaseClient,
   token: string
@@ -119,6 +166,7 @@ export async function loadPublicEstimateForToken(token: string): Promise<
       ok: true;
       estimate: ReturnType<typeof publicEstimatePayload>;
       confirms: ReturnType<typeof signEstimateActionConfirms>;
+      orgLanguage: string | null;
     }
   | { ok: false; message: string }
 > {
@@ -142,6 +190,7 @@ export async function loadPublicEstimateForToken(token: string): Promise<
     ok: true,
     estimate: publicEstimatePayload(est, companyName, moneyPrefs),
     confirms: signEstimateActionConfirms(token, secret),
+    orgLanguage: estimateDocumentLocale(est),
   };
 }
 

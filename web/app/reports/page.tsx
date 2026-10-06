@@ -1,4 +1,5 @@
 'use client';
+import { useFormatDate } from '@/lib/use-format-date';
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -22,6 +23,7 @@ function isValidOrgId(val: any): boolean {
 
 export default function ReportsList() {
   const t = useT();
+  const { format } = useFormatDate();
   const [reports, setReports] = useState<ServiceReport[]>([]);
   const [filtered, setFiltered] = useState<ServiceReport[]>([]);
   const [activeFilter, setActiveFilter] = useState<'all' | 'draft' | 'complete'>('all');
@@ -144,9 +146,9 @@ export default function ReportsList() {
         </div>
 
         <div className="flex gap-2 mb-4 overflow-x-auto pb-1">
-          <button className={`filter-chip ${activeFilter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>All</button>
+          <button className={`filter-chip ${activeFilter === 'all' ? 'active' : ''}`} onClick={() => setFilter('all')}>{t('All')}</button>
           <button className={`filter-chip ${activeFilter === 'draft' ? 'active' : ''}`} onClick={() => setFilter('draft')}>Drafts</button>
-          <button className={`filter-chip ${activeFilter === 'complete' ? 'active' : ''}`} onClick={() => setFilter('complete')}>Completed</button>
+          <button className={`filter-chip ${activeFilter === 'complete' ? 'active' : ''}`} onClick={() => setFilter('complete')}>{t('Completed')}</button>
         </div>
 
         {loading ? (
@@ -160,9 +162,9 @@ export default function ReportsList() {
         ) : (
           <div className="space-y-3">
             {filtered.map(r => {
-              const title = displayModelText(r.equipment_name || r.model_type || '') || r.report_number || 'Untitled Report';
-              const dateStr = r.date_out ? new Date(r.date_out + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
-              const updated = r.updated_at ? new Date(r.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
+              const title = displayModelText(r.equipment_name || r.model_type || '') || r.report_number || t('Untitled Report');
+              const dateStr = r.date_out ? format(r.date_out, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
+              const updated = r.updated_at ? format(r.updated_at, { month: 'short', day: 'numeric' }) : '';
               return (
                 <Link key={r.id} href={`/reports/${r.id}`} className="card p-4 flex gap-4 items-start hover:border-[var(--gold-border)] block">
                   <div className="text-3xl flex-shrink-0 mt-0.5">{r.status === 'complete' ? '✅' : '📝'}</div>
@@ -178,7 +180,7 @@ export default function ReportsList() {
                   </div>
                   <div className="text-right flex-shrink-0 text-xs text-[var(--text3)]">
                     <div className={`inline-block px-2.5 py-0.5 rounded-full text-[10px] font-bold mt-1 ${r.status === 'complete' ? 'bg-[var(--green)]/10 text-[var(--green)] border border-[var(--green)]/30' : 'bg-[var(--gold-glow)] text-[var(--gold)] border border-[var(--gold-border)]'}`}>
-                      {r.status === 'complete' ? 'Complete' : 'Draft'}
+                      {r.status === 'complete' ? 'Complete' : t('Draft')}
                     </div>
                     <div className="mt-2">Saved {updated}</div>
                   </div>
@@ -189,7 +191,7 @@ export default function ReportsList() {
         )}
       </div>
 
-      <Link href="/reports/new" className="fab sm:hidden" title="New Report">
+      <Link href="/reports/new" className="fab sm:hidden" title={t('New Report')}>
         <Plus size={28} />
       </Link>
     </div>

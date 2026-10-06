@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { wrapCustomerFacingDocumentEmail } from '../customer-invite.ts';
+import { formatOrgMoney } from '../money-format.ts';
 import {
   buildEstimateActionCtasHtml,
   buildEstimateHtml,
@@ -7,7 +10,6 @@ import {
   buildInvoiceHtml,
   ensureEstimateActionCtas,
 } from './doc-html.ts';
-
 const TOKEN_URL = 'https://repairplanet.net/e/abc-token-123';
 
 test('estimate email CTAs are Approve / Reject / Modify on tokenized links', () => {
@@ -22,6 +24,19 @@ test('estimate email CTAs are Approve / Reject / Modify on tokenized links', () 
   assert.match(html, /\?action=modify/);
   assert.doesNotMatch(html, /Sign in with your clinic account/);
   assert.doesNotMatch(html, /Request Changes/);
+  const localized = `${TOKEN_URL}?lang=ar`;
+  const arHtml = buildEstimateActionCtasHtml(localized, 'banner', 'ar');
+  assert.match(arHtml, /action=approve&amp;lang=ar/);
+  assert.match(arHtml, /action=reject&amp;lang=ar/);
+  assert.match(arHtml, /action=modify&amp;lang=ar/);
+  const plain = buildEstimatePlainText({
+    company: { company_name: 'QA' },
+    customer: { name: 'Clinic' },
+    estNumber: 'E-1',
+    actionUrl: localized,
+    locale: 'ar',
+  } as any);
+  assert.match(plain, /action=approve&lang=ar/);
 });
 
 test('ensureEstimateActionCtas puts three CTAs at the top and bottom', () => {
@@ -141,4 +156,77 @@ test('invoice HTML after deposit paid has no Stripe button until remainder is re
   assert.match(html, /Deposit received: <strong>\$650\.00<\/strong>/);
   assert.match(html, /upon completion of the service call/);
   assert.doesNotMatch(html, /Pay .* securely with Stripe/);
+});
+
+const estimateBase = {
+  company: { company_name: 'Lux Service' },
+  customer: { name: 'Clinic' },
+  estNumber: 'EST-1',
+  dateStr: '2026-09-28',
+  services: ['Routine PM Visit'],
+  subtotal: 100,
+  tax: 0,
+  total: 100,
+  actionUrl: TOKEN_URL,
+};
+
+test('estimate HTML stays English when no locale is passed', () => {
+  const html = buildEstimateHtml(estimateBase);
+  assert.match(html, /Service Estimate/);
+  assert.match(html, /Cost Breakdown/);
+  assert.match(html, />Approve</);
+  assert.doesNotMatch(html, /dir="rtl"/);
+  assert.match(html, /28/);
+});
+
+test('estimate HTML follows German labels and Arabic direction', () => {
+  const de = buildEstimateHtml({ ...estimateBase, locale: 'de' });
+  assert.match(de, /Kostenaufstellung/);
+  assert.match(de, /Service-Kostenvoranschlag/);
+  assert.doesNotMatch(de, /Cost Breakdown/);
+  const ar = buildEstimateHtml({ ...estimateBase, locale: 'ar' });
+  assert.match(ar, /dir="rtl"/);
+  assert.match(ar, /تفصيل التكلفة/);
+});
+
+test('estimate part lines and totals share one currency format', () => {
+  const prefs = { currencyCode: 'USD', numberFormat: 'auto' as const };
+  const part = formatOrgMoney(10, prefs, 'ar');
+  const total = formatOrgMoney(630, prefs, 'ar');
+  const shape = (value: string) =>
+    value.replace(/[\d\u0660-\u0669\u06F0-\u06F9.,\u066B\u066C\s\u00A0\u200E\u200F]+/g, '#');
+  assert.equal(shape(part), shape(total));
+  assert.notEqual(shape(part), shape('$10.00'));
+  const html = buildEstimateHtml({
+    ...estimateBase,
+    locale: 'ar',
+    moneyPrefs: prefs,
+    miles: 12,
+    partsLines: [`Filter ×1 @ ${part} = ${part}`],
+    partsTotal: 10,
+    subtotal: 630,
+    tax: 0,
+    total: 630,
+    issues: 'QA TEST note.',
+  });
+  assert.ok(html.includes(part), part);
+  assert.ok(html.includes(total), total);
+  assert.match(html, /<bdi dir="auto">QA TEST note\./);
+  assert.match(html, /تنقّل/);
+  assert.doesNotMatch(html, />Travel</);
+  const de = buildEstimateHtml({ ...estimateBase, locale: 'de', miles: 4 });
+  assert.match(de, /Anreise/);
+  assert.doesNotMatch(de, />Travel</);
+  const wrapped = wrapCustomerFacingDocumentEmail({
+    subject: 'Estimate',
+    documentHtml: html,
+    signupUrl: 'https://repairplanet.net/signup',
+    loginUrl: 'https://repairplanet.net/login',
+    locale: 'ar',
+  });
+  assert.match(wrapped, /<html[^>]*lang="ar"[^>]*dir="rtl"/);
+  assert.match(wrapped, /<bdi dir="auto">/);
+  const preview = readFileSync(new URL('../../app/estimates/new/EstimateFormClient.tsx', import.meta.url), 'utf8');
+  assert.match(preview, /<html lang="\$\{meta\.lang\}" dir="\$\{meta\.dir\}">/);
+  assert.doesNotMatch(preview, /\$\$\{/);
 });

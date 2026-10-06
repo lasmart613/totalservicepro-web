@@ -31,9 +31,9 @@ import { toast } from 'sonner';
 import { catalogManualTitle } from '@/lib/manual-catalog';
 import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
 import { canAccessRepairAi } from '@/lib/roles';
+import { useSiteLocale, useT } from '@/lib/fa/locale';
 import { currentOrgPlanLabel, type OrgPlanFields } from '@/lib/org-plan';
 import { ORG_PLAN_SELECTS } from '@/lib/org-plan-load';
-import { useSiteLocale } from '@/lib/fa/locale';
 import { AssistantCitedManual } from '@/components/AssistantCitedManual';
 import { useAssistantCitationOpen } from '@/components/useAssistantCitationOpen';
 import { canAskAssistant, getVoiceMode } from '@/lib/ai/citation-auto-open';
@@ -58,12 +58,12 @@ function assistantManualOptionLabel(row: ManualRow): string {
   return `${title} · ${badge.code}`;
 }
 
-const QUICK_CHIPS: { label: string; prompt: string }[] = [
-  { label: '⚡ Fault codes', prompt: 'What are the most common fault codes for this system?' },
-  { label: '🔧 Calibration', prompt: 'Walk me through the calibration procedure' },
-  { label: '📋 PM steps', prompt: 'What preventive maintenance steps should I perform?' },
-  { label: '🔩 Spare parts', prompt: 'What spare parts should I carry for this system?' },
-  { label: '⚠️ Safety', prompt: 'What are the laser safety precautions?' },
+const QUICK_CHIPS: { emoji: string; label: string; prompt: string }[] = [
+  { emoji: '⚡', label: 'Fault codes', prompt: 'What are the most common fault codes for this system?' },
+  { emoji: '🔧', label: 'Calibration', prompt: 'Walk me through the calibration procedure' },
+  { emoji: '📋', label: 'PM steps', prompt: 'What preventive maintenance steps should I perform?' },
+  { emoji: '🔩', label: 'Spare parts', prompt: 'What spare parts should I carry for this system?' },
+  { emoji: '⚠️', label: 'Safety', prompt: 'What are the laser safety precautions?' },
 ];
 
 function answerTimestamp(): number {
@@ -79,6 +79,7 @@ function defaultUsage(): AiUsage {
 }
 
 export default function AIAssistantClient() {
+  const t = useT();
   const router = useRouter();
   const siteLanguage = useSiteLocale();
   const supabase = getSupabaseClient();
@@ -483,7 +484,7 @@ export default function AIAssistantClient() {
   });
 
   function clearHistory() {
-    if (!confirm('Clear conversation history?')) return;
+    if (!confirm(t('Clear conversation history?'))) return;
     citedManual.cancelPending();
     citedManual.close();
     setMessages([]);
@@ -494,9 +495,7 @@ export default function AIAssistantClient() {
     return (
       <div className="fixed inset-0 z-30 flex flex-col bg-[var(--bg)]">
         <Header />
-        <div className="flex-1 min-h-0 flex items-center justify-center text-[var(--text3)] text-sm">
-          Loading AI Assistant…
-        </div>
+        <div className="flex-1 min-h-0 flex items-center justify-center text-[var(--text3)] text-sm">{t('Loading AI Assistant…')}</div>
       </div>
     );
   }
@@ -512,59 +511,55 @@ export default function AIAssistantClient() {
       <div className={`px-4 py-3 flex flex-col flex-1 min-h-0 ${split ? 'ai-assistant-split border-r border-[var(--border)]' : 'w-full min-w-0 max-w-3xl'}`}>
         <div className="shrink-0 flex items-start justify-between gap-3 mb-3">
           <div>
-            <h1 className="text-2xl font-extrabold text-[var(--text)]">🤖 AI Assistant</h1>
+            <h1 className="text-2xl font-extrabold text-[var(--text)]">🤖 {t('AI Assistant')}</h1>
             <p className="text-sm text-[var(--text3)] mt-0.5">
-              Same engine as the mobile app (fault codes + selected manual).{' '}
-              <span className="text-[var(--text3)]">Voice is available in the Android app.</span>
+              {t('Same engine as the mobile app (fault codes + selected manual).')}{' '}
+              <span className="text-[var(--text3)]">{t('Voice is available in the Android app.')}</span>
             </p>
           </div>
           <button
             type="button"
             onClick={clearHistory}
             className="text-xs text-[var(--text3)] hover:text-[var(--gold)] shrink-0 mt-1"
-          >
-            Clear chat
-          </button>
+          >{t('Clear chat')}</button>
         </div>
 
         {/* Usage */}
         <div className="shrink-0 flex flex-wrap items-center gap-3 mb-3 text-xs text-[var(--text3)]">
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface2)]">
-            <span>⌨️ Text</span>
+            <span>⌨️ {t('Text')}</span>
             <strong className={textLimitHit ? 'text-red-400' : 'text-[var(--gold)]'}>
               {usage.text.used}/{usage.text.limit}
             </strong>
             {planLabel && <span className="opacity-70">· {planLabel}</span>}
           </span>
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface2)] opacity-70">
-            🎙️ Voice {usage.voice.used}/{usage.voice.limit}
-            <span className="hidden sm:inline">(mobile)</span>
+            🎙️ {t('Voice')} {usage.voice.used}/{usage.voice.limit}
+            <span className="hidden sm:inline">{t('(mobile)')}</span>
           </span>
           <button
             type="button"
             onClick={citedManual.toggleAutoOpen}
             aria-pressed={citedManual.autoOpen}
-            aria-label="Auto-open cited manual page"
+            aria-label={t('Auto-open cited manual page')}
             className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface2)] hover:border-[var(--gold)] ${
               citedManual.autoOpen ? 'text-[var(--gold)]' : ''
             }`}
           >
-            Auto-open page {citedManual.autoOpen ? 'ON' : 'OFF'}
+            {citedManual.autoOpen ? t('Auto-open page ON') : t('Auto-open page OFF')}
           </button>
         </div>
 
         {/* Manual context */}
         <div className="card p-3 mb-3 grid grid-cols-1 sm:grid-cols-2 gap-3 shrink-0">
           <div>
-            <label className="text-[10px] font-bold uppercase tracking-wide text-[var(--text3)]">
-              Brand
-            </label>
+            <label className="text-[10px] font-bold uppercase tracking-wide text-[var(--text3)]">{t('Brand')}</label>
             <select
               className="input w-full mt-1 text-sm"
               value={brand}
               onChange={(e) => onBrandChange(e.target.value)}
             >
-              <option value="">Select manufacturer…</option>
+              <option value="">{t('Select manufacturer…')}</option>
               {brands.map((b) => (
                 <option key={b} value={b}>
                   {b}
@@ -573,16 +568,14 @@ export default function AIAssistantClient() {
             </select>
           </div>
           <div>
-            <label className="text-[10px] font-bold uppercase tracking-wide text-[var(--text3)]">
-              Manual
-            </label>
+            <label className="text-[10px] font-bold uppercase tracking-wide text-[var(--text3)]">{t('Manual')}</label>
             <select
               className="input w-full mt-1 text-sm"
               value={manualId != null ? String(manualId) : ''}
               onChange={(e) => onManualChange(e.target.value)}
               disabled={!brand}
             >
-              <option value="">{brand ? 'Select model / manual…' : 'Pick a brand first'}</option>
+              <option value="">{brand ? t('Select model / manual…') : t('Pick a brand first')}</option>
               {manualsForBrand.map((m) => (
                 <option key={m.id} value={String(m.id)}>
                   {assistantManualOptionLabel(m)}
@@ -602,16 +595,13 @@ export default function AIAssistantClient() {
                       title: catalogManualTitle(selectedManual),
                     })}
                     className="ai-cite-link underline-offset-2 hover:underline"
-                  >
-                    Open in viewer
-                  </Link>
+                  >{t('Open in viewer')}</Link>
                 </>
               )}
             </div>
           ) : (
             <div className="sm:col-span-2 text-xs text-[var(--text3)]">
-              Select a manual for accurate PM, calibration, and model-specific answers. Fault codes
-              still work from the TSP database.
+              {t('Select a manual for accurate PM, calibration, and model-specific answers. Fault codes still work from the TSP database.')}
             </div>
           )}
         </div>
@@ -632,7 +622,7 @@ export default function AIAssistantClient() {
               onClick={() => sendPrompt(c.prompt)}
               className="text-xs px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface3)] hover:border-[var(--gold)] hover:text-[var(--gold)] disabled:opacity-40"
             >
-              {c.label}
+              {c.emoji} {t(c.label)}
             </button>
           ))}
         </div>
@@ -644,16 +634,14 @@ export default function AIAssistantClient() {
           tabIndex={-1}
           data-answer-thread=""
           role="log"
-          aria-label="AI Assistant conversation"
+          aria-label={t('AI Assistant conversation')}
           onClick={citedManual.onThreadClick}
         >
           {messages.length === 0 && (
             <div className="text-center text-sm text-[var(--text3)] py-10 leading-relaxed">
-              👋 Select brand + manual above, then ask about that system.
+              👋 {t('Select brand + manual above, then ask about that system.')}
               <br />
-              <span className="text-xs opacity-80">
-                Fault codes use the TSP database; other topics pull from the selected manual corpus.
-              </span>
+              <span className="text-xs opacity-80">{t('Fault codes use the TSP database; other topics pull from the selected manual corpus.')}</span>
             </div>
           )}
           {messages.map((m, i) => (
@@ -679,7 +667,7 @@ export default function AIAssistantClient() {
           {sending && (
             <div className="flex justify-start">
               <div className="rounded-2xl px-4 py-3 bg-[var(--surface3)] border border-[var(--border)] text-sm text-[var(--text3)]">
-                Thinking…
+                {t('Thinking…')}
               </div>
             </div>
           )}
@@ -691,8 +679,8 @@ export default function AIAssistantClient() {
             className="input flex-1 min-h-[44px] max-h-[120px] text-sm resize-y"
             placeholder={
               manualPath
-                ? 'Ask about this system…'
-                : 'Ask a question (select a manual for best results)…'
+                ? t('Ask about this system…')
+                : t('Ask a question (select a manual for best results)…')
             }
             rows={2}
             value={input}
@@ -711,16 +699,16 @@ export default function AIAssistantClient() {
             disabled={sending || textLimitHit || !input.trim()}
             onClick={() => sendPrompt(input)}
           >
-            {sending ? '…' : 'Send'}
+            {sending ? '…' : t('Send')}
           </button>
         </div>
 
         <div className="shrink-0 pb-3 flex flex-wrap gap-4 text-xs">
           <Link href="/hub" className="text-[var(--gold)] hover:underline">
-            ← Tech Hub
+            {t('← Tech Hub')}
           </Link>
           <Link href="/manuals" className="text-[var(--text3)] hover:text-[var(--gold)]">
-            Manual library
+            {t('Manual library')}
           </Link>
         </div>
       </div>

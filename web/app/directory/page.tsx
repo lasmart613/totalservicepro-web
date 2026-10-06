@@ -358,7 +358,7 @@ export default function DirectoryPage() {
               <div className="text-center text-xs text-[var(--text3)] mt-4">
                 Showing {visibleGuests.length}
                 {guestTotal != null ? ` of ${guestTotal}` : ''} organizations.
-                {guestHasMore ? ' More listings are available after you sign up — or load the next page.' : ''}
+                {guestHasMore ? ` ${t('More listings are available after you sign up — or load the next page.')}` : ''}
               </div>
               {guestHasMore && (
                 <div className="flex justify-center mt-3">
@@ -423,9 +423,7 @@ export default function DirectoryPage() {
                           target="_blank"
                           rel="noopener noreferrer"
                           className="text-[var(--gold)] hover:underline"
-                        >
-                          Website
-                        </a>
+                        >{t('Website')}</a>
                       )}
                     </div>
                   )}
@@ -442,9 +440,7 @@ export default function DirectoryPage() {
               {t('Create a free account')}
             </PublicLink>
           ) : (
-            <PublicLink href="/company" className="text-[var(--gold)] hover:underline">
-              Company Profile
-            </PublicLink>
+            <PublicLink href="/company" className="text-[var(--gold)] hover:underline">{t('Company Profile')}</PublicLink>
           )}{' '}
           {t('→ enable free directory listing.')}
         </p>

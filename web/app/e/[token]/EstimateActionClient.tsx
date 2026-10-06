@@ -8,6 +8,10 @@ import {
   type CustomerActionKind,
   type EstimateEmailAction,
 } from '@/lib/billing/save-helpers';
+import { translate } from '@/lib/fa/locale';
+import { formatLocaleDate } from '@/lib/i18n/format-date';
+import type { PublicLocale } from '@/lib/i18n/locales';
+import { documentLocaleMeta } from '@/lib/i18n/preference';
 import { formatOrgMoney } from '@/lib/money-format';
 
 type PublicEstimate = {
@@ -43,10 +47,40 @@ function noticeMessage(notice: string) {
   return '';
 }
 
-function actionVerb(action: CustomerActionKind | null) {
-  if (action === 'approved') return 'approved';
-  if (action === 'rejected') return 'rejected';
-  return 'marked for modification';
+function fillSlots(template: string, slots: Record<string, React.ReactNode>): React.ReactNode {
+  return template.split(/(\{[a-z]+\})/g).map((part, index) => {
+    const match = /^\{([a-z]+)\}$/.exec(part);
+    if (match && Object.prototype.hasOwnProperty.call(slots, match[1])) {
+      return <React.Fragment key={index}>{slots[match[1]]}</React.Fragment>;
+    }
+    return <React.Fragment key={index}>{part}</React.Fragment>;
+  });
+}
+
+function actionHref(action: EstimateEmailAction, locale: PublicLocale): string {
+  const params = new URLSearchParams();
+  params.set('action', action);
+  if (locale !== 'en') params.set('lang', locale);
+  return `?${params.toString()}`;
+}
+
+export function EstimateLinkFallback({ message, locale }: { message: string; locale: PublicLocale }) {
+  const t = (text: string) => translate(locale, text);
+  const meta = documentLocaleMeta(locale);
+  const unavailable = message.includes('temporarily unavailable');
+  return (
+    <div
+      lang={meta.lang}
+      dir={meta.dir}
+      className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center"
+    >
+      <div className="text-[var(--gold)] font-extrabold tracking-wide text-sm uppercase">RepairPlanet</div>
+      <h1 className="text-xl font-extrabold mb-2 mt-3">
+        {unavailable ? t('Temporarily unavailable') : t('Link not valid')}
+      </h1>
+      <p className="text-sm text-[var(--text2)] max-w-md">{t(message)}</p>
+    </div>
+  );
 }
 
 export default function EstimateActionClient({
@@ -56,6 +90,7 @@ export default function EstimateActionClient({
   requested,
   justCompleted,
   notice,
+  locale,
 }: {
   token: string;
   confirms: Record<EstimateEmailAction, string>;
@@ -63,7 +98,10 @@ export default function EstimateActionClient({
   requested: EstimateEmailAction | null;
   justCompleted: CustomerActionKind | null;
   notice: string;
+  locale: PublicLocale;
 }) {
+  const t = (text: string) => translate(locale, text);
+  const meta = documentLocaleMeta(locale);
   const [est, setEst] = useState(estimate);
   const [note, setNote] = useState('');
   const [rejectNote, setRejectNote] = useState('');
@@ -123,7 +161,30 @@ export default function EstimateActionClient({
     }
   }
 
-  const company = est.companyName || 'the company';
+  const company = est.companyName || t('the company');
+  const through = est.validUntil
+    ? formatLocaleDate(est.validUntil, locale, {
+        timeZone: 'UTC',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })
+    : '';
+  const validity = est.expired
+    ? through
+      ? t('Expired on {date}').replace('{date}', through)
+      : t('Expired')
+    : through
+      ? t('Good for {days} days (through {date})')
+          .replace('{days}', String(est.validDays))
+          .replace('{date}', through)
+      : t('Good for {days} days').replace('{days}', String(est.validDays));
+  const alreadyLine =
+    done === 'approved'
+      ? t('This estimate was already approved.')
+      : done === 'rejected'
+        ? t('This estimate was already rejected.')
+        : t('This estimate was already marked for modification.');
   const mode = estimateConfirmMode({
     expired: est.expired,
     customerAction: done || est.customerAction,
@@ -133,7 +194,7 @@ export default function EstimateActionClient({
   const showConfirmation = !!confirmation && (mode.kind === 'final' || done === 'changes_requested');
 
   return (
-    <div className="min-h-[80vh] flex flex-col items-center p-6">
+    <div lang={meta.lang} dir={meta.dir} className="min-h-[80vh] flex flex-col items-center p-6">
       <div className="w-full max-w-lg">
         <div className="text-center mb-6">
           <div className="text-[var(--gold)] font-extrabold tracking-wide text-sm uppercase">
@@ -146,26 +207,24 @@ export default function EstimateActionClient({
           {submitting ? (
             <div className="py-10 text-center text-[var(--text3)]">
               {submitting === 'approve'
-                ? 'Approving estimate…'
+                ? t('Approving estimate…')
                 : submitting === 'reject'
-                  ? 'Recording rejection…'
-                  : 'Sending modification request…'}
+                  ? t('Recording rejection…')
+                  : t('Sending modification request…')}
             </div>
           ) : showConfirmation && confirmation ? (
             <div className="text-center py-4">
               <div className="text-4xl mb-3">
                 {done === 'approved' ? '✓' : done === 'rejected' ? '✕' : '✎'}
               </div>
-              <h1 className="text-2xl font-extrabold mb-2">{confirmation}</h1>
+              <h1 className="text-2xl font-extrabold mb-2">{t(confirmation)}</h1>
               <p className="text-[var(--text2)] leading-relaxed">
                 {already
-                  ? `This estimate was already ${actionVerb(done)}.`
+                  ? alreadyLine
                   : notified
-                    ? (
-                      <>
-                        We’ve notified <strong className="text-[var(--text)]">{company}</strong>.
-                      </>
-                    )
+                    ? fillSlots(t('We’ve notified {company}.'), {
+                        company: <strong className="text-[var(--text)]">{company}</strong>,
+                      })
                     : null}
               </p>
               {est.estimateNumber && (
@@ -174,73 +233,81 @@ export default function EstimateActionClient({
                 </p>
               )}
               {(done === 'changes_requested' || done === 'rejected') && (est.customerActionNote || note || rejectNote) && (
-                <p className="text-sm mt-4 p-3 rounded-xl border border-[var(--border2)] text-left">
+                <p className="text-sm mt-4 p-3 rounded-xl border border-[var(--border2)] text-start">
                   {est.customerActionNote || (done === 'rejected' ? rejectNote : note)}
                 </p>
               )}
               {done === 'changes_requested' && (
                 <p className="text-sm text-[var(--text2)] mt-4 leading-relaxed">
-                  You can still{' '}
-                  <a className="underline" href="?action=approve">
-                    approve this estimate
-                  </a>{' '}
-                  or{' '}
-                  <a className="underline" href="?action=reject">
-                    reject it
-                  </a>
-                  .
+                  {fillSlots(t('You can still {approve} or {reject}.'), {
+                    approve: (
+                      <a className="underline" href={actionHref('approve', locale)}>
+                        {t('approve this estimate')}
+                      </a>
+                    ),
+                    reject: (
+                      <a className="underline" href={actionHref('reject', locale)}>
+                        {t('reject it')}
+                      </a>
+                    ),
+                  })}
                 </p>
               )}
             </div>
           ) : (
             <>
               <div className="text-xs font-bold uppercase tracking-wider text-[var(--gold)] mb-1">
-                Service estimate
+                {t('Service estimate')}
               </div>
-              <h1 className="text-2xl font-extrabold">{est.estimateNumber || 'Estimate'}</h1>
+              <h1 className="text-2xl font-extrabold">{est.estimateNumber || t('Estimate')}</h1>
               <p className="text-sm text-[var(--text3)] mt-1">{company}</p>
 
               <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
                 <div>
-                  <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Customer</div>
+                  <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">{t('Customer')}</div>
                   <div className="font-semibold">{est.customerName}</div>
                 </div>
                 <div>
-                  <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Total</div>
+                  <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">{t('Total')}</div>
                   <div className="font-extrabold text-[var(--gold)] text-lg">
                     {money(est.total, est.currencyCode, est.numberFormat)}
                   </div>
                 </div>
                 <div className="col-span-2">
-                  <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Validity</div>
-                  <div>{est.validityText || `Good for ${est.validDays} days`}</div>
+                  <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">{t('Validity')}</div>
+                  <div>{validity}</div>
                 </div>
               </div>
 
               {mode.kind !== 'expired' && (mode.kind === 'confirm' || mode.kind === 'choose') && mode.priorModification && (
-                <div className="mt-5 p-3 rounded-xl border border-[var(--border2)] text-sm text-left leading-relaxed">
-                  You requested a modification
-                  {est.customerActionNote ? `: “${est.customerActionNote}”` : ''}. You can still approve or
-                  reject this estimate.
+                <div className="mt-5 p-3 rounded-xl border border-[var(--border2)] text-sm text-start leading-relaxed">
+                  {est.customerActionNote
+                    ? t('You requested a modification: “{note}”. You can still approve or reject this estimate.').replace(
+                        '{note}',
+                        est.customerActionNote,
+                      )
+                    : t('You requested a modification. You can still approve or reject this estimate.')}
                 </div>
               )}
 
               {mode.kind === 'expired' ? (
                 <div className="mt-6 p-4 rounded-xl border border-red-700/50 bg-red-950/30 text-sm leading-relaxed">
-                  This estimate has expired and can no longer be updated online. Please contact{' '}
-                  <strong>{company}</strong> for an updated quote.
+                  {fillSlots(
+                    t('This estimate has expired and can no longer be updated online. Please contact {company} for an updated quote.'),
+                    { company: <strong>{company}</strong> },
+                  )}
                 </div>
               ) : (
                 <div className="mt-6">
                   <p className="text-sm text-[var(--text2)] leading-relaxed mb-4">
-                    Review the total, then confirm. Opening this page does not approve or reject the estimate.
+                    {t('Review the total, then confirm. Opening this page does not approve or reject the estimate.')}
                   </p>
                   {(mode.kind === 'choose' || (mode.kind === 'confirm' && mode.action === 'approve')) && (
                     <ConfirmForm
                       token={token}
                       confirm={confirms.approve}
                       action="approve"
-                      label="Approve estimate"
+                      label={t('Approve estimate')}
                       className="btn btn-primary w-full text-base py-3"
                       disabled={!!submitting}
                       onSubmit={() => submit('approve')}
@@ -260,7 +327,7 @@ export default function EstimateActionClient({
                       <input type="hidden" name="confirm" value={confirms.reject} />
                       <input type="hidden" name="action" value="reject" />
                       <label className="text-xs text-[var(--text3)] font-semibold" htmlFor="reject-reason">
-                        Reason for rejecting (optional)
+                        {t('Reason for rejecting (optional)')}
                       </label>
                       <textarea
                         id="reject-reason"
@@ -268,7 +335,7 @@ export default function EstimateActionClient({
                         className="input mt-1 min-h-[90px]"
                         value={rejectNote}
                         onChange={(e) => setRejectNote(e.target.value)}
-                        placeholder="Optional reason…"
+                        placeholder={t('Optional reason…')}
                       />
                       <button
                         type="submit"
@@ -276,7 +343,7 @@ export default function EstimateActionClient({
                         style={{ background: '#7f1d1d', color: '#fecaca', borderColor: '#991b1b' }}
                         disabled={!!submitting}
                       >
-                        Reject estimate
+                        {t('Reject estimate')}
                       </button>
                     </form>
                   )}
@@ -294,7 +361,7 @@ export default function EstimateActionClient({
                       <input type="hidden" name="confirm" value={confirms.modify} />
                       <input type="hidden" name="action" value="modify" />
                       <label className="text-xs text-[var(--text3)] font-semibold" htmlFor="modify-note">
-                        Optional note for the service company
+                        {t('Optional note for the service company')}
                       </label>
                       <textarea
                         id="modify-note"
@@ -302,50 +369,53 @@ export default function EstimateActionClient({
                         className="input mt-1 min-h-[110px]"
                         value={note}
                         onChange={(e) => setNote(e.target.value)}
-                        placeholder="Short note (optional)…"
+                        placeholder={t('Short note (optional)…')}
                       />
                       <button type="submit" className="btn btn-primary w-full mt-3" disabled={!!submitting}>
-                        Request modification
+                        {t('Request modification')}
                       </button>
                     </form>
                   )}
                   {mode.kind === 'confirm' && mode.action === 'approve' && (
                     <p className="text-center text-sm mt-4">
-                      <a className="underline text-[var(--text3)]" href="?action=reject">
-                        Reject instead
+                      <a className="underline text-[var(--text3)]" href={actionHref('reject', locale)}>
+                        {t('Reject instead')}
                       </a>
                     </p>
                   )}
                   {mode.kind === 'confirm' && mode.action === 'reject' && (
                     <p className="text-center text-sm mt-4">
-                      <a className="underline text-[var(--text3)]" href="?action=approve">
-                        Approve instead
+                      <a className="underline text-[var(--text3)]" href={actionHref('approve', locale)}>
+                        {t('Approve instead')}
                       </a>
                     </p>
                   )}
                   {mode.kind === 'confirm' && mode.action === 'modify' && (
                     <p className="text-center text-sm mt-4 text-[var(--text2)]">
-                      Or{' '}
-                      <a className="underline" href="?action=approve">
-                        approve this estimate
-                      </a>{' '}
-                      or{' '}
-                      <a className="underline" href="?action=reject">
-                        reject it
-                      </a>
-                      .
+                      {fillSlots(t('Or {approve} or {reject}.'), {
+                        approve: (
+                          <a className="underline" href={actionHref('approve', locale)}>
+                            {t('approve this estimate')}
+                          </a>
+                        ),
+                        reject: (
+                          <a className="underline" href={actionHref('reject', locale)}>
+                            {t('reject it')}
+                          </a>
+                        ),
+                      })}
                     </p>
                   )}
                 </div>
               )}
 
-              {error && <p className="text-sm text-red-300 mt-4 text-center">{error}</p>}
+              {error && <p className="text-sm text-red-300 mt-4 text-center">{t(error)}</p>}
             </>
           )}
         </div>
 
         <p className="text-center text-[11px] text-[var(--text3)] mt-6">
-          No account required · Sent via Total Service Pro
+          {t('No account required · Sent via Total Service Pro')}
         </p>
       </div>
     </div>

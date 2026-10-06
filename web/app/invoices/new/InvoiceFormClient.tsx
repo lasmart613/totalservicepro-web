@@ -287,7 +287,9 @@ export default function InvoiceFormClient() {
     });
     const json = await res.json().catch(() => ({}));
     if (res.status === 409) return json?.error || REJECTED_ESTIMATE_CONVERT_ERROR;
-    if (!res.ok) return json?.error || `Could not convert estimate (${res.status})`;
+    if (!res.ok) {
+      return t('Could not convert estimate ({status})').replace('{status}', String(res.status));
+    }
     return null;
   }
 
@@ -299,12 +301,12 @@ export default function InvoiceFormClient() {
         .eq('id', estimateId)
         .maybeSingle();
       if (error || !data) {
-        toast.error('Could not load estimate for convert');
+        toast.error(t('Could not load estimate for convert'));
         return;
       }
       const refusal = await guardRejectedEstimateConvert(data.id);
       if (refusal || customerActionFromEstimate(data).action === 'rejected') {
-        toast.error(refusal || REJECTED_ESTIMATE_CONVERT_ERROR);
+        toast.error(t(refusal || REJECTED_ESTIMATE_CONVERT_ERROR));
         setSourceEstimateId(null);
         router.replace('/estimates');
         return;
@@ -395,11 +397,13 @@ export default function InvoiceFormClient() {
       setDescription(ed.description || parts.join('\n'));
       toast.message(
         estDeposit > 0
-          ? `Prefilling from estimate — Stripe will charge the $${estDeposit.toFixed(2)} parts/travel deposit only. Remainder stays due on completion.`
-          : 'Prefilling invoice from estimate — review and save.'
+          ? t(
+              'Prefilling from estimate — Stripe will charge the {amount} parts/travel deposit only. Remainder stays due on completion.'
+            ).replace('{amount}', money(estDeposit))
+          : t('Prefilling invoice from estimate — review and save.')
       );
     },
-    [supabase, router]
+    [supabase, router, t, money]
   );
 
   useEffect(() => {
@@ -515,7 +519,7 @@ export default function InvoiceFormClient() {
       if (!existingIdBefore && sourceEstimateId) {
         const refusal = await guardRejectedEstimateConvert(sourceEstimateId);
         if (refusal) {
-          toast.error(refusal);
+          toast.error(t(refusal));
           return null;
         }
       }
@@ -824,13 +828,13 @@ export default function InvoiceFormClient() {
 
   async function collectRemainingBalance() {
     if (!collectable.hasDeferredSplit || collectable.deferredReleased) {
-      toast.message('There is no deferred remainder to collect.');
+      toast.message(t('There is no deferred remainder to collect.'));
       return;
     }
     const remain = collectable.deferredUnpaid || collectable.deferredOriginal;
     if (
       !confirm(
-        `Release the remaining ${money(remain)} so Stripe can charge it?\n\nEmail or resend the invoice after this to send a new pay link.`
+        t('Release the remaining {amount} so Stripe can charge it? Email or resend the invoice after this to send a new pay link.').replace('{amount}', money(remain))
       )
     ) {
       return;
@@ -840,7 +844,10 @@ export default function InvoiceFormClient() {
     const id = await saveInvoice(status || 'draft', { quiet: true, deferredReleased: true });
     if (id) {
       toast.success(
-        `Remaining ${money(remain)} is now collectable. Email or resend to send a Stripe pay link.`
+        t('Remaining {amount} is now collectable. Email or resend to send a Stripe pay link.').replace(
+          '{amount}',
+          money(remain),
+        )
       );
     }
   }
@@ -848,7 +855,7 @@ export default function InvoiceFormClient() {
   function markSentWithoutEmail() {
     if (
       !confirm(
-        'Mark this invoice as sent WITHOUT emailing the customer?\n\nUse this only if you already emailed a PDF yourself.'
+        t('Mark this invoice as sent WITHOUT emailing the customer? Use this only if you already emailed a PDF yourself.')
       )
     ) {
       return;
@@ -893,9 +900,7 @@ export default function InvoiceFormClient() {
     return (
       <div className="min-h-screen flex flex-col">
         <Header />
-        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">
-          Loading invoice…
-        </div>
+        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">{t('Loading invoice…')}</div>
       </div>
     );
   }
@@ -906,11 +911,9 @@ export default function InvoiceFormClient() {
       <div className="doc-action-page-compact max-w-4xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
-            <Link href="/invoices" className="text-sm text-[var(--gold)] hover:underline">
-              ← Invoices
-            </Link>
+            <Link href="/invoices" className="text-sm text-[var(--gold)] hover:underline">{t('← Invoices')}</Link>
             <h1 className="text-2xl font-extrabold mt-1">
-              {savedId ? 'Edit Invoice' : sourceEstimateId ? 'Invoice from Estimate' : 'New Invoice'}
+              {savedId ? t('Edit Invoice') : sourceEstimateId ? t('Invoice from Estimate') : t('New Invoice')}
             </h1>
             <div className="text-sm text-[var(--text3)] mt-0.5 flex flex-wrap gap-2 items-center">
               {docNumber && (
@@ -923,14 +926,31 @@ export default function InvoiceFormClient() {
                     : 'border-[var(--border2)] bg-[var(--surface2)]'
                 }`}
               >
-                {(status || 'draft').toUpperCase()}
+                {t(
+                  (
+                    {
+                      draft: 'DRAFT',
+                      sent: 'SENT',
+                      paid: 'PAID',
+                      partially_paid: 'PARTIALLY PAID',
+                      void: 'VOID',
+                      voided: 'VOID',
+                    } as Record<string, string>
+                  )[(status || 'draft').toLowerCase()] || 'DRAFT'
+                )}
               </span>
               {sourceEstimateId && (
-                <span className="text-xs">from estimate #{sourceEstimateId}</span>
+                <span className="text-xs" dir="auto">
+                  {t('from estimate #{number}').split('{number}')[0]}
+                  <bdi dir="ltr">{sourceEstimateId}</bdi>
+                  {t('from estimate #{number}').split('{number}')[1]}
+                </span>
               )}
               {collectable.hasDeferredSplit && !collectable.deferredReleased && (
-                <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-amber-700 bg-amber-900/40 text-amber-200">
-                  Due now {money(collectable.stripeAmount || collectable.dueNowOriginal)}
+                <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-amber-700 bg-amber-900/40 text-amber-200" dir="auto">
+                  {t('Due now {amount}').split('{amount}')[0]}
+                  <bdi dir="ltr">{money(collectable.stripeAmount || collectable.dueNowOriginal)}</bdi>
+                  {t('Due now {amount}').split('{amount}')[1]}
                 </span>
               )}
             </div>
@@ -938,9 +958,9 @@ export default function InvoiceFormClient() {
         </div>
 
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Customer</h2>
+          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Customer')}</h2>
           <div className="relative mb-3">
-            <label className="text-xs text-[var(--text3)] font-semibold">Search / name</label>
+            <label className="text-xs text-[var(--text3)] font-semibold">{t('Search / name')}</label>
             <input
               className="input mt-1"
               value={custSearch}
@@ -951,7 +971,7 @@ export default function InvoiceFormClient() {
                 if (!e.target.value) setCustomerOrgId(null);
               }}
               onFocus={() => setShowCustDrop(true)}
-              placeholder="Type customer name…"
+              placeholder={t('Type customer name…')}
               autoComplete="off"
             />
             {showCustDrop && filteredCustomers.length > 0 && (
@@ -975,32 +995,32 @@ export default function InvoiceFormClient() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-[var(--text3)]">Address</label>
+              <label className="text-xs text-[var(--text3)]">{t('Address')}</label>
               <input className="input mt-1" value={custAddress} onChange={(e) => setCustAddress(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Contact</label>
+              <label className="text-xs text-[var(--text3)]">{t('Contact')}</label>
               <input className="input mt-1" value={custContact} onChange={(e) => setCustContact(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Phone</label>
+              <label className="text-xs text-[var(--text3)]">{t('Phone')}</label>
               <input className="input mt-1" value={custPhone} onChange={(e) => setCustPhone(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Email</label>
+              <label className="text-xs text-[var(--text3)]">{t('Email')}</label>
               <input className="input mt-1" type="email" value={custEmail} onChange={(e) => setCustEmail(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">City</label>
+              <label className="text-xs text-[var(--text3)]">{t('City')}</label>
               <input className="input mt-1" value={custCity} onChange={(e) => setCustCity(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-xs text-[var(--text3)]">State</label>
+                <label className="text-xs text-[var(--text3)]">{t('State')}</label>
                 <input className="input mt-1" maxLength={2} value={custState} onChange={(e) => setCustState(e.target.value)} />
               </div>
               <div>
-                <label className="text-xs text-[var(--text3)]">ZIP</label>
+                <label className="text-xs text-[var(--text3)]">{t('ZIP')}</label>
                 <input className="input mt-1" value={custZip} onChange={(e) => setCustZip(e.target.value)} />
               </div>
             </div>
@@ -1008,10 +1028,10 @@ export default function InvoiceFormClient() {
         </section>
 
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Equipment (optional)</h2>
+          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Equipment (optional)')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-[var(--text3)]">Manufacturer</label>
+              <label className="text-xs text-[var(--text3)]">{t('Manufacturer')}</label>
               <select
                 className="input select mt-1"
                 value={manufacturer}
@@ -1020,7 +1040,7 @@ export default function InvoiceFormClient() {
                   setModel('');
                 }}
               >
-                <option value="">— Select —</option>
+                <option value="">{t('— Select —')}</option>
                 {manufacturers.map((m) => (
                   <option key={m} value={m}>
                     {m}
@@ -1029,14 +1049,14 @@ export default function InvoiceFormClient() {
               </select>
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Model</label>
+              <label className="text-xs text-[var(--text3)]">{t('Model')}</label>
               <select
                 className="input select mt-1"
                 value={model}
                 disabled={!manufacturer}
                 onChange={(e) => setModel(e.target.value)}
               >
-                <option value="">— Select —</option>
+                <option value="">{t('— Select —')}</option>
                 {models.map((m) => (
                   <option key={m} value={m}>
                     {displayModelName(m)}
@@ -1045,11 +1065,11 @@ export default function InvoiceFormClient() {
               </select>
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Serial #</label>
+              <label className="text-xs text-[var(--text3)]">{t('Serial #')}</label>
               <input className="input mt-1" value={serial} onChange={(e) => setSerial(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Pulse count</label>
+              <label className="text-xs text-[var(--text3)]">{t('Pulse count')}</label>
               <input
                 className="input mt-1"
                 type="number"
@@ -1062,10 +1082,10 @@ export default function InvoiceFormClient() {
         </section>
 
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Invoice Details</h2>
+          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Invoice Details')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div>
-              <label className="text-xs text-[var(--text3)]">Invoice date</label>
+              <label className="text-xs text-[var(--text3)]">{t('Invoice date')}</label>
               <input
                 className="input mt-1"
                 type="date"
@@ -1077,7 +1097,7 @@ export default function InvoiceFormClient() {
               />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Due date</label>
+              <label className="text-xs text-[var(--text3)]">{t('Due date')}</label>
               <input
                 className="input mt-1"
                 type="date"
@@ -1087,26 +1107,26 @@ export default function InvoiceFormClient() {
             </div>
           </div>
           <div>
-            <label className="text-xs text-[var(--text3)]">Notes / description</label>
+            <label className="text-xs text-[var(--text3)]">{t('Notes / description')}</label>
             <textarea
               className="input mt-1"
               rows={2}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional notes (service summary, PO #, etc.)"
+              placeholder={t('Optional notes (service summary, PO #, etc.)')}
             />
           </div>
 
-          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Line Items</h3>
+          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">{t('Line Items')}</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[560px]">
               <thead>
                 <tr className="text-left text-[var(--text3)] text-xs border-b border-[var(--border2)]">
-                  <th className="py-2 pr-2">Part #</th>
-                  <th className="py-2 pr-2">Description</th>
-                  <th className="py-2 pr-2 w-16">Qty</th>
-                  <th className="py-2 pr-2 w-24">Price</th>
-                  <th className="py-2 pr-2 w-24">Ext</th>
+                  <th className="py-2 pr-2">{t('Part #')}</th>
+                  <th className="py-2 pr-2">{t('Description')}</th>
+                  <th className="py-2 pr-2 w-16">{t('Qty')}</th>
+                  <th className="py-2 pr-2 w-24">{t('Price')}</th>
+                  <th className="py-2 pr-2 w-24">{t('Ext')}</th>
                   <th className="w-8" />
                 </tr>
               </thead>
@@ -1133,7 +1153,7 @@ export default function InvoiceFormClient() {
                             });
                           }
                         }}
-                        placeholder="Part #"
+                        placeholder={t('Part #')}
                       />
                       <datalist id={`inv-parts-${li.id}`}>
                         {suggestParts(li.part_number).map((p) => (
@@ -1148,7 +1168,7 @@ export default function InvoiceFormClient() {
                         className="input text-sm py-1.5"
                         value={li.description}
                         onChange={(e) => updateLine(li.id, { description: e.target.value })}
-                        placeholder="Description"
+                        placeholder={t('Description')}
                       />
                       {li.marketplace_listing_id ? (
                         <Link
@@ -1189,7 +1209,7 @@ export default function InvoiceFormClient() {
                       <input
                         className="input text-sm py-1.5 opacity-80"
                         readOnly
-                        value={li.ext.toFixed(2)}
+                        value={money(li.ext)}
                       />
                     </td>
                     <td className="py-1.5">
@@ -1217,16 +1237,16 @@ export default function InvoiceFormClient() {
             className="btn btn-secondary text-sm mt-2"
             onClick={() => setLineItems((r) => [...r, emptyLineItem('LI')])}
           >
-            + Add line item
+            + {t('Add line item')}
           </button>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
             <div>
-              <label className="text-xs text-[var(--text3)]">Subtotal (from line items)</label>
-              <input className="input mt-1 opacity-90" readOnly value={subtotal.toFixed(2)} />
+              <label className="text-xs text-[var(--text3)]">{t('Subtotal (from line items)')}</label>
+              <input className="input mt-1 opacity-90" readOnly value={money(subtotal)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Tax</label>
+              <label className="text-xs text-[var(--text3)]">{t('Tax')}</label>
               <input
                 className="input mt-1"
                 type="number"
@@ -1238,7 +1258,7 @@ export default function InvoiceFormClient() {
             </div>
           </div>
 
-          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Payment split</h3>
+          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">{t('Payment split')}</h3>
           {((dueNowAmount != null && dueNowAmount > 0) || collectable.hasDeferredSplit) && (
             <label className="flex items-start gap-2 text-sm mb-3">
               <input
@@ -1252,15 +1272,16 @@ export default function InvoiceFormClient() {
                 }}
               />
               <span>
-                Charge parts/travel deposit now. Remainder stays on this invoice as due on completion
-                and is not included in the Stripe pay button until you collect it.
+                {t(
+                  'Charge parts/travel deposit now. Remainder stays on this invoice as due on completion and is not included in the Stripe pay button until you collect it.'
+                )}
               </span>
             </label>
           )}
           {collectable.hasDeferredSplit && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
               <div>
-                <label className="text-xs text-[var(--text3)]">Due now (parts/travel deposit)</label>
+                <label className="text-xs text-[var(--text3)]">{t('Due now (parts/travel deposit)')}</label>
                 <input
                   className="input mt-1"
                   type="number"
@@ -1272,34 +1293,38 @@ export default function InvoiceFormClient() {
                 />
               </div>
               <div>
-                <label className="text-xs text-[var(--text3)]">Remaining (due on completion)</label>
+                <label className="text-xs text-[var(--text3)]">{t('Remaining (due on completion)')}</label>
                 <input
                   className="input mt-1 opacity-90"
                   readOnly
-                  value={collectable.deferredOriginal.toFixed(2)}
+                  value={money(collectable.deferredOriginal)}
                 />
               </div>
             </div>
           )}
           <div className="rounded-lg border border-[var(--border2)] bg-[var(--surface2)] p-3 mb-3 text-sm">
             <div className="flex justify-between gap-3">
-              <span className="text-[var(--text3)]">Stripe pay button</span>
+              <span className="text-[var(--text3)]">{t('Stripe pay button')}</span>
               <strong className="text-[var(--gold)]">{money(collectable.stripeAmount)}</strong>
             </div>
             {collectable.hasDeferredSplit && !collectable.deferredReleased && (
               <p className="text-xs text-[var(--text3)] mt-2">
-                Customer pay link charges the deposit only. The {money(collectable.deferredUnpaid)}{' '}
-                remainder is deferred until you collect it.
+                {t(
+                  'Customer pay link charges the deposit only. The {amount} remainder is deferred until you collect it.'
+                ).replace('{amount}', money(collectable.deferredUnpaid))}
               </p>
             )}
             {collectable.deferredReleased && collectable.remainingOwed > 0 && (
               <p className="text-xs text-[var(--text3)] mt-2">
-                Remaining balance is released — Stripe will charge {money(collectable.stripeAmount)}.
+                {t('Remaining balance is released — Stripe will charge {amount}.').replace(
+                  '{amount}',
+                  money(collectable.stripeAmount)
+                )}
               </p>
             )}
           </div>
 
-          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Amount received</h3>
+          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">{t('Amount received')}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-[var(--text3)]">{moneyLabel('Amount received ({symbol})')}</label>
@@ -1313,7 +1338,7 @@ export default function InvoiceFormClient() {
               />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Received date</label>
+              <label className="text-xs text-[var(--text3)]">{t('Received date')}</label>
               <input
                 className="input mt-1"
                 type="date"
@@ -1322,30 +1347,31 @@ export default function InvoiceFormClient() {
               />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Payment method</label>
+              <label className="text-xs text-[var(--text3)]">{t('Payment method')}</label>
               <select
                 className="input select mt-1"
                 value={depositMethod}
                 onChange={(e) => setDepositMethod(e.target.value)}
               >
-                <option value="">— Select —</option>
-                <option value="Cash">Cash</option>
-                <option value="Check">Check</option>
-                <option value="Credit Card">Credit Card</option>
-                <option value="ACH / Wire">ACH / Wire</option>
+                <option value="">{t('— Select —')}</option>
+                <option value="Cash">{t('Cash')}</option>
+                <option value="Check">{t('Check')}</option>
+                <option value="Credit Card">{t('Credit Card')}</option>
+                <option value="ACH / Wire">{t('ACH / Wire')}</option>
                 <option value="Stripe">Stripe</option>
-                <option value="Other">Other</option>
+                <option value="Other">{t('Other')}</option>
               </select>
             </div>
           </div>
           <p className="text-xs text-[var(--text3)] mt-2">
-            Amount received is cash/check/card already in hand — not the unpaid deposit. Stripe
-            Checkout records this automatically when the customer pays the due-now amount.
+            {t(
+              'Amount received is cash/check/card already in hand — not the unpaid deposit. Stripe Checkout records this automatically when the customer pays the due-now amount.'
+            )}
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
             <div>
-              <label className="text-xs text-[var(--text3)] font-bold">Total Due</label>
+              <label className="text-xs text-[var(--text3)] font-bold">{t('Total Due')}</label>
               <input
                 className="input mt-1 font-bold text-lg"
                 type="number"
@@ -1357,13 +1383,12 @@ export default function InvoiceFormClient() {
             <div>
               <label className="text-xs text-[var(--text3)] font-bold">
                 {collectable.hasDeferredSplit && !collectable.deferredReleased
-                  ? 'Still owed (incl. due on completion)'
-                  : 'Balance remaining'}
+                  ? t('Still owed (incl. due on completion)') : t('Balance remaining')}
               </label>
               <input
                 className="input mt-1 font-bold text-lg opacity-90"
                 readOnly
-                value={balanceDue.toFixed(2)}
+                value={money(balanceDue)}
               />
             </div>
           </div>
@@ -1374,15 +1399,13 @@ export default function InvoiceFormClient() {
 
         {voided && (
           <div className="card p-4 mb-4 border border-rose-700 bg-rose-950/40">
-            <p className="font-bold">{VOIDED_INVOICE_MESSAGE}</p>
+            <p className="font-bold">{t(VOIDED_INVOICE_MESSAGE)}</p>
             {storedVoidReason ? <p className="text-sm text-[var(--text3)] mt-1">{storedVoidReason}</p> : null}
           </div>
         )}
 
         <div className="doc-action-bar flex flex-wrap gap-2 sticky bottom-4 z-10">
-          <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">
-            Cancel
-          </Link>
+          <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">{t('Cancel')}</Link>
           {!voided && (
           <button
             type="button"
@@ -1390,16 +1413,14 @@ export default function InvoiceFormClient() {
             disabled={saving || emailing}
             onClick={() => saveInvoice('draft')}
           >
-            {saving ? 'Saving…' : 'Save Draft'}
+            {saving ? t('Saving…') : t('Save Draft')}
           </button>
           )}
           <button
             type="button"
             className="btn btn-secondary min-w-[120px]"
             onClick={openInvoicePreview}
-          >
-            Preview / PDF
-          </button>
+          >{t('Preview / PDF')}</button>
           {!voided && (
           <>
           <button
@@ -1408,7 +1429,7 @@ export default function InvoiceFormClient() {
             disabled={saving || emailing}
             onClick={() => finalizeAndEmail()}
           >
-            {emailing ? 'Emailing…' : 'Finalize & Email'}
+            {emailing ? t('Emailing…') : t('Finalize & Email')}
           </button>
           {status === 'sent' && (
             <button
@@ -1417,7 +1438,7 @@ export default function InvoiceFormClient() {
               disabled={saving || emailing}
               onClick={() => resendEmail()}
             >
-              Resend Email
+              {t('Resend Email')}
             </button>
           )}
           <button
@@ -1425,11 +1446,9 @@ export default function InvoiceFormClient() {
             className="btn btn-secondary min-w-[100px] text-xs"
             disabled={saving || emailing}
             onClick={() => markSentWithoutEmail()}
-            aria-label="Mark sent (no email)"
-            title="Sets status to sent without calling Resend"
-          >
-            Mark sent (no email)
-          </button>
+            aria-label={t('Mark sent (no email)')}
+            title={t('Sets status to sent without calling Resend')}
+          >{t('Mark sent (no email)')}</button>
           {collectable.hasDeferredSplit && !collectable.deferredReleased && (
             <button
               type="button"
@@ -1437,7 +1456,7 @@ export default function InvoiceFormClient() {
               disabled={saving || emailing}
               onClick={() => collectRemainingBalance()}
             >
-              Collect remaining balance
+              {t('Collect remaining balance')}
             </button>
           )}
           <button
@@ -1448,13 +1467,13 @@ export default function InvoiceFormClient() {
               const rec = received;
               const tot = Number(total) || 0;
               if (rec <= 0) {
-                toast.error('Enter amount received first, or use Mark paid for the full total.');
+                toast.error(t('Enter amount received first, or use Mark paid for the full total.'));
                 return;
               }
               saveInvoice(rec + 0.004 >= tot ? 'paid' : 'partially_paid');
             }}
           >
-            Mark partial
+            {t('Mark partial')}
           </button>
           <button
             type="button"
@@ -1462,7 +1481,7 @@ export default function InvoiceFormClient() {
             disabled={saving || emailing}
             onClick={() => saveInvoice('paid')}
           >
-            Mark paid
+            {t('Mark paid')}
           </button>
           {voidable && (
             <button
@@ -1471,7 +1490,7 @@ export default function InvoiceFormClient() {
               disabled={saving || emailing || voiding}
               onClick={() => setVoidOpen(true)}
             >
-              Void invoice
+              {t('Void invoice')}
             </button>
           )}
           </>
@@ -1480,11 +1499,11 @@ export default function InvoiceFormClient() {
         {voidOpen && (
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setVoidOpen(false)}>
             <div className="card w-full max-w-sm p-5 hover:transform-none" onClick={(e) => e.stopPropagation()}>
-              <h2 className="text-lg font-extrabold mb-1">Void invoice</h2>
-              <p className="text-xs text-[var(--text3)] mb-3">
-                This unpaid invoice will be voided. An open payment link is expired. No charge or refund is made.
+              <h2 className="text-lg font-extrabold mb-1">{t('Void invoice')}</h2>
+              <p className="text-xs text-[var(--text3)] mb-3" dir="auto">
+                {t('This unpaid invoice will be voided. An open payment link is expired. No charge or refund is made.')}
               </p>
-              <label className="text-xs text-[var(--text3)] font-bold">Reason (optional)</label>
+              <label className="text-xs text-[var(--text3)] font-bold">{t('Reason (optional)')}</label>
               <textarea
                 className="input mt-1 min-h-[80px]"
                 value={voidReason}
@@ -1493,18 +1512,17 @@ export default function InvoiceFormClient() {
               />
               <div className="flex gap-2 mt-4 justify-end">
                 <button type="button" className="btn btn-secondary" onClick={() => setVoidOpen(false)}>
-                  Cancel
+                  {t('Cancel')}
                 </button>
                 <button type="button" className="btn btn-primary" disabled={voiding} onClick={() => submitVoid()}>
-                  {voiding ? 'Voiding…' : 'Void invoice'}
+                  {voiding ? t('Voiding…') : t('Void invoice')}
                 </button>
               </div>
             </div>
           </div>
         )}
-        <p className="text-[10px] text-[var(--text3)] mt-2">
-          Finalize &amp; Email only sets status to <strong>sent</strong> after Resend accepts the
-          message. Requires customer email + verified From domain (contact@medicalrepairnetwork.com).
+        <p className="text-[10px] text-[var(--text3)] mt-2" dir="auto">
+          {t('Finalize & Email only sets status to sent after Resend accepts the message. Requires customer email and a verified From domain.')}
         </p>
 
         {!isValidOrgId(userOrgId) && (

@@ -17,6 +17,7 @@ import { asPositivePage } from '@/lib/ai/citations';
 import { fittedPageBoxHeight, viewerCitedPageNotice, viewerPhysicalPage } from '@/lib/pdf-viewer-page';
 import { ViewerAiPanel } from '@/components/ViewerAiPanel';
 import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
+import { useT } from '@/lib/fa/locale';
 
 type PdfTextRun = {
   str?: string;
@@ -318,6 +319,7 @@ export function ManualPdfViewer({
   /** Assistant side panel. Parent owns Back/Close so this view does not navigate away. */
   embedded?: boolean;
 }) {
+  const t = useT();
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pdfRef = useRef<PdfDoc | null>(null);
   const searchGen = useRef(0);
@@ -819,7 +821,7 @@ export function ManualPdfViewer({
           data-testid="pdf-page-notice"
           className="shrink-0 px-3 py-2 text-sm font-semibold bg-amber-950 text-amber-100 border-b border-amber-500/50"
         >
-          {pageNotice}
+          {t("Page {page} isn't in this PDF").replace('{page}', String(requestedPage ?? ''))}
         </div>
       )}
 

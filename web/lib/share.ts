@@ -1,3 +1,4 @@
+import { customerLinkLang } from './i18n/stored-org-language.ts';
 import { displayModelName } from './model-display.ts';
 import { publicSiteOrigin } from './site-origin.ts';
 
@@ -52,13 +53,19 @@ export type EstimateActionQuery = {
   /** @deprecated use action: 'modify' */
   changes?: boolean;
   action?: 'approve' | 'reject' | 'modify';
+  /** Shop UI language to carry onto the customer page. */
+  lang?: string | null;
 };
 
 function estimateActionQuery(opts?: EstimateActionQuery): string {
-  if (opts?.action === 'approve') return '?action=approve';
-  if (opts?.action === 'reject') return '?action=reject';
-  if (opts?.action === 'modify' || opts?.changes) return '?action=modify';
-  return '';
+  const params = new URLSearchParams();
+  if (opts?.action === 'approve') params.set('action', 'approve');
+  else if (opts?.action === 'reject') params.set('action', 'reject');
+  else if (opts?.action === 'modify' || opts?.changes) params.set('action', 'modify');
+  const lang = customerLinkLang(opts?.lang);
+  if (lang) params.set('lang', lang);
+  const query = params.toString();
+  return query ? `?${query}` : '';
 }
 
 /** Tokenized email CTA. Customer acts on /e/{token} without a clinic login. */
@@ -80,9 +87,30 @@ export function estimateEmailActionUrl(
   actionUrl: string,
   action: 'approve' | 'reject' | 'modify'
 ): string {
-  const base = estimateActionBaseUrl(actionUrl);
+  const raw = String(actionUrl || '').trim();
+  const base = estimateActionBaseUrl(raw);
   if (!base) return '';
-  return `${base}?action=${action}`;
+  let lang: string | null = null;
+  try {
+    lang = new URL(raw, 'https://repairplanet.net').searchParams.get('lang');
+  } catch {
+    lang = null;
+  }
+  return `${base}${estimateActionQuery({ action, lang })}`;
+}
+
+/** Add lang= to customer /e/ links that do not already carry one. Other URLs stay put. */
+export function stampLangOnEstimateLinks(text: string, locale: unknown): string {
+  const lang = customerLinkLang(locale);
+  if (!lang || !text || !text.includes('/e/')) return text;
+  return text.replace(
+    /https?:\/\/[^\s"'<>]*\/e\/[A-Za-z0-9._~-]+(?:\?[^"'<>\s]*)?/g,
+    (url) => {
+      if (/[?&](?:amp;)?lang=/.test(url)) return url;
+      const join = url.includes('?') ? '&' : '?';
+      return `${url}${join}lang=${encodeURIComponent(lang)}`;
+    }
+  );
 }
 
 export function serviceRequestShareText(opts: {

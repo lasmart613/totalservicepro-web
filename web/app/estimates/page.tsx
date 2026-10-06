@@ -1,4 +1,5 @@
 'use client';
+import { useFormatDate } from '@/lib/use-format-date';
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -120,6 +121,7 @@ export default function EstimatesPage() {
 
 function ShopEstimatesList() {
   const t = useT();
+  const { locale } = useFormatDate();
   const { money } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
@@ -413,35 +415,28 @@ function ShopEstimatesList() {
         </div>
 
         <div className="note-30 text-xs text-[var(--text3)] bg-[var(--surface)] border border-[var(--border2)] rounded-xl p-3 mb-4 leading-relaxed">
-          Estimates are kept on file (not deleted). Drafts and open quotes are{' '}
-          <strong className="text-[var(--text)]">valid for 30 days</strong> from creation, then
-          move to <strong className="text-[var(--text)]">Expired</strong>. Use the Expired pill to
-          show older records. Convert before expiry when possible.
+          {t('Estimates are kept on file (not deleted). Drafts and open quotes are valid for 30 days from creation, then move to Expired. Use the Expired pill to show older records. Convert before expiry when possible.')}
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-[var(--gold)]">{loading ? '—' : drafts}</div>
-            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              DRAFTS
-            </div>
+            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">{t('DRAFTS')}</div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-blue-300">{loading ? '—' : sent}</div>
-            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              SENT
-            </div>
+            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">{t('SENT')}</div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-purple-300">{loading ? '—' : invoiced}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              INVOICED
+              {t('INVOICED')}
             </div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-red-300">{loading ? '—' : expired}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              EXPIRED
+              {t('EXPIRED')}
             </div>
           </div>
         </div>
@@ -472,7 +467,7 @@ function ShopEstimatesList() {
               className={`filter-chip ${activeFilter === key ? 'active' : ''}`}
               onClick={() => setActiveFilter(key)}
             >
-              {label}
+              {t(label)}
             </button>
           ))}
         </div>
@@ -487,7 +482,7 @@ function ShopEstimatesList() {
             <div className="font-semibold">
               {activeFilter === 'expired' ? t('No expired estimates.') : t('No estimates in this view')}
             </div>
-            <p className="text-sm mt-1 text-[var(--text3)]">Create your first estimate to get started.</p>
+            <p className="text-sm mt-1 text-[var(--text3)]">{t('Create your first estimate to get started.')}</p>
             <Link href="/estimates/new" className="btn btn-primary mt-4 inline-flex">
               + {t('New Estimate')}
             </Link>
@@ -497,7 +492,7 @@ function ShopEstimatesList() {
             {filtered.map((est) => {
               const st = effectiveStatus(est);
               const badge = estimateListBadge(est);
-              const until = validUntilLabel(est.created_at, docZone);
+              const until = validUntilLabel(est.created_at, docZone, locale);
               const num = docNumber(est);
               const canConvert =
                 st !== 'expired' && canConvertEstimateToInvoice(est);
@@ -530,19 +525,19 @@ function ShopEstimatesList() {
                         {num && (
                           <span className="text-[var(--gold)] font-bold">{num} </span>
                         )}
-                        <span>{formatOrgDocumentDate(est.created_at, docZone) || '—'}</span>
+                        <span>{formatOrgDocumentDate(est.created_at, docZone, locale) || '—'}</span>
                         {' '}
                         <span
                           className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${estimateStatusBadgeClass(
                             badge
                           )}`}
                         >
-                          {estimateStatusLabel(badge)}
+                          {t(estimateStatusLabel(badge))}
                         </span>
                         {st === 'expired' ? (
-                          <span> · Expired</span>
+                          <span>{t(' · Expired')}</span>
                         ) : until ? (
-                          <span> · Valid thru {until}</span>
+                          <span>{t(' · Valid thru {date}').replace('{date}', until)}</span>
                         ) : (
                           <span> · Valid 30 days</span>
                         )}
@@ -578,24 +573,22 @@ function ShopEstimatesList() {
                         className="btn btn-secondary text-xs px-3 py-1.5"
                         style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
                       >
-                        Edit
+                        {t('Edit')}
                       </Link>
                       <Link
                         href={`/estimates/${est.id}`}
                         className="btn btn-secondary text-xs px-3 py-1.5"
                         style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
                       >
-                        Customer view
+                        {t('Customer view')}
                       </Link>
                       {canConvert && (
                         <Link
                           href={`/invoices/new?fromEstimate=${est.id}`}
                           className="btn btn-primary text-xs px-3 py-1.5"
                           style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
-                          title="Parts/travel deposit is due now; remainder stays on the invoice until you collect it."
-                        >
-                          Convert to Invoice
-                        </Link>
+                          title={t('Parts/travel deposit is due now; remainder stays on the invoice until you collect it.')}
+                        >{t('Convert to Invoice')}</Link>
                       )}
                       {st !== 'expired' &&
                         st !== 'invoiced' &&
@@ -608,25 +601,19 @@ function ShopEstimatesList() {
                             className="btn text-xs px-3 py-1.5"
                             style={{ display: 'inline-block', margin: '0 8px 8px 0', background: '#14532d', color: '#bbf7d0', borderColor: '#166534' }}
                             onClick={() => recordCustomerAction(est, 'approved')}
-                          >
-                            Approve
-                          </button>
+                          >{t('Approve')}</button>
                           <button
                             type="button"
                             className="btn text-xs px-3 py-1.5"
                             style={{ display: 'inline-block', margin: '0 8px 8px 0', background: '#7f1d1d', color: '#fecaca', borderColor: '#991b1b' }}
                             onClick={() => recordCustomerAction(est, 'rejected')}
-                          >
-                            Reject
-                          </button>
+                          >{t('Reject')}</button>
                           <button
                             type="button"
                             className="btn btn-secondary text-xs px-3 py-1.5"
                             style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
                             onClick={() => recordCustomerAction(est, 'changes_requested')}
-                          >
-                            Modify
-                          </button>
+                          >{t('Modify')}</button>
                         </>
                       )}
                       {cust.token && (
