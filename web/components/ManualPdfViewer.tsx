@@ -721,10 +721,7 @@ export function ManualPdfViewer({
           </span>
         )}
         {languageBadge && (
-          <span
-            className="shrink-0 rounded-full bg-sky-900 text-white text-[10px] font-extrabold px-2 py-0.5"
-            title={languageBadge.label}
-          >
+          <span className="manual-language-chip" title={languageBadge.code}>
             {languageBadge.label}
           </span>
         )}
