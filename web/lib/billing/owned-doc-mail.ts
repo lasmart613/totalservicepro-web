@@ -284,6 +284,30 @@ export function buildOwnedEstimatePlainText(input: {
   return buildEstimatePlainText(ownedEstimateHtmlInput(input));
 }
 
+/**
+ * text/plain body of a customer estimate email, including the free-account lines.
+ * Labels go through translateApp, the same dictionary as the HTML account footer.
+ */
+export function buildOwnedEstimateEmailText(input: {
+  row: Record<string, unknown>;
+  company: DocCompany;
+  theme: CompanyTheme | null;
+  actionUrl?: string | null;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
+  timeZone?: string | null;
+  signupUrl: string;
+  loginUrl: string;
+}): string {
+  const tr = (text: string) => translateApp(input.locale, text);
+  return [
+    buildOwnedEstimatePlainText(input),
+    '',
+    `${tr('Create a free account')}: ${input.signupUrl}`,
+    `${tr('Sign in')}: ${input.loginUrl}`,
+  ].join('\n');
+}
+
 function ownedEstimateHtmlInput(input: {
   row: Record<string, unknown>;
   company: DocCompany;
@@ -395,7 +419,8 @@ function formatEstimatePartLines(
   );
   if (usable.length) {
     return usable.map((row) => {
-      const label = [row.part_number, row.description].filter(Boolean).join(' ').trim() || 'Part';
+      const label =
+        [row.part_number, row.description].filter(Boolean).join(' ').trim() || translateApp(locale, 'Part');
       const qty = num(row.qty) > 0 ? num(row.qty) : 1;
       const unit = formatOrgMoney(row.unit_price, moneyPrefs, locale);
       const ext = formatOrgMoney(

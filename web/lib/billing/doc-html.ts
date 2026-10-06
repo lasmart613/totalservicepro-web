@@ -793,7 +793,7 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
           row.description && String(row.description).trim() ? isolateUserText(String(row.description).trim()) : '',
         ].filter(Boolean);
         const ext = row.ext != null ? Number(row.ext) : qty * (Number(row.unitPrice) || 0);
-        cost += `<div>${label.join(' ') || isolateUserText('Part')} ×${qty} @ ${money(row.unitPrice)} = ${money(ext)}</div>`;
+        cost += `<div>${label.join(' ') || isolateUserText(tr('Part'))} ×${qty} @ ${money(row.unitPrice)} = ${money(ext)}</div>`;
       });
     } else {
       (input.partsLines || []).forEach((ln) => {
@@ -891,7 +891,9 @@ export function buildEstimatePlainText(input: EstimateHtmlInput): string {
   if (input.dateStr) lines.push(input.dateStr);
   lines.push('', `${tr('Customer')}: ${input.customer.name || tr('Customer')}`);
   if (input.customer.email) lines.push(`${tr('Email')}: ${input.customer.email}`);
-  if (input.services?.length) lines.push('', `${tr('Services')}:`, ...input.services.map((s) => `- ${s}`));
+  if (input.services?.length) {
+    lines.push('', `${tr('Services')}:`, ...input.services.map((s) => `- ${tr(s)}`));
+  }
   if (input.diagFee) lines.push(`${tr('Diagnostic Fee')}: ${amount(input.diagFee)}`);
   if (input.labor) {
     lines.push(
