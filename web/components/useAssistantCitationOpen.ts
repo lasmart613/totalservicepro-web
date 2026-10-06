@@ -35,7 +35,7 @@ import {
   type CitationOpenDetail,
 } from '@/lib/ai/citation-auto-open';
 
-export type CitedManual = CitationOpenDetail & { title?: string };
+export type CitedManual = CitationOpenDetail & { title?: string; pageOutOfRange?: boolean };
 
 type ManualOption = {
   id: number;
@@ -342,7 +342,15 @@ export function useAssistantCitationOpen(opts: {
       if (!target || !allowed(target.manualId)) return;
       event.preventDefault();
       const row = lookup(target.manualId);
-      openCited({ ...target, title: row ? catalogManualTitle(row) : undefined }, false);
+      const titleAttr = anchor.getAttribute('data-cite-title') || undefined;
+      openCited(
+        {
+          ...target,
+          title: row ? catalogManualTitle(row) : titleAttr,
+          pageOutOfRange: anchor.getAttribute('data-cite-oor') === '1',
+        },
+        false
+      );
     },
     [allowed, autoOpen, lookup, openCited]
   );

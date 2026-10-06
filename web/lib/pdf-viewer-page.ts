@@ -27,6 +27,22 @@ export function viewerPageOutOfRangeNotice(
 }
 
 /**
+ * Notice for a deep link. `flaggedOutOfRange` is `_meta.citations[].page_out_of_range`
+ * (marker `oor=1`). That flag shows the notice even before the PDF reports a page count,
+ * and even when the loaded file happens to contain that page number.
+ */
+export function viewerCitedPageNotice(
+  requested: number | null | undefined,
+  documentPages: number,
+  flaggedOutOfRange = false
+): string | null {
+  const page = Math.floor(Number(requested));
+  if (!Number.isFinite(page) || page < 1) return null;
+  if (flaggedOutOfRange) return `Page ${page} isn't in this PDF`;
+  return viewerPageOutOfRangeNotice(page, documentPages);
+}
+
+/**
  * Stable placeholder height for one page, including the row's vertical padding.
  * Scroll-to-page must use this before canvases paint, or a short placeholder
  * lands the viewport on an earlier page after layout grows.

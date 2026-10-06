@@ -16,6 +16,10 @@ export type ManualCitation = {
   title?: string;
   page?: number;
   section?: string;
+  /** `page` is past that PDF. Keep the 1-based number; do not scroll to it. */
+  pageOutOfRange?: boolean;
+  /** Passage belongs to a different catalog row than the manual open in the assistant. */
+  crossManual?: boolean;
 };
 
 const CITE_RE = /\[\[cite:([^\]]+)\]\]/gi;
@@ -115,6 +119,7 @@ export function citationViewerHref(c: ManualCitation): string {
   if (c.page) qs.set('page', String(c.page));
   else if (!c.section) qs.set('page', '1');
   if (c.section) qs.set('section', String(c.section).slice(0, 80));
+  if (c.pageOutOfRange) qs.set('oor', '1');
   return `${VIEWER_PATH}?${qs.toString()}`;
 }
 
@@ -124,6 +129,7 @@ export function embedCitationMarker(c: ManualCitation): string {
   if (c.page) qs.set('p', String(c.page));
   if (c.section) qs.set('s', String(c.section).slice(0, 80));
   if (c.title) qs.set('t', String(c.title).slice(0, 80));
+  if (c.pageOutOfRange) qs.set('oor', '1');
   return `[[cite:${qs.toString()}]]`;
 }
 
@@ -135,7 +141,15 @@ export function parseCitationMarkerQuery(raw: string): ManualCitation | null {
     const page = asPositivePage(qs.get('p') || qs.get('page'));
     const section = cleanSection(qs.get('s') || qs.get('section'));
     const title = cleanSection(qs.get('t') || qs.get('title'));
-    return { manualId: id, ...(page ? { page } : {}), ...(section ? { section } : {}), ...(title ? { title } : {}) };
+    const oor = String(qs.get('oor') || '').trim().toLowerCase();
+    const pageOutOfRange = oor === '1' || oor === 'true';
+    return {
+      manualId: id,
+      ...(page ? { page } : {}),
+      ...(section ? { section } : {}),
+      ...(title ? { title } : {}),
+      ...(pageOutOfRange ? { pageOutOfRange: true } : {}),
+    };
   } catch {
     return null;
   }
@@ -175,10 +189,27 @@ export function mergeCitations(...lists: Array<ManualCitation[] | undefined | nu
       const page = asPositivePage(c.page);
       const section = cleanSection(c.section);
       const title = cleanSection(c.title);
+      const pageOutOfRange = c.pageOutOfRange === true;
+      const crossManual = c.crossManual === true;
       const key = `${id}|${page || ''}|${section || ''}`;
-      if (seen.has(key)) continue;
+      if (seen.has(key)) {
+        const prev = out.find((item) => `${item.manualId}|${item.page || ''}|${item.section || ''}` === key);
+        if (prev) {
+          if (pageOutOfRange) prev.pageOutOfRange = true;
+          if (crossManual) prev.crossManual = true;
+          if (!prev.title && title) prev.title = title;
+        }
+        continue;
+      }
       seen.add(key);
-      out.push({ manualId: id, ...(page ? { page } : {}), ...(section ? { section } : {}), ...(title ? { title } : {}) });
+      out.push({
+        manualId: id,
+        ...(page ? { page } : {}),
+        ...(section ? { section } : {}),
+        ...(title ? { title } : {}),
+        ...(pageOutOfRange ? { pageOutOfRange: true } : {}),
+        ...(crossManual ? { crossManual: true } : {}),
+      });
     }
   }
   // A bare document cite (opens page 1) is redundant once the same manual has a physical page/section.
@@ -192,6 +223,16 @@ export function citationLabel(c: ManualCitation): string {
   if (c.page) bits.push(`p.${c.page}`);
   if (c.section) bits.push(`§${c.section}`);
   return bits.length ? `${title}, ${bits.join(', ')}` : title;
+}
+
+/** Chip text. A different catalog row is labeled with that row's title, not the open manual. */
+export function citationChipLabel(c: ManualCitation): string {
+  if (!c.crossManual) return citationLabel(c);
+  const title = (c.title || 'Service manual').trim();
+  const bits: string[] = [];
+  if (c.page) bits.push(`p. ${c.page}`);
+  if (c.section) bits.push(`§${c.section}`);
+  return bits.length ? `From: ${title}, ${bits.join(', ')}` : `From: ${title}`;
 }
 
 function escapeHtml(s: string): string {
@@ -210,7 +251,9 @@ function viewerAnchor(c: ManualCitation, label: string): string {
   const id = Number(c.manualId);
   const idAttr = Number.isSafeInteger(id) && id >= 1 ? ` data-cite-manual="${id}"` : '';
   const pageAttr = c.page ? ` data-cite-page="${c.page}"` : '';
-  return `<a class="ai-cite-link" href="${escapeHtml(href)}"${idAttr}${pageAttr}>${escapeHtml(label)}</a>`;
+  const oorAttr = c.pageOutOfRange ? ' data-cite-oor="1"' : '';
+  const titleAttr = c.title ? ` data-cite-title="${escapeHtml(c.title)}"` : '';
+  return `<a class="ai-cite-link" href="${escapeHtml(href)}"${idAttr}${pageAttr}${oorAttr}${titleAttr}>${escapeHtml(label)}</a>`;
 }
 
 function hasPhysicalPageStamp(sources: Array<string | undefined>, page: number): boolean {
@@ -279,6 +322,22 @@ export function sourceLineMatchesCitation(source: string, citation: ManualCitati
 }
 
 /**
+ * Link a source line to a cite that actually names that book.
+ * A cross-manual title is used only when the line contains it, so a Pro
+ * source line is not rewritten as PRO PLUS (or the reverse).
+ */
+function sourceLineCitation(source: string, citations: ManualCitation[]): ManualCitation | undefined {
+  const hits = citations.filter((c) => sourceLineMatchesCitation(source, c));
+  if (!hits.length) return undefined;
+  const text = source.toLowerCase();
+  const namedCross = hits.find(
+    (c) => c.crossManual && c.title && text.includes(c.title.trim().toLowerCase())
+  );
+  if (namedCross) return namedCross;
+  return hits.find((c) => !c.crossManual);
+}
+
+/**
  * Safe HTML for an assistant bubble: escaped text, bold, citation links.
  * Page/section phrases become links only when a scoped manualId is known.
  * A printed range links to its first page only when that physical page is stamped.
@@ -334,14 +393,16 @@ export function formatAssistantHtml(
   }
 
   body = body.replace(/(^|\n|<br\/>)[—\-]\s*Source:\s*([^<\n]+)/gi, (_all, lead: string, src: string) => {
-    const primary = citations.find((c) => sourceLineMatchesCitation(src, c));
+    const primary = sourceLineCitation(src, citations);
     if (!primary) return `${lead}— Source: ${src}`;
-    return `${lead}— Source: ${viewerAnchor(primary, src.trim() || citationLabel(primary))}`;
+    return `${lead}— Source: ${viewerAnchor(primary, src.trim() || citationChipLabel(primary))}`;
   });
 
   if (citations.length) {
     const chips = citations
-      .map((c) => viewerAnchor(c, c.page || c.section ? citationLabel(c) : `Open ${citationLabel(c)}`))
+      .map((c) =>
+        viewerAnchor(c, c.crossManual || c.page || c.section ? citationChipLabel(c) : `Open ${citationChipLabel(c)}`)
+      )
       .join(' · ');
     body += `<div class="ai-cite-row">${chips}</div>`;
   }
@@ -369,17 +430,9 @@ export function citationsForAssistantReply(
   const fromMeta = citationsFromMeta(meta, fallbackManualId ?? null);
   const metaId = Number(obj.manualId);
   const fallbackId = Number(fallbackManualId);
-  const confirmedId =
-    Number.isSafeInteger(metaId) && metaId > 0
-      ? metaId
-      : Number.isSafeInteger(fallbackId) && fallbackId > 0
-        ? fallbackId
-        : 0;
-  // Drop cites for a different book than the one the server scoped.
-  const scoped = confirmedId
-    ? fromMeta.filter((c) => c.manualId === confirmedId)
-    : fromMeta;
-  if (scoped.length) return attachProsePages(scoped, String(content || ''));
+  // Keep cites the server attributed to another catalog row (manual 5 while 110 is open).
+  // Do not relabel those as the open manual. An empty list still must not invent one.
+  if (fromMeta.length) return attachProsePages(fromMeta, String(content || ''));
   // The viewer id alone must not invent a page-1 cite. That retargeted
   // Auriga source lines onto the open manual when the server had not scoped it.
   const serverConfirmed =
@@ -401,20 +454,27 @@ export function citationsFromMeta(meta: unknown, fallbackManualId?: number | nul
   const fallbackId =
     Number(obj.manualId) ||
     (fallbackManualId != null && Number.isSafeInteger(fallbackManualId) ? fallbackManualId : 0);
-  const parsed = raw
-    .map((row) => {
-      if (!row || typeof row !== 'object') return null;
-      const r = row as Record<string, unknown>;
-      const id = Number(r.manualId ?? r.manual_id ?? fallbackId);
-      if (!Number.isSafeInteger(id) || id < 1) return null;
-      return {
-        manualId: id,
-        title: cleanSection(r.title || r.label || obj.manualLabel),
-        page: asPositivePage(r.page),
-        section: cleanSection(r.section),
-      } satisfies ManualCitation;
-    })
-    .filter((c): c is ManualCitation => !!c);
+  const parsed: ManualCitation[] = [];
+  for (const row of raw) {
+    if (!row || typeof row !== 'object') continue;
+    const r = row as Record<string, unknown>;
+    const explicit = Number(r.manualId ?? r.manual_id);
+    const id = Number.isSafeInteger(explicit) && explicit >= 1 ? explicit : fallbackId;
+    if (!Number.isSafeInteger(id) || id < 1) continue;
+    const own = !(fallbackId > 0) || id === fallbackId;
+    const title = cleanSection(r.title || r.label || (own ? obj.manualLabel : ''));
+    const page = asPositivePage(r.page);
+    const section = cleanSection(r.section);
+    const pageOutOfRange = r.page_out_of_range === true || r.pageOutOfRange === true;
+    parsed.push({
+      manualId: id,
+      ...(title ? { title } : {}),
+      ...(page ? { page } : {}),
+      ...(section ? { section } : {}),
+      ...(pageOutOfRange ? { pageOutOfRange: true } : {}),
+      ...(!own ? { crossManual: true } : {}),
+    });
+  }
   if (parsed.length) return mergeCitations(parsed);
   return [];
 }

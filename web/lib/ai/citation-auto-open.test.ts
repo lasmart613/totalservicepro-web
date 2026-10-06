@@ -122,6 +122,42 @@ test('auto-open uses only the first citation, and only with a real page', () => 
   );
   assert.equal(autoOpenTargetFromReply({ content: '[[cite:id=105&s=4.2]]' }), null);
   assert.equal(autoOpenTargetFromReply({ content: 'No manual cited.' }), null);
+
+  assert.deepEqual(
+    autoOpenTarget([
+      { manualId: 5, page: 121, crossManual: true, title: 'Candela GentleMAX PRO PLUS Service Manual' },
+      { manualId: 110, page: 88, pageOutOfRange: true },
+      { manualId: 110, page: 12, title: 'GentleMAX Pro Service Manual' },
+    ]),
+    { manualId: 110, page: 12 }
+  );
+  assert.equal(
+    autoOpenTarget([
+      { manualId: 5, page: 121, crossManual: true },
+      { manualId: 110, page: 88, pageOutOfRange: true },
+    ]),
+    null
+  );
+  assert.equal(
+    autoOpenTargetFromReply({
+      citations: [
+        {
+          manualId: 5,
+          page: 121,
+          crossManual: true,
+          title: 'Candela GentleMAX PRO PLUS Service Manual',
+        },
+      ],
+      content: '[[cite:id=5&p=121&t=Candela+GentleMAX+PRO+PLUS+Service+Manual]]',
+    }),
+    null
+  );
+  assert.equal(
+    autoOpenTargetFromReply({
+      content: '[[cite:id=110&p=88&oor=1]]',
+    }),
+    null
+  );
 });
 
 test('auto-open runs once for a fresh settled answer', () => {

@@ -169,12 +169,12 @@ export function parseCitationOpenDetail(detail: unknown): CitationOpenDetail | n
 }
 
 /**
- * Only the first displayed citation may auto-open, and only when that
- * citation already has a real manual id and physical page. A later chip
- * is not promoted when the first one is section-only or page-less.
+ * Auto-open the first in-range citation of the open manual.
+ * Skip a page flagged past the PDF, and skip a cite for a different manual.
+ * A later chip is not promoted when the first remaining cite is section-only or page-less.
  */
 export function autoOpenTarget(citations: ManualCitation[] | null | undefined): CitationOpenDetail | null {
-  const first = (citations || [])[0];
+  const first = (citations || []).find((cite) => cite.pageOutOfRange !== true && cite.crossManual !== true);
   if (!first) return null;
   return normalizeCitationTarget(first.manualId, first.page);
 }

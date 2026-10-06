@@ -89,7 +89,7 @@ The dedicated key wins when it is set. The Settings page and the assistant toggl
 
 When the setting is off, citations stay ordinary links. Nothing opens by itself.
 
-- Only the **first** citation, and only with a manual id ≥ 1 and a physical page ≥ 1.
+- Only the **first in-range citation of the open manual**, and only with a manual id ≥ 1 and a physical page ≥ 1. A cite for a different manual stays a chip and does not auto-open. A page flagged `page_out_of_range` (marker `oor=1`) does not auto-open and does not scroll; the viewer shows “Page N isn't in this PDF”. A later chip is not promoted when the first remaining cite is section-only or page-less.
 - Once per fresh answer, after it has been committed.
 - Not on history restore, conversation reload, or a later re-render.
 - Not when the signed-in user cannot view that manual. The chip stays a normal link. The panel is not mounted, so restricted PDF bytes are not requested.
@@ -99,7 +99,9 @@ Wide web (viewport ≥ 1024px and not the Android shell): side panel. Escape clo
 
 Mobile web and the Android WebView (`TSPAndroid` in the user agent, or `window.Android`): full screen. **Back to answer** restores the thread scroll position and moves focus to the answer thread (`tabindex="-1"`), not the page body.
 
-If the requested page is past the end of that PDF, the viewer does not jump to page 1. It shows “Page N isn't in this PDF”. A page that exists in the file still opens on that page (`/manuals/view?id=&page=`).
+If the requested page is past the end of that PDF, or the citation has `page_out_of_range` / `oor=1`, the viewer does not jump to that page. It shows “Page N isn't in this PDF”. A page that exists in the file, and is not flagged, still opens on that page (`/manuals/view?id=&page=`).
+
+A passage attributed to a different catalog row is a chip labeled “From: {that manual's title}, p. {page}”. The link opens that manual. It is not renamed to the manual that was open in the assistant.
 
 Other chips stay links. With the setting on, a primary click jumps the open viewer to that manual and page.
 

@@ -107,6 +107,7 @@ export function AssistantCitedManual({
           manualId={String(cited.manualId)}
           title={cited.title}
           initialPage={cited.page}
+          pageOutOfRange={cited.pageOutOfRange === true}
         />
       </div>
     </div>

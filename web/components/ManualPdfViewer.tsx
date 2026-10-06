@@ -14,7 +14,7 @@ import {
   type ManualViewPayload,
 } from '@/lib/manuals';
 import { asPositivePage } from '@/lib/ai/citations';
-import { fittedPageBoxHeight, viewerPageOutOfRangeNotice, viewerPhysicalPage } from '@/lib/pdf-viewer-page';
+import { fittedPageBoxHeight, viewerCitedPageNotice, viewerPhysicalPage } from '@/lib/pdf-viewer-page';
 import { ViewerAiPanel } from '@/components/ViewerAiPanel';
 import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
 
@@ -302,6 +302,7 @@ export function ManualPdfViewer({
   initialPage,
   initialSection,
   initialFind,
+  pageOutOfRange = false,
   embedded = false,
 }: {
   manualId?: string | null;
@@ -312,6 +313,8 @@ export function ManualPdfViewer({
   initialPage?: string | number | null;
   initialSection?: string | null;
   initialFind?: string | null;
+  /** Citation flag `page_out_of_range` / `oor=1`. Do not scroll to `initialPage`. */
+  pageOutOfRange?: boolean;
   /** Assistant side panel. Parent owns Back/Close so this view does not navigate away. */
   embedded?: boolean;
 }) {
@@ -644,9 +647,10 @@ export function ManualPdfViewer({
     if (loading || !pageCount || !pageBoxHeight) return;
     const requested = asPositivePage(initialPage);
     if (requested) {
+      // Flagged past the PDF, or past the loaded page count: leave the document
+      // where it is and show the notice. Do not clamp the deep link onto page 1.
+      if (pageOutOfRange) return;
       const target = viewerPhysicalPage(requested, pageCount);
-      // Past the last page: leave the document where it is and show the notice.
-      // Do not clamp the deep link onto page 1.
       if (!target) return;
       let cancelled = false;
       const jump = () => {
@@ -666,7 +670,7 @@ export function ManualPdfViewer({
     void runSearch(0, find);
     // Deep-link jump after the fitted page height is known.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docEpoch, loading, pageCount, pageBoxHeight, initialPage, jumpToPhysicalPage]);
+  }, [docEpoch, loading, pageCount, pageBoxHeight, initialPage, pageOutOfRange, jumpToPhysicalPage]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -706,8 +710,11 @@ export function ManualPdfViewer({
   const pdf = pdfRef.current;
   const pages = pageCount && pdf ? Array.from({ length: pageCount }, (_, i) => i + 1) : [];
   const languageBadge = manualLanguageBadge(languageCode);
+  const requestedPage = asPositivePage(initialPage);
   const pageNotice =
-    !loading && pageCount > 0 ? viewerPageOutOfRangeNotice(asPositivePage(initialPage), pageCount) : null;
+    pageOutOfRange || (!loading && pageCount > 0)
+      ? viewerCitedPageNotice(requestedPage, pageCount, pageOutOfRange)
+      : null;
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-[#0d1117] text-[#E5E7EB]">

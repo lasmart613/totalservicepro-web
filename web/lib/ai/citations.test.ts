@@ -9,6 +9,7 @@ import {
   citationViewerHref,
   citationsForAssistantReply,
   citationsFromMeta,
+  parseCitationMarkerQuery,
   sourceLineMatchesCitation,
   embedCitationMarker,
   extractPageRef,
@@ -241,6 +242,81 @@ test('meta citations and section extraction', () => {
     'Typical RF deck check is on page 4.'
   );
   assert.deepEqual(general, []);
+});
+
+test('out-of-range and cross-manual cites stay on their own row', () => {
+  const fromMarker = parseCitationMarkerQuery('id=110&p=88&oor=1&t=GentleMAX+Pro+Service+Manual');
+  assert.equal(fromMarker?.page, 88);
+  assert.equal(fromMarker?.pageOutOfRange, true);
+  assert.match(embedCitationMarker(fromMarker!), /oor=1/);
+  assert.match(embedCitationMarker(fromMarker!), /p=88/);
+
+  const parsed = parseCitationMarkers('[[cite:id=5&p=121&t=Candela+GentleMAX+PRO+PLUS+Service+Manual]]');
+  assert.equal(parsed[0].manualId, 5);
+  assert.equal(parsed[0].page, 121);
+  assert.equal(parsed[0].pageOutOfRange, undefined);
+
+  const cites = citationsForAssistantReply(
+    {
+      manualId: 110,
+      manualLabel: 'GentleMAX Pro Service Manual',
+      citations: [
+        { manualId: 110, title: 'GentleMAX Pro Service Manual', page: 12 },
+        {
+          manualId: 5,
+          title: 'Candela GentleMAX PRO PLUS Service Manual',
+          page: 121,
+        },
+        {
+          manualId: 110,
+          page: 88,
+          page_out_of_range: true,
+        },
+      ],
+    },
+    110,
+    'Check the port.'
+  );
+  assert.deepEqual(
+    cites.map((c) => ({ id: c.manualId, page: c.page, cross: c.crossManual === true, oor: c.pageOutOfRange === true })),
+    [
+      { id: 110, page: 12, cross: false, oor: false },
+      { id: 5, page: 121, cross: true, oor: false },
+      { id: 110, page: 88, cross: false, oor: true },
+    ]
+  );
+  assert.equal(cites[1].title, 'Candela GentleMAX PRO PLUS Service Manual');
+  assert.equal(cites[2].title, 'GentleMAX Pro Service Manual');
+
+  const unlabeled = citationsForAssistantReply(
+    {
+      manualId: 110,
+      manualLabel: 'GentleMAX Pro Service Manual',
+      citations: [{ manualId: 5, page: 121 }],
+    },
+    110,
+    ''
+  );
+  assert.equal(unlabeled[0].manualId, 5);
+  assert.equal(unlabeled[0].title, undefined);
+  assert.equal(unlabeled[0].crossManual, true);
+
+  const html = formatAssistantHtml(
+    '[[cite:id=5&p=121&t=Candela+GentleMAX+PRO+PLUS+Service+Manual]]\n[[cite:id=110&p=12&t=GentleMAX+Pro+Service+Manual]]',
+    cites.filter((c) => c.page !== 88)
+  );
+  assert.match(html, /From: Candela GentleMAX PRO PLUS Service Manual, p\. 121/);
+  assert.match(html, /href="\/manuals\/view\?id=5[^"]*page=121/);
+  assert.match(html, /data-cite-manual="5"/);
+  assert.doesNotMatch(html, /From: GentleMAX Pro/);
+  assert.match(html, /GentleMAX Pro Service Manual, p\.12/);
+  const oorHtml = formatAssistantHtml('[[cite:id=110&p=88&oor=1&t=GentleMAX+Pro+Service+Manual]]', [
+    cites[2],
+  ]);
+  assert.match(oorHtml, /page=88/);
+  assert.match(oorHtml, /oor=1/);
+  assert.match(oorHtml, /data-cite-oor="1"/);
+  assert.equal(oorHtml.match(/id=5/g), null);
 });
 
 test('an unscoped reply does not deep-link Auriga page labels to the open manual page 1', () => {
