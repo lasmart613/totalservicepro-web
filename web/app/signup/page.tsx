@@ -33,6 +33,9 @@ export default function SignupIndex() {
         }
       }
       // Logged-out (or no org) register only. Never clear a signed-in org session.
+      // Leave the page before this resolves and the cleanup flag skips the call,
+      // so opening a company or owner form does not inherit a cookie DELETE.
+      if (cancelled) return;
       await prepareFreshSignup(supabase);
     })();
     return () => {
