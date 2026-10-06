@@ -23,6 +23,26 @@ export const PARTS_CATALOG_COLUMNS = [
   'quantity_on_hand',
 ] as const;
 
+/** Live parts_catalog_category_check. Stored option values must match these strings. */
+export const PARTS_CATALOG_CATEGORIES = [
+  'Handpiece Components',
+  'Power Supplies',
+  'Optical Components',
+  'Cooling System',
+  'Electronics/Boards',
+  'Mechanical/Frame',
+  'Other',
+] as const;
+
+export const PART_SAVE_ERROR = "Couldn't save this part. Check the category and try again.";
+
+/** Database and PostgREST failures stay out of the toast. Sign-in text is ours. */
+export function partCatalogSaveMessage(raw: string | null | undefined): string {
+  const message = String(raw || '');
+  if (/sign in/i.test(message)) return message;
+  return PART_SAVE_ERROR;
+}
+
 export type PartsCatalogColumn = (typeof PARTS_CATALOG_COLUMNS)[number];
 
 const COLUMN_SET = new Set<string>(PARTS_CATALOG_COLUMNS);

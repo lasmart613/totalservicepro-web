@@ -8,8 +8,10 @@ export const PRIVATE_IMAGE_BUCKETS = new Set(['equipment-photos', 'marketplace-i
 export const PUBLIC_IMAGE_BUCKETS = new Set(['part-images', 'company-assets', 'logos', 'user-avatars']);
 
 export const LIST_THUMB_WIDTH = 480;
+export const THUMB_WIDTHS = [160, 320, 480, 960] as const;
 export const SIGNED_URL_TTL_SECONDS = 60 * 60;
-export const SIGNED_URL_CACHE_MS = 50 * 60 * 1000;
+/** Client reuse. Kept under the signed-URL lifetime even after a server-cache hit. */
+export const SIGNED_URL_CACHE_MS = 30 * 60 * 1000;
 
 export const PHOTO_PLACEHOLDER =
   'data:image/svg+xml;charset=UTF-8,' +
@@ -74,11 +76,27 @@ function encodePath(path: string): string {
 }
 
 /** Width-limited render URL for the public part-images bucket. Other public buckets stay as stored. */
-export function partImageThumbnailUrl(url: string, width: number): string | null {
+export function partImageThumbnailUrl(url: string, width: number | null): string | null {
   const parsed = parseStoredStorageUrl(url);
   if (!parsed || parsed.bucket !== 'part-images') return null;
-  const w = clampWidth(width);
+  const w = snapThumbWidth(width);
   return `${parsed.origin}/storage/v1/render/image/public/${encodeURIComponent(parsed.bucket)}/${encodePath(parsed.path)}?width=${w}&resize=contain`;
+}
+
+/** Nearest allowed thumbnail width so signed-URL cache keys stay small. */
+export function snapThumbWidth(width: number | null | undefined, fallback = LIST_THUMB_WIDTH): number {
+  const n = Number(width);
+  const target = Number.isFinite(n) && n > 0 ? n : fallback;
+  let best: number = THUMB_WIDTHS[0];
+  let bestDist = Math.abs(target - best);
+  for (const candidate of THUMB_WIDTHS) {
+    const dist = Math.abs(target - candidate);
+    if (dist < bestDist || (dist === bestDist && candidate < best)) {
+      best = candidate;
+      bestDist = dist;
+    }
+  }
+  return best;
 }
 
 export function clampWidth(width: number | null | undefined, fallback = LIST_THUMB_WIDTH): number {
@@ -93,7 +111,7 @@ export type ImmediateDisplay = { src: string | null; sign: boolean };
  * Synchronous display decision.
  * Private buckets must be signed before the browser requests them.
  */
-export function immediateDisplayUrl(url: string | null | undefined, width = LIST_THUMB_WIDTH): ImmediateDisplay {
+export function immediateDisplayUrl(url: string | null | undefined, width: number | null = LIST_THUMB_WIDTH): ImmediateDisplay {
   const raw = String(url || '').trim();
   if (!raw) return { src: null, sign: false };
   if (raw.startsWith('blob:') || raw.startsWith('data:')) return { src: raw, sign: false };
@@ -108,8 +126,9 @@ export function immediateDisplayUrl(url: string | null | undefined, width = LIST
 
 export type SignRequest = { bucket: string; path: string; width: number; url: string };
 
-export function signCacheKey(bucket: string, path: string, width: number): string {
-  return `${bucket}\n${path}\n${clampWidth(width)}`;
+export function signCacheKey(bucket: string, path: string, width: number | null): string {
+  if (width == null) return `${bucket}\n${path}\nfull`;
+  return `${bucket}\n${path}\n${snapThumbWidth(width)}`;
 }
 
 export type CachedSignedUrl = { url: string; exp: number };
@@ -127,7 +146,7 @@ export async function resolveStoredImageUrls(
     now?: number;
   }
 ): Promise<Array<string | null>> {
-  const width = clampWidth(opts.width);
+  const width = snapThumbWidth(opts.width);
   const cache = opts.cache || new Map<string, CachedSignedUrl>();
   const now = opts.now ?? Date.now();
   const needed = new Map<string, { bucket: string; path: string; width: number }>();

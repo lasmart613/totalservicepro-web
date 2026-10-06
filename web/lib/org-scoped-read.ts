@@ -5,7 +5,7 @@
  * Profile email is not membership. God access is not decided here.
  */
 
-import { signedThumbnailUrl } from './storage-display.ts';
+import { signImagePaths, type ImageSigner } from './signed-image-urls.ts';
 
 export const OPEN_SERVICE_REQUEST_COLUMNS =
   'id, title, description, status, urgency, manufacturer, model, service_type, city, state, location, category, created_at, budget_max, organization_id';
@@ -80,81 +80,27 @@ export function storageObjectFromPublicUrl(
 }
 
 const PRIVATE_PHOTO_BUCKETS = new Set(['equipment-photos', 'marketplace-images']);
-const PHOTO_SIGN_TTL_SECONDS = 60 * 60;
-
-type SignedUrlResult = { data: { signedUrl?: string } | null; error: { message?: string } | null };
-type SignedUrlsResult = {
-  data: Array<{ path?: string | null; signedUrl?: string | null; error?: string | null }> | null;
-  error: { message?: string } | null;
-};
-
-/**
- * Matches @supabase/storage-js createSignedUrl(s). Return values are read as
- * { data, error }; the SDK's discriminated union is not assigned here.
- */
-type BucketSigner = {
-  createSignedUrl: (
-    path: string,
-    expiresIn: number,
-    options?: {
-      download?: string | boolean;
-      transform?: { width?: number; height?: number; resize?: 'cover' | 'contain' | 'fill'; quality?: number };
-      cacheNonce?: string;
-    }
-  ) => Promise<SignedUrlResult | { data: { signedUrl: string } | null; error: { message: string } | null }>;
-  createSignedUrls?: (
-    paths: string[],
-    expiresIn: number,
-    options?: { download?: string | boolean; cacheNonce?: string }
-  ) => Promise<SignedUrlsResult | { data: Array<{ path: string | null; signedUrl: string | null; error: string | null }> | null; error: { message: string } | null }>;
-};
 
 type SignedStorage = {
   storage: {
-    from: (bucket: string) => BucketSigner;
+    from: (bucket: string) => ImageSigner;
   };
 };
 
 async function signBucketPaths(
-  signer: BucketSigner,
+  signer: ImageSigner,
+  bucket: string,
   paths: string[],
   width?: number
 ): Promise<Map<string, string>> {
-  const signed = new Map<string, string>();
-  if (!paths.length) return signed;
-  if (signer.createSignedUrls) {
-    const batch = await signer.createSignedUrls(paths, PHOTO_SIGN_TTL_SECONDS);
-    if (!batch.error && batch.data) {
-      for (const row of batch.data) {
-        if (row?.path && row.signedUrl) {
-          signed.set(row.path, width ? signedThumbnailUrl(row.signedUrl, width) : row.signedUrl);
-        }
-      }
-    } else if (batch.error) {
-      console.error('[equipment-photos] createSignedUrls', batch.error.message);
-    }
-  }
-  for (const path of paths) {
-    if (signed.has(path)) continue;
-    const transformed = width
-      ? await signer.createSignedUrl(path, PHOTO_SIGN_TTL_SECONDS, { transform: { width, resize: 'contain' } })
-      : await signer.createSignedUrl(path, PHOTO_SIGN_TTL_SECONDS);
-    if (!transformed.error && transformed.data?.signedUrl) {
-      signed.set(path, transformed.data.signedUrl);
-      continue;
-    }
-    if (width) {
-      const plain = await signer.createSignedUrl(path, PHOTO_SIGN_TTL_SECONDS);
-      if (!plain.error && plain.data?.signedUrl) signed.set(path, plain.data.signedUrl);
-    }
-  }
-  return signed;
+  const signed = await signImagePaths(signer, bucket, paths, width == null ? null : width);
+  return new Map(Object.entries(signed));
 }
 
 /**
  * Private buckets (equipment-photos, marketplace-images) need a signed URL.
  * A failed sign does not fall back to the public object URL.
- * Many photos are one createSignedUrls call per bucket.
+ * Thumbnails pass transform into createSignedUrl. Full size omits it.
  */
 export async function equipmentPhotoDisplayUrls(
   supabase: SignedStorage,
@@ -177,7 +123,7 @@ export async function equipmentPhotoDisplayUrls(
   }
   const signedByBucket = new Map<string, Map<string, string>>();
   for (const [bucket, paths] of byBucket) {
-    signedByBucket.set(bucket, await signBucketPaths(supabase.storage.from(bucket), paths, opts?.width));
+    signedByBucket.set(bucket, await signBucketPaths(supabase.storage.from(bucket), bucket, paths, opts?.width));
   }
   return parsed.map((item) => {
     if (!item.raw) return null;

@@ -4,7 +4,10 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  PARTS_CATALOG_CATEGORIES,
   PARTS_CATALOG_COLUMNS,
+  PART_SAVE_ERROR,
+  partCatalogSaveMessage,
   partsCatalogManufacturerLabel,
   partsCatalogWritePayload,
 } from './parts-catalog-columns.ts';
@@ -15,7 +18,7 @@ test('parts catalog writes brand and drops manufacturer and image_urls', () => {
     name: 'Flashlamp',
     manufacturer: 'Candela',
     description: 'Lamp',
-    category: 'Consumables',
+    category: 'Optical Components',
     image_urls: ['https://cdn.example/a.webp', 'https://cdn.example/b.webp'],
     sale_price: 12,
     is_active: true,
@@ -44,4 +47,32 @@ test('supplier catalog select uses brand, not parts_catalog.manufacturer', () =>
   const modal = readFileSync(join(here, '../components/AddPartModal.tsx'), 'utf8');
   assert.match(modal, /partsCatalogWritePayload/);
   assert.doesNotMatch(modal, /manufacturer: resolvedBrand/);
+});
+
+test('catalog category options match the live check constraint', () => {
+  assert.deepEqual(
+    [...PARTS_CATALOG_CATEGORIES],
+    [
+      'Handpiece Components',
+      'Power Supplies',
+      'Optical Components',
+      'Cooling System',
+      'Electronics/Boards',
+      'Mechanical/Frame',
+      'Other',
+    ]
+  );
+  const here = dirname(fileURLToPath(import.meta.url));
+  const modal = readFileSync(join(here, '../components/AddPartModal.tsx'), 'utf8');
+  const detail = readFileSync(join(here, '../app/parts/[id]/page.tsx'), 'utf8');
+  assert.match(modal, /PART_CATEGORIES = PARTS_CATALOG_CATEGORIES/);
+  assert.doesNotMatch(modal, /'Consumables'/);
+  assert.match(modal, /console\.error\('\[parts-catalog\] save'/);
+  assert.match(modal, /partCatalogSaveMessage/);
+  assert.match(detail, /partCatalogSaveMessage/);
+  assert.equal(
+    partCatalogSaveMessage('new row for relation "parts_catalog" violates check constraint "parts_catalog_category_check"'),
+    PART_SAVE_ERROR
+  );
+  assert.equal(partCatalogSaveMessage('Sign in to add a part.'), 'Sign in to add a part.');
 });

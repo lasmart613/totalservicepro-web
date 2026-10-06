@@ -12,7 +12,7 @@ import {
   PART_CATEGORIES,
   PART_UNITS,
 } from '@/components/AddPartModal';
-import { partsCatalogManufacturerLabel, partsCatalogWritePayload } from '@/lib/parts-catalog-columns';
+import { partCatalogSaveMessage, partsCatalogManufacturerLabel, partsCatalogWritePayload } from '@/lib/parts-catalog-columns';
 import { StorageImage } from '@/components/StorageImage';
 
 type PartRow = Record<string, any>;
@@ -202,7 +202,9 @@ export default function PartDetailPage() {
       setPreviews([]);
       await load();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Save failed');
+      const raw = e instanceof Error ? e.message : 'Save failed';
+      console.error('[parts-catalog] save', raw);
+      toast.error(partCatalogSaveMessage(raw));
     } finally {
       setSaving(false);
     }

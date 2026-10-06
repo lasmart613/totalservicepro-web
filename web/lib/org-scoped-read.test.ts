@@ -212,21 +212,19 @@ test('equipment photo display does not fall back to the public object URL', asyn
   );
 });
 
-test('private listing photos are signed in one batch and public part-images stay public', async () => {
-  const calls: string[][] = [];
+test('private listing photos pass a thumbnail transform and public logos stay public', async () => {
+  const calls: Array<{ bucket: string; path: string; options?: { transform?: { width?: number; resize?: string } } }> = [];
   const supabase = {
     storage: {
       from(bucket: string) {
         return {
-          createSignedUrls: async (paths: string[]) => {
-            calls.push([bucket, ...paths]);
-            return {
-              data: paths.map((path) => ({ path, signedUrl: `https://signed.example/${bucket}/${path}` })),
-              error: null,
-            };
-          },
-          createSignedUrl: async () => {
-            throw new Error('expected createSignedUrls');
+          createSignedUrl: async (
+            path: string,
+            _ttl: number,
+            options?: { transform?: { width?: number; resize?: string } }
+          ) => {
+            calls.push({ bucket, path, options });
+            return { data: { signedUrl: `https://signed.example/${bucket}/${path}?w=${options?.transform?.width ?? 'full'}` }, error: null };
           },
         };
       },
@@ -236,11 +234,17 @@ test('private listing photos are signed in one batch and public part-images stay
   const part = 'https://db.example/storage/v1/object/public/equipment-photos/parts/0d04a116-38a8-4ba0-8738-7981e398f551/1787667473597_0.webp?t=1';
   const market = 'https://db.example/storage/v1/object/public/marketplace-images/user/listings/a.png';
   const logo = 'https://db.example/storage/v1/object/public/logos/org/logo.png';
-  const signed = await equipmentPhotoDisplayUrls(supabase, [equipment, part, market, logo, equipment]);
-  assert.equal(calls.length, 2);
-  assert.equal(signed[0], 'https://signed.example/equipment-photos/0d04a116-38a8-4ba0-8738-7981e398f551/listings/1787347953497_0.jpg');
-  assert.equal(signed[1], 'https://signed.example/equipment-photos/parts/0d04a116-38a8-4ba0-8738-7981e398f551/1787667473597_0.webp');
-  assert.equal(signed[2], 'https://signed.example/marketplace-images/user/listings/a.png');
+  const signed = await equipmentPhotoDisplayUrls(supabase, [equipment, part, market, logo, equipment], { width: 160 });
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every((call) => call.options?.transform?.width === 160 && call.options?.transform?.resize === 'contain'));
+  assert.match(signed[0] || '', /1787347953497_0\.jpg\?w=160/);
+  assert.match(signed[1] || '', /1787667473597_0\.webp\?w=160/);
+  assert.match(signed[2] || '', /marketplace-images\/user\/listings\/a\.png\?w=160/);
   assert.equal(signed[3], logo);
   assert.equal(signed[4], signed[0]);
+
+  const full = await equipmentPhotoDisplayUrls(supabase, [equipment]);
+  assert.equal(calls.length, 4);
+  assert.equal(calls[3].options, undefined);
+  assert.match(full[0] || '', /\?w=full/);
 });

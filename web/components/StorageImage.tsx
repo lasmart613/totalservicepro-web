@@ -43,6 +43,30 @@ export function StorageImage({
 
   return (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={shown} alt={alt} className={className} loading={loading} onClick={onClick} onError={photoImgOnError} />
+    <img
+      src={shown}
+      alt={alt}
+      className={className}
+      loading={loading}
+      onClick={onClick}
+      onError={(event) => {
+        if (!immediate.sign) {
+          photoImgOnError(event);
+          return;
+        }
+        const img = event.currentTarget;
+        if (img.dataset.fallback === 'full') {
+          img.dataset.fallback = 'placeholder';
+          img.src = PHOTO_PLACEHOLDER;
+          return;
+        }
+        img.dataset.fallback = 'full';
+        void enqueueSignedDisplayUrl(src, null).then((url) => {
+          if (img.dataset.fallback !== 'full') return;
+          img.src = url || PHOTO_PLACEHOLDER;
+          if (!url) img.dataset.fallback = 'placeholder';
+        });
+      }}
+    />
   );
 }
