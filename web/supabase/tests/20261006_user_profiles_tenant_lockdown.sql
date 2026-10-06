@@ -1,4 +1,5 @@
--- Trigger and privilege checks for 20261006_000400_user_profiles_tenant_lockdown.
+-- Trigger and privilege checks for 20261006_000400 and 20261006_000401.
+-- Apply both migrations first. 000401 closes the live open write policies.
 -- Do not run this on production. It rolls back. It inserts fixture rows only
 -- inside a transaction that ends in ROLLBACK.
 --
@@ -99,6 +100,131 @@ BEGIN
         RAISE;
       END IF;
   END;
+END $$;
+
+-- Open write policies from the live sweep. 000401 must already be applied.
+DO $$
+DECLARE
+  open_table text;
+  open_tables text[] := ARRAY[
+    'contacts',
+    'engineer_invitations',
+    'forum_attachments',
+    'forum_bookmarks',
+    'forum_categories',
+    'forum_posts',
+    'forum_reactions',
+    'forum_threads',
+    'labor_log',
+    'notifications',
+    'parts',
+    'parts_used',
+    'sites'
+  ];
+BEGIN
+  FOREACH open_table IN ARRAY open_tables LOOP
+    IF EXISTS (
+      SELECT 1 FROM pg_policies
+      WHERE schemaname = 'public'
+        AND tablename = open_table
+        AND policyname = 'Allow all - ' || open_table
+    ) THEN
+      RAISE EXCEPTION 'FAIL Allow all policy still present on %', open_table;
+    END IF;
+  END LOOP;
+
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND policyname = 'notifications_insert_authenticated'
+  ) THEN
+    RAISE EXCEPTION 'FAIL notifications_insert_authenticated still present';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND policyname = 'Authenticated can create customer orgs'
+  ) THEN
+    RAISE EXCEPTION 'FAIL customer org insert still has no created_by check';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'laser_models'
+      AND policyname IN ('auth_insert_laser_models', 'Authenticated can insert laser_models')
+  ) THEN
+    RAISE EXCEPTION 'FAIL laser_models insert policy still present';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'parts_catalog' AND policyname = 'parts_catalog_update'
+  ) THEN
+    RAISE EXCEPTION 'FAIL parts_catalog_update was replaced; leave it for 000700';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'waitlist' AND policyname = 'public insert waitlist'
+  ) THEN
+    RAISE EXCEPTION 'FAIL public insert waitlist was removed';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND tablename = 'forum_threads'
+      AND policyname = 'forum_threads_write_author'
+      AND with_check ILIKE '%author_id%'
+  ) THEN
+    RAISE EXCEPTION 'FAIL forum threads are not limited to the author';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'labor_log' AND policyname = 'labor_log_ticket_org'
+  ) THEN
+    RAISE EXCEPTION 'FAIL labor_log is not scoped to the ticket org';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'parts_used' AND policyname = 'parts_used_ticket_org'
+  ) THEN
+    RAISE EXCEPTION 'FAIL parts_used is not scoped to the ticket org';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'sites' AND policyname = 'sites_org_member'
+  ) THEN
+    RAISE EXCEPTION 'FAIL sites are not scoped to the organization';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public'
+      AND policyname IN ('locations_insert', 'stock_insert', 'stock_update', 'transactions_insert', 'part_vendors_insert', 'part_vendors_update', 'parts_catalog_insert')
+      AND coalesce(with_check, qual, '') IN ('true', '(true)')
+  ) THEN
+    RAISE EXCEPTION 'FAIL an inventory or catalog write policy is still USING/CHECK true';
+  END IF;
+
+  IF has_column_privilege('anon', 'public.contacts', 'organization_id', 'UPDATE') THEN
+    RAISE EXCEPTION 'FAIL anon can still UPDATE contacts.organization_id';
+  END IF;
+  IF has_column_privilege('authenticated', 'public.contacts', 'organization_id', 'UPDATE') THEN
+    RAISE EXCEPTION 'FAIL authenticated can still UPDATE contacts.organization_id';
+  END IF;
+  IF has_column_privilege('anon', 'public.notifications', 'user_id', 'UPDATE') THEN
+    RAISE EXCEPTION 'FAIL anon can still UPDATE notifications.user_id';
+  END IF;
+  IF has_column_privilege('authenticated', 'public.notifications', 'user_id', 'UPDATE') THEN
+    RAISE EXCEPTION 'FAIL authenticated can still UPDATE notifications.user_id';
+  END IF;
+  IF has_table_privilege('authenticated', 'public.notifications', 'INSERT') THEN
+    RAISE EXCEPTION 'FAIL authenticated can still INSERT notifications';
+  END IF;
+  IF has_table_privilege('authenticated', 'public.laser_models', 'INSERT') THEN
+    RAISE EXCEPTION 'FAIL authenticated can still INSERT laser_models';
+  END IF;
+  IF has_column_privilege('anon', 'public.bids', 'bidder_id', 'UPDATE') THEN
+    RAISE EXCEPTION 'FAIL anon can still UPDATE bids.bidder_id';
+  END IF;
+  IF has_column_privilege('anon', 'public.sites', 'organization_id', 'UPDATE') THEN
+    RAISE EXCEPTION 'FAIL anon can still UPDATE sites.organization_id';
+  END IF;
 END $$;
 
 ROLLBACK;

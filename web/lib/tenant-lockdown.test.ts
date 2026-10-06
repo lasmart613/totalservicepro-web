@@ -197,6 +197,39 @@ test('server routes call the authorizers and do not trust a client role on found
   assert.match(adminTeam, /postMemberRole/);
 });
 
+test('open write policies are replaced and catalog update is left for 000700', () => {
+  const sql = readFileSync(
+    join(here, '../supabase/migrations/20261006_000401_open_write_policies.sql'),
+    'utf8'
+  );
+  assert.match(sql, /DROP POLICY IF EXISTS %I ON public\.%I', 'Allow all - ' \|\| tbl, tbl/);
+  assert.match(sql, /'engineer_invitations'/);
+  assert.match(sql, /notifications_insert_authenticated/);
+  assert.match(sql, /forum_threads_write_author/);
+  assert.match(sql, /author_id = auth\.uid\(\)/);
+  assert.match(sql, /labor_log_ticket_org/);
+  assert.match(sql, /parts_used_ticket_org/);
+  assert.match(sql, /sites_org_member/);
+  assert.match(sql, /parts_catalog_insert_owner/);
+  assert.match(sql, /created_by = auth\.uid\(\)/);
+  assert.match(sql, /Authenticated can create customer orgs/);
+  assert.match(sql, /laser_models_read/);
+  assert.doesNotMatch(sql, /DROP POLICY IF EXISTS parts_catalog_update/);
+  assert.doesNotMatch(sql, /DROP POLICY IF EXISTS "public insert waitlist"/);
+  assert.match(sql, /REVOKE UPDATE \(%I\) ON TABLE public\.%I FROM PUBLIC, anon/);
+
+  const award = readFileSync(join(here, 'award.ts'), 'utf8');
+  const notify = readFileSync(join(here, '../app/api/marketplace/award-notify/route.ts'), 'utf8');
+  const assignee = readFileSync(join(here, '../app/api/tickets/notify-assignee/route.ts'), 'utf8');
+  assert.match(award, /\/api\/marketplace\/award-notify/);
+  assert.doesNotMatch(award, /from\('notifications'\)\.insert/);
+  assert.match(notify, /hasServiceRole/);
+  assert.match(notify, /posted_by/);
+  assert.match(notify, /created_by/);
+  assert.match(assignee, /getSupabaseAdmin\(\)\.from\('notifications'\)\.insert/);
+  assert.doesNotMatch(assignee, /writer\.from\('notifications'\)\.insert/);
+});
+
 test('cross-tenant audit file is SELECT only', () => {
   const audit = readFileSync(
     join(here, '../supabase/audits/20261006_cross_tenant_membership_audit.sql'),
