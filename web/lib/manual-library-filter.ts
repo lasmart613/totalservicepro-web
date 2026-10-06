@@ -20,7 +20,7 @@ import {
 } from './equipment-types.ts';
 import {
   ALL_MANUAL_LANGUAGES,
-  manualLanguageLabel,
+  manualQueryLanguageMatch,
   resolveManualLanguage,
 } from './manual-language.ts';
 import { normalizeManualSearchText } from './manual-search-text.ts';
@@ -98,7 +98,6 @@ export function manualSearchHaystack(manual: ManualLibraryRow): string {
       meta.label,
       meta.roomLabel,
       wls,
-      resolveManualLanguage(manual) === 'en' ? '' : manualLanguageLabel(resolveManualLanguage(manual)),
     ].join(' ')
   );
 }
@@ -109,8 +108,13 @@ function hayIncludes(hay: string, token: string): boolean {
   return hay.replace(/\s+/g, '').includes(token.replace(/\s+/g, ''));
 }
 
+/** Text left after language names are taken out. Empty means the query is only a language tag. */
+export function manualSearchBodyQuery(query: string): string {
+  return manualQueryLanguageMatch(query).textQuery;
+}
+
 export function manualMatchesQuery(manual: ManualLibraryRow, query: string): boolean {
-  const tokens = manualSearchTokens(query);
+  const tokens = manualSearchTokens(manualSearchBodyQuery(query));
   if (!tokens.length) return true;
   const hay = manualSearchHaystack(manual);
   return tokens.every((t) => hayIncludes(hay, t));
@@ -236,7 +240,9 @@ export function filterManualLibrary(
   bodyMatchIds?: Set<string> | null
 ): ManualLibraryRow[] {
   const query = sanitizeManualSearchQuery(filters.query || '');
-  const tokens = manualSearchTokens(query);
+  const languageQuery = manualQueryLanguageMatch(query);
+  const textQuery = languageQuery.textQuery;
+  const tokens = manualSearchTokens(textQuery);
   const brand = String(filters.brand || '')
     .trim()
     .toLowerCase();
@@ -262,10 +268,12 @@ export function filterManualLibrary(
     if (room && inferred !== room) return false;
     if (brand && String(m.brand || '').trim().toLowerCase() !== brand) return false;
     if (applyLanguage && resolveManualLanguage(m) !== language) return false;
+    if (languageQuery.codes.some((code) => resolveManualLanguage(m) !== code)) return false;
     if (incompleteOnly && !isManualIncomplete(m)) return false;
     if (applyWavelength && !matchesWavelength(m, wavelength)) return false;
+    // A language name is a tag filter. PDF body text that merely contains the word does not count.
     if (!tokens.length) return true;
-    if (manualMatchesQuery(m, query)) return true;
+    if (manualMatchesQuery(m, textQuery)) return true;
     const id = manualRowId(m);
     return !!(id && bodyMatchIds && bodyMatchIds.has(id));
   });

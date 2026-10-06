@@ -17,6 +17,7 @@ import {
   manualLibraryFiltersActive,
   manualLibrarySearchParams,
   manualMatchesQuery,
+  manualSearchBodyQuery,
   parseManualLibrarySearchParams,
   uniqueManualBrands,
 } from './manual-library-filter.ts';
@@ -239,6 +240,34 @@ test('language filter defaults to all and still matches brand and model', () => 
   assert.match(qs, /lang=de/);
   assert.equal(parseManualLibrarySearchParams(`?${qs}`).language, 'de');
   assert.equal(parseManualLibrarySearchParams('?lang=all').language, '');
+
+  const rowsWithWord = [
+    { id: 'en-word', brand: 'Candela', title: 'Spanish Inquisition Laser', model: 'Inquisition', language: 'en' },
+    { id: 'es', brand: 'Candela', title: 'GentleMax Pro', model: 'GentleMax', language: 'es' },
+    { id: 'es-title', brand: 'Lumenis', title: 'UltraPulse (Spanish)', model: 'UltraPulse', language: 'es' },
+    { id: 'de', brand: 'Candela', title: 'GentleMax Pro (German)', model: 'GentleMax', language: 'de' },
+  ];
+  const bodyHits = new Set(['en-word']);
+  assert.deepEqual(
+    filterManualLibrary(rowsWithWord, { query: 'spanish', room: ALL_MANUAL_ROOMS }, bodyHits).map((r) => String(r.id)),
+    ['es', 'es-title']
+  );
+  assert.deepEqual(
+    filterManualLibrary(rowsWithWord, { query: 'español', room: ALL_MANUAL_ROOMS }, bodyHits).map((r) => String(r.id)),
+    ['es', 'es-title']
+  );
+  assert.deepEqual(
+    filterManualLibrary(rowsWithWord, { query: 'candela spanish', room: ALL_MANUAL_ROOMS }, bodyHits).map((r) =>
+      String(r.id)
+    ),
+    ['es']
+  );
+  assert.deepEqual(
+    filterManualLibrary(rowsWithWord, { query: 'deutsch', room: ALL_MANUAL_ROOMS }, bodyHits).map((r) => String(r.id)),
+    ['de']
+  );
+  assert.equal(manualSearchBodyQuery('spanish'), '');
+  assert.equal(manualSearchBodyQuery('candela spanish'), 'candela');
 });
 
 test('library page wires search UI and keeps open/get-manual-url gating', () => {
@@ -254,6 +283,14 @@ test('library page wires search UI and keeps open/get-manual-url gating', () => 
   assert.match(page, /manuals-language/);
   assert.match(page, /manualLanguageFilterOptions/);
   assert.match(page, /manualLanguageBadge/);
+  assert.match(page, /manualSearchBodyQuery/);
+  assert.match(page, /manual-language-badge/);
+  const css = readFileSync(join(here, '../app/globals.css'), 'utf8');
+  assert.match(css, /\.manual-language-badge/);
+  assert.match(css, /min-width:\s*44px/);
+  assert.match(css, /min-height:\s*44px/);
+  const viewer = readFileSync(join(here, '../components/ManualPdfViewer.tsx'), 'utf8');
+  assert.match(viewer, /manual-language-chip/);
   const languageLib = readFileSync(join(here, 'manual-language.ts'), 'utf8');
   assert.match(languageLib, /All languages/);
   assert.match(page, /ALL_MANUAL_ROOMS|room === 'all'/);
