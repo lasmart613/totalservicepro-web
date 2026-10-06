@@ -796,7 +796,7 @@ export default function EstimateFormClient() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-4xl mx-auto w-full px-4 py-6 pb-36 scroll-pb-36">
+      <div className="doc-action-page max-w-4xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
             <Link href="/estimates" className="text-sm text-[var(--gold)] hover:underline">
@@ -1314,7 +1314,7 @@ export default function EstimateFormClient() {
         )}
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-[var(--gold)] bg-[var(--surface)] px-3 py-2.5">
+      <div className="doc-action-bar fixed bottom-0 inset-x-0 z-40 border-t border-[var(--gold)] bg-[var(--surface)] px-3 py-2.5">
         <div className="max-w-4xl mx-auto flex flex-wrap gap-2 justify-center">
           <Link href="/estimates" className="btn btn-secondary min-w-[80px] text-center">
             Cancel

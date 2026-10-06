@@ -811,7 +811,7 @@ export default function InvoiceFormClient() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-4xl mx-auto w-full px-4 py-6 pb-28">
+      <div className="doc-action-page-compact max-w-4xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
             <Link href="/invoices" className="text-sm text-[var(--gold)] hover:underline">
@@ -1271,7 +1271,7 @@ export default function InvoiceFormClient() {
           </div>
         </section>
 
-        <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
+        <div className="doc-action-bar flex flex-wrap gap-2 sticky bottom-4 z-10">
           <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">
             Cancel
           </Link>
