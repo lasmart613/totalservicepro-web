@@ -14,6 +14,9 @@ import {
 } from '@/lib/billing/estimate-action';
 import { isEstimateExpired, parseCustomerActionKind } from '@/lib/billing/save-helpers';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { loadOrgMoneyPrefs } from '@/lib/org-money';
+import { resolveNumberingTimeZone } from '@/lib/org-timezone';
+import type { OrgMoneyPrefs } from '@/lib/money-format';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,12 +62,19 @@ async function callerContext(req: NextRequest) {
   return { user, supabase, orgId };
 }
 
-function viewerPayload(estimate: any, companyName: string, role: 'shop' | 'customer') {
+function viewerPayload(
+  estimate: any,
+  companyName: string,
+  role: 'shop' | 'customer',
+  money?: OrgMoneyPrefs | null,
+  timeZone?: string | null
+) {
   const ticket = approvedTicketRefFromEstimate(estimate);
   return {
     role,
     estimate: {
-      ...publicEstimatePayload(estimate, companyName),
+      ...publicEstimatePayload(estimate, companyName, money),
+      timeZone: timeZone || null,
       estimateId: estimate.id,
       customerOrgLinked: customerOrgIdFromEstimate(estimate) != null,
     },
@@ -113,7 +123,9 @@ export async function GET(
     }
 
     const { companyName } = await resolveOrgNotifyEmails(admin, est);
-    return NextResponse.json(viewerPayload(est, companyName, role));
+    const moneyPrefs = await loadOrgMoneyPrefs(admin, est.organization_id);
+    const zone = await resolveNumberingTimeZone(admin, est.organization_id, { allowBrowser: false });
+    return NextResponse.json(viewerPayload(est, companyName, role, moneyPrefs, zone.timeZone));
   } catch (e: any) {
     console.error('estimate GET', e);
     return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
@@ -172,7 +184,9 @@ export async function POST(
     }
 
     const { companyName } = await resolveOrgNotifyEmails(admin, est);
-    const payload = publicEstimatePayload(est, companyName);
+    const moneyPrefs = await loadOrgMoneyPrefs(admin, est.organization_id);
+    const zone = await resolveNumberingTimeZone(admin, est.organization_id, { allowBrowser: false });
+    const payload = { ...publicEstimatePayload(est, companyName, moneyPrefs), timeZone: zone.timeZone };
 
     if (payload.expired || isEstimateExpired(est)) {
       return NextResponse.json(

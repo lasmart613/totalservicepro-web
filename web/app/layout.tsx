@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, DM_Sans } from "next/font/google";
 import "./globals.css";
+import "./fa/fa-preview.css";
+import "./he/he-preview.css";
+import "./ar/ar-preview.css";
 import { Providers } from "@/components/providers";
 import { AdBannerGate } from "@/components/AdBannerGate";
 import { GoogleAnalytics } from "@/components/GoogleAnalytics";
@@ -50,7 +53,7 @@ export default function RootLayout({
         <script
           dangerouslySetInnerHTML={{
             __html:
-              '(function(){try{var p=location.pathname||"";if(p==="/fa"||p.indexOf("/fa/")===0){var d=document.documentElement;d.lang="fa";d.dir="rtl";d.classList.add("fa-preview");}}catch(e){}})();',
+              '(function(){try{var p=location.pathname||"";var d=document.documentElement;var s="";try{s=localStorage.getItem("siteLanguage")||"";}catch(x){}function set(l,r,c){d.lang=l;d.dir=r;["fa-preview","he-preview","ar-preview"].forEach(function(k){d.classList.remove(k);});if(c)d.classList.add(c);}if(p==="/fa"||p.indexOf("/fa/")===0){d.lang="fa";d.dir="rtl";d.classList.add("fa-preview");}else if(p==="/es"||p.indexOf("/es/")===0){d.lang="es";d.dir="ltr";}else if(p==="/fr"||p.indexOf("/fr/")===0){d.lang="fr";d.dir="ltr";}else if(p==="/he"||p.indexOf("/he/")===0){d.lang="he";d.dir="rtl";d.classList.add("he-preview");}else if(p==="/ar"||p.indexOf("/ar/")===0){d.lang="ar";d.dir="rtl";d.classList.add("ar-preview");}else if(p==="/it"||p.indexOf("/it/")===0){d.lang="it";d.dir="ltr";}else if(p==="/de"||p.indexOf("/de/")===0){d.lang="de";d.dir="ltr";}else if(p==="/pt"||p.indexOf("/pt/")===0){d.lang="pt-BR";d.dir="ltr";}else if(s==="fa")set("fa","rtl","fa-preview");else if(s==="es")set("es","ltr");else if(s==="fr")set("fr","ltr");else if(s==="he")set("he","rtl","he-preview");else if(s==="ar")set("ar","rtl","ar-preview");else if(s==="it")set("it","ltr");else if(s==="de")set("de","ltr");else if(s==="pt")set("pt-BR","ltr");}catch(e){}})();',
           }}
         />
         <ThemeScript />

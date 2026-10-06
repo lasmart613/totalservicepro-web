@@ -2,6 +2,7 @@ import { cookies } from 'next/headers';
 import { Header } from '@/components/Header';
 import { JOB_COSTING_COOKIE } from '@/lib/job-costing-access';
 import { loadAuthorizedJobCostReport } from '@/lib/job-costing-server';
+import { ReportUpgradeLock } from '@/components/ReportUpgradeLock';
 import { JobCostingGate } from './JobCostingGate';
 import { JobCostingView } from './JobCostingView';
 
@@ -30,7 +31,14 @@ export default async function JobCostingPage() {
     return (
       <div className="min-h-screen flex flex-col">
         <Header />
-        <JobCostingGate />
+        {result.status === 402 ? (
+          <div className="max-w-3xl mx-auto w-full px-4 py-8">
+            <h1 className="text-2xl font-extrabold">Job Costing</h1>
+            <ReportUpgradeLock feature="Job Costing" sections={['Repair orders', 'Labor cost', 'Parts and materials', 'Margin']} />
+          </div>
+        ) : (
+          <JobCostingGate />
+        )}
       </div>
     );
   }

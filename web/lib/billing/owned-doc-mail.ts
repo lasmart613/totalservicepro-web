@@ -5,7 +5,19 @@
  */
 
 import type { CompanyTheme } from '../company-theme.ts';
-import { buildEstimateHtml, buildInvoiceHtml, type DocCompany } from './doc-html.ts';
+import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
+import { DEFAULT_ORG_TIMEZONE, formatDateInTimeZone } from '../org-timezone.ts';
+import {
+  buildEstimateHtml,
+  buildEstimatePlainText,
+  buildInvoiceHtml,
+  type DocCompany,
+  type EstimateHtmlInput,
+} from './doc-html.ts';
+import {
+  isEstimateDepositEnabled,
+  printableEstimateDeposit,
+} from './estimate-deposit.ts';
 import { resolveInvoiceCollectable } from './invoice-collectable.ts';
 import { parseJsonField, SERVICE_TYPE_LABELS } from './save-helpers.ts';
 import { buildServiceReportPrintHTML } from '../service-report-print.ts';
@@ -188,6 +200,9 @@ export function buildOwnedInvoiceMessage(input: {
   company: DocCompany;
   theme: CompanyTheme | null;
   paymentUrl?: string | null;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
+  timeZone?: string | null;
 }): string {
   const data = parseJsonField(input.row.invoice_data);
   const lines = Array.isArray(data.line_items) ? data.line_items : [];
@@ -236,6 +251,9 @@ export function buildOwnedInvoiceMessage(input: {
     paymentUrl: input.paymentUrl || null,
     theme: input.theme,
     themeScope: 'email',
+    moneyPrefs: input.moneyPrefs,
+    locale: input.locale,
+    timeZone: input.timeZone,
   });
 }
 
@@ -244,7 +262,34 @@ export function buildOwnedEstimateMessage(input: {
   company: DocCompany;
   theme: CompanyTheme | null;
   actionUrl?: string | null;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
+  timeZone?: string | null;
 }): string {
+  return buildEstimateHtml(ownedEstimateHtmlInput(input));
+}
+
+export function buildOwnedEstimatePlainText(input: {
+  row: Record<string, unknown>;
+  company: DocCompany;
+  theme: CompanyTheme | null;
+  actionUrl?: string | null;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
+  timeZone?: string | null;
+}): string {
+  return buildEstimatePlainText(ownedEstimateHtmlInput(input));
+}
+
+function ownedEstimateHtmlInput(input: {
+  row: Record<string, unknown>;
+  company: DocCompany;
+  theme: CompanyTheme | null;
+  actionUrl?: string | null;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
+  timeZone?: string | null;
+}): EstimateHtmlInput {
   const data = parseJsonField(input.row.estimate_data);
   const servicesRaw = Array.isArray(input.row.services)
     ? input.row.services
@@ -254,11 +299,10 @@ export function buildOwnedEstimateMessage(input: {
   const services = servicesRaw.map((item: unknown) => SERVICE_TYPE_LABELS[String(item)] || String(item));
   const pricing =
     data.pricing && typeof data.pricing === 'object' ? (data.pricing as Record<string, unknown>) : {};
-  const partsLines = String(data.partsText || '')
-    .split('\n')
-    .map((line) => line.trim())
-    .filter(Boolean);
-  return buildEstimateHtml({
+  const jobTotal = num(input.row.total ?? data.total);
+  const depositOn = isEstimateDepositEnabled(data);
+  const depositAmount = printableEstimateDeposit(data);
+  return {
     company: input.company,
     customer: {
       name: String(input.row.customer_name || ''),
@@ -271,7 +315,7 @@ export function buildOwnedEstimateMessage(input: {
       email: String(data.custEmail || ''),
     },
     estNumber: String(input.row.estimate_number || data.estimate_number || data.estNumber || ''),
-    dateStr: formatDocDate(input.row.created_at),
+    dateStr: formatDocDate(input.row.created_at, input.timeZone),
     manufacturer: String(data.manufacturer || ''),
     model: String(data.model || ''),
     serial: String(data.serial || ''),
@@ -293,19 +337,68 @@ export function buildOwnedEstimateMessage(input: {
     perDiem: num(data.perDiem),
     perDiemRate: num(data.perDiemRate),
     perDiemDays: num(data.perDiemDays),
-    partsLines,
+    partsLines: formatEstimatePartLines(data, input.moneyPrefs, input.locale),
     partsTotal: num(data.partsTotal),
     subtotal: num(data.subtotal),
     taxRate: num(pricing.taxRate),
     tax: num(data.tax),
-    total: num(input.row.total ?? data.total),
-    deposit: num(data.deposit),
-    balanceDue: num(data.balanceDue),
+    total: jobTotal,
+    deposit: depositAmount,
+    depositRequired: depositOn,
+    balanceDue: depositOn ? num(data.balanceDue) : jobTotal,
     validDays: 30,
     actionUrl: input.actionUrl || null,
     theme: input.theme,
     themeScope: 'email',
-  });
+    moneyPrefs: input.moneyPrefs,
+    locale: input.locale,
+  };
+}
+
+function formatEstimatePartLines(
+  data: Record<string, unknown>,
+  moneyPrefs?: OrgMoneyPrefs | null,
+  locale?: string | null
+): string[] {
+  const structured = Array.isArray(data.part_lines) ? data.part_lines : [];
+  const rows = structured.filter(
+    (row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row)
+  );
+  const usable = rows.filter(
+    (row) => row.description || row.part_number || num(row.ext) || num(row.unit_price)
+  );
+  if (usable.length) {
+    return usable.map((row) => {
+      const label = [row.part_number, row.description].filter(Boolean).join(' ').trim() || 'Part';
+      const qty = num(row.qty) > 0 ? num(row.qty) : 1;
+      const unit = formatOrgMoney(row.unit_price, moneyPrefs, locale);
+      const ext = formatOrgMoney(
+        row.ext != null && row.ext !== '' ? row.ext : qty * num(row.unit_price),
+        moneyPrefs,
+        locale
+      );
+      return `${label} ×${qty} @ ${unit} = ${ext}`;
+    });
+  }
+  return String(data.partsText || '')
+    .split('\n')
+    .map((line) => formatBarePartAmount(line, moneyPrefs, locale))
+    .filter(Boolean);
+}
+
+/** Stored partsText is "Description: 10.00" with no currency. */
+function formatBarePartAmount(
+  line: string,
+  moneyPrefs?: OrgMoneyPrefs | null,
+  locale?: string | null
+): string {
+  const trimmed = line.trim();
+  if (!trimmed) return '';
+  const match = trimmed.match(/^(.*?):\s*(-?\d+(?:\.\d+)?)\s*$/);
+  if (!match) return trimmed;
+  const label = match[1].trim();
+  const amount = formatOrgMoney(match[2], moneyPrefs, locale);
+  return label ? `${label}: ${amount}` : amount;
 }
 
 export function buildOwnedReportMessage(
@@ -326,14 +419,17 @@ export function resendMessage(input: {
   to: string;
   subject: string;
   html: string;
+  text?: string | null;
   replyTo?: string | null;
-}): { from: string; to: string[]; subject: string; html: string; reply_to?: string } {
-  const message: { from: string; to: string[]; subject: string; html: string; reply_to?: string } = {
+}): { from: string; to: string[]; subject: string; html: string; text?: string; reply_to?: string } {
+  const message: { from: string; to: string[]; subject: string; html: string; text?: string; reply_to?: string } = {
     from: input.from,
     to: [input.to],
     subject: input.subject,
     html: input.html,
   };
+  const text = String(input.text || '').trim();
+  if (text) message.text = text;
   const reply = String(input.replyTo || '').trim();
   if (isMailbox(reply)) message.reply_to = reply;
   return message;
@@ -445,9 +541,7 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function formatDocDate(value: unknown): string {
-  if (!value) return new Date().toLocaleDateString();
-  const parsed = new Date(String(value));
-  if (Number.isNaN(parsed.getTime())) return String(value);
-  return parsed.toLocaleDateString();
+function formatDocDate(value: unknown, timeZone?: string | null): string {
+  const zone = String(timeZone || '').trim() || DEFAULT_ORG_TIMEZONE;
+  return formatDateInTimeZone(value == null || value === '' ? new Date() : String(value), zone);
 }

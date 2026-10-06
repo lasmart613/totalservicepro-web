@@ -4,7 +4,7 @@ import React, { useEffect, useId, useState } from 'react';
 import { CircleAlert, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { WHAT_HAPPENED_MAX, WHAT_HAPPENED_MIN } from '@/lib/product-issues';
+import { PRODUCT_ISSUE_LATER_MESSAGE, WHAT_HAPPENED_MAX, WHAT_HAPPENED_MIN } from '@/lib/product-issues';
 import { useT } from '@/lib/fa/locale';
 
 type Variant = 'app' | 'landing';
@@ -63,7 +63,9 @@ export function ReportIssueControl({
       });
       const json = (await res.json().catch(() => ({}))) as { error?: string; message?: string };
       if (!res.ok) {
-        toast.error(t(json.error || 'Could not send the report'));
+        console.error('[product-issues] send failed', res.status, json.error || '');
+        const validation = res.status === 400 || res.status === 429;
+        toast.error(t(validation && json.error ? json.error : PRODUCT_ISSUE_LATER_MESSAGE));
         return;
       }
       toast.success(t(json.message || 'Thanks — the Total Service Pro team has your report.'));
@@ -71,7 +73,8 @@ export function ReportIssueControl({
       setGuestEmail('');
       setOpen(false);
     } catch (err: unknown) {
-      toast.error(err instanceof Error ? t(err.message) : t('Could not send the report'));
+      console.error('[product-issues] send failed', err);
+      toast.error(t(PRODUCT_ISSUE_LATER_MESSAGE));
     } finally {
       setSending(false);
     }
@@ -94,7 +97,7 @@ export function ReportIssueControl({
         aria-label={t('Report an Issue')}
       >
         <CircleAlert size={16} aria-hidden className={variant === 'landing' ? undefined : 'shrink-0'} />
-        <span className={variant === 'app' && !showLabel ? 'hidden xl:inline' : undefined}>
+        <span className={variant === 'app' && !showLabel ? 'hidden 2xl:inline' : undefined}>
           {t('Report an Issue')}
         </span>
       </button>

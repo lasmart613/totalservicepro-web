@@ -6,6 +6,8 @@ import { getSupabaseClient, ServiceReport } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
+import { useT } from '@/lib/fa/locale';
+import { displayModelText } from '@/lib/model-display';
 
 function isValidOrgId(val: any): boolean {
   if (val == null) return false;
@@ -19,6 +21,7 @@ function isValidOrgId(val: any): boolean {
 }
 
 export default function ReportsList() {
+  const t = useT();
   const [reports, setReports] = useState<ServiceReport[]>([]);
   const [filtered, setFiltered] = useState<ServiceReport[]>([]);
   const [activeFilter, setActiveFilter] = useState<'all' | 'draft' | 'complete'>('all');
@@ -112,29 +115,29 @@ export default function ReportsList() {
       <div className="page max-w-7xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-6">
           <div>
-            <h1 className="text-2xl font-extrabold">📋 Service Reports</h1>
-            <p className="text-[var(--text3)] text-sm">Manage performance &amp; safety documentation</p>
+            <h1 className="text-2xl font-extrabold">📋 {t('Service Reports')}</h1>
+            <p className="text-[var(--text3)] text-sm">{t('Manage performance & safety documentation')}</p>
           </div>
           <Link href="/reports/new" className="btn btn-primary hidden sm:flex items-center gap-2">
-            <Plus size={18} /> New Report
+            <Plus size={18} /> {t('New Report')}
           </Link>
         </div>
 
         <div className="grid grid-cols-2 gap-3 mb-5">
           <div className="stat-card card p-4 text-center">
             <div className="text-3xl font-extrabold text-[var(--gold)]">{loading ? '—' : drafts}</div>
-            <div className="text-xs font-semibold tracking-wider text-[var(--text3)] mt-1">DRAFTS</div>
+            <div className="text-xs font-semibold tracking-wider text-[var(--text3)] mt-1">{t('DRAFTS')}</div>
           </div>
           <div className="stat-card card p-4 text-center">
             <div className="text-3xl font-extrabold text-[var(--green)]">{loading ? '—' : completes}</div>
-            <div className="text-xs font-semibold tracking-wider text-[var(--text3)] mt-1">COMPLETED</div>
+            <div className="text-xs font-semibold tracking-wider text-[var(--text3)] mt-1">{t('COMPLETED')}</div>
           </div>
         </div>
 
         <div className="mb-4">
           <input
             className="input"
-            placeholder="Search by customer, equipment, report #, serial..."
+            placeholder={t('Search by customer, equipment, report #, serial...')}
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
@@ -151,13 +154,13 @@ export default function ReportsList() {
         ) : filtered.length === 0 ? (
           <div className="empty-state">
             <div className="text-4xl mb-3">📋</div>
-            <div className="font-semibold">No matching reports</div>
+            <div className="font-semibold">{t('No matching reports')}</div>
             <p className="text-sm mt-1">Tap the + button to create your first service report.</p>
           </div>
         ) : (
           <div className="space-y-3">
             {filtered.map(r => {
-              const title = r.equipment_name || r.model_type || r.report_number || 'Untitled Report';
+              const title = displayModelText(r.equipment_name || r.model_type || '') || r.report_number || 'Untitled Report';
               const dateStr = r.date_out ? new Date(r.date_out + 'T00:00:00').toLocaleDateString([], { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
               const updated = r.updated_at ? new Date(r.updated_at).toLocaleDateString([], { month: 'short', day: 'numeric' }) : '';
               return (

@@ -39,13 +39,18 @@ test('Farsi, Spanish, and French stills sit beside the English files', () => {
   assert.equal(localizedLandingSrc('/landing/app-hub.webp', 'fr'), '/landing/fr/app-hub.webp');
   assert.equal(localizedLandingSrc('/landing/hero-bg-shop.webp', 'fa'), '/landing/hero-bg-shop.webp');
   assert.equal(localizedLandingSrc('/landing/badge-google-play.png', 'es'), '/landing/badge-google-play.png');
+  assert.equal(localizedLandingSrc('/landing/app-reports.webp', 'fa'), '/landing/app-reports.webp');
+  for (const locale of ['he', 'it', 'de', 'pt', 'ar']) {
+    assert.equal(localizedLandingSrc('/landing/dashboard.webp', locale), '/landing/dashboard.webp');
+  }
   assert.equal(landingHalfSrc('/landing/fa/dashboard.webp'), '/landing/fa/dashboard-700.webp');
   assert.equal(landingHalfSrc('/landing/es/app-calcs.webp'), null);
 
   const page = readFileSync(join(here, '../components/landing/LandingPage.tsx'), 'utf8');
   assert.match(page, /localizedLandingSrc/);
-  assert.match(page, /pathname === '\/es'/);
-  assert.match(page, /pathname === '\/fr'/);
+  assert.match(page, /usePublicLocale\(\)/);
+  assert.match(page, /prefixLocaleHref/);
+  assert.doesNotMatch(page, /useFa\(/);
   assert.doesNotMatch(page, /src: '\/landing\/fa\//);
 
   for (const locale of ['fa', 'es', 'fr']) {

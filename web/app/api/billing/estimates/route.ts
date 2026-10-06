@@ -4,6 +4,8 @@ import { loadBillingCaller } from '@/lib/billing/billing-caller';
 import { callerRoleOnEstimate, isEstimateCustomer } from '@/lib/billing/approve-estimate';
 import { publicEstimatePayload, resolveOrgNotifyEmails } from '@/lib/billing/estimate-action';
 import { isEstimateAwaitingCustomerAction } from '@/lib/billing/save-helpers';
+import { loadOrgMoneyPrefs } from '@/lib/org-money';
+import { resolveNumberingTimeZone } from '@/lib/org-timezone';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 
 export const dynamic = 'force-dynamic';
@@ -103,8 +105,11 @@ export async function GET(req: NextRequest) {
     const estimates = await Promise.all(
       rows.map(async (est) => {
         const { companyName } = await resolveOrgNotifyEmails(admin, est);
+        const moneyPrefs = await loadOrgMoneyPrefs(admin, est.organization_id);
+        const zone = await resolveNumberingTimeZone(admin, est.organization_id, { allowBrowser: false });
         return {
-          ...publicEstimatePayload(est, companyName),
+          ...publicEstimatePayload(est, companyName, moneyPrefs),
+          timeZone: zone.timeZone,
           estimateId: est.id,
           status: est.status || null,
           deviceModel: est.device_model || null,

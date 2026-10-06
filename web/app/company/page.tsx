@@ -13,7 +13,10 @@ import {
   canAccessCompanyProfile,
 } from '@/lib/roles';
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
+import { invitationIsOpen } from '@/lib/org-membership';
+import { useT } from '@/lib/fa/locale';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
+import { displayModelName } from '@/lib/model-display';
 import {
   modelBelongsToManufacturer,
   normalizeManufacturerRow,
@@ -25,7 +28,10 @@ import { saveOwnOrganizationProfile } from '@/lib/org-profile-client';
 import { orgCanUpgrade, orgIsPaid, upgradeTargetForOrg } from '@/lib/org-plan';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import { CompanyBrandingEditor } from '@/components/CompanyBrandingEditor';
+import { OrgMoneySettings } from '@/components/OrgMoneySettings';
 import { applyBrandColorPair, normalizeHex } from '@/lib/company-theme';
+import { canEditOrgCurrency } from '@/lib/org-money';
+import { ORG_TIME_ZONE_CHOICES } from '@/lib/org-timezone';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -42,7 +48,6 @@ const FACILITY_TYPES = [
 
 const TEAM_ROLES = ['company_admin', 'service_manager', 'fse', 'dispatcher', 'billing_manager', 'admin'];
 const ADDITIONAL_ROLES = ['fse', 'dispatcher', 'service_manager', 'billing_manager'];
-const ADMIN_ROLES = ['admin', 'company_admin'];
 
 const MODEL_WAVELENGTHS: { [key: string]: string[] } = {
   'candela_vbeam2': ['595'],
@@ -51,51 +56,25 @@ const MODEL_WAVELENGTHS: { [key: string]: string[] } = {
   'default': ['532', '595', '755', '1064', '10600']
 };
 
-/** Only force admin for service-company creators — never overwrite owner/supplier roles. */
-async function ensureServiceCreatorLinked(supabase: any, orgId: any, orgType?: string | null) {
+/** Link a founder to a shop they created. Role is assigned on the server. */
+async function ensureServiceCreatorLinked(supabase: any, orgId: any, _orgType?: string | null) {
   if (!orgId) return;
   try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return;
+    const { postFounderOrganization } = await import('@/lib/org-founder-client');
+    const linked = await postFounderOrganization(token, { organizationId: orgId });
+    if (!linked.ok) console.warn('ensureServiceCreatorLinked', linked.error);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: prof } = await supabase
-      .from('user_profiles')
-      .select('organization_id, role')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    // Never elevate owner / customer / supplier to company_admin
-    if (isOwnerish(prof?.role, orgType) || isSupplier(prof?.role, orgType)) {
-      const needsLink = !prof?.organization_id || prof.organization_id !== orgId;
-      if (needsLink) {
-        await supabase.from('user_profiles').update({ organization_id: orgId }).eq('id', user.id);
-      }
-      await claimPendingInvitations?.(supabase, user.id, user.email || '');
-      return;
-    }
-
-    if (!isServiceCompany(prof?.role, orgType) && orgType && orgType !== 'service_company') {
-      await claimPendingInvitations?.(supabase, user.id, user.email || '');
-      return;
-    }
-
-    const needsLink = !prof?.organization_id || prof.organization_id !== orgId;
-    const needsAdminRole = !prof?.role || !ADMIN_ROLES.includes(prof.role);
-    // Only auto-admin if they already look like service staff without a role
-    if (needsLink || (needsAdminRole && !prof?.role)) {
-      await supabase.from('user_profiles').update({
-        organization_id: orgId,
-        ...(needsAdminRole && !prof?.role ? { role: 'company_admin' } : { organization_id: orgId }),
-      }).eq('id', user.id);
-    } else if (needsLink) {
-      await supabase.from('user_profiles').update({ organization_id: orgId }).eq('id', user.id);
-    }
-    await claimPendingInvitations?.(supabase, user.id, user.email || '');
+    if (user?.email) await claimPendingInvitations?.(supabase, user.id, user.email || '');
   } catch (e) {
     console.warn('ensureServiceCreatorLinked non-fatal:', e);
   }
 }
 
 function CompanyProfile() {
+  const t = useT();
   const [org, setOrg] = useState<any>({});
   const [members, setMembers] = useState<any[]>([]);
   const [pendingInvites, setPendingInvites] = useState<any[]>([]);
@@ -109,6 +88,7 @@ function CompanyProfile() {
   const searchParams = useSearchParams();
   const justSetup = searchParams.get('justSetup');
   const [userRole, setUserRole] = useState('');
+  const [selfUserId, setSelfUserId] = useState('');
   const [loadingOrg, setLoadingOrg] = useState(true);
   const [showTeamPrompt, setShowTeamPrompt] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -242,6 +222,7 @@ function CompanyProfile() {
       setLoadingOrg(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setLoadingOrg(false); return; }
+      setSelfUserId(user.id);
 
       const { data: prof } = await supabase
         .from('user_profiles')
@@ -291,7 +272,7 @@ function CompanyProfile() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) {
-        // Sync links first, then list
+        // Read-only status, then the roster. Sync does not add members.
         await fetch('/api/team/sync', {
           method: 'POST',
           headers: {
@@ -367,7 +348,7 @@ function CompanyProfile() {
     try {
       const { data: invs } = await supabase
         .from('engineer_invitations')
-        .select('id, email, role, first_name, last_name, created_at, accepted')
+        .select('id, email, role, first_name, last_name, created_at, expires_at, accepted')
         .eq('organization_id', orgId)
         .eq('accepted', false)
         .order('created_at', { ascending: false });
@@ -376,6 +357,31 @@ function CompanyProfile() {
     } catch {
       /* ignore */
     }
+  }
+
+  async function changeMemberRole(memberId: string, role: string) {
+    const orgId = org?.id;
+    if (!orgId || !memberId) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      toast.error('Sign in required.');
+      return;
+    }
+    const { postMemberRole } = await import('@/lib/org-founder-client');
+    const result = await postMemberRole(token, {
+      userId: memberId,
+      organizationId: orgId,
+      role,
+    });
+    if (!result.ok) {
+      toast.error(result.error || 'Could not change that role.');
+      return;
+    }
+    setMembers((prev) =>
+      prev.map((row) => (row.id === memberId ? { ...row, role: result.role || role } : row))
+    );
+    toast.success('Role updated');
   }
 
   async function resendInviteEmail(email: string, role?: string) {
@@ -482,6 +488,11 @@ function CompanyProfile() {
         updateData.brand_primary_color = normalizeHex(currentOrg.brand_primary_color);
         updateData.brand_accent_color = normalizeHex(currentOrg.brand_accent_color);
       }
+      if (canEditOrgCurrency(userRole)) {
+        updateData.currency_code = currentOrg.currency_code || 'USD';
+        updateData.number_format = currentOrg.number_format || 'auto';
+      }
+      updateData.timezone = currentOrg.timezone || null;
 
       // Claimed owners: client PATCH is a silent RLS no-op (204, 0 rows).
       // Same service-role path as invite/claim — only the caller's linked org.
@@ -491,7 +502,15 @@ function CompanyProfile() {
       const saved = await saveOwnOrganizationProfile(access, updateData);
       if (!saved.ok || !saved.org) throw new Error(saved.error || 'Save did not persist.');
       setOrg({ ...currentOrg, ...saved.org, id: saved.org.id ?? saveId });
-      toast.success('Details saved.');
+      const omitted = saved.omittedColumns || [];
+      const followUps: string[] = [];
+      if (omitted.includes('currency_code') || omitted.includes('number_format')) {
+        followUps.push('Currency will stay on US dollars until the organization currency columns are added.');
+      }
+      if (omitted.includes('timezone')) {
+        followUps.push('Timezone will use the address state until the organization timezone column is added.');
+      }
+      toast.success(followUps.length ? `Details saved. ${followUps.join(' ')}` : 'Details saved.');
       if (serviceAdminMode) setShowTeamPrompt(true);
     } catch (err: any) {
       toast.error('Save failed: ' + (err.message || err));
@@ -694,15 +713,17 @@ function CompanyProfile() {
     if (!newCustomer.name) { setCustomerMessage('Customer name is required.'); return; }
     if (!org?.id) { setCustomerMessage('Your organization is not loaded yet.'); return; }
     try {
+      const { data: { user: actor } } = await supabase.auth.getUser();
       const customerInsert: any = {
         name: newCustomer.name,
         type: 'customer',
+        created_by: actor?.id || null,
         address: newCustomer.address || null,
         city: newCustomer.city || null,
         state: newCustomer.state || null,
         phone: newCustomer.contactPhone || null,
         laser_models: newCustomer.selectedEquipment.length 
-          ? newCustomer.selectedEquipment.map((e: any) => `${e.manufacturer} ${e.model}${e.config ? ' ' + e.config : ''}${e.wl ? ' (' + e.wl + 'nm)' : ''}${e.serialNumber ? ' [SN: ' + e.serialNumber + ']' : ''}`).join(' | ')
+          ? newCustomer.selectedEquipment.map((e: any) => `${e.manufacturer} ${displayModelName(e.model)}${e.config ? ' ' + e.config : ''}${e.wl ? ' (' + e.wl + 'nm)' : ''}${e.serialNumber ? ' [SN: ' + e.serialNumber + ']' : ''}`).join(' | ')
           : null,
         facility_type: 'Clinic',
       };
@@ -732,6 +753,7 @@ function CompanyProfile() {
     }
   }
 
+  const canEditMoney = canEditOrgCurrency(userRole);
   const ownerMode = isOwnerish(userRole, org?.type);
   const supplierMode = isSupplier(userRole, org?.type);
   const serviceAdminMode =
@@ -753,8 +775,8 @@ function CompanyProfile() {
       <div className="min-h-screen flex flex-col">
         <Header />
         <div className="max-w-xl mx-auto p-8 text-center">
-          <h1 className="text-2xl font-bold mb-2">Access denied</h1>
-          <p className="text-[var(--text3)]">Company profile is for org admins, facility owners, or suppliers.</p>
+          <h1 className="text-2xl font-bold mb-2">{t('Access denied')}</h1>
+          <p className="text-[var(--text3)]">{t('Company profile is for org admins, facility owners, or suppliers.')}</p>
         </div>
       </div>
     );
@@ -764,7 +786,7 @@ function CompanyProfile() {
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="max-w-7xl mx-auto w-full p-6 space-y-8">
-        {loadingOrg && <div className="mb-4 text-center text-xs py-1.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text3)]">Loading company profile…</div>}
+        {loadingOrg && <div className="mb-4 text-center text-xs py-1.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text3)]">{t('Loading company profile…')}</div>}
         {justSetup && (
           <div className="mb-4 p-4 rounded bg-green-900/20 border border-green-600 text-sm">
             {ownerMode
@@ -773,28 +795,28 @@ function CompanyProfile() {
           </div>
         )}
         <div className="flex items-center justify-between gap-4 flex-wrap">
-          <h1 className="text-2xl font-extrabold">🏢 {profileTitle}</h1>
+          <h1 className="text-2xl font-extrabold">🏢 {t(profileTitle)}</h1>
           {orgCanUpgrade(org) && org?.id ? (
             <UpgradePlanLink
               className="btn btn-secondary text-sm px-4 py-1.5"
               target={upgradeTargetForOrg(org) || 'plans'}
             >
-              Upgrade plan
+              {t('Upgrade plan')}
             </UpgradePlanLink>
           ) : null}
         </div>
 
         {/* Company Details Form - FULLY RESTORED */}
         <div className="card p-6">
-          <h2 className="font-bold mb-4">{detailsTitle}</h2>
+          <h2 className="font-bold mb-4">{t(detailsTitle)}</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             <div className="space-y-4">
               <div>
-                <label className="label">Company Name</label>
+                <label className="label">{t('Company Name')}</label>
                 <input className="input" value={org.name || ''} onChange={e => setOrg({ ...org, name: e.target.value })} />
               </div>
               <div>
-                <label className="label">Address</label>
+                <label className="label">{t('Address')}</label>
                 <input className="input" value={org.address || ''} onChange={e => setOrg({ ...org, address: e.target.value })} />
               </div>
               <div className="grid grid-cols-2 gap-3">
@@ -812,12 +834,34 @@ function CompanyProfile() {
                 <input className="input" value={org.zip || ''} onChange={e => setOrg({ ...org, zip: e.target.value })} />
               </div>
               <div>
+                <label className="label">Timezone</label>
+                <select
+                  className="select"
+                  value={org.timezone || ''}
+                  onChange={(e) => setOrg({ ...org, timezone: e.target.value || null })}
+                >
+                  <option value="">Use address state</option>
+                  {org.timezone && !ORG_TIME_ZONE_CHOICES.includes(org.timezone as (typeof ORG_TIME_ZONE_CHOICES)[number]) ? (
+                    <option value={org.timezone}>{org.timezone}</option>
+                  ) : null}
+                  {ORG_TIME_ZONE_CHOICES.map((tz) => (
+                    <option key={tz} value={tz}>
+                      {tz.replace(/_/g, ' ')}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-[var(--text3)] mt-1">
+                  Document numbers, email dates, and financial report dates use this timezone.
+                </p>
+              </div>
+              <div>
                 <label className="label">Phone</label>
                 <input className="input" value={org.phone || ''} onChange={e => setOrg({ ...org, phone: e.target.value })} />
               </div>
               <div>
-                <label className="label">Email</label>
+                <label className="label" htmlFor="company-details-email">Email</label>
                 <input
+                  id="company-details-email"
                   className="input"
                   type="email"
                   value={org.email || ''}
@@ -951,6 +995,15 @@ function CompanyProfile() {
                 </p>
               ) : null}
             </div>
+
+            <div className="md:col-span-2 border-t border-[var(--border)] pt-4">
+              <OrgMoneySettings
+                currencyCode={org.currency_code || 'USD'}
+                numberFormat={org.number_format || 'auto'}
+                disabled={!canEditMoney}
+                onChange={(next) => setOrg({ ...org, ...next })}
+              />
+            </div>
           </div>
 
           {supplierMode && (
@@ -991,10 +1044,26 @@ function CompanyProfile() {
             <div id="team-section" className="card p-6">
               <h2 className="font-bold mb-4">Team Members &amp; Roles</h2>
               <p className="text-xs text-[var(--text3)] mb-3">Add or assign people to roles in this RSP org. Creator/admin changeable but always keep &gt;=1 admin. Use invites for new signups (they sign up first using org tiles or login, then get claimed/assigned here).</p>
-              <div className="mb-4">
-                <h3 className="font-semibold mb-2">Add / Assign Team Member (general roles)</h3>
+              <div id="team-invite" className="team-invite-panel mb-4">
+                <h3 className="font-semibold mb-1">{t('Invite a teammate')}</h3>
+                <p className="text-xs text-[var(--text3)] mb-3">
+                  {t('This invite form is separate from Company Details. It does not change the organization email.')}
+                </p>
                 <div className="space-y-2 text-sm">
-                  <input className="input" placeholder="Email" value={newTeam.email} onChange={e => setNewTeam({...newTeam, email: e.target.value})} />
+                  <div>
+                    <label className="label" htmlFor="team-invite-email">{t('Invitee email')}</label>
+                    <input
+                      id="team-invite-email"
+                      name="invitee-email"
+                      className="input"
+                      type="email"
+                      inputMode="email"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={newTeam.email}
+                      onChange={e => setNewTeam({...newTeam, email: e.target.value})}
+                    />
+                  </div>
                   <input className="input" placeholder="Full Name" value={newTeam.fullName} onChange={e => setNewTeam({...newTeam, fullName: e.target.value})} />
                   <div className="grid grid-cols-2 gap-2">
                     <select className="select" value={newTeam.role} onChange={e => setNewTeam({...newTeam, role: e.target.value})}>
@@ -1050,9 +1119,22 @@ function CompanyProfile() {
                         <div>
                           <div className="font-medium">
                             {[m.first_name, m.last_name].filter(Boolean).join(' ') || '—'}
-                            <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-[var(--surface3)] capitalize">
-                              {roleLabel(m.role)}
-                            </span>
+                            {(isAdmin(userRole) || userRole === 'owner') && m.id && m.id !== selfUserId ? (
+                              <select
+                                className="select text-xs ml-2"
+                                aria-label={`Role for ${m.email || m.first_name || 'member'}`}
+                                value={m.role || 'fse'}
+                                onChange={(e) => changeMemberRole(String(m.id), e.target.value)}
+                              >
+                                {(m.role && !TEAM_ROLES.includes(m.role) ? [m.role, ...TEAM_ROLES] : TEAM_ROLES).map((r) => (
+                                  <option key={r} value={r}>{roleLabel(r)}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-[var(--surface3)] capitalize">
+                                {roleLabel(m.role)}
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-[var(--text3)]">{m.email || 'no email'}</div>
                           {m.job_title && (
@@ -1100,7 +1182,7 @@ function CompanyProfile() {
                             {inv.created_at
                               ? ` · invited ${new Date(inv.created_at).toLocaleDateString()}`
                               : ''}
-                            {inv.accepted ? ' · marked accepted' : ' · waiting'}
+                            {inv.accepted ? ' · marked accepted' : invitationIsOpen(inv) ? ' · waiting' : ' · expired'}
                           </div>
                         </div>
                         <button
@@ -1139,7 +1221,9 @@ function CompanyProfile() {
                               ? 'on team'
                               : inv.accepted
                                 ? 'accepted'
-                                : 'pending'}
+                                : invitationIsOpen(inv)
+                                  ? 'pending'
+                                  : 'expired'}
                             {' · '}
                             {inv.created_at
                               ? new Date(inv.created_at).toLocaleDateString()
@@ -1240,8 +1324,8 @@ function CompanyProfile() {
         {(ownerMode || supplierMode) && (
           <p className="text-sm text-[var(--text3)]">
             {ownerMode
-              ? 'You can only edit this facility. Add lasers on My Lasers. Post service needs on the Marketplace.'
-              : 'Manage catalog items from Parts and list inventory on the Marketplace. Premium / Team suppliers can enable an optional storefront and bulk-upload CSV or Excel from Seller storefront.'}
+              ? t('You can only edit this facility. Add lasers on My Lasers. Post service needs on the Marketplace.')
+              : t('Manage catalog items from Parts and list inventory on the Marketplace. Premium / Team suppliers can enable an optional storefront and bulk-upload CSV or Excel from Seller storefront.')}
           </p>
         )}
       </div>
@@ -1249,16 +1333,19 @@ function CompanyProfile() {
   );
 }
 
+function CompanyProfileFallback() {
+  const t = useT();
+  return (
+    <div className="min-h-screen flex items-center justify-center text-[var(--text3)]">
+      {t('Loading company profile…')}
+    </div>
+  );
+}
+
 /** Next.js requires Suspense around useSearchParams for static generation */
 export default function CompanyProfilePage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center text-[var(--text3)]">
-          Loading company profile…
-        </div>
-      }
-    >
+    <Suspense fallback={<CompanyProfileFallback />}>
       <CompanyProfile />
     </Suspense>
   );

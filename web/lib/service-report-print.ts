@@ -12,6 +12,7 @@ import {
   type ThemeScope,
 } from './company-theme.ts';
 import { viewMeasurement } from './fluence-measurement.ts';
+import { displayModelText } from './model-display.ts';
 import { systemParameterRows } from './models.ts';
 
 export type PrintReportInput = {
@@ -254,7 +255,7 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
     `<div style="margin-bottom:10px;padding:6px 8px;background:#f9f9f9;border:1px solid #eee;border-radius:4px">` +
     `<div style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;margin-bottom:3px">Report</div>` +
     `<table style="width:100%;font-size:10px"><tr>` +
-    `<td style="width:50%;padding:2px 4px 2px 0"><span style="font-size:8px;color:#666">EQUIPMENT</span><br><strong>${esc(r.equipment_name || '—')}</strong></td>` +
+    `<td style="width:50%;padding:2px 4px 2px 0"><span style="font-size:8px;color:#666">EQUIPMENT</span><br><strong>${esc(displayModelText(r.equipment_name || '') || '—')}</strong></td>` +
     `<td style="width:50%;padding:2px 0 2px 4px"><span style="font-size:8px;color:#666">SERIAL #</span><br><strong>${esc(r.serial_number || '—')}</strong></td>` +
     `</tr><tr>` +
     `<td style="padding:2px 4px 2px 0"><span style="font-size:8px;color:#666">ENGINEER (FSE)</span><br><strong>${esc(engineer)}</strong></td>` +

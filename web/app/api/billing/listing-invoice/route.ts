@@ -10,6 +10,7 @@ import {
 import { coerceOrgId, writeWithColumnRetry } from '@/lib/billing/save-helpers';
 import { loadLinkedCustomerOrgs } from '@/lib/customer-form';
 import { sameOrg } from '@/lib/org-membership';
+import { resolveNumberingTimeZone } from '@/lib/org-timezone';
 
 export const dynamic = 'force-dynamic';
 
@@ -78,8 +79,12 @@ export async function POST(req: NextRequest) {
     }
 
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
+    const zone =
+      activeOrgId != null
+        ? await resolveNumberingTimeZone(supabase, activeOrgId, { allowBrowser: false })
+        : null;
     const result = await runAddListingToInvoice(
-      { userId: user.id, activeOrgId, orgType },
+      { userId: user.id, activeOrgId, orgType, timeZone: zone?.timeZone || null },
       {
         listingId: body.listing_id as string | number | null,
         qty: body.qty,
@@ -92,7 +97,12 @@ export async function POST(req: NextRequest) {
         loadDraft: (id, orgId) => loadDraft(supabase, id, orgId),
         loadCustomer: (orgId, customerId) => loadLinkedCustomer(supabase, orgId, customerId),
         allocateInvoiceNumber: (orgId) =>
-          allocateDocNumber(supabase, { orgId, kind: 'INV', date: new Date() }),
+          allocateDocNumber(supabase, {
+            orgId,
+            kind: 'INV',
+            date: new Date(),
+            timeZone: zone?.timeZone || undefined,
+          }),
         writeInvoice: (payload, existingId) =>
           writeWithColumnRetry(supabase, 'service_invoices', payload, existingId),
       }

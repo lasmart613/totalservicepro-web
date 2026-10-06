@@ -8,9 +8,11 @@ import {
   decideClaim,
   decideInviteForExistingProfile,
   decideSwitch,
+  invitationIsOpen,
   inviteMustNotLeaveHome,
   isFounderLockedRole,
   isOnOrgRoster,
+  membershipRoleForInvite,
   nextActiveAfterLeave,
 } from './org-membership.ts';
 
@@ -18,6 +20,34 @@ const TONY_HOME = 101;
 const LUXOR = 4;
 const COMPANY_A = 10;
 const COMPANY_B = 20;
+
+test('invite role admin becomes company_admin and expired invites are closed', () => {
+  assert.equal(membershipRoleForInvite('admin'), 'company_admin');
+  assert.equal(membershipRoleForInvite('fse'), 'fse');
+  const now = Date.parse('2026-10-06T00:00:00.000Z');
+  assert.equal(
+    invitationIsOpen(
+      { accepted: false, expires_at: null, created_at: '2026-10-01T00:00:00.000Z' },
+      now
+    ),
+    true
+  );
+  assert.equal(
+    invitationIsOpen(
+      { accepted: false, expires_at: null, created_at: '2026-09-01T00:00:00.000Z' },
+      now
+    ),
+    false
+  );
+  assert.equal(
+    invitationIsOpen(
+      { accepted: false, expires_at: '2026-10-01T00:00:00.000Z', created_at: '2026-10-05T00:00:00.000Z' },
+      now
+    ),
+    false
+  );
+  assert.equal(invitationIsOpen({ accepted: true, expires_at: '2026-12-01T00:00:00.000Z' }, now), false);
+});
 
 test('default staff role is FSE; founder roles are locked', () => {
   assert.equal(DEFAULT_STAFF_ROLE, 'fse');
@@ -150,7 +180,10 @@ test('Luxor roster includes a moonlighting FSE even if their active org is the d
 test('invite route no longer 409s just because the email already has an org', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/api/team/invite/route.ts'), 'utf8');
-  assert.match(source, /applyInviteToExistingUser/);
+  assert.doesNotMatch(source, /applyInviteToExistingUser/);
+  assert.doesNotMatch(source, /ensureTeamMemberProfile/);
+  assert.doesNotMatch(source, /upsertMembership/);
+  assert.match(source, /freshTeamInviteFields/);
   assert.match(source, /moonlight/);
   assert.match(source, /buildTeamInviteHtml/);
   assert.match(source, /alreadyRegistered:/);
@@ -229,10 +262,14 @@ test('creating your own shop after an FSE invite still adds a home membership', 
   assert.doesNotMatch(pending, /organization_memberships'\)\.upsert/);
 
   const membershipsRoute = readFileSync(join(here, '../app/api/org/memberships/route.ts'), 'utf8');
-  assert.match(membershipsRoute, /created_by/);
-  assert.match(membershipsRoute, /isHome:\s*true/);
   assert.match(membershipsRoute, /const email = \(user\.email \|\| ''\)/);
   assert.doesNotMatch(membershipsRoute, /profile\?\.email/);
+  assert.doesNotMatch(membershipsRoute, /upsertMembership/);
+  assert.doesNotMatch(membershipsRoute, /\.insert\(|\.update\(|\.upsert\(/);
+  assert.match(membershipsRoute, /invitationIsOpen/);
+  const founder = readFileSync(join(here, '../app/api/org/founder/route.ts'), 'utf8');
+  assert.match(founder, /decideFounderLink/);
+  assert.match(founder, /isHome:\s*true/);
 });
 
 test('invite acceptance and membership inserts follow the Auth login, not profile email', () => {

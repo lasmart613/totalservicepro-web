@@ -11,7 +11,7 @@
  */
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { PublicLink, useFa, useT } from '@/lib/fa/locale';
+import { PublicLink, useLocalizedPublic, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { GuestDirectoryCard } from '@/components/directory/GuestDirectoryCard';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -77,7 +77,7 @@ function guestFilters(signedIn: boolean): { key: FilterKey; label: string }[] {
 
 export default function DirectoryPage() {
   const supabase = getSupabaseClient();
-  const fa = useFa();
+  const localized = useLocalizedPublic();
   const t = useT();
   const { ready: authReady, signedIn } = useSignedIn();
   const [loading, setLoading] = useState(true);
@@ -234,7 +234,7 @@ export default function DirectoryPage() {
     [applyGuestPayload, filter]
   );
 
-  const previewGuest = fa || !signedIn;
+  const previewGuest = localized || !signedIn;
 
   useEffect(() => {
     if (!authReady || previewGuest) return;
@@ -286,7 +286,7 @@ export default function DirectoryPage() {
     });
   }, [guestCards, search]);
 
-  const filters = guestFilters(signedIn && !fa);
+  const filters = guestFilters(signedIn && !localized);
   const showingGuest = authReady && previewGuest;
 
   return (
@@ -295,7 +295,7 @@ export default function DirectoryPage() {
       <div className="max-w-3xl mx-auto w-full px-4 py-6">
         <div className="flex items-center gap-3 mb-1">
           <PublicLink href="/" className="text-[var(--gold)] text-xl font-bold" aria-label={t('Back')}>
-            {fa ? t('Back') : '←'}
+            {localized ? t('Back') : '←'}
           </PublicLink>
           <h1 className="text-2xl font-extrabold">{t('Company directory')}</h1>
         </div>
@@ -383,9 +383,9 @@ export default function DirectoryPage() {
           <div className="text-center text-[var(--text3)] py-12 px-4">
             {filter === 'clinics'
               ? myOrgId
-                ? 'No customers linked to your organization yet.'
-                : 'Sign in with a repair company to see your linked clinics.'
-              : 'No organizations match this filter. Orgs appear when they opt into the free directory listing.'}
+                ? t('No customers linked to your organization yet.')
+                : t('Sign in with a repair company to see your linked clinics.')
+              : t('No organizations match this filter. Orgs appear when they opt into the free directory listing.')}
           </div>
         ) : (
           <div className="space-y-2.5">

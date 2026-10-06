@@ -6,7 +6,9 @@ import { useRouter } from 'next/navigation';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { JOB_COSTING_API, JOB_COSTING_PATH } from '@/lib/job-costing-access';
 import type { JobCostReport } from '@/lib/job-costing';
+import { ReportUpgradeLock } from '@/components/ReportUpgradeLock';
 import { JobCostingView } from './JobCostingView';
+import { useT } from '@/lib/fa/locale';
 
 function isReport(value: unknown): value is JobCostReport {
   return Boolean(value && typeof value === 'object' && Array.isArray((value as JobCostReport).jobs));
@@ -17,8 +19,9 @@ function isReport(value: unknown): value is JobCostReport {
  * that request authorizes the caller. A 403 renders no figures.
  */
 export function JobCostingGate() {
+  const t = useT();
   const router = useRouter();
-  const [phase, setPhase] = useState<'checking' | 'denied' | 'error' | 'ready'>('checking');
+  const [phase, setPhase] = useState<'checking' | 'denied' | 'upgrade' | 'error' | 'ready'>('checking');
   const [message, setMessage] = useState('');
   const [report, setReport] = useState<JobCostReport | null>(null);
 
@@ -50,6 +53,10 @@ export function JobCostingGate() {
         setPhase('denied');
         return;
       }
+      if (res.status === 402) {
+        setPhase('upgrade');
+        return;
+      }
       if (!res.ok || !isReport(json)) {
         setMessage(typeof json?.error === 'string' ? json.error : 'Job costing could not be loaded');
         setPhase('error');
@@ -73,22 +80,28 @@ export function JobCostingGate() {
     return <JobCostingView report={report} />;
   }
 
+  if (phase === 'upgrade') {
+    return (
+      <div className="max-w-3xl mx-auto w-full px-4 py-8">
+        <h1 className="text-2xl font-extrabold">{t('Job Costing')}</h1>
+        <ReportUpgradeLock feature="Job Costing" sections={['Repair orders', 'Labor cost', 'Parts and materials', 'Margin']} />
+      </div>
+    );
+  }
+
   if (phase === 'denied') {
     return (
       <div className="max-w-lg mx-auto w-full px-4 py-16 text-center">
-        <h1 className="text-2xl font-extrabold mb-2">Admin access required</h1>
+        <h1 className="text-2xl font-extrabold mb-2">{t('Admin access required')}</h1>
         <p className="text-sm text-[var(--text3)] mb-6">
-          Job Costing is limited to organization admins (
-          <code className="text-[var(--gold)]">admin</code> /{' '}
-          <code className="text-[var(--gold)]">company_admin</code>
-          ) and existing God access. {message}
+          {t('Job Costing is limited to organization admins and existing God access.')} {t(message)}
         </p>
         <div className="flex gap-3 justify-center flex-wrap">
           <Link href="/" className="btn btn-primary">
-            Dashboard
+            {t('Dashboard')}
           </Link>
           <Link href="/company" className="btn btn-secondary">
-            Company Profile
+            {t('Company Profile')}
           </Link>
         </div>
       </div>
@@ -97,7 +110,7 @@ export function JobCostingGate() {
 
   return (
     <div className="flex-1 flex items-center justify-center text-[var(--text3)] px-4 py-16 text-center">
-      {phase === 'error' ? message : 'Checking access…'}
+      {phase === 'error' ? t(message) : t('Checking access…')}
     </div>
   );
 }

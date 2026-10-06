@@ -32,7 +32,9 @@ async function handle(req: NextRequest, persistCookie: boolean) {
     return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
   }
 
-  const result = await loadAuthorizedFinancialReport(token);
+  const detailRequested = req.nextUrl.searchParams.get('detail') === '1';
+  const browserTimeZone = req.nextUrl.searchParams.get('tz') || req.cookies.get('rp-tz')?.value || '';
+  const result = await loadAuthorizedFinancialReport(token, { detailRequested, browserTimeZone });
   if (!result.ok) {
     const res = NextResponse.json({ error: result.error }, { status: result.status });
     if (persistCookie || result.status === 403) clearAccessCookie(res);

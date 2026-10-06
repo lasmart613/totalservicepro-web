@@ -12,6 +12,8 @@ import {
   type CustomerActionKind,
   type EstimateEmailAction,
 } from '@/lib/billing/save-helpers';
+import { formatOrgMoney } from '@/lib/money-format';
+import { formatOrgDocumentDate } from '@/lib/org-timezone';
 
 type EstimateView = {
   estimateId?: string | number | null;
@@ -27,19 +29,19 @@ type EstimateView = {
   customerActionAt: string | null;
   customerActionNote: string | null;
   customerOrgLinked?: boolean;
+  currencyCode?: string | null;
+  numberFormat?: string | null;
+  timeZone?: string | null;
 };
 
 type RequestRef = { id?: string | number | null; number?: string | null } | null;
 
-function money(n: number) {
-  return `$${(Number(n) || 0).toFixed(2)}`;
+function money(n: number, currencyCode?: string | null, numberFormat?: string | null) {
+  return formatOrgMoney(n, { currencyCode, numberFormat });
 }
 
-function formatDate(iso: string | null) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString();
+function formatDate(iso: string | null, timeZone?: string | null) {
+  return formatOrgDocumentDate(iso, timeZone);
 }
 
 export default function EstimateCustomerClient({
@@ -202,7 +204,7 @@ export default function EstimateCustomerClient({
                 </p>
                 {est.estimateNumber && (
                   <p className="text-sm text-[var(--text3)] mt-4">
-                    {est.estimateNumber} · {money(est.total)}
+                    {est.estimateNumber} · {money(est.total, est.currencyCode, est.numberFormat)}
                   </p>
                 )}
               </div>
@@ -221,15 +223,15 @@ export default function EstimateCustomerClient({
                   </div>
                   <div>
                     <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Total</div>
-                    <div className="font-extrabold text-[var(--gold)] text-lg">{money(est.total)}</div>
+                    <div className="font-extrabold text-[var(--gold)] text-lg">{money(est.total, est.currencyCode, est.numberFormat)}</div>
                   </div>
                   <div className="col-span-2">
                     <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Validity</div>
                     <div>
                       {est.expired
-                        ? `Expired${est.validUntil ? ` on ${formatDate(est.validUntil)}` : ''}`
+                        ? `Expired${est.validUntil ? ` on ${formatDate(est.validUntil, est.timeZone)}` : ''}`
                         : `Good for ${est.validDays} days${
-                            est.validUntil ? ` (through ${formatDate(est.validUntil)})` : ''
+                            est.validUntil ? ` (through ${formatDate(est.validUntil, est.timeZone)})` : ''
                           }`}
                     </div>
                   </div>
@@ -250,7 +252,7 @@ export default function EstimateCustomerClient({
                 {est.customerAction === 'changes_requested' && est.customerActionNote && (
                   <div className="mt-4 p-3 rounded-xl border border-amber-700/40 bg-amber-950/20 text-sm">
                     A modification request was already sent
-                    {est.customerActionAt ? ` on ${formatDate(est.customerActionAt)}` : ''}.
+                    {est.customerActionAt ? ` on ${formatDate(est.customerActionAt, est.timeZone)}` : ''}.
                   </div>
                 )}
 

@@ -28,8 +28,9 @@ import { OrgSwitcher } from '@/components/OrgSwitcher';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
 import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
 import { isUnreadPollBackoffError, startDocumentUnreadPoll } from '@/lib/unread-poll';
-import { useFa } from '@/lib/fa/locale';
+import { useLocalizedPublic, useT } from '@/lib/fa/locale';
 import { FaPublicHeader } from '@/components/fa/FaPublicHeader';
+import { LanguageSelector } from '@/components/i18n/LanguageSelector';
 
 type NavLink = { href: string; label: string };
 type NavGroup = { id: string; label: string; href?: string; items: NavLink[] };
@@ -43,6 +44,7 @@ function NavDropdown({
   openId: string | null;
   setOpenId: (id: string | null) => void;
 }) {
+  const t = useT();
   const open = openId === group.id;
   const leaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -71,7 +73,7 @@ function NavDropdown({
           className="inline-flex items-center gap-1 hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0"
           onFocus={() => setOpenId(group.id)}
         >
-          {group.label}
+          {t(group.label)}
           <ChevronDown size={14} className={`opacity-70 transition-transform ${open ? 'rotate-180' : ''}`} />
         </Link>
       ) : (
@@ -82,13 +84,13 @@ function NavDropdown({
           aria-haspopup="true"
           onClick={() => setOpenId(open ? null : group.id)}
         >
-          {group.label}
+          {t(group.label)}
           <ChevronDown size={14} className={`opacity-70 transition-transform ${open ? 'rotate-180' : ''}`} />
         </button>
       )}
       {open && group.items.length > 0 && (
         <div
-          className="absolute left-0 top-full pt-2 z-[100]"
+          className="absolute start-0 top-full pt-2 z-[100]"
           onMouseEnter={onEnter}
           onMouseLeave={onLeave}
         >
@@ -100,7 +102,7 @@ function NavDropdown({
                 className="block px-4 py-2.5 text-sm text-[var(--text2)] hover:bg-[var(--surface)] hover:text-[var(--gold)]"
                 onClick={() => setOpenId(null)}
               >
-                {item.label}
+                {t(item.label)}
               </Link>
             ))}
           </div>
@@ -111,7 +113,8 @@ function NavDropdown({
 }
 
 export function Header({ authPending = false }: { authPending?: boolean }) {
-  const faPreview = useFa();
+  const localizedPublic = useLocalizedPublic();
+  const t = useT();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -396,7 +399,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       }
     : null;
 
-  if (faPreview) return <FaPublicHeader />;
+  if (localizedPublic) return <FaPublicHeader />;
 
   if (loading || authPending) {
     return (
@@ -415,26 +418,27 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   }
 
   return (
-    <header className="header px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2">
-      <div className="flex items-center gap-3 min-w-0 flex-1 relative z-[100]">
-        <Link href="/" className="flex flex-col leading-none min-w-0">
+    <header className="header w-full min-w-0 px-3 sm:px-4 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1 relative z-[100]">
+        <Link href="/" className="flex flex-col leading-none shrink-0 max-w-full">
           <span
-            className="font-extrabold text-lg sm:text-xl tracking-[-0.5px] truncate"
+            className="font-extrabold text-lg sm:text-xl tracking-[-0.5px]"
             style={{ color: 'var(--gold)' }}
           >
             Total Service Pro
           </span>
-          <span className="hidden sm:block text-[10px] font-medium tracking-[1.5px] text-[var(--text3)] uppercase -mt-0.5 truncate">
-            Laser Equipment Service
+          <span className="hidden sm:block text-[10px] font-medium tracking-normal text-[var(--text3)] uppercase -mt-0.5">
+            {t('Laser Equipment Service')}
           </span>
         </Link>
 
-        {/* Desktop / large tablet: inline groups. Phones + small tablets use the drawer. */}
-        <nav className="ml-4 xl:ml-6 hidden lg:flex items-center gap-3 xl:gap-5 text-sm xl:text-base font-medium text-[var(--text2)] min-w-0 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+        {/* Desktop / large tablet: inline groups. Phones + small tablets use the drawer.
+            At 1280 the row wraps instead of clipping Admin Portal or the brand. */}
+        <nav className="ms-1 xl:ms-3 hidden lg:flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm font-medium text-[var(--text2)] min-w-0">
           {user ? (
             <>
               <Link href="/" className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
-                Dashboard
+                {t('Dashboard')}
               </Link>
               <NavDropdown group={hubGroup} openId={navOpenId} setOpenId={setNavOpenId} />
               <NavDropdown group={marketplaceGroup} openId={navOpenId} setOpenId={setNavOpenId} />
@@ -443,52 +447,53 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
               )}
               {canAdminPortal && (
                 <Link href="/admin" className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
-                  Admin Portal
+                  {t('Admin Portal')}
                 </Link>
               )}
               {financialNav && !businessGroup && (
                 <Link href={financialNav.href} className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
-                  {financialNav.label}
+                  {t(financialNav.label)}
                 </Link>
               )}
               {jobCostingNav && !businessGroup && (
                 <Link href={jobCostingNav.href} className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
-                  {jobCostingNav.label}
+                  {t(jobCostingNav.label)}
                 </Link>
               )}
               {isGod && (
                 <Link href={GOD_DASHBOARD_PATH} className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
-                  God Dashboard
+                  {t('God Dashboard')}
                 </Link>
               )}
             </>
           ) : (
             <>
               <Link href="/directory" className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
-                Directory
+                {t('Directory')}
               </Link>
               <Link href="/marketplace" className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
-                Marketplace
+                {t('Marketplace')}
               </Link>
+              <LanguageSelector variant="header" />
             </>
           )}
         </nav>
       </div>
 
-      <div className="flex items-center gap-1 sm:gap-2 shrink-0 relative z-[100]">
-        <div className="hidden lg:flex items-center gap-2 xl:gap-3">
+      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 relative z-[100]">
+        <div className="hidden lg:flex items-center gap-1.5">
           <ReportIssueControl />
           {user && <OrgSwitcher compact />}
           {user && (
             <Link
               href="/notifications"
               className="relative inline-flex items-center justify-center min-h-11 min-w-11 p-2 text-[var(--text2)] hover:text-[var(--gold)]"
-              aria-label="Notifications"
-              title="Notifications"
+              aria-label={t('Notifications')}
+              title={t('Notifications')}
             >
               <Bell size={20} />
               {unread > 0 && (
-                <span className="absolute top-1 right-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
+                <span className="absolute top-1 end-1 min-w-[18px] h-[18px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold flex items-center justify-center">
                   {unread > 99 ? '99+' : unread}
                 </span>
               )}
@@ -499,10 +504,10 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         {!user && (
           <div className="hidden lg:flex items-center gap-2">
             <Link href="/login" className="btn btn-primary text-sm px-4 py-1.5">
-              Sign In
+              {t('Sign In')}
             </Link>
             <Link href="/signup" className="btn btn-secondary text-sm px-4 py-1.5">
-              Sign Up
+              {t('Sign Up')}
             </Link>
           </div>
         )}
@@ -514,7 +519,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
             setDropdownOpen(false);
           }}
           className="lg:hidden inline-flex items-center justify-center min-h-11 min-w-11 p-2 text-[var(--text)] hover:text-[var(--gold)]"
-          aria-label={mobileMenuOpen ? 'Close menu' : 'Open menu'}
+          aria-label={mobileMenuOpen ? t('Close menu') : t('Open menu')}
           aria-expanded={mobileMenuOpen}
           aria-controls="app-mobile-nav"
         >
@@ -529,19 +534,19 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 setDropdownOpen(!dropdownOpen);
                 setMobileMenuOpen(false);
               }}
-              className="flex items-center gap-2 rounded-full border border-[var(--gold-border)] pl-1 pr-1.5 lg:pr-3 py-1 min-h-11 hover:bg-[var(--surface3)]"
-              aria-label="Account menu"
+              className="flex items-center gap-2 rounded-full border border-[var(--gold-border)] ps-1 pe-1.5 lg:pe-2 py-1 min-h-11 hover:bg-[var(--surface3)]"
+              aria-label={t('Account menu')}
             >
               <div className="w-8 h-8 rounded-full bg-[var(--gold)] text-[#111827] flex items-center justify-center text-xs font-bold border-2 border-[var(--gold)]">
                 {initials}
               </div>
-              <span className="hidden lg:block text-sm font-semibold text-[var(--text)] max-w-[140px] truncate">
+              <span className="hidden 2xl:block text-sm font-semibold text-[var(--text)] max-w-[9rem] truncate">
                 {chipLabel}
               </span>
             </button>
 
             {dropdownOpen && (
-              <div className="absolute right-0 mt-2 w-[min(22rem,calc(100vw-1.5rem))] min-w-[18rem] rounded-xl border border-[var(--gold)] bg-[var(--surface3)] shadow-xl z-[100] overflow-visible text-sm">
+              <div className="absolute end-0 mt-2 w-[min(22rem,calc(100vw-1.5rem))] min-w-[18rem] rounded-xl border border-[var(--gold)] bg-[var(--surface3)] shadow-xl z-[100] overflow-visible text-sm">
                 <div className="px-4 py-3 border-b border-[var(--border)]">
                   <div className="font-semibold text-[var(--gold)]">{orgName || fullName}</div>
                   {orgName ? (
@@ -549,7 +554,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                   ) : null}
                   <div className="text-xs text-[var(--text3)] truncate">{user.email}</div>
                   {profile?.role && (
-                    <div className="text-[10px] mt-0.5 text-[var(--text3)]">Role: {roleLabel(profile.role)}</div>
+                    <div className="text-[10px] mt-0.5 text-[var(--text3)]">{t('Role:')} {t(roleLabel(profile.role))}</div>
                   )}
                   <div className="mt-2">
                     <OrgSwitcher variant="menu" />
@@ -561,14 +566,14 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                   className="flex items-center gap-2 px-4 py-2.5 min-h-11 hover:bg-[var(--surface)]"
                   onClick={() => setDropdownOpen(false)}
                 >
-                  <UserIcon size={16} /> User Profile
+                  <UserIcon size={16} /> {t('User Profile')}
                 </Link>
                 <Link
                   href="/company"
                   className="flex items-center gap-2 px-4 py-2.5 min-h-11 hover:bg-[var(--surface)]"
                   onClick={() => setDropdownOpen(false)}
                 >
-                  <Building2 size={16} /> {companyLabel}
+                  <Building2 size={16} /> {t(companyLabel)}
                 </Link>
                 {upgrade.show && (
                   <UpgradePlanLink
@@ -576,7 +581,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                     onClick={() => setDropdownOpen(false)}
                     target={upgrade.target}
                   >
-                    <ArrowUpCircle size={16} /> Upgrade plan
+                    <ArrowUpCircle size={16} /> {t('Upgrade plan')}
                   </UpgradePlanLink>
                 )}
                 <Link
@@ -584,7 +589,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                   className="flex items-center gap-2 px-4 py-2.5 min-h-11 hover:bg-[var(--surface)]"
                   onClick={() => setDropdownOpen(false)}
                 >
-                  <Settings size={16} /> Settings
+                  <Settings size={16} /> {t('Settings')}
                 </Link>
                 {canAdminPortal && (
                   <Link
@@ -592,7 +597,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                     className="flex items-center gap-2 px-4 py-2.5 min-h-11 hover:bg-[var(--surface)]"
                     onClick={() => setDropdownOpen(false)}
                   >
-                    <Building2 size={16} /> Admin Portal
+                    <Building2 size={16} /> {t('Admin Portal')}
                   </Link>
                 )}
                 {isGod && (
@@ -601,15 +606,15 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                     className="flex items-center gap-2 px-4 py-2.5 min-h-11 hover:bg-[var(--surface)]"
                     onClick={() => setDropdownOpen(false)}
                   >
-                    <Building2 size={16} /> God Dashboard
+                    <Building2 size={16} /> {t('God Dashboard')}
                   </Link>
                 )}
 
                 <button
                   onClick={handleLogout}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 min-h-11 text-left text-red-400 hover:bg-[var(--surface)] border-t border-[var(--border)]"
+                  className="w-full flex items-center gap-2 px-4 py-2.5 min-h-11 text-start text-red-400 hover:bg-[var(--surface)] border-t border-[var(--border)]"
                 >
-                  <LogOut size={16} /> Log Out
+                  <LogOut size={16} /> {t('Log Out')}
                 </button>
               </div>
             )}
@@ -621,7 +626,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         <button
           type="button"
           className="lg:hidden fixed inset-0 z-[80] bg-black/40"
-          aria-label="Close menu"
+          aria-label={t('Close menu')}
           onClick={closeMobileMenu}
         />
       )}
@@ -638,7 +643,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                 onClick={closeMobileMenu}
               >
-                Dashboard
+                {t('Dashboard')}
               </Link>
             ) : (
               <>
@@ -647,17 +652,18 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                   className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                   onClick={closeMobileMenu}
                 >
-                  Directory
+                  {t('Directory')}
                 </Link>
                 <Link
                   href="/marketplace"
                   className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                   onClick={closeMobileMenu}
                 >
-                  Marketplace
+                  {t('Marketplace')}
                 </Link>
               </>
             )}
+            {!user && <LanguageSelector variant="drawer" onNavigate={closeMobileMenu} />}
 
             {user &&
               [hubGroup, marketplaceGroup, businessGroup].filter(Boolean).map((g) => {
@@ -667,18 +673,18 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                   <div key={group.id} className="border-b border-[var(--border)]">
                     <button
                       type="button"
-                      className="w-full flex items-center justify-between min-h-11 py-3 hover:text-[var(--gold)] bg-transparent border-0 text-inherit font-medium text-left cursor-pointer"
+                      className="w-full flex items-center justify-between min-h-11 py-3 hover:text-[var(--gold)] bg-transparent border-0 text-inherit font-medium text-start cursor-pointer"
                       aria-expanded={open}
                       onClick={() => setMobileOpenGroup(open ? null : group.id)}
                     >
-                      {group.label}
+                      {t(group.label)}
                       <ChevronDown
                         size={16}
                         className={`transition-transform ${open ? 'rotate-180' : ''}`}
                       />
                     </button>
                     {open && (
-                      <div className="pb-2 pl-3 flex flex-col">
+                      <div className="pb-2 ps-3 flex flex-col">
                         {group.items.map((item) => (
                           <Link
                             key={item.href}
@@ -686,7 +692,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                             className="flex items-center min-h-11 py-2 text-sm text-[var(--text3)] hover:text-[var(--gold)]"
                             onClick={closeMobileMenu}
                           >
-                            {item.label}
+                            {t(item.label)}
                           </Link>
                         ))}
                       </div>
@@ -701,7 +707,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                 onClick={closeMobileMenu}
               >
-                Admin Portal
+                {t('Admin Portal')}
               </Link>
             )}
             {financialNav && !businessGroup && (
@@ -710,7 +716,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                 onClick={closeMobileMenu}
               >
-                {financialNav.label}
+                {t(financialNav.label)}
               </Link>
             )}
             {jobCostingNav && !businessGroup && (
@@ -719,7 +725,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                 onClick={closeMobileMenu}
               >
-                {jobCostingNav.label}
+                {t(jobCostingNav.label)}
               </Link>
             )}
             {isGod && (
@@ -728,7 +734,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                 onClick={closeMobileMenu}
               >
-                God Dashboard
+                {t('God Dashboard')}
               </Link>
             )}
             {user && (
@@ -745,16 +751,16 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 className="flex items-center min-h-11 py-3 border-b border-[var(--border)] hover:text-[var(--gold)]"
                 onClick={closeMobileMenu}
               >
-                Notifications{unread > 0 ? ` (${unread})` : ''}
+                {t('Notifications')}{unread > 0 ? ` (${unread})` : ''}
               </Link>
             )}
             {!user && (
               <div className="flex flex-col gap-2 py-3">
                 <Link href="/login" className="btn btn-primary min-h-11" onClick={closeMobileMenu}>
-                  Sign In
+                  {t('Sign In')}
                 </Link>
                 <Link href="/signup" className="btn btn-secondary min-h-11" onClick={closeMobileMenu}>
-                  Sign Up
+                  {t('Sign Up')}
                 </Link>
               </div>
             )}

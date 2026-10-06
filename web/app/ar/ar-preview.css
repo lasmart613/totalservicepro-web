@@ -1,0 +1,89 @@
+@font-face {
+  font-family: "Noto Sans Arabic";
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url("/fonts/noto-sans-arabic.woff2") format("woff2");
+  unicode-range: U+0600-06FF, U+0750-077F, U+0870-088E, U+0890-0891, U+0897-08E1, U+08E3-08FF,
+    U+200C-200E, U+2010-2011, U+204F, U+2E41, U+FB50-FDFF, U+FE70-FEFC;
+}
+
+html.ar-preview,
+html.ar-preview body,
+.ar-preview-root,
+.ar-preview-root .lp-root {
+  font-family: "Noto Sans Arabic", var(--font-dm-sans), var(--font-geist-sans), Tahoma, sans-serif;
+}
+
+html.ar-preview .lp-nav {
+  flex-wrap: wrap;
+  padding-inline: 1.25rem;
+}
+
+html.ar-preview .lp-nav-links,
+html.ar-preview .lp-nav-cta {
+  flex-wrap: wrap;
+  row-gap: 8px;
+}
+
+html.ar-preview .lp-nav-links,
+html.ar-preview .lp-btn,
+html.ar-preview .lp-brand-biz,
+html.ar-preview .lp-brand-sub,
+html.ar-preview .lp-kicker,
+html.ar-preview .lp-hero-tagline,
+html.ar-preview .lp-title,
+html.ar-preview .lp-h2,
+html.ar-preview .lp-hero-subhead {
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+html.ar-preview .lp-hero-track,
+html.ar-preview .lp-hero-controls {
+  direction: ltr;
+}
+
+html.ar-preview .lp-hero-slide,
+html.ar-preview .lp-hero-copy,
+html.ar-preview .lp-hero-cta {
+  direction: rtl;
+}
+
+html.ar-preview header.header nav {
+  margin-left: 0 !important;
+  margin-inline-start: 1rem;
+  flex-wrap: wrap;
+}
+
+html.ar-preview input[type="email"],
+html.ar-preview input[type="password"],
+html.ar-preview input[type="tel"],
+html.ar-preview input[type="url"],
+html.ar-preview input[type="number"],
+html.ar-preview input[inputmode="numeric"],
+html.ar-preview .fa-ltr {
+  direction: ltr;
+  unicode-bidi: isolate;
+  text-align: start;
+}
+
+html.ar-preview .text-left {
+  text-align: start;
+}
+
+html.ar-preview .uppercase,
+html.ar-preview .label {
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+html.ar-preview h1,
+html.ar-preview h2,
+html.ar-preview h3,
+html.ar-preview .lp-title,
+html.ar-preview .lp-hero-subhead,
+html.ar-preview .lp-lede {
+  line-height: 1.6;
+  overflow-wrap: break-word;
+}

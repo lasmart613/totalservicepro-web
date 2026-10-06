@@ -1,4 +1,5 @@
 import type { Metadata } from 'next';
+import { PublicLocaleFrame } from '@/components/i18n/PublicLocaleFrame';
 
 export const metadata: Metadata = {
   title: { absolute: 'RepairPlanet en español' },
@@ -6,5 +7,5 @@ export const metadata: Metadata = {
 };
 
 export default function EsLayout({ children }: { children: React.ReactNode }) {
-  return <div lang="es">{children}</div>;
+  return <PublicLocaleFrame locale="es">{children}</PublicLocaleFrame>;
 }

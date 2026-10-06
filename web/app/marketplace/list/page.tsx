@@ -6,9 +6,11 @@ import Link from 'next/link';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { displayModelName } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { toast } from 'sonner';
 import { canPostMarketplaceNeed, isPro, isSupplier, isOwnerish, isServiceCompany } from '@/lib/roles';
+import { rememberManufacturerName } from '@/lib/remember-manufacturer';
 
 type ListingType = 'part' | 'consumable' | 'used' | 'request';
 
@@ -225,14 +227,9 @@ function MarketplaceListContent() {
     return urls;
   };
 
-  /** Best-effort: remember custom brand in manufacturers table for future dropdowns */
+  /** Best-effort: remember custom brand for future dropdowns. Insert-only; never renames. */
   async function rememberManufacturer(name: string) {
-    if (!name || name === 'Other') return;
-    try {
-      await getSupabaseClient().from('manufacturers').upsert({ name }, { onConflict: 'name' });
-    } catch {
-      /* table may not exist / no unique constraint */
-    }
+    await rememberManufacturerName(getSupabaseClient(), name);
   }
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -910,7 +907,7 @@ function MarketplaceListContent() {
                       <>
                         <select className="input" value={form.model} onChange={(e) => set('model', e.target.value)} required>
                           <option value="">Select model…</option>
-                          {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+                          {modelOptions.map((m) => <option key={m} value={m}>{displayModelName(m)}</option>)}
                           <option value={OTHER_MODEL}>Other / not listed…</option>
                         </select>
                         {form.model === OTHER_MODEL && (
@@ -1067,7 +1064,7 @@ function MarketplaceListContent() {
                     <>
                       <select className="input" value={form.model} onChange={(e) => set('model', e.target.value)} required>
                         <option value="">Select model…</option>
-                        {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
+                        {modelOptions.map((m) => <option key={m} value={m}>{displayModelName(m)}</option>)}
                         <option value={OTHER_MODEL}>Other / not listed…</option>
                       </select>
                       {(form.model === OTHER_MODEL) && (

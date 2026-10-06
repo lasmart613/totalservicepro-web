@@ -3,42 +3,44 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
+import { useT } from '@/lib/fa/locale';
 
 export default function AdminDashboard() {
+  const t = useT();
   const [isGod, setIsGod] = useState(false);
   useEffect(() => {
     fetchGodMe().then(setIsGod);
   }, []);
   return (
     <div>
-      <h1 className="text-3xl font-extrabold mb-2">Admin Dashboard</h1>
+      <h1 className="text-3xl font-extrabold mb-2">{t('Admin Dashboard')}</h1>
       <p className="text-[var(--text3)] mb-8">
-        Organization operations: team, customers, and reports.
+        {t('Organization operations: team, customers, and reports.')}
       </p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
         <Link href="/admin/team" className="card p-6 hover:border-[var(--gold)] group">
           <div className="text-4xl mb-4">👥</div>
-          <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">Team Management</div>
-          <p className="text-[var(--text3)]">Add and manage FSEs, dispatchers, and admins.</p>
+          <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">{t('Team Management')}</div>
+          <p className="text-[var(--text3)]">{t('Add and manage FSEs, dispatchers, and admins.')}</p>
         </Link>
 
         <Link href="/customers" className="card p-6 hover:border-[var(--gold)] group">
           <div className="text-4xl mb-4">🏥</div>
-          <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">Customers</div>
-          <p className="text-[var(--text3)]">Customer Directory for your organization only.</p>
+          <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">{t('Customers')}</div>
+          <p className="text-[var(--text3)]">{t('Customer Directory for your organization only.')}</p>
         </Link>
 
         <Link href="/admin/reports" className="card p-6 hover:border-[var(--gold)] group">
           <div className="text-4xl mb-4">📊</div>
-          <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">Reports & Analytics</div>
-          <p className="text-[var(--text3)]">Organization performance and insights.</p>
+          <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">{t('Reports & Analytics')}</div>
+          <p className="text-[var(--text3)]">{t('Organization performance and insights.')}</p>
         </Link>
 
         {isGod && (
           <Link href={GOD_DASHBOARD_PATH} className="card p-6 hover:border-[var(--gold)] group">
             <div className="text-4xl mb-4">♔</div>
-            <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">God Dashboard</div>
+            <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">{t('God Dashboard')}</div>
             <p className="text-[var(--text3)]">
               All orgs, CRM, Equipment / Users / Auth tables, and the shop-tester invite.
             </p>
@@ -48,7 +50,7 @@ export default function AdminDashboard() {
         {isGod && (
           <Link href="/admin/god/manuals" className="card p-6 hover:border-[var(--gold)] group">
             <div className="text-4xl mb-4">📚</div>
-            <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">Manuals catalog</div>
+            <div className="font-bold text-2xl mb-1 group-hover:text-[var(--gold)]">{t('Manuals catalog')}</div>
             <p className="text-[var(--text3)]">
               Attach a PDF path to a room (Laser, Lithotriptor, C-arm, Other).
             </p>

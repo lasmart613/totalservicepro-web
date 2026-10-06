@@ -7,6 +7,9 @@ import { signOutAndClearIdentity } from '@/lib/auth-session';
 import { applyStoredTheme, togglePersistedTheme } from '@/lib/theme';
 import { MembershipsSettings } from '@/components/OrgSwitcher';
 import { APP_CHANNEL, APP_VERSION, buildLabel } from '@/lib/app-version';
+import { useSetSiteLanguage, useSiteLocale, useT } from '@/lib/fa/locale';
+import { PUBLIC_LOCALES, type PublicLocale } from '@/lib/i18n/locales';
+import { useAutoOpenCitedManual } from '@/components/useAssistantCitationOpen';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,6 +17,9 @@ export const dynamic = 'force-dynamic';
 // force-dynamic + safe client-only hydration prevents build errors like "Export encountered an error on /settings/page"
 
 export default function Settings() {
+  const t = useT();
+  const siteLanguage = useSiteLocale();
+  const setSiteLanguage = useSetSiteLanguage();
   const [defaultScheduleView, setDefaultScheduleView] = useState('Month');
   const [weekStartsOn, setWeekStartsOn] = useState('Sunday');
   const [showCompleted, setShowCompleted] = useState(true);
@@ -23,6 +29,7 @@ export default function Settings() {
   const [browserNotif, setBrowserNotif] = useState(true);
   const [sound, setSound] = useState(true);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [autoOpenCited, setAutoOpenCited] = useAutoOpenCitedManual();
 
   const TIME_ZONES = [
     'UTC',
@@ -124,67 +131,91 @@ export default function Settings() {
     save('notificationSound', next);
   };
 
+  const toggleAutoOpenCited = () => {
+    setAutoOpenCited(!autoOpenCited);
+  };
+
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="max-w-md mx-auto w-full p-6">
-        <h1 className="text-xl font-bold mb-4">⚙️ Settings</h1>
+        <h1 className="text-xl font-bold mb-4">⚙️ {t('Settings')}</h1>
 
         <div className="card p-5 space-y-6 text-sm">
+          <div>
+            <div className="font-semibold mb-2">{t('Language')}</div>
+            <div className="flex flex-wrap gap-2" role="group" aria-label={t('Language')}>
+              {PUBLIC_LOCALES.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  lang={item.htmlLang}
+                  onClick={() => setSiteLanguage(item.id as PublicLocale)}
+                  className={`btn btn-secondary text-xs px-3 py-1 ${siteLanguage === item.id ? 'bg-[var(--gold)] text-black' : ''}`}
+                  aria-pressed={siteLanguage === item.id}
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <div className="text-xs text-[var(--text3)] mt-1">
+              {t('Saved on this device. The public language menu uses this same choice.')}
+            </div>
+          </div>
+
           {/* Theme */}
           <div>
-            <div className="font-semibold mb-2">Theme</div>
-            <button onClick={toggleTheme} className="btn btn-secondary">Toggle Light / Dark</button>
+            <div className="font-semibold mb-2">{t('Theme')}</div>
+            <button onClick={toggleTheme} className="btn btn-secondary">{t('Toggle Light / Dark')}</button>
             <div className="text-xs text-[var(--text3)] mt-1">
-              Current: {theme === 'light' ? 'Light' : 'Dark'}. Saved on this device after you choose.
-              Until then, follows your system Light/Dark setting.
+              {t('Current:')} {theme === 'light' ? t('Light') : t('Dark')}. {t('Saved on this device after you choose. Until then, follows your system Light/Dark setting.')}
             </div>
           </div>
 
           {/* Schedule */}
           <div>
-            <div className="font-semibold mb-2">Default Schedule View</div>
-            <div className="flex gap-2">
+            <div className="font-semibold mb-2">{t('Default Schedule View')}</div>
+            <div className="flex flex-wrap gap-2">
               {['Month', 'Week', 'Day', 'Agenda'].map(v => (
-                <button key={v} onClick={() => updateScheduleView(v)} className={`btn btn-secondary text-xs px-3 py-1 ${defaultScheduleView === v ? 'bg-[var(--gold)] text-black' : ''}`}>{v}</button>
+                <button key={v} onClick={() => updateScheduleView(v)} className={`btn btn-secondary text-xs px-3 py-1 ${defaultScheduleView === v ? 'bg-[var(--gold)] text-black' : ''}`}>{t(v)}</button>
               ))}
             </div>
           </div>
 
           <div>
-            <div className="font-semibold mb-2">Week Starts On</div>
+            <div className="font-semibold mb-2">{t('Week Starts On')}</div>
             <div className="flex gap-2">
               {['Sunday', 'Monday'].map(v => (
-                <button key={v} onClick={() => updateWeekStart(v)} className={`btn btn-secondary text-xs px-3 py-1 ${weekStartsOn === v ? 'bg-[var(--gold)] text-black' : ''}`}>{v}</button>
+                <button key={v} onClick={() => updateWeekStart(v)} className={`btn btn-secondary text-xs px-3 py-1 ${weekStartsOn === v ? 'bg-[var(--gold)] text-black' : ''}`}>{t(v)}</button>
               ))}
             </div>
           </div>
 
           <div className="flex items-center justify-between">
-            <div>Show Completed Tickets</div>
+            <div>{t('Show Completed Tickets')}</div>
             <button onClick={toggleCompleted} className={`px-3 py-1 rounded text-xs ${showCompleted ? 'bg-green-600' : 'bg-[var(--surface)] border'}`}>
-              {showCompleted ? 'ON' : 'OFF'}
+              {showCompleted ? t('ON') : t('OFF')}
             </button>
           </div>
 
           <div className="flex items-center justify-between">
-            <div>Show Cancelled Tickets</div>
+            <div>{t('Show Cancelled Tickets')}</div>
             <button onClick={toggleCancelled} className={`px-3 py-1 rounded text-xs ${showCancelled ? 'bg-green-600' : 'bg-[var(--surface)] border'}`}>
-              {showCancelled ? 'ON' : 'OFF'}
+              {showCancelled ? t('ON') : t('OFF')}
             </button>
           </div>
 
           {/* Date & Time */}
           <div>
-            <div className="font-semibold mb-2">Date & Time Format</div>
+            <div className="font-semibold mb-2">{t('Date & Time Format')}</div>
             <div className="flex gap-2 mb-2">
-              <span className="text-xs self-center">Time:</span>
+              <span className="text-xs self-center">{t('Time:')}</span>
               {['12h', '24h'].map(v => (
                 <button key={v} onClick={() => updateTimeFormat(v)} className={`btn btn-secondary text-xs px-3 py-1 ${timeFormat === v ? 'bg-[var(--gold)] text-black' : ''}`}>{v}</button>
               ))}
             </div>
             <div>
-              <label className="text-xs">Time Zone</label>
+              <label className="text-xs">{t('Time Zone')}</label>
               <select
                 value={timeZone}
                 onChange={e => updateTimeZone(e.target.value)}
@@ -203,17 +234,37 @@ export default function Settings() {
 
           {/* Notifications */}
           <div>
-            <div className="font-semibold mb-2">Notifications</div>
+            <div className="font-semibold mb-2">{t('Notifications')}</div>
             <div className="flex items-center justify-between mb-1">
-              <div>Browser Notifications</div>
+              <div>{t('Browser Notifications')}</div>
               <button onClick={toggleBrowserNotif} className={`px-3 py-1 rounded text-xs ${browserNotif ? 'bg-green-600' : 'bg-[var(--surface)] border'}`}>
-                {browserNotif ? 'ON' : 'OFF'}
+                {browserNotif ? t('ON') : t('OFF')}
               </button>
             </div>
             <div className="flex items-center justify-between">
-              <div>Sound</div>
+              <div>{t('Sound')}</div>
               <button onClick={toggleSound} className={`px-3 py-1 rounded text-xs ${sound ? 'bg-green-600' : 'bg-[var(--surface)] border'}`}>
-                {sound ? 'ON' : 'OFF'}
+                {sound ? t('ON') : t('OFF')}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div className="font-semibold mb-2">{t('AI Assistant')}</div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div>{t('Auto-open cited manual page')}</div>
+                <div className="text-xs text-[var(--text3)] mt-1">
+                  {t('When an answer cites a manual page, open it next to the answer. On a phone it opens full screen after the answer is shown. Saved on this device.')}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={toggleAutoOpenCited}
+                aria-pressed={autoOpenCited}
+                className={`px-3 py-1 rounded text-xs shrink-0 ${autoOpenCited ? 'bg-green-600' : 'bg-[var(--surface)] border'}`}
+              >
+                {autoOpenCited ? t('ON') : t('OFF')}
               </button>
             </div>
           </div>
@@ -221,22 +272,22 @@ export default function Settings() {
           <MembershipsSettings />
 
           <div>
-            <div className="font-semibold mb-2">Account</div>
-            <button onClick={async () => { const s = getSupabaseClient(); await signOutAndClearIdentity(s); window.location.href = '/login'; }} className="btn btn-secondary text-red-400 border-red-900/40">Sign Out Everywhere</button>
+            <div className="font-semibold mb-2">{t('Account')}</div>
+            <button onClick={async () => { const s = getSupabaseClient(); await signOutAndClearIdentity(s); window.location.href = '/login'; }} className="btn btn-secondary text-red-400 border-red-900/40">{t('Sign Out Everywhere')}</button>
           </div>
 
           <div className="pt-2 border-t border-[var(--border)]">
-            <div className="font-semibold mb-2">About</div>
+            <div className="font-semibold mb-2">{t('About')}</div>
             <div className="flex justify-between text-sm mb-1">
-              <span className="text-[var(--text3)]">Version</span>
+              <span className="text-[var(--text3)]">{t('Version')}</span>
               <span className="text-[var(--gold)] font-semibold">{APP_VERSION}</span>
             </div>
             <div className="flex justify-between text-sm mb-1">
-              <span className="text-[var(--text3)]">Build</span>
+              <span className="text-[var(--text3)]">{t('Build')}</span>
               <span>{buildLabel()}</span>
             </div>
             <div className="flex justify-between text-sm">
-              <span className="text-[var(--text3)]">Channel</span>
+              <span className="text-[var(--text3)]">{t('Channel')}</span>
               <span className="capitalize">{APP_CHANNEL}</span>
             </div>
           </div>

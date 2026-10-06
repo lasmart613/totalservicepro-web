@@ -8,6 +8,7 @@ export type OrgProfileSaveResult = {
   ok: boolean;
   organizationId?: string | number;
   org?: Record<string, unknown>;
+  omittedColumns?: string[];
   error?: string;
 };
 
@@ -31,5 +32,6 @@ export async function saveOwnOrganizationProfile(
     ok: true,
     organizationId: json.organizationId,
     org: json.org,
+    omittedColumns: json.omittedColumns,
   };
 }

@@ -4,6 +4,8 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { canAccessCompanyProfile, isOwnerish } from '@/lib/roles';
 import { isOwnerOrgType } from '@/lib/org-types';
 import { companyBrandingEnabled, normalizeHex, type CompanyThemeSource } from '@/lib/company-theme';
+import { canEditOrgCurrency, validateOrgMoneyFields } from '@/lib/org-money';
+import { parseOrgTimeZone } from '@/lib/org-timezone';
 
 /**
  * POST /api/org/profile
@@ -32,6 +34,9 @@ const ALLOWED_FIELDS = [
   'logo_url',
   'brand_primary_color',
   'brand_accent_color',
+  'currency_code',
+  'number_format',
+  'timezone',
 ] as const;
 
 type AllowedField = (typeof ALLOWED_FIELDS)[number];
@@ -127,6 +132,23 @@ export async function POST(req: NextRequest) {
     }
 
     const payload = pickAllowed(body);
+    const moneyTouched = 'currency_code' in payload || 'number_format' in payload;
+    if (moneyTouched && !canEditOrgCurrency(prof?.role)) {
+      delete payload.currency_code;
+      delete payload.number_format;
+      if (Object.keys(payload).length === 0) {
+        return NextResponse.json(
+          { error: 'Only an organization owner or admin can change currency.' },
+          { status: 403 }
+        );
+      }
+    } else if (moneyTouched) {
+      const checked = validateOrgMoneyFields(payload);
+      if (!checked.ok) {
+        return NextResponse.json({ error: checked.error }, { status: 400 });
+      }
+      Object.assign(payload, checked.fields);
+    }
     if ('brand_primary_color' in payload || 'brand_accent_color' in payload) {
       const planSelects = [
         'is_premium, subscription_tier, plan, premium_until, premium_grant',
@@ -158,6 +180,13 @@ export async function POST(req: NextRequest) {
         }
       }
     }
+    if ('timezone' in payload) {
+      const checked = parseOrgTimeZone(payload.timezone);
+      if (!checked.ok) {
+        return NextResponse.json({ error: checked.error }, { status: 400 });
+      }
+      payload.timezone = checked.timezone;
+    }
     if (Object.keys(payload).length === 0) {
       return NextResponse.json({ error: 'No profile fields to save' }, { status: 400 });
     }
@@ -165,6 +194,7 @@ export async function POST(req: NextRequest) {
 
     let lastError: { message?: string } | null = null;
     let saved: Record<string, unknown> | null = null;
+    const omittedColumns: string[] = [];
 
     for (let attempt = 0; attempt < 12; attempt++) {
       const { data, error } = await admin
@@ -181,13 +211,23 @@ export async function POST(req: NextRequest) {
       lastError = error;
       const col = missingColumn(error?.message);
       if (col && col in payload) {
+        omittedColumns.push(col);
         delete payload[col];
+        if (Object.keys(payload).every((key) => key === 'updated_at')) break;
         continue;
       }
       break;
     }
 
     if (!saved) {
+      if (omittedColumns.length > 0) {
+        return NextResponse.json({
+          ok: true,
+          organizationId: linkedId,
+          org: { id: linkedId },
+          omittedColumns,
+        });
+      }
       return NextResponse.json(
         { error: lastError?.message || 'Save did not update your facility. Try again.' },
         { status: 500 }
@@ -198,6 +238,7 @@ export async function POST(req: NextRequest) {
       ok: true,
       organizationId: saved.id,
       org: saved,
+      omittedColumns,
     });
   } catch (e: any) {
     console.error('org profile save', e);

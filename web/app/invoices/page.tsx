@@ -5,21 +5,24 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { Header } from '@/components/Header';
+import { useT } from '@/lib/fa/locale';
+import { useOrgMoney } from '@/lib/use-org-money';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import {
   coerceOrgId,
   isValidOrgId,
-  money,
   parseJsonField,
 } from '@/lib/billing/save-helpers';
 import { buildInvoicePaymentPatch, existingPaidAmount } from '@/lib/billing/apply-invoice-payment';
+import { canVoidInvoice, isVoidInvoiceStatus } from '@/lib/billing/void-invoice';
 import {
   releaseDeferredBalance,
   resolveInvoiceCollectable,
 } from '@/lib/billing/invoice-collectable';
 import { toast } from 'sonner';
+import { DEFAULT_ORG_TIMEZONE, formatOrgDocumentDate, resolveNumberingTimeZone } from '@/lib/org-timezone';
 
-type InvFilter = 'all' | 'draft' | 'sent' | 'paid' | 'partially_paid';
+type InvFilter = 'all' | 'draft' | 'sent' | 'paid' | 'partially_paid' | 'void';
 
 type InvoiceRow = {
   id: string | number;
@@ -39,6 +42,7 @@ function statusBadgeClass(st: string): string {
   if (st === 'partially_paid') return 'bg-amber-900/40 text-amber-200 border-amber-700';
   if (st === 'draft') return 'bg-gray-700/40 text-gray-200 border-gray-600';
   if (st === 'sent') return 'bg-blue-900/40 text-blue-200 border-blue-700';
+  if (st === 'void' || st === 'voided') return 'bg-rose-900/40 text-rose-200 border-rose-700';
   return 'bg-[var(--surface2)] text-[var(--text2)] border-[var(--border2)]';
 }
 
@@ -53,6 +57,8 @@ function docNumber(inv: InvoiceRow): string {
 }
 
 export default function InvoicesListPage() {
+  const { money } = useOrgMoney();
+  const t = useT();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [rows, setRows] = useState<InvoiceRow[]>([]);
@@ -64,6 +70,11 @@ export default function InvoicesListPage() {
   const [payAmt, setPayAmt] = useState('');
   const [payMethod, setPayMethod] = useState('Check');
   const [paying, setPaying] = useState(false);
+  const [callerRole, setCallerRole] = useState('');
+  const [voidRow, setVoidRow] = useState<InvoiceRow | null>(null);
+  const [voidReason, setVoidReason] = useState('');
+  const [voiding, setVoiding] = useState(false);
+  const [docZone, setDocZone] = useState(DEFAULT_ORG_TIMEZONE);
 
   useEffect(() => {
     init();
@@ -101,10 +112,15 @@ export default function InvoicesListPage() {
       }
       const { data: profile } = await supabase
         .from('user_profiles')
-        .select('organization_id')
+        .select('organization_id, role')
         .eq('id', user.id)
         .maybeSingle();
       const orgId = coerceOrgId(profile?.organization_id);
+      setCallerRole(String((profile as { role?: string } | null)?.role || ''));
+      const zone = await resolveNumberingTimeZone(supabase, isValidOrgId(orgId) ? orgId : null, {
+        allowBrowser: false,
+      });
+      setDocZone(zone.timeZone);
       await loadInvoices(orgId, user.id);
     } catch (e) {
       console.error(e);
@@ -167,7 +183,9 @@ export default function InvoicesListPage() {
 
   function applyFilters() {
     let res = [...rows];
-    if (activeFilter !== 'all') {
+    if (activeFilter === 'void') {
+      res = res.filter((e) => isVoidInvoiceStatus(e.status));
+    } else if (activeFilter !== 'all') {
       res = res.filter((e) => (e.status || '').toLowerCase() === activeFilter);
     }
     const q = search.trim().toLowerCase();
@@ -181,6 +199,34 @@ export default function InvoicesListPage() {
       });
     }
     setFiltered(res);
+  }
+
+  async function submitVoid() {
+    if (!voidRow) return;
+    setVoiding(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const access = sessionData.session?.access_token;
+      if (!access) throw new Error('Sign in required');
+      const res = await fetch('/api/billing/invoices/void', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${access}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ invoice_id: voidRow.id, reason: voidReason }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.error || 'Could not void invoice');
+      toast.success('Invoice voided');
+      setVoidRow(null);
+      setVoidReason('');
+      await init();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : 'Could not void invoice');
+    } finally {
+      setVoiding(false);
+    }
   }
 
   async function applyManualPayment(inv: InvoiceRow, addAmount: number, method: string) {
@@ -260,11 +306,11 @@ export default function InvoicesListPage() {
       <div className="page max-w-7xl mx-auto w-full px-4 py-6 pb-24">
         <div className="flex items-center justify-between mb-4">
           <div>
-            <h1 className="text-2xl font-extrabold">🧾 Invoices</h1>
-            <p className="text-[var(--text3)] text-sm">Billing &amp; collections</p>
+            <h1 className="text-2xl font-extrabold">🧾 {t('Invoices')}</h1>
+            <p className="text-[var(--text3)] text-sm">{t('Billing & collections')}</p>
           </div>
           <Link href="/invoices/new" className="btn btn-primary hidden sm:flex items-center gap-2">
-            <Plus size={18} /> New Invoice
+            <Plus size={18} /> {t('New Invoice')}
           </Link>
         </div>
 
@@ -272,25 +318,25 @@ export default function InvoicesListPage() {
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-[var(--gold)]">{loading ? '—' : drafts}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              DRAFTS
+              {t('DRAFTS')}
             </div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-blue-300">{loading ? '—' : sent}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              SENT
+              {t('SENT')}
             </div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-amber-300">{loading ? '—' : partial}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              PARTIAL
+              {t('PARTIAL')}
             </div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-[var(--green)]">{loading ? '—' : paid}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              PAID
+              {t('PAID')}
             </div>
           </div>
         </div>
@@ -298,7 +344,7 @@ export default function InvoicesListPage() {
         <div className="mb-4">
           <input
             className="input"
-            placeholder="Search customer, invoice #..."
+            placeholder={t('Search customer, invoice #...')}
             value={search}
             onChange={(e) => setSearch(e.target.value)}
           />
@@ -312,6 +358,7 @@ export default function InvoicesListPage() {
               ['sent', 'Sent'],
               ['partially_paid', 'Partial'],
               ['paid', 'Paid'],
+              ['void', 'Void'],
             ] as [InvFilter, string][]
           ).map(([key, label]) => (
             <button
@@ -332,12 +379,12 @@ export default function InvoicesListPage() {
         ) : filtered.length === 0 ? (
           <div className="empty-state card p-8 text-center">
             <div className="text-4xl mb-3">🧾</div>
-            <div className="font-semibold">No invoices yet</div>
+            <div className="font-semibold">{t('No invoices yet')}</div>
             <p className="text-sm mt-1 text-[var(--text3)]">
               Create an invoice or convert from an estimate.
             </p>
             <Link href="/invoices/new" className="btn btn-primary mt-4 inline-flex">
-              + New Invoice
+              + {t('New Invoice')}
             </Link>
           </div>
         ) : (
@@ -345,12 +392,15 @@ export default function InvoicesListPage() {
             {filtered.map((inv) => {
               const st = String(inv.status || 'draft').toLowerCase();
               const num = docNumber(inv);
-              const dateStr = inv.invoice_date
-                ? new Date(inv.invoice_date + 'T00:00:00').toLocaleDateString()
-                : inv.created_at
-                  ? new Date(inv.created_at).toLocaleDateString()
-                  : '—';
-              const alreadyPaid = st === 'paid';
+              const dateStr =
+                formatOrgDocumentDate(inv.invoice_date || inv.created_at, docZone) || '—';
+              const alreadyPaid = st === 'paid' || isVoidInvoiceStatus(st);
+              const voidable = canVoidInvoice({
+                status: inv.status,
+                amount_paid: existingPaidAmount(inv),
+                invoice_data: inv.invoice_data,
+                role: callerRole,
+              }).ok;
               return (
                 <div
                   key={String(inv.id)}
@@ -398,7 +448,7 @@ export default function InvoicesListPage() {
                     })()}
                   </div>
                   {!alreadyPaid && (
-                    <div className="flex gap-2 w-full sm:w-auto">
+                    <div className="flex gap-2 w-full sm:w-auto flex-wrap">
                       <button
                         type="button"
                         className="btn btn-secondary text-xs"
@@ -446,6 +496,18 @@ export default function InvoicesListPage() {
                           </button>
                         );
                       })()}
+                      {voidable && (
+                        <button
+                          type="button"
+                          className="btn btn-secondary text-xs"
+                          onClick={() => {
+                            setVoidRow(inv);
+                            setVoidReason('');
+                          }}
+                        >
+                          Void invoice
+                        </button>
+                      )}
                     </div>
                   )}
                 </div>
@@ -455,7 +517,7 @@ export default function InvoicesListPage() {
         )}
       </div>
 
-      <Link href="/invoices/new" className="fab sm:hidden" title="New Invoice">
+      <Link href="/invoices/new" className="fab sm:hidden" title={t('New Invoice')}>
         <Plus size={28} />
       </Link>
 
@@ -495,6 +557,32 @@ export default function InvoicesListPage() {
                 onClick={() => applyManualPayment(payRow, Number(payAmt) || 0, payMethod)}
               >
                 {paying ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {voidRow && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setVoidRow(null)}>
+          <div className="card w-full max-w-sm p-5 hover:transform-none" onClick={(e) => e.stopPropagation()}>
+            <h2 className="text-lg font-extrabold mb-1">Void invoice</h2>
+            <p className="text-xs text-[var(--text3)] mb-3">
+              {docNumber(voidRow) || 'This invoice'} will be voided. An open payment link is expired. No charge or refund is made.
+            </p>
+            <label className="text-xs text-[var(--text3)] font-bold">Reason (optional)</label>
+            <textarea
+              className="input mt-1 min-h-[80px]"
+              value={voidReason}
+              maxLength={500}
+              onChange={(e) => setVoidReason(e.target.value)}
+            />
+            <div className="flex gap-2 mt-4">
+              <button type="button" className="btn btn-secondary flex-1" onClick={() => setVoidRow(null)}>
+                Cancel
+              </button>
+              <button type="button" className="btn btn-primary flex-1" disabled={voiding} onClick={() => submitVoid()}>
+                {voiding ? 'Voiding…' : 'Void invoice'}
               </button>
             </div>
           </div>

@@ -6,6 +6,7 @@ import { useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isOwnerish } from '@/lib/roles';
+import { displayModelName } from '@/lib/model-display';
 
 type Row = {
   id: string;
@@ -194,7 +195,7 @@ function AcceptedBidsInner() {
                         {r.title || 'Service request'}
                       </h2>
                       <p className="text-xs text-[var(--text3)] mt-1">
-                        {[r.manufacturer, r.model].filter(Boolean).join(' ')}
+                        {[r.manufacturer, displayModelName(r.model)].filter(Boolean).join(' ')}
                         {(r.city || r.state)
                           ? ` · ${[r.city, r.state].filter(Boolean).join(', ')}`
                           : ''}

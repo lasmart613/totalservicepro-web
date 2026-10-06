@@ -13,6 +13,7 @@
  * before any invoice row is written.
  */
 
+import { DEFAULT_ORG_TIMEZONE, isoDateInTimeZone } from '../org-timezone.ts';
 import { sameOrg } from '../org-membership.ts';
 import { isServiceOrgType } from '../org-types.ts';
 import { listingPriceDollars, type MarketplaceListingLike } from '../marketplace/parts.ts';
@@ -289,8 +290,8 @@ export function mergeListingOntoDraft(
   };
 }
 
-function ymd(date: Date): string {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+function ymd(date: Date, timeZone?: string | null): string {
+  return isoDateInTimeZone(date, timeZone && String(timeZone).trim() ? String(timeZone) : DEFAULT_ORG_TIMEZONE);
 }
 
 export function buildNewListingInvoicePayload(input: {
@@ -301,11 +302,12 @@ export function buildNewListingInvoicePayload(input: {
   qty: number;
   invoiceNumber: string;
   now?: Date;
+  timeZone?: string | null;
 }): Record<string, unknown> {
   const line = listingToInvoiceLine(input.listing, input.qty);
   const totals = invoiceTotalsFromLines([line], 0);
   const now = input.now ?? new Date();
-  const invoiceDate = ymd(now);
+  const invoiceDate = ymd(now, input.timeZone);
   const splitFields = collectableInvoiceDataFields(
     resolveInvoiceCollectable({
       total: totals.total,
@@ -374,6 +376,7 @@ export type ListingInvoiceActor = {
   userId: string;
   activeOrgId: string | number | null;
   orgType?: string | null;
+  timeZone?: string | null;
 };
 
 export type ListingInvoiceRequest = {
@@ -471,6 +474,7 @@ export async function runAddListingToInvoice(
       qty,
       invoiceNumber,
       now,
+      timeZone: actor.timeZone,
     });
   } else {
     return { ok: false, status: 400, error: 'Choose an existing draft or a new invoice' };

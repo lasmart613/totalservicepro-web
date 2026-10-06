@@ -3,6 +3,8 @@
  * Missing wage, price, or link data stays unavailable. Nothing here is estimated.
  */
 
+import { resolveOrgMoneyPrefs } from './money-format.ts';
+
 export type MoneyFigure = {
   amount: number | null;
   available: boolean;
@@ -44,6 +46,8 @@ export type JobCostRow = {
 export type JobCostReport = {
   organizationId: string | number | null;
   organizationName: string | null;
+  currencyCode: string;
+  numberFormat: string;
   asOfDate: string;
   ticketCount: number | null;
   ticketIssue: string | null;
@@ -132,6 +136,8 @@ export type JobCostInput = {
   invoices: InvoiceSourceRow[] | null;
   invoiceIssue: string | null;
   asOf?: string;
+  currencyCode?: string | null;
+  numberFormat?: string | null;
 };
 
 const HOURS_SOURCE =
@@ -528,9 +534,15 @@ function asOfDate(value?: string): string {
 }
 
 export function assembleJobCostReport(input: JobCostInput): JobCostReport {
+  const moneyPrefs = resolveOrgMoneyPrefs({
+    currencyCode: input.currencyCode,
+    numberFormat: input.numberFormat,
+  });
   const base = {
     organizationId: input.organizationId,
     organizationName: input.organizationName,
+    currencyCode: moneyPrefs.currencyCode,
+    numberFormat: moneyPrefs.numberFormat,
     asOfDate: asOfDate(input.asOf),
     ticketIssue: input.ticketIssue,
     laborIssue: input.laborIssue,

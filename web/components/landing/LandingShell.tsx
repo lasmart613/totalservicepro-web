@@ -2,6 +2,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
+import { LanguageSelector } from '@/components/i18n/LanguageSelector';
 import { PublicLink, useT } from '@/lib/fa/locale';
 import { FindRepControl } from './FindRepControl';
 import './landing.css';
@@ -34,6 +35,7 @@ export function LandingShell({ children }: { children: React.ReactNode }) {
           <PublicLink href="/marketplace">{t('Marketplace')}</PublicLink>
           <PublicLink href="/marketplace/parts">{t('Parts')}</PublicLink>
           <PublicLink href="/plans">{t('Free Plan')}</PublicLink>
+          <LanguageSelector variant="landing" />
         </nav>
         <div className="lp-nav-cta">
           <ReportIssueControl variant="landing" />

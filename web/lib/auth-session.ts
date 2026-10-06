@@ -62,7 +62,16 @@ export async function signOutAndClearIdentity(supabase: SupabaseClient): Promise
   clearBrowserIdentityArtifacts();
 }
 
-/** Call before creating a new account so the previous session cannot stay in the header. */
+/**
+ * Call before creating a new account so a previous session cannot stay in the header.
+ * A logged-out browser has no report cookie, so this does not DELETE the financial
+ * or job-costing routes. Those DELETEs only clear an httpOnly cookie on sign-out.
+ */
 export async function prepareFreshSignup(supabase: SupabaseClient): Promise<void> {
+  const { data } = await supabase.auth.getSession();
+  if (!data.session) {
+    clearBrowserIdentityArtifacts();
+    return;
+  }
   await signOutAndClearIdentity(supabase);
 }

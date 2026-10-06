@@ -39,6 +39,7 @@ import {
 } from '@/lib/equipment-dropdown';
 import { listManufacturerChoices } from '@/lib/laser-catalog';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
+import { orgTodayIso } from '@/lib/org-timezone';
 import { ensureEquipment } from '@/lib/equipment-ensure';
 import { isAdmin, normalizeRole } from '@/lib/roles';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs } from '@/lib/customer-form';
@@ -178,6 +179,7 @@ export default function NewServiceReport() {
   const ticketModelRef = useRef('');
   const selectModelRef = useRef<(key: string) => void>(() => {});
   const ticketCatalogApplied = useRef(false);
+  const orgZoneRef = useRef<{ stored: string | null; state: string | null }>({ stored: null, state: null });
   const locationRequestRef = useRef(0);
   const locationLoadRef = useRef<{
     preferredId: string | number | null;
@@ -469,10 +471,11 @@ export default function NewServiceReport() {
         }
       }
 
+      let org: any = null;
       if (profile?.organization_id) {
         setCurrentUserOrgId(profile.organization_id as any);
         setCurrentProfile(profile);
-        const org = Array.isArray(profile.organizations) ? profile.organizations[0] : profile.organizations;
+        org = Array.isArray(profile.organizations) ? profile.organizations[0] : profile.organizations;
         const techName = [profile.first_name, profile.last_name].filter(Boolean).join(' ') || user.email || '';
         setTechCompanyCache({
           tech_name: techName,
@@ -491,8 +494,20 @@ export default function NewServiceReport() {
       if (profile?.organization_id) {
         await loadCustomers(profile.organization_id);
       }
-      // default date
-      if (!dateOut) setDateOut(new Date().toISOString().slice(0,10));
+      let storedZone: string | null = null;
+      let orgState: string | null = org?.state || null;
+      if (profile?.organization_id) {
+        const zoneRow = await supabase
+          .from('organizations')
+          .select('timezone')
+          .eq('id', profile.organization_id)
+          .maybeSingle();
+        if (zoneRow.error) console.warn('organizations.timezone', zoneRow.error.message);
+        else if (zoneRow.data?.timezone) storedZone = String(zoneRow.data.timezone);
+      }
+      // default date is the organization calendar day, not the browser or UTC
+      orgZoneRef.current = { stored: storedZone, state: orgState };
+      if (!dateOut) setDateOut(orgTodayIso(orgZoneRef.current));
       } finally {
         if (signedIn) setSessionReady(true);
       }
@@ -1120,7 +1135,8 @@ export default function NewServiceReport() {
         phone: newCustomer.phone || null,
         email: newCustomer.email || null,
         contact_name: newCustomer.contactName || null,
-        type: 'customer'
+        type: 'customer',
+        created_by: currentUser?.id || null,
       }).select().single();
       if (error) throw error;
 
@@ -1224,7 +1240,7 @@ export default function NewServiceReport() {
       generateDocNumber(supabase, {
         orgId: currentUserOrgId,
         kind: 'SR',
-        date: dateOut || new Date(),
+        date: dateOut || orgTodayIso(orgZoneRef.current),
       }).then((n) => setReportNumber(n)).catch(() => {});
     }
   }
@@ -1364,7 +1380,7 @@ export default function NewServiceReport() {
           rn = await generateDocNumber(supabase, {
             orgId: currentUserOrgId,
             kind: 'SR',
-            date: dateOut || new Date(),
+            date: dateOut || orgTodayIso(orgZoneRef.current),
           });
           setReportNumber(rn);
         } catch {
@@ -1447,13 +1463,21 @@ export default function NewServiceReport() {
         tech_signature: latestSig || currentProfile?.signature_data || null,
         signed_date:
           (techSigDate && String(techSigDate).slice(0, 10)) ||
-          (status === 'complete' ? new Date().toISOString().slice(0, 10) : null),
+          (status === 'complete'
+            ? orgTodayIso(orgZoneRef.current)
+            : null),
       };
 
       // Retry without columns PostgREST says are missing (schema drift / unapplied migrations).
       // 22P02 (invalid uuid) drops ticket_id even when the message does not name the column.
       async function writeReport(payload: Record<string, any>, id: any) {
         let body = { ...payload };
+        // Updates echo organization_id and created_by. A client change of either
+        // column is rejected, so a teammate save must leave them untouched.
+        if (id) {
+          delete body.organization_id;
+          delete body.created_by;
+        }
         for (let attempt = 0; attempt < 6; attempt++) {
           if (id) {
             const { error } = await supabase.from('service_reports').update(body).eq('id', id);

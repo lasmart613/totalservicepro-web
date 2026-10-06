@@ -160,10 +160,12 @@ test('shop-invite promise is wired on company signup', () => {
   const signup = readFileSync(join(here, '../app/signup/company/page.tsx'), 'utf8');
   const pending = readFileSync(join(here, './pending-signup.ts'), 'utf8');
   const onboard = readFileSync(join(here, '../app/onboarding/page.tsx'), 'utf8');
+  const founder = readFileSync(join(here, '../app/api/org/founder/route.ts'), 'utf8');
   const dashboard = readFileSync(join(here, '../app/admin/god/page.tsx'), 'utf8');
   assert.match(signup, /two months of Premium on us/i);
   assert.match(pending, /applyComplimentarySignupFields/);
-  assert.match(onboard, /applyComplimentarySignupFields/);
+  assert.match(founder, /applyComplimentarySignupFields/);
+  assert.match(onboard, /postFounderOrganization/);
   assert.match(dashboard, /GodComplimentaryPremium/);
   assert.equal(clampComplimentaryDays(120), 90);
   assert.equal(clampComplimentaryDays('nope'), 60);

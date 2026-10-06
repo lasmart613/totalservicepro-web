@@ -333,6 +333,48 @@ test('Upgrade chrome goes to /plans and never starts Stripe Checkout', () => {
   assert.match(plans, /Upgrade to Team/);
 });
 
+test('logged-out signup does not DELETE report cookies', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const session = readFileSync(join(here, './auth-session.ts'), 'utf8');
+  const prepare = session.slice(session.indexOf('export async function prepareFreshSignup'));
+  assert.match(prepare, /getSession\(\)/);
+  assert.match(prepare, /if \(!data\.session\)/);
+  assert.doesNotMatch(prepare, /method: 'DELETE'/);
+  const signOut = session.slice(
+    session.indexOf('export async function signOutAndClearIdentity'),
+    session.indexOf('export async function prepareFreshSignup')
+  );
+  assert.match(signOut, /method: 'DELETE'/);
+  assert.match(signOut, /FINANCIAL_REPORTING_API/);
+  assert.match(signOut, /JOB_COSTING_API/);
+
+  const chooser = readFileSync(join(here, '../app/signup/page.tsx'), 'utf8');
+  const effect = chooser.slice(chooser.indexOf('useEffect'), chooser.indexOf('return ('));
+  assert.match(effect, /if \(cancelled\) return;\s+await prepareFreshSignup/);
+  for (const rel of ['../app/signup/company/page.tsx', '../app/signup/owner/page.tsx']) {
+    const page = readFileSync(join(here, rel), 'utf8');
+    const beforeSubmit = page.slice(page.indexOf('export default'), page.indexOf('const handleSubmit'));
+    assert.doesNotMatch(beforeSubmit, /prepareFreshSignup/);
+    assert.match(page, /await prepareFreshSignup\(supabase\)/);
+  }
+
+  for (const rel of [
+    '../app/api/business/financial-reporting/route.ts',
+    '../app/api/business/job-costing/route.ts',
+  ]) {
+    const route = readFileSync(join(here, rel), 'utf8');
+    const handle = route.slice(route.indexOf('async function handle'), route.indexOf('export function GET'));
+    assert.match(handle, /if \(!token\)/);
+    assert.match(handle, /Sign in required/);
+    assert.match(handle, /status: 401/);
+    const del = route.slice(route.indexOf('export function DELETE'));
+    assert.match(del, /ok: true/);
+    assert.match(del, /clearAccessCookie/);
+    assert.doesNotMatch(del, /loadAuthorized/);
+    assert.doesNotMatch(del, /\.delete\(|\.from\(/);
+  }
+});
+
 test('webhook and sync routes persist the existing org and never sign up', () => {
   const here = dirname(fileURLToPath(import.meta.url));
   const webhook = readFileSync(join(here, '../app/api/billing/upgrade/webhook/route.ts'), 'utf8');

@@ -6,12 +6,13 @@ import { useRouter } from 'next/navigation';
 import { Plus } from 'lucide-react';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { useOrgMoney } from '@/lib/use-org-money';
 import {
   coerceOrgId,
   isValidOrgId,
-  money,
   parseJsonField,
 } from '@/lib/billing/save-helpers';
+import { DEFAULT_ORG_TIMEZONE, formatOrgDocumentDate, resolveNumberingTimeZone } from '@/lib/org-timezone';
 
 type PoFilter = 'all' | 'draft' | 'sent';
 
@@ -40,6 +41,7 @@ function docNumber(row: PoRow): string {
 }
 
 export default function PurchaseOrdersListPage() {
+  const { money } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [rows, setRows] = useState<PoRow[]>([]);
@@ -47,6 +49,7 @@ export default function PurchaseOrdersListPage() {
   const [activeFilter, setActiveFilter] = useState<PoFilter>('all');
   const [search, setSearch] = useState('');
   const [loading, setLoading] = useState(true);
+  const [docZone, setDocZone] = useState(DEFAULT_ORG_TIMEZONE);
 
   useEffect(() => {
     init();
@@ -72,6 +75,10 @@ export default function PurchaseOrdersListPage() {
         .eq('id', user.id)
         .maybeSingle();
       const orgId = coerceOrgId(profile?.organization_id);
+      const zone = await resolveNumberingTimeZone(supabase, isValidOrgId(orgId) ? orgId : null, {
+        allowBrowser: false,
+      });
+      setDocZone(zone.timeZone);
       if (!isValidOrgId(orgId)) {
         setRows([]);
         return;
@@ -187,11 +194,7 @@ export default function PurchaseOrdersListPage() {
             {filtered.map((row) => {
               const st = String(row.status || 'draft').toLowerCase();
               const num = docNumber(row);
-              const dateStr = row.po_date
-                ? new Date(row.po_date + 'T00:00:00').toLocaleDateString()
-                : row.created_at
-                  ? new Date(row.created_at).toLocaleDateString()
-                  : '—';
+              const dateStr = formatOrgDocumentDate(row.po_date || row.created_at, docZone) || '—';
               return (
                 <Link
                   key={String(row.id)}

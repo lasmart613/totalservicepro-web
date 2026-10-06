@@ -1,7 +1,8 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { PublicLink, useFa, useT } from '@/lib/fa/locale';
+import Link from 'next/link';
+import { PublicLink, useLocalizedPublic, useT } from '@/lib/fa/locale';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { canPostMarketplaceNeed, isPro, isSupplier } from '@/lib/roles';
@@ -11,7 +12,7 @@ export default function Marketplace() {
   const [userRole, setUserRole] = useState('');
   const [orgType, setOrgType] = useState<string | null>(null);
   const supabase = getSupabaseClient();
-  const fa = useFa();
+  const localized = useLocalizedPublic();
   const t = useT();
 
   useEffect(() => {
@@ -104,7 +105,7 @@ export default function Marketplace() {
             </p>
           </div>
 
-          {!fa && (isPro(userRole) || isSupplier(userRole, orgType)) && (
+          {!localized && (isPro(userRole) || isSupplier(userRole, orgType)) && (
             <PublicLink
               href={
                 isSupplier(userRole, orgType)
@@ -116,7 +117,7 @@ export default function Marketplace() {
               {t('+ Create New Listing')}
             </PublicLink>
           )}
-          {!fa && canPostMarketplaceNeed(userRole, orgType) && !isPro(userRole) && (
+          {!localized && canPostMarketplaceNeed(userRole, orgType) && !isPro(userRole) && (
             <PublicLink href="/service-requests" className="btn btn-primary whitespace-nowrap">
               {t('Post Service Request')}
             </PublicLink>
@@ -172,9 +173,9 @@ export default function Marketplace() {
           {isSupplier(userRole, orgType) && (
             <Link href="/marketplace/storefront" className="card p-6 hover:border-[var(--gold)] group flex flex-col">
               <div className="text-4xl mb-4">🏪</div>
-              <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">Seller storefront</h3>
+              <h3 className="font-bold text-xl mb-2 group-hover:text-[var(--gold)]">{t('Seller storefront')}</h3>
               <p className="text-sm text-[var(--text3)] flex-1">
-                Optional public shop page and CSV / Excel inventory upload (Premium / Team)
+                {t('Optional public shop page and CSV / Excel inventory upload (Premium / Team)')}
               </p>
             </Link>
           )}

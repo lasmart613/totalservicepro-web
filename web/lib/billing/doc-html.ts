@@ -16,6 +16,9 @@ import {
   type CompanyTheme,
   type ThemeScope,
 } from '../company-theme.ts';
+import { displayModelName, displayModelText } from '../model-display.ts';
+import { DEFAULT_ORG_TIMEZONE, formatDateInTimeZone } from '../org-timezone.ts';
+import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
 
 export type DocThemeScope = ThemeScope;
 
@@ -53,8 +56,12 @@ function esc(s: any) {
     .replace(/"/g, '&quot;');
 }
 
-function money(n: number | undefined | null) {
-  return `$${Number(n || 0).toFixed(2)}`;
+function money(
+  n: number | undefined | null,
+  prefs?: OrgMoneyPrefs | null,
+  locale?: string | null
+) {
+  return formatOrgMoney(n, prefs, locale);
 }
 
 function estimateEmailActionHref(actionUrl: string, action: 'approve' | 'reject' | 'modify'): string {
@@ -64,28 +71,27 @@ function estimateEmailActionHref(actionUrl: string, action: 'approve' | 'reject'
   return `${base}?action=${action}`;
 }
 
+function estimateActionButtonCell(href: string, bg: string, color: string, label: string): string {
+  return (
+    `<td align="center" style="padding:6px 4px;" width="33%">\n` +
+    `<a href="${href}" ` +
+    `style="display:inline-block;background:${bg};color:${color};padding:14px 18px;border-radius:8px;` +
+    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid ${bg};min-width:110px;">` +
+    `${label}</a>\n` +
+    `</td>\n`
+  );
+}
+
 function estimateActionButtonsRow(actionUrl: string): string {
   const approveHref = esc(estimateEmailActionHref(actionUrl, 'approve'));
   const rejectHref = esc(estimateEmailActionHref(actionUrl, 'reject'));
   const modifyHref = esc(estimateEmailActionHref(actionUrl, 'modify'));
   return (
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">` +
-    `<tr>` +
-    `<td align="center" style="padding:6px 4px;" width="33%">` +
-    `<a href="${approveHref}" ` +
-    `style="display:inline-block;background:#15803D;color:#ffffff;padding:14px 18px;border-radius:8px;` +
-    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #15803D;min-width:110px;">` +
-    `Approve</a></td>` +
-    `<td align="center" style="padding:6px 4px;" width="33%">` +
-    `<a href="${rejectHref}" ` +
-    `style="display:inline-block;background:#B91C1C;color:#ffffff;padding:14px 18px;border-radius:8px;` +
-    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #B91C1C;min-width:110px;">` +
-    `Reject</a></td>` +
-    `<td align="center" style="padding:6px 4px;" width="33%">` +
-    `<a href="${modifyHref}" ` +
-    `style="display:inline-block;background:#FBBF24;color:#111827;padding:14px 18px;border-radius:8px;` +
-    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #FBBF24;min-width:110px;">` +
-    `Modify</a></td>` +
+    `<tr>\n` +
+    estimateActionButtonCell(approveHref, '#15803D', '#ffffff', 'Approve') +
+    estimateActionButtonCell(rejectHref, '#B91C1C', '#ffffff', 'Reject') +
+    estimateActionButtonCell(modifyHref, '#FBBF24', '#111827', 'Modify') +
     `</tr></table>`
   );
 }
@@ -104,21 +110,51 @@ export function buildEstimateActionCtasHtml(actionUrl: string, variant: 'banner'
     `Tap Approve, Reject, or Modify — no login required.` +
     `</td></tr>` +
     `<tr><td style="padding:4px 8px 14px;">${estimateActionButtonsRow(actionUrl)}</td></tr>` +
-    `<tr><td align="center" style="padding:0 12px 14px;font-size:10px;color:#D1D5DB;">` +
-    `These links are unique to this estimate.` +
-    `</td></tr>` +
+    (variant === 'banner'
+      ? `<tr><td align="center" style="padding:0 12px 14px;font-size:10px;color:#D1D5DB;">` +
+        `These links are unique to this estimate.` +
+        `</td></tr>`
+      : '') +
     `</table>`
   );
 }
 
-const ESTIMATE_CTA_TABLE_RE = /<table[^>]*class="tsp-est-cta[^"]*"[^>]*>[\s\S]*?<\/table>/gi;
+/** Remove a CTA table, including the nested button table, so the sentence is not left behind. */
+function stripEstimateActionCtas(html: string): string {
+  const re = /<table\b[^>]*>/gi;
+  let out = '';
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html))) {
+    if (!/tsp-est-cta/.test(match[0])) continue;
+    const end = endOfTable(html, match.index);
+    if (end < 0) break;
+    out += html.slice(cursor, match.index);
+    cursor = end;
+    re.lastIndex = end;
+  }
+  return out + html.slice(cursor);
+}
+
+function endOfTable(html: string, start: number): number {
+  const re = /<\/?table\b[^>]*>/gi;
+  re.lastIndex = start;
+  let depth = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html))) {
+    if (/^<\//.test(match[0])) depth -= 1;
+    else depth += 1;
+    if (depth === 0) return re.lastIndex;
+  }
+  return -1;
+}
 
 /** Inject or replace CTAs at the top and bottom so they are hard to miss. */
 export function ensureEstimateActionCtas(html: string, actionUrl: string): string {
   if (!html || !actionUrl) return html;
   const top = buildEstimateActionCtasHtml(actionUrl, 'banner');
   const bottom = buildEstimateActionCtasHtml(actionUrl, 'repeat');
-  let next = html.replace(ESTIMATE_CTA_TABLE_RE, '');
+  let next = stripEstimateActionCtas(html);
   const firstDiv = next.indexOf('<div');
   if (firstDiv >= 0) {
     const close = next.indexOf('>', firstDiv);
@@ -290,27 +326,29 @@ export type InvoiceHtmlInput = {
   theme?: CompanyTheme | null;
   /** document = header + accent rules. email = header and logo only. */
   themeScope?: DocThemeScope;
+  /** Organization display currency. Omitted values stay USD in the locale format. */
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
+  /** IANA zone for the fallback "today" date. Date-only invoice dates are not shifted. */
+  timeZone?: string | null;
 };
 
+function docZone(timeZone: string | null | undefined): string {
+  const zone = String(timeZone || '').trim();
+  return zone || DEFAULT_ORG_TIMEZONE;
+}
+
+function docDateLabel(value: string | null | undefined, timeZone: string | null | undefined, locale?: string | null): string {
+  return formatDateInTimeZone(value || new Date(), docZone(timeZone), locale || 'en-US');
+}
+
 export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
+  const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
+  const zone = docZone(input.timeZone);
   const dateLabel = input.invoiceDate
-    ? (() => {
-        try {
-          return new Date(input.invoiceDate + (input.invoiceDate.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
-        } catch {
-          return input.invoiceDate;
-        }
-      })()
-    : new Date().toLocaleDateString();
-  const dueLabel = input.dueDate
-    ? (() => {
-        try {
-          return new Date(input.dueDate + (input.dueDate.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
-        } catch {
-          return input.dueDate;
-        }
-      })()
-    : '—';
+    ? docDateLabel(input.invoiceDate, zone, input.locale)
+    : docDateLabel(null, zone, input.locale);
+  const dueLabel = input.dueDate ? docDateLabel(input.dueDate, zone, input.locale) : '—';
 
   const rule = documentRuleColor(input.theme, input.themeScope);
 
@@ -392,7 +430,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
     linesHtml +
     (input.description
       ? `<div style="margin:0 0 12px;font-size:11px;color:#444;"><strong>Notes:</strong> ${esc(
-          input.description
+          displayModelText(input.description)
         )}</div>`
       : '') +
     `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">Amounts</h3>` +
@@ -410,17 +448,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         (deposit > 0
           ? `<div style="margin-top:8px;">Deposit received: <strong>${money(deposit)}</strong>` +
             (input.depositDate
-              ? ` on ${esc(
-                  (() => {
-                    try {
-                      return new Date(
-                        input.depositDate + (input.depositDate.length === 10 ? 'T12:00:00' : '')
-                      ).toLocaleDateString();
-                    } catch {
-                      return input.depositDate;
-                    }
-                  })()
-                )}`
+              ? ` on ${esc(docDateLabel(input.depositDate, zone, input.locale))}`
               : '') +
             (input.depositMethod ? ` via ${esc(input.depositMethod)}` : '') +
             `</div>` +
@@ -433,17 +461,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         ? `<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid ${rule};border-radius:6px;font-size:12px;">` +
           `<div>Deposit received: <strong>${money(deposit)}</strong>` +
           (input.depositDate
-            ? ` on ${esc(
-                (() => {
-                  try {
-                    return new Date(
-                      input.depositDate + (input.depositDate.length === 10 ? 'T12:00:00' : '')
-                    ).toLocaleDateString();
-                  } catch {
-                    return input.depositDate;
-                  }
-                })()
-              )}`
+            ? ` on ${esc(docDateLabel(input.depositDate, zone, input.locale))}`
             : '') +
           (input.depositMethod ? ` via ${esc(input.depositMethod)}` : '') +
           `</div>` +
@@ -496,26 +514,17 @@ export type PurchaseOrderHtmlInput = {
   subtotal: number;
   tax: number;
   total: number;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
 };
 
 export function buildPurchaseOrderHtml(input: PurchaseOrderHtmlInput): string {
+  const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
   const dateLabel = input.poDate
-    ? (() => {
-        try {
-          return new Date(input.poDate + (input.poDate.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
-        } catch {
-          return input.poDate;
-        }
-      })()
-    : new Date().toLocaleDateString();
+    ? docDateLabel(input.poDate, DEFAULT_ORG_TIMEZONE, input.locale)
+    : docDateLabel(null, DEFAULT_ORG_TIMEZONE, input.locale);
   const neededLabel = input.neededBy
-    ? (() => {
-        try {
-          return new Date(input.neededBy + (input.neededBy.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
-        } catch {
-          return input.neededBy;
-        }
-      })()
+    ? docDateLabel(input.neededBy, DEFAULT_ORG_TIMEZONE, input.locale)
     : '—';
 
   let linesHtml =
@@ -631,18 +640,26 @@ export type EstimateHtmlInput = {
   tax: number;
   total: number;
   deposit?: number;
+  /**
+   * When false, a stored deposit amount is not printed. Omit to keep the
+   * historical "show a positive deposit" behavior for direct callers.
+   */
+  depositRequired?: boolean;
   balanceDue?: number;
   validDays?: number;
   /** Clinic estimate page (https://repairplanet.net/estimates/{id}). */
   actionUrl?: string | null;
   theme?: CompanyTheme | null;
   themeScope?: DocThemeScope;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
 };
 
 export function buildEstimateHtml(input: EstimateHtmlInput): string {
+  const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
   const services = input.services?.length ? input.services : ['Not specified'];
   const rule = documentRuleColor(input.theme, input.themeScope);
-  const deposit = Number(input.deposit) || 0;
+  const deposit = input.depositRequired === false ? 0 : Number(input.deposit) || 0;
   const balance =
     input.balanceDue != null
       ? Number(input.balanceDue)
@@ -723,7 +740,7 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
     `<div><span style="color:#666;font-size:8px;">MANUFACTURER</span> ${esc(
       input.manufacturer || '—'
     )}</div>` +
-    `<div><span style="color:#666;font-size:8px;">MODEL</span> ${esc(input.model || '—')}</div>` +
+    `<div><span style="color:#666;font-size:8px;">MODEL</span> ${esc(input.model ? displayModelName(input.model) : '—')}</div>` +
     `<div><span style="color:#666;font-size:8px;">SERIAL #</span> ${esc(input.serial || '—')}</div>` +
     `<div><span style="color:#666;font-size:8px;">PULSE COUNT</span> ${esc(
       input.pulseCount || '—'
@@ -762,6 +779,50 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
       input.company.company_name || 'Total Service Pro'
     )}!</div></div></div>`
   );
+}
+
+/** Plain-text part of the estimate email. Links stay on their own lines so words do not run together. */
+export function buildEstimatePlainText(input: EstimateHtmlInput): string {
+  const amount = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
+  const company = input.company.company_name || 'Total Service Pro';
+  const lines: string[] = [
+    company,
+    `Service estimate ${input.estNumber || ''}`.trim(),
+  ];
+  if (input.dateStr) lines.push(input.dateStr);
+  lines.push('', `Customer: ${input.customer.name || 'Customer'}`);
+  if (input.customer.email) lines.push(`Email: ${input.customer.email}`);
+  if (input.services?.length) lines.push('', 'Services:', ...input.services.map((s) => `- ${s}`));
+  if (input.diagFee) lines.push(`Diagnostic Fee: ${amount(input.diagFee)}`);
+  if (input.labor) {
+    lines.push(
+      `Labor: ${input.laborHours ?? 0} hrs @ ${amount(input.laborRate)}/hr = ${amount(input.labor)}`
+    );
+  }
+  if (input.partsLines?.length) {
+    lines.push('', 'Parts:');
+    for (const line of input.partsLines) lines.push(line);
+  }
+  if (input.partsTotal) lines.push(`Parts subtotal: ${amount(input.partsTotal)}`);
+  lines.push(
+    '',
+    `Subtotal: ${amount(input.subtotal)}`,
+    `Tax: ${amount(input.tax)}`,
+    `Grand total: ${amount(input.total)}`
+  );
+  if (input.actionUrl) {
+    lines.push(
+      '',
+      'Respond to this estimate. No login required.',
+      `Approve: ${estimateEmailActionHref(input.actionUrl, 'approve')}`,
+      `Reject: ${estimateEmailActionHref(input.actionUrl, 'reject')}`,
+      `Modify: ${estimateEmailActionHref(input.actionUrl, 'modify')}`,
+      '',
+      'These links are unique to this estimate.'
+    );
+  }
+  lines.push('', `Thank you for choosing ${company}.`);
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /** Open print dialog with full HTML document (app-quality PDF via browser Save as PDF). */

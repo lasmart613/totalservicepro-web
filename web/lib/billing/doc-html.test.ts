@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildEstimateActionCtasHtml,
+  buildEstimateHtml,
+  buildEstimatePlainText,
   buildInvoiceHtml,
   ensureEstimateActionCtas,
 } from './doc-html.ts';
@@ -47,6 +49,53 @@ test('ensureEstimateActionCtas injects CTAs when the client HTML has none', () =
   assert.match(html, /\?action=approve/);
 });
 
+const estimateMail = {
+  company: { company_name: 'QA Locations' },
+  customer: { name: 'Clinic' },
+  estNumber: 'QAL-EST-1',
+  dateStr: '10/5/2026',
+  services: ['Repair'],
+  subtotal: 10,
+  tax: 0,
+  total: 10,
+  partsLines: ['Laser tip: $10.00'],
+  actionUrl: TOKEN_URL,
+};
+
+test('estimate email renders the unique-links sentence once and does not glue the buttons', () => {
+  const built = buildEstimateHtml(estimateMail);
+  const html = ensureEstimateActionCtas(built, TOKEN_URL);
+  assert.equal((html.match(/These links are unique to this estimate\./g) || []).length, 1);
+  assert.equal((html.match(/\?action=approve/g) || []).length, 2);
+  assert.equal((html.match(/<table\b/gi) || []).length, (html.match(/<\/table>/gi) || []).length);
+  const plainFromHtml = html.replace(/<[^>]+>/g, '\n');
+  assert.doesNotMatch(plainFromHtml, /ApproveReject|RejectModify|approveReject/);
+
+  const text = buildEstimatePlainText(estimateMail);
+  assert.equal((text.match(/These links are unique to this estimate\./g) || []).length, 1);
+  assert.match(text, /Approve: /);
+  assert.match(text, /Reject: /);
+  assert.match(text, /Modify: /);
+  assert.doesNotMatch(text, /ApproveReject|RejectModify|approveReject/);
+  assert.match(text, /Laser tip: \$10\.00/);
+});
+
+test('estimate plain text includes diagnostic fee and labor with currency', () => {
+  const text = buildEstimatePlainText({
+    ...estimateMail,
+    diagFee: 50,
+    laborHours: 1,
+    laborRate: 40,
+    labor: 40,
+    subtotal: 100,
+    total: 100,
+    moneyPrefs: { currencyCode: 'USD', numberFormat: 'auto' },
+  });
+  assert.match(text, /Diagnostic Fee: \$50\.00/);
+  assert.match(text, /Labor: 1 hrs @ \$40\.00\/hr = \$40\.00/);
+  assert.match(text, /Subtotal: \$100\.00/);
+});
+
 const invoiceBase = {
   company: { company_name: 'Lux Service' },
   customer: { name: 'Clinic' },
@@ -70,7 +119,7 @@ test('invoice HTML shows due-now deposit vs deferred remainder; pay button is de
     collectableAmount: 650,
     paymentUrl: 'https://checkout.stripe.com/c/pay/cs_test_deposit',
   });
-  assert.match(html, /Invoice Total: \$1555\.00/);
+  assert.match(html, /Invoice Total: \$1,555\.00/);
   assert.match(html, /Due now \(parts\/travel deposit\)/);
   assert.match(html, /Remaining \(due on completion\)/);
   assert.match(html, /Pay deposit \$650\.00 securely with Stripe/);

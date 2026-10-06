@@ -31,9 +31,15 @@ const LOCALIZED_LANDING_SHOTS = new Set([
 
 export type LandingShotLocale = 'en' | 'fa' | 'es' | 'fr';
 
-/** English path, or the same file under /landing/fa|es|fr when that language is open. */
-export function localizedLandingSrc(src: string, locale: LandingShotLocale): string {
-  if (locale === 'en' || !LOCALIZED_LANDING_SHOTS.has(src)) return src;
+/** Locales that have a still beside the English file. Others stay on the English path. */
+const LOCALIZED_SHOT_LOCALES = new Set<string>(['fa', 'es', 'fr']);
+
+/**
+ * English path, or the same file under /landing/fa|es|fr when that language is open.
+ * Locales and stills without a localized file stay on the English path.
+ */
+export function localizedLandingSrc(src: string, locale: string): string {
+  if (!LOCALIZED_SHOT_LOCALES.has(locale) || !LOCALIZED_LANDING_SHOTS.has(src)) return src;
   return `/landing/${locale}/${src.slice('/landing/'.length)}`;
 }
 

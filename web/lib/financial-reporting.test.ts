@@ -12,6 +12,7 @@ import { decideFinancialAccess } from './financial-reporting-auth.ts';
 import {
   assembleFinancialReport,
   invoiceColumnFlags,
+  presentFinancialReport,
   type InvoiceColumnFlags,
 } from './financial-reporting.ts';
 import { loadShopFinancialSources, type FinanceClient } from './financial-reporting-load.ts';
@@ -212,7 +213,7 @@ test('figures come from invoice, purchase order, and estimate rows', () => {
 
   const collected = metric('cash_collected', report);
   assert.equal(collected.amount, 500);
-  assert.match(collected.note || '', /no amount_paid/);
+  assert.match(collected.note || '', /no recorded payment/);
 
   const outstanding = metric('outstanding_balance', report);
   assert.equal(outstanding.amount, 1300);
@@ -238,10 +239,21 @@ test('figures come from invoice, purchase order, and estimate rows', () => {
 
   assert.equal(metric('cash_paid_out', report).availability, 'unavailable');
   assert.equal(metric('cash_paid_out', report).amount, undefined);
+  assert.match(metric('cash_paid_out', report).reason || '', /Payment details aren't recorded yet/);
+  assert.doesNotMatch(
+    `${metric('cash_paid_out', report).reason} ${metric('cash_paid_out', report).source}`,
+    /purchase_orders|amount_paid|paid_at|payment_method/
+  );
   assert.equal(metric('net_cash_flow', report).availability, 'unavailable');
   assert.equal(metric('processing_fees', report).availability, 'unavailable');
   assert.equal(metric('bank_balance', report).availability, 'unavailable');
   assert.equal(metric('payroll', report).availability, 'unavailable');
+  assert.match(metric('payroll', report).reason || '', /Labor hours aren't recorded yet/);
+  assert.doesNotMatch(metric('payroll', report).reason || '', /labor_log/);
+  for (const row of report.metrics) {
+    const shown = `${row.reason || ''} ${row.note || ''} ${row.source}`;
+    assert.doesNotMatch(shown, /purchase_orders|labor_log|service_invoices|service_estimates|amount_paid|paid_at|payment_method|invoice_data|invoice_date/);
+  }
   assert.equal(metric('marketplace_payouts', report).availability, 'unavailable');
 
   assert.equal(report.paymentMethods.find((row) => row.method === 'Stripe')?.amount, 300);
@@ -289,9 +301,14 @@ test('collected cash is unavailable when payment fields were not returned', () =
   assert.equal(metric('cash_collected', report).availability, 'unavailable');
   assert.equal(metric('cash_collected', report).amount, undefined);
   assert.equal(metric('po_commitments', report).availability, 'unavailable');
+  assert.match(metric('po_commitments', report).reason || '', /Purchase orders could not be read/);
+  assert.doesNotMatch(metric('po_commitments', report).reason || '', /purchase_orders/);
+  assert.match(metric('estimate_pipeline', report).reason || '', /Estimates could not be read/);
+  assert.doesNotMatch(metric('estimate_pipeline', report).reason || '', /service_estimates/);
+  assert.doesNotMatch(metric('cash_collected', report).reason || '', /amount_paid|invoice_data/);
   assert.equal(metric('estimate_pipeline', report).availability, 'unavailable');
   assert.equal(report.aging, null);
-  assert.match(report.agingReason || '', /due_date/);
+  assert.match(report.agingReason || '', /due date/);
 });
 
 test('a failed invoice read does not become a zero total', () => {
@@ -393,4 +410,48 @@ test('nav and page keep financial reporting in Business Management and enforce i
   assert.match(readFileSync(join(webDir, 'lib/auth-session.ts'), 'utf8'), /method: 'DELETE'/);
   assert.match(server, /email: user\.email/);
   assert.doesNotMatch(server, /getSupabaseAdmin/);
+  assert.match(server, /gateFinancialDetail/);
+  assert.match(readFileSync(join(webDir, 'lib/job-costing-server.ts'), 'utf8'), /gateJobCostingPlan/);
+});
+
+test('summary KPIs use the same invoice rows and free presentation drops line items', () => {
+  const report = sample();
+  const revenue = report.summary.kpis.find((row) => row.id === 'revenue_this_month');
+  const outstanding = report.summary.kpis.find((row) => row.id === 'outstanding_invoices');
+  const paid = report.summary.kpis.find((row) => row.id === 'paid_invoices');
+  const average = report.summary.kpis.find((row) => row.id === 'average_job_value');
+  const margin = report.summary.kpis.find((row) => row.id === 'gross_margin');
+  const open = report.summary.kpis.find((row) => row.id === 'open_estimates');
+  assert.equal(revenue?.amount, 400);
+  assert.equal(revenue?.compareAmount, 1500);
+  assert.equal(outstanding?.amount, 1300);
+  assert.equal(paid?.amount, 300);
+  assert.equal(paid?.count, 1);
+  assert.equal(average?.amount, 475);
+  assert.equal(margin?.availability, 'unavailable');
+  assert.equal(open?.amount, 400);
+  assert.equal(report.summary.monthlyRevenue?.find((point) => point.month === '2026-10')?.amount, 400);
+  assert.equal(report.currencyCode, 'USD');
+  assert.equal(report.detailIncluded, true);
+  assert.ok(report.outstanding.length > 0);
+
+  const free = presentFinancialReport(report, false);
+  assert.equal(free.detailIncluded, false);
+  assert.equal(free.outstanding.length, 0);
+  assert.equal(free.paymentMethods.length, 0);
+  assert.equal(free.aging, null);
+  assert.equal(free.metrics.length, 0);
+  assert.equal(free.summary.kpis.find((row) => row.id === 'outstanding_invoices')?.amount, 1300);
+
+  const eur = assembleFinancialReport({
+    organizationId: 1,
+    currencyCode: 'eur',
+    numberFormat: 'dot_comma_after',
+    invoices: [],
+    invoiceColumns: columns,
+    purchaseOrders: [],
+    estimates: [],
+  });
+  assert.equal(eur.currencyCode, 'EUR');
+  assert.equal(eur.numberFormat, 'dot_comma_after');
 });

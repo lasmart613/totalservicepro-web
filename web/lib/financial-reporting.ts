@@ -5,6 +5,8 @@
  */
 
 import { money2, parseInvoiceData } from './billing/apply-invoice-payment.ts';
+import { resolveOrgMoneyPrefs } from './money-format.ts';
+import { DEFAULT_ORG_TIMEZONE, isoDateInTimeZone, isValidTimeZone, timeZoneShortName } from './org-timezone.ts';
 
 export type InvoiceSourceRow = {
   id?: string | number | null;
@@ -110,14 +112,50 @@ export type AgingBucket = {
   source: string;
 };
 
+export type MoneyKpi = {
+  id: string;
+  label: string;
+  availability: 'available' | 'unavailable';
+  amount?: number;
+  count?: number;
+  note?: string;
+  reason?: string;
+  /** Prior-period amount, when this KPI is a comparison. */
+  compareAmount?: number;
+  /** Percent change versus compareAmount. Null when the prior period is zero. */
+  deltaPercent?: number | null;
+};
+
+export type MonthlyRevenuePoint = {
+  month: string;
+  amount: number;
+};
+
+export type FinancialSummary = {
+  kpis: MoneyKpi[];
+  monthlyRevenue: MonthlyRevenuePoint[] | null;
+  monthlyRevenueReason: string | null;
+  collectedThisMonth: number | null;
+  outstandingAmount: number | null;
+};
+
 export type FinancialReport = {
   organizationId: string | null;
   organizationName: string | null;
+  currencyCode: string;
+  numberFormat: string;
+  /** False on the free plan: line-item tables are omitted. */
+  detailIncluded: boolean;
   generatedAt: string;
   asOfDate: string;
+  /** IANA zone used for the as-of date and timestamp payment days. */
+  timeZone: string;
+  /** Short name such as PDT, shown next to the as-of date. */
+  timeZoneLabel: string;
   invoiceRowCount: number | null;
   purchaseOrderRowCount: number | null;
   estimateRowCount: number | null;
+  summary: FinancialSummary;
   metrics: FinancialMetric[];
   outstanding: OutstandingInvoice[];
   unpricedInvoices: UnpricedInvoice[];
@@ -139,7 +177,7 @@ const CLOSED_ESTIMATE = new Set([
 ]);
 
 const PAYMENT_METHOD_SOURCE =
-  'service_invoices.payment_method, else invoice_data.last_payment_method or depositMethod; Stripe when a stripe_checkout_session_id is stored and no method is';
+  'Payment method, or Stripe when a checkout was used and no method is recorded';
 
 export function invoiceColumnFlags(select: string): InvoiceColumnFlags {
   const names = new Set(
@@ -216,13 +254,25 @@ function recordedPayment(
   return { known: false, amount: 0 };
 }
 
-function paymentDate(row: InvoiceSourceRow, columns: InvoiceColumnFlags): string | null {
+/** Date-only values stay on that calendar day. Timestamps use the organization zone. */
+function calendarDay(value: unknown, timeZone: string): string | null {
+  if (value == null || value === '') return null;
+  const text = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return text;
+  if (/[T\s]/.test(text.slice(10))) {
+    const date = new Date(text);
+    if (!Number.isNaN(date.getTime())) return isoDateInTimeZone(date, timeZone);
+  }
+  return ymd(text);
+}
+
+function paymentDate(row: InvoiceSourceRow, columns: InvoiceColumnFlags, timeZone: string): string | null {
   if (columns.paid_at) {
-    const paid = ymd(row.paid_at);
+    const paid = calendarDay(row.paid_at, timeZone);
     if (paid) return paid;
   }
   const data = invoiceData(row, columns);
-  return ymd(data.last_payment_at) || ymd(data.depositDate);
+  return calendarDay(data.last_payment_at, timeZone) || calendarDay(data.depositDate, timeZone);
 }
 
 function paymentMethod(row: InvoiceSourceRow, columns: InvoiceColumnFlags): string {
@@ -270,6 +320,17 @@ function unavailable(id: string, label: string, source: string, reason: string):
   return { id, label, source, availability: 'unavailable', reason };
 }
 
+/** Table and column names stay in the log. The report shows a plain sentence. */
+function plainDiagnostic(raw: string | null | undefined, fallback: string): string | null {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  if (/[a-z][a-z0-9]*_[a-z0-9_]+|schema cache|does not exist|could not find the/i.test(text)) {
+    console.warn('[financial-reporting]', text);
+    return fallback;
+  }
+  return text;
+}
+
 function ageBucket(due: string | null, asOf: string): string {
   if (!due) return 'no_due_date';
   if (due >= asOf) return 'not_yet_due';
@@ -298,9 +359,22 @@ function isOpenEstimate(status: string): boolean {
   return !CLOSED_ESTIMATE.has(status);
 }
 
+function shiftMonth(ym: string, delta: number): string {
+  const [year, month] = ym.split('-').map(Number);
+  const next = new Date(Date.UTC(year, month - 1 + delta, 1));
+  return next.toISOString().slice(0, 7);
+}
+
+function deltaPercent(current: number, previous: number): number | null {
+  if (previous === 0) return current === 0 ? 0 : null;
+  return Math.round(((current - previous) / Math.abs(previous)) * 1000) / 10;
+}
+
 export function assembleFinancialReport(input: {
   organizationId: string | number | null;
   organizationName?: string | null;
+  currencyCode?: string | null;
+  numberFormat?: string | null;
   asOf?: Date;
   invoices: InvoiceSourceRow[] | null;
   invoiceIssue?: string | null;
@@ -309,12 +383,23 @@ export function assembleFinancialReport(input: {
   purchaseOrderIssue?: string | null;
   estimates: EstimateSourceRow[] | null;
   estimateIssue?: string | null;
+  timeZone?: string | null;
 }): FinancialReport {
   const asOf = input.asOf || new Date();
-  const asOfDate = asOf.toISOString().slice(0, 10);
+  const requestedZone = String(input.timeZone || '').trim();
+  const timeZone = requestedZone && isValidTimeZone(requestedZone) ? requestedZone : DEFAULT_ORG_TIMEZONE;
+  const asOfDate = isoDateInTimeZone(asOf, timeZone);
+  const timeZoneLabel = timeZoneShortName(asOf, timeZone);
   const month = asOfDate.slice(0, 7);
+  const lastMonth = shiftMonth(month, -1);
+  const moneyPrefs = resolveOrgMoneyPrefs({
+    currencyCode: input.currencyCode,
+    numberFormat: input.numberFormat,
+  });
   const columns = input.invoiceColumns;
-  const invoiceIssue = input.invoiceIssue || null;
+  const invoiceIssue = plainDiagnostic(input.invoiceIssue, 'Invoices could not be read.');
+  const purchaseOrderIssue = plainDiagnostic(input.purchaseOrderIssue, 'Purchase orders could not be read.');
+  const estimateIssue = plainDiagnostic(input.estimateIssue, 'Estimates could not be read.');
   const invoicesKnown = input.invoices != null && !invoiceIssue;
 
   let billedCents = 0;
@@ -340,6 +425,11 @@ export function assembleFinancialReport(input: {
   let stripeCount = 0;
   let unknownPaid = 0;
   let draftPayments = 0;
+  let pricedBilledCount = 0;
+  let lastMonthBilledCents = 0;
+  let paidInvoiceCents = 0;
+  let paidInvoiceCount = 0;
+  const monthlyBilled = new Map<string, number>();
   const outstanding: OutstandingInvoice[] = [];
   const unpriced: UnpricedInvoice[] = [];
   const methods = new Map<string, { cents: number; count: number }>();
@@ -382,23 +472,35 @@ export function assembleFinancialReport(input: {
       }
 
       billedCount += 1;
-      if (total != null) billedCents += centsOf(total);
-      else {
+      if (total != null) {
+        billedCents += centsOf(total);
+        pricedBilledCount += 1;
+        if (paid.known && paid.amount > 0 && centsOf(total) <= centsOf(paid.amount)) {
+          paidInvoiceCents += centsOf(total);
+          paidInvoiceCount += 1;
+        }
+      } else {
         unpriced.push({
           id: String(row.id ?? ''),
           number: docNumber(row, columns),
           customer: String(row.customer_name || '').trim() || 'Customer name not recorded',
           status: status || 'blank',
-          reason: 'service_invoices.total is empty',
+          reason: 'Invoice total is empty',
         });
       }
 
       if (columns.invoice_date) {
         const invoiceDay = ymd(row.invoice_date);
         if (!invoiceDay) monthBilledUndated += 1;
-        else if (invoiceDay.startsWith(month) && total != null) {
-          monthBilledCents += centsOf(total);
-          monthBilledCount += 1;
+        else if (total != null) {
+          const ym = invoiceDay.slice(0, 7);
+          monthlyBilled.set(ym, (monthlyBilled.get(ym) || 0) + centsOf(total));
+          if (ym === month) {
+            monthBilledCents += centsOf(total);
+            monthBilledCount += 1;
+          } else if (ym === lastMonth) {
+            lastMonthBilledCents += centsOf(total);
+          }
         }
       }
 
@@ -418,7 +520,7 @@ export function assembleFinancialReport(input: {
           number: docNumber(row, columns),
           customer: String(row.customer_name || '').trim() || 'Customer name not recorded',
           status: status || 'blank',
-          reason: 'No amount_paid and no invoice_data.deposit',
+          reason: 'No recorded payment and no deposit',
         });
       } else if (paid.amount > 0) {
         collectedCents += centsOf(paid.amount);
@@ -432,7 +534,7 @@ export function assembleFinancialReport(input: {
           stripeCents += centsOf(paid.amount);
           stripeCount += 1;
         }
-        const paidDay = paymentDate(row, columns);
+        const paidDay = paymentDate(row, columns, timeZone);
         if (!paidDay) {
           collectedUndatedCents += centsOf(paid.amount);
           collectedUndatedCount += 1;
@@ -483,52 +585,52 @@ export function assembleFinancialReport(input: {
   const metrics: FinancialMetric[] = [];
 
   if (!invoicesKnown) {
-    const reason = invoiceIssue || 'service_invoices could not be read';
+    const reason = invoiceIssue || 'Invoices could not be read';
     metrics.push(
-      unavailable('billed_income', 'Billed income', 'service_invoices.total', reason),
+      unavailable('billed_income', 'Billed income', 'Issued invoice total', reason),
       unavailable(
         'cash_collected',
         'Cash collected',
-        'service_invoices.amount_paid or invoice_data.deposit',
+        'Recorded payment or the deposit saved on the invoice',
         reason
       ),
       unavailable(
         'outstanding_balance',
         'Outstanding unpaid invoices',
-        'service_invoices.total minus amount paid',
+        'Issued invoice total minus the recorded payment',
         reason
       ),
-      unavailable('draft_invoices', 'Unissued draft invoices', 'service_invoices.total where status is draft', reason),
-      unavailable('sales_tax', 'Sales tax on issued invoices', 'service_invoices.tax', reason),
-      unavailable('billed_this_month', 'Billed this UTC month', 'service_invoices.invoice_date and total', reason),
+      unavailable('draft_invoices', 'Unissued draft invoices', 'Draft invoice total', reason),
+      unavailable('sales_tax', 'Sales tax on issued invoices', 'Tax collected', reason),
+      unavailable('billed_this_month', 'Billed this month', 'Invoice date and total', reason),
       unavailable(
         'collected_this_month',
-        'Cash collected this UTC month',
-        'service_invoices.paid_at or invoice_data.last_payment_at / depositDate',
+        'Cash collected this month',
+        'Payment date, or the deposit date saved on the invoice',
         reason
       ),
       unavailable('stripe_processed', 'Stripe-processed collections', PAYMENT_METHOD_SOURCE, reason),
       unavailable(
         'voided_payments',
         'Payments recorded on voided invoices',
-        'service_invoices.amount_paid where status is void or cancelled',
+        'Payments recorded on voided or cancelled invoices',
         reason
       )
     );
   } else {
     const paymentSource = columns.amount_paid
-      ? 'service_invoices.amount_paid; invoice_data.deposit when amount_paid is 0 or empty'
-      : 'invoice_data.deposit (service_invoices.amount_paid was not returned)';
+      ? 'Recorded payment, or the deposit saved on the invoice when the payment amount is empty'
+      : 'Deposit saved on the invoice (the payment amount column was not returned)';
     const collectedAvailable = columns.amount_paid || columns.invoice_data;
     metrics.push(
       available({
         id: 'billed_income',
         label: 'Billed income',
-        source: 'service_invoices.total for issued invoices (not draft, void, or cancelled)',
+        source: 'Issued invoice total',
         amount: fromCents(billedCents),
         count: billedCount,
         note:
-          unpriced.some((row) => row.reason.startsWith('service_invoices.total'))
+          unpriced.some((row) => row.reason.startsWith('Invoice total'))
             ? 'Issued invoices with an empty total were counted and omitted from the amount.'
             : undefined,
       })
@@ -539,15 +641,15 @@ export function assembleFinancialReport(input: {
         unavailable(
           'cash_collected',
           'Cash collected',
-          'service_invoices.amount_paid or invoice_data.deposit',
-          'Neither amount_paid nor invoice_data was returned, so collected cash cannot be read.'
+          'Recorded payment or the deposit saved on the invoice',
+          'Payment amounts were not returned, so collected cash cannot be read.'
         )
       );
     } else {
       const notes: string[] = [];
       if (unknownPaid > 0) {
         notes.push(
-          `${unknownPaid} issued invoice${unknownPaid === 1 ? '' : 's'} have no amount_paid and no invoice_data.deposit, so they are not included in cash collected.`
+          `${unknownPaid} issued invoice${unknownPaid === 1 ? '' : 's'} have no recorded payment and no deposit, so they are not included in cash collected.`
         );
       }
       if (draftPayments > 0) {
@@ -569,7 +671,7 @@ export function assembleFinancialReport(input: {
       available({
         id: 'outstanding_balance',
         label: 'Outstanding unpaid invoices',
-        source: 'service_invoices.total minus amount_paid (or invoice_data.deposit) for issued invoices that still have a balance',
+        source: 'Issued invoice total minus the recorded payment',
         amount: fromCents(outstandingCents),
         count: outstanding.length,
         note:
@@ -583,7 +685,7 @@ export function assembleFinancialReport(input: {
       available({
         id: 'draft_invoices',
         label: 'Unissued draft invoices',
-        source: 'service_invoices.total where status is draft',
+        source: 'Draft invoice total',
         amount: fromCents(draftCents),
         count: draftCount,
         note: 'Drafts are not counted as billed income or accounts receivable.',
@@ -595,8 +697,8 @@ export function assembleFinancialReport(input: {
         unavailable(
           'sales_tax',
           'Sales tax on issued invoices',
-          'service_invoices.tax',
-          'The tax column was not returned for service_invoices.'
+          'Tax collected',
+          'The tax amount was not returned.'
         )
       );
     } else if (taxKnown === 0 && taxNulls > 0) {
@@ -604,8 +706,8 @@ export function assembleFinancialReport(input: {
         unavailable(
           'sales_tax',
           'Sales tax on issued invoices',
-          'service_invoices.tax',
-          'tax is null on every issued invoice.'
+          'Tax collected',
+          'Tax is empty on every issued invoice.'
         )
       );
     } else {
@@ -613,12 +715,12 @@ export function assembleFinancialReport(input: {
         available({
           id: 'sales_tax',
           label: 'Sales tax on issued invoices',
-          source: 'service_invoices.tax',
+          source: 'Tax collected',
           amount: fromCents(taxCents),
           count: taxKnown,
           note:
             taxNulls > 0
-              ? `${taxNulls} issued invoice${taxNulls === 1 ? '' : 's'} have a null tax value and were not added.`
+              ? `${taxNulls} issued invoice${taxNulls === 1 ? '' : 's'} have no tax amount and were not added.`
               : 'Tax stored on the invoice. Partial payments are not allocated to tax.',
         })
       );
@@ -628,23 +730,23 @@ export function assembleFinancialReport(input: {
       metrics.push(
         unavailable(
           'billed_this_month',
-          'Billed this UTC month',
-          'service_invoices.invoice_date',
-          'invoice_date was not returned, so this month cannot be split out.'
+          'Billed this month',
+          'Invoice date',
+          'The invoice date was not returned, so this month cannot be split out.'
         )
       );
     } else {
       metrics.push(
         available({
           id: 'billed_this_month',
-          label: 'Billed this UTC month',
-          source: 'service_invoices.invoice_date and total',
+          label: 'Billed this month',
+          source: 'Invoice date and total',
           amount: fromCents(monthBilledCents),
           count: monthBilledCount,
           note:
             monthBilledUndated > 0
-              ? `${monthBilledUndated} issued invoice${monthBilledUndated === 1 ? '' : 's'} have no invoice_date and are excluded from this month.`
-              : `UTC month ${month}.`,
+              ? `${monthBilledUndated} issued invoice${monthBilledUndated === 1 ? '' : 's'} have no invoice date and are excluded from this month.`
+              : `Month ${month}.`,
         })
       );
     }
@@ -653,8 +755,8 @@ export function assembleFinancialReport(input: {
       metrics.push(
         unavailable(
           'collected_this_month',
-          'Cash collected this UTC month',
-          'service_invoices.paid_at or invoice_data payment dates',
+          'Cash collected this month',
+          'Payment date',
           'Collected cash itself is unavailable.'
         )
       );
@@ -662,23 +764,23 @@ export function assembleFinancialReport(input: {
       metrics.push(
         unavailable(
           'collected_this_month',
-          'Cash collected this UTC month',
-          'service_invoices.paid_at or invoice_data.last_payment_at / depositDate',
-          'No payment date column or invoice_data was returned.'
+          'Cash collected this month',
+          'Payment date, or the deposit date saved on the invoice',
+          'No payment date was returned.'
         )
       );
     } else {
       metrics.push(
         available({
           id: 'collected_this_month',
-          label: 'Cash collected this UTC month',
-          source: 'service_invoices.paid_at, else invoice_data.last_payment_at or depositDate',
+          label: 'Cash collected this month',
+          source: 'Payment date, or the deposit date saved on the invoice',
           amount: fromCents(monthCollectedCents),
           count: monthCollectedCount,
           note:
             collectedUndatedCount > 0
               ? `${fromCents(collectedUndatedCents).toFixed(2)} collected across ${collectedUndatedCount} payment${collectedUndatedCount === 1 ? '' : 's'} has no payment date and is excluded from this month.`
-              : `UTC month ${month}. Uses the payment date, not the invoice date.`,
+              : `Month ${month}. Uses the payment date, not the invoice date.`,
         })
       );
     }
@@ -704,7 +806,7 @@ export function assembleFinancialReport(input: {
       available({
         id: 'voided_payments',
         label: 'Payments recorded on voided invoices',
-        source: 'service_invoices.amount_paid or invoice_data.deposit where status is void or cancelled',
+        source: 'Payments recorded on voided or cancelled invoices',
         amount: fromCents(voidedPaymentCents),
         count: voidedPaymentCount,
         note: 'Excluded from billed income, cash collected, and outstanding. Refunds are not stored separately.',
@@ -712,16 +814,16 @@ export function assembleFinancialReport(input: {
     );
   }
 
-  if (input.purchaseOrders == null || input.purchaseOrderIssue) {
-    const reason = input.purchaseOrderIssue || 'purchase_orders could not be read';
+  if (input.purchaseOrders == null || purchaseOrderIssue) {
+    const reason = purchaseOrderIssue || 'Purchase orders could not be read.';
     metrics.push(
       unavailable(
         'po_commitments',
         'Purchase-order commitments',
-        'purchase_orders.total where status is not draft or cancelled',
+        'Purchase order total for orders that are not drafts or cancelled',
         reason
       ),
-      unavailable('po_drafts', 'Draft purchase orders', 'purchase_orders.total where status is draft', reason)
+      unavailable('po_drafts', 'Draft purchase orders', 'Draft purchase order total', reason)
     );
   } else {
     let commitCents = 0;
@@ -744,7 +846,7 @@ export function assembleFinancialReport(input: {
       available({
         id: 'po_commitments',
         label: 'Purchase-order commitments',
-        source: 'purchase_orders.total where status is sent or another non-draft, non-cancelled status',
+        source: 'Purchase order total for sent and other open orders',
         amount: fromCents(commitCents),
         count: commitCount,
         note: 'This is the recorded order total, not cash paid to the supplier.',
@@ -752,26 +854,27 @@ export function assembleFinancialReport(input: {
       available({
         id: 'po_drafts',
         label: 'Draft purchase orders',
-        source: 'purchase_orders.total where status is draft or blank',
+        source: 'Draft purchase order total',
         amount: fromCents(draftPoCents),
         count: draftPoCount,
       })
     );
   }
 
-  if (input.estimates == null || input.estimateIssue) {
+  let pipelineCents = 0;
+  let pipelineCount = 0;
+  const estimatesKnown = input.estimates != null && !estimateIssue;
+  if (!estimatesKnown) {
     metrics.push(
       unavailable(
         'estimate_pipeline',
         'Open estimate pipeline',
-        'service_estimates.total',
-        input.estimateIssue || 'service_estimates could not be read'
+        'Open estimate total',
+        estimateIssue || 'Estimates could not be read.'
       )
     );
   } else {
-    let pipelineCents = 0;
-    let pipelineCount = 0;
-    for (const row of input.estimates) {
+    for (const row of input.estimates || []) {
       if (!isOpenEstimate(statusOf(row.status))) continue;
       pipelineCount += 1;
       const total = num(row.total);
@@ -781,7 +884,7 @@ export function assembleFinancialReport(input: {
       available({
         id: 'estimate_pipeline',
         label: 'Open estimate pipeline',
-        source: 'service_estimates.total where status is not invoiced, approved, accepted, expired, rejected, declined, cancelled, or completed',
+        source: 'Open estimate total',
         amount: fromCents(pipelineCents),
         count: pipelineCount,
         note: 'Pipeline only. Not income and not cash.',
@@ -793,32 +896,32 @@ export function assembleFinancialReport(input: {
     unavailable(
       'cash_paid_out',
       'Cash paid to suppliers',
-      'purchase_orders',
-      'purchase_orders stores supplier, total, and status. It has no amount_paid, paid_at, or payment_method, so supplier payments are not recorded.'
+      'Supplier payments',
+      "Payment details aren't recorded yet."
     ),
     unavailable(
       'net_cash_flow',
       'Net cash flow',
-      'service_invoices collections minus supplier payments',
+      'Invoice collections minus supplier payments',
       'Cash collected can be read from invoices. Cash paid out is not stored, so net cash flow is not computed.'
     ),
     unavailable(
       'processing_fees',
       'Card processing fees',
-      'No fee column on service_invoices',
+      'No fee is stored on invoices',
       'Stripe fees, payouts, and processor costs are not stored on shop invoices.'
     ),
     unavailable(
       'bank_balance',
       'Bank balance',
-      'No bank or ledger table',
-      'There is no bank, general-ledger, or reconciliation table.'
+      'Not recorded',
+      "Bank balances aren't recorded yet."
     ),
     unavailable(
       'payroll',
       'Payroll',
       'No payroll table',
-      'There is no payroll or labor-cost table. labor_log has hours, not wages.'
+      "Labor hours aren't recorded yet."
     ),
     unavailable(
       'marketplace_payouts',
@@ -837,20 +940,145 @@ export function assembleFinancialReport(input: {
             label: bucket.label,
             amount: fromCents(hit.cents),
             count: hit.count,
-            source: 'service_invoices.due_date and outstanding balance',
+            source: 'Due date and outstanding balance',
           };
         })
       : null;
 
+  const monthlyRevenue = columns.invoice_date
+    ? Array.from({ length: 6 }, (_, index) => {
+        const ym = shiftMonth(month, index - 5);
+        return { month: ym, amount: fromCents(monthlyBilled.get(ym) || 0) };
+      })
+    : null;
+
+  const revenueThis = fromCents(monthBilledCents);
+  const revenueLast = fromCents(lastMonthBilledCents);
+  const outstandingAmount = fromCents(outstandingCents);
+  const collectedMonthAmount = fromCents(monthCollectedCents);
+  const average =
+    pricedBilledCount > 0 ? fromCents(Math.round(billedCents / pricedBilledCount)) : null;
+
+  const summary: FinancialSummary = {
+    kpis: [],
+    monthlyRevenue,
+    monthlyRevenueReason: columns.invoice_date
+      ? null
+      : invoicesKnown
+        ? 'The invoice date was not returned, so monthly revenue cannot be charted.'
+        : invoiceIssue || 'Invoices could not be read',
+    collectedThisMonth: invoicesKnown && (columns.paid_at || columns.invoice_data) ? collectedMonthAmount : null,
+    outstandingAmount: invoicesKnown ? outstandingAmount : null,
+  };
+
+  if (!invoicesKnown || !columns.invoice_date) {
+    summary.kpis.push({
+      id: 'revenue_this_month',
+      label: 'Revenue this month',
+      availability: 'unavailable',
+      reason: !invoicesKnown
+        ? invoiceIssue || 'Invoices could not be read'
+        : 'The invoice date was not returned, so this month cannot be split out.',
+    });
+  } else {
+    summary.kpis.push({
+      id: 'revenue_this_month',
+      label: 'Revenue this month',
+      availability: 'available',
+      amount: revenueThis,
+      count: monthBilledCount,
+      compareAmount: revenueLast,
+      deltaPercent: deltaPercent(revenueThis, revenueLast),
+      note: `Compared with ${lastMonth}. Billed invoice totals.`,
+    });
+  }
+
+  summary.kpis.push(
+    invoicesKnown
+      ? {
+          id: 'outstanding_invoices',
+          label: 'Outstanding invoices',
+          availability: 'available',
+          amount: outstandingAmount,
+          count: outstanding.length,
+          note: 'Issued invoices that still have a balance.',
+        }
+      : {
+          id: 'outstanding_invoices',
+          label: 'Outstanding invoices',
+          availability: 'unavailable',
+          reason: invoiceIssue || 'Invoices could not be read',
+        },
+    invoicesKnown
+      ? {
+          id: 'paid_invoices',
+          label: 'Paid invoices',
+          availability: 'available',
+          amount: fromCents(paidInvoiceCents),
+          count: paidInvoiceCount,
+          note: 'Issued invoices whose recorded payment covers the total.',
+        }
+      : {
+          id: 'paid_invoices',
+          label: 'Paid invoices',
+          availability: 'unavailable',
+          reason: invoiceIssue || 'Invoices could not be read',
+        },
+    invoicesKnown && average != null
+      ? {
+          id: 'average_job_value',
+          label: 'Average job value',
+          availability: 'available',
+          amount: average,
+          count: pricedBilledCount,
+          note: 'Issued invoice total divided by issued invoices that have a total.',
+        }
+      : {
+          id: 'average_job_value',
+          label: 'Average job value',
+          availability: 'unavailable',
+          reason: invoicesKnown
+            ? 'No issued invoice has a total.'
+            : invoiceIssue || 'Invoices could not be read',
+        },
+    {
+      id: 'gross_margin',
+      label: 'Gross margin',
+      availability: 'unavailable',
+      reason: 'Invoices do not store labor or parts cost, so gross margin is not computed on this report.',
+    },
+    estimatesKnown
+      ? {
+          id: 'open_estimates',
+          label: 'Open estimates',
+          availability: 'available',
+          amount: fromCents(pipelineCents),
+          count: pipelineCount,
+          note: 'Open estimate totals. Not income and not cash.',
+        }
+      : {
+          id: 'open_estimates',
+          label: 'Open estimates',
+          availability: 'unavailable',
+          reason: estimateIssue || 'Estimates could not be read.',
+        }
+  );
+
   return {
     organizationId: input.organizationId == null ? null : String(input.organizationId),
     organizationName: input.organizationName || null,
+    currencyCode: moneyPrefs.currencyCode,
+    numberFormat: moneyPrefs.numberFormat,
+    detailIncluded: true,
     generatedAt: asOf.toISOString(),
     asOfDate,
+    timeZone,
+    timeZoneLabel,
+    summary,
     invoiceRowCount: invoicesKnown ? (input.invoices || []).length : null,
     purchaseOrderRowCount:
-      input.purchaseOrders != null && !input.purchaseOrderIssue ? input.purchaseOrders.length : null,
-    estimateRowCount: input.estimates != null && !input.estimateIssue ? input.estimates.length : null,
+      input.purchaseOrders != null && !purchaseOrderIssue ? input.purchaseOrders.length : null,
+    estimateRowCount: input.estimates != null && !estimateIssue ? input.estimates.length : null,
     metrics,
     outstanding,
     unpricedInvoices: unpriced,
@@ -858,9 +1086,24 @@ export function assembleFinancialReport(input: {
     aging,
     agingReason:
       !invoicesKnown
-        ? invoiceIssue || 'service_invoices could not be read'
+        ? invoiceIssue || 'Invoices could not be read'
         : columns.due_date
           ? null
-          : 'service_invoices.due_date was not returned, so aging is unavailable.',
+          : 'The due date was not returned, so aging is unavailable.',
+  };
+}
+
+/** Drop line-item tables for the free plan. KPI summary stays. */
+export function presentFinancialReport(report: FinancialReport, detail: boolean): FinancialReport {
+  if (detail) return { ...report, detailIncluded: true };
+  return {
+    ...report,
+    detailIncluded: false,
+    metrics: [],
+    outstanding: [],
+    unpricedInvoices: [],
+    paymentMethods: [],
+    aging: null,
+    agingReason: null,
   };
 }

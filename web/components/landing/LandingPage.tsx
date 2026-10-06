@@ -1,20 +1,15 @@
 'use client';
 
 import React, { useEffect, useState } from 'react';
-import { usePathname, useRouter } from 'next/navigation';
-import { PublicLink, useFa, useT } from '@/lib/fa/locale';
+import { useRouter } from 'next/navigation';
+import { PublicLink, usePublicLocale, useT } from '@/lib/fa/locale';
+import { prefixLocaleHref } from '@/lib/i18n/locales';
 import { LandingShell } from './LandingShell';
 import { FindRepControl } from './FindRepControl';
 import { FindRepForm } from './FindRepForm';
 import { plansHrefForAudience, type PlanAudience } from '@/lib/billing/plan-tiles';
 import { shouldAutoOpenFindRep } from '@/lib/clinic-service-lead';
-import {
-  LANDING_SHOT_SIZE,
-  landingSizes,
-  landingSrcSet,
-  localizedLandingSrc,
-  type LandingShotLocale,
-} from '@/lib/landing-images';
+import { LANDING_SHOT_SIZE, landingSizes, landingSrcSet, localizedLandingSrc } from '@/lib/landing-images';
 import './landing.css';
 
 const LANDING_PLAN_ROLE: Record<'shop' | 'clinic' | 'parts', PlanAudience> = {
@@ -38,15 +33,6 @@ export function LandingSplash() {
   );
 }
 
-function useLandingShotLocale(): LandingShotLocale {
-  const fa = useFa();
-  const pathname = usePathname() || '';
-  if (fa || pathname === '/fa' || pathname.startsWith('/fa/')) return 'fa';
-  if (pathname === '/es' || pathname.startsWith('/es/')) return 'es';
-  if (pathname === '/fr' || pathname.startsWith('/fr/')) return 'fr';
-  return 'en';
-}
-
 function Shot({
   src,
   alt,
@@ -64,7 +50,7 @@ function Shot({
   sizesKind?: 'hero' | 'gallery' | 'role' | 'phone';
   mount?: boolean;
 }) {
-  const locale = useLandingShotLocale();
+  const locale = usePublicLocale();
   const shown = localizedLandingSrc(src, locale);
   const phone = frame === 'phone';
   const dim = LANDING_SHOT_SIZE[src] || { width: phone ? 390 : 1400, height: phone ? 844 : 900 };
@@ -274,7 +260,7 @@ const HERO_COVER_ID: Record<string, string> = {
 function HeroCarousel() {
   const router = useRouter();
   const t = useT();
-  const fa = useFa();
+  const locale = usePublicLocale();
   const n = HERO_SLIDES.length;
   const [i, setI] = useState(0);
   const [paused, setPaused] = useState(false);
@@ -300,9 +286,9 @@ function HeroCarousel() {
     const el = document.getElementById('find-a-rep');
     el?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     if (new URLSearchParams(window.location.search).has('find')) {
-      router.replace(fa ? '/fa#find-a-rep' : '/#find-a-rep', { scroll: false });
+      router.replace(prefixLocaleHref(locale, '/#find-a-rep'), { scroll: false });
     }
-  }, [router, fa]);
+  }, [router, locale]);
 
   useEffect(() => {
     if (paused || hold) return;
@@ -493,7 +479,7 @@ function HeroCarousel() {
 
 export function LandingPage() {
   const t = useT();
-  const shotLocale = useLandingShotLocale();
+  const shotLocale = usePublicLocale();
   return (
     <LandingShell>
       <HeroCarousel />

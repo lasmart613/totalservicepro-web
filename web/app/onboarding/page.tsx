@@ -11,11 +11,12 @@ import { useRouter } from 'next/navigation';
 import { isOwnerish, isSupplier } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { displayModelName } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { applyPendingSignup, ensureOrganizationMembership, resolvePendingSignup } from '@/lib/pending-signup';
+import { postFounderOrganization } from '@/lib/org-founder-client';
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim, shouldSendToMemberOnboarding } from '@/lib/invite-claim';
 import {
-  applyComplimentarySignupFields,
   missingComplimentaryColumn,
   stripUnbackedComplimentaryPremium,
 } from '@/lib/complimentary-premium';
@@ -565,7 +566,6 @@ export default function Onboarding() {
         }
       } else {
         orgPayload.created_by = currentUser.id;
-        applyComplimentarySignupFields(orgPayload, oType);
         let { data: newOrg, error: iErr } = await supabase
           .from('organizations')
           .insert(orgPayload)
@@ -644,12 +644,28 @@ export default function Onboarding() {
         email: currentUser.email,
         phone: formData.phone || null,
         job_title: finalJob,
-        role: creatorRole,
-        organization_id: orgId,
         onboarding_completed: true,
         onboarding_completed_at: new Date().toISOString(),
       };
-      if (creatorAddl.length) profilePayload.additional_roles = creatorAddl;
+
+      const { data: founderSession } = await supabase.auth.getSession();
+      const founderToken = founderSession.session?.access_token;
+      if (!founderToken) throw new Error('Sign in required to finish organization setup.');
+      const founderLink = await postFounderOrganization(founderToken, {
+        organizationId: orgId,
+        profile: {
+          firstName: formData.firstName,
+          lastName: formData.lastName,
+          phone: formData.phone || null,
+          jobTitle: finalJob,
+          onboardingCompleted: true,
+          additionalRoles: creatorAddl,
+        },
+      });
+      if (!founderLink.ok) {
+        throw new Error(founderLink.error || 'Could not link your organization.');
+      }
+      if (founderLink.organizationId != null) orgId = founderLink.organizationId;
 
       let { error: profErr } = await supabase
         .from('user_profiles')
@@ -669,8 +685,6 @@ export default function Onboarding() {
         console.error('profile upsert', profErr);
         // Force-link org even if full upsert fails — still mark onboarding done
         const forcePayload: any = {
-          organization_id: orgId,
-          role: creatorRole,
           first_name: formData.firstName || null,
           last_name: formData.lastName || null,
           job_title: finalJob || null,
@@ -684,8 +698,6 @@ export default function Onboarding() {
           ({ error: forceErr } = await supabase
             .from('user_profiles')
             .update({
-              organization_id: orgId,
-              role: creatorRole,
               onboarding_completed: true,
             })
             .eq('id', currentUser.id));
@@ -744,15 +756,6 @@ export default function Onboarding() {
       let laserSaveErrors: string[] = [];
       let lasersSaved = 0;
       if (orgType === 'clinic' && orgId && lasers.length > 0) {
-        // Ensure org.created_by is this user (helps RLS for just-created facilities)
-        try {
-          await supabase
-            .from('organizations')
-            .update({ created_by: currentUser.id })
-            .eq('id', orgId)
-            .is('created_by', null);
-        } catch { /* ignore */ }
-
         for (const l of lasers) {
           const payload: any = {
             customer_organization_id: orgId,
@@ -772,7 +775,7 @@ export default function Onboarding() {
             };
             const r2 = await supabase.from('equipment').insert(slim);
             if (r2.error) {
-              laserSaveErrors.push(`${l.manufacturer} ${l.model}: ${r2.error.message}`);
+              laserSaveErrors.push(`${l.manufacturer} ${displayModelName(l.model)}: ${r2.error.message}`);
               console.error('equipment insert failed', r2.error);
             } else {
               lasersSaved++;
@@ -1006,7 +1009,7 @@ export default function Onboarding() {
                 >
                   <option value="">{laserMfr ? 'Select model…' : 'Select manufacturer first'}</option>
                   {laserModelsForMfr.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m} value={m}>{displayModelName(m)}</option>
                   ))}
                   <option value={OTHER_MODEL}>Other / not listed…</option>
                 </select>
@@ -1035,7 +1038,7 @@ export default function Onboarding() {
                 {lasers.map(l => (
                   <li key={l.id} className="card p-3 flex justify-between items-center text-sm">
                     <div>
-                      <div className="font-bold text-[var(--gold)]">{l.manufacturer} {l.model}</div>
+                      <div className="font-bold text-[var(--gold)]">{l.manufacturer} {displayModelName(l.model)}</div>
                       <div className="text-xs text-[var(--text3)]">{l.serial_number ? `SN ${l.serial_number}` : 'No serial'}{l.notes ? ` · ${l.notes}` : ''}</div>
                     </div>
                     <button type="button" className="text-red-400 text-xs" onClick={() => removeLaserDraft(l.id)}>Remove</button>

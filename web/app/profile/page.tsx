@@ -4,8 +4,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { useT } from '@/lib/fa/locale';
 
 export default function Profile() {
+  const t = useT();
   const [profile, setProfile] = useState<any>({});
   const [userId, setUserId] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -182,9 +184,9 @@ export default function Profile() {
       await supabase.auth.updateUser({
         data: { first_name: profile.first_name, last_name: profile.last_name },
       });
-      toast.success('Profile saved');
+      toast.success(t('Profile saved'));
     } catch (e: any) {
-      toast.error(e?.message || 'Save failed');
+      toast.error(e?.message || t('Save failed'));
     } finally {
       setSaving(false);
     }
@@ -194,12 +196,12 @@ export default function Profile() {
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="max-w-lg mx-auto w-full p-6">
-        <h1 className="text-xl font-bold mb-4">👤 Your Profile</h1>
+        <h1 className="text-xl font-bold mb-4">👤 {t('Your Profile')}</h1>
 
         <div className="space-y-4 card p-5">
           <div className="grid grid-cols-2 gap-4">
             <div>
-              <label className="label">First Name</label>
+              <label className="label">{t('First Name')}</label>
               <input
                 className="input"
                 value={profile.first_name || ''}
@@ -207,7 +209,7 @@ export default function Profile() {
               />
             </div>
             <div>
-              <label className="label">Last Name</label>
+              <label className="label">{t('Last Name')}</label>
               <input
                 className="input"
                 value={profile.last_name || ''}
@@ -216,7 +218,7 @@ export default function Profile() {
             </div>
           </div>
           <div>
-            <label className="label">Phone</label>
+            <label className="label">{t('Phone')}</label>
             <input
               className="input"
               value={profile.phone || ''}
@@ -224,7 +226,7 @@ export default function Profile() {
             />
           </div>
           <div>
-            <label className="label">Job Title</label>
+            <label className="label">{t('Job Title')}</label>
             <input
               className="input"
               value={profile.job_title || ''}
@@ -232,7 +234,7 @@ export default function Profile() {
             />
           </div>
           <div>
-            <label className="label">Role</label>
+            <label className="label">{t('Role')}</label>
             <input className="input" value={profile.role || '—'} disabled />
           </div>
           <p className="text-[10px] text-[var(--text3)]">
@@ -267,7 +269,7 @@ export default function Profile() {
         </div>
 
         <button onClick={save} disabled={saving} className="btn btn-primary mt-5 w-full">
-          {saving ? 'Saving…' : 'Save Profile'}
+          {saving ? t('Loading…') : t('Save')}
         </button>
         <p className="text-xs text-center mt-4 text-[var(--text3)]">
           Changes sync across web and Android apps.

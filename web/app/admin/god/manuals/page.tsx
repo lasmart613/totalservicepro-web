@@ -17,6 +17,7 @@ import {
   manualLibraryShelf,
   manualLibraryShelfLabel,
 } from '@/lib/manual-catalog';
+import { manualLanguageLabel, resolveManualLanguage } from '@/lib/manual-language';
 
 export default function GodManualsCatalogPage() {
   const [ready, setReady] = useState(false);
@@ -275,7 +276,11 @@ export default function GodManualsCatalogPage() {
           reindex never uploads the Grok collection attachment. Live grok-assistant still searches
           the shared collection; the stamp marks that this PDF was uploaded.{' '}
           <code>is_incomplete</code> does not skip either action. Clear the Incomplete badge
-          separately in God → Tables → manuals if the PDF is actually complete.
+          separately in God → Tables → manuals if the PDF is actually complete. Language is an
+          ISO 639-1 code on the catalog row (default en). A title that ends in (German) is stored
+          as de and the suffix stays on the title. Neither index reads that column, so adding
+          language does not require a corpus re-index. A new non-English PDF still needs Index
+          and Attach, the same as an English one.
         </p>
         <div className="flex flex-wrap items-end gap-2 mb-2">
           <button
@@ -434,6 +439,9 @@ export default function GodManualsCatalogPage() {
               manualLibraryShelf({ title, brand, model, doc_kind: docKind || undefined })
             )}{' '}
             · {catalogManualKindLabel(catalogManualKind({ title, brand, model, doc_kind: docKind || undefined }))}
+            {' · '}
+            {manualLanguageLabel(resolveManualLanguage({ title }))}
+            {resolveManualLanguage({ title }) !== 'en' ? ` (${resolveManualLanguage({ title })})` : ''}
           </span>
         </label>
 

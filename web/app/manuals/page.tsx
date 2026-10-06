@@ -7,6 +7,7 @@ import { getSupabaseClient, getSupabaseUrl } from '@/lib/supabase/client';
 import { fetchAllPages } from '@/lib/supabase/paginate';
 import { isUnlimitedManualSlots, manualSlotLimit } from '@/lib/org-plan';
 import { useRouter } from 'next/navigation';
+import { useT } from '@/lib/fa/locale';
 import { manualViewHref, stashManualView, type ManualViewPayload } from '@/lib/manuals';
 import {
   catalogManualKind,
@@ -29,7 +30,6 @@ import {
 } from '@/lib/manuals-access';
 import {
   DEFAULT_EQUIPMENT_TYPE,
-  EQUIPMENT_TYPES,
   EQUIPMENT_TYPE_VALUES,
   equipmentTypeMeta,
   equipmentTypeOrDefault,
@@ -42,12 +42,20 @@ import {
   filterManualLibrary,
   fetchManualLibraryRows,
   manufacturerShelves,
+  manualLanguageOptionsForView,
+  manualRoomsForView,
   manualLibraryFiltersActive,
   manualLibrarySearchParams,
   parseManualLibrarySearchParams,
+  manualSearchBodyQuery,
   uniqueManualBrands,
   type ManualLibraryRoom,
 } from '@/lib/manual-library-filter';
+import {
+  ALL_MANUAL_LANGUAGES,
+  manualLanguageBadge,
+  resolveManualLanguage,
+} from '@/lib/manual-language';
 
 const WAVELENGTH_OPTIONS = [
   { label: 'All Wavelengths', value: '' },
@@ -62,6 +70,7 @@ const WAVELENGTH_OPTIONS = [
 const DEFAULT_SLOT_LIMIT = 5; // free default; Premium is 15 via manualSlotLimit()
 
 export default function ManualsLibrary() {
+  const t = useT();
   const router = useRouter();
   const [manuals, setManuals] = useState<any[]>([]);
   const [myLibrary, setMyLibrary] = useState<any[]>([]);
@@ -73,6 +82,7 @@ export default function ManualsLibrary() {
   const [selectedWavelength, setSelectedWavelength] = useState('');
   const [query, setQuery] = useState('');
   const [selectedBrand, setSelectedBrand] = useState('');
+  const [selectedLanguage, setSelectedLanguage] = useState('');
   const [incompleteOnly, setIncompleteOnly] = useState(false);
   const [bodyMatchIds, setBodyMatchIds] = useState<Set<string> | null>(null);
   const [bodySearchReady, setBodySearchReady] = useState(true);
@@ -89,6 +99,7 @@ export default function ManualsLibrary() {
     else if (parsed.room) setRoom(equipmentTypeOrDefault(parsed.room));
     if (parsed.query) setQuery(parsed.query);
     if (parsed.brand) setSelectedBrand(parsed.brand);
+    if (parsed.language) setSelectedLanguage(parsed.language);
     if (parsed.incompleteOnly) setIncompleteOnly(true);
     loadData();
   }, []);
@@ -97,6 +108,7 @@ export default function ManualsLibrary() {
     room?: ManualLibraryRoom;
     query?: string;
     brand?: string;
+    language?: string;
     incompleteOnly?: boolean;
     library?: ManualLibraryShelf;
   }) {
@@ -104,6 +116,7 @@ export default function ManualsLibrary() {
       room: next.room ?? room,
       query: next.query ?? query,
       brand: next.brand ?? selectedBrand,
+      language: next.language ?? selectedLanguage,
       incompleteOnly: next.incompleteOnly ?? incompleteOnly,
       library: next.library ?? library,
     });
@@ -126,10 +139,11 @@ export default function ManualsLibrary() {
   function clearLibraryFilters() {
     setQuery('');
     setSelectedBrand('');
+    setSelectedLanguage('');
     setIncompleteOnly(false);
     setSelectedWavelength('');
     setBodyMatchIds(null);
-    syncFilterUrl({ query: '', brand: '', incompleteOnly: false });
+    syncFilterUrl({ query: '', brand: '', language: '', incompleteOnly: false });
   }
 
   function manualRoom(m: any): EquipmentType {
@@ -386,6 +400,7 @@ export default function ManualsLibrary() {
       contentType: json?.content_type || null,
       chapters: Array.isArray(json?.chapters) ? json.chapters : null,
       isIncomplete: showIncompleteBadge(manual),
+      language: resolveManualLanguage(manual),
     };
     stashManualView(payload);
     router.push(manualViewHref({ id: payload.manualId, title: payload.title }));
@@ -514,12 +529,13 @@ export default function ManualsLibrary() {
   const discoveryActive = manualLibraryFiltersActive({
     query,
     brand: selectedBrand,
+    language: selectedLanguage,
     incompleteOnly,
     wavelength: selectedWavelength,
   });
 
   useEffect(() => {
-    const q = query.trim();
+    const q = manualSearchBodyQuery(query);
     if (!q) {
       setBodyMatchIds(null);
       setBodySearchReady(true);
@@ -577,6 +593,7 @@ export default function ManualsLibrary() {
         {
           query,
           brand: selectedBrand,
+          language: selectedLanguage,
           room,
           wavelength: selectedWavelength,
           incompleteOnly,
@@ -584,7 +601,7 @@ export default function ManualsLibrary() {
         },
         bodyMatchIds
       ),
-    [sourceManuals, query, selectedBrand, room, selectedWavelength, incompleteOnly, library, bodyMatchIds]
+    [sourceManuals, query, selectedBrand, selectedLanguage, room, selectedWavelength, incompleteOnly, library, bodyMatchIds]
   );
 
   const otherLibraryHits = useMemo(
@@ -594,6 +611,7 @@ export default function ManualsLibrary() {
         {
           query,
           brand: selectedBrand,
+          language: selectedLanguage,
           room,
           wavelength: selectedWavelength,
           incompleteOnly,
@@ -601,7 +619,7 @@ export default function ManualsLibrary() {
         },
         bodyMatchIds
       ),
-    [sourceManuals, query, selectedBrand, room, selectedWavelength, incompleteOnly, library, bodyMatchIds]
+    [sourceManuals, query, selectedBrand, selectedLanguage, room, selectedWavelength, incompleteOnly, library, bodyMatchIds]
   );
 
   const libraryCounts = useMemo(() => {
@@ -622,6 +640,7 @@ export default function ManualsLibrary() {
       {
         query,
         brand: selectedBrand,
+        language: selectedLanguage,
         room: ALL_MANUAL_ROOMS,
         incompleteOnly,
         library,
@@ -636,13 +655,39 @@ export default function ManualsLibrary() {
       counts[manualRoom(m)] += 1;
     });
     return counts;
-  }, [sourceManuals, query, selectedBrand, incompleteOnly, library, bodyMatchIds]);
+  }, [sourceManuals, query, selectedBrand, selectedLanguage, incompleteOnly, library, bodyMatchIds]);
+
+  const shelfRooms = useMemo(
+    () =>
+      manualRoomsForView(
+        sourceManuals,
+        {
+          query,
+          brand: selectedBrand,
+          language: selectedLanguage,
+          incompleteOnly,
+          library,
+        },
+        bodyMatchIds
+      ),
+    [sourceManuals, query, selectedBrand, selectedLanguage, incompleteOnly, library, bodyMatchIds]
+  );
 
   const brandShelves = useMemo(() => manufacturerShelves(filteredManuals), [filteredManuals]);
   const makeOptions = useMemo(
     () => uniqueManualBrands(manuals.filter((m) => manualLibraryShelf(m) === library)),
     [manuals, library]
   );
+  const languageOptions = useMemo(
+    () => manualLanguageOptionsForView(sourceManuals, { room, library }),
+    [sourceManuals, room, library]
+  );
+  useEffect(() => {
+    if (loading || !selectedLanguage || selectedLanguage === ALL_MANUAL_LANGUAGES) return;
+    if (languageOptions.some((option) => option.value === selectedLanguage)) return;
+    setSelectedLanguage('');
+    syncFilterUrl({ language: '' });
+  }, [loading, languageOptions, selectedLanguage]);
   const filtersOn = discoveryActive || selectedWavelength !== '';
   const activeRoom =
     room === ALL_MANUAL_ROOMS
@@ -854,6 +899,25 @@ export default function ManualsLibrary() {
               </option>
             ))}
           </select>
+          <label className="label" htmlFor="manuals-language">
+            Language
+          </label>
+          <select
+            id="manuals-language"
+            className="input"
+            value={selectedLanguage || ALL_MANUAL_LANGUAGES}
+            onChange={(e) => {
+              const next = e.target.value === ALL_MANUAL_LANGUAGES ? '' : e.target.value;
+              setSelectedLanguage(next);
+              syncFilterUrl({ language: next });
+            }}
+          >
+            {languageOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
           <label className="flex items-center gap-2 text-sm text-[var(--text2)]">
             <input
               type="checkbox"
@@ -890,7 +954,7 @@ export default function ManualsLibrary() {
                 </span>
               </span>
             </button>
-            {EQUIPMENT_TYPES.map((t) => {
+            {shelfRooms.map((t) => {
               const selected = room === t.value;
               const count = roomCounts[t.value];
               return (
@@ -933,7 +997,7 @@ export default function ManualsLibrary() {
           )}
           <p className="manuals-rail-count">
             {loading
-              ? 'Loading catalog…'
+              ? t('Loading catalog…')
               : !bodySearchReady && query.trim()
                 ? 'Searching inside manuals…'
                 : `Showing ${filteredManuals.length} of ${catalogInLibrary} in ${manualLibraryShelfLabel(library)}`}
@@ -941,7 +1005,7 @@ export default function ManualsLibrary() {
           </p>
           {filtersOn && (
             <button type="button" className="btn btn-secondary text-sm py-1 px-3 w-full" onClick={clearLibraryFilters}>
-              Clear filters
+              {t('Clear filters')}
             </button>
           )}
         </aside>
@@ -949,12 +1013,12 @@ export default function ManualsLibrary() {
         <div className="manuals-shelf-col">
         <div className="mb-6">
           <h1 className="text-3xl font-extrabold">
-            {library === 'operators' ? '📖 Operators Manuals' : '📚 Service Manuals'}
+            {library === 'operators' ? `📖 ${t('Operators Manuals')}` : `📚 ${t('Service Manuals')}`}
           </h1>
           <p className="text-sm text-[var(--text3)]">
             {library === 'operators'
-              ? 'Operators, IFU, and user manuals — separate from the service shelf'
-              : 'Service, technical, and parts manuals'}
+              ? t('Operators, IFU, and user manuals — separate from the service shelf')
+              : t('Service, technical, and parts manuals')}
             {' • '}
             {activeRoom.roomLabel} • Bookshelf by manufacturer
           </p>
@@ -967,7 +1031,7 @@ export default function ManualsLibrary() {
             className={`px-6 py-2 text-sm font-semibold ${tab === 'browse' ? 'border-b-2 border-[var(--gold)] text-[var(--gold)]' : 'text-[var(--text3)]'}`}
             title={`${manuals.length} manuals in the catalog`}
           >
-            Browse All{' '}
+            {t('Browse All')}{' '}
             <span className="ml-1 inline-flex min-w-[1.5rem] items-center justify-center rounded-full bg-[var(--surface3)] px-1.5 py-0.5 text-[11px] font-bold tabular-nums text-[var(--text2,#ccc)] border border-[var(--border2)]">
               {loading ? '…' : manuals.length}
             </span>
@@ -976,7 +1040,7 @@ export default function ManualsLibrary() {
             onClick={() => setTab('library')}
             className={`px-6 py-2 text-sm font-semibold ${tab === 'library' ? 'border-b-2 border-[var(--gold)] text-[var(--gold)]' : 'text-[var(--text3)]'}`}
           >
-            My Library ({ownedIds.size}/{isUnlimitedManualSlots(slotLimit) ? '∞' : slotLimit})
+            {t('My Library')} ({ownedIds.size}/{isUnlimitedManualSlots(slotLimit) ? '∞' : slotLimit})
           </button>
         </div>
 
@@ -989,19 +1053,19 @@ export default function ManualsLibrary() {
         )}
         {tab === 'library' && ownedIds.size === 0 && !discoveryActive && (
           <p className="text-sm text-[var(--text3)] mb-4">
-            Your company library is empty. Switch to <strong className="text-[var(--gold)]">Browse All</strong> and tap a book to add it.
+            {t('Your company library is empty. Switch to Browse All and tap a book to add it.')}
           </p>
         )}
 
         {loading ? (
-          <div className="p-12 text-center text-[var(--text3)]">Loading bookshelf...</div>
+          <div className="p-12 text-center text-[var(--text3)]">{t('Loading bookshelf...')}</div>
         ) : (
           <div className="space-y-12">
             {brandShelves.length === 0 && (
               <div className="text-center py-12 px-4 text-[var(--text3)]">
                 {filtersOn || query.trim() ? (
                   <>
-                    <p className="text-lg font-semibold text-[var(--text)] mb-2">No manuals match</p>
+                    <p className="text-lg font-semibold text-[var(--text)] mb-2">{t('No manuals match')}</p>
                     <p className="mb-4">
                       Nothing in {manualLibraryShelfLabel(library)} matches that search and filter
                       combination. Try a different string, another manufacturer, or All rooms.
@@ -1021,7 +1085,7 @@ export default function ManualsLibrary() {
                       </p>
                     )}
                     <button type="button" className="btn btn-secondary" onClick={clearLibraryFilters}>
-                      Clear filters
+                      {t('Clear filters')}
                     </button>
                   </>
                 ) : selectedWavelength && room === 'laser' ? (
@@ -1073,6 +1137,7 @@ export default function ManualsLibrary() {
                       const shownTitle = catalogManualTitle(m);
                       const kind = catalogManualKind(m);
                       const kindLabel = catalogManualKindLabel(kind);
+                      const languageBadge = manualLanguageBadge(resolveManualLanguage(m));
                       return (
                       <div
                         key={m.id != null ? String(m.id) : index}
@@ -1084,6 +1149,7 @@ export default function ManualsLibrary() {
                             : `${shownTitle} (tap to add to company library)`) +
                           `\n${kindLabel}` +
                           (showIncompleteBadge(m) ? '\nIncomplete document' : '') +
+                          (languageBadge ? `\n${languageBadge.label}` : '') +
                           (wlHint ? `\n${wlHint}` : '')
                         }
                         style={{ width: 50 + (index % 4) * 2 }}
@@ -1108,6 +1174,11 @@ export default function ManualsLibrary() {
                                   title={s.label}
                                 />
                               ))}
+                            </div>
+                          )}
+                          {languageBadge && (
+                            <div className="manual-language-badge" title={languageBadge.label}>
+                              {languageBadge.code}
                             </div>
                           )}
                         </div>

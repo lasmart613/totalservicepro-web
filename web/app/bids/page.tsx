@@ -6,6 +6,8 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { OPEN_SERVICE_REQUEST_COLUMNS } from '@/lib/org-scoped-read';
+import { useT } from '@/lib/fa/locale';
+import { displayModelName } from '@/lib/model-display';
 
 type BidRow = {
   id: string;
@@ -41,6 +43,7 @@ function parseAmt(s: string) {
 }
 
 export default function MyBidsPage() {
+  const t = useT();
   const [bids, setBids] = useState<BidRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
@@ -247,31 +250,31 @@ export default function MyBidsPage() {
         <div className="flex flex-wrap justify-between items-start gap-3 mb-8">
           <div>
             <Link href="/" className="text-sm text-[var(--gold)] hover:underline">
-              ← Dashboard
+              {t('← Dashboard')}
             </Link>
-            <h1 className="text-3xl font-extrabold mt-1">My Bids</h1>
+            <h1 className="text-3xl font-extrabold mt-1">{t('My Bids')}</h1>
             <p className="text-[var(--text3)] text-sm">
-              Bids your company submitted on repair jobs. Pending bids can be edited or withdrawn.
+              {t('Bids your company submitted on repair jobs. Pending bids can be edited or withdrawn.')}
             </p>
           </div>
           <div className="flex gap-2">
             <Link href="/service-requests" className="btn btn-secondary text-sm">
-              Repair Jobs
+              {t('Repair Jobs')}
             </Link>
             <Link href="/accepted-bids" className="btn btn-primary text-sm">
-              Accepted Bids
+              {t('Accepted Bids')}
             </Link>
           </div>
         </div>
 
         {bids.length === 0 ? (
           <div className="card p-8 text-center">
-            <p className="text-lg mb-2">No bids yet.</p>
+            <p className="text-lg mb-2">{t('No bids yet.')}</p>
             <p className="text-sm text-[var(--text3)] mb-4">
               Open repair jobs and submit a bid from the request detail page.
             </p>
             <Link href="/service-requests" className="btn btn-primary">
-              Browse Repair Jobs
+              {t('Browse Repair Jobs')}
             </Link>
           </div>
         ) : (
@@ -303,7 +306,7 @@ export default function MyBidsPage() {
                       </div>
                       {(bid.service_requests?.manufacturer || bid.service_requests?.model) && (
                         <p className="text-xs text-[var(--text3)]">
-                          {[bid.service_requests?.manufacturer, bid.service_requests?.model]
+                          {[bid.service_requests?.manufacturer, displayModelName(bid.service_requests?.model)]
                             .filter(Boolean)
                             .join(' ')}
                           {bid.service_requests?.urgency

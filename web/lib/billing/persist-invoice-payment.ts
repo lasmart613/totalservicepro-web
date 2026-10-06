@@ -11,6 +11,9 @@ import {
   type InvoicePaymentRow,
 } from './apply-invoice-payment.ts';
 import type { StripeObject } from './stripe-subscription.ts';
+import { formatOrgMoney } from '../money-format.ts';
+import { loadOrgMoneyPrefs } from '../org-money.ts';
+import { flagVoidInvoicePayment, isVoidInvoiceStatus } from './void-invoice.ts';
 
 export type AppliedInvoicePayment = {
   invoiceId: string;
@@ -56,6 +59,14 @@ export async function applyInvoiceCheckoutSession(input: {
   if (!inv) return { ok: false, reason: 'invoice_not_found' };
 
   const row = inv as InvoicePaymentRow;
+  if (isVoidInvoiceStatus(row.status)) {
+    const flagged = flagVoidInvoicePayment(row.invoice_data, {
+      sessionId,
+      amount: amountCents / 100,
+    });
+    await input.writer.from('service_invoices').update({ invoice_data: flagged }).eq('id', invoiceId);
+    return { ok: false, reason: 'invoice_void' };
+  }
   if (sessionId && alreadyAppliedSession(row, sessionId)) {
     return {
       ok: true,
@@ -134,7 +145,14 @@ export async function notifyShopOfPayment(
   const num = inv.invoice_number || `#${inv.id}`;
   const who = inv.customer_name || 'A customer';
   const label = status === 'paid' ? 'paid in full' : 'sent a partial payment';
-  const message = `${who} ${label} on invoice ${num} ($${money2(amountPaid).toFixed(2)}).`;
+  let shown = formatOrgMoney(money2(amountPaid));
+  try {
+    const prefs = await loadOrgMoneyPrefs(writer, inv.organization_id);
+    shown = formatOrgMoney(money2(amountPaid), prefs);
+  } catch {
+    /* USD locale format */
+  }
+  const message = `${who} ${label} on invoice ${num} (${shown}).`;
   const link = `/invoices/new?id=${inv.id}`;
   for (const userId of ids) {
     try {

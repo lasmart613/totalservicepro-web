@@ -1,10 +1,13 @@
+import { displayModelName } from './model-display.ts';
+import { publicSiteOrigin } from './site-origin.ts';
+
 /** Build public share URLs (always website so non-app users can open them). */
-export const SITE_ORIGIN =
-  (typeof process !== 'undefined' && process.env.NEXT_PUBLIC_SITE_URL) ||
-  'https://repairplanet.net';
+function siteOrigin(): string {
+  return publicSiteOrigin();
+}
 
 export function serviceRequestShareUrl(id: string): string {
-  return `${SITE_ORIGIN}/marketplace/requests/${encodeURIComponent(id)}?utm_source=share&invite=1`;
+  return `${siteOrigin()}/marketplace/requests/${encodeURIComponent(id)}?utm_source=share&invite=1`;
 }
 
 export function listingShareUrl(
@@ -19,11 +22,7 @@ export function listingShareUrl(
     category === 'part' ||
     category === 'parts';
   const path = isPart ? `/marketplace/parts/${encodeURIComponent(id)}` : `/marketplace/listing/${encodeURIComponent(id)}`;
-  return `${SITE_ORIGIN}${path}?utm_source=share&invite=1`;
-}
-
-function siteOrigin(): string {
-  return String(SITE_ORIGIN || 'https://repairplanet.net').replace(/\/$/, '');
+  return `${siteOrigin()}${path}?utm_source=share&invite=1`;
 }
 
 /** Signed-in clinic estimate page (RequireAuth → /login?next=/estimates/{id}). */
@@ -96,7 +95,10 @@ export function serviceRequestShareText(opts: {
   id: string;
 }): { title: string; text: string; url: string } {
   const url = serviceRequestShareUrl(opts.id);
-  const headline = opts.title || [opts.manufacturer, opts.model].filter(Boolean).join(' ') || 'Service request';
+  const headline =
+    opts.title ||
+    [opts.manufacturer, displayModelName(opts.model)].filter(Boolean).join(' ') ||
+    'Service request';
   const bits = [
     headline,
     opts.urgency ? `Urgency: ${opts.urgency}` : '',
@@ -129,7 +131,7 @@ export function listingShareText(opts: {
   const url = listingShareUrl(opts.id, { listingType: opts.listingType, category: opts.category });
   const headline =
     opts.title ||
-    [opts.manufacturer, opts.model].filter(Boolean).join(' ') ||
+    [opts.manufacturer, displayModelName(opts.model)].filter(Boolean).join(' ') ||
     'Marketplace listing';
   const priceLabel =
     opts.price != null && opts.price !== '' && !Number.isNaN(Number(opts.price))

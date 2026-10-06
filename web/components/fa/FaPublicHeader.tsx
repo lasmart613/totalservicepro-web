@@ -3,9 +3,10 @@
 import React, { useEffect, useState } from 'react';
 import { Menu, X } from 'lucide-react';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
+import { LanguageSelector } from '@/components/i18n/LanguageSelector';
 import { PublicLink, useT } from '@/lib/fa/locale';
 
-/** Logged-out header used only on the Farsi preview. */
+/** Logged-out header for the Farsi, Spanish, and French public pages. */
 export function FaPublicHeader() {
   const t = useT();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -42,6 +43,7 @@ export function FaPublicHeader() {
           <PublicLink href="/plans" className="hover:text-[var(--gold)] py-1 shrink-0">
             {t('Free Plan')}
           </PublicLink>
+          <LanguageSelector variant="header" />
         </nav>
       </div>
       <div className="flex items-center gap-1 sm:gap-2 shrink-0">
@@ -88,6 +90,7 @@ export function FaPublicHeader() {
             <PublicLink href="/plans" className="flex items-center min-h-11 py-3 border-b border-[var(--border)]" onClick={closeMobileMenu}>
               {t('Free Plan')}
             </PublicLink>
+            <LanguageSelector variant="drawer" onNavigate={closeMobileMenu} />
             <div className="py-3 border-b border-[var(--border)]">
               <ReportIssueControl showLabel />
             </div>
