@@ -17,7 +17,6 @@ import {
   STOCK_SAVE_ERROR,
   VENDOR_PREFER_ERROR,
   VENDOR_REMOVE_ERROR,
-  canArchiveCatalogPart,
   changedRowCount,
   postPartsJson,
 } from '@/lib/part-catalog-manage';
@@ -101,17 +100,16 @@ export default function PartDetailPage() {
           data: { user },
         } = await supabase.auth.getUser();
         const createdBy = data.created_by ? String(data.created_by) : '';
-        const memberFilter = [user?.id, createdBy].filter(Boolean).map((id) => `user_id.eq.${id}`).join(',');
-        const { data: memberships } = memberFilter
-          ? await supabase.from('organization_memberships').select('user_id, organization_id, role').or(memberFilter)
-          : { data: [] };
-        setCanArchive(
-          canArchiveCatalogPart({
-            userId: user?.id,
-            createdBy,
-            memberships: memberships || [],
-          })
-        );
+        if (user?.id && createdBy && user.id === createdBy) {
+          setCanArchive(true);
+        } else if (user?.id && createdBy) {
+          const { data: allowed } = await supabase.rpc('caller_is_part_creator_admin', {
+            p_creator: createdBy,
+          });
+          setCanArchive(allowed === true);
+        } else {
+          setCanArchive(false);
+        }
       } else {
         setVendors([]);
         setCanArchive(false);

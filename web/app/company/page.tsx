@@ -989,7 +989,7 @@ function CompanyProfile() {
               />
               {orgIsPaid(org) ? (
                 <p className="text-xs text-[var(--text3)] mt-2">
-                  Save company details to keep color changes. Colors apply on Premium, Team, and Enterprise.
+                  {t('Save company details to keep color changes. Colors apply on Premium, Team, and Enterprise.')}
                 </p>
               ) : null}
             </div>

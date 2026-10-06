@@ -341,6 +341,7 @@ function ownedEstimateHtmlInput(input: {
     perDiemRate: num(data.perDiemRate),
     perDiemDays: num(data.perDiemDays),
     partsLines: formatEstimatePartLines(data, input.moneyPrefs, input.locale),
+    partRows: estimatePartRows(data),
     partsTotal: num(data.partsTotal),
     subtotal: num(data.subtotal),
     taxRate: num(pricing.taxRate),
@@ -356,6 +357,28 @@ function ownedEstimateHtmlInput(input: {
     moneyPrefs: input.moneyPrefs,
     locale: input.locale,
   };
+}
+
+function estimatePartRows(data: Record<string, unknown>): EstimateHtmlInput['partRows'] {
+  const structured = Array.isArray(data.part_lines) ? data.part_lines : [];
+  const rows = structured.filter(
+    (row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row)
+  );
+  const usable = rows.filter(
+    (row) => row.description || row.part_number || num(row.ext) || num(row.unit_price)
+  );
+  if (!usable.length) return undefined;
+  return usable.map((row) => {
+    const qty = num(row.qty) > 0 ? num(row.qty) : 1;
+    const ext = row.ext != null && row.ext !== '' ? num(row.ext) : qty * num(row.unit_price);
+    return {
+      partNumber: String(row.part_number || ''),
+      description: String(row.description || ''),
+      qty,
+      unitPrice: num(row.unit_price),
+      ext,
+    };
+  });
 }
 
 function formatEstimatePartLines(

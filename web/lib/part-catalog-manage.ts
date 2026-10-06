@@ -11,6 +11,7 @@ export type CatalogMembership = {
   user_id?: string | null;
   organization_id?: number | string | null;
   role?: string | null;
+  is_home?: boolean | null;
 };
 
 export function isSameOrgCatalogAdmin(role: string | null | undefined): boolean {
@@ -19,8 +20,9 @@ export function isSameOrgCatalogAdmin(role: string | null | undefined): boolean 
 }
 
 /**
- * Part creator, or an admin/company_admin who shares an organization_memberships
- * row with that creator. user_profiles.organization_id is not an input.
+ * Same rule as caller_is_part_creator_admin, for tests.
+ * Live checks call that function. A client membership read cannot see a
+ * moonlighter's foreign home row, so this must not be the authorization check.
  */
 export function canArchiveCatalogPart(input: {
   userId: string | null | undefined;
@@ -31,15 +33,19 @@ export function canArchiveCatalogPart(input: {
   const createdBy = String(input.createdBy || '');
   if (!userId || !createdBy) return false;
   if (userId === createdBy) return true;
-  const adminOrgs = new Set(
-    input.memberships
-      .filter((row) => String(row.user_id || '') === userId && isSameOrgCatalogAdmin(row.role))
+  const creatorRows = input.memberships.filter((row) => String(row.user_id || '') === createdBy);
+  const homeRows = creatorRows.filter((row) => row.is_home === true);
+  const scopeOrgs = new Set(
+    (homeRows.length ? homeRows : creatorRows)
       .map((row) => String(row.organization_id ?? ''))
       .filter(Boolean)
   );
-  if (!adminOrgs.size) return false;
+  if (!scopeOrgs.size) return false;
   return input.memberships.some(
-    (row) => String(row.user_id || '') === createdBy && adminOrgs.has(String(row.organization_id ?? ''))
+    (row) =>
+      String(row.user_id || '') === userId &&
+      isSameOrgCatalogAdmin(row.role) &&
+      scopeOrgs.has(String(row.organization_id ?? ''))
   );
 }
 

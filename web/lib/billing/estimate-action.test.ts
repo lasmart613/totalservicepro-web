@@ -309,7 +309,64 @@ test('form POST redirect stays on an allowlisted host and never a deploy permali
   const route = readFileSync(join(here, '../../app/api/billing/estimate-action/route.ts'), 'utf8');
   const finish = route.slice(route.indexOf('function finish'));
   assert.match(finish, /estimateActionRedirectLocation/);
+  assert.match(finish, /lang: body\.lang/);
   assert.doesNotMatch(finish, /req\.url|DEPLOY_URL|DEPLOY_PRIME_URL|process\.env\.URL|new URL\(/);
+});
+
+test('no-JS approve, reject, and modify redirects keep the estimate language', () => {
+  const token = generateEstimateActionToken();
+  const encoded = encodeURIComponent(token);
+  const approve = estimateActionRedirectLocation({
+    token,
+    status: 200,
+    action: 'approve',
+    lang: 'ar',
+    forwardedHost: 'repairplanet.net',
+  });
+  assert.equal(approve, `https://repairplanet.net/e/${encoded}?done=approved&lang=ar`);
+
+  const reject = estimateActionRedirectLocation({
+    token,
+    status: 200,
+    action: 'reject',
+    lang: 'de',
+    host: 'localhost:3456',
+  });
+  assert.equal(reject, `http://localhost:3456/e/${encoded}?done=rejected&lang=de`);
+
+  const modify = estimateActionRedirectLocation({
+    token,
+    status: 200,
+    action: 'modify',
+    lang: 'fr',
+    forwardedHost: 'repairplanet.net',
+  });
+  assert.equal(modify, `https://repairplanet.net/e/${encoded}?done=changes_requested&lang=fr`);
+
+  const notice = estimateActionRedirectLocation({
+    token,
+    status: 400,
+    action: 'approve',
+    notice: 'confirm',
+    lang: 'he',
+    forwardedHost: 'repairplanet.net',
+  });
+  assert.equal(
+    notice,
+    `https://repairplanet.net/e/${encoded}?action=approve&notice=confirm&lang=he`,
+  );
+
+  const dropped = estimateActionRedirectLocation({
+    token,
+    status: 200,
+    action: 'approved',
+    lang: 'nope',
+    forwardedHost: 'repairplanet.net',
+  });
+  assert.equal(dropped, `https://repairplanet.net/e/${encoded}?done=approved`);
+
+  const client = readFileSync(join(here, '../../app/e/[token]/EstimateActionClient.tsx'), 'utf8');
+  assert.equal((client.match(/name="lang"/g) || []).length, 3);
 });
 
 test('approve and reject still work after a modification request; approved stays final', () => {

@@ -36,14 +36,14 @@ function money(n: number, currencyCode?: string | null, numberFormat?: string | 
   return formatOrgMoney(n, { currencyCode, numberFormat });
 }
 
-function noticeMessage(notice: string) {
+function noticeMessage(notice: string, t: (text: string) => string) {
   if (notice === 'confirm') {
-    return 'Use the button on this page. Opening the email link does not approve or reject the estimate.';
+    return t('Use the button on this page. Opening the email link does not approve or reject the estimate.');
   }
   if (notice === 'expired') {
-    return 'This estimate has expired and can no longer be updated online.';
+    return t('This estimate has expired and can no longer be updated online.');
   }
-  if (notice === 'failed') return 'Something went wrong. Please try the button again.';
+  if (notice === 'failed') return t('Something went wrong. Please try the button again.');
   return '';
 }
 
@@ -106,7 +106,7 @@ export default function EstimateActionClient({
   const [note, setNote] = useState('');
   const [rejectNote, setRejectNote] = useState('');
   const [submitting, setSubmitting] = useState<EstimateEmailAction | null>(null);
-  const [error, setError] = useState(noticeMessage(notice));
+  const [error, setError] = useState(() => noticeMessage(notice, t));
   const freshCompletion =
     justCompleted != null && justCompleted === estimate.customerAction ? justCompleted : null;
   const [done, setDone] = useState<CustomerActionKind | null>(
@@ -146,7 +146,11 @@ export default function EstimateActionClient({
         return;
       }
       if (!res.ok) {
-        setError(json?.error || 'Something went wrong. Please contact the company.');
+        setError(
+          json?.error
+            ? t(String(json.error))
+            : t('Something went wrong. Please contact the company.'),
+        );
         if (json?.estimate) setEst(json.estimate);
         return;
       }
@@ -155,7 +159,7 @@ export default function EstimateActionClient({
       setAlready(!!json.already);
       setNotified(!json.already);
     } catch {
-      setError('Network error. Please try again or call the company.');
+      setError(t('Network error. Please try again or call the company.'));
     } finally {
       setSubmitting(null);
     }
@@ -307,6 +311,7 @@ export default function EstimateActionClient({
                       token={token}
                       confirm={confirms.approve}
                       action="approve"
+                      locale={locale}
                       label={t('Approve estimate')}
                       className="btn btn-primary w-full text-base py-3"
                       disabled={!!submitting}
@@ -326,6 +331,7 @@ export default function EstimateActionClient({
                       <input type="hidden" name="token" value={token} />
                       <input type="hidden" name="confirm" value={confirms.reject} />
                       <input type="hidden" name="action" value="reject" />
+                      <input type="hidden" name="lang" value={locale} />
                       <label className="text-xs text-[var(--text3)] font-semibold" htmlFor="reject-reason">
                         {t('Reason for rejecting (optional)')}
                       </label>
@@ -360,6 +366,7 @@ export default function EstimateActionClient({
                       <input type="hidden" name="token" value={token} />
                       <input type="hidden" name="confirm" value={confirms.modify} />
                       <input type="hidden" name="action" value="modify" />
+                      <input type="hidden" name="lang" value={locale} />
                       <label className="text-xs text-[var(--text3)] font-semibold" htmlFor="modify-note">
                         {t('Optional note for the service company')}
                       </label>
@@ -426,6 +433,7 @@ function ConfirmForm({
   token,
   confirm,
   action,
+  locale,
   label,
   className,
   disabled,
@@ -434,6 +442,7 @@ function ConfirmForm({
   token: string;
   confirm: string;
   action: EstimateEmailAction;
+  locale: PublicLocale;
   label: string;
   className: string;
   disabled: boolean;
@@ -451,6 +460,7 @@ function ConfirmForm({
       <input type="hidden" name="token" value={token} />
       <input type="hidden" name="confirm" value={confirm} />
       <input type="hidden" name="action" value={action} />
+      <input type="hidden" name="lang" value={locale} />
       <button type="submit" className={className} disabled={disabled}>
         {label}
       </button>

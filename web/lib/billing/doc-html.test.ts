@@ -195,22 +195,53 @@ test('estimate part lines and totals share one currency format', () => {
   const total = formatOrgMoney(630, prefs, 'ar');
   const shape = (value: string) =>
     value.replace(/[\d\u0660-\u0669\u06F0-\u06F9.,\u066B\u066C\s\u00A0\u200E\u200F]+/g, '#');
+  const shown = (value: string) => value.replace(/[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, '');
   assert.equal(shape(part), shape(total));
   assert.notEqual(shape(part), shape('$10.00'));
+  assert.equal(shape(shown(part)), shape(shown(total)));
+  assert.doesNotMatch(shown(part), /^\$US/);
+  assert.doesNotMatch(shown(total), /^\$US/);
+  const isolated = (value: string) =>
+    `<bdi dir="ltr">${shown(value).replace(/&/g, '&amp;').replace(/</g, '&lt;')}</bdi>`;
   const html = buildEstimateHtml({
     ...estimateBase,
     locale: 'ar',
     moneyPrefs: prefs,
     miles: 12,
     partsLines: [`Filter ×1 @ ${part} = ${part}`],
+    partRows: [
+      {
+        partNumber: 'QA-TEST-213',
+        description: 'QA TEST 213 part',
+        qty: 1,
+        unitPrice: 10,
+        ext: 10,
+      },
+    ],
     partsTotal: 10,
     subtotal: 630,
     tax: 0,
     total: 630,
     issues: 'QA TEST note.',
   });
-  assert.ok(html.includes(part), part);
-  assert.ok(html.includes(total), total);
+  assert.ok(html.includes(isolated(part)), shown(part));
+  assert.ok(html.includes(isolated(total)), shown(total));
+  assert.match(html, /<bdi dir="auto">QA-TEST-213<\/bdi>/);
+  assert.match(html, /<bdi dir="auto">QA TEST 213 part<\/bdi>/);
+  assert.equal((html.match(/<bdi dir="ltr">/g) || []).length >= 2, true);
+  const legacy = buildEstimateHtml({
+    ...estimateBase,
+    locale: 'ar',
+    moneyPrefs: prefs,
+    partsLines: [`QA-TEST-213 QA TEST 213 part ×1 @ ${part} = ${part}`],
+    partsTotal: 10,
+    subtotal: 630,
+    tax: 0,
+    total: 630,
+  });
+  assert.match(legacy, /<bdi dir="auto">QA-TEST-213 QA TEST 213 part<\/bdi>/);
+  assert.ok(legacy.includes(isolated(part)), shown(part));
+  assert.ok(legacy.includes(isolated(total)), shown(total));
   assert.match(html, /<bdi dir="auto">QA TEST note\./);
   assert.match(html, /تنقّل/);
   assert.doesNotMatch(html, />Travel</);
@@ -228,5 +259,8 @@ test('estimate part lines and totals share one currency format', () => {
   assert.match(wrapped, /<bdi dir="auto">/);
   const preview = readFileSync(new URL('../../app/estimates/new/EstimateFormClient.tsx', import.meta.url), 'utf8');
   assert.match(preview, /<html lang="\$\{meta\.lang\}" dir="\$\{meta\.dir\}">/);
+  assert.match(preview, /partRows/);
+  const mail = readFileSync(new URL('./owned-doc-mail.ts', import.meta.url), 'utf8');
+  assert.match(mail, /partRows/);
   assert.doesNotMatch(preview, /\$\$\{/);
 });

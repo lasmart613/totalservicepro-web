@@ -114,8 +114,11 @@ test('signed-in dictionaries cover the same chrome in every language', () => {
       for (const token of ['RepairPlanet', 'Total Service Pro', 'Premium']) {
         if (key.includes(token)) assert.ok(value.includes(token), `${locale} dropped ${token} from ${key}`);
       }
-      if (key.includes('Premium / Team')) {
-        assert.ok(value.includes('Premium') && value.includes('Team'), `${locale} dropped a plan name from ${key}`);
+      if (key.includes('Premium / Team') || key.includes('Premium, Team, and Enterprise')) {
+        assert.ok(
+          value.includes('Premium') && value.includes('Team') && (key.includes('Enterprise') ? value.includes('Enterprise') : true),
+          `${locale} dropped a plan name from ${key}`,
+        );
       }
       for (const token of key.match(/\{[A-Za-z_]+\}/g) || []) {
         assert.ok(value.includes(token), `${locale} dropped ${token} from ${key}`);

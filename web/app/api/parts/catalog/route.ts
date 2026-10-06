@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { CATALOG_SAVE_ERROR, PART_ARCHIVE_ERROR, STOCK_SAVE_ERROR } from '@/lib/part-catalog-manage';
 import { catalogWritePatch } from '@/lib/part-catalog-write';
-import { bearerUserId, catalogManagerStatus, updateAllowingMissing } from '@/lib/part-catalog-access';
+import { bearerCaller, bearerUserId, catalogManagerStatus, updateAllowingMissing } from '@/lib/part-catalog-access';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
   if (!body || !patch) return NextResponse.json({ error: message }, { status: 400 });
 
   const admin = getSupabaseAdmin();
-  const access = await catalogManagerStatus(admin, userId, body.id);
+  const access = await catalogManagerStatus(admin, userId, body.id, bearerCaller(req));
   if (!access.ok) {
     const status = access.status === 404 ? 404 : access.status === 400 ? 400 : 403;
     return NextResponse.json({ error: status === 404 ? 'Part not found' : message }, { status });
