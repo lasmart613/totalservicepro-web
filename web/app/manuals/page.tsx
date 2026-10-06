@@ -882,7 +882,7 @@ export default function ManualsLibrary() {
             autoComplete="off"
           />
           <label className="label" htmlFor="manuals-make">
-            Manufacturer
+            {t('Manufacturer')}
           </label>
           <select
             id="manuals-make"
@@ -894,7 +894,7 @@ export default function ManualsLibrary() {
               syncFilterUrl({ brand: next });
             }}
           >
-            <option value="">All manufacturers</option>
+            <option value="">{t('All manufacturers')}</option>
             {makeOptions.map((brand) => (
               <option key={brand} value={brand}>
                 {brand}
@@ -902,7 +902,7 @@ export default function ManualsLibrary() {
             ))}
           </select>
           <label className="label" htmlFor="manuals-language">
-            Language
+            {t('Language')}
           </label>
           <select
             id="manuals-language"
@@ -916,7 +916,7 @@ export default function ManualsLibrary() {
           >
             {languageOptions.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {t(option.label)}
               </option>
             ))}
           </select>

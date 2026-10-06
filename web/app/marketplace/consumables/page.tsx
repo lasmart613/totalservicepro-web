@@ -16,6 +16,7 @@ import {
 } from '@/lib/marketplace/parts';
 import { useSignedIn } from '@/lib/use-signed-in';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
+import { displayModelName } from '@/lib/model-display';
 import { toast } from 'sonner';
 import { StorageImage } from '@/components/StorageImage';
 
@@ -126,7 +127,7 @@ export default function ConsumablesMarketplace() {
                   )}
                   <p className="text-sm text-[var(--text3)] mb-1">{l.description || l.notes}</p>
                   <p className="text-sm text-[var(--text3)] mb-2 fa-ltr">{t('PN:')} {l.part_number || l.serial_number || t('N/A')}</p>
-                  <p className="text-sm mb-2">{l.manufacturer} {l.model} • {l.condition ? t(l.condition) : ''}</p>
+                  <p className="text-sm mb-2">{l.manufacturer} {displayModelName(l.model)} • {l.condition ? t(l.condition) : ''}</p>
                   <GuestAwarePrice signedIn={signedIn} priceLabel={formatListingPrice(l)} className="font-semibold text-[var(--gold)] mb-2" />
                   {signedIn ? (
                   <button 

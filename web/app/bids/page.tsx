@@ -7,6 +7,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { OPEN_SERVICE_REQUEST_COLUMNS } from '@/lib/org-scoped-read';
 import { useT } from '@/lib/fa/locale';
+import { displayModelName } from '@/lib/model-display';
 
 type BidRow = {
   id: string;
@@ -305,7 +306,7 @@ export default function MyBidsPage() {
                       </div>
                       {(bid.service_requests?.manufacturer || bid.service_requests?.model) && (
                         <p className="text-xs text-[var(--text3)]">
-                          {[bid.service_requests?.manufacturer, bid.service_requests?.model]
+                          {[bid.service_requests?.manufacturer, displayModelName(bid.service_requests?.model)]
                             .filter(Boolean)
                             .join(' ')}
                           {bid.service_requests?.urgency

@@ -25,6 +25,9 @@ import {
   type LineItem,
 } from '@/lib/billing/save-helpers';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
+import { displayModelName, displayModelText } from '@/lib/model-display';
+import { orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
+import { canVoidInvoice, isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 import {
@@ -37,11 +40,6 @@ import { REJECTED_ESTIMATE_CONVERT_ERROR } from '@/lib/billing/estimate-display'
 import { lineItemFromStored } from '@/lib/billing/listing-invoice';
 
 type CustomerOpt = LinkedCustomerOpt;
-
-function todayYmd() {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
-}
 
 export default function InvoiceFormClient() {
   const t = useT();
@@ -64,6 +62,12 @@ export default function InvoiceFormClient() {
   const [userId, setUserId] = useState<string | null>(null);
   const [docNumber, setDocNumber] = useState('');
   const [status, setStatus] = useState('draft');
+  const [callerRole, setCallerRole] = useState('');
+  const [orgTimeZone, setOrgTimeZone] = useState<string | null>(null);
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [voiding, setVoiding] = useState(false);
+  const [storedVoidReason, setStoredVoidReason] = useState<string | null>(null);
   const [company, setCompany] = useState<DocCompany>({});
   const [companyTheme, setCompanyTheme] = useState<CompanyTheme | null>(null);
   const [emailing, setEmailing] = useState(false);
@@ -95,7 +99,9 @@ export default function InvoiceFormClient() {
     [manufacturer, catalog.manufacturers, catalog.models]
   );
 
-  const [invoiceDate, setInvoiceDate] = useState(todayYmd());
+  const invoiceDateTouched = useRef(false);
+  const orgTodayRef = useRef(orgTodayIso());
+  const [invoiceDate, setInvoiceDate] = useState(() => orgTodayRef.current);
   const [dueDate, setDueDate] = useState('');
   const [description, setDescription] = useState('');
   const [lineItems, setLineItems] = useState<LineItem[]>([emptyLineItem('LI')]);
@@ -212,14 +218,16 @@ export default function InvoiceFormClient() {
       savedIdRef.current = data.id;
       setSavedId(data.id);
       setStatus(data.status || 'draft');
+      setStoredVoidReason(data.void_reason || parseJsonField(data.invoice_data).void_reason || null);
       setCustomerName(data.customer_name || '');
       setCustSearch(data.customer_name || '');
       setCustomerOrgId(data.customer_organization_id || null);
       setSourceEstimateId(data.estimate_id || null);
+      invoiceDateTouched.current = true;
       setInvoiceDate(
         data.invoice_date
           ? String(data.invoice_date).slice(0, 10)
-          : todayYmd()
+          : orgTodayRef.current
       );
       setDueDate(data.due_date ? String(data.due_date).slice(0, 10) : '');
       setDescription(data.description || '');
@@ -373,7 +381,7 @@ export default function InvoiceFormClient() {
       }
 
       const parts: string[] = [];
-      if (data.device_model) parts.push(`Device: ${data.device_model}`);
+      if (data.device_model) parts.push(`Device: ${displayModelText(data.device_model)}`);
       if (data.serial_pulses) parts.push(`Serial/Pulses: ${data.serial_pulses}`);
       let svcs = data.services;
       if (typeof svcs === 'string') {
@@ -413,15 +421,27 @@ export default function InvoiceFormClient() {
         const { data: profile } = await supabase
           .from('user_profiles')
           .select(
-            'organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url, slogan)'
+            'role, organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url, slogan)'
           )
           .eq('id', user.id)
           .maybeSingle();
         const orgId = coerceOrgId(profile?.organization_id);
         setUserOrgId(orgId);
+        setCallerRole(String((profile as { role?: string } | null)?.role || ''));
+        let storedZone: string | null = null;
+        if (orgId) {
+          const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();
+          if (zoneRow.error) console.warn('organizations.timezone', zoneRow.error.message);
+          else if (zoneRow.data?.timezone) {
+            storedZone = String(zoneRow.data.timezone);
+            setOrgTimeZone(storedZone);
+          }
+        }
         const org = Array.isArray((profile as any)?.organizations)
           ? (profile as any).organizations[0]
           : (profile as any)?.organizations;
+        orgTodayRef.current = orgTodayIso({ stored: storedZone, state: org?.state });
+        if (!editIdParam && !invoiceDateTouched.current) setInvoiceDate(orgTodayRef.current);
         const techName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ');
         if (org || techName) {
           setCompany({
@@ -505,10 +525,11 @@ export default function InvoiceFormClient() {
       }
       let invNum = editIdParam ? docNumber : '';
       if (!invNum && userOrgId) {
+        const dated = invoiceDate || orgTodayRef.current;
         invNum = await allocateDocNumber(supabase, {
           orgId: userOrgId,
           kind: 'INV',
-          date: invoiceDate || new Date(),
+          date: dated,
         });
         setDocNumber(invNum);
       }
@@ -567,7 +588,7 @@ export default function InvoiceFormClient() {
         organization_id: userOrgId || null,
         customer_organization_id: customerOrgId || null,
         estimate_id: sourceEstimateId || null,
-        invoice_date: invoiceDate || todayYmd(),
+        invoice_date: invoiceDate || orgTodayRef.current,
         due_date: dueDate || null,
         description: description || null,
         subtotal: Math.round(subtotal * 100) / 100,
@@ -660,7 +681,7 @@ export default function InvoiceFormClient() {
         email: custEmail,
       },
       invNumber: docNumber || 'Draft',
-      invoiceDate: invoiceDate || todayYmd(),
+      invoiceDate: invoiceDate || orgTodayRef.current,
       dueDate: dueDate || undefined,
       description: description || undefined,
       preparedBy: company.tech_name,
@@ -681,6 +702,11 @@ export default function InvoiceFormClient() {
       themeScope,
       moneyPrefs: prefs,
       locale,
+      timeZone: resolveOrgTimeZone({
+        stored: orgTimeZone,
+        state: company.state,
+        allowBrowser: false,
+      }).timeZone,
     });
   }
 
@@ -802,13 +828,13 @@ export default function InvoiceFormClient() {
 
   async function collectRemainingBalance() {
     if (!collectable.hasDeferredSplit || collectable.deferredReleased) {
-      toast.message('There is no deferred remainder to collect.');
+      toast.message(t('There is no deferred remainder to collect.'));
       return;
     }
     const remain = collectable.deferredUnpaid || collectable.deferredOriginal;
     if (
       !confirm(
-        `Release the remaining ${money(remain)} so Stripe can charge it?\n\nEmail or resend the invoice after this to send a new pay link.`
+        t('Release the remaining {amount} so Stripe can charge it? Email or resend the invoice after this to send a new pay link.').replace('{amount}', money(remain))
       )
     ) {
       return;
@@ -818,7 +844,10 @@ export default function InvoiceFormClient() {
     const id = await saveInvoice(status || 'draft', { quiet: true, deferredReleased: true });
     if (id) {
       toast.success(
-        `Remaining ${money(remain)} is now collectable. Email or resend to send a Stripe pay link.`
+        t('Remaining {amount} is now collectable. Email or resend to send a Stripe pay link.').replace(
+          '{amount}',
+          money(remain),
+        )
       );
     }
   }
@@ -826,12 +855,45 @@ export default function InvoiceFormClient() {
   function markSentWithoutEmail() {
     if (
       !confirm(
-        'Mark this invoice as sent WITHOUT emailing the customer?\n\nUse this only if you already emailed a PDF yourself.'
+        t('Mark this invoice as sent WITHOUT emailing the customer? Use this only if you already emailed a PDF yourself.')
       )
     ) {
       return;
     }
     saveInvoice('sent');
+  }
+
+  const voided = isVoidInvoiceStatus(status);
+  const voidable =
+    Boolean(savedId) && canVoidInvoice({ status, amount_paid: received, role: callerRole }).ok;
+
+  async function submitVoid() {
+    if (!savedId) return;
+    setVoiding(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const access = sessionData.session?.access_token;
+      if (!access) throw new Error('Sign in required');
+      const res = await fetch('/api/billing/invoices/void', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${access}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ invoice_id: savedId, reason: voidReason }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.error || 'Could not void invoice');
+      setStatus('void');
+      setStoredVoidReason(json.void_reason || voidReason.trim() || null);
+      setVoidOpen(false);
+      setVoidReason('');
+      toast.success('Invoice voided');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not void invoice');
+    } finally {
+      setVoiding(false);
+    }
   }
 
   if (loading) {
@@ -857,15 +919,38 @@ export default function InvoiceFormClient() {
               {docNumber && (
                 <span className="text-[var(--gold)] font-bold">{docNumber}</span>
               )}
-              <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-[var(--border2)] bg-[var(--surface2)]">
-                {(status || 'draft').toUpperCase()}
+              <span
+                className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                  isVoidInvoiceStatus(status)
+                    ? 'bg-rose-900/40 text-rose-200 border-rose-700'
+                    : 'border-[var(--border2)] bg-[var(--surface2)]'
+                }`}
+              >
+                {t(
+                  (
+                    {
+                      draft: 'DRAFT',
+                      sent: 'SENT',
+                      paid: 'PAID',
+                      partially_paid: 'PARTIALLY PAID',
+                      void: 'VOID',
+                      voided: 'VOID',
+                    } as Record<string, string>
+                  )[(status || 'draft').toLowerCase()] || 'DRAFT'
+                )}
               </span>
               {sourceEstimateId && (
-                <span className="text-xs">from estimate #{sourceEstimateId}</span>
+                <span className="text-xs" dir="auto">
+                  {t('from estimate #{number}').split('{number}')[0]}
+                  <bdi dir="ltr">{sourceEstimateId}</bdi>
+                  {t('from estimate #{number}').split('{number}')[1]}
+                </span>
               )}
               {collectable.hasDeferredSplit && !collectable.deferredReleased && (
-                <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-amber-700 bg-amber-900/40 text-amber-200">
-                  Due now {money(collectable.stripeAmount || collectable.dueNowOriginal)}
+                <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-amber-700 bg-amber-900/40 text-amber-200" dir="auto">
+                  {t('Due now {amount}').split('{amount}')[0]}
+                  <bdi dir="ltr">{money(collectable.stripeAmount || collectable.dueNowOriginal)}</bdi>
+                  {t('Due now {amount}').split('{amount}')[1]}
                 </span>
               )}
             </div>
@@ -974,7 +1059,7 @@ export default function InvoiceFormClient() {
                 <option value="">{t('— Select —')}</option>
                 {models.map((m) => (
                   <option key={m} value={m}>
-                    {m}
+                    {displayModelName(m)}
                   </option>
                 ))}
               </select>
@@ -1005,7 +1090,10 @@ export default function InvoiceFormClient() {
                 className="input mt-1"
                 type="date"
                 value={invoiceDate}
-                onChange={(e) => setInvoiceDate(e.target.value)}
+                onChange={(e) => {
+                  invoiceDateTouched.current = true;
+                  setInvoiceDate(e.target.value);
+                }}
               />
             </div>
             <div>
@@ -1121,7 +1209,7 @@ export default function InvoiceFormClient() {
                       <input
                         className="input text-sm py-1.5 opacity-80"
                         readOnly
-                        value={li.ext.toFixed(2)}
+                        value={money(li.ext)}
                       />
                     </td>
                     <td className="py-1.5">
@@ -1149,13 +1237,13 @@ export default function InvoiceFormClient() {
             className="btn btn-secondary text-sm mt-2"
             onClick={() => setLineItems((r) => [...r, emptyLineItem('LI')])}
           >
-            + Add line item
+            + {t('Add line item')}
           </button>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Subtotal (from line items)')}</label>
-              <input className="input mt-1 opacity-90" readOnly value={subtotal.toFixed(2)} />
+              <input className="input mt-1 opacity-90" readOnly value={money(subtotal)} />
             </div>
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Tax')}</label>
@@ -1209,7 +1297,7 @@ export default function InvoiceFormClient() {
                 <input
                   className="input mt-1 opacity-90"
                   readOnly
-                  value={collectable.deferredOriginal.toFixed(2)}
+                  value={money(collectable.deferredOriginal)}
                 />
               </div>
             </div>
@@ -1300,7 +1388,7 @@ export default function InvoiceFormClient() {
               <input
                 className="input mt-1 font-bold text-lg opacity-90"
                 readOnly
-                value={balanceDue.toFixed(2)}
+                value={money(balanceDue)}
               />
             </div>
           </div>
@@ -1309,8 +1397,16 @@ export default function InvoiceFormClient() {
           </div>
         </section>
 
+        {voided && (
+          <div className="card p-4 mb-4 border border-rose-700 bg-rose-950/40">
+            <p className="font-bold">{t(VOIDED_INVOICE_MESSAGE)}</p>
+            {storedVoidReason ? <p className="text-sm text-[var(--text3)] mt-1">{storedVoidReason}</p> : null}
+          </div>
+        )}
+
         <div className="doc-action-bar flex flex-wrap gap-2 sticky bottom-4 z-10">
           <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">{t('Cancel')}</Link>
+          {!voided && (
           <button
             type="button"
             className="btn btn-secondary min-w-[100px]"
@@ -1319,11 +1415,14 @@ export default function InvoiceFormClient() {
           >
             {saving ? t('Saving…') : t('Save Draft')}
           </button>
+          )}
           <button
             type="button"
             className="btn btn-secondary min-w-[120px]"
             onClick={openInvoicePreview}
           >{t('Preview / PDF')}</button>
+          {!voided && (
+          <>
           <button
             type="button"
             className="btn btn-primary min-w-[140px]"
@@ -1339,7 +1438,7 @@ export default function InvoiceFormClient() {
               disabled={saving || emailing}
               onClick={() => resendEmail()}
             >
-              Resend Email
+              {t('Resend Email')}
             </button>
           )}
           <button
@@ -1357,7 +1456,7 @@ export default function InvoiceFormClient() {
               disabled={saving || emailing}
               onClick={() => collectRemainingBalance()}
             >
-              Collect remaining balance
+              {t('Collect remaining balance')}
             </button>
           )}
           <button
@@ -1368,13 +1467,13 @@ export default function InvoiceFormClient() {
               const rec = received;
               const tot = Number(total) || 0;
               if (rec <= 0) {
-                toast.error('Enter amount received first, or use Mark paid for the full total.');
+                toast.error(t('Enter amount received first, or use Mark paid for the full total.'));
                 return;
               }
               saveInvoice(rec + 0.004 >= tot ? 'paid' : 'partially_paid');
             }}
           >
-            Mark partial
+            {t('Mark partial')}
           </button>
           <button
             type="button"
@@ -1382,12 +1481,48 @@ export default function InvoiceFormClient() {
             disabled={saving || emailing}
             onClick={() => saveInvoice('paid')}
           >
-            Mark paid
+            {t('Mark paid')}
           </button>
+          {voidable && (
+            <button
+              type="button"
+              className="btn btn-secondary min-w-[120px]"
+              disabled={saving || emailing || voiding}
+              onClick={() => setVoidOpen(true)}
+            >
+              {t('Void invoice')}
+            </button>
+          )}
+          </>
+          )}
         </div>
-        <p className="text-[10px] text-[var(--text3)] mt-2">
-          Finalize &amp; Email only sets status to <strong>sent</strong> after Resend accepts the
-          message. Requires customer email + verified From domain (contact@medicalrepairnetwork.com).
+        {voidOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setVoidOpen(false)}>
+            <div className="card w-full max-w-sm p-5 hover:transform-none" onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-lg font-extrabold mb-1">{t('Void invoice')}</h2>
+              <p className="text-xs text-[var(--text3)] mb-3" dir="auto">
+                {t('This unpaid invoice will be voided. An open payment link is expired. No charge or refund is made.')}
+              </p>
+              <label className="text-xs text-[var(--text3)] font-bold">{t('Reason (optional)')}</label>
+              <textarea
+                className="input mt-1 min-h-[80px]"
+                value={voidReason}
+                maxLength={500}
+                onChange={(e) => setVoidReason(e.target.value)}
+              />
+              <div className="flex gap-2 mt-4 justify-end">
+                <button type="button" className="btn btn-secondary" onClick={() => setVoidOpen(false)}>
+                  {t('Cancel')}
+                </button>
+                <button type="button" className="btn btn-primary" disabled={voiding} onClick={() => submitVoid()}>
+                  {voiding ? t('Voiding…') : t('Void invoice')}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+        <p className="text-[10px] text-[var(--text3)] mt-2" dir="auto">
+          {t('Finalize & Email only sets status to sent after Resend accepts the message. Requires customer email and a verified From domain.')}
         </p>
 
         {!isValidOrgId(userOrgId) && (

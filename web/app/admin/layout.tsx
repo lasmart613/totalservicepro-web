@@ -219,7 +219,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 }
                 target={upgrade.target}
               >
-                {UPGRADE_LABEL}
+                {t(UPGRADE_LABEL)}
               </UpgradePlanLink>
             )}
             <div className="pt-4 mt-4 border-t border-[var(--border)]">
@@ -242,7 +242,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 className="btn btn-secondary text-xs whitespace-nowrap"
                 target={upgrade.target}
               >
-                {UPGRADE_LABEL}
+                {t(UPGRADE_LABEL)}
               </UpgradePlanLink>
             )}
           </div>

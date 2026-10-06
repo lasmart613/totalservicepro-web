@@ -601,8 +601,7 @@ export default function AIAssistantClient() {
             </div>
           ) : (
             <div className="sm:col-span-2 text-xs text-[var(--text3)]">
-              Select a manual for accurate PM, calibration, and model-specific answers. Fault codes
-              still work from the TSP database.
+              {t('Select a manual for accurate PM, calibration, and model-specific answers. Fault codes still work from the TSP database.')}
             </div>
           )}
         </div>
@@ -668,7 +667,7 @@ export default function AIAssistantClient() {
           {sending && (
             <div className="flex justify-start">
               <div className="rounded-2xl px-4 py-3 bg-[var(--surface3)] border border-[var(--border)] text-sm text-[var(--text3)]">
-                Thinking…
+                {t('Thinking…')}
               </div>
             </div>
           )}
@@ -680,8 +679,8 @@ export default function AIAssistantClient() {
             className="input flex-1 min-h-[44px] max-h-[120px] text-sm resize-y"
             placeholder={
               manualPath
-                ? 'Ask about this system…'
-                : 'Ask a question (select a manual for best results)…'
+                ? t('Ask about this system…')
+                : t('Ask a question (select a manual for best results)…')
             }
             rows={2}
             value={input}

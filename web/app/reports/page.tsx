@@ -8,6 +8,7 @@ import { Header } from '@/components/Header';
 import { Plus } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { useT } from '@/lib/fa/locale';
+import { displayModelText } from '@/lib/model-display';
 
 function isValidOrgId(val: any): boolean {
   if (val == null) return false;
@@ -161,7 +162,7 @@ export default function ReportsList() {
         ) : (
           <div className="space-y-3">
             {filtered.map(r => {
-              const title = r.equipment_name || r.model_type || r.report_number || 'Untitled Report';
+              const title = displayModelText(r.equipment_name || r.model_type || '') || r.report_number || t('Untitled Report');
               const dateStr = r.date_out ? format(r.date_out, { month: 'short', day: 'numeric', year: 'numeric' }) : '—';
               const updated = r.updated_at ? format(r.updated_at, { month: 'short', day: 'numeric' }) : '';
               return (

@@ -5,10 +5,10 @@
  */
 
 import type { CompanyTheme } from '../company-theme.ts';
-import { formatLocaleDate } from '../i18n/format-date.ts';
 import type { PublicLocale } from '../i18n/locales.ts';
-import { parseMailLocale, translateApp, translateAppFill } from '../i18n/translate-app.ts';
+import { localeToBcp47, parseMailLocale, translateApp, translateAppFill } from '../i18n/translate-app.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
+import { DEFAULT_ORG_TIMEZONE, formatDateInTimeZone } from '../org-timezone.ts';
 import {
   buildEstimateHtml,
   buildEstimatePlainText,
@@ -205,6 +205,7 @@ export function buildOwnedInvoiceMessage(input: {
   paymentUrl?: string | null;
   moneyPrefs?: OrgMoneyPrefs | null;
   locale?: string | null;
+  timeZone?: string | null;
 }): string {
   const data = parseJsonField(input.row.invoice_data);
   const lines = Array.isArray(data.line_items) ? data.line_items : [];
@@ -255,6 +256,7 @@ export function buildOwnedInvoiceMessage(input: {
     themeScope: 'email',
     moneyPrefs: input.moneyPrefs,
     locale: input.locale,
+    timeZone: input.timeZone,
   });
 }
 
@@ -265,6 +267,7 @@ export function buildOwnedEstimateMessage(input: {
   actionUrl?: string | null;
   moneyPrefs?: OrgMoneyPrefs | null;
   locale?: string | null;
+  timeZone?: string | null;
 }): string {
   return buildEstimateHtml(ownedEstimateHtmlInput(input));
 }
@@ -276,6 +279,7 @@ export function buildOwnedEstimatePlainText(input: {
   actionUrl?: string | null;
   moneyPrefs?: OrgMoneyPrefs | null;
   locale?: string | null;
+  timeZone?: string | null;
 }): string {
   return buildEstimatePlainText(ownedEstimateHtmlInput(input));
 }
@@ -287,6 +291,7 @@ function ownedEstimateHtmlInput(input: {
   actionUrl?: string | null;
   moneyPrefs?: OrgMoneyPrefs | null;
   locale?: string | null;
+  timeZone?: string | null;
 }): EstimateHtmlInput {
   const data = parseJsonField(input.row.estimate_data);
   const servicesRaw = Array.isArray(input.row.services)
@@ -313,7 +318,7 @@ function ownedEstimateHtmlInput(input: {
       email: String(data.custEmail || ''),
     },
     estNumber: String(input.row.estimate_number || data.estimate_number || data.estNumber || ''),
-    dateStr: formatDocDate(input.row.created_at, input.locale),
+    dateStr: formatDocDate(input.row.created_at, input.timeZone, input.locale),
     manufacturer: String(data.manufacturer || ''),
     model: String(data.model || ''),
     serial: String(data.serial || ''),
@@ -541,7 +546,12 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function formatDocDate(value: unknown, locale?: string | null): string {
-  if (!value) return formatLocaleDate(new Date(), locale);
-  return formatLocaleDate(String(value), locale);
+function formatDocDate(value: unknown, timeZone?: string | null, locale?: string | null): string {
+  const zone = String(timeZone || '').trim() || DEFAULT_ORG_TIMEZONE;
+  const bcp = locale ? localeToBcp47(locale) : 'en-US';
+  return formatDateInTimeZone(
+    value == null || value === '' ? new Date() : String(value),
+    zone,
+    bcp === 'en' ? 'en-US' : bcp,
+  );
 }

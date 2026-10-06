@@ -5,7 +5,7 @@
 
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { CompanyTheme } from './company-theme.ts';
-import { translateApp, translateAppFill, withDocDirection } from './i18n/translate-app.ts';
+import { documentDirection, translateApp, translateAppFill, withDocDirection } from './i18n/translate-app.ts';
 
 export const CUSTOMER_INVITE_TTL_SEC = 60 * 60 * 24 * 30; // 30 days
 
@@ -267,8 +267,9 @@ export function wrapSupplierFacingDocumentEmail(opts: {
         loginUrl: opts.loginUrl,
         locale: opts.locale,
       });
+  const meta = documentDirection(opts.locale);
   const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"/><title>${title}</title></head>
+<html lang="${meta.lang}" dir="${meta.dir}"><head><meta charset="utf-8"/><title>${title}</title></head>
 <body style="margin:0;padding:16px;background:#f4f4f5;font-family:system-ui,sans-serif;">
   <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:12px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.06);">
     ${opts.documentHtml}
@@ -305,8 +306,9 @@ export function wrapCustomerFacingDocumentEmail(opts: {
     opts.theme?.branded && !opts.documentHtml.includes('data-tsp-brand-header')
       ? emailBrandHeader(opts.theme)
       : '';
+  const meta = documentDirection(opts.locale);
   const html = `<!DOCTYPE html>
-<html><head><meta charset="utf-8"/><title>${title}</title></head>
+<html lang="${meta.lang}" dir="${meta.dir}"><head><meta charset="utf-8"/><title>${title}</title></head>
 <body style="margin:0;padding:16px;background:#f4f4f5;font-family:system-ui,sans-serif;">
   <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:12px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.06);">
     ${header}

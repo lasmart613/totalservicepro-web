@@ -1,7 +1,13 @@
 /** Shared helpers for estimates / invoices Supabase writes (schema-drift tolerant). */
 
-import { formatLocaleDate } from '../i18n/format-date.ts';
+import { localeToBcp47 } from '../i18n/translate-app.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
+import {
+  DEFAULT_ORG_TIMEZONE,
+  formatDateInTimeZone,
+  isoDateInTimeZone,
+  isValidTimeZone,
+} from '../org-timezone.ts';
 
 export function isValidOrgId(val: unknown): boolean {
   if (val == null) return false;
@@ -263,13 +269,21 @@ export function isEstimateExpired(est: { status?: string | null; created_at?: st
   return estimateAgeDays(est.created_at) >= ESTIMATE_VALID_DAYS;
 }
 
-export function validUntilLabel(createdAt?: string | null, locale?: string | null): string {
+export function validUntilLabel(
+  createdAt?: string | null,
+  timeZone?: string | null,
+  locale?: string | null,
+): string {
   if (!createdAt) return '';
-  const d = new Date(createdAt);
-  if (isNaN(d.getTime())) return '';
-  d.setDate(d.getDate() + ESTIMATE_VALID_DAYS);
-  if (locale) return formatLocaleDate(d, locale);
-  return d.toLocaleDateString();
+  const start = new Date(createdAt);
+  if (isNaN(start.getTime())) return '';
+  const zone = timeZone && isValidTimeZone(timeZone) ? timeZone : DEFAULT_ORG_TIMEZONE;
+  const ymd = isoDateInTimeZone(start, zone);
+  const [y, m, d] = ymd.split('-').map(Number);
+  const next = new Date(Date.UTC(y, (m || 1) - 1, (d || 1) + ESTIMATE_VALID_DAYS, 12));
+  const nextYmd = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
+  const intlLocale = locale ? localeToBcp47(locale) : 'en-US';
+  return formatDateInTimeZone(nextYmd, zone, intlLocale === 'en' ? 'en-US' : intlLocale);
 }
 
 /** Fixed UTC calendar day so server and browser render the same validity line. */

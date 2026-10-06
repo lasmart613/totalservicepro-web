@@ -1,7 +1,7 @@
 'use client';
 import { useT } from '@/lib/fa/locale';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -9,6 +9,7 @@ import { Header } from '@/components/Header';
 import { useOrgMoney } from '@/lib/use-org-money';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
+import { orgTodayIso } from '@/lib/org-timezone';
 import { buildPurchaseOrderHtml, type DocCompany } from '@/lib/billing/doc-html';
 import { isValidOnFileEmail, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import { chunkIds, fetchAllPages } from '@/lib/supabase/paginate';
@@ -44,9 +45,16 @@ type SupplierOpt = {
   zip?: string | null;
 };
 
-function todayYmd() {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
+export function PurchaseOrderPageFallback() {
+  const t = useT();
+  return (
+    <div className="min-h-screen flex items-center justify-center">
+      <div className="text-center">
+        <div className="text-2xl mb-2">{t('Loading purchase order…')}</div>
+        <div className="text-sm text-[var(--text3)]">{t('Preparing suppliers and line items')}</div>
+      </div>
+    </div>
+  );
 }
 
 export default function PurchaseOrderFormClient() {
@@ -78,7 +86,9 @@ export default function PurchaseOrderFormClient() {
   const [supPhone, setSupPhone] = useState('');
   const [supEmail, setSupEmail] = useState('');
 
-  const [poDate, setPoDate] = useState(todayYmd());
+  const poDateTouched = useRef(false);
+  const orgTodayRef = useRef(orgTodayIso());
+  const [poDate, setPoDate] = useState(() => orgTodayRef.current);
   const [neededBy, setNeededBy] = useState('');
   const [shipTo, setShipTo] = useState('');
   const [description, setDescription] = useState('');
@@ -246,7 +256,8 @@ export default function PurchaseOrderFormClient() {
       setSupSearch(data.supplier_name || '');
       setSupplierOrgId(data.supplier_organization_id || null);
       setSupEmail(data.supplier_email || '');
-      setPoDate(data.po_date ? String(data.po_date).slice(0, 10) : todayYmd());
+      poDateTouched.current = true;
+      setPoDate(data.po_date ? String(data.po_date).slice(0, 10) : orgTodayRef.current);
       setNeededBy(data.needed_by ? String(data.needed_by).slice(0, 10) : '');
       setDescription(data.description || '');
       setTax(Number(data.tax) || 0);
@@ -299,11 +310,17 @@ export default function PurchaseOrderFormClient() {
         setUserOrgId(orgId);
         const techName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ');
         if (orgId) {
+          let storedZone: string | null = null;
+          const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();
+          if (zoneRow.error) console.warn('organizations.timezone', zoneRow.error.message);
+          else if (zoneRow.data?.timezone) storedZone = String(zoneRow.data.timezone);
           const { data: org } = await supabase
             .from('organizations')
             .select('name, address, city, state, zip, phone, email, website, logo_url, slogan')
             .eq('id', orgId)
             .maybeSingle();
+          orgTodayRef.current = orgTodayIso({ stored: storedZone, state: org?.state });
+          if (!editIdParam && !poDateTouched.current) setPoDate(orgTodayRef.current);
           setCompany({
             company_name: org?.name || '',
             address: org?.address || '',
@@ -365,10 +382,11 @@ export default function PurchaseOrderFormClient() {
     try {
       let num = editIdParam ? docNumber : '';
       if (!num && userOrgId) {
+        const dated = poDate || orgTodayRef.current;
         num = await allocateDocNumber(supabase, {
           orgId: userOrgId,
           kind: 'PO',
-          date: poDate || new Date(),
+          date: dated,
         });
         setDocNumber(num);
       }
@@ -382,7 +400,7 @@ export default function PurchaseOrderFormClient() {
         organization_id: userOrgId,
         supplier_organization_id: supplierOrgId || null,
         supplier_email: supEmail.trim() || null,
-        po_date: poDate || todayYmd(),
+        po_date: poDate || orgTodayRef.current,
         needed_by: neededBy || null,
         description: description || null,
         subtotal: Math.round(subtotal * 100) / 100,
@@ -445,7 +463,7 @@ export default function PurchaseOrderFormClient() {
         email: supEmail,
       },
       poNumber: docNumber || 'Draft',
-      poDate: poDate || todayYmd(),
+      poDate: poDate || orgTodayRef.current,
       neededBy: neededBy || undefined,
       shipTo: shipTo || undefined,
       description: description || undefined,
@@ -508,7 +526,7 @@ export default function PurchaseOrderFormClient() {
       <div className="min-h-screen flex flex-col">
         <Header authPending />
         <div className="flex-1 flex items-center justify-center text-[var(--text3)]">
-          Loading purchase order…
+          {t('Loading purchase order…')}
         </div>
       </div>
     );
@@ -521,8 +539,8 @@ export default function PurchaseOrderFormClient() {
         <div className="mb-4">
           <h1 className="text-2xl font-extrabold">{t('Purchase Order')}</h1>
           <p className="text-sm text-[var(--text3)]">
-            {docNumber ? <span className="text-[var(--gold)] font-bold">{docNumber}</span> : 'Draft'}{' '}
-            · emails the address on the supplier profile
+            {docNumber ? <span className="text-[var(--gold)] font-bold">{docNumber}</span> : t('Draft')}{' '}
+            · {t('emails the address on the supplier profile')}
           </p>
         </div>
 
@@ -545,14 +563,14 @@ export default function PurchaseOrderFormClient() {
             >
               <option value="">
                 {suppliers.length
-                  ? `Choose a parts supplier (${filteredSuppliers.length} shown)…`
-                  : 'No parts suppliers found'}
+                  ? t('Choose a parts supplier ({count} shown)…').replace('{count}', String(filteredSuppliers.length))
+                  : t('No parts suppliers found')}
               </option>
               {filteredSuppliers.map((s) => (
                 <option key={String(s.id)} value={String(s.id)}>
                   {s.name}
                   {s.city || s.state ? ` — ${[s.city, s.state].filter(Boolean).join(', ')}` : ''}
-                  {s.email ? ` · ${s.email}` : ' · no email'}
+                  {s.email ? ` · ${s.email}` : ` · ${t('no email')}`}
                 </option>
               ))}
             </select>
@@ -584,7 +602,7 @@ export default function PurchaseOrderFormClient() {
               ))}
             </datalist>
             <p className="text-[11px] text-[var(--text3)] mt-1">
-              Pick from the dropdown or type a name — email fills from their profile.
+              {t('Pick from the dropdown or type a name — email fills from their profile.')}
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
@@ -608,7 +626,10 @@ export default function PurchaseOrderFormClient() {
                 className="input mt-1"
                 type="date"
                 value={poDate}
-                onChange={(e) => setPoDate(e.target.value)}
+                onChange={(e) => {
+                  poDateTouched.current = true;
+                  setPoDate(e.target.value);
+                }}
               />
             </div>
             <div>
@@ -642,7 +663,7 @@ export default function PurchaseOrderFormClient() {
         <section className="card p-4 mb-4 overflow-x-auto">
           <h2 className="font-bold text-[var(--gold)] mb-3">{t('Line items')}</h2>
           <p className="text-[11px] text-[var(--text3)] mb-2">
-            Part # suggests from the Parts Catalog and Marketplace Parts. Pick a match to fill description and price.
+            {t('Part # suggests from the Parts Catalog and Marketplace Parts. Pick a match to fill description and price.')}
           </p>
           <table className="w-full text-sm">
             <thead>
@@ -732,7 +753,7 @@ export default function PurchaseOrderFormClient() {
                     />
                   </td>
                   <td className="pr-1 pb-2">
-                    <input className="input opacity-90" readOnly value={li.ext.toFixed(2)} />
+                    <input className="input opacity-90" readOnly value={money(li.ext)} />
                   </td>
                   <td className="pb-2">
                     <button
@@ -756,12 +777,12 @@ export default function PurchaseOrderFormClient() {
             className="btn btn-secondary text-sm mt-2"
             onClick={() => setLineItems((r) => [...r, emptyLineItem('LI')])}
           >
-            + Add line item
+            + {t('Add line item')}
           </button>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Subtotal')}</label>
-              <input className="input mt-1 opacity-90" readOnly value={subtotal.toFixed(2)} />
+              <input className="input mt-1 opacity-90" readOnly value={money(subtotal)} />
             </div>
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Tax')}</label>

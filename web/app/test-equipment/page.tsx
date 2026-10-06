@@ -7,6 +7,7 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { saveShopTestEquipment } from '@/lib/test-equipment';
+import { displayModelName } from '@/lib/model-display';
 
 type TeRow = {
   id: string;
@@ -295,7 +296,7 @@ export default function TestEquipmentPage() {
             </p>
           </div>
           <button type="button" className="btn btn-primary" onClick={openNew}>
-            ＋ Add equipment
+            ＋ {t('Add equipment')}
           </button>
         </div>
 
@@ -324,7 +325,7 @@ export default function TestEquipmentPage() {
                   <div className="flex justify-between gap-2">
                     <div>
                       <div className="font-bold text-[var(--gold)]">
-                        {[r.make, r.model].filter(Boolean).join(' ') || r.type}
+                        {[r.make, displayModelName(r.model)].filter(Boolean).join(' ') || r.type}
                       </div>
                       <div className="text-xs text-[var(--text3)] mt-1">
                         {r.type}
@@ -366,7 +367,7 @@ export default function TestEquipmentPage() {
           <div className="card w-full max-w-lg p-5 max-h-[90vh] overflow-y-auto">
             <div className="flex justify-between mb-3">
               <h2 className="font-bold text-lg text-[var(--gold)]">
-                {editing ? 'Edit equipment' : 'Add equipment'}
+                {editing ? t('Edit equipment') : t('Add equipment')}
               </h2>
               <button type="button" className="text-[var(--text3)]" onClick={() => setOpen(false)}>
                 ✕

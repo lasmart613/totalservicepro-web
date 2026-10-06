@@ -280,15 +280,16 @@ export default function TeamManagement() {
   return (
     <div>
       <h1 className="text-3xl font-extrabold mb-2">{t('Team Management')}</h1>
-      <p className="text-[var(--text3)] mb-8">
-        Invite FSEs and staff. An email that already owns another shop is valid —
-        they join this company as a second membership (moonlight) and keep their home org.
+      <p className="text-[var(--text3)] mb-8" dir="auto">
+        <bdi>
+          {t('Invite FSEs and staff. An email that already owns another shop is valid — they join this company as a second membership (moonlight) and keep their home org.')}
+        </bdi>
       </p>
 
       <div className="card p-6 mb-10">
         <h2 className="font-bold text-xl mb-4">{t('Invite Team Member')}</h2>
         <p className="text-xs text-[var(--text3)] mb-4">
-          If the invite email is delayed or doesn&apos;t arrive, copy the invite link and send it to them directly.
+          {t("If the invite email is delayed or doesn't arrive, copy the invite link and send it to them directly.")}
         </p>
 
         {lastInviteUrl && (
@@ -379,10 +380,12 @@ export default function TeamManagement() {
               disabled={adding}
               className="btn btn-primary w-full md:w-auto px-8"
             >
-              {adding ? 'Sending invite…' : 'Send Invite Email'}
+              {adding ? t('Sending invite…') : t('Send Invite Email')}
             </button>
-            <p className="text-xs text-[var(--text3)] mt-2">
-              Sends a RepairPlanet invite email. Existing users (including shop owners) are added as a membership — default FSE — and keep their home shop. New users set a password from the email.
+            <p className="text-xs text-[var(--text3)] mt-2" dir="auto">
+              <bdi>
+                {t('Sends a RepairPlanet invite email. Existing users (including shop owners) are added as a membership — default FSE — and keep their home shop. New users set a password from the email.')}
+              </bdi>
             </p>
           </div>
         </form>
@@ -390,7 +393,7 @@ export default function TeamManagement() {
 
       {pendingInvites.length > 0 && (
         <div className="card p-6 mb-10">
-          <h2 className="font-bold text-xl mb-4">Pending Invites ({pendingInvites.length})</h2>
+          <h2 className="font-bold text-xl mb-4">{t('Pending Invites ({count})').replace('{count}', String(pendingInvites.length))}</h2>
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -419,7 +422,7 @@ export default function TeamManagement() {
                         className="btn btn-secondary text-xs"
                         onClick={() => resendInvite(inv.email, inv.role)}
                       >
-                        Resend email
+                        {t('Resend email')}
                       </button>
                     </td>
                   </tr>
@@ -431,7 +434,7 @@ export default function TeamManagement() {
       )}
 
       <div className="card p-6">
-        <h2 className="font-bold text-xl mb-4">Current Team ({teamMembers.length})</h2>
+        <h2 className="font-bold text-xl mb-4">{t('Current Team ({count})').replace('{count}', String(teamMembers.length))}</h2>
 
         {loading ? (
           <div className="text-center py-8 text-[var(--text3)]">{t('Loading team...')}</div>

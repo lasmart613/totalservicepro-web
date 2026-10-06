@@ -218,7 +218,8 @@ test('server-built estimate and report ignore a stored HTML blob', () => {
   assert.equal((emailed.match(/These links are unique to this estimate\./g) || []).length, 1);
   assert.match(emailed, /LT-1 Laser tip ×1 @ \$10\.00 = \$10\.00/);
   assert.doesNotMatch(emailed, /Laser tip: 10\.00/);
-  assert.match(emailed, /alex_trivantage/);
+  assert.match(emailed, /Alexandrite TriVantage/);
+  assert.doesNotMatch(emailed, /alex_trivantage/);
 
   const bare = buildOwnedEstimateMessage({
     row: {

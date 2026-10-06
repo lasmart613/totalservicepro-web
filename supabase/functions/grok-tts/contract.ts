@@ -7,9 +7,44 @@ export const MAX_TTS_CHARS = 4000
 export const TTS_REQUESTS_PER_MINUTE = 8
 export const VOICES_REQUESTS_PER_MINUTE = 30
 export const RATE_WINDOW_MS = 60_000
-/** Same built-in voices as grok-assistant TTS. Unknown ids are rejected. */
-export const ALLOWED_VOICE_IDS = ['eve', 'ara', 'rex', 'sal', 'leo', 'sage'] as const
-export const DEFAULT_VOICE_ID = 'sage'
+/**
+ * Built-in voices from the xAI TTS docs voice table, checked 2026-10-06:
+ * https://docs.x.ai/developers/model-capabilities/audio/text-to-speech
+ * `eve` is the documented default. `sage` is not in that table and xAI
+ * returns 400 Voice 'sage' not found. Unknown ids, including sage, are rejected.
+ * Accent notes on the page (Australian, Indian, British) are descriptions, not ids.
+ */
+export const ALLOWED_VOICE_IDS = [
+  'carina',
+  'zagan',
+  'helix',
+  'orion',
+  'luna',
+  'iris',
+  'altair',
+  'zenith',
+  'perseus',
+  'helios',
+  'lux',
+  'kepler',
+  'rigel',
+  'cosmo',
+  'celeste',
+  'ursa',
+  'sirius',
+  'lumen',
+  'castor',
+  'naksh',
+  'atlas',
+  'aurora',
+  'liora',
+  'ara',
+  'eve',
+  'leo',
+  'rex',
+  'sal',
+] as const
+export const DEFAULT_VOICE_ID = 'eve'
 export const DEFAULT_LANGUAGE = 'en'
 export const TTS_REQUEST_TYPE = 'grok_tts'
 export const VOICES_REQUEST_TYPE = 'grok_tts_voices'
@@ -123,6 +158,23 @@ export function parseTtsBody(input: unknown): { ok: true; value: TtsRequest } | 
   }
 
   return { ok: true, value: { text, voiceId, language } }
+}
+
+/** Drop voices POST will reject, including sage, before the Settings picker sees them. */
+export function filterListedVoices(payload: unknown): Record<string, unknown> {
+  const allowed = new Set<string>(ALLOWED_VOICE_IDS)
+  const keep = (row: unknown) => {
+    if (!row || typeof row !== 'object') return false
+    const id = String((row as { voice_id?: unknown }).voice_id ?? '')
+      .trim()
+      .toLowerCase()
+    return allowed.has(id)
+  }
+  if (Array.isArray(payload)) return { voices: payload.filter(keep) }
+  if (!payload || typeof payload !== 'object') return { voices: [] }
+  const rec = payload as Record<string, unknown>
+  if (!Array.isArray(rec.voices)) return { ...rec }
+  return { ...rec, voices: rec.voices.filter(keep) }
 }
 
 /** Strip a secret and common key shapes before any upstream body is returned. */

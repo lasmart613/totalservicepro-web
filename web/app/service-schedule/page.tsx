@@ -12,6 +12,7 @@ import { canSeeAllShopTickets, isAdmin, isFieldEngineer, isPro } from '@/lib/rol
 import { roleLabel } from '@/lib/labels';
 import { useT } from '@/lib/fa/locale';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
+import { orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
 import { ticketDateYmd, toLocalYmd } from '@/lib/tickets';
 import {
   UNASSIGNED_ASSIGNEE,
@@ -112,7 +113,7 @@ type TicketForm = {
 
 const EMPTY_FORM = (presetDate?: string): TicketForm => ({
   customer_name: '',
-  service_date: presetDate || toLocalYmd(new Date()),
+  service_date: presetDate || orgTodayIso(),
   scheduled_time: '09:00',
   end_time: '10:00',
   service_type: 'Repair',
@@ -147,6 +148,10 @@ export default function ServiceSchedule() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>('');
   const [orgId, setOrgId] = useState<number | string | null>(null);
+  const [orgZone, setOrgZone] = useState<{ stored: string | null; state: string | null }>({
+    stored: null,
+    state: null,
+  });
   const [userId, setUserId] = useState<string | null>(null);
   const [selfName, setSelfName] = useState('');
   const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
@@ -199,7 +204,7 @@ export default function ServiceSchedule() {
   const shopLeadView = canSeeAllShopTickets(userRole);
   const fseOnlyView = isFieldEngineer(userRole) || !shopLeadView;
 
-  const formatTicket = useCallback((ticket: any) => {
+  const formatTicket = useCallback((ticket: any, timeZone?: string) => {
     const start = ticket.scheduled_time;
     const end = ticket.end_time;
     let duration = 60;
@@ -208,7 +213,14 @@ export default function ServiceSchedule() {
       const [eh, em] = String(end).split(':').map(Number);
       duration = eh * 60 + em - (sh * 60 + sm);
     }
-    const dateStr = ticketDateYmd(ticket.service_date);
+    const docZone =
+      timeZone ||
+      resolveOrgTimeZone({
+        stored: orgZone.stored,
+        state: orgZone.state,
+        allowBrowser: false,
+      }).timeZone;
+    const dateStr = ticketDateYmd(ticket.service_date, docZone);
     return {
       id: ticket.id,
       ticket_number: ticket.ticket_number,
@@ -227,7 +239,7 @@ export default function ServiceSchedule() {
       customer_state: ticket.customer_state || ticket.state || '',
       zip: ticket.zip || ticket.customer_zip || '',
     };
-  }, []);
+  }, [orgZone.stored, orgZone.state]);
 
   const fetchServiceCalls = useCallback(async () => {
     setLoading(true);
@@ -262,6 +274,25 @@ export default function ServiceSchedule() {
       setSelfName(mine);
       const oId = coerceOrgId(profile?.organization_id ?? null);
       setOrgId(oId);
+      let zoneStored: string | null = null;
+      let zoneState: string | null = null;
+      if (oId != null) {
+        const zoneRow = await supabase.from('organizations').select('timezone, state').eq('id', oId).maybeSingle();
+        if (!zoneRow.error) {
+          zoneStored = zoneRow.data?.timezone ? String(zoneRow.data.timezone) : null;
+          zoneState = zoneRow.data?.state ? String(zoneRow.data.state) : null;
+        } else {
+          console.warn('organizations.timezone', zoneRow.error.message);
+          const stateRow = await supabase.from('organizations').select('state').eq('id', oId).maybeSingle();
+          zoneState = stateRow.data?.state ? String(stateRow.data.state) : null;
+        }
+        setOrgZone({ stored: zoneStored, state: zoneState });
+      }
+      const loadedZone = resolveOrgTimeZone({
+        stored: zoneStored,
+        state: zoneState,
+        allowBrowser: false,
+      }).timeZone;
 
       const selectCols = `
             id,
@@ -347,7 +378,7 @@ export default function ServiceSchedule() {
         role,
         userId: user.id,
       });
-      const formatted = scoped.map(formatTicket);
+      const formatted = scoped.map((ticket) => formatTicket(ticket, loadedZone));
       setServiceCalls(formatted);
     } catch (err: any) {
       console.error('Error fetching service calls:', err);
@@ -507,8 +538,8 @@ export default function ServiceSchedule() {
     setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() - 1, 12, 0, 0));
 
   const goToday = () => {
-    const n = new Date();
-    setCursor(new Date(n.getFullYear(), n.getMonth(), n.getDate(), 12, 0, 0));
+    const [y, m, d] = orgTodayIso(orgZone).split('-').map(Number);
+    setCursor(new Date(y, (m || 1) - 1, d || 1, 12, 0, 0));
   };
 
   /** Open Day view for a calendar day (primary month interaction) */
@@ -566,7 +597,7 @@ export default function ServiceSchedule() {
   };
 
   function openNewModal(presetDate?: string) {
-    setForm(EMPTY_FORM(presetDate));
+    setForm(EMPTY_FORM(presetDate || orgTodayIso(orgZone)));
     setFormError(null);
     setCustomerOrgId(null);
     setCustomerLocations([]);
@@ -604,7 +635,7 @@ export default function ServiceSchedule() {
         ticketNumber = await generateDocNumber(supabase as any, {
           orgId,
           kind: 'TKT',
-          date: form.service_date ? new Date(form.service_date + 'T12:00:00') : new Date(),
+          date: form.service_date || orgTodayIso(orgZone),
         });
       } catch {
         ticketNumber = `TMP-TKT-${Date.now().toString().slice(-6)}`;
@@ -715,7 +746,7 @@ export default function ServiceSchedule() {
   }
 
   const dayYmd = toLocalYmd(cursor);
-  const todayYmd = toLocalYmd(new Date());
+  const todayYmd = orgTodayIso(orgZone);
 
   const unscheduledCalls = useMemo(
     () => serviceCalls.filter((c) => !c.date || !/^\d{4}-\d{2}-\d{2}$/.test(c.date)),

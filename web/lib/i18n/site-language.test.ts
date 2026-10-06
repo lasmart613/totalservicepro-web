@@ -175,6 +175,96 @@ function walkTsx(dir: string, out: string[]) {
   }
 }
 
+test('QA leftover labels exist in German and Arabic', () => {
+  const keys = [
+    'Primary',
+    'Accent',
+    'Primary picker',
+    'Accent picker',
+    'Primary hex',
+    'Accent hex',
+    'white',
+    'dark',
+    'below AA',
+    'on team',
+    'accepted',
+    'pending',
+    'Timezone',
+    'Use address state',
+    'Add equipment',
+    'Edit equipment',
+    'Full list',
+    'Add line item',
+    'Travel',
+    'DRAFT',
+    'PARTIALLY PAID',
+    'VOID',
+    'Void invoice',
+    'This invoice was voided',
+    'Parts total:',
+    'All languages',
+    'German',
+    'Spanish',
+    'English',
+    'French',
+    'Italian',
+    'Portuguese',
+    'Language',
+    'Send Invite Email',
+    'Resend Email',
+    'Mark partial',
+    'Mark paid',
+    'Collect remaining balance',
+    'Current Team ({count})',
+    'Pending Invites ({count})',
+    'emails the address on the supplier profile',
+    'Use {primary} and {accent}',
+    'Text on each color is chosen automatically so it stays readable. AA is the WCAG target for body text.',
+    'All invite records for your organization (including completed).',
+    'Add and manage customers from the {page}.',
+    'Invite FSEs and staff. An email that already owns another shop is valid — they join this company as a second membership (moonlight) and keep their home org.',
+    "If the invite email is delayed or doesn't arrive, copy the invite link and send it to them directly.",
+    'Meters, analyzers, and other shop tools. Admin / owner can assign a piece to an FSE.',
+    'Add a customer to build your CRM directory.',
+    'Showing only customers linked to your organization',
+    'Access limited to service companies and parts suppliers.',
+    'Finalize & Email only sets status to sent after Resend accepts the message. Requires customer email and a verified From domain.',
+    'Requires customer email and a verified From domain.',
+    'Part # suggests from the Parts Catalog and Marketplace Parts. Pick a match to fill description and price.',
+    'Pick from the dropdown or type a name — email fills from their profile.',
+    'Ask a question (select a manual for best results)…',
+    'Ask about this system…',
+    'Sends a RepairPlanet invite email. Existing users (including shop owners) are added as a membership — default FSE — and keep their home shop. New users set a password from the email.',
+    'Due now {amount}',
+    'from estimate #{number}',
+    'All manufacturers',
+    'Thinking…',
+    'Loading customers...',
+    'Unnamed Customer',
+    'View profile →',
+    'No parts suppliers found',
+    'Choose a parts supplier ({count} shown)…',
+  ];
+  for (const key of keys) {
+    assert.ok(APP_STRING_KEYS.includes(key), key);
+    for (const locale of ['de', 'ar'] as const) {
+      const value = appStrings(locale)[key];
+      assert.equal(typeof value, 'string', key);
+      assert.notEqual(value, key, `${locale} ${key}`);
+    }
+    for (const token of key.match(/\{[A-Za-z_]+\}/g) || []) {
+      assert.ok(appStrings('ar')[key].includes(token), `${key} ${token}`);
+      assert.ok(appStrings('de')[key].includes(token), `${key} ${token}`);
+    }
+    if (key.includes('RepairPlanet')) {
+      assert.ok(appStrings('ar')[key].includes('RepairPlanet'));
+      assert.ok(appStrings('de')[key].includes('RepairPlanet'));
+    }
+  }
+  assert.equal(appStrings('de').Travel, 'Anreise');
+  assert.match(appStrings('ar').Travel, /[\u0600-\u06FF]/);
+});
+
 test('every t() literal exists in the signed-in or public dictionary', () => {
   const files: string[] = [];
   walkTsx(join(webDir, 'app'), files);

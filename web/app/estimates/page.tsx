@@ -27,6 +27,8 @@ import {
   type CustomerActionKind,
 } from '@/lib/billing/save-helpers';
 import { approvedTicketRefFromEstimate } from '@/lib/billing/approve-estimate';
+import { displayModelText } from '@/lib/model-display';
+import { DEFAULT_ORG_TIMEZONE, formatOrgDocumentDate, resolveNumberingTimeZone } from '@/lib/org-timezone';
 import {
   ESTIMATE_LIST_POLL_MS,
   estimateRowBelongsToViewer,
@@ -119,7 +121,7 @@ export default function EstimatesPage() {
 
 function ShopEstimatesList() {
   const t = useT();
-  const { format, locale } = useFormatDate();
+  const { locale } = useFormatDate();
   const { money } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
@@ -131,6 +133,7 @@ function ShopEstimatesList() {
   const [viewer, setViewer] = useState<{ orgId: string | number | null; userId: string } | null>(
     null
   );
+  const [docZone, setDocZone] = useState(DEFAULT_ORG_TIMEZONE);
 
   useEffect(() => {
     init();
@@ -159,6 +162,10 @@ function ShopEstimatesList() {
 
       const orgId = coerceOrgId(profile?.organization_id);
       setViewer({ orgId, userId: user.id });
+      const zone = await resolveNumberingTimeZone(supabase, isValidOrgId(orgId) ? orgId : null, {
+        allowBrowser: false,
+      });
+      setDocZone(zone.timeZone);
       await loadEstimates(orgId, user.id);
     } catch (e) {
       console.error(e);
@@ -485,7 +492,7 @@ function ShopEstimatesList() {
             {filtered.map((est) => {
               const st = effectiveStatus(est);
               const badge = estimateListBadge(est);
-              const until = validUntilLabel(est.created_at, locale);
+              const until = validUntilLabel(est.created_at, docZone, locale);
               const num = docNumber(est);
               const canConvert =
                 st !== 'expired' && canConvertEstimateToInvoice(est);
@@ -518,11 +525,7 @@ function ShopEstimatesList() {
                         {num && (
                           <span className="text-[var(--gold)] font-bold">{num} </span>
                         )}
-                        <span>
-                          {est.created_at
-                            ? format(est.created_at)
-                            : '—'}
-                        </span>
+                        <span>{formatOrgDocumentDate(est.created_at, docZone, locale) || '—'}</span>
                         {' '}
                         <span
                           className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${estimateStatusBadgeClass(
@@ -551,7 +554,7 @@ function ShopEstimatesList() {
                       </div>
                       {est.device_model && (
                         <div className="text-xs text-[var(--text3)] mt-0.5 truncate">
-                          {est.device_model}
+                          {displayModelText(est.device_model)}
                         </div>
                       )}
                       {cust.note && (

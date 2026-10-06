@@ -150,17 +150,17 @@ export function TestEquipmentRoster(props: {
         <div>
           <h2 className="font-bold text-xl">{t('Company test equipment')}</h2>
           <p className="text-sm text-[var(--text3)] mt-1">
-            Meters, analyzers, and other shop tools. Admin / owner can assign a piece to an FSE.
+            {t('Meters, analyzers, and other shop tools. Admin / owner can assign a piece to an FSE.')}
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
           {props.canAssign && (
             <button type="button" className="btn btn-primary text-sm" onClick={() => setAdding((v) => !v)}>
-              {adding ? t('Cancel') : 'Add equipment'}
+              {adding ? t('Cancel') : t('Add equipment')}
             </button>
           )}
           <Link href="/test-equipment" className="btn btn-secondary text-sm">
-            Full list
+            {t('Full list')}
           </Link>
         </div>
       </div>

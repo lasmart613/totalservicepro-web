@@ -12,6 +12,7 @@ import { formatListingPrice, partsDetailPath } from '@/lib/marketplace/parts';
 import { GUEST_SIGNUP_HREF } from '@/lib/marketplace/guest';
 import { useSignedIn } from '@/lib/use-signed-in';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
+import { displayModelName } from '@/lib/model-display';
 import { StorageImage } from '@/components/StorageImage';
 
 type Seller = {
@@ -186,7 +187,7 @@ export default function SellerStorefrontPage() {
                   <ListingDescriptionSnippet text={l.description} className="mb-1" />
                   <p className="text-sm text-[var(--text3)] mb-2">PN: {l.part_number || 'N/A'}</p>
                   <p className="text-sm mb-1">
-                    {[l.manufacturer, l.model].filter(Boolean).join(' ')}
+                    {[l.manufacturer, displayModelName(l.model)].filter(Boolean).join(' ')}
                     {l.condition ? ` • ${l.condition}` : ''}
                   </p>
                   <GuestAwarePrice

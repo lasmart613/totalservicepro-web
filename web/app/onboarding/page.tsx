@@ -12,6 +12,7 @@ import { useRouter } from 'next/navigation';
 import { isOwnerish, isSupplier } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { displayModelName } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { applyPendingSignup, ensureOrganizationMembership, resolvePendingSignup } from '@/lib/pending-signup';
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim, shouldSendToMemberOnboarding } from '@/lib/invite-claim';
@@ -773,7 +774,7 @@ export default function Onboarding() {
             };
             const r2 = await supabase.from('equipment').insert(slim);
             if (r2.error) {
-              laserSaveErrors.push(`${l.manufacturer} ${l.model}: ${r2.error.message}`);
+              laserSaveErrors.push(`${l.manufacturer} ${displayModelName(l.model)}: ${r2.error.message}`);
               console.error('equipment insert failed', r2.error);
             } else {
               lasersSaved++;
@@ -1007,7 +1008,7 @@ export default function Onboarding() {
                 >
                   <option value="">{laserMfr ? t('Select model…') : 'Select manufacturer first'}</option>
                   {laserModelsForMfr.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m} value={m}>{displayModelName(m)}</option>
                   ))}
                   <option value={OTHER_MODEL}>{t('Other / not listed…')}</option>
                 </select>
@@ -1036,7 +1037,7 @@ export default function Onboarding() {
                 {lasers.map(l => (
                   <li key={l.id} className="card p-3 flex justify-between items-center text-sm">
                     <div>
-                      <div className="font-bold text-[var(--gold)]">{l.manufacturer} {l.model}</div>
+                      <div className="font-bold text-[var(--gold)]">{l.manufacturer} {displayModelName(l.model)}</div>
                       <div className="text-xs text-[var(--text3)]">{l.serial_number ? `SN ${l.serial_number}` : 'No serial'}{l.notes ? ` · ${l.notes}` : ''}</div>
                     </div>
                     <button type="button" className="text-red-400 text-xs" onClick={() => removeLaserDraft(l.id)}>{t('Remove')}</button>

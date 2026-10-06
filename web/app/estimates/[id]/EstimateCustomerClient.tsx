@@ -15,6 +15,7 @@ import {
   type EstimateEmailAction,
 } from '@/lib/billing/save-helpers';
 import { formatOrgMoney } from '@/lib/money-format';
+import { formatOrgDocumentDate } from '@/lib/org-timezone';
 
 function fillEmphasis(template: string, slots: Record<string, string>) {
   return template.split(/(\{[A-Za-z_]+\})/g).map((part, i) => {
@@ -46,12 +47,17 @@ type EstimateView = {
   customerOrgLinked?: boolean;
   currencyCode?: string | null;
   numberFormat?: string | null;
+  timeZone?: string | null;
 };
 
 type RequestRef = { id?: string | number | null; number?: string | null } | null;
 
 function money(n: number, currencyCode?: string | null, numberFormat?: string | null) {
   return formatOrgMoney(n, { currencyCode, numberFormat });
+}
+
+function formatDate(iso: string | null, timeZone?: string | null, locale?: string | null) {
+  return formatOrgDocumentDate(iso, timeZone, locale || 'en-US');
 }
 
 export default function EstimateCustomerClient({
@@ -62,7 +68,7 @@ export default function EstimateCustomerClient({
   wantChanges: boolean;
 }) {
   const t = useT();
-  const { format } = useFormatDate();
+  const { locale } = useFormatDate();
   const supabase = getSupabaseClient();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -235,12 +241,12 @@ export default function EstimateCustomerClient({
                     <div>
                       {est.expired
                         ? (est.validUntil
-                            ? t('Expired on {date}').replace('{date}', format(est.validUntil))
+                            ? t('Expired on {date}').replace('{date}', formatDate(est.validUntil, est.timeZone, locale))
                             : t('Expired'))
                         : est.validUntil
                           ? t('Good for {days} days (through {date})')
                               .replace('{days}', String(est.validDays))
-                              .replace('{date}', format(est.validUntil))
+                              .replace('{date}', formatDate(est.validUntil, est.timeZone, locale))
                           : t('Good for {days} days').replace('{days}', String(est.validDays))}
                     </div>
                   </div>
@@ -260,7 +266,7 @@ export default function EstimateCustomerClient({
                 {est.customerAction === 'changes_requested' && est.customerActionNote && (
                   <div className="mt-4 p-3 rounded-xl border border-amber-700/40 bg-amber-950/20 text-sm">
                     {est.customerActionAt
-                      ? t('A modification request was already sent on {date}.').replace('{date}', format(est.customerActionAt))
+                      ? t('A modification request was already sent on {date}.').replace('{date}', formatDate(est.customerActionAt, est.timeZone, locale))
                       : t('A modification request was already sent.')}
                   </div>
                 )}

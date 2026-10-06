@@ -5,6 +5,7 @@
  */
 
 import { writeWithColumnRetry } from './billing/save-helpers.ts';
+import { displayModelName } from './model-display.ts';
 
 export type TestEquipmentRow = {
   id: string;
@@ -55,7 +56,7 @@ export function isSchemaDriftError(message?: string | null): boolean {
 }
 
 export function testEquipmentLabel(row: TestEquipmentRow): string {
-  return [row.make, row.model].filter(Boolean).join(' ') || row.type || 'Test equipment';
+  return [row.make, displayModelName(row.model)].filter(Boolean).join(' ') || row.type || 'Test equipment';
 }
 
 export type LoadTestEquipmentResult = {

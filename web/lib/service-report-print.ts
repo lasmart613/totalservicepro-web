@@ -14,6 +14,7 @@ import {
 import { formatLocaleDate } from './i18n/format-date.ts';
 import { translateApp, withDocDirection } from './i18n/translate-app.ts';
 import { viewMeasurement } from './fluence-measurement.ts';
+import { displayModelText } from './model-display.ts';
 import { systemParameterRows } from './models.ts';
 
 export type PrintReportInput = {
@@ -270,7 +271,7 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
     `<div style="margin-bottom:10px;padding:6px 8px;background:#f9f9f9;border:1px solid #eee;border-radius:4px">` +
     `<div style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;margin-bottom:3px">${esc(tr('Report'))}</div>` +
     `<table style="width:100%;font-size:10px"><tr>` +
-    `<td style="width:50%;padding:2px 4px 2px 0">${cap('Equipment')}<br><strong>${esc(r.equipment_name || '—')}</strong></td>` +
+    `<td style="width:50%;padding:2px 4px 2px 0">${cap('Equipment')}<br><strong>${esc(displayModelText(r.equipment_name || '') || '—')}</strong></td>` +
     `<td style="width:50%;padding:2px 0 2px 4px">${cap('Serial #')}<br><strong>${esc(r.serial_number || '—')}</strong></td>` +
     `</tr><tr>` +
     `<td style="padding:2px 4px 2px 0">${cap('Engineer (FSE)')}<br><strong>${esc(engineer)}</strong></td>` +
@@ -284,7 +285,7 @@ export function buildServiceReportPrintHTML(r: PrintReportInput): string {
     safetyHTML +
     (r.comments
       ? `<h3 style="margin:14px 0 6px;border-bottom:2px solid ${accent};padding-bottom:4px;font-size:13px">${esc(tr('Comments & Notes'))}</h3>` +
-        `<p style="font-size:12px;background:#f9f9f9;padding:10px;border-radius:4px">${esc(r.comments)}</p>`
+        `<p style="font-size:12px;background:#f9f9f9;padding:10px;border-radius:4px"><bdi dir="auto">${esc(r.comments)}</bdi></p>`
       : '') +
     `<div style="margin-top:28px;border-top:2px solid ${accent};padding-top:12px">` +
     `<table style="width:100%;font-size:12px;margin-bottom:10px"><tr>` +

@@ -16,8 +16,9 @@ import {
   type CompanyTheme,
   type ThemeScope,
 } from '../company-theme.ts';
-import { formatLocaleDate } from '../i18n/format-date.ts';
-import { translateApp, translateAppFill, withDocDirection } from '../i18n/translate-app.ts';
+import { localeToBcp47, translateApp, translateAppFill, withDocDirection } from '../i18n/translate-app.ts';
+import { displayModelName, displayModelText } from '../model-display.ts';
+import { DEFAULT_ORG_TIMEZONE, formatDateInTimeZone } from '../org-timezone.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
 
 function docT(locale: string | null | undefined, text: string): string {
@@ -34,7 +35,9 @@ function docFill(
 
 function docDate(value: string | undefined | null, locale?: string | null, empty = ''): string {
   if (!value) return empty;
-  return formatLocaleDate(value, locale) || value;
+  if (!/^\d{4}-\d{2}-\d{2}/.test(value)) return value;
+  const bcp = locale ? localeToBcp47(locale) : 'en-US';
+  return formatDateInTimeZone(value, DEFAULT_ORG_TIMEZONE, bcp === 'en' ? 'en-US' : bcp) || value;
 }
 
 export type DocThemeScope = ThemeScope;
@@ -360,15 +363,28 @@ export type InvoiceHtmlInput = {
   /** Organization display currency. Omitted values stay USD in the locale format. */
   moneyPrefs?: OrgMoneyPrefs | null;
   locale?: string | null;
+  /** IANA zone for the fallback "today" date. Date-only invoice dates are not shifted. */
+  timeZone?: string | null;
 };
+
+function docZone(timeZone: string | null | undefined): string {
+  const zone = String(timeZone || '').trim();
+  return zone || DEFAULT_ORG_TIMEZONE;
+}
+
+function docDateLabel(value: string | null | undefined, timeZone: string | null | undefined, locale?: string | null): string {
+  const bcp = locale ? localeToBcp47(locale) : 'en-US';
+  return formatDateInTimeZone(value || new Date(), docZone(timeZone), bcp === 'en' ? 'en-US' : bcp);
+}
 
 export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
   const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
   const tr = (text: string) => docT(input.locale, text);
+  const zone = docZone(input.timeZone);
   const dateLabel = input.invoiceDate
-    ? docDate(input.invoiceDate, input.locale, input.invoiceDate)
-    : docDate(new Date().toISOString(), input.locale);
-  const dueLabel = input.dueDate ? docDate(input.dueDate, input.locale, input.dueDate) : '—';
+    ? docDateLabel(input.invoiceDate, zone, input.locale)
+    : docDateLabel(null, zone, input.locale);
+  const dueLabel = input.dueDate ? docDateLabel(input.dueDate, zone, input.locale) : '—';
 
   const rule = documentRuleColor(input.theme, input.themeScope);
 
@@ -449,9 +465,9 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
     `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">${tr('Line Items')}</h3>` +
     linesHtml +
     (input.description
-      ? `<div style="margin:0 0 12px;font-size:11px;color:#444;"><strong>${tr('Notes')}:</strong> ${esc(
-          input.description
-        )}</div>`
+      ? `<div style="margin:0 0 12px;font-size:11px;color:#444;"><strong>${tr('Notes')}:</strong> <bdi dir="auto">${esc(
+          displayModelText(input.description)
+        )}</bdi></div>`
       : '') +
     `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">${tr('Amounts')}</h3>` +
     `<div style="font-size:13px;font-weight:600;">` +
@@ -468,7 +484,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         (deposit > 0
           ? `<div style="margin-top:8px;">${tr('Deposit received')}: <strong>${money(deposit)}</strong>` +
             (input.depositDate
-              ? ` ${docFill(input.locale, 'on {date}', { date: docDate(input.depositDate, input.locale, input.depositDate) })}`
+              ? ` ${docFill(input.locale, 'on {date}', { date: docDateLabel(input.depositDate, zone, input.locale) })}`
               : '') +
             (input.depositMethod ? ` ${docFill(input.locale, 'via {method}', { method: esc(tr(input.depositMethod)) })}` : '') +
             `</div>` +
@@ -481,7 +497,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         ? `<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid ${rule};border-radius:6px;font-size:12px;">` +
           `<div>${tr('Deposit received')}: <strong>${money(deposit)}</strong>` +
           (input.depositDate
-            ? ` ${docFill(input.locale, 'on {date}', { date: docDate(input.depositDate, input.locale, input.depositDate) })}`
+            ? ` ${docFill(input.locale, 'on {date}', { date: docDateLabel(input.depositDate, zone, input.locale) })}`
             : '') +
           (input.depositMethod ? ` ${docFill(input.locale, 'via {method}', { method: esc(tr(input.depositMethod)) })}` : '') +
           `</div>` +
@@ -545,9 +561,11 @@ export function buildPurchaseOrderHtml(input: PurchaseOrderHtmlInput): string {
   const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
   const tr = (text: string) => docT(input.locale, text);
   const dateLabel = input.poDate
-    ? docDate(input.poDate, input.locale, input.poDate)
-    : docDate(new Date().toISOString(), input.locale);
-  const neededLabel = input.neededBy ? docDate(input.neededBy, input.locale, input.neededBy) : '—';
+    ? docDateLabel(input.poDate, DEFAULT_ORG_TIMEZONE, input.locale)
+    : docDateLabel(null, DEFAULT_ORG_TIMEZONE, input.locale);
+  const neededLabel = input.neededBy
+    ? docDateLabel(input.neededBy, DEFAULT_ORG_TIMEZONE, input.locale)
+    : '—';
 
   let linesHtml =
     `<table style="width:100%;border-collapse:collapse;font-size:11px;margin:0 0 12px;">` +
@@ -735,7 +753,7 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
   if (input.partsTotal) {
     cost += `<div style="margin-top:6px;">${tr('Parts')}:<br>`;
     (input.partsLines || []).forEach((ln) => {
-      cost += `<div>${esc(ln)}</div>`;
+      cost += `<div><bdi dir="auto">${esc(ln)}</bdi></div>`;
     });
     cost += `<strong>${tr('Parts Subtotal')}: ${money(input.partsTotal)}</strong></div>`;
   }
@@ -776,7 +794,7 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
     `<div style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">${tr('Estimate Details')}</div>` +
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:10px;">` +
     `<div>${fieldLabel(input.locale, 'Manufacturer')} ${esc(input.manufacturer || '—')}</div>` +
-    `<div>${fieldLabel(input.locale, 'Model')} ${esc(input.model || '—')}</div>` +
+    `<div>${fieldLabel(input.locale, 'Model')} ${esc(input.model ? displayModelName(input.model) : '—')}</div>` +
     `<div>${fieldLabel(input.locale, 'Serial #')} ${esc(input.serial || '—')}</div>` +
     `<div>${fieldLabel(input.locale, 'Pulse count')} ${esc(input.pulseCount || '—')}</div>` +
     `<div>${fieldLabel(input.locale, 'Travel')} ${docFill(input.locale, '{miles} mi round-trip', { miles: input.miles ?? 0 })}</div>` +
@@ -791,9 +809,9 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
       .map((s) => `• ${esc(s)}`)
       .join('<br>')}</div>` +
     `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">${tr('Reported Issues')}</h3>` +
-    `<pre style="white-space:pre-wrap;font-family:inherit;margin:0 0 12px;font-size:12px;background:#f9f9f9;padding:8px;border-radius:4px;">${esc(
+    `<pre style="white-space:pre-wrap;font-family:inherit;margin:0 0 12px;font-size:12px;background:#f9f9f9;padding:8px;border-radius:4px;"><bdi dir="auto">${esc(
       input.issues || tr('No issues noted')
-    )}</pre>` +
+    )}</bdi></pre>` +
     `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">${tr('Cost Breakdown')}</h3>` +
     cost +
     `<div style="margin-top:28px;font-size:11px;color:#555;text-align:center;border-top:1px solid #eee;padding-top:12px;">` +

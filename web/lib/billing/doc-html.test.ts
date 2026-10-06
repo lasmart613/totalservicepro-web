@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
+import { wrapCustomerFacingDocumentEmail } from '../customer-invite.ts';
+import { formatOrgMoney } from '../money-format.ts';
 import {
   buildEstimateActionCtasHtml,
   buildEstimateHtml,
@@ -171,4 +174,46 @@ test('estimate HTML follows German labels and Arabic direction', () => {
   const ar = buildEstimateHtml({ ...estimateBase, locale: 'ar' });
   assert.match(ar, /dir="rtl"/);
   assert.match(ar, /تفصيل التكلفة/);
+});
+
+test('estimate part lines and totals share one currency format', () => {
+  const prefs = { currencyCode: 'USD', numberFormat: 'auto' as const };
+  const part = formatOrgMoney(10, prefs, 'ar');
+  const total = formatOrgMoney(630, prefs, 'ar');
+  const shape = (value: string) =>
+    value.replace(/[\d\u0660-\u0669\u06F0-\u06F9.,\u066B\u066C\s\u00A0\u200E\u200F]+/g, '#');
+  assert.equal(shape(part), shape(total));
+  assert.notEqual(shape(part), shape('$10.00'));
+  const html = buildEstimateHtml({
+    ...estimateBase,
+    locale: 'ar',
+    moneyPrefs: prefs,
+    miles: 12,
+    partsLines: [`Filter ×1 @ ${part} = ${part}`],
+    partsTotal: 10,
+    subtotal: 630,
+    tax: 0,
+    total: 630,
+    issues: 'QA TEST note.',
+  });
+  assert.ok(html.includes(part), part);
+  assert.ok(html.includes(total), total);
+  assert.match(html, /<bdi dir="auto">QA TEST note\./);
+  assert.match(html, /تنقّل/);
+  assert.doesNotMatch(html, />Travel</);
+  const de = buildEstimateHtml({ ...estimateBase, locale: 'de', miles: 4 });
+  assert.match(de, /Anreise/);
+  assert.doesNotMatch(de, />Travel</);
+  const wrapped = wrapCustomerFacingDocumentEmail({
+    subject: 'Estimate',
+    documentHtml: html,
+    signupUrl: 'https://repairplanet.net/signup',
+    loginUrl: 'https://repairplanet.net/login',
+    locale: 'ar',
+  });
+  assert.match(wrapped, /<html[^>]*lang="ar"[^>]*dir="rtl"/);
+  assert.match(wrapped, /<bdi dir="auto">/);
+  const preview = readFileSync(new URL('../../app/estimates/new/EstimateFormClient.tsx', import.meta.url), 'utf8');
+  assert.match(preview, /<html lang="\$\{meta\.lang\}" dir="\$\{meta\.dir\}">/);
+  assert.doesNotMatch(preview, /\$\$\{/);
 });

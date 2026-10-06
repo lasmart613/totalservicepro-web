@@ -1,6 +1,4 @@
 'use client';
-import { formatLocaleDate } from '@/lib/i18n/format-date';
-
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -49,6 +47,8 @@ import {
   type EquipmentType,
 } from '@/lib/equipment-types';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
+import { documentDirection } from '@/lib/i18n/translate-app';
+import { formatDateInTimeZone, orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
 
 type CustomerOpt = LinkedCustomerOpt;
 
@@ -73,6 +73,7 @@ export default function EstimateFormClient() {
   const allocatedNumberRef = useRef('');
   const [status, setStatus] = useState('draft');
   const [company, setCompany] = useState<DocCompany>({});
+  const [orgTimeZone, setOrgTimeZone] = useState<string | null>(null);
   const [companyTheme, setCompanyTheme] = useState<CompanyTheme | null>(null);
   const [emailing, setEmailing] = useState(false);
 
@@ -398,6 +399,10 @@ export default function EstimateFormClient() {
           });
         }
         if (orgId) {
+          const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();
+          if (!zoneRow.error && zoneRow.data?.timezone) setOrgTimeZone(String(zoneRow.data.timezone));
+        }
+        if (orgId) {
           await loadCustomers(orgId);
           try {
             setCompanyTheme(await getCompanyTheme(orgId, supabase));
@@ -522,7 +527,7 @@ export default function EstimateFormClient() {
         estNum = await allocateDocNumber(supabase, {
           orgId: userOrgId,
           kind: 'EST',
-          date: new Date(),
+          date: orgTodayIso({ stored: orgTimeZone, state: company.state }),
         });
         setDocNumber(estNum);
       }
@@ -716,10 +721,12 @@ export default function EstimateFormClient() {
     if (otherService.trim()) svcLabels.push(otherService.trim());
     const partsLines = partLines
       .filter((p) => p.part_number || p.description || p.ext)
-      .map(
-        (p) =>
-          `${p.part_number || ''} ${p.description || ''} ×${p.qty || 1} @ $${Number(p.unit_price || 0).toFixed(2)} = $${Number(p.ext || 0).toFixed(2)}`
-      );
+      .map((p) => {
+        const qty = p.qty || 1;
+        const unit = money(p.unit_price || 0);
+        const ext = money(p.ext || 0);
+        return `${p.part_number || ''} ${p.description || ''} ×${qty} @ ${unit} = ${ext}`;
+      });
     return buildEstimateHtml({
       company,
       customer: {
@@ -736,7 +743,15 @@ export default function EstimateFormClient() {
         (docNumber && !/^draft$/i.test(docNumber) ? docNumber : '') ||
         allocatedNumberRef.current ||
         '',
-      dateStr: formatLocaleDate(new Date(), locale),
+      dateStr: formatDateInTimeZone(
+        new Date(),
+        resolveOrgTimeZone({
+          stored: orgTimeZone,
+          state: company.state,
+          allowBrowser: false,
+        }).timeZone,
+        locale,
+      ),
       manufacturer,
       model: modelName,
       serial,
@@ -776,10 +791,14 @@ export default function EstimateFormClient() {
   }
 
   function openEstimatePreview() {
-    const html = buildEstimateEmailHtml('document');
+    const body = buildEstimateEmailHtml('document');
+    const meta = documentDirection(locale);
+    const html =
+      `<!DOCTYPE html><html lang="${meta.lang}" dir="${meta.dir}"><head><meta charset="utf-8">` +
+      `<title>${t('Service Estimate')}</title></head><body>${body}</body></html>`;
     const preview = window.open('', '_blank');
     if (!preview) {
-      toast.error('Pop-up blocked — allow pop-ups to preview the estimate');
+      toast.error(t('Pop-up blocked — allow pop-ups to preview the estimate'));
       return;
     }
     preview.document.write(html);
@@ -838,7 +857,7 @@ export default function EstimateFormClient() {
   function markSentWithoutEmail() {
     if (
       !confirm(
-        'Mark this estimate as sent WITHOUT emailing the customer?\n\nUse only if you already shared a PDF yourself.'
+        t('Mark this estimate as sent WITHOUT emailing the customer? Use only if you already shared a PDF yourself.')
       )
     ) {
       return;
@@ -1302,7 +1321,7 @@ export default function EstimateFormClient() {
                       <input
                         className="input text-sm py-1.5 opacity-80"
                         readOnly
-                        value={li.ext.toFixed(2)}
+                        value={money(li.ext)}
                       />
                     </td>
                     <td className="py-1.5">
@@ -1332,7 +1351,7 @@ export default function EstimateFormClient() {
             onClick={() => setPartLines((r) => [...r, emptyLineItem('EP')])}
           >{t('+ Add part row')}</button>
           <p className="text-xs text-[var(--text3)] mt-2">
-            Parts total: {money(totals.partsTotal)}
+            {t('Parts total:')} <span dir="ltr">{money(totals.partsTotal)}</span>
           </p>
 
           <div className="mt-4 p-3 rounded-xl border border-[var(--gold)] bg-[var(--gold)]/10">
@@ -1437,9 +1456,9 @@ export default function EstimateFormClient() {
             </>
           )}
         </div>
-        <p className="text-[10px] text-[var(--text3)] mt-1.5 text-center">
-          Finalize &amp; Email only marks the estimate sent after Resend accepts the message.
-          Requires customer email and a verified From domain.
+        <p className="text-[10px] text-[var(--text3)] mt-1.5 text-center" dir="auto">
+          {t('Finalize & Email only marks the estimate sent after Resend accepts the message.')}{' '}
+          {t('Requires customer email and a verified From domain.')}
         </p>
       </div>
     </div>
