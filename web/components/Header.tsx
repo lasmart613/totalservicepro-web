@@ -418,22 +418,23 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   }
 
   return (
-    <header className="header px-3 sm:px-4 py-2.5 sm:py-3 flex items-center justify-between gap-2">
-      <div className="flex items-center gap-3 min-w-0 flex-1 relative z-[100]">
-        <Link href="/" className="flex flex-col leading-none min-w-0">
+    <header className="header w-full min-w-0 px-3 sm:px-4 py-2.5 sm:py-3 flex flex-wrap items-center justify-between gap-x-2 gap-y-1">
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0 flex-1 relative z-[100]">
+        <Link href="/" className="flex flex-col leading-none shrink-0 max-w-full">
           <span
-            className="font-extrabold text-lg sm:text-xl tracking-[-0.5px] truncate"
+            className="font-extrabold text-lg sm:text-xl tracking-[-0.5px]"
             style={{ color: 'var(--gold)' }}
           >
             Total Service Pro
           </span>
-          <span className="hidden sm:block text-[10px] font-medium tracking-[1.5px] text-[var(--text3)] uppercase -mt-0.5 truncate">
+          <span className="hidden sm:block text-[10px] font-medium tracking-normal text-[var(--text3)] uppercase -mt-0.5">
             {t('Laser Equipment Service')}
           </span>
         </Link>
 
-        {/* Desktop / large tablet: inline groups. Phones + small tablets use the drawer. */}
-        <nav className={`ms-4 xl:ms-6 hidden lg:flex items-center gap-3 xl:gap-5 text-sm xl:text-base font-medium text-[var(--text2)] min-w-0 ${user ? 'overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden' : 'overflow-visible'}`}>
+        {/* Desktop / large tablet: inline groups. Phones + small tablets use the drawer.
+            At 1280 the row wraps instead of clipping Admin Portal or the brand. */}
+        <nav className="ms-1 xl:ms-3 hidden lg:flex flex-wrap items-center gap-x-2.5 gap-y-1 text-sm font-medium text-[var(--text2)] min-w-0">
           {user ? (
             <>
               <Link href="/" className="hover:text-[var(--gold)] py-1 whitespace-nowrap shrink-0">
@@ -479,8 +480,8 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         </nav>
       </div>
 
-      <div className="flex items-center gap-1 sm:gap-2 shrink-0 relative z-[100]">
-        <div className="hidden lg:flex items-center gap-2 xl:gap-3">
+      <div className="flex items-center gap-1 sm:gap-1.5 shrink-0 relative z-[100]">
+        <div className="hidden lg:flex items-center gap-1.5">
           <ReportIssueControl />
           {user && <OrgSwitcher compact />}
           {user && (
@@ -533,13 +534,13 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                 setDropdownOpen(!dropdownOpen);
                 setMobileMenuOpen(false);
               }}
-              className="flex items-center gap-2 rounded-full border border-[var(--gold-border)] pl-1 pr-1.5 lg:pr-3 py-1 min-h-11 hover:bg-[var(--surface3)]"
+              className="flex items-center gap-2 rounded-full border border-[var(--gold-border)] ps-1 pe-1.5 lg:pe-2 py-1 min-h-11 hover:bg-[var(--surface3)]"
               aria-label={t('Account menu')}
             >
               <div className="w-8 h-8 rounded-full bg-[var(--gold)] text-[#111827] flex items-center justify-center text-xs font-bold border-2 border-[var(--gold)]">
                 {initials}
               </div>
-              <span className="hidden lg:block text-sm font-semibold text-[var(--text)] max-w-[140px] truncate">
+              <span className="hidden 2xl:block text-sm font-semibold text-[var(--text)] max-w-[9rem] truncate">
                 {chipLabel}
               </span>
             </button>
@@ -611,7 +612,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
 
                 <button
                   onClick={handleLogout}
-                  className="w-full flex items-center gap-2 px-4 py-2.5 min-h-11 text-left text-red-400 hover:bg-[var(--surface)] border-t border-[var(--border)]"
+                  className="w-full flex items-center gap-2 px-4 py-2.5 min-h-11 text-start text-red-400 hover:bg-[var(--surface)] border-t border-[var(--border)]"
                 >
                   <LogOut size={16} /> {t('Log Out')}
                 </button>
@@ -672,7 +673,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                   <div key={group.id} className="border-b border-[var(--border)]">
                     <button
                       type="button"
-                      className="w-full flex items-center justify-between min-h-11 py-3 hover:text-[var(--gold)] bg-transparent border-0 text-inherit font-medium text-left cursor-pointer"
+                      className="w-full flex items-center justify-between min-h-11 py-3 hover:text-[var(--gold)] bg-transparent border-0 text-inherit font-medium text-start cursor-pointer"
                       aria-expanded={open}
                       onClick={() => setMobileOpenGroup(open ? null : group.id)}
                     >
@@ -683,7 +684,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                       />
                     </button>
                     {open && (
-                      <div className="pb-2 pl-3 flex flex-col">
+                      <div className="pb-2 ps-3 flex flex-col">
                         {group.items.map((item) => (
                           <Link
                             key={item.href}

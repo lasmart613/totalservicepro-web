@@ -15,17 +15,6 @@ html.fa-preview body,
   font-family: "Vazirmatn", "Noto Naskh Arabic", "Noto Sans Arabic", Tahoma, sans-serif;
 }
 
-.fa-draft-banner {
-  margin: 0;
-  padding: 8px 16px;
-  background: #1f2937;
-  color: #f3e8d8;
-  border-bottom: 1px solid #fbbf24;
-  text-align: center;
-  font-size: 13px;
-  line-height: 1.7;
-}
-
 html.fa-preview .lp-nav {
   flex-wrap: wrap;
   padding-inline: 1.25rem;

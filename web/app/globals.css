@@ -85,6 +85,47 @@ html.landing-mode main {
   min-width: 0;
 }
 
+/* Sticky header is about 4.5–7rem. Anchors and focused fields should clear it. */
+html {
+  scroll-padding-top: 7.5rem;
+}
+
+#team-section {
+  scroll-margin-top: 7.5rem;
+}
+
+/* Invite form stacks above the sticky header so its fields stay clickable. */
+.team-invite-panel {
+  position: relative;
+  z-index: 60;
+  scroll-margin-top: 7.5rem;
+  border: 1px solid var(--gold-border);
+  background: var(--surface3);
+  border-radius: 12px;
+  padding: 1rem 1rem 0.85rem;
+}
+
+.team-invite-panel :is(input, select, textarea, button, label) {
+  scroll-margin-top: 7.5rem;
+}
+
+/* Mobile doc action bars (fixed or sticky) cover the last inputs at 390px.
+   Padding matches a wrapped button row plus the estimate caption. */
+.doc-action-page {
+  padding-bottom: 16rem;
+}
+.doc-action-page-compact {
+  padding-bottom: 13rem;
+}
+@media (min-width: 640px) {
+  .doc-action-page {
+    padding-bottom: 9rem;
+  }
+  .doc-action-page-compact {
+    padding-bottom: 7.5rem;
+  }
+}
+
 .section {
   background: var(--surface2);
   border: 1px solid var(--border);
