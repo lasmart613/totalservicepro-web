@@ -8,7 +8,7 @@ function InvoicePaidInner() {
   const params = useSearchParams();
   const sessionId = params.get('session_id') || '';
   const canceled = params.get('canceled') === '1';
-  const [state, setState] = useState<'loading' | 'ok' | 'err' | 'canceled'>(
+  const [state, setState] = useState<'loading' | 'ok' | 'err' | 'canceled' | 'void'>(
     canceled ? 'canceled' : 'loading'
   );
   const [status, setStatus] = useState('');
@@ -24,7 +24,9 @@ function InvoicePaidInner() {
         const res = await fetch('/api/billing/invoices/confirm?session_id=' + encodeURIComponent(sessionId));
         const json = await res.json().catch(() => ({}));
         if (gone) return;
-        if (json.ok) {
+        if (json.voided || json.error === 'This invoice was voided') {
+          setState('void');
+        } else if (json.ok) {
           setStatus(String(json.status || 'paid'));
           setState('ok');
         } else setState('err');
@@ -47,6 +49,11 @@ function InvoicePaidInner() {
           </>
         ) : state === 'loading' ? (
           <p className="text-[var(--text3)]">Confirming your payment…</p>
+        ) : state === 'void' ? (
+          <>
+            <h1 className="text-2xl font-extrabold mb-2">Invoice voided</h1>
+            <p className="text-[var(--text3)]">This invoice was voided</p>
+          </>
         ) : state === 'ok' ? (
           <>
             <h1 className="text-2xl font-extrabold text-[var(--gold)] mb-2">Thank you</h1>

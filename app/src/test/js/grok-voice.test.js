@@ -26,6 +26,18 @@ test('default voice is eve and a saved sage id reads as eve', () => {
     assert.equal(voice.normalizeVoiceId('nova'), 'eve');
     assert.deepEqual(voice.ALLOWED_VOICE_IDS, ['eve', 'ara', 'rex', 'sal', 'leo']);
     assert.equal(voice.ALLOWED_VOICE_IDS.includes('sage'), false);
+    const contract = fs.readFileSync(
+        path.join(__dirname, '../../../../supabase/functions/grok-tts/contract.ts'),
+        'utf8'
+    );
+    const allowStart = contract.indexOf('export const ALLOWED_VOICE_IDS');
+    const allowEnd = contract.indexOf('export const DEFAULT_VOICE_ID');
+    const serverIds = [...contract.slice(allowStart, allowEnd).matchAll(/'([a-z]+)'/g)].map((m) => m[1]);
+    assert.equal(serverIds.includes('sage'), false);
+    assert.equal(contract.includes("DEFAULT_VOICE_ID = 'eve'"), true);
+    for (const id of voice.ALLOWED_VOICE_IDS) {
+        assert.ok(serverIds.includes(id), id + ' is not in the grok-tts allow-list');
+    }
     const stored = { zappVoice: 'sage', zappVoiceGender: 'male', theme: 'dark' };
     assert.equal(voice.migrateStoredVoice(stored), true);
     assert.equal(stored.zappVoice, 'eve');

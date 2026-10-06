@@ -4,8 +4,8 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { allocateDocNumber } from '@/lib/billing/doc-numbers';
-import { customerActionFromEstimate } from '@/lib/billing/save-helpers';
+import { allocateDocNumber } from './doc-numbers.ts';
+import { customerActionFromEstimate } from './save-helpers.ts';
 import {
   approvedTicketRefFromEstimate,
   isMarketplaceVisibleStatus,
@@ -13,7 +13,7 @@ import {
   shopOrgIdFromEstimate,
   UNSCHEDULED_TICKET_STATUS,
   unscheduledTicketPayloadFromEstimate,
-} from '@/lib/billing/approve-estimate-helpers';
+} from './approve-estimate-helpers.ts';
 
 export {
   APPROVE_MARKETPLACE_STATUSES,
@@ -29,7 +29,7 @@ export {
   shopOrgIdFromEstimate,
   UNSCHEDULED_TICKET_STATUS,
   unscheduledTicketPayloadFromEstimate,
-} from '@/lib/billing/approve-estimate-helpers';
+} from './approve-estimate-helpers.ts';
 
 const CUSTOMER_ACTION_APPROVED = 'approved' as const;
 

@@ -1055,6 +1055,7 @@
         if (err && err !== 'cancelled' && err !== 'no_match') showToast('Voice error: ' + err);
     };
 
+    // grok-tts default is eve. sage is not an xAI TTS voice (HTTP 400).
     const VOICE_OPTIONS = {
         male:   [
             { id: 'rex',  label: 'Rex — confident & clear' },

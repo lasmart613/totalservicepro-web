@@ -3,6 +3,7 @@
  * Text chat only on web for Sprint A — voice/TTS remains mobile.
  * Mobile voice calls Supabase `grok-tts` with the user JWT. The xAI key stays
  * a Supabase function secret (same XAI_API_KEY as grok-assistant).
+ * Omit voice_id to use eve. sage is rejected (xAI: Voice 'sage' not found).
  */
 
 import { getSupabaseUrl } from '@/lib/supabase/client';

@@ -15,6 +15,7 @@ import {
 } from './financial-reporting.ts';
 import { loadShopFinancialSources, type FinanceClient } from './financial-reporting-load.ts';
 import { loadOrganizationFinanceSettings } from './org-money.ts';
+import { resolveNumberingTimeZone } from './org-timezone.ts';
 import { gateFinancialDetail } from './report-tier.ts';
 
 export type AuthorizedFinancialReport =
@@ -41,7 +42,7 @@ export function userClientForToken(token: string): SupabaseClient | null {
 
 export async function loadAuthorizedFinancialReport(
   token: string,
-  options?: { detailRequested?: boolean }
+  options?: { detailRequested?: boolean; browserTimeZone?: string | null }
 ): Promise<AuthorizedFinancialReport> {
   const client = userClientForToken(token);
   if (!client) {
@@ -105,6 +106,10 @@ export async function loadAuthorizedFinancialReport(
   if (!gate.ok) return { ok: false, status: gate.status, error: gate.error };
 
   const sources = await loadShopFinancialSources(client as unknown as FinanceClient, access.organizationId);
+  const zone = await resolveNumberingTimeZone(client, access.organizationId, {
+    browserTimeZone: options?.browserTimeZone,
+    allowBrowser: Boolean(options?.browserTimeZone),
+  });
 
   return {
     ok: true,
@@ -114,6 +119,7 @@ export async function loadAuthorizedFinancialReport(
         organizationName: settings.name,
         currencyCode: settings.prefs.currencyCode,
         numberFormat: settings.prefs.numberFormat,
+        timeZone: zone.timeZone,
         ...sources,
       }),
       gate.detail

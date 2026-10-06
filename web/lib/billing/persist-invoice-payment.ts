@@ -13,6 +13,7 @@ import {
 import type { StripeObject } from './stripe-subscription.ts';
 import { formatOrgMoney } from '../money-format.ts';
 import { loadOrgMoneyPrefs } from '../org-money.ts';
+import { flagVoidInvoicePayment, isVoidInvoiceStatus } from './void-invoice.ts';
 
 export type AppliedInvoicePayment = {
   invoiceId: string;
@@ -58,6 +59,14 @@ export async function applyInvoiceCheckoutSession(input: {
   if (!inv) return { ok: false, reason: 'invoice_not_found' };
 
   const row = inv as InvoicePaymentRow;
+  if (isVoidInvoiceStatus(row.status)) {
+    const flagged = flagVoidInvoicePayment(row.invoice_data, {
+      sessionId,
+      amount: amountCents / 100,
+    });
+    await input.writer.from('service_invoices').update({ invoice_data: flagged }).eq('id', invoiceId);
+    return { ok: false, reason: 'invoice_void' };
+  }
   if (sessionId && alreadyAppliedSession(row, sessionId)) {
     return {
       ok: true,

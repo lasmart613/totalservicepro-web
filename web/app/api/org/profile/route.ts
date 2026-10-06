@@ -5,6 +5,7 @@ import { canAccessCompanyProfile, isOwnerish } from '@/lib/roles';
 import { isOwnerOrgType } from '@/lib/org-types';
 import { companyBrandingEnabled, normalizeHex, type CompanyThemeSource } from '@/lib/company-theme';
 import { canEditOrgCurrency, validateOrgMoneyFields } from '@/lib/org-money';
+import { parseOrgTimeZone } from '@/lib/org-timezone';
 
 /**
  * POST /api/org/profile
@@ -35,6 +36,7 @@ const ALLOWED_FIELDS = [
   'brand_accent_color',
   'currency_code',
   'number_format',
+  'timezone',
 ] as const;
 
 type AllowedField = (typeof ALLOWED_FIELDS)[number];
@@ -177,6 +179,13 @@ export async function POST(req: NextRequest) {
           payload.brand_accent_color = normalizeHex(payload.brand_accent_color);
         }
       }
+    }
+    if ('timezone' in payload) {
+      const checked = parseOrgTimeZone(payload.timezone);
+      if (!checked.ok) {
+        return NextResponse.json({ error: checked.error }, { status: 400 });
+      }
+      payload.timezone = checked.timezone;
     }
     if (Object.keys(payload).length === 0) {
       return NextResponse.json({ error: 'No profile fields to save' }, { status: 400 });
