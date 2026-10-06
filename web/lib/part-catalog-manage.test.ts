@@ -85,14 +85,17 @@ test('archived parts are hidden from the catalog list and search load', () => {
   assert.equal(vendor && vendor.vendor_name, 'Acme');
 });
 
-test('archive is the part creator or a same-org admin membership', () => {
+test('archive is the part creator or an admin of the creator home org', () => {
   const memberships = [
-    { user_id: 'creator', organization_id: 9, role: 'fse' },
-    { user_id: 'boss', organization_id: 9, role: 'company_admin' },
+    { user_id: 'creator', organization_id: 9, role: 'fse', is_home: true },
+    { user_id: 'creator', organization_id: 4, role: 'fse', is_home: false },
+    { user_id: 'boss', organization_id: 9, role: 'company_admin', is_home: true },
+    { user_id: 'side', organization_id: 4, role: 'admin', is_home: true },
     { user_id: 'other', organization_id: 4, role: 'admin' },
   ];
   assert.equal(canArchiveCatalogPart({ userId: 'creator', createdBy: 'creator', memberships }), true);
   assert.equal(canArchiveCatalogPart({ userId: 'boss', createdBy: 'creator', memberships }), true);
+  assert.equal(canArchiveCatalogPart({ userId: 'side', createdBy: 'creator', memberships }), false);
   assert.equal(canArchiveCatalogPart({ userId: 'other', createdBy: 'creator', memberships }), false);
   assert.equal(canArchiveCatalogPart({ userId: 'stranger', createdBy: 'creator', memberships: [] }), false);
   assert.equal(canArchiveCatalogPart({ userId: 'boss', createdBy: null, memberships }), false);

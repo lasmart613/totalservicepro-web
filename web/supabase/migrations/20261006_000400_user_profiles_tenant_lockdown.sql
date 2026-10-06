@@ -100,7 +100,7 @@ COMMENT ON FUNCTION public.profile_role_from_membership(text) IS
 REVOKE ALL ON FUNCTION public.profile_role_from_membership(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.profile_role_from_membership(text) TO authenticated;
 
--- Replaces 20261005_235902. NULL expires_at follows invitation_is_open (14 days),
+-- Replaces 20261006030456_hotfix_user_profiles_guard_identity_20261005. NULL expires_at follows invitation_is_open (14 days),
 -- not the hotfix's "null expires_at is open forever".
 CREATE OR REPLACE FUNCTION public.profile_org_change_allowed(p_uid uuid, p_org bigint)
 RETURNS boolean
@@ -201,9 +201,8 @@ $$;
 COMMENT ON FUNCTION public.handle_new_auth_user() IS
   'Creates user_profiles. An invite-based org and role are copied only when NEW.email_confirmed_at is set and the invite is open. Not attached to auth.users: signup and team join go through /api/auth/signup and /api/team/claim. Do not recreate on_auth_user_created in this security migration.';
 
--- Live has no trigger on auth.users. 20260717 created on_auth_user_created, but
--- signup does not depend on it. Drop it if a replay of older files attached it.
-DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+-- Do not drop on_auth_user_created here. The live apply of this file left that
+-- line out, so a replay must match what ran. Signup does not use the trigger.
 
 REVOKE ALL ON FUNCTION public.handle_new_auth_user() FROM PUBLIC, anon;
 
@@ -251,7 +250,7 @@ GRANT EXECUTE ON FUNCTION public.user_owns_or_created_org(bigint) TO authenticat
 
 -- ---------------------------------------------------------------------------
 -- 4) Guard + membership sync.
---    user_profiles_guard_identity replaces the 20261005_235902 hotfix (same
+--    user_profiles_guard_identity replaces the 20261006030456 hotfix (same
 --    trigger name, so it still sorts before user_profiles_sync_membership).
 --    The trigger function is SECURITY INVOKER. current_user not in
 --    (authenticated, anon) returns NEW. That is the hotfix bypass.

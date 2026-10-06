@@ -1,12 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { PART_IMAGE_BUCKET, PART_PHOTO_MAX_BYTES, partPhotoContentType, partPhotoPath } from '@/lib/part-photo-upload';
+import {
+  PART_IMAGE_BUCKET,
+  PART_PHOTO_MAX_BYTES,
+  PART_PHOTO_MAX_FILES,
+  PART_PHOTO_USER_STORED_MAX,
+  livePartPhotoQuotaState,
+  partPhotoContentType,
+  partPhotoPath,
+  partPhotoQuotaAllows,
+  partPhotoStoredAllows,
+  partPhotoUserPrefix,
+  recordPartPhotoQuota,
+} from '@/lib/part-photo-upload';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const MAX_FILES = 6;
 const UPLOAD_ERROR = "Couldn't upload this photo.";
 
 async function callerId(req: NextRequest): Promise<string | null> {
@@ -34,10 +45,38 @@ export async function POST(req: NextRequest) {
   }
 
   const form = await req.formData().catch(() => null);
-  const files = (form ? form.getAll('file') : []).filter((item): item is File => item instanceof File).slice(0, MAX_FILES);
+  const files = (form ? form.getAll('file') : []).filter((item): item is File => item instanceof File);
   if (!files.length) return NextResponse.json({ error: 'Choose a photo.' }, { status: 400 });
+  if (files.length > PART_PHOTO_MAX_FILES) {
+    return NextResponse.json(
+      { error: `Upload up to ${PART_PHOTO_MAX_FILES} photos at a time.` },
+      { status: 400 }
+    );
+  }
 
   const admin = getSupabaseAdmin();
+  const { data: profile } = await admin
+    .from('user_profiles')
+    .select('organization_id')
+    .eq('id', userId)
+    .maybeSingle();
+  const organizationId = profile?.organization_id ?? null;
+  const quota = partPhotoQuotaAllows(livePartPhotoQuotaState, {
+    userId,
+    organizationId,
+    files: files.length,
+  });
+  if (!quota.ok) return NextResponse.json({ error: quota.error }, { status: 429 });
+
+  const { data: stored, error: listError } = await admin.storage
+    .from(PART_IMAGE_BUCKET)
+    .list(partPhotoUserPrefix(userId), { limit: PART_PHOTO_USER_STORED_MAX });
+  if (listError) {
+    console.error('[part-photos] list', listError.message);
+    return NextResponse.json({ error: UPLOAD_ERROR }, { status: 503 });
+  }
+  const storedQuota = partPhotoStoredAllows(stored?.length || 0, files.length);
+  if (!storedQuota.ok) return NextResponse.json({ error: storedQuota.error }, { status: 429 });
   const urls: string[] = [];
   const now = Date.now();
   for (let i = 0; i < files.length; i++) {
@@ -61,6 +100,14 @@ export async function POST(req: NextRequest) {
     }
     const { data } = admin.storage.from(PART_IMAGE_BUCKET).getPublicUrl(path);
     if (data?.publicUrl) urls.push(data.publicUrl);
+  }
+
+  if (urls.length) {
+    recordPartPhotoQuota(livePartPhotoQuotaState, {
+      userId,
+      organizationId,
+      files: urls.length,
+    });
   }
 
   return NextResponse.json({ urls });

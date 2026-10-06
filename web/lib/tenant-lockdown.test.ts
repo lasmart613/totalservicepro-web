@@ -186,7 +186,7 @@ test('migration revokes tenant columns and the trigger raises instead of downgra
   assert.match(sql, /current_user NOT IN \('authenticated', 'anon'\)/);
   assert.match(sql, /FROM PUBLIC, anon/);
   assert.match(sql, /email_confirmed_at IS NOT NULL/);
-  assert.match(sql, /DROP TRIGGER IF EXISTS on_auth_user_created ON auth\.users/);
+  assert.doesNotMatch(sql, /DROP TRIGGER IF EXISTS on_auth_user_created ON auth\.users/);
   assert.doesNotMatch(sql, /CREATE TRIGGER on_auth_user_created/);
   assert.match(sql, /organization_memberships_role_not_platform_admin/);
   assert.match(sql, /ALTER FUNCTION public\.generate_ticket_number\(bigint\) SET search_path/);

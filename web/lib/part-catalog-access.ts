@@ -35,7 +35,10 @@ export async function catalogManagerStatus(
   const createdBy = part.created_by ? String(part.created_by) : '';
   const ids = [userId, createdBy].filter(Boolean);
   const { data: memberships } = ids.length
-    ? await admin.from('organization_memberships').select('user_id, organization_id, role').in('user_id', ids)
+    ? await admin
+        .from('organization_memberships')
+        .select('user_id, organization_id, role, is_home')
+        .in('user_id', ids)
     : { data: [] };
   const allowed = canArchiveCatalogPart({
     userId,

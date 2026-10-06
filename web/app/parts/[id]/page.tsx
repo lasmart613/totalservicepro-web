@@ -103,7 +103,10 @@ export default function PartDetailPage() {
         const createdBy = data.created_by ? String(data.created_by) : '';
         const memberFilter = [user?.id, createdBy].filter(Boolean).map((id) => `user_id.eq.${id}`).join(',');
         const { data: memberships } = memberFilter
-          ? await supabase.from('organization_memberships').select('user_id, organization_id, role').or(memberFilter)
+          ? await supabase
+              .from('organization_memberships')
+              .select('user_id, organization_id, role, is_home')
+              .or(memberFilter)
           : { data: [] };
         setCanArchive(
           canArchiveCatalogPart({
