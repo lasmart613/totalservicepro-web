@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { assembleFinancialReport, invoiceColumnFlags } from '../financial-reporting.ts';
 import {
@@ -130,4 +133,33 @@ test('void invoices are left out of outstanding, billed income, and revenue KPIs
     report.metrics.some((row) => row.source.includes('service_invoices.')),
     false
   );
+});
+
+test('invoice status check allows every status the app writes and validates existing rows', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const migration = readFileSync(
+    join(here, '../../supabase/migrations/20261006_000301_service_invoice_void.sql'),
+    'utf8'
+  );
+  assert.match(migration, /drop constraint if exists service_invoices_status_check/);
+  assert.match(migration, /add constraint service_invoices_status_check/);
+  assert.match(migration, /not valid/);
+  assert.match(migration, /validate constraint service_invoices_status_check/);
+  for (const status of [
+    'draft',
+    'sent',
+    'paid',
+    'partially_paid',
+    'partial',
+    'void',
+    'voided',
+    'cancelled',
+    'canceled',
+    'overdue',
+    'unpaid',
+    'invoiced',
+  ]) {
+    assert.match(migration, new RegExp(`'${status}'`));
+  }
+  assert.doesNotMatch(migration, /'refunded'/);
 });

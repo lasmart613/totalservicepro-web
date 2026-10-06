@@ -4,8 +4,16 @@
 -- before this file is applied.
 --
 -- Do not apply this file to production from the app. Ship the SQL only.
--- Review service_invoices.status values before applying the check: a row
--- whose status is not in the list will fail the constraint.
+--
+-- Live service_invoices.status (read-only check): draft 16, sent 15, paid 2.
+-- The table has no existing CHECK constraints. Those three values are in
+-- the list below, so VALIDATE CONSTRAINT is safe for the rows that exist.
+--
+-- Allowed values are every status this repo assigns or classifies on
+-- service_invoices:
+--   written: draft, sent, paid, partially_paid, void
+--   classified: voided, cancelled, canceled, partial, overdue, unpaid, invoiced
+-- refunded is not assigned or classified anywhere, so it is not allowed.
 
 alter table public.service_invoices
   add column if not exists voided_at timestamptz,
@@ -35,6 +43,11 @@ alter table public.service_invoices
       'cancelled',
       'canceled',
       'overdue',
-      'unpaid'
+      'unpaid',
+      'invoiced'
     )
-  );
+  )
+  not valid;
+
+alter table public.service_invoices
+  validate constraint service_invoices_status_check;
