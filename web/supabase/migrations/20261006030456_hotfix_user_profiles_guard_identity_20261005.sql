@@ -1,3 +1,6 @@
+-- Filename version 20261006030456 matches supabase_migrations.schema_migrations
+-- (name hotfix_user_profiles_guard_identity_20261005). The earlier repo label
+-- 20261005_235902 was not the version live recorded.
 -- Applied on live 2026-10-05 ~8:05 PM PT as supabase_migrations version 20261006030456,
 -- name hotfix_user_profiles_guard_identity_20261005. Exact text below.
 -- Hotfix 2026-10-05 ~8:05pm PT: stop signed-in clients from self-granting platform admin

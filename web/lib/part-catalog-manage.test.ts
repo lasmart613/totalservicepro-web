@@ -85,17 +85,60 @@ test('archived parts are hidden from the catalog list and search load', () => {
   assert.equal(vendor && vendor.vendor_name, 'Acme');
 });
 
-test('archive is the part creator or a same-org admin membership', () => {
-  const memberships = [
-    { user_id: 'creator', organization_id: 9, role: 'fse' },
-    { user_id: 'boss', organization_id: 9, role: 'company_admin' },
-    { user_id: 'other', organization_id: 4, role: 'admin' },
+test('archive follows caller_is_part_creator_admin, including a tech with no home org', () => {
+  const fieldTech = [
+    { user_id: 'creator', organization_id: 9, role: 'fse', is_home: false },
+    { user_id: 'boss', organization_id: 9, role: 'company_admin', is_home: true },
+    { user_id: 'stranger', organization_id: 3, role: 'company_admin', is_home: true },
   ];
-  assert.equal(canArchiveCatalogPart({ userId: 'creator', createdBy: 'creator', memberships }), true);
-  assert.equal(canArchiveCatalogPart({ userId: 'boss', createdBy: 'creator', memberships }), true);
-  assert.equal(canArchiveCatalogPart({ userId: 'other', createdBy: 'creator', memberships }), false);
-  assert.equal(canArchiveCatalogPart({ userId: 'stranger', createdBy: 'creator', memberships: [] }), false);
-  assert.equal(canArchiveCatalogPart({ userId: 'boss', createdBy: null, memberships }), false);
+  assert.equal(canArchiveCatalogPart({ userId: 'creator', createdBy: 'creator', memberships: fieldTech }), true);
+  assert.equal(canArchiveCatalogPart({ userId: 'boss', createdBy: 'creator', memberships: fieldTech }), true);
+  assert.equal(canArchiveCatalogPart({ userId: 'stranger', createdBy: 'creator', memberships: fieldTech }), false);
+
+  const twoShops = [
+    { user_id: 'creator', organization_id: 9, role: 'fse', is_home: false },
+    { user_id: 'creator', organization_id: 4, role: 'fse', is_home: false },
+    { user_id: 'boss', organization_id: 9, role: 'company_admin', is_home: true },
+    { user_id: 'side', organization_id: 4, role: 'admin', is_home: true },
+  ];
+  assert.equal(canArchiveCatalogPart({ userId: 'boss', createdBy: 'creator', memberships: twoShops }), true);
+  assert.equal(canArchiveCatalogPart({ userId: 'side', createdBy: 'creator', memberships: twoShops }), true);
+
+  const homeAndSide = [
+    { user_id: 'creator', organization_id: 9, role: 'fse', is_home: true },
+    { user_id: 'creator', organization_id: 4, role: 'fse', is_home: false },
+    { user_id: 'boss', organization_id: 9, role: 'company_admin', is_home: true },
+    { user_id: 'side', organization_id: 4, role: 'admin', is_home: true },
+  ];
+  assert.equal(canArchiveCatalogPart({ userId: 'boss', createdBy: 'creator', memberships: homeAndSide }), true);
+  assert.equal(canArchiveCatalogPart({ userId: 'side', createdBy: 'creator', memberships: homeAndSide }), false);
+
+  const left = [{ user_id: 'boss', organization_id: 9, role: 'company_admin', is_home: true }];
+  assert.equal(canArchiveCatalogPart({ userId: 'creator', createdBy: 'creator', memberships: left }), true);
+  assert.equal(canArchiveCatalogPart({ userId: 'boss', createdBy: 'creator', memberships: left }), false);
+  assert.equal(canArchiveCatalogPart({ userId: 'boss', createdBy: null, memberships: left }), false);
+
+  const detail = readFileSync(join(here, '../app/parts/[id]/page.tsx'), 'utf8');
+  const catalogRoute = readFileSync(join(here, '../app/api/parts/catalog/route.ts'), 'utf8');
+  const vendorsRoute = readFileSync(join(here, '../app/api/parts/vendors/route.ts'), 'utf8');
+  const access = readFileSync(join(here, './part-catalog-access.ts'), 'utf8');
+  assert.match(detail, /rpc\('caller_is_part_creator_admin'/);
+  assert.doesNotMatch(detail, /canArchiveCatalogPart/);
+  assert.match(access, /rpc\('caller_is_part_creator_admin'/);
+  assert.doesNotMatch(access, /canArchiveCatalogPart/);
+  assert.match(catalogRoute, /bearerCaller\(req\)/);
+  assert.match(vendorsRoute, /bearerCaller\(req\)/);
+  const sql = readFileSync(
+    join(here, '../supabase/migrations/20261006_000800_round2_review_nits.sql'),
+    'utf8'
+  );
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.caller_is_part_creator_admin\(p_creator uuid\)/);
+  assert.match(sql, /SET search_path = public, pg_temp SET row_security = off/);
+  assert.match(sql, /REVOKE ALL ON FUNCTION public\.caller_is_part_creator_admin\(uuid\) FROM PUBLIC, anon/);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION public\.caller_is_part_creator_admin\(uuid\) TO authenticated, service_role/);
+  assert.match(sql, /REVOKE UPDATE ON TABLE public\.part_vendors FROM PUBLIC, anon, authenticated/);
+  assert.doesNotMatch(sql, /^COMMIT\b/m);
+  assert.doesNotMatch(sql, /CONCURRENTLY/);
 });
 
 test('part photos upload straight to part-images with a content type', () => {

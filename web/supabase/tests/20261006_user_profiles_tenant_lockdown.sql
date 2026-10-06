@@ -394,11 +394,15 @@ BEGIN
      ) THEN
     RAISE EXCEPTION 'FAIL authenticated lost service_invoices void columns';
   END IF;
-  IF has_function_privilege('anon', 'public.profile_org_change_allowed(uuid, bigint)', 'EXECUTE') THEN
+  IF to_regprocedure('public.profile_org_change_allowed(uuid, bigint)') IS NOT NULL THEN
+    RAISE EXCEPTION 'FAIL profile_org_change_allowed(uuid, bigint) still exists';
+  END IF;
+  IF has_function_privilege('anon', 'public.profile_org_change_allowed(bigint)', 'EXECUTE') THEN
     RAISE EXCEPTION 'FAIL anon can still execute profile_org_change_allowed';
   END IF;
-  IF position('invitation_is_open' IN pg_get_functiondef('public.profile_org_change_allowed(uuid,bigint)'::regprocedure)) = 0 THEN
-    RAISE EXCEPTION 'FAIL profile_org_change_allowed does not use the 14-day invite rule';
+  IF position('invitation_is_open' IN pg_get_functiondef('public.profile_org_change_allowed(bigint)'::regprocedure)) = 0
+     OR position('auth.uid()' IN pg_get_functiondef('public.profile_org_change_allowed(bigint)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'FAIL profile_org_change_allowed does not use auth.uid() and the 14-day invite rule';
   END IF;
   IF position('current_user' IN pg_get_functiondef('public.user_profiles_guard_identity()'::regprocedure)) = 0
      OR EXISTS (
