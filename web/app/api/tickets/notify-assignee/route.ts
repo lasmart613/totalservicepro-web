@@ -175,20 +175,22 @@ export async function POST(req: NextRequest) {
     const to = String(assignee.email || '').trim();
     const emailed = await sendTicketAssignedEmail({ to, copy });
 
-    try {
-      await writer.from('notifications').insert({
-        user_id: assigneeId,
-        type: 'ticket_assigned',
-        message: `${displayName(caller)} assigned you ${ticket.ticket_number || 'a service call'}${
-          ticket.customer_name ? ` — ${ticket.customer_name}` : ''
-        }.`,
-        triggered_by: user.id,
-        is_read: false,
-        ticket_id: Number.isFinite(Number(ticket.id)) ? Number(ticket.id) : null,
-        link: `/service-tickets/${ticket.id}`,
-      });
-    } catch (e) {
-      console.warn('ticket assigned notification', e);
+    if (hasServiceRole()) {
+      try {
+        await getSupabaseAdmin().from('notifications').insert({
+          user_id: assigneeId,
+          type: 'ticket_assigned',
+          message: `${displayName(caller)} assigned you ${ticket.ticket_number || 'a service call'}${
+            ticket.customer_name ? ` — ${ticket.customer_name}` : ''
+          }.`,
+          triggered_by: user.id,
+          is_read: false,
+          ticket_id: Number.isFinite(Number(ticket.id)) ? Number(ticket.id) : null,
+          link: `/service-tickets/${ticket.id}`,
+        });
+      } catch (e) {
+        console.warn('ticket assigned notification', e);
+      }
     }
 
     if (!emailed.ok) {
