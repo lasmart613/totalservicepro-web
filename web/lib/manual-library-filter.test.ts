@@ -11,6 +11,7 @@ import {
   MANUAL_LIBRARY_SELECT,
   MANUAL_LIBRARY_SELECT_LEGACY,
   MANUAL_LIBRARY_SELECT_WITH_KIND,
+  MANUAL_LIBRARY_SELECT_WITH_LANGUAGE,
   fetchManualLibraryRows,
   isManualsSelectSchemaError,
   manualLibraryFiltersActive,
@@ -209,6 +210,37 @@ test('Service and Operators are separate library shelves', () => {
   assert.equal(String(lyraOnOps[0]?.id), '4');
 });
 
+test('language filter defaults to all and still matches brand and model', () => {
+  const rows = [
+    { id: 'en', brand: 'Candela', title: 'GentleMax Pro', model: 'GentleMax', language: 'en' },
+    { id: 'de', brand: 'Candela', title: 'GentleMax Pro (German)', model: 'GentleMax', language: 'de' },
+    { id: 'es', brand: 'Candela', title: 'GentleMax Pro', model: 'GentleMax', language: 'es' },
+    { id: 'other', brand: 'Lumenis', title: 'UltraPulse (Spanish)', model: 'UltraPulse', language: 'es' },
+  ];
+  const all = filterManualLibrary(rows, { query: 'candela gentlemax', room: ALL_MANUAL_ROOMS, language: 'all' });
+  assert.deepEqual(
+    all.map((r) => String(r.id)),
+    ['en', 'de', 'es']
+  );
+  const german = filterManualLibrary(rows, { query: 'gentlemax', room: ALL_MANUAL_ROOMS, language: 'de' });
+  assert.deepEqual(
+    german.map((r) => String(r.id)),
+    ['de']
+  );
+  const spanish = filterManualLibrary(rows, { query: 'lumenis', room: ALL_MANUAL_ROOMS, language: 'es' });
+  assert.deepEqual(
+    spanish.map((r) => String(r.id)),
+    ['other']
+  );
+  assert.equal(manualLibraryFiltersActive({ language: 'de' }), true);
+  assert.equal(manualLibraryFiltersActive({ language: 'all' }), false);
+  assert.equal(manualLibraryFiltersActive({}), false);
+  const qs = manualLibrarySearchParams({ language: 'de', room: 'laser', query: 'gentlemax' });
+  assert.match(qs, /lang=de/);
+  assert.equal(parseManualLibrarySearchParams(`?${qs}`).language, 'de');
+  assert.equal(parseManualLibrarySearchParams('?lang=all').language, '');
+});
+
 test('library page wires search UI and keeps open/get-manual-url gating', () => {
   const page = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
   const searchApi = readFileSync(join(here, '../app/api/manuals/search/route.ts'), 'utf8');
@@ -219,6 +251,11 @@ test('library page wires search UI and keeps open/get-manual-url gating', () => 
   assert.match(page, /manuals-search/);
   assert.match(page, /manuals-rail/);
   assert.match(page, /All manufacturers|All makes/i);
+  assert.match(page, /manuals-language/);
+  assert.match(page, /manualLanguageFilterOptions/);
+  assert.match(page, /manualLanguageBadge/);
+  const languageLib = readFileSync(join(here, 'manual-language.ts'), 'utf8');
+  assert.match(languageLib, /All languages/);
   assert.match(page, /ALL_MANUAL_ROOMS|room === 'all'/);
   assert.match(page, /Clear filters/);
   assert.match(page, /Operators Manuals/);
@@ -239,8 +276,11 @@ test('library page wires search UI and keeps open/get-manual-url gating', () => 
 });
 
 test('catalog select matches live manuals columns and retries only on schema errors', async () => {
+  assert.match(MANUAL_LIBRARY_SELECT_WITH_LANGUAGE, /language/);
+  assert.match(MANUAL_LIBRARY_SELECT_WITH_LANGUAGE, /doc_kind/);
   assert.match(MANUAL_LIBRARY_SELECT_WITH_KIND, /doc_kind/);
-  assert.doesNotMatch(MANUAL_LIBRARY_SELECT, /doc_kind|description|completeness_note/);
+  assert.doesNotMatch(MANUAL_LIBRARY_SELECT_WITH_KIND, /\blanguage\b/);
+  assert.doesNotMatch(MANUAL_LIBRARY_SELECT, /doc_kind|description|completeness_note|language/);
   assert.doesNotMatch(MANUAL_LIBRARY_SELECT_LEGACY, /doc_kind/);
   assert.match(MANUAL_LIBRARY_SELECT, /equipment_type/);
   assert.match(MANUAL_LIBRARY_SELECT, /wavelengths/);
@@ -248,30 +288,56 @@ test('catalog select matches live manuals columns and retries only on schema err
     isManualsSelectSchemaError("Could not find the 'doc_kind' column of 'manuals' in the schema cache"),
     true
   );
+  assert.equal(
+    isManualsSelectSchemaError("Could not find the 'language' column of 'manuals' in the schema cache"),
+    true
+  );
   assert.equal(isManualsSelectSchemaError('JWT expired'), false);
 
   const ok = await fetchManualLibraryRows(async (select) => {
-    assert.equal(select, MANUAL_LIBRARY_SELECT_WITH_KIND);
+    assert.equal(select, MANUAL_LIBRARY_SELECT_WITH_LANGUAGE);
     return { data: [{ id: 1 }, { id: 2 }], error: null };
   });
   assert.equal(ok.error, null);
   assert.equal(ok.data.length, 2);
 
+  const languageMissing: string[] = [];
+  const withoutLanguage = await fetchManualLibraryRows(async (select) => {
+    languageMissing.push(select);
+    if (select.includes('language')) {
+      return {
+        data: [],
+        error: { message: "Could not find the 'language' column of 'manuals' in the schema cache" },
+      };
+    }
+    return { data: [{ id: 9 }], error: null };
+  });
+  assert.equal(withoutLanguage.error, null);
+  assert.deepEqual(
+    withoutLanguage.data.map((r) => (r as { id: number }).id),
+    [9]
+  );
+  assert.deepEqual(languageMissing, [MANUAL_LIBRARY_SELECT_WITH_LANGUAGE, MANUAL_LIBRARY_SELECT_WITH_KIND]);
+
   const calls: string[] = [];
   const retried = await fetchManualLibraryRows(async (select) => {
     calls.push(select);
-    if (select.includes('doc_kind')) {
+    if (select.includes('language') || select.includes('doc_kind')) {
       return {
         data: [],
         error: { message: "Could not find the 'doc_kind' column of 'manuals' in the schema cache" },
       };
     }
-    return { data: [{ id: 9 }], error: null };
+    return { data: [{ id: 4 }], error: null };
   });
   assert.equal(retried.error, null);
   assert.deepEqual(
     retried.data.map((r) => (r as { id: number }).id),
-    [9]
+    [4]
   );
-  assert.deepEqual(calls, [MANUAL_LIBRARY_SELECT_WITH_KIND, MANUAL_LIBRARY_SELECT]);
+  assert.deepEqual(calls, [
+    MANUAL_LIBRARY_SELECT_WITH_LANGUAGE,
+    MANUAL_LIBRARY_SELECT_WITH_KIND,
+    MANUAL_LIBRARY_SELECT,
+  ]);
 });
