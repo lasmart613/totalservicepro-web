@@ -30,7 +30,6 @@ import {
 } from '@/lib/manuals-access';
 import {
   DEFAULT_EQUIPMENT_TYPE,
-  EQUIPMENT_TYPES,
   EQUIPMENT_TYPE_VALUES,
   equipmentTypeMeta,
   equipmentTypeOrDefault,
@@ -44,6 +43,7 @@ import {
   fetchManualLibraryRows,
   manufacturerShelves,
   manualLanguageOptionsForView,
+  manualRoomsForView,
   manualLibraryFiltersActive,
   manualLibrarySearchParams,
   parseManualLibrarySearchParams,
@@ -657,6 +657,22 @@ export default function ManualsLibrary() {
     return counts;
   }, [sourceManuals, query, selectedBrand, selectedLanguage, incompleteOnly, library, bodyMatchIds]);
 
+  const shelfRooms = useMemo(
+    () =>
+      manualRoomsForView(
+        sourceManuals,
+        {
+          query,
+          brand: selectedBrand,
+          language: selectedLanguage,
+          incompleteOnly,
+          library,
+        },
+        bodyMatchIds
+      ),
+    [sourceManuals, query, selectedBrand, selectedLanguage, incompleteOnly, library, bodyMatchIds]
+  );
+
   const brandShelves = useMemo(() => manufacturerShelves(filteredManuals), [filteredManuals]);
   const makeOptions = useMemo(
     () => uniqueManualBrands(manuals.filter((m) => manualLibraryShelf(m) === library)),
@@ -938,7 +954,7 @@ export default function ManualsLibrary() {
                 </span>
               </span>
             </button>
-            {EQUIPMENT_TYPES.map((t) => {
+            {shelfRooms.map((t) => {
               const selected = room === t.value;
               const count = roomCounts[t.value];
               return (
@@ -1160,6 +1176,11 @@ export default function ManualsLibrary() {
                               ))}
                             </div>
                           )}
+                          {languageBadge && (
+                            <div className="manual-language-badge" title={languageBadge.label}>
+                              {languageBadge.code}
+                            </div>
+                          )}
                         </div>
                         {showOperatorBadge(m) && (
                           <div
@@ -1175,11 +1196,6 @@ export default function ManualsLibrary() {
                             title="This document is incomplete"
                           >
                             Incomplete
-                          </div>
-                        )}
-                        {languageBadge && (
-                          <div className="manual-language-badge" title={languageBadge.label}>
-                            {languageBadge.code}
                           </div>
                         )}
                         {isOwned(m) && (
