@@ -228,7 +228,7 @@ test('missing consent columns do not break email or google signup', async () => 
 });
 
 test('signup pages send consent and the migration only adds nullable columns', () => {
-  const sql = read('supabase/migrations/20261006_000000_user_profile_legal_consent.sql');
+  const sql = read('supabase/migrations/20261006_000100_user_profile_legal_consent.sql');
   assert.match(sql, /ADD COLUMN IF NOT EXISTS legal_consent_at timestamptz/);
   assert.match(sql, /ADD COLUMN IF NOT EXISTS legal_consent_version text/);
   assert.doesNotMatch(sql, /NOT NULL/);
