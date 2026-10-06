@@ -16,7 +16,26 @@ import {
   type CompanyTheme,
   type ThemeScope,
 } from '../company-theme.ts';
+import { formatLocaleDate } from '../i18n/format-date.ts';
+import { translateApp, translateAppFill, withDocDirection } from '../i18n/translate-app.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
+
+function docT(locale: string | null | undefined, text: string): string {
+  return translateApp(locale, text);
+}
+
+function docFill(
+  locale: string | null | undefined,
+  text: string,
+  vars: Record<string, string | number>,
+): string {
+  return translateAppFill(locale, text, vars);
+}
+
+function docDate(value: string | undefined | null, locale?: string | null, empty = ''): string {
+  if (!value) return empty;
+  return formatLocaleDate(value, locale) || value;
+}
 
 export type DocThemeScope = ThemeScope;
 
@@ -69,10 +88,11 @@ function estimateEmailActionHref(actionUrl: string, action: 'approve' | 'reject'
   return `${base}?action=${action}`;
 }
 
-function estimateActionButtonsRow(actionUrl: string): string {
+function estimateActionButtonsRow(actionUrl: string, locale?: string | null): string {
   const approveHref = esc(estimateEmailActionHref(actionUrl, 'approve'));
   const rejectHref = esc(estimateEmailActionHref(actionUrl, 'reject'));
   const modifyHref = esc(estimateEmailActionHref(actionUrl, 'modify'));
+  const tr = (text: string) => docT(locale, text);
   return (
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">` +
     `<tr>` +
@@ -80,25 +100,29 @@ function estimateActionButtonsRow(actionUrl: string): string {
     `<a href="${approveHref}" ` +
     `style="display:inline-block;background:#15803D;color:#ffffff;padding:14px 18px;border-radius:8px;` +
     `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #15803D;min-width:110px;">` +
-    `Approve</a></td>` +
+    `${tr('Approve')}</a></td>` +
     `<td align="center" style="padding:6px 4px;" width="33%">` +
     `<a href="${rejectHref}" ` +
     `style="display:inline-block;background:#B91C1C;color:#ffffff;padding:14px 18px;border-radius:8px;` +
     `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #B91C1C;min-width:110px;">` +
-    `Reject</a></td>` +
+    `${tr('Reject')}</a></td>` +
     `<td align="center" style="padding:6px 4px;" width="33%">` +
     `<a href="${modifyHref}" ` +
     `style="display:inline-block;background:#FBBF24;color:#111827;padding:14px 18px;border-radius:8px;` +
     `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #FBBF24;min-width:110px;">` +
-    `Modify</a></td>` +
+    `${tr('Modify')}</a></td>` +
     `</tr></table>`
   );
 }
 
 /** High-contrast banner + 3 CTAs. Table-based so Gmail does not collapse the buttons. */
-export function buildEstimateActionCtasHtml(actionUrl: string, variant: 'banner' | 'repeat' = 'banner'): string {
+export function buildEstimateActionCtasHtml(
+  actionUrl: string,
+  variant: 'banner' | 'repeat' = 'banner',
+  locale?: string | null,
+): string {
   const cls = variant === 'banner' ? 'tsp-est-cta tsp-est-cta-top' : 'tsp-est-cta tsp-est-cta-bottom';
-  const heading = variant === 'banner' ? 'Respond to this estimate' : 'Need to decide?';
+  const heading = docT(locale, variant === 'banner' ? 'Respond to this estimate' : 'Need to decide?');
   return (
     `<table class="${cls}" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
     `style="margin:16px 0;border-collapse:collapse;background:#111827;border-radius:10px;">` +
@@ -106,11 +130,11 @@ export function buildEstimateActionCtasHtml(actionUrl: string, variant: 'banner'
     `${heading}` +
     `</td></tr>` +
     `<tr><td align="center" style="padding:0 12px 10px;font-size:13px;color:#F9FAFB;font-weight:600;">` +
-    `Tap Approve, Reject, or Modify — no login required.` +
+    `${docT(locale, 'Tap Approve, Reject, or Modify — no login required.')}` +
     `</td></tr>` +
-    `<tr><td style="padding:4px 8px 14px;">${estimateActionButtonsRow(actionUrl)}</td></tr>` +
+    `<tr><td style="padding:4px 8px 14px;">${estimateActionButtonsRow(actionUrl, locale)}</td></tr>` +
     `<tr><td align="center" style="padding:0 12px 14px;font-size:10px;color:#D1D5DB;">` +
-    `These links are unique to this estimate.` +
+    `${docT(locale, 'These links are unique to this estimate.')}` +
     `</td></tr>` +
     `</table>`
   );
@@ -119,10 +143,10 @@ export function buildEstimateActionCtasHtml(actionUrl: string, variant: 'banner'
 const ESTIMATE_CTA_TABLE_RE = /<table[^>]*class="tsp-est-cta[^"]*"[^>]*>[\s\S]*?<\/table>/gi;
 
 /** Inject or replace CTAs at the top and bottom so they are hard to miss. */
-export function ensureEstimateActionCtas(html: string, actionUrl: string): string {
+export function ensureEstimateActionCtas(html: string, actionUrl: string, locale?: string | null): string {
   if (!html || !actionUrl) return html;
-  const top = buildEstimateActionCtasHtml(actionUrl, 'banner');
-  const bottom = buildEstimateActionCtasHtml(actionUrl, 'repeat');
+  const top = buildEstimateActionCtasHtml(actionUrl, 'banner', locale);
+  const bottom = buildEstimateActionCtasHtml(actionUrl, 'repeat', locale);
   let next = html.replace(ESTIMATE_CTA_TABLE_RE, '');
   const firstDiv = next.indexOf('<div');
   if (firstDiv >= 0) {
@@ -135,7 +159,8 @@ export function ensureEstimateActionCtas(html: string, actionUrl: string): strin
   } else {
     next = top + next;
   }
-  const thankYou = next.lastIndexOf('Thank you for choosing');
+  const marker = next.lastIndexOf('<!--tsp-thanks-->');
+  const thankYou = marker >= 0 ? marker : next.lastIndexOf('Thank you for choosing');
   if (thankYou >= 0) {
     next = next.slice(0, thankYou) + bottom + next.slice(thankYou);
   } else {
@@ -171,7 +196,7 @@ export function buildDocTopHeader(
   docTitle: string,
   docNum: string,
   docDate: string,
-  options?: { theme?: CompanyTheme | null; themeScope?: DocThemeScope }
+  options?: { theme?: CompanyTheme | null; themeScope?: DocThemeScope; locale?: string | null }
 ): string {
   const cName = company.company_name || '';
   const cAddr = [company.address, company.city, company.state, company.zip].filter(Boolean).join(', ');
@@ -194,7 +219,7 @@ export function buildDocTopHeader(
   let logoBlock = '';
   if (company.logo_url) {
     logoBlock =
-      `<img src="${esc(company.logo_url)}" style="${logoStyle}" alt="Company Logo" />` +
+      `<img src="${esc(company.logo_url)}" style="${logoStyle}" alt="${esc(docT(options?.locale, 'Company Logo'))}" />` +
       (cSlogan
         ? `<div style="font-size:9px;font-style:italic;color:${meta};margin-top:2px;line-height:1.1;max-width:105px;">${esc(cSlogan)}</div>`
         : '');
@@ -227,7 +252,7 @@ export function buildDocTopHeader(
       `<td style="width:120px;vertical-align:top;${logoPad}">${logoBlock}</td>` +
       `<td style="vertical-align:top;${midPad}font-size:10px;">${companyBlock}</td>` +
       `<td style="width:130px;vertical-align:top;text-align:right;white-space:nowrap;${titlePad}">` +
-      `<div style="font-size:16px;font-weight:700;color:${ink};">${esc(docTitle)}</div>` +
+      `<div style="font-size:16px;font-weight:700;color:${ink};">${esc(docT(options?.locale, docTitle))}</div>` +
       (docNum
         ? `<div style="font-size:12px;color:${numberColor};font-weight:700;">${esc(docNum)}</div>`
         : '') +
@@ -238,29 +263,37 @@ export function buildDocTopHeader(
 
   return (
     `<div${brandAttr} style="${bar}padding-bottom:4px;margin-bottom:8px;text-align:right;">` +
-    `<div style="font-size:16px;font-weight:700;color:${ink};">${esc(docTitle)}</div>` +
+    `<div style="font-size:16px;font-weight:700;color:${ink};">${esc(docT(options?.locale, docTitle))}</div>` +
     (docDate ? `<div style="font-size:10px;color:${meta};">${esc(docDate)}</div>` : '') +
     `</div>`
   );
 }
 
-function customerBillTo(customer: DocCustomer, heading = 'Customer / Bill To'): string {
+function fieldLabel(locale: string | null | undefined, text: string): string {
+  return `<span style="color:#666;font-size:8px;text-transform:uppercase;">${esc(docT(locale, text))}</span>`;
+}
+
+function customerBillTo(
+  customer: DocCustomer,
+  heading = 'Customer / Bill To',
+  locale?: string | null,
+): string {
   const addr = [customer.address, customer.city, customer.state, customer.zip]
     .filter(Boolean)
     .join(', ');
   return (
     `<div style="margin-bottom:8px;padding:6px 8px;background:#f8f4e8;border:1px solid #e8d9a0;border-radius:4px;">` +
     `<div style="font-size:9px;font-weight:700;color:#8a6f2e;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">${esc(
-      heading
+      docT(locale, heading)
     )}</div>` +
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:10px;">` +
-    `<div><span style="color:#666;font-size:8px;">NAME</span> ${esc(customer.name || '—')}</div>` +
-    `<div><span style="color:#666;font-size:8px;">ADDRESS</span> ${esc(addr || '—')}</div>` +
-    `<div><span style="color:#666;font-size:8px;">CONTACT</span> ${esc(customer.contact || '—')}</div>` +
-    `<div><span style="color:#666;font-size:8px;">PHONE</span> ${esc(customer.phone || '—')}</div>` +
-    `<div><span style="color:#666;font-size:8px;">EMAIL</span> ${esc(customer.email || '—')}</div>` +
+    `<div>${fieldLabel(locale, 'Name')} ${esc(customer.name || '—')}</div>` +
+    `<div>${fieldLabel(locale, 'Address')} ${esc(addr || '—')}</div>` +
+    `<div>${fieldLabel(locale, 'Contact')} ${esc(customer.contact || '—')}</div>` +
+    `<div>${fieldLabel(locale, 'Phone')} ${esc(customer.phone || '—')}</div>` +
+    `<div>${fieldLabel(locale, 'Email')} ${esc(customer.email || '—')}</div>` +
     (customer.website
-      ? `<div><span style="color:#666;font-size:8px;">WEBSITE</span> ${esc(customer.website)}</div>`
+      ? `<div>${fieldLabel(locale, 'Website')} ${esc(customer.website)}</div>`
       : '') +
     `</div></div>`
   );
@@ -302,42 +335,29 @@ export type InvoiceHtmlInput = {
 
 export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
   const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
+  const tr = (text: string) => docT(input.locale, text);
   const dateLabel = input.invoiceDate
-    ? (() => {
-        try {
-          return new Date(input.invoiceDate + (input.invoiceDate.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
-        } catch {
-          return input.invoiceDate;
-        }
-      })()
-    : new Date().toLocaleDateString();
-  const dueLabel = input.dueDate
-    ? (() => {
-        try {
-          return new Date(input.dueDate + (input.dueDate.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
-        } catch {
-          return input.dueDate;
-        }
-      })()
-    : '—';
+    ? docDate(input.invoiceDate, input.locale, input.invoiceDate)
+    : docDate(new Date().toISOString(), input.locale);
+  const dueLabel = input.dueDate ? docDate(input.dueDate, input.locale, input.dueDate) : '—';
 
   const rule = documentRuleColor(input.theme, input.themeScope);
 
   let linesHtml =
     `<table style="width:100%;border-collapse:collapse;font-size:11px;margin:0 0 12px;">` +
     `<thead><tr style="background:#f5f5f5;border-bottom:2px solid ${rule};">` +
-    `<th style="text-align:left;padding:6px 4px;">Part #</th>` +
-    `<th style="text-align:left;padding:6px 4px;">Description</th>` +
-    `<th style="text-align:right;padding:6px 4px;">Qty</th>` +
-    `<th style="text-align:right;padding:6px 4px;">Price</th>` +
-    `<th style="text-align:right;padding:6px 4px;">Ext</th>` +
+    `<th style="text-align:left;padding:6px 4px;">${tr('Part #')}</th>` +
+    `<th style="text-align:left;padding:6px 4px;">${tr('Description')}</th>` +
+    `<th style="text-align:right;padding:6px 4px;">${tr('Qty')}</th>` +
+    `<th style="text-align:right;padding:6px 4px;">${tr('Price')}</th>` +
+    `<th style="text-align:right;padding:6px 4px;">${tr('Ext')}</th>` +
     `</tr></thead><tbody>`;
 
   const items = (input.lines || []).filter(
     (it) => it.description || it.part_number || it.unit_price
   );
   if (!items.length) {
-    linesHtml += `<tr><td colspan="5" style="padding:8px;color:#666;">No line items</td></tr>`;
+    linesHtml += `<tr><td colspan="5" style="padding:8px;color:#666;">${tr('No line items')}</td></tr>`;
   } else {
     items.forEach((it) => {
       const ext = it.ext ?? (Number(it.qty) || 0) * (Number(it.unit_price) || 0);
@@ -370,110 +390,91 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
           ? Math.max(0, dueNow - deposit)
           : balance;
 
-  return (
+  return withDocDirection(
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;font-size:12px;line-height:1.35;max-width:800px;margin:auto;">` +
-    buildDocTopHeader(input.company, 'Invoice', input.invNumber, dateLabel, {
+    buildDocTopHeader(input.company, tr('Invoice'), input.invNumber, dateLabel, {
       theme: input.theme,
       themeScope: input.themeScope,
+      locale: input.locale,
     }) +
     customerBillTo({
       ...input.customer,
-      // show due in bill-to grid like app
-    }) +
+    }, 'Customer / Bill To', input.locale) +
     `<div style="margin-bottom:10px;padding:6px 8px;background:#f9f9f9;border:1px solid #eee;border-radius:4px;">` +
-    `<div style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Invoice</div>` +
+    `<div style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">${tr('Invoice')}</div>` +
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:10px;">` +
-    `<div><span style="color:#666;font-size:8px;">INVOICE DATE</span> ${esc(dateLabel)}</div>` +
-    `<div><span style="color:#666;font-size:8px;">INVOICE #</span> ${esc(input.invNumber)}</div>` +
-    `<div><span style="color:#666;font-size:8px;">DUE DATE</span> ${esc(dueLabel)}</div>` +
+    `<div>${fieldLabel(input.locale, 'Invoice date')} ${esc(dateLabel)}</div>` +
+    `<div>${fieldLabel(input.locale, 'Invoice #')} ${esc(input.invNumber)}</div>` +
+    `<div>${fieldLabel(input.locale, 'Due date')} ${esc(dueLabel)}</div>` +
     (input.preparedBy || input.company.tech_name
-      ? `<div><span style="color:#666;font-size:8px;">PREPARED BY</span> ${esc(
+      ? `<div>${fieldLabel(input.locale, 'Prepared by')} ${esc(
           input.preparedBy || input.company.tech_name
         )}</div>`
       : '') +
     (input.fromEstimateId
-      ? `<div><span style="color:#666;font-size:8px;">FROM ESTIMATE</span> #${esc(
+      ? `<div>${fieldLabel(input.locale, 'From estimate')} #${esc(
           String(input.fromEstimateId)
         )}</div>`
       : '') +
     `</div></div>` +
-    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">Line Items</h3>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">${tr('Line Items')}</h3>` +
     linesHtml +
     (input.description
-      ? `<div style="margin:0 0 12px;font-size:11px;color:#444;"><strong>Notes:</strong> ${esc(
+      ? `<div style="margin:0 0 12px;font-size:11px;color:#444;"><strong>${tr('Notes')}:</strong> ${esc(
           input.description
         )}</div>`
       : '') +
-    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">Amounts</h3>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">${tr('Amounts')}</h3>` +
     `<div style="font-size:13px;font-weight:600;">` +
-    `<div>Subtotal: ${money(input.subtotal)}</div>` +
-    `<div>Tax: ${money(input.tax)}</div>` +
-    `<div class="totals" style="margin-top:10px;padding-top:10px;border-top:2px solid #ccc;font-size:1.25rem;">Invoice Total: ${money(
+    `<div>${tr('Subtotal')}: ${money(input.subtotal)}</div>` +
+    `<div>${tr('Tax')}: ${money(input.tax)}</div>` +
+    `<div class="totals" style="margin-top:10px;padding-top:10px;border-top:2px solid #ccc;font-size:1.25rem;">${tr('Invoice Total')}: ${money(
       total
     )}</div>` +
     (hasSplit
       ? `<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid ${rule};border-radius:6px;font-size:12px;">` +
-        `<div style="font-weight:800;font-size:12px;color:#92400e;margin-bottom:6px;">Payment split</div>` +
-        `<div>Due now (parts/travel deposit): <strong>${money(dueNow)}</strong></div>` +
-        `<div>Remaining (due on completion): <strong>${money(deferred)}</strong></div>` +
+        `<div style="font-weight:800;font-size:12px;color:#92400e;margin-bottom:6px;">${tr('Payment split')}</div>` +
+        `<div>${tr('Due now (parts/travel deposit)')}: <strong>${money(dueNow)}</strong></div>` +
+        `<div>${tr('Remaining (due on completion)')}: <strong>${money(deferred)}</strong></div>` +
         (deposit > 0
-          ? `<div style="margin-top:8px;">Deposit received: <strong>${money(deposit)}</strong>` +
+          ? `<div style="margin-top:8px;">${tr('Deposit received')}: <strong>${money(deposit)}</strong>` +
             (input.depositDate
-              ? ` on ${esc(
-                  (() => {
-                    try {
-                      return new Date(
-                        input.depositDate + (input.depositDate.length === 10 ? 'T12:00:00' : '')
-                      ).toLocaleDateString();
-                    } catch {
-                      return input.depositDate;
-                    }
-                  })()
-                )}`
+              ? ` ${docFill(input.locale, 'on {date}', { date: docDate(input.depositDate, input.locale, input.depositDate) })}`
               : '') +
-            (input.depositMethod ? ` via ${esc(input.depositMethod)}` : '') +
+            (input.depositMethod ? ` ${docFill(input.locale, 'via {method}', { method: esc(tr(input.depositMethod)) })}` : '') +
             `</div>` +
-            `<div style="font-size:1.1rem;margin-top:4px;">Still owed: <strong>${money(
+            `<div style="font-size:1.1rem;margin-top:4px;">${tr('Still owed')}: <strong>${money(
               balance
             )}</strong></div>`
           : '') +
         `</div>`
       : deposit > 0
         ? `<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid ${rule};border-radius:6px;font-size:12px;">` +
-          `<div>Deposit received: <strong>${money(deposit)}</strong>` +
+          `<div>${tr('Deposit received')}: <strong>${money(deposit)}</strong>` +
           (input.depositDate
-            ? ` on ${esc(
-                (() => {
-                  try {
-                    return new Date(
-                      input.depositDate + (input.depositDate.length === 10 ? 'T12:00:00' : '')
-                    ).toLocaleDateString();
-                  } catch {
-                    return input.depositDate;
-                  }
-                })()
-              )}`
+            ? ` ${docFill(input.locale, 'on {date}', { date: docDate(input.depositDate, input.locale, input.depositDate) })}`
             : '') +
-          (input.depositMethod ? ` via ${esc(input.depositMethod)}` : '') +
+          (input.depositMethod ? ` ${docFill(input.locale, 'via {method}', { method: esc(tr(input.depositMethod)) })}` : '') +
           `</div>` +
-          `<div style="font-size:1.1rem;margin-top:4px;">Balance remaining: <strong>${money(
+          `<div style="font-size:1.1rem;margin-top:4px;">${tr('Balance remaining')}: <strong>${money(
             balance
           )}</strong></div></div>`
         : '') +
     `</div>` +
     `<div style="margin-top:28px;font-size:11px;color:#555;text-align:center;border-top:1px solid #eee;padding-top:12px;">` +
     (hasSplit && deposit <= 0
-      ? `A parts/travel deposit of ${money(dueNow)} is due now. The remaining ${money(
-          deferred
-        )} is due upon completion of the service call.<br>`
+      ? `${docFill(input.locale, 'A parts/travel deposit of {due} is due now. The remaining {rest} is due upon completion of the service call.', {
+          due: money(dueNow),
+          rest: money(deferred),
+        })}<br>`
       : '') +
     (hasSplit && deposit > 0 && !input.deferredReleased
-      ? `Deposit has been applied. Remaining balance of ${money(
-          balance
-        )} is payable upon completion of the service call.<br>`
+      ? `${docFill(input.locale, 'Deposit has been applied. Remaining balance of {balance} is payable upon completion of the service call.', {
+          balance: money(balance),
+        })}<br>`
       : '') +
     (!hasSplit && deposit > 0
-      ? `Deposit has been applied. Remaining balance is payable upon completion of the service call.<br>`
+      ? `${tr('Deposit has been applied. Remaining balance is payable upon completion of the service call.')}<br>`
       : '') +
     (input.paymentUrl && collectable > 0
       ? `<div style="margin:18px 0 8px;text-align:center;">` +
@@ -481,15 +482,17 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         `style="${payButtonStyle(input.theme)}">` +
         `${
           hasSplit && !input.deferredReleased && deposit <= 0
-            ? `Pay deposit ${money(collectable)} securely with Stripe`
-            : `Pay ${money(collectable)} securely with Stripe`
+            ? docFill(input.locale, 'Pay deposit {amount} securely with Stripe', { amount: money(collectable) })
+            : docFill(input.locale, 'Pay {amount} securely with Stripe', { amount: money(collectable) })
         }</a>` +
-        `<div style="font-size:10px;color:#666;margin-top:8px;">Secure card payment · Powered by Stripe</div>` +
+        `<div style="font-size:10px;color:#666;margin-top:8px;">${tr('Secure card payment · Powered by Stripe')}</div>` +
         `</div>`
       : '') +
-    `Thank you for choosing ${esc(input.company.company_name || 'Total Service Pro')}!` +
+    `<!--tsp-thanks-->${docFill(input.locale, 'Thank you for choosing {shop}!', {
+      shop: esc(input.company.company_name || 'Total Service Pro'),
+    })}` +
     `</div></div>`
-  );
+  , input.locale);
 }
 
 export type PurchaseOrderHtmlInput = {
@@ -511,40 +514,27 @@ export type PurchaseOrderHtmlInput = {
 
 export function buildPurchaseOrderHtml(input: PurchaseOrderHtmlInput): string {
   const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
+  const tr = (text: string) => docT(input.locale, text);
   const dateLabel = input.poDate
-    ? (() => {
-        try {
-          return new Date(input.poDate + (input.poDate.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
-        } catch {
-          return input.poDate;
-        }
-      })()
-    : new Date().toLocaleDateString();
-  const neededLabel = input.neededBy
-    ? (() => {
-        try {
-          return new Date(input.neededBy + (input.neededBy.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
-        } catch {
-          return input.neededBy;
-        }
-      })()
-    : '—';
+    ? docDate(input.poDate, input.locale, input.poDate)
+    : docDate(new Date().toISOString(), input.locale);
+  const neededLabel = input.neededBy ? docDate(input.neededBy, input.locale, input.neededBy) : '—';
 
   let linesHtml =
     `<table style="width:100%;border-collapse:collapse;font-size:11px;margin:0 0 12px;">` +
     `<thead><tr style="background:#f5f5f5;border-bottom:2px solid #FBBF24;">` +
-    `<th style="text-align:left;padding:6px 4px;">Part #</th>` +
-    `<th style="text-align:left;padding:6px 4px;">Description</th>` +
-    `<th style="text-align:right;padding:6px 4px;">Qty</th>` +
-    `<th style="text-align:right;padding:6px 4px;">Price</th>` +
-    `<th style="text-align:right;padding:6px 4px;">Ext</th>` +
+    `<th style="text-align:left;padding:6px 4px;">${tr('Part #')}</th>` +
+    `<th style="text-align:left;padding:6px 4px;">${tr('Description')}</th>` +
+    `<th style="text-align:right;padding:6px 4px;">${tr('Qty')}</th>` +
+    `<th style="text-align:right;padding:6px 4px;">${tr('Price')}</th>` +
+    `<th style="text-align:right;padding:6px 4px;">${tr('Ext')}</th>` +
     `</tr></thead><tbody>`;
 
   const items = (input.lines || []).filter(
     (it) => it.description || it.part_number || it.unit_price
   );
   if (!items.length) {
-    linesHtml += `<tr><td colspan="5" style="padding:8px;color:#666;">No line items</td></tr>`;
+    linesHtml += `<tr><td colspan="5" style="padding:8px;color:#666;">${tr('No line items')}</td></tr>`;
   } else {
     items.forEach((it) => {
       const ext = it.ext ?? (Number(it.qty) || 0) * (Number(it.unit_price) || 0);
@@ -562,52 +552,55 @@ export function buildPurchaseOrderHtml(input: PurchaseOrderHtmlInput): string {
   }
   linesHtml += `</tbody></table>`;
 
-  return (
+  return withDocDirection(
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;font-size:12px;line-height:1.35;max-width:800px;margin:auto;">` +
-    buildDocTopHeader(input.company, 'Purchase Order', input.poNumber, dateLabel) +
+    buildDocTopHeader(input.company, tr('Purchase Order'), input.poNumber, dateLabel, { locale: input.locale }) +
     customerBillTo(
       {
         ...input.supplier,
-        name: input.supplier.name || 'Parts supplier',
+        name: input.supplier.name || tr('Parts supplier'),
       },
-      'Vendor / Parts Supplier'
+      'Vendor / Parts Supplier',
+      input.locale,
     ) +
     `<div style="margin-bottom:10px;padding:6px 8px;background:#f9f9f9;border:1px solid #eee;border-radius:4px;">` +
-    `<div style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Purchase Order</div>` +
+    `<div style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">${tr('Purchase Order')}</div>` +
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:10px;">` +
-    `<div><span style="color:#666;font-size:8px;">PO DATE</span> ${esc(dateLabel)}</div>` +
-    `<div><span style="color:#666;font-size:8px;">PO #</span> ${esc(input.poNumber)}</div>` +
-    `<div><span style="color:#666;font-size:8px;">NEEDED BY</span> ${esc(neededLabel)}</div>` +
+    `<div>${fieldLabel(input.locale, 'PO date')} ${esc(dateLabel)}</div>` +
+    `<div>${fieldLabel(input.locale, 'PO #')} ${esc(input.poNumber)}</div>` +
+    `<div>${fieldLabel(input.locale, 'Needed by')} ${esc(neededLabel)}</div>` +
     (input.preparedBy || input.company.tech_name
-      ? `<div><span style="color:#666;font-size:8px;">PREPARED BY</span> ${esc(
+      ? `<div>${fieldLabel(input.locale, 'Prepared by')} ${esc(
           input.preparedBy || input.company.tech_name
         )}</div>`
       : '') +
     (input.shipTo
-      ? `<div style="grid-column:1 / -1;"><span style="color:#666;font-size:8px;">SHIP TO</span> ${esc(
+      ? `<div style="grid-column:1 / -1;">${fieldLabel(input.locale, 'Ship to')} ${esc(
           input.shipTo
         )}</div>`
       : '') +
     `</div></div>` +
-    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px;">Line Items</h3>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px;">${tr('Line Items')}</h3>` +
     linesHtml +
     (input.description
-      ? `<div style="margin:0 0 12px;font-size:11px;color:#444;"><strong>Notes:</strong> ${esc(
+      ? `<div style="margin:0 0 12px;font-size:11px;color:#444;"><strong>${tr('Notes')}:</strong> ${esc(
           input.description
         )}</div>`
       : '') +
-    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px;">Amounts</h3>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid #FBBF24;padding-bottom:4px;font-size:13px;">${tr('Amounts')}</h3>` +
     `<div style="font-size:13px;font-weight:600;">` +
-    `<div>Subtotal: ${money(input.subtotal)}</div>` +
-    `<div>Tax: ${money(input.tax)}</div>` +
-    `<div class="totals" style="margin-top:10px;padding-top:10px;border-top:2px solid #ccc;font-size:1.25rem;">PO Total: ${money(
+    `<div>${tr('Subtotal')}: ${money(input.subtotal)}</div>` +
+    `<div>${tr('Tax')}: ${money(input.tax)}</div>` +
+    `<div class="totals" style="margin-top:10px;padding-top:10px;border-top:2px solid #ccc;font-size:1.25rem;">${tr('PO Total')}: ${money(
       input.total
     )}</div>` +
     `</div>` +
     `<div style="margin-top:28px;font-size:11px;color:#555;text-align:center;border-top:1px solid #eee;padding-top:12px;">` +
-    `Please confirm this purchase order with ${esc(input.company.company_name || 'Total Service Pro')}.` +
+    `${docFill(input.locale, 'Please confirm this purchase order with {shop}.', {
+      shop: esc(input.company.company_name || 'Total Service Pro'),
+    })}` +
     `</div></div>`
-  );
+  , input.locale);
 }
 
 export type EstimateHtmlInput = {
@@ -655,24 +648,31 @@ export type EstimateHtmlInput = {
 
 export function buildEstimateHtml(input: EstimateHtmlInput): string {
   const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
-  const services = input.services?.length ? input.services : ['Not specified'];
+  const tr = (text: string) => docT(input.locale, text);
+  const services = (input.services?.length ? input.services : ['Not specified']).map((item) => tr(item));
   const rule = documentRuleColor(input.theme, input.themeScope);
   const deposit = Number(input.deposit) || 0;
   const balance =
     input.balanceDue != null
       ? Number(input.balanceDue)
       : Math.max(0, Number(input.total) - deposit);
+  const dateLabel = docDate(input.dateStr, input.locale, input.dateStr);
+  const urgencyRaw = (input.urgency || 'standard').replace(/^\w/, (c) => c.toUpperCase());
 
   let cost = `<div style="font-size:12px;">`;
-  if (input.diagFee) cost += `<div>Diagnostic Fee: ${money(input.diagFee)}</div>`;
+  if (input.diagFee) cost += `<div>${tr('Diagnostic Fee')}: ${money(input.diagFee)}</div>`;
   if (input.labor)
-    cost += `<div>Labor: ${input.laborHours ?? 0} hrs @ ${money(input.laborRate)}/hr = ${money(
-      input.labor
-    )}</div>`;
+    cost += `<div>${docFill(input.locale, 'Labor: {hours} hrs @ {rate}/hr = {amount}', {
+      hours: input.laborHours ?? 0,
+      rate: money(input.laborRate),
+      amount: money(input.labor),
+    })}</div>`;
   if (input.travel)
-    cost += `<div>Travel (mileage): ${input.miles ?? 0} mi @ ${money(input.travelRate)}/mi = ${money(
-      input.travel
-    )}</div>`;
+    cost += `<div>${docFill(input.locale, 'Travel (mileage): {miles} mi @ {rate}/mi = {amount}', {
+      miles: input.miles ?? 0,
+      rate: money(input.travelRate),
+      amount: money(input.travel),
+    })}</div>`;
   if (
     input.reimbTravel ||
     input.reimbLodging ||
@@ -680,103 +680,104 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
     input.reimbOther ||
     input.perDiem
   ) {
-    cost += `<div style="margin-top:8px;font-weight:700;font-size:11px;color:#555;">REIMBURSABLE EXPENSES</div>`;
+    cost += `<div style="margin-top:8px;font-weight:700;font-size:11px;color:#555;">${tr('Reimbursable expenses')}</div>`;
   }
   if (input.reimbTravel)
-    cost += `<div style="padding-left:8px;">Travel (airfare / tickets): ${money(input.reimbTravel)}</div>`;
+    cost += `<div style="padding-left:8px;">${tr('Travel (airfare / tickets)')}: ${money(input.reimbTravel)}</div>`;
   if (input.reimbLodging)
-    cost += `<div style="padding-left:8px;">Lodging: ${money(input.reimbLodging)}</div>`;
+    cost += `<div style="padding-left:8px;">${tr('Lodging')}: ${money(input.reimbLodging)}</div>`;
   if (input.reimbGround)
-    cost += `<div style="padding-left:8px;">Car rental / ground transportation: ${money(
+    cost += `<div style="padding-left:8px;">${tr('Car rental / ground transportation')}: ${money(
       input.reimbGround
     )}</div>`;
   if (input.perDiem)
-    cost += `<div style="padding-left:8px;">Per diem: ${input.perDiemDays ?? 0} day(s) @ ${money(
-      input.perDiemRate
-    )}/day = ${money(input.perDiem)}</div>`;
+    cost += `<div style="padding-left:8px;">${docFill(input.locale, 'Per diem: {days} day(s) @ {rate}/day = {amount}', {
+      days: input.perDiemDays ?? 0,
+      rate: money(input.perDiemRate),
+      amount: money(input.perDiem),
+    })}</div>`;
   if (input.reimbOther)
-    cost += `<div style="padding-left:8px;">Other: ${money(input.reimbOther)}</div>`;
+    cost += `<div style="padding-left:8px;">${tr('Other')}: ${money(input.reimbOther)}</div>`;
   if (input.partsTotal) {
-    cost += `<div style="margin-top:6px;">Parts:<br>`;
+    cost += `<div style="margin-top:6px;">${tr('Parts')}:<br>`;
     (input.partsLines || []).forEach((ln) => {
       cost += `<div>${esc(ln)}</div>`;
     });
-    cost += `<strong>Parts Subtotal: ${money(input.partsTotal)}</strong></div>`;
+    cost += `<strong>${tr('Parts Subtotal')}: ${money(input.partsTotal)}</strong></div>`;
   }
   cost +=
     `<div class="totals" style="font-weight:bold;font-size:1.1rem;margin-top:14px;border-top:2px solid #ccc;padding-top:12px;">` +
-    `Subtotal: ${money(input.subtotal)}<br>` +
-    `Tax (${input.taxRate ?? 0}%): ${money(input.tax)}<br>` +
-    `<span style="font-size:1.25rem;">Grand Total: ${money(input.total)}</span></div>`;
+    `${tr('Subtotal')}: ${money(input.subtotal)}<br>` +
+    `${docFill(input.locale, 'Tax ({rate}%): {amount}', {
+      rate: input.taxRate ?? 0,
+      amount: money(input.tax),
+    })}<br>` +
+    `<span style="font-size:1.25rem;">${tr('Grand Total')}: ${money(input.total)}</span></div>`;
   if (deposit > 0) {
     cost +=
       `<div style="margin-top:14px;padding:12px;background:#fffbeb;border:1px solid ${rule};border-radius:6px;">` +
-      `<div style="font-weight:800;font-size:13px;color:#92400e;margin-bottom:6px;">Parts / Travel Deposit</div>` +
+      `<div style="font-weight:800;font-size:13px;color:#92400e;margin-bottom:6px;">${tr('Parts / Travel Deposit')}</div>` +
       `<div style="font-size:12px;color:#111;line-height:1.45;">` +
-      `A deposit of <strong>${money(deposit)}</strong> (covering estimated parts and travel-related costs) ` +
-      `must be paid before the service call is scheduled. ` +
-      `The remaining balance of <strong>${money(
-        balance
-      )}</strong> is due upon completion of the service call.` +
+      `${docFill(
+        input.locale,
+        'A deposit of {deposit} (covering estimated parts and travel-related costs) must be paid before the service call is scheduled. The remaining balance of {balance} is due upon completion of the service call.',
+        { deposit: money(deposit), balance: money(balance) },
+      )}` +
       `</div></div>`;
   }
   cost += `</div>`;
 
   const valid = input.validDays ?? 30;
 
-  return (
+  return withDocDirection(
     `<div style="font-family:Arial,Helvetica,sans-serif;color:#111;font-size:12px;line-height:1.35;max-width:800px;margin:auto;">` +
-    buildDocTopHeader(input.company, 'Service Estimate', input.estNumber, input.dateStr, {
+    buildDocTopHeader(input.company, tr('Service Estimate'), input.estNumber, dateLabel, {
       theme: input.theme,
       themeScope: input.themeScope,
+      locale: input.locale,
     }) +
-    (input.actionUrl ? buildEstimateActionCtasHtml(input.actionUrl, 'banner') : '') +
-    customerBillTo(input.customer) +
+    (input.actionUrl ? buildEstimateActionCtasHtml(input.actionUrl, 'banner', input.locale) : '') +
+    customerBillTo(input.customer, 'Customer / Bill To', input.locale) +
     `<div style="margin-bottom:10px;padding:6px 8px;background:#f9f9f9;border:1px solid #eee;border-radius:4px;">` +
-    `<div style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">Estimate Details</div>` +
+    `<div style="font-size:9px;font-weight:700;color:#666;text-transform:uppercase;letter-spacing:0.5px;margin-bottom:3px;">${tr('Estimate Details')}</div>` +
     `<div style="display:grid;grid-template-columns:1fr 1fr;gap:2px 8px;font-size:10px;">` +
-    `<div><span style="color:#666;font-size:8px;">MANUFACTURER</span> ${esc(
-      input.manufacturer || '—'
-    )}</div>` +
-    `<div><span style="color:#666;font-size:8px;">MODEL</span> ${esc(input.model || '—')}</div>` +
-    `<div><span style="color:#666;font-size:8px;">SERIAL #</span> ${esc(input.serial || '—')}</div>` +
-    `<div><span style="color:#666;font-size:8px;">PULSE COUNT</span> ${esc(
-      input.pulseCount || '—'
-    )}</div>` +
-    `<div><span style="color:#666;font-size:8px;">TRAVEL</span> ${input.miles ?? 0} mi round-trip</div>` +
-    `<div><span style="color:#666;font-size:8px;">URGENCY</span> ${esc(
-      (input.urgency || 'standard').replace(/^\w/, (c) => c.toUpperCase())
-    )}</div>` +
+    `<div>${fieldLabel(input.locale, 'Manufacturer')} ${esc(input.manufacturer || '—')}</div>` +
+    `<div>${fieldLabel(input.locale, 'Model')} ${esc(input.model || '—')}</div>` +
+    `<div>${fieldLabel(input.locale, 'Serial #')} ${esc(input.serial || '—')}</div>` +
+    `<div>${fieldLabel(input.locale, 'Pulse count')} ${esc(input.pulseCount || '—')}</div>` +
+    `<div>${fieldLabel(input.locale, 'Travel')} ${docFill(input.locale, '{miles} mi round-trip', { miles: input.miles ?? 0 })}</div>` +
+    `<div>${fieldLabel(input.locale, 'Urgency')} ${esc(tr(urgencyRaw))}</div>` +
     (input.company.tech_name
-      ? `<div><span style="color:#666;font-size:8px;">PREPARED BY</span> ${esc(
-          input.company.tech_name
-        )}</div>`
+      ? `<div>${fieldLabel(input.locale, 'Prepared by')} ${esc(input.company.tech_name)}</div>`
       : '') +
-    `<div><span style="color:#666;font-size:8px;">DATE</span> ${esc(input.dateStr)}</div>` +
+    `<div>${fieldLabel(input.locale, 'Date')} ${esc(dateLabel)}</div>` +
     `</div></div>` +
-    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">Services Included</h3>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">${tr('Services Included')}</h3>` +
     `<div style="font-size:12px;margin-bottom:12px;">${services
       .map((s) => `• ${esc(s)}`)
       .join('<br>')}</div>` +
-    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">Reported Issues</h3>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">${tr('Reported Issues')}</h3>` +
     `<pre style="white-space:pre-wrap;font-family:inherit;margin:0 0 12px;font-size:12px;background:#f9f9f9;padding:8px;border-radius:4px;">${esc(
-      input.issues || 'No issues noted'
+      input.issues || tr('No issues noted')
     )}</pre>` +
-    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">Cost Breakdown</h3>` +
+    `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">${tr('Cost Breakdown')}</h3>` +
     cost +
     `<div style="margin-top:28px;font-size:11px;color:#555;text-align:center;border-top:1px solid #eee;padding-top:12px;">` +
     `<div style="margin-top:10px;padding:10px;background:#f8f4e8;border:1px solid #e8d9a0;border-radius:6px;font-size:11px;color:#111;">` +
-    `<strong>Validity:</strong> This estimate is good for <strong>${valid} days</strong> from the date above. ` +
-    `After ${valid} days it is considered expired and pricing may be revised. Prices are subject to on-site inspection.` +
+    `${docFill(
+      input.locale,
+      'Validity: This estimate is good for {days} days from the date above. After {days} days it is considered expired and pricing may be revised. Prices are subject to on-site inspection.',
+      { days: valid },
+    )}` +
     `</div>` +
     (deposit > 0
-      ? `<div style="margin-top:8px;font-size:11px;color:#555;">Scheduling is contingent on receipt of the parts/travel deposit described above.</div>`
+      ? `<div style="margin-top:8px;font-size:11px;color:#555;">${tr('Scheduling is contingent on receipt of the parts/travel deposit described above.')}</div>`
       : '') +
-    (input.actionUrl ? buildEstimateActionCtasHtml(input.actionUrl, 'repeat') : '') +
-    `<div style="margin-top:12px;">Thank you for choosing ${esc(
-      input.company.company_name || 'Total Service Pro'
-    )}!</div></div></div>`
-  );
+    (input.actionUrl ? buildEstimateActionCtasHtml(input.actionUrl, 'repeat', input.locale) : '') +
+    `<div style="margin-top:12px;"><!--tsp-thanks-->${docFill(input.locale, 'Thank you for choosing {shop}!', {
+      shop: esc(input.company.company_name || 'Total Service Pro'),
+    })}</div></div></div>`
+  , input.locale);
 }
 
 /** Open print dialog with full HTML document (app-quality PDF via browser Save as PDF). */

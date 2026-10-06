@@ -137,7 +137,7 @@ export async function POST(req: NextRequest) {
       console.warn('could not persist estimate action token', e);
     }
 
-    const subject = ownedDocumentSubject('estimate', est.estimate_number, company.company_name);
+    const subject = ownedDocumentSubject('estimate', est.estimate_number, company.company_name, request.locale);
     const moneyPrefs = callerOrgId != null ? await loadOrgMoneyPrefs(supabase, callerOrgId) : null;
     let html = buildOwnedEstimateMessage({
       row: est,
@@ -145,8 +145,9 @@ export async function POST(req: NextRequest) {
       theme,
       actionUrl: estimateActionUrl(actionToken),
       moneyPrefs,
+      locale: request.locale,
     });
-    html = ensureEstimateActionCtas(html, estimateActionUrl(actionToken));
+    html = ensureEstimateActionCtas(html, estimateActionUrl(actionToken), request.locale);
     const origin = publicSiteOrigin(req);
     const { signupUrl, loginUrl } = documentAccountLinks(origin, estimateCustomerPath(estimateId));
     const wrapped = wrapCustomerFacingDocumentEmail({
@@ -156,6 +157,7 @@ export async function POST(req: NextRequest) {
       loginUrl,
       companyName: String(est.customer_name || '').trim(),
       theme,
+      locale: request.locale,
     });
 
     const resendKey = process.env.RESEND_API_KEY;

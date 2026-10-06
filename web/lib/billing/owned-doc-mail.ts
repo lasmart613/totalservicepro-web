@@ -5,6 +5,9 @@
  */
 
 import type { CompanyTheme } from '../company-theme.ts';
+import { formatLocaleDate } from '../i18n/format-date.ts';
+import type { PublicLocale } from '../i18n/locales.ts';
+import { parseMailLocale, translateApp, translateAppFill } from '../i18n/translate-app.ts';
 import type { OrgMoneyPrefs } from '../money-format.ts';
 import { buildEstimateHtml, buildInvoiceHtml, type DocCompany } from './doc-html.ts';
 import { resolveInvoiceCollectable } from './invoice-collectable.ts';
@@ -40,15 +43,16 @@ export function documentOwnedByOrganization(
   return String(row.organization_id) === String(callerOrgId);
 }
 
-/** Only the document id (and the invoice pay-link flag) is read from the body. */
+/** Document id, pay-link flag, and a validated site language. HTML, recipient, and subject stay off the body. */
 export function ownedSendRequest(
   body: unknown,
   idKey: 'invoice_id' | 'estimate_id' | 'report_id'
-): { documentId: string | number | null; includePaymentLink: boolean } {
+): { documentId: string | number | null; includePaymentLink: boolean; locale: PublicLocale | null } {
   const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
   return {
     documentId: parseDocumentId(record[idKey]),
     includePaymentLink: record.include_payment_link !== false,
+    locale: parseMailLocale(record.locale),
   };
 }
 
@@ -122,18 +126,18 @@ export function documentAccountLinks(
 export function ownedDocumentSubject(
   kind: 'invoice' | 'estimate' | 'report',
   docNumber: unknown,
-  shopName: unknown
+  shopName: unknown,
+  locale?: string | null
 ): string {
   const num = String(docNumber || '').trim();
   const shop = String(shopName ?? '').trim();
-  const fromShop = shop ? ` from ${shop}` : '';
-  if (kind === 'invoice') {
-    return num ? `Invoice ${num}${fromShop}` : `Invoice${fromShop}`;
-  }
-  if (kind === 'estimate') {
-    return num ? `Estimate ${num}${fromShop}` : `Service estimate${fromShop}`;
-  }
-  return num ? `Service Report ${num}${fromShop}` : `Service report${fromShop}`;
+  const noun =
+    kind === 'invoice' ? 'Invoice' : kind === 'estimate' ? 'Estimate' : 'Service Report';
+  const bare = kind === 'estimate' ? 'Service estimate' : kind === 'report' ? 'Service report' : 'Invoice';
+  if (num && shop) return translateAppFill(locale, `${noun} {num} from {shop}`, { num, shop });
+  if (num) return translateAppFill(locale, `${noun} {num}`, { num });
+  if (shop) return translateAppFill(locale, `${bare} from {shop}`, { shop });
+  return translateApp(locale, bare);
 }
 
 export function senderCompanyFromOrg(
@@ -278,7 +282,7 @@ export function buildOwnedEstimateMessage(input: {
       email: String(data.custEmail || ''),
     },
     estNumber: String(input.row.estimate_number || data.estimate_number || data.estNumber || ''),
-    dateStr: formatDocDate(input.row.created_at),
+    dateStr: formatDocDate(input.row.created_at, input.locale),
     manufacturer: String(data.manufacturer || ''),
     model: String(data.model || ''),
     serial: String(data.serial || ''),
@@ -319,7 +323,8 @@ export function buildOwnedEstimateMessage(input: {
 
 export function buildOwnedReportMessage(
   row: Record<string, unknown>,
-  theme: CompanyTheme | null
+  theme: CompanyTheme | null,
+  locale?: string | null
 ): string {
   const printable = { ...row };
   delete printable.html;
@@ -327,6 +332,7 @@ export function buildOwnedReportMessage(
     ...printable,
     theme,
     themeScope: 'email',
+    locale,
   });
 }
 
@@ -454,9 +460,7 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function formatDocDate(value: unknown): string {
-  if (!value) return new Date().toLocaleDateString();
-  const parsed = new Date(String(value));
-  if (Number.isNaN(parsed.getTime())) return String(value);
-  return parsed.toLocaleDateString();
+function formatDocDate(value: unknown, locale?: string | null): string {
+  if (!value) return formatLocaleDate(new Date(), locale);
+  return formatLocaleDate(String(value), locale);
 }

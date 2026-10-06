@@ -54,10 +54,10 @@ export function OrgSwitcher({
     setBusy(true);
     try {
       await switchOrganization(organizationId);
-      toast.success('Working as that company now. Jobs stay in their own shop.');
+      toast.success(t('Working as that company now. Jobs stay in their own shop.'));
       window.location.reload();
     } catch (e: any) {
-      toast.error(e?.message || 'Could not switch company');
+      toast.error(e?.message || t('Could not switch company'));
       setBusy(false);
     }
   };
@@ -73,7 +73,7 @@ export function OrgSwitcher({
       );
       window.location.reload();
     } catch (e: any) {
-      toast.error(e?.message || 'Could not accept invite');
+      toast.error(e?.message || t('Could not accept invite'));
       setBusy(false);
     }
   };
@@ -86,9 +86,7 @@ export function OrgSwitcher({
               : 'absolute right-0 mt-2 w-[min(18rem,calc(100vw-2rem))] min-w-[16rem] rounded-xl border border-[var(--gold)] bg-[var(--surface3)] shadow-xl z-[120] overflow-visible text-sm'
           }
         >
-          <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-[var(--text3)] border-b border-[var(--border)]">
-            Working as
-          </div>
+          <div className="px-3 py-2 text-[10px] uppercase tracking-wide text-[var(--text3)] border-b border-[var(--border)]">{t('Working as')}</div>
           {memberships.map((m) => (
             <button
               key={String(m.organizationId)}
@@ -103,15 +101,13 @@ export function OrgSwitcher({
               <div className="text-[11px] text-[var(--text3)]">
                 {t(roleLabel(m.role))}
                 {m.isHome ? ` · ${t('Home shop')}` : ''}
-                {m.isActive ? ' · Active' : ''}
+                {m.isActive ? ` · ${t('Active')}` : ''}
               </div>
             </button>
           ))}
           {pending.length > 0 && (
             <div className="border-t border-[var(--border)] px-3 py-2 space-y-2">
-              <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">
-                Pending invites
-              </div>
+              <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">{t('Pending invites')}</div>
               {pending.map((inv) => (
                 <div key={inv.id} className="rounded border border-[var(--border)] p-2">
                   <div className="font-semibold">{inv.name}</div>
@@ -124,9 +120,7 @@ export function OrgSwitcher({
                       className="btn btn-primary text-[11px] px-2 py-1"
                       disabled={busy}
                       onClick={() => onAccept(inv)}
-                    >
-                      Join (keep home)
-                    </button>
+                    >{t('Join (keep home)')}</button>
                     {memberships
                       .filter((m) => !m.isHome)
                       .map((m) => (
@@ -137,7 +131,7 @@ export function OrgSwitcher({
                           disabled={busy}
                           onClick={() => onAccept(inv, m.organizationId)}
                         >
-                          Join & leave {m.name}
+                          {t('Join & leave {name}').replace('{name}', m.name)}
                         </button>
                       ))}
                   </div>
@@ -159,12 +153,12 @@ export function OrgSwitcher({
         disabled={busy}
         onClick={() => setOpen(!open)}
         className="inline-flex items-center gap-1.5 max-w-[8.5rem] xl:max-w-[14rem] rounded-full border border-[var(--gold-border)] px-2.5 py-1 text-xs hover:bg-[var(--surface3)]"
-        aria-label="Switch company"
-        title="Switch which company you are working as"
+        aria-label={t('Switch company')}
+        title={t('Switch which company you are working as')}
       >
         <Building2 size={14} className="text-[var(--gold)] shrink-0" />
         <span className="truncate font-semibold">
-          {active?.name || 'Choose company'}
+          {active?.name || t('Choose company')}
         </span>
         <ChevronDown size={12} className="opacity-70 shrink-0" />
       </button>
@@ -196,16 +190,16 @@ export function MembershipsSettings() {
   if (!memberships.length && !pending.length) return null;
 
   const onLeave = async (m: OrgMembership) => {
-    if (!window.confirm(`Leave ${m.name}? Your login stays. You will lose access to that shop's jobs.`)) {
+    if (!window.confirm(t("Leave {name}? Your login stays. You will lose access to that shop's jobs.").replace('{name}', m.name))) {
       return;
     }
     setBusy(true);
     try {
       await leaveOrganization(m.organizationId);
-      toast.success(`Left ${m.name}. Account kept.`);
+      toast.success(t('Left {name}. Account kept.').replace('{name}', m.name));
       window.location.reload();
     } catch (e: any) {
-      toast.error(e?.message || 'Could not leave');
+      toast.error(e?.message || t('Could not leave'));
       setBusy(false);
     }
   };
@@ -214,10 +208,10 @@ export function MembershipsSettings() {
     setBusy(true);
     try {
       await acceptTeamInvite(invite.id, leave);
-      toast.success(`Joined ${invite.name}`);
+      toast.success(t('Joined {name}').replace('{name}', invite.name));
       window.location.reload();
     } catch (e: any) {
-      toast.error(e?.message || 'Could not accept invite');
+      toast.error(e?.message || t('Could not accept invite'));
       setBusy(false);
     }
   };
@@ -239,7 +233,7 @@ export function MembershipsSettings() {
               <div className="text-[11px] text-[var(--text3)]">
                 {t(roleLabel(m.role))}
                 {m.isHome ? ` · ${t('Home shop')}` : ''}
-                {m.isActive ? ' · Active' : ''}
+                {m.isActive ? ` · ${t('Active')}` : ''}
               </div>
             </div>
             <div className="flex gap-1 shrink-0">
@@ -254,22 +248,18 @@ export function MembershipsSettings() {
                       await switchOrganization(m.organizationId);
                       window.location.reload();
                     } catch (e: any) {
-                      toast.error(e?.message || 'Switch failed');
+                      toast.error(e?.message || t('Switch failed'));
                       setBusy(false);
                     }
                   }}
-                >
-                  Work as
-                </button>
+                >{t('Work as')}</button>
               )}
               <button
                 type="button"
                 className="btn btn-secondary text-[11px] px-2 py-1 text-red-400"
                 disabled={busy}
                 onClick={() => onLeave(m)}
-              >
-                Leave
-              </button>
+              >{t('Leave')}</button>
             </div>
           </div>
         ))}
@@ -280,15 +270,13 @@ export function MembershipsSettings() {
           {pending.map((inv) => (
             <div key={inv.id} className="rounded border border-[var(--gold)] px-3 py-2">
               <div className="font-medium">{inv.name}</div>
-              <div className="text-[11px] text-[var(--text3)] mb-2">{roleLabel(inv.role)}</div>
+              <div className="text-[11px] text-[var(--text3)] mb-2">{t(roleLabel(inv.role))}</div>
               <button
                 type="button"
                 className="btn btn-primary text-[11px] px-2 py-1"
                 disabled={busy}
                 onClick={() => onAccept(inv)}
-              >
-                Join (keep home)
-              </button>
+              >{t('Join (keep home)')}</button>
             </div>
           ))}
         </div>

@@ -1,4 +1,5 @@
 'use client';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
@@ -17,6 +18,7 @@ export const dynamic = 'force-dynamic';
 type QtyBreak = { min_qty: string; unit_price: string };
 
 function MarketplaceListContent() {
+  const t = useT();
   const searchParams = useSearchParams();
   const router = useRouter();
   const supabase = getSupabaseClient();
@@ -588,16 +590,16 @@ function MarketplaceListContent() {
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="max-w-3xl mx-auto w-full px-4 py-8">
-        <Link href="/marketplace" className="text-sm text-[var(--gold)] hover:underline">← Marketplace</Link>
-        <h1 className="text-3xl font-extrabold mt-1 mb-2">Post a Marketplace Listing</h1>
+        <Link href="/marketplace" className="text-sm text-[var(--gold)] hover:underline">{t('← Marketplace')}</Link>
+        <h1 className="text-3xl font-extrabold mt-1 mb-2">{t('Post a Marketplace Listing')}</h1>
         <p className="text-sm text-[var(--text3)] mb-6">
-          Each listing type uses a form tailored to that product — same structure as the Android app.
+          {t('Each listing type uses a form tailored to that product — same structure as the Android app.')}
           {isSupplier(userRole, orgType) && (
             <>
               {' '}
-              Premium / Team suppliers can also{' '}
+              {t('Premium / Team suppliers can also')}{' '}
               <Link href="/marketplace/storefront" className="text-[var(--gold)] hover:underline">
-                upload inventory as CSV or Excel
+                {t('upload inventory as CSV or Excel')}
               </Link>
               .
             </>
@@ -606,10 +608,10 @@ function MarketplaceListContent() {
 
         <div className="flex flex-wrap gap-2 mb-8">
           {[
-            { key: 'part' as const, label: 'Parts for Sale' },
-            { key: 'consumable' as const, label: 'Consumables' },
-            { key: 'used' as const, label: 'Used Laser' },
-            { key: 'request' as const, label: proPosting ? 'Subcontract RFQ' : 'Service Request' },
+            { key: 'part' as const, label: t('Parts for Sale') },
+            { key: 'consumable' as const, label: t('Consumables') },
+            { key: 'used' as const, label: t('Used Laser') },
+            { key: 'request' as const, label: proPosting ? t('Subcontract RFQ') : t('Service Request') },
           ].map((type) => (
             <button
               key={type.key}
@@ -628,8 +630,8 @@ function MarketplaceListContent() {
           {/* ── PHOTOS (sales only) ── */}
           {!isRequest && (
             <section className="bg-[var(--surface3)] border border-[var(--border)] rounded-xl p-4 space-y-3">
-              <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">Photos</h3>
-              <p className="text-xs text-[var(--text3)]">Up to 8 photos. First / starred photo is the cover.</p>
+              <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">{t('Photos')}</h3>
+              <p className="text-xs text-[var(--text3)]">{t('Up to 8 photos. First / starred photo is the cover.')}</p>
               <div className="flex flex-wrap gap-2">
                 {previews.map((src, i) => (
                   <div key={i} className="relative w-20 h-20 rounded-lg overflow-hidden border border-[var(--border)]">
@@ -641,7 +643,7 @@ function MarketplaceListContent() {
                       className={`absolute bottom-0 left-0 right-0 text-[9px] font-bold py-0.5 ${i === featuredIndex ? 'bg-[var(--gold)] text-black' : 'bg-black/60 text-white'}`}
                       onClick={() => setFeaturedIndex(i)}
                     >
-                      {i === featuredIndex ? 'COVER' : 'Set cover'}
+                      {i === featuredIndex ? t('COVER') : t('Set cover')}
                     </button>
                   </div>
                 ))}
@@ -660,25 +662,25 @@ function MarketplaceListContent() {
             <>
               <section className="bg-[var(--surface3)] border border-[var(--border)] rounded-xl p-4 space-y-4">
                 <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">
-                  {listingType === 'consumable' ? 'Consumable identity' : 'Part identity'}
+                  {listingType === 'consumable' ? t('Consumable identity') : t('Part identity')}
                 </h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="label">{listingType === 'consumable' ? 'Product / catalog # *' : 'Part number / OEM # *'}</label>
-                    <input className="input" value={form.partNumber} onChange={(e) => set('partNumber', e.target.value)} placeholder="e.g. 7122-00-1234" required />
+                    <label className="label">{listingType === 'consumable' ? t('Product / catalog # *') : t('Part number / OEM # *')}</label>
+                    <input className="input" value={form.partNumber} onChange={(e) => set('partNumber', e.target.value)} placeholder={t('e.g. 7122-00-1234')} required />
                   </div>
                   <div>
-                    <label className="label">Your SKU</label>
+                    <label className="label">{t('Your SKU')}</label>
                     <input className="input" value={form.sku} onChange={(e) => set('sku', e.target.value)} />
                   </div>
                 </div>
                 <div>
-                  <label className="label">Listing title *</label>
-                  <input className="input" value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="e.g. Candela GentleMax Pro Flashlamp" required />
+                  <label className="label">{t('Listing title *')}</label>
+                  <input className="input" value={form.title} onChange={(e) => set('title', e.target.value)} placeholder={t('e.g. Candela GentleMax Pro Flashlamp')} required />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="label">Brand / manufacturer *</label>
+                    <label className="label">{t('Brand / manufacturer *')}</label>
                     <input className="input" list="brandList" value={form.manufacturer === 'Other' ? form.customManufacturer : form.manufacturer} onChange={(e) => {
                       const v = e.target.value;
                       if (mfrOptions.includes(v)) {
@@ -686,127 +688,127 @@ function MarketplaceListContent() {
                       } else {
                         setForm((p) => ({ ...p, manufacturer: 'Other', customManufacturer: v }));
                       }
-                    }} placeholder="Type brand or pick from list" required />
+                    }} placeholder={t('Type brand or pick from list')} required />
                     <datalist id="brandList">
                       {mfrOptions.map((m) => <option key={m} value={m} />)}
                     </datalist>
                   </div>
                   <div>
-                    <label className="label">{listingType === 'consumable' ? 'Consumable type' : 'Part category'}</label>
+                    <label className="label">{listingType === 'consumable' ? t('Consumable type') : t('Part category')}</label>
                     <select className="input" value={form.partCategory} onChange={(e) => set('partCategory', e.target.value)}>
-                      {partCategories.map((c) => <option key={c} value={c}>{c}</option>)}
+                      {partCategories.map((c) => <option key={c} value={c}>{t(c)}</option>)}
                     </select>
                   </div>
                 </div>
                 <div>
-                  <label className="label">Compatible systems / models</label>
-                  <input className="input" value={form.compatible} onChange={(e) => set('compatible', e.target.value)} placeholder="Comma-separated models" />
+                  <label className="label">{t('Compatible systems / models')}</label>
+                  <input className="input" value={form.compatible} onChange={(e) => set('compatible', e.target.value)} placeholder={t('Comma-separated models')} />
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="label">Condition *</label>
+                    <label className="label">{t('Condition *')}</label>
                     <select className="input" value={form.condition} onChange={(e) => set('condition', e.target.value)}>
-                      {conditionOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                      {conditionOptions.map((c) => <option key={c} value={c}>{t(c)}</option>)}
                     </select>
                   </div>
                   {listingType === 'part' && (
                     <div>
-                      <label className="label">OEM vs aftermarket</label>
+                      <label className="label">{t('OEM vs aftermarket')}</label>
                       <select className="input" value={form.oemType} onChange={(e) => set('oemType', e.target.value)}>
-                        <option value="oem">OEM / genuine</option>
-                        <option value="oem_compatible">OEM-compatible</option>
-                        <option value="aftermarket">Aftermarket</option>
-                        <option value="refurbished_oem">Refurbished OEM</option>
-                        <option value="unknown">Not specified</option>
+                        <option value="oem">{t('OEM / genuine')}</option>
+                        <option value="oem_compatible">{t('OEM-compatible')}</option>
+                        <option value="aftermarket">{t('Aftermarket')}</option>
+                        <option value="refurbished_oem">{t('Refurbished OEM')}</option>
+                        <option value="unknown">{t('Not specified')}</option>
                       </select>
                     </div>
                   )}
                   <div>
-                    <label className="label">{listingType === 'consumable' ? 'Lot / batch #' : 'Serial / lot #'}</label>
+                    <label className="label">{listingType === 'consumable' ? t('Lot / batch #') : t('Serial / lot #')}</label>
                     <input className="input" value={form.serialNumber} onChange={(e) => set('serialNumber', e.target.value)} />
                   </div>
                   <div>
-                    <label className="label">{listingType === 'consumable' ? 'Return / freshness' : 'Warranty'}</label>
-                    <input className="input" value={form.warranty} onChange={(e) => set('warranty', e.target.value)} placeholder="e.g. 90 days" />
+                    <label className="label">{listingType === 'consumable' ? t('Return / freshness') : t('Warranty')}</label>
+                    <input className="input" value={form.warranty} onChange={(e) => set('warranty', e.target.value)} placeholder={t('e.g. 90 days')} />
                   </div>
                 </div>
 
                 {listingType === 'consumable' && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-t border-[var(--border)] pt-3">
                     <div>
-                      <label className="label">Pack / unit size</label>
-                      <input className="input" value={form.packSize} onChange={(e) => set('packSize', e.target.value)} placeholder="e.g. 1 L bottle, box of 50" />
+                      <label className="label">{t('Pack / unit size')}</label>
+                      <input className="input" value={form.packSize} onChange={(e) => set('packSize', e.target.value)} placeholder={t('e.g. 1 L bottle, box of 50')} />
                     </div>
                     <div>
-                      <label className="label">Units per case</label>
+                      <label className="label">{t('Units per case')}</label>
                       <input className="input" type="number" min={1} value={form.unitsPerCase} onChange={(e) => set('unitsPerCase', e.target.value)} />
                     </div>
                     <div>
-                      <label className="label">Expiration / best-by</label>
+                      <label className="label">{t('Expiration / best-by')}</label>
                       <input className="input" type="date" value={form.expiration} onChange={(e) => set('expiration', e.target.value)} />
                     </div>
                     <div>
-                      <label className="label">Shelf life</label>
-                      <input className="input" value={form.shelfLife} onChange={(e) => set('shelfLife', e.target.value)} placeholder="e.g. 24 months unopened" />
+                      <label className="label">{t('Shelf life')}</label>
+                      <input className="input" value={form.shelfLife} onChange={(e) => set('shelfLife', e.target.value)} placeholder={t('e.g. 24 months unopened')} />
                     </div>
                     <div>
-                      <label className="label">Sterile / sealed</label>
+                      <label className="label">{t('Sterile / sealed')}</label>
                       <select className="input" value={form.sterile} onChange={(e) => set('sterile', e.target.value)}>
-                        <option value="">Not specified</option>
-                        <option value="sterile_sealed">Sterile, factory sealed</option>
-                        <option value="sealed">Sealed (non-sterile)</option>
-                        <option value="opened">Opened / partial</option>
-                        <option value="n_a">N/A</option>
+                        <option value="">{t('Not specified')}</option>
+                        <option value="sterile_sealed">{t('Sterile, factory sealed')}</option>
+                        <option value="sealed">{t('Sealed (non-sterile)')}</option>
+                        <option value="opened">{t('Opened / partial')}</option>
+                        <option value="n_a">{t('N/A')}</option>
                       </select>
                     </div>
                     <div>
-                      <label className="label">Storage</label>
-                      <input className="input" value={form.storage} onChange={(e) => set('storage', e.target.value)} placeholder="Room temp / refrigerate" />
+                      <label className="label">{t('Storage')}</label>
+                      <input className="input" value={form.storage} onChange={(e) => set('storage', e.target.value)} placeholder={t('Room temp / refrigerate')} />
                     </div>
                   </div>
                 )}
 
                 <div>
-                  <label className="label">Description *</label>
+                  <label className="label">{t('Description *')}</label>
                   <textarea className="input min-h-[100px]" value={form.description} onChange={(e) => set('description', e.target.value)} required
-                    placeholder={listingType === 'consumable' ? 'Pack contents, storage, restrictions…' : 'What it is, what’s included, condition notes…'} />
+                    placeholder={listingType === 'consumable' ? t('Pack contents, storage, restrictions…') : t('What it is, what’s included, condition notes…')} />
                 </div>
               </section>
 
               <section className="bg-[var(--surface3)] border border-[var(--border)] rounded-xl p-4 space-y-4">
-                <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">Quantity & pricing</h3>
+                <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">{t('Quantity & pricing')}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
                   <div>
-                    <label className="label">Qty available *</label>
+                    <label className="label">{t('Qty available *')}</label>
                     <input className="input" type="number" min={1} value={form.quantity} onChange={(e) => set('quantity', e.target.value)} required />
                   </div>
                   <div>
-                    <label className="label">Min order qty</label>
+                    <label className="label">{t('Min order qty')}</label>
                     <input className="input" type="number" min={1} value={form.minOrder} onChange={(e) => set('minOrder', e.target.value)} />
                   </div>
                   <div>
-                    <label className="label">Unit of measure</label>
+                    <label className="label">{t('Unit of measure')}</label>
                     <select className="input" value={form.uom} onChange={(e) => set('uom', e.target.value)}>
-                      <option value="each">Each</option>
-                      <option value="pair">Pair</option>
-                      <option value="set">Set</option>
-                      <option value="box">Box</option>
-                      <option value="pack">Pack</option>
-                      <option value="case">Case</option>
+                      <option value="each">{t('Each')}</option>
+                      <option value="pair">{t('Pair')}</option>
+                      <option value="set">{t('Set')}</option>
+                      <option value="box">{t('Box')}</option>
+                      <option value="pack">{t('Pack')}</option>
+                      <option value="case">{t('Case')}</option>
                     </select>
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="label">Unit price (USD) *</label>
+                    <label className="label">{t('Unit price (USD) *')}</label>
                     <input className="input" type="number" min={0} step="0.01" value={form.price} onChange={(e) => set('price', e.target.value)} disabled={form.priceType === 'contact'} />
                   </div>
                   <div>
-                    <label className="label">Price type</label>
+                    <label className="label">{t('Price type')}</label>
                     <select className="input" value={form.priceType} onChange={(e) => set('priceType', e.target.value)}>
-                      <option value="fixed">Fixed price</option>
-                      <option value="obo">Or best offer (OBO)</option>
-                      <option value="contact">Contact for price</option>
+                      <option value="fixed">{t('Fixed price')}</option>
+                      <option value="obo">{t('Or best offer (OBO)')}</option>
+                      <option value="contact">{t('Contact for price')}</option>
                     </select>
                   </div>
                 </div>
@@ -819,68 +821,68 @@ function MarketplaceListContent() {
                     {breaks.map((b, i) => (
                       <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-2 items-end">
                         <div>
-                          <label className="label">Min qty</label>
+                          <label className="label">{t('Min qty')}</label>
                           <input className="input" type="number" min={2} value={b.min_qty} onChange={(e) => {
                             const next = [...breaks]; next[i] = { ...next[i], min_qty: e.target.value }; setBreaks(next);
                           }} />
                         </div>
                         <div>
-                          <label className="label">Unit price ($)</label>
+                          <label className="label">{t('Unit price ($)')}</label>
                           <input className="input" type="number" min={0} step="0.01" value={b.unit_price} onChange={(e) => {
                             const next = [...breaks]; next[i] = { ...next[i], unit_price: e.target.value }; setBreaks(next);
                           }} />
                         </div>
-                        <button type="button" className="btn btn-secondary text-sm mb-0.5" onClick={() => setBreaks(breaks.filter((_, j) => j !== i))}>Remove</button>
+                        <button type="button" className="btn btn-secondary text-sm mb-0.5" onClick={() => setBreaks(breaks.filter((_, j) => j !== i))}>{t('Remove')}</button>
                       </div>
                     ))}
                     {breaks.length < 5 && (
-                      <button type="button" className="btn btn-secondary text-sm" onClick={() => setBreaks([...breaks, { min_qty: '', unit_price: '' }])}>+ Add discount tier</button>
+                      <button type="button" className="btn btn-secondary text-sm" onClick={() => setBreaks([...breaks, { min_qty: '', unit_price: '' }])}>{t('+ Add discount tier')}</button>
                     )}
                   </div>
                 )}
               </section>
 
               <section className="bg-[var(--surface3)] border border-[var(--border)] rounded-xl p-4 space-y-4">
-                <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">Shipping & fulfillment</h3>
+                <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">{t('Shipping & fulfillment')}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="label">Shipping cost (USD)</label>
+                    <label className="label">{t('Shipping cost (USD)')}</label>
                     <input className="input" type="number" min={0} step="0.01" value={form.shipCost} onChange={(e) => set('shipCost', e.target.value)} />
                   </div>
                   <div>
-                    <label className="label">Free shipping over ($)</label>
+                    <label className="label">{t('Free shipping over ($)')}</label>
                     <input className="input" type="number" min={0} value={form.freeShipOver} onChange={(e) => set('freeShipOver', e.target.value)} />
                   </div>
                   <div>
-                    <label className="label">Ships from city</label>
+                    <label className="label">{t('Ships from city')}</label>
                     <input className="input" value={form.city} onChange={(e) => set('city', e.target.value)} />
                   </div>
                   <div>
-                    <label className="label">State</label>
+                    <label className="label">{t('State')}</label>
                     <input className="input" maxLength={2} value={form.state} onChange={(e) => set('state', e.target.value)} />
                   </div>
                   <div>
-                    <label className="label">Lead time</label>
+                    <label className="label">{t('Lead time')}</label>
                     <select className="input" value={form.leadTime} onChange={(e) => set('leadTime', e.target.value)}>
-                      <option>Same day</option>
-                      <option>1–2 business days</option>
-                      <option>3–5 business days</option>
-                      <option>1–2 weeks</option>
-                      <option>2–4 weeks</option>
-                      <option>Made to order</option>
-                      <option>Contact seller</option>
+                      <option>{t('Same day')}</option>
+                      <option>{t('1–2 business days')}</option>
+                      <option>{t('3–5 business days')}</option>
+                      <option>{t('1–2 weeks')}</option>
+                      <option>{t('2–4 weeks')}</option>
+                      <option>{t('Made to order')}</option>
+                      <option>{t('Contact seller')}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="label">Shipping method notes</label>
-                    <input className="input" value={form.shipMethod} onChange={(e) => set('shipMethod', e.target.value)} placeholder="UPS Ground, freight…" />
+                    <label className="label">{t('Shipping method notes')}</label>
+                    <input className="input" value={form.shipMethod} onChange={(e) => set('shipMethod', e.target.value)} placeholder={t('UPS Ground, freight…')} />
                   </div>
                 </div>
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.localPickup} onChange={(e) => set('localPickup', e.target.checked)} /> Local pickup available</label>
-                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.international} onChange={(e) => set('international', e.target.checked)} /> International shipping</label>
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.localPickup} onChange={(e) => set('localPickup', e.target.checked)} />{t('Local pickup available')}</label>
+                <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={form.international} onChange={(e) => set('international', e.target.checked)} />{t('International shipping')}</label>
                 <div>
-                  <label className="label">Shipping policy</label>
-                  <textarea className="input min-h-[70px]" value={form.shipPolicy} onChange={(e) => set('shipPolicy', e.target.value)} placeholder="Returns, packaging, insurance…" />
+                  <label className="label">{t('Shipping policy')}</label>
+                  <textarea className="input min-h-[70px]" value={form.shipPolicy} onChange={(e) => set('shipPolicy', e.target.value)} placeholder={t('Returns, packaging, insurance…')} />
                 </div>
               </section>
             </>
@@ -890,131 +892,131 @@ function MarketplaceListContent() {
           {listingType === 'used' && (
             <>
               <section className="bg-[var(--surface3)] border border-[var(--border)] rounded-xl p-4 space-y-4">
-                <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">Laser identity</h3>
+                <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">{t('Laser identity')}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="label">Manufacturer *</label>
+                    <label className="label">{t('Manufacturer *')}</label>
                     <select className="input" value={form.manufacturer} onChange={(e) => {
                       setForm((p) => ({ ...p, manufacturer: e.target.value, model: '', customModel: e.target.value === 'Other' ? p.customModel : '' }));
                     }} required>
-                      <option value="">Select…</option>
+                      <option value="">{t('Select…')}</option>
                       {mfrOptions.map((m) => <option key={m} value={m}>{m}</option>)}
                     </select>
                     {showCustomMfr && (
-                      <input className="input mt-2" value={form.customManufacturer} onChange={(e) => set('customManufacturer', e.target.value)} placeholder="Type manufacturer name (e.g. new IPL brand)" required />
+                      <input className="input mt-2" value={form.customManufacturer} onChange={(e) => set('customManufacturer', e.target.value)} placeholder={t('Type manufacturer name (e.g. new IPL brand)')} required />
                     )}
                   </div>
                   <div>
-                    <label className="label">Model *</label>
+                    <label className="label">{t('Model *')}</label>
                     {!showCustomMfr && modelOptions.length > 0 ? (
                       <>
                         <select className="input" value={form.model} onChange={(e) => set('model', e.target.value)} required>
-                          <option value="">Select model…</option>
+                          <option value="">{t('Select model…')}</option>
                           {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
-                          <option value={OTHER_MODEL}>Other / not listed…</option>
+                          <option value={OTHER_MODEL}>{t('Other / not listed…')}</option>
                         </select>
                         {form.model === OTHER_MODEL && (
-                          <input className="input mt-2" value={form.customModel} onChange={(e) => set('customModel', e.target.value)} placeholder="Type model name" required />
+                          <input className="input mt-2" value={form.customModel} onChange={(e) => set('customModel', e.target.value)} placeholder={t('Type model name')} required />
                         )}
                       </>
                     ) : (
-                      <input className="input" value={form.customModel} onChange={(e) => set('customModel', e.target.value)} placeholder="Type model name" required />
+                      <input className="input" value={form.customModel} onChange={(e) => set('customModel', e.target.value)} placeholder={t('Type model name')} required />
                     )}
                   </div>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="label">Serial number</label>
+                    <label className="label">{t('Serial number')}</label>
                     <input className="input" value={form.serialNumber} onChange={(e) => set('serialNumber', e.target.value)} />
                   </div>
                   <div>
-                    <label className="label">Year manufactured</label>
+                    <label className="label">{t('Year manufactured')}</label>
                     <input className="input" type="number" min={1990} max={2035} value={form.yearManufactured} onChange={(e) => set('yearManufactured', e.target.value)} />
                   </div>
                 </div>
                 <div>
-                  <label className="label">Wavelength / medium</label>
-                  <input className="input" value={form.wavelength} onChange={(e) => set('wavelength', e.target.value)} placeholder="e.g. IPL 500–1200 nm" />
+                  <label className="label">{t('Wavelength / medium')}</label>
+                  <input className="input" value={form.wavelength} onChange={(e) => set('wavelength', e.target.value)} placeholder={t('e.g. IPL 500–1200 nm')} />
                 </div>
               </section>
 
               <section className="bg-[var(--surface3)] border border-[var(--border)] rounded-xl p-4 space-y-4">
-                <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">Condition & pricing</h3>
+                <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">{t('Condition & pricing')}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                   <div>
-                    <label className="label">Condition *</label>
+                    <label className="label">{t('Condition *')}</label>
                     <select className="input" value={form.condition} onChange={(e) => set('condition', e.target.value)}>
-                      {conditionOptions.map((c) => <option key={c} value={c}>{c}</option>)}
+                      {conditionOptions.map((c) => <option key={c} value={c}>{t(c)}</option>)}
                     </select>
                   </div>
                   <div>
-                    <label className="label">Asking price (USD)</label>
+                    <label className="label">{t('Asking price (USD)')}</label>
                     <input className="input" type="number" min={0} value={form.price} onChange={(e) => set('price', e.target.value)} disabled={form.priceType === 'contact'} />
                   </div>
                   <div>
-                    <label className="label">Price type</label>
+                    <label className="label">{t('Price type')}</label>
                     <select className="input" value={form.priceType} onChange={(e) => set('priceType', e.target.value)}>
-                      <option value="fixed">Fixed price</option>
-                      <option value="obo">Or best offer (OBO)</option>
-                      <option value="contact">Contact for price</option>
+                      <option value="fixed">{t('Fixed price')}</option>
+                      <option value="obo">{t('Or best offer (OBO)')}</option>
+                      <option value="contact">{t('Contact for price')}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="label">Includes handpieces / accessories?</label>
+                    <label className="label">{t('Includes handpieces / accessories?')}</label>
                     <select className="input" value={form.includesAccessories} onChange={(e) => set('includesAccessories', e.target.value)}>
-                      <option value="yes">Yes — listed in description</option>
-                      <option value="partial">Partial / some</option>
-                      <option value="no">No — base unit only</option>
+                      <option value="yes">{t('Yes — listed in description')}</option>
+                      <option value="partial">{t('Partial / some')}</option>
+                      <option value="no">{t('No — base unit only')}</option>
                     </select>
                   </div>
                 </div>
               </section>
 
               <section className="bg-[var(--surface3)] border border-[var(--border)] rounded-xl p-4 space-y-4">
-                <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">Pulse / shot counts</h3>
+                <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">{t('Pulse / shot counts')}</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                  <div><label className="label">System total</label><input className="input" value={form.totalSystemShots} onChange={(e) => set('totalSystemShots', e.target.value)} /></div>
-                  <div><label className="label">Head / resonator</label><input className="input" value={form.headPulses} onChange={(e) => set('headPulses', e.target.value)} /></div>
-                  <div><label className="label">Flashlamp</label><input className="input" value={form.lampPulses} onChange={(e) => set('lampPulses', e.target.value)} /></div>
-                  <div><label className="label">Handpiece</label><input className="input" value={form.handpieceShots} onChange={(e) => set('handpieceShots', e.target.value)} /></div>
+                  <div><label className="label">{t('System total')}</label><input className="input" value={form.totalSystemShots} onChange={(e) => set('totalSystemShots', e.target.value)} /></div>
+                  <div><label className="label">{t('Head / resonator')}</label><input className="input" value={form.headPulses} onChange={(e) => set('headPulses', e.target.value)} /></div>
+                  <div><label className="label">{t('Flashlamp')}</label><input className="input" value={form.lampPulses} onChange={(e) => set('lampPulses', e.target.value)} /></div>
+                  <div><label className="label">{t('Handpiece')}</label><input className="input" value={form.handpieceShots} onChange={(e) => set('handpieceShots', e.target.value)} /></div>
                 </div>
               </section>
 
               <section className="bg-[var(--surface3)] border border-[var(--border)] rounded-xl p-4 space-y-4">
-                <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">Service history & location</h3>
+                <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">{t('Service history & location')}</h3>
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <div><label className="label">Last PM date</label><input className="input" type="date" value={form.lastPMDate} onChange={(e) => set('lastPMDate', e.target.value)} /></div>
-                  <div><label className="label">Reason for selling</label><input className="input" value={form.reasonForSelling} onChange={(e) => set('reasonForSelling', e.target.value)} /></div>
-                  <div><label className="label">City</label><input className="input" value={form.city} onChange={(e) => set('city', e.target.value)} /></div>
-                  <div><label className="label">State</label><input className="input" maxLength={2} value={form.state} onChange={(e) => set('state', e.target.value)} /></div>
+                  <div><label className="label">{t('Last PM date')}</label><input className="input" type="date" value={form.lastPMDate} onChange={(e) => set('lastPMDate', e.target.value)} /></div>
+                  <div><label className="label">{t('Reason for selling')}</label><input className="input" value={form.reasonForSelling} onChange={(e) => set('reasonForSelling', e.target.value)} /></div>
+                  <div><label className="label">{t('City')}</label><input className="input" value={form.city} onChange={(e) => set('city', e.target.value)} /></div>
+                  <div><label className="label">{t('State')}</label><input className="input" maxLength={2} value={form.state} onChange={(e) => set('state', e.target.value)} /></div>
                   <div>
-                    <label className="label">Fulfillment</label>
+                    <label className="label">{t('Fulfillment')}</label>
                     <select className="input" value={form.fulfillment} onChange={(e) => set('fulfillment', e.target.value)}>
-                      <option value="pickup">Buyer pickup only</option>
-                      <option value="freight">Seller arranges freight</option>
-                      <option value="either">Pickup or freight</option>
-                      <option value="included">Delivery / install included</option>
+                      <option value="pickup">{t('Buyer pickup only')}</option>
+                      <option value="freight">{t('Seller arranges freight')}</option>
+                      <option value="either">{t('Pickup or freight')}</option>
+                      <option value="included">{t('Delivery / install included')}</option>
                     </select>
                   </div>
                   <div>
-                    <label className="label">Est. freight (USD)</label>
+                    <label className="label">{t('Est. freight (USD)')}</label>
                     <input className="input" type="number" min={0} value={form.shipCost} onChange={(e) => set('shipCost', e.target.value)} />
                   </div>
                 </div>
                 <div>
-                  <label className="label">Service history notes</label>
+                  <label className="label">{t('Service history notes')}</label>
                   <textarea className="input min-h-[60px]" value={form.serviceNotes} onChange={(e) => set('serviceNotes', e.target.value)} />
                 </div>
                 <div>
-                  <label className="label">Shipping / pickup notes</label>
+                  <label className="label">{t('Shipping / pickup notes')}</label>
                   <textarea className="input min-h-[60px]" value={form.shipPolicy} onChange={(e) => set('shipPolicy', e.target.value)} />
                 </div>
                 <div>
-                  <label className="label">Listing title (optional)</label>
-                  <input className="input" value={form.title} onChange={(e) => set('title', e.target.value)} placeholder="Auto from make/model if blank" />
+                  <label className="label">{t('Listing title (optional)')}</label>
+                  <input className="input" value={form.title} onChange={(e) => set('title', e.target.value)} placeholder={t('Auto from make/model if blank')} />
                 </div>
                 <div>
-                  <label className="label">Full description *</label>
+                  <label className="label">{t('Full description *')}</label>
                   <textarea className="input min-h-[100px]" value={form.description} onChange={(e) => set('description', e.target.value)} required />
                 </div>
               </section>
@@ -1025,17 +1027,17 @@ function MarketplaceListContent() {
           {isRequest && (
             <section className="bg-[var(--surface3)] border border-[var(--border)] rounded-xl p-4 space-y-4">
               <h3 className="font-semibold text-[var(--gold)] uppercase text-sm tracking-wide">
-                {proPosting ? 'Subcontract RFQ' : 'Service request'}
+                {proPosting ? t('Subcontract RFQ') : t('Service request')}
               </h3>
               <p className="text-xs text-[var(--text3)]">
                 {proPosting
-                  ? 'Post overflow work for other service companies to bid. Use Other to add a make/model not in the catalog (e.g. a new IPL).'
-                  : 'Describe the work needed. Service companies can bid. Use Other to type a manufacturer or model not listed yet.'}
+                  ? t('Post overflow work for other service companies to bid. Use Other to add a make/model not in the catalog (e.g. a new IPL).')
+                  : t('Describe the work needed. Service companies can bid. Use Other to type a manufacturer or model not listed yet.')}
               </p>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Manufacturer *</label>
+                  <label className="label">{t('Manufacturer *')}</label>
                   <select
                     className="input"
                     value={form.manufacturer}
@@ -1048,7 +1050,7 @@ function MarketplaceListContent() {
                     }))}
                     required
                   >
-                    <option value="">Select brand…</option>
+                    <option value="">{t('Select brand…')}</option>
                     {mfrOptions.map((m) => <option key={m} value={m}>{m}</option>)}
                   </select>
                   {showCustomMfr && (
@@ -1056,118 +1058,118 @@ function MarketplaceListContent() {
                       className="input mt-2"
                       value={form.customManufacturer}
                       onChange={(e) => set('customManufacturer', e.target.value)}
-                      placeholder="Type manufacturer (e.g. new IPL brand)"
+                      placeholder={t('Type manufacturer (e.g. new IPL brand)')}
                       required
                     />
                   )}
                 </div>
                 <div>
-                  <label className="label">Model *</label>
+                  <label className="label">{t('Model *')}</label>
                   {!showCustomMfr && modelOptions.length > 0 ? (
                     <>
                       <select className="input" value={form.model} onChange={(e) => set('model', e.target.value)} required>
-                        <option value="">Select model…</option>
+                        <option value="">{t('Select model…')}</option>
                         {modelOptions.map((m) => <option key={m} value={m}>{m}</option>)}
-                        <option value={OTHER_MODEL}>Other / not listed…</option>
+                        <option value={OTHER_MODEL}>{t('Other / not listed…')}</option>
                       </select>
                       {(form.model === OTHER_MODEL) && (
-                        <input className="input mt-2" value={form.customModel} onChange={(e) => set('customModel', e.target.value)} placeholder="Type model name" required />
+                        <input className="input mt-2" value={form.customModel} onChange={(e) => set('customModel', e.target.value)} placeholder={t('Type model name')} required />
                       )}
                     </>
                   ) : (
-                    <input className="input" value={form.customModel} onChange={(e) => set('customModel', e.target.value)} placeholder="Type model name" required />
+                    <input className="input" value={form.customModel} onChange={(e) => set('customModel', e.target.value)} placeholder={t('Type model name')} required />
                   )}
                 </div>
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Serial #</label>
+                  <label className="label">{t('Serial #')}</label>
                   <input className="input" value={form.serialNumber} onChange={(e) => set('serialNumber', e.target.value)} />
                 </div>
                 {proPosting && (
                   <div>
-                    <label className="label">Customer / site (optional)</label>
-                    <input className="input" value={form.customerSite} onChange={(e) => set('customerSite', e.target.value)} placeholder="Clinic name" />
+                    <label className="label">{t('Customer / site (optional)')}</label>
+                    <input className="input" value={form.customerSite} onChange={(e) => set('customerSite', e.target.value)} placeholder={t('Clinic name')} />
                   </div>
                 )}
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Service type</label>
+                  <label className="label">{t('Service type')}</label>
                   <select className="input" value={form.serviceType} onChange={(e) => set('serviceType', e.target.value)}>
-                    {proPosting && <option value="Subcontract Repair">Subcontract Repair</option>}
-                    <option value="Emergency Repair">Emergency Repair</option>
-                    <option value="PM">PM</option>
-                    <option value="Install / Commission">Install / Commission</option>
-                    <option value="Calibration">Calibration</option>
-                    <option value="Full Contract">Full Contract</option>
-                    <option value="Other">Other</option>
+                    {proPosting && <option value="Subcontract Repair">{t('Subcontract Repair')}</option>}
+                    <option value="Emergency Repair">{t('Emergency Repair')}</option>
+                    <option value="PM">{t('PM')}</option>
+                    <option value="Install / Commission">{t('Install / Commission')}</option>
+                    <option value="Calibration">{t('Calibration')}</option>
+                    <option value="Full Contract">{t('Full Contract')}</option>
+                    <option value="Other">{t('Other')}</option>
                   </select>
                 </div>
                 <div>
-                  <label className="label">Urgency</label>
+                  <label className="label">{t('Urgency')}</label>
                   <select className="input" value={form.urgency} onChange={(e) => set('urgency', e.target.value)}>
-                    <option>Low</option>
-                    <option>Medium</option>
-                    <option>High</option>
-                    <option>Emergency</option>
+                    <option>{t('Low')}</option>
+                    <option>{t('Medium')}</option>
+                    <option>{t('High')}</option>
+                    <option>{t('Emergency')}</option>
                   </select>
                 </div>
                 <div>
-                  <label className="label">Preferred date</label>
+                  <label className="label">{t('Preferred date')}</label>
                   <input className="input" type="date" value={form.preferredDate} onChange={(e) => set('preferredDate', e.target.value)} />
                 </div>
                 <div>
-                  <label className="label">Error codes</label>
+                  <label className="label">{t('Error codes')}</label>
                   <input className="input" value={form.errorCodes} onChange={(e) => set('errorCodes', e.target.value)} />
                 </div>
                 {proPosting && (
                   <div>
-                    <label className="label">Sub pay budget (optional)</label>
-                    <input className="input" type="number" min={0} value={form.budget} onChange={(e) => set('budget', e.target.value)} placeholder="What you can pay a sub" />
+                    <label className="label">{t('Sub pay budget (optional)')}</label>
+                    <input className="input" type="number" min={0} value={form.budget} onChange={(e) => set('budget', e.target.value)} placeholder={t('What you can pay a sub')} />
                   </div>
                 )}
                 <div>
-                  <label className="label">City</label>
+                  <label className="label">{t('City')}</label>
                   <input className="input" value={form.city} onChange={(e) => set('city', e.target.value)} />
                 </div>
                 <div>
-                  <label className="label">State</label>
+                  <label className="label">{t('State')}</label>
                   <input className="input" maxLength={2} value={form.state} onChange={(e) => set('state', e.target.value)} />
                 </div>
               </div>
 
               <div>
-                <label className="label">Description *</label>
+                <label className="label">{t('Description *')}</label>
                 <textarea
                   className="input min-h-[120px]"
                   value={form.description}
                   onChange={(e) => set('description', e.target.value)}
                   required
                   placeholder={proPosting
-                    ? 'Scope of work, symptoms, access notes, what you need the subcontractor to do…'
-                    : 'Symptoms, timeline, access notes…'}
+                    ? t('Scope of work, symptoms, access notes, what you need the subcontractor to do…')
+                    : t('Symptoms, timeline, access notes…')}
                 />
               </div>
               <p className="text-xs text-[var(--text3)]">
-                Prefer the dedicated flow?{' '}
-                <Link href="/service-requests" className="text-[var(--gold)] underline">Open Service Requests</Link>
+                {t('Prefer the dedicated flow?')}{' '}
+                <Link href="/service-requests" className="text-[var(--gold)] underline">{t('Open Service Requests')}</Link>
               </p>
             </section>
           )}
 
           <button type="submit" disabled={loading} className="btn btn-primary w-full py-3 text-lg font-extrabold">
             {loading
-              ? 'Submitting…'
+              ? t('Submitting…')
               : isRequest
-                ? (proPosting ? 'Post Subcontract RFQ' : 'Post Service Request')
+                ? (proPosting ? t('Post Subcontract RFQ') : t('Post Service Request'))
                 : listingType === 'used'
-                  ? 'Publish Equipment Listing'
+                  ? t('Publish Equipment Listing')
                   : listingType === 'consumable'
-                    ? 'Publish Consumable Listing'
-                    : 'Publish Part Listing'}
+                    ? t('Publish Consumable Listing')
+                    : t('Publish Part Listing')}
           </button>
         </form>
       </div>
@@ -1175,9 +1177,16 @@ function MarketplaceListContent() {
   );
 }
 
+function MarketplaceListFallback() {
+  const t = useT();
+  return (
+    <div className="min-h-screen flex items-center justify-center">{t('Loading form…')}</div>
+  );
+}
+
 export default function MarketplaceList() {
   return (
-    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading form…</div>}>
+    <Suspense fallback={<MarketplaceListFallback />}>
       <MarketplaceListContent />
     </Suspense>
   );

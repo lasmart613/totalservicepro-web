@@ -1,4 +1,5 @@
 'use client';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -30,6 +31,7 @@ export function TestEquipmentRoster(props: {
   canAssign: boolean;
 }) {
   const supabase = getSupabaseClient();
+  const t = useT();
   const [rows, setRows] = useState<TestEquipmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState<string | null>(null);
@@ -146,7 +148,7 @@ export function TestEquipmentRoster(props: {
     <div className="card p-6 mt-10">
       <div className="flex items-start justify-between gap-3 flex-wrap mb-4">
         <div>
-          <h2 className="font-bold text-xl">Company test equipment</h2>
+          <h2 className="font-bold text-xl">{t('Company test equipment')}</h2>
           <p className="text-sm text-[var(--text3)] mt-1">
             Meters, analyzers, and other shop tools. Admin / owner can assign a piece to an FSE.
           </p>
@@ -154,7 +156,7 @@ export function TestEquipmentRoster(props: {
         <div className="flex gap-2 flex-wrap">
           {props.canAssign && (
             <button type="button" className="btn btn-primary text-sm" onClick={() => setAdding((v) => !v)}>
-              {adding ? 'Cancel' : 'Add equipment'}
+              {adding ? t('Cancel') : 'Add equipment'}
             </button>
           )}
           <Link href="/test-equipment" className="btn btn-secondary text-sm">
@@ -165,34 +167,34 @@ export function TestEquipmentRoster(props: {
 
       {note && (
         <div className="mb-4 p-3 rounded-lg border border-[var(--border)] bg-[var(--surface3)] text-sm text-[var(--text2)]">
-          {note}
+          {note ? t(note) : null}
         </div>
       )}
 
       {adding && props.canAssign && (
         <form onSubmit={onAdd} className="mb-6 grid grid-cols-1 md:grid-cols-2 gap-3 p-4 rounded-lg border border-[var(--border)]">
           <div>
-            <label className="label">Type</label>
+            <label className="label">{t('Type')}</label>
             <select
               className="select"
               value={form.type}
               onChange={(e) => setForm({ ...form, type: e.target.value })}
             >
-              {TEST_EQUIPMENT_TYPES.map((t) => (
-                <option key={t} value={t}>
-                  {t}
+              {TEST_EQUIPMENT_TYPES.map((kind) => (
+                <option key={kind} value={kind}>
+                  {t(kind)}
                 </option>
               ))}
             </select>
           </div>
           <div>
-            <label className="label">Assign to FSE</label>
+            <label className="label">{t('Assign to FSE')}</label>
             <select
               className="select"
               value={form.assigned_to_fse}
               onChange={(e) => setForm({ ...form, assigned_to_fse: e.target.value })}
             >
-              <option value="">Unassigned / shop stock</option>
+              <option value="">{t('Unassigned / shop stock')}</option>
               {assignOptions.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
@@ -202,7 +204,7 @@ export function TestEquipmentRoster(props: {
             </select>
           </div>
           <div>
-            <label className="label">Make</label>
+            <label className="label">{t('Make')}</label>
             <input
               className="input"
               value={form.make}
@@ -210,7 +212,7 @@ export function TestEquipmentRoster(props: {
             />
           </div>
           <div>
-            <label className="label">Model</label>
+            <label className="label">{t('Model')}</label>
             <input
               className="input"
               value={form.model}
@@ -218,7 +220,7 @@ export function TestEquipmentRoster(props: {
             />
           </div>
           <div className="md:col-span-2">
-            <label className="label">Serial #</label>
+            <label className="label">{t('Serial #')}</label>
             <input
               className="input"
               value={form.serial_number}
@@ -227,25 +229,25 @@ export function TestEquipmentRoster(props: {
           </div>
           <div className="md:col-span-2">
             <button type="submit" className="btn btn-primary" disabled={saving}>
-              {saving ? 'Saving…' : 'Save equipment'}
+              {saving ? t('Saving…') : 'Save equipment'}
             </button>
           </div>
         </form>
       )}
 
       {loading ? (
-        <div className="text-center py-8 text-[var(--text3)]">Loading test equipment…</div>
+        <div className="text-center py-8 text-[var(--text3)]">{t('Loading test equipment…')}</div>
       ) : rows.length === 0 ? (
-        <div className="text-center py-8 text-[var(--text3)]">No company test equipment yet.</div>
+        <div className="text-center py-8 text-[var(--text3)]">{t('No company test equipment yet.')}</div>
       ) : (
         <div className="overflow-x-auto">
           <table className="w-full">
             <thead>
               <tr className="border-b border-[var(--border)] text-left text-sm text-[var(--text3)]">
-                <th className="py-3 px-4">Equipment</th>
-                <th className="py-3 px-4">Type</th>
-                <th className="py-3 px-4">Serial</th>
-                <th className="py-3 px-4">Assigned FSE</th>
+                <th className="py-3 px-4">{t('Equipment')}</th>
+                <th className="py-3 px-4">{t('Type')}</th>
+                <th className="py-3 px-4">{t('Serial')}</th>
+                <th className="py-3 px-4">{t('Assigned FSE')}</th>
               </tr>
             </thead>
             <tbody>
@@ -261,7 +263,7 @@ export function TestEquipmentRoster(props: {
                         value={r.assigned_to_fse || ''}
                         onChange={(e) => onAssign(r.id, e.target.value)}
                       >
-                        <option value="">Unassigned</option>
+                        <option value="">{t('Unassigned')}</option>
                         {assignOptions.map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.name}

@@ -1,4 +1,6 @@
 'use client';
+import { useFormatDate } from '@/lib/use-format-date';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -38,13 +40,6 @@ function money(n: number, currencyCode?: string | null, numberFormat?: string | 
   return formatOrgMoney(n, { currencyCode, numberFormat });
 }
 
-function formatDate(iso: string | null) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString();
-}
-
 export default function EstimateCustomerClient({
   estimateId,
   wantChanges,
@@ -52,6 +47,8 @@ export default function EstimateCustomerClient({
   estimateId: string;
   wantChanges: boolean;
 }) {
+  const t = useT();
+  const { format } = useFormatDate();
   const supabase = getSupabaseClient();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -173,7 +170,7 @@ export default function EstimateCustomerClient({
 
           <div className="card p-6 border-[var(--gold-border)]">
             {loading ? (
-              <div className="py-10 text-center text-[var(--text3)]">Loading estimate…</div>
+              <div className="py-10 text-center text-[var(--text3)]">{t('Loading estimate…')}</div>
             ) : error && !est ? (
               <div className="py-6 text-center">
                 <h1 className="text-xl font-extrabold mb-2">Estimate not available</h1>
@@ -211,28 +208,26 @@ export default function EstimateCustomerClient({
               </div>
             ) : est ? (
               <>
-                <div className="text-xs font-bold uppercase tracking-wider text-[var(--gold)] mb-1">
-                  Service estimate
-                </div>
+                <div className="text-xs font-bold uppercase tracking-wider text-[var(--gold)] mb-1">{t('Service estimate')}</div>
                 <h1 className="text-2xl font-extrabold">{est.estimateNumber || 'Estimate'}</h1>
                 <p className="text-sm text-[var(--text3)] mt-1">{company}</p>
 
                 <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
                   <div>
-                    <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Customer</div>
+                    <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">{t('Customer')}</div>
                     <div className="font-semibold">{est.customerName}</div>
                   </div>
                   <div>
-                    <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Total</div>
+                    <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">{t('Total')}</div>
                     <div className="font-extrabold text-[var(--gold)] text-lg">{money(est.total, est.currencyCode, est.numberFormat)}</div>
                   </div>
                   <div className="col-span-2">
                     <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Validity</div>
                     <div>
                       {est.expired
-                        ? `Expired${est.validUntil ? ` on ${formatDate(est.validUntil)}` : ''}`
+                        ? `Expired${est.validUntil ? ` on ${format(est.validUntil)}` : ''}`
                         : `Good for ${est.validDays} days${
-                            est.validUntil ? ` (through ${formatDate(est.validUntil)})` : ''
+                            est.validUntil ? ` (through ${format(est.validUntil)})` : ''
                           }`}
                     </div>
                   </div>
@@ -253,7 +248,7 @@ export default function EstimateCustomerClient({
                 {est.customerAction === 'changes_requested' && est.customerActionNote && (
                   <div className="mt-4 p-3 rounded-xl border border-amber-700/40 bg-amber-950/20 text-sm">
                     A modification request was already sent
-                    {est.customerActionAt ? ` on ${formatDate(est.customerActionAt)}` : ''}.
+                    {est.customerActionAt ? ` on ${format(est.customerActionAt)}` : ''}.
                   </div>
                 )}
 
@@ -271,7 +266,7 @@ export default function EstimateCustomerClient({
                         disabled={!!submitting}
                         onClick={() => submit('approve')}
                       >
-                        {submitting === 'approve' ? 'Approving…' : 'Approve'}
+                        {submitting === 'approve' ? 'Approving…' : t('Approve')}
                       </button>
                       <button
                         type="button"
@@ -280,16 +275,14 @@ export default function EstimateCustomerClient({
                         disabled={!!submitting}
                         onClick={() => submit('reject')}
                       >
-                        {submitting === 'reject' ? 'Rejecting…' : 'Reject'}
+                        {submitting === 'reject' ? 'Rejecting…' : t('Reject')}
                       </button>
                       <button
                         type="button"
                         className="btn btn-secondary w-full text-base py-3"
                         disabled={!!submitting}
                         onClick={() => setShowChanges((v) => !v)}
-                      >
-                        Modify
-                      </button>
+                      >{t('Modify')}</button>
                     </div>
                   ))}
 

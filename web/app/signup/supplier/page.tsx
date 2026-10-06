@@ -288,7 +288,7 @@ export default function SupplierSignup() {
                   </button>
                 ))}
               </div>
-              <p className="text-[10px] text-[var(--text3)]">Multi-select. Shown on your supplier profile &amp; future marketplace matching.</p>
+              <p className="text-[10px] text-[var(--text3)]">{t('Multi-select. Shown on your supplier profile & future marketplace matching.')}</p>
             </div>
 
             <div className="grid grid-cols-2 gap-3">
@@ -304,7 +304,7 @@ export default function SupplierSignup() {
 
             <div>
               <label className="label">{t('Company Bio / About')}</label>
-              <textarea className="input" rows={3} value={bio} onChange={e => setBio(e.target.value)} placeholder="Years supplying laser parts, specialties, coverage areas, notable OEMs..." />
+              <textarea className="input" rows={3} value={bio} onChange={e => setBio(e.target.value)} placeholder={t('Years supplying laser parts, specialties, coverage areas, notable OEMs...')} />
             </div>
 
             {!awaitingConfirm && (

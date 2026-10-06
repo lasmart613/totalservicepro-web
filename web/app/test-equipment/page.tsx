@@ -1,4 +1,5 @@
 'use client';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -37,6 +38,7 @@ const TYPES = [
 ];
 
 export default function TestEquipmentPage() {
+  const t = useT();
   const supabase = getSupabaseClient();
   const [rows, setRows] = useState<TeRow[]>([]);
   const [ownerOptions, setOwnerOptions] = useState<Mate[]>([]);
@@ -286,10 +288,8 @@ export default function TestEquipmentPage() {
       <div className="max-w-3xl mx-auto w-full px-4 py-8">
         <div className="flex justify-between items-start gap-3 mb-4 flex-wrap">
           <div>
-            <Link href="/" className="text-sm text-[var(--gold)] hover:underline">
-              ← Dashboard
-            </Link>
-            <h1 className="text-3xl font-extrabold mt-1">Test Equipment</h1>
+            <Link href="/" className="text-sm text-[var(--gold)] hover:underline">{t('← Dashboard')}</Link>
+            <h1 className="text-3xl font-extrabold mt-1">{t('Test Equipment')}</h1>
             <p className="text-sm text-[var(--text3)] mt-1">
               Track power meters and tools by organization, owner, and assigned FSE.
             </p>
@@ -300,7 +300,7 @@ export default function TestEquipmentPage() {
         </div>
 
         {loading ? (
-          <div className="card p-8 text-center text-[var(--text3)]">Loading…</div>
+          <div className="card p-8 text-center text-[var(--text3)]">{t('Loading…')}</div>
         ) : rows.length === 0 ? (
           <div className="card p-10 text-center text-[var(--text3)]">
             No test equipment yet.
@@ -374,23 +374,23 @@ export default function TestEquipmentPage() {
             </div>
             <div className="space-y-3">
               <div>
-                <label className="label">Type *</label>
+                <label className="label">{t('Type *')}</label>
                 <select
                   className="input"
                   value={form.type}
                   onChange={(e) => setForm({ ...form, type: e.target.value })}
                 >
-                  <option value="">Select…</option>
-                  {TYPES.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
+                  <option value="">{t('Select…')}</option>
+                  {TYPES.map((kind) => (
+                    <option key={kind} value={kind}>
+                      {t(kind)}
                     </option>
                   ))}
                 </select>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Make</label>
+                  <label className="label">{t('Make')}</label>
                   <input
                     className="input"
                     value={form.make}
@@ -398,7 +398,7 @@ export default function TestEquipmentPage() {
                   />
                 </div>
                 <div>
-                  <label className="label">Model</label>
+                  <label className="label">{t('Model')}</label>
                   <input
                     className="input"
                     value={form.model}
@@ -408,7 +408,7 @@ export default function TestEquipmentPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Serial #</label>
+                  <label className="label">{t('Serial #')}</label>
                   <input
                     className="input"
                     value={form.serial_number}
@@ -416,7 +416,7 @@ export default function TestEquipmentPage() {
                   />
                 </div>
                 <div>
-                  <label className="label">Asset tag</label>
+                  <label className="label">{t('Asset tag')}</label>
                   <input
                     className="input"
                     value={form.asset_tag}
@@ -426,7 +426,7 @@ export default function TestEquipmentPage() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Last cal</label>
+                  <label className="label">{t('Last cal')}</label>
                   <input
                     type="date"
                     className="input"
@@ -435,7 +435,7 @@ export default function TestEquipmentPage() {
                   />
                 </div>
                 <div>
-                  <label className="label">Cal due</label>
+                  <label className="label">{t('Cal due')}</label>
                   <input
                     type="date"
                     className="input"
@@ -445,7 +445,7 @@ export default function TestEquipmentPage() {
                 </div>
               </div>
               <div>
-                <label className="label">Owned by</label>
+                <label className="label">{t('Owned by')}</label>
                 <select
                   className="input"
                   value={form.owned_by}
@@ -462,13 +462,13 @@ export default function TestEquipmentPage() {
                 </p>
               </div>
               <div>
-                <label className="label">Assigned to FSE</label>
+                <label className="label">{t('Assigned to FSE')}</label>
                 <select
                   className="input"
                   value={form.assigned_to_fse}
                   onChange={(e) => setForm({ ...form, assigned_to_fse: e.target.value })}
                 >
-                  <option value="">Unassigned / shop stock</option>
+                  <option value="">{t('Unassigned / shop stock')}</option>
                   {assignOptions.map((m) => (
                     <option key={m.id} value={m.id} disabled={m.kind === 'pending'}>
                       {m.label}
@@ -480,7 +480,7 @@ export default function TestEquipmentPage() {
                 </p>
               </div>
               <div>
-                <label className="label">Notes</label>
+                <label className="label">{t('Notes')}</label>
                 <textarea
                   className="input"
                   rows={2}
@@ -489,11 +489,9 @@ export default function TestEquipmentPage() {
                 />
               </div>
               <div className="flex gap-2 pt-2">
-                <button type="button" className="btn btn-secondary flex-1" onClick={() => setOpen(false)}>
-                  Cancel
-                </button>
+                <button type="button" className="btn btn-secondary flex-1" onClick={() => setOpen(false)}>{t('Cancel')}</button>
                 <button type="button" className="btn btn-primary flex-1" disabled={saving} onClick={save}>
-                  {saving ? 'Saving…' : 'Save'}
+                  {saving ? t('Saving…') : t('Save')}
                 </button>
               </div>
             </div>

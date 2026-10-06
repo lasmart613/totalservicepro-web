@@ -1,4 +1,6 @@
 'use client';
+import { useFormatDate } from '@/lib/use-format-date';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useEffect, useState } from 'react';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
@@ -88,6 +90,8 @@ export function CompanyBrandingEditor({
   uploadingLogo,
   showLogoUpload,
 }: CompanyBrandingEditorProps) {
+  const t = useT();
+  const { format, locale } = useFormatDate();
   const [suggestions, setSuggestions] = useState<SuggestedBrandColors | null>(null);
 
   useEffect(() => {
@@ -143,21 +147,21 @@ export function CompanyBrandingEditor({
     },
     'Invoice',
     'INV-1042',
-    'Sep 28, 2026',
-    { theme: preview, themeScope: 'document' }
+    format('2026-09-28'),
+    { theme: preview, themeScope: 'document', locale }
   );
 
   return (
     <div className="space-y-5">
       {showLogoUpload && (
         <div>
-          <label className="label">Company logo</label>
+          <label className="label">{t('Company logo')}</label>
           <div
             className="cursor-pointer rounded-2xl border-2 border-dashed p-8 text-center"
             onClick={() => document.getElementById('brandLogoInput')?.click()}
           >
             {logoUrl ? (
-              <img src={logoUrl} alt="Company logo" className="mx-auto max-h-20" />
+              <img src={logoUrl} alt={t('Company logo')} className="mx-auto max-h-20" />
             ) : (
               <div className="text-sm text-[var(--text2)]">
                 {uploadingLogo ? 'Uploading…' : 'Tap to choose a logo (PNG, JPG, WebP, or SVG)'}
@@ -186,7 +190,7 @@ export function CompanyBrandingEditor({
       {premium ? (
         <div className="space-y-4">
           <div>
-            <div className="label">Presets</div>
+            <div className="label">{t('Presets')}</div>
             <div className="flex flex-wrap gap-2">
               {BRAND_COLOR_PRESETS.map((preset) => {
                 const active =
@@ -216,15 +220,13 @@ export function CompanyBrandingEditor({
                 type="button"
                 className="rounded-full border border-[var(--border)] px-3 py-1 text-xs text-[var(--text3)]"
                 onClick={() => commitPair(CLEARED_BRAND_COLORS.primary, CLEARED_BRAND_COLORS.accent)}
-              >
-                RepairPlanet default
-              </button>
+              >{t('RepairPlanet default')}</button>
             </div>
           </div>
 
           {suggestions && (
             <div>
-              <div className="label">Suggested from your logo</div>
+              <div className="label">{t('Suggested from your logo')}</div>
               <button
                 type="button"
                 className="flex items-center gap-2 rounded-full border border-[var(--border)] px-3 py-1 text-xs"
@@ -247,17 +249,17 @@ export function CompanyBrandingEditor({
         </div>
       ) : (
         <div className="rounded-xl border border-[var(--border)] bg-[var(--surface3)] p-4">
-          <div className="font-semibold">Custom colors are a Premium feature</div>
+          <div className="font-semibold">{t('Custom colors are a Premium feature')}</div>
           <p className="mt-1 text-sm text-[var(--text2)]">
             Free accounts keep the RepairPlanet theme on invoices, estimates, service reports, and customer emails.
             Your logo still appears. Upgrade to set a primary and accent color.
           </p>
-          <UpgradePlanLink className="btn btn-primary mt-3 inline-flex text-sm">Upgrade to Premium</UpgradePlanLink>
+          <UpgradePlanLink className="btn btn-primary mt-3 inline-flex text-sm">{t('Upgrade to Premium')}</UpgradePlanLink>
         </div>
       )}
 
       <div>
-        <div className="label">Invoice header preview</div>
+        <div className="label">{t('Invoice header preview')}</div>
         <div
           className="overflow-hidden rounded-xl border border-[var(--border)] bg-white p-4 text-black"
           dangerouslySetInnerHTML={{ __html: previewHtml }}

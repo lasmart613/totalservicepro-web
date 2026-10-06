@@ -1,4 +1,5 @@
 'use client';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
@@ -49,6 +50,7 @@ function todayYmd() {
 }
 
 export default function PurchaseOrderFormClient() {
+  const t = useT();
   const { money, prefs, locale } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
@@ -517,7 +519,7 @@ export default function PurchaseOrderFormClient() {
       <Header />
       <div className="page max-w-3xl mx-auto w-full px-4 py-6 pb-28">
         <div className="mb-4">
-          <h1 className="text-2xl font-extrabold">Purchase Order</h1>
+          <h1 className="text-2xl font-extrabold">{t('Purchase Order')}</h1>
           <p className="text-sm text-[var(--text3)]">
             {docNumber ? <span className="text-[var(--gold)] font-bold">{docNumber}</span> : 'Draft'}{' '}
             · emails the address on the supplier profile
@@ -525,9 +527,9 @@ export default function PurchaseOrderFormClient() {
         </div>
 
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-[var(--gold)] mb-3">Parts supplier</h2>
+          <h2 className="font-bold text-[var(--gold)] mb-3">{t('Parts supplier')}</h2>
           <div>
-            <label className="text-xs text-[var(--text3)]">Choose a parts supplier</label>
+            <label className="text-xs text-[var(--text3)]">{t('Choose a parts supplier')}</label>
             <select
               className="input select mt-1"
               value={supplierOrgId != null ? String(supplierOrgId) : ''}
@@ -554,7 +556,7 @@ export default function PurchaseOrderFormClient() {
                 </option>
               ))}
             </select>
-            <label className="text-xs text-[var(--text3)] mt-3 block">Type to filter the list</label>
+            <label className="text-xs text-[var(--text3)] mt-3 block">{t('Type to filter the list')}</label>
             <input
               className="input mt-1"
               value={supSearch}
@@ -571,7 +573,7 @@ export default function PurchaseOrderFormClient() {
                 if (!v.trim()) clearSupplier();
               }}
               list="po-supplier-autofill"
-              placeholder="Start typing a supplier name…"
+              placeholder={t('Start typing a supplier name…')}
               autoComplete="off"
             />
             <datalist id="po-supplier-autofill">
@@ -587,21 +589,21 @@ export default function PurchaseOrderFormClient() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <div>
-              <label className="text-xs text-[var(--text3)]">Email on supplier profile</label>
+              <label className="text-xs text-[var(--text3)]">{t('Email on supplier profile')}</label>
               <input className="input mt-1 opacity-90" readOnly value={supEmail || '—'} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Phone</label>
+              <label className="text-xs text-[var(--text3)]">{t('Phone')}</label>
               <input className="input mt-1 opacity-90" readOnly value={supPhone || '—'} />
             </div>
           </div>
         </section>
 
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-[var(--gold)] mb-3">PO details</h2>
+          <h2 className="font-bold text-[var(--gold)] mb-3">{t('PO details')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-[var(--text3)]">PO date</label>
+              <label className="text-xs text-[var(--text3)]">{t('PO date')}</label>
               <input
                 className="input mt-1"
                 type="date"
@@ -610,7 +612,7 @@ export default function PurchaseOrderFormClient() {
               />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Needed by</label>
+              <label className="text-xs text-[var(--text3)]">{t('Needed by')}</label>
               <input
                 className="input mt-1"
                 type="date"
@@ -620,7 +622,7 @@ export default function PurchaseOrderFormClient() {
             </div>
           </div>
           <div className="mt-3">
-            <label className="text-xs text-[var(--text3)]">Ship to</label>
+            <label className="text-xs text-[var(--text3)]">{t('Ship to')}</label>
             <input
               className="input mt-1"
               value={shipTo}
@@ -628,7 +630,7 @@ export default function PurchaseOrderFormClient() {
             />
           </div>
           <div className="mt-3">
-            <label className="text-xs text-[var(--text3)]">Notes</label>
+            <label className="text-xs text-[var(--text3)]">{t('Notes')}</label>
             <textarea
               className="input mt-1 min-h-[72px]"
               value={description}
@@ -638,18 +640,18 @@ export default function PurchaseOrderFormClient() {
         </section>
 
         <section className="card p-4 mb-4 overflow-x-auto">
-          <h2 className="font-bold text-[var(--gold)] mb-3">Line items</h2>
+          <h2 className="font-bold text-[var(--gold)] mb-3">{t('Line items')}</h2>
           <p className="text-[11px] text-[var(--text3)] mb-2">
             Part # suggests from the Parts Catalog and Marketplace Parts. Pick a match to fill description and price.
           </p>
           <table className="w-full text-sm">
             <thead>
               <tr className="text-left text-[11px] text-[var(--text3)]">
-                <th className="pb-2">Part #</th>
-                <th className="pb-2">Description</th>
-                <th className="pb-2 w-16">Qty</th>
-                <th className="pb-2 w-24">Price</th>
-                <th className="pb-2 w-24">Ext</th>
+                <th className="pb-2">{t('Part #')}</th>
+                <th className="pb-2">{t('Description')}</th>
+                <th className="pb-2 w-16">{t('Qty')}</th>
+                <th className="pb-2 w-24">{t('Price')}</th>
+                <th className="pb-2 w-24">{t('Ext')}</th>
                 <th />
               </tr>
             </thead>
@@ -662,7 +664,7 @@ export default function PurchaseOrderFormClient() {
                       list={`po-parts-${li.id}`}
                       value={li.part_number}
                       autoComplete="off"
-                      placeholder="Start typing a part #…"
+                      placeholder={t('Start typing a part #…')}
                       onFocus={() => setSuggestLineId(li.id)}
                       onBlur={() => setTimeout(() => setSuggestLineId((cur) => (cur === li.id ? null : cur)), 180)}
                       onChange={(e) => {
@@ -758,11 +760,11 @@ export default function PurchaseOrderFormClient() {
           </button>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
             <div>
-              <label className="text-xs text-[var(--text3)]">Subtotal</label>
+              <label className="text-xs text-[var(--text3)]">{t('Subtotal')}</label>
               <input className="input mt-1 opacity-90" readOnly value={subtotal.toFixed(2)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Tax</label>
+              <label className="text-xs text-[var(--text3)]">{t('Tax')}</label>
               <input
                 className="input mt-1"
                 type="number"
@@ -779,16 +781,14 @@ export default function PurchaseOrderFormClient() {
         </section>
 
         <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
-          <Link href="/purchase-orders" className="btn btn-secondary min-w-[80px] text-center">
-            Cancel
-          </Link>
+          <Link href="/purchase-orders" className="btn btn-secondary min-w-[80px] text-center">{t('Cancel')}</Link>
           <button
             type="button"
             className="btn btn-secondary min-w-[100px]"
             disabled={saving || emailing}
             onClick={() => savePo('draft')}
           >
-            {saving ? 'Saving…' : 'Save Draft'}
+            {saving ? t('Saving…') : t('Save Draft')}
           </button>
           <button
             type="button"
@@ -796,7 +796,7 @@ export default function PurchaseOrderFormClient() {
             disabled={saving || emailing}
             onClick={() => finalizeAndEmail()}
           >
-            {emailing ? 'Emailing…' : 'Finalize & Email'}
+            {emailing ? t('Emailing…') : t('Finalize & Email')}
           </button>
         </div>
       </div>

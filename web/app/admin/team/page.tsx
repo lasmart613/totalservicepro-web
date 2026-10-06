@@ -1,4 +1,6 @@
 'use client';
+import { useFormatDate } from '@/lib/use-format-date';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -20,6 +22,8 @@ const ROLES = [
 ];
 
 export default function TeamManagement() {
+  const t = useT();
+  const { format } = useFormatDate();
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [pendingInvites, setPendingInvites] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -275,14 +279,14 @@ export default function TeamManagement() {
 
   return (
     <div>
-      <h1 className="text-3xl font-extrabold mb-2">Team Management</h1>
+      <h1 className="text-3xl font-extrabold mb-2">{t('Team Management')}</h1>
       <p className="text-[var(--text3)] mb-8">
         Invite FSEs and staff. An email that already owns another shop is valid —
         they join this company as a second membership (moonlight) and keep their home org.
       </p>
 
       <div className="card p-6 mb-10">
-        <h2 className="font-bold text-xl mb-4">Invite Team Member</h2>
+        <h2 className="font-bold text-xl mb-4">{t('Invite Team Member')}</h2>
         <p className="text-xs text-[var(--text3)] mb-4">
           If the invite email is delayed or doesn&apos;t arrive, copy the invite link and send it to them directly.
         </p>
@@ -316,7 +320,7 @@ export default function TeamManagement() {
           className="grid grid-cols-1 md:grid-cols-2 gap-4"
         >
           <div>
-            <label className="label">Email Address *</label>
+            <label className="label">{t('Email Address *')}</label>
             <input
               type="email"
               className="input"
@@ -327,7 +331,7 @@ export default function TeamManagement() {
           </div>
 
           <div>
-            <label className="label">Role</label>
+            <label className="label">{t('Role')}</label>
             <select
               className="select"
               value={newMember.role}
@@ -342,7 +346,7 @@ export default function TeamManagement() {
           </div>
 
           <div>
-            <label className="label">First Name</label>
+            <label className="label">{t('First Name')}</label>
             <input
               className="input"
               value={newMember.firstName}
@@ -351,7 +355,7 @@ export default function TeamManagement() {
           </div>
 
           <div>
-            <label className="label">Last Name</label>
+            <label className="label">{t('Last Name')}</label>
             <input
               className="input"
               value={newMember.lastName}
@@ -360,12 +364,12 @@ export default function TeamManagement() {
           </div>
 
           <div className="md:col-span-2">
-            <label className="label">Job Title</label>
+            <label className="label">{t('Job Title')}</label>
             <input
               className="input"
               value={newMember.jobTitle}
               onChange={(e) => setNewMember({ ...newMember, jobTitle: e.target.value })}
-              placeholder="e.g. Senior Field Service Engineer"
+              placeholder={t('e.g. Senior Field Service Engineer')}
             />
           </div>
 
@@ -391,10 +395,10 @@ export default function TeamManagement() {
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[var(--border)] text-left text-sm text-[var(--text3)]">
-                  <th className="py-3 px-4">Name</th>
-                  <th className="py-3 px-4">Email</th>
-                  <th className="py-3 px-4">Role</th>
-                  <th className="py-3 px-4">Invited</th>
+                  <th className="py-3 px-4">{t('Name')}</th>
+                  <th className="py-3 px-4">{t('Email')}</th>
+                  <th className="py-3 px-4">{t('Role')}</th>
+                  <th className="py-3 px-4">{t('Invited')}</th>
                   <th className="py-3 px-4"></th>
                 </tr>
               </thead>
@@ -407,7 +411,7 @@ export default function TeamManagement() {
                     <td className="py-3 px-4 text-sm">{inv.email}</td>
                     <td className="py-3 px-4 capitalize text-sm">{inv.role || 'fse'}</td>
                     <td className="py-3 px-4 text-sm text-[var(--text3)]">
-                      {inv.created_at ? new Date(inv.created_at).toLocaleDateString() : '—'}
+                      {inv.created_at ? format(inv.created_at) : '—'}
                     </td>
                     <td className="py-3 px-4 text-right">
                       <button
@@ -430,19 +434,19 @@ export default function TeamManagement() {
         <h2 className="font-bold text-xl mb-4">Current Team ({teamMembers.length})</h2>
 
         {loading ? (
-          <div className="text-center py-8 text-[var(--text3)]">Loading team...</div>
+          <div className="text-center py-8 text-[var(--text3)]">{t('Loading team...')}</div>
         ) : teamMembers.length === 0 ? (
-          <div className="text-center py-8 text-[var(--text3)]">No team members yet.</div>
+          <div className="text-center py-8 text-[var(--text3)]">{t('No team members yet.')}</div>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
                 <tr className="border-b border-[var(--border)] text-left text-sm text-[var(--text3)]">
-                  <th className="py-3 px-4">Name</th>
-                  <th className="py-3 px-4">Email</th>
-                  <th className="py-3 px-4">Role</th>
-                  <th className="py-3 px-4">Job Title</th>
-                  <th className="py-3 px-4">Joined</th>
+                  <th className="py-3 px-4">{t('Name')}</th>
+                  <th className="py-3 px-4">{t('Email')}</th>
+                  <th className="py-3 px-4">{t('Role')}</th>
+                  <th className="py-3 px-4">{t('Job Title')}</th>
+                  <th className="py-3 px-4">{t('Joined')}</th>
                   <th className="py-3 px-4"></th>
                 </tr>
               </thead>
@@ -455,9 +459,7 @@ export default function TeamManagement() {
                     <td className="py-3 px-4 font-medium">
                       {member.first_name} {member.last_name}
                       {member.onboarding_completed !== true && (
-                        <div className="text-[10px] font-normal text-[var(--text3)] mt-0.5">
-                          Setup not finished
-                        </div>
+                        <div className="text-[10px] font-normal text-[var(--text3)] mt-0.5">{t('Setup not finished')}</div>
                       )}
                     </td>
                     <td className="py-3 px-4 text-sm">{member.email}</td>
@@ -471,7 +473,7 @@ export default function TeamManagement() {
                     </td>
                     <td className="py-3 px-4 text-sm text-[var(--text3)]">
                       {member.created_at
-                        ? new Date(member.created_at).toLocaleDateString()
+                        ? format(member.created_at)
                         : '—'}
                     </td>
                     <td className="py-3 px-4 text-right">
@@ -480,9 +482,7 @@ export default function TeamManagement() {
                           type="button"
                           className="btn btn-secondary text-xs"
                           onClick={() => resendInvite(member.email, member.role)}
-                        >
-                          Resend invite email
-                        </button>
+                        >{t('Resend invite email')}</button>
                       ) : null}
                     </td>
                   </tr>

@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appStrings, APP_STRING_KEYS } from './app-copy.ts';
+import { FA_COPY } from '../fa/copy.ts';
+import { formatLocaleDate } from './format-date.ts';
 import { PUBLIC_LOCALES, type PublicLocale } from './locales.ts';
 import { applyDocumentLocale, documentLocaleMeta, parseSiteLanguage } from './preference.ts';
 
@@ -25,6 +27,13 @@ const ALLOW_SAME = new Set([
   'PDF',
   'URL',
   'ID',
+  // Medical loanwords spelled the same as English in these locales.
+  'Defibrillator',
+  'Endoscope',
+  'Multimeter',
+  'Oscilloscope',
+  'Thermometer',
+  'Hospital',
 ]);
 
 test('saved language accepts only the public locale ids', () => {
@@ -107,6 +116,9 @@ test('signed-in dictionaries cover the same chrome in every language', () => {
       if (key.includes('Premium / Team')) {
         assert.ok(value.includes('Premium') && value.includes('Team'), `${locale} dropped a plan name from ${key}`);
       }
+      for (const token of key.match(/\{[A-Za-z_]+\}/g) || []) {
+        assert.ok(value.includes(token), `${locale} dropped ${token} from ${key}`);
+      }
     }
   }
   assert.doesNotMatch(joined.fr, /[\u0152\u0153]/);
@@ -141,4 +153,41 @@ test('Settings and the public menu share one device language', () => {
   assert.match(header, /label: 'Estimates'/);
   assert.match(header, /LanguageSelector variant="header"/);
   assert.match(read('app/layout.tsx'), /localStorage\.getItem\("siteLanguage"\)/);
+});
+
+test('date-only values keep the calendar day in the active language', () => {
+  const en = formatLocaleDate('2026-09-28', 'en');
+  const de = formatLocaleDate('2026-09-28', 'de');
+  assert.match(en, /28/);
+  assert.match(de, /28/);
+  assert.notEqual(en, de);
+  assert.equal(formatLocaleDate('', 'de'), '');
+  assert.equal(formatLocaleDate('not-a-date', 'de'), 'not-a-date');
+});
+
+function walkTsx(dir: string, out: string[]) {
+  for (const name of readdirSync(dir)) {
+    if (name === 'node_modules' || name === '.next') continue;
+    const abs = join(dir, name);
+    const st = statSync(abs);
+    if (st.isDirectory()) walkTsx(abs, out);
+    else if (name.endsWith('.tsx') || name.endsWith('.ts')) out.push(abs);
+  }
+}
+
+test('every t() literal exists in the signed-in or public dictionary', () => {
+  const files: string[] = [];
+  walkTsx(join(webDir, 'app'), files);
+  walkTsx(join(webDir, 'components'), files);
+  const known = new Set([...APP_STRING_KEYS, ...Object.keys(FA_COPY)]);
+  const missing = new Set<string>();
+  const re = /(?<![\w$.])t\(\s*(['"])((?:\\.|(?!\1).)*)\1/g;
+  for (const file of files) {
+    const src = readFileSync(file, 'utf8');
+    for (const match of src.matchAll(re)) {
+      const key = match[2].replace(/\\'/g, "'").replace(/\\"/g, '"');
+      if (!known.has(key)) missing.add(key);
+    }
+  }
+  assert.deepEqual([...missing], [], 't() literals missing from every locale');
 });

@@ -1,5 +1,6 @@
 /** Shared helpers for estimates / invoices Supabase writes (schema-drift tolerant). */
 
+import { formatLocaleDate } from '../i18n/format-date.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
 
 export function isValidOrgId(val: unknown): boolean {
@@ -262,11 +263,12 @@ export function isEstimateExpired(est: { status?: string | null; created_at?: st
   return estimateAgeDays(est.created_at) >= ESTIMATE_VALID_DAYS;
 }
 
-export function validUntilLabel(createdAt?: string | null): string {
+export function validUntilLabel(createdAt?: string | null, locale?: string | null): string {
   if (!createdAt) return '';
   const d = new Date(createdAt);
   if (isNaN(d.getTime())) return '';
   d.setDate(d.getDate() + ESTIMATE_VALID_DAYS);
+  if (locale) return formatLocaleDate(d, locale);
   return d.toLocaleDateString();
 }
 

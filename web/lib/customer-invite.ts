@@ -5,6 +5,7 @@
 
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { CompanyTheme } from './company-theme.ts';
+import { translateApp, translateAppFill, withDocDirection } from './i18n/translate-app.ts';
 
 export const CUSTOMER_INVITE_TTL_SEC = 60 * 60 * 24 * 30; // 30 days
 
@@ -173,8 +174,10 @@ export function buildFreeAccountEmailCtaHtml(opts: {
   loginUrl: string;
   companyName?: string | null;
   theme?: CompanyTheme | null;
+  locale?: string | null;
 }): string {
-  const company = esc(opts.companyName?.trim() || 'your clinic');
+  const company = esc(opts.companyName?.trim() || translateApp(opts.locale, 'your clinic'));
+  const tr = (text: string) => translateApp(opts.locale, text);
   const branded = !!opts.theme?.branded;
   const buttonBg = branded ? opts.theme!.accent : '#d4a017';
   return (
@@ -182,20 +185,18 @@ export function buildFreeAccountEmailCtaHtml(opts: {
     `style="margin:20px 0 0;border-collapse:collapse;">` +
     `<tr><td style="padding:18px 16px;background:#0f1115;border-radius:12px;border:1px solid #2a2f3a;">` +
     `<div style="font-size:13px;font-weight:800;color:#d4a017;letter-spacing:0.02em;margin-bottom:6px;">RepairPlanet</div>` +
-    `<div style="font-size:15px;font-weight:700;color:#f1f3f4;margin-bottom:8px;">Keep ${company}&apos;s service work in one place</div>` +
+    `<div style="font-size:15px;font-weight:700;color:#f1f3f4;margin-bottom:8px;">${translateAppFill(opts.locale, "Keep {company}'s service work in one place", { company })}</div>` +
     `<p style="margin:0 0 10px;font-size:13px;line-height:1.55;color:#c4c7cc;">` +
-    `Create a <strong style="color:#f1f3f4;">free account</strong> to view laser service history and upcoming service, ` +
-    `request service / RFQs, review estimates, open manuals for your equipment, shop the parts marketplace, ` +
-    `and keep ${company}&apos;s equipment list in My Lasers.` +
+    `${translateAppFill(opts.locale, 'Create a free account to view laser service history and upcoming service, request service / RFQs, review estimates, open manuals for your equipment, shop the parts marketplace, and keep {company} equipment list in My Lasers.', { company })}` +
     `</p>` +
     `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:12px 0 8px;"><tr>` +
     `<td style="border-radius:8px;background:${buttonBg};">` +
     `<a href="${esc(opts.signupUrl)}" ` +
     `style="${emailCtaAnchorStyle(opts.theme)}">` +
-    `Create your free account</a>` +
+    `${tr('Create your free account')}</a>` +
     `</td></tr></table>` +
     `<p style="margin:0;font-size:12px;line-height:1.5;color:#9aa0a6;">` +
-    `Already on RepairPlanet? <a href="${esc(opts.loginUrl)}" style="color:#d4a017;text-decoration:none;">Sign in</a>.` +
+    `${tr('Already on RepairPlanet?')} <a href="${esc(opts.loginUrl)}" style="color:#d4a017;text-decoration:none;">${tr('Sign in')}</a>.` +
     `</p>` +
     `</td></tr></table>`
   );
@@ -222,28 +223,29 @@ export function supplierLoginUrl(origin: string): string {
 export function buildSupplierPoEmailCtaHtml(opts: {
   signupUrl: string;
   loginUrl: string;
+  locale?: string | null;
 }): string {
+  const tr = (text: string) => translateApp(opts.locale, text);
   return (
     `<table class="tsp-supplier-po-cta" role="presentation" width="100%" cellpadding="0" cellspacing="0" ` +
     `style="margin:20px 0 0;border-collapse:collapse;">` +
     `<tr><td style="padding:18px 16px;background:#0f1115;border-radius:12px;border:1px solid #2a2f3a;">` +
     `<div style="font-size:13px;font-weight:800;color:#d4a017;letter-spacing:0.02em;margin-bottom:6px;">RepairPlanet</div>` +
-    `<div style="font-size:15px;font-weight:700;color:#f1f3f4;margin-bottom:8px;">Free for parts suppliers</div>` +
+    `<div style="font-size:15px;font-weight:700;color:#f1f3f4;margin-bottom:8px;">${tr('Free for parts suppliers')}</div>` +
     `<p style="margin:0 0 10px;font-size:13px;line-height:1.55;color:#c4c7cc;">` +
-    `Register free. Connect with laser service companies, receive purchase orders in one inbox, ` +
-    `and list parts on the marketplace.` +
+    `${tr('Register free. Connect with laser service companies, receive purchase orders in one inbox, and list parts on the marketplace.')}` +
     `</p>` +
     `<table role="presentation" cellspacing="0" cellpadding="0" style="margin:12px 0 8px;"><tr>` +
     `<td style="border-radius:8px;background:#d4a017;">` +
     `<a href="${esc(opts.signupUrl)}" ` +
     `style="display:inline-block;padding:12px 22px;font-size:14px;font-weight:700;color:#111;text-decoration:none;border-radius:8px;">` +
-    `Create a free account</a>` +
+    `${tr('Create a free account')}</a>` +
     `</td>` +
     `<td width="10"></td>` +
     `<td style="border-radius:8px;border:1px solid #d4a017;">` +
     `<a href="${esc(opts.loginUrl)}" ` +
     `style="display:inline-block;padding:12px 18px;font-size:14px;font-weight:700;color:#d4a017;text-decoration:none;border-radius:8px;">` +
-    `Sign in</a>` +
+    `${tr('Sign in')}</a>` +
     `</td></tr></table>` +
     `</td></tr></table>`
   );
@@ -254,6 +256,7 @@ export function wrapSupplierFacingDocumentEmail(opts: {
   documentHtml: string;
   signupUrl: string;
   loginUrl: string;
+  locale?: string | null;
 }): string {
   const title = esc(opts.subject);
   const already = opts.documentHtml.includes('tsp-supplier-po-cta');
@@ -262,8 +265,9 @@ export function wrapSupplierFacingDocumentEmail(opts: {
     : buildSupplierPoEmailCtaHtml({
         signupUrl: opts.signupUrl,
         loginUrl: opts.loginUrl,
+        locale: opts.locale,
       });
-  return `<!DOCTYPE html>
+  const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/><title>${title}</title></head>
 <body style="margin:0;padding:16px;background:#f4f4f5;font-family:system-ui,sans-serif;">
   <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:12px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.06);">
@@ -271,9 +275,10 @@ export function wrapSupplierFacingDocumentEmail(opts: {
     ${cta}
   </div>
   <p style="max-width:720px;margin:16px auto 0;font-size:11px;color:#666;text-align:center;">
-    Sent via Total Service Pro · <a href="https://repairplanet.net">repairplanet.net</a>
+    ${translateApp(opts.locale, 'Sent via Total Service Pro')} · <a href="https://repairplanet.net">repairplanet.net</a>
   </p>
 </body></html>`;
+  return withDocDirection(html, opts.locale);
 }
 
 export function wrapCustomerFacingDocumentEmail(opts: {
@@ -283,6 +288,7 @@ export function wrapCustomerFacingDocumentEmail(opts: {
   loginUrl: string;
   companyName?: string | null;
   theme?: CompanyTheme | null;
+  locale?: string | null;
 }): string {
   const title = esc(opts.subject);
   const already = opts.documentHtml.includes('tsp-free-account-cta');
@@ -293,12 +299,13 @@ export function wrapCustomerFacingDocumentEmail(opts: {
         loginUrl: opts.loginUrl,
         companyName: opts.companyName,
         theme: opts.theme,
+        locale: opts.locale,
       });
   const header =
     opts.theme?.branded && !opts.documentHtml.includes('data-tsp-brand-header')
       ? emailBrandHeader(opts.theme)
       : '';
-  return `<!DOCTYPE html>
+  const html = `<!DOCTYPE html>
 <html><head><meta charset="utf-8"/><title>${title}</title></head>
 <body style="margin:0;padding:16px;background:#f4f4f5;font-family:system-ui,sans-serif;">
   <div style="max-width:720px;margin:0 auto;background:#fff;border-radius:12px;padding:8px;box-shadow:0 2px 12px rgba(0,0,0,.06);">
@@ -307,9 +314,10 @@ export function wrapCustomerFacingDocumentEmail(opts: {
     ${cta}
   </div>
   <p style="max-width:720px;margin:16px auto 0;font-size:11px;color:#666;text-align:center;">
-    Sent via Total Service Pro · <a href="https://repairplanet.net">repairplanet.net</a>
+    ${translateApp(opts.locale, 'Sent via Total Service Pro')} · <a href="https://repairplanet.net">repairplanet.net</a>
   </p>
 </body></html>`;
+  return withDocDirection(html, opts.locale);
 }
 
 export function customerInviteLoginUrl(origin: string, token: string | null): string {

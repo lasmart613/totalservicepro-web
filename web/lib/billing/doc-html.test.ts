@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
   buildEstimateActionCtasHtml,
+  buildEstimateHtml,
   buildInvoiceHtml,
   ensureEstimateActionCtas,
 } from './doc-html.ts';
-
 const TOKEN_URL = 'https://repairplanet.net/e/abc-token-123';
 
 test('estimate email CTAs are Approve / Reject / Modify on tokenized links', () => {
@@ -92,4 +92,35 @@ test('invoice HTML after deposit paid has no Stripe button until remainder is re
   assert.match(html, /Deposit received: <strong>\$650\.00<\/strong>/);
   assert.match(html, /upon completion of the service call/);
   assert.doesNotMatch(html, /Pay .* securely with Stripe/);
+});
+
+const estimateBase = {
+  company: { company_name: 'Lux Service' },
+  customer: { name: 'Clinic' },
+  estNumber: 'EST-1',
+  dateStr: '2026-09-28',
+  services: ['Routine PM Visit'],
+  subtotal: 100,
+  tax: 0,
+  total: 100,
+  actionUrl: TOKEN_URL,
+};
+
+test('estimate HTML stays English when no locale is passed', () => {
+  const html = buildEstimateHtml(estimateBase);
+  assert.match(html, /Service Estimate/);
+  assert.match(html, /Cost Breakdown/);
+  assert.match(html, />Approve</);
+  assert.doesNotMatch(html, /dir="rtl"/);
+  assert.match(html, /28/);
+});
+
+test('estimate HTML follows German labels and Arabic direction', () => {
+  const de = buildEstimateHtml({ ...estimateBase, locale: 'de' });
+  assert.match(de, /Kostenaufstellung/);
+  assert.match(de, /Service-Kostenvoranschlag/);
+  assert.doesNotMatch(de, /Cost Breakdown/);
+  const ar = buildEstimateHtml({ ...estimateBase, locale: 'ar' });
+  assert.match(ar, /dir="rtl"/);
+  assert.match(ar, /تفصيل التكلفة/);
 });

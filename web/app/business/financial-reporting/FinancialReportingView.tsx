@@ -4,6 +4,7 @@ import Link from 'next/link';
 import type { FinancialReport, FinancialSummary, MoneyKpi, MonthlyRevenuePoint } from '@/lib/financial-reporting';
 import { formatOrgMoney } from '@/lib/money-format';
 import { useSiteLocale, useT } from '@/lib/fa/locale';
+import { useFormatDate } from '@/lib/use-format-date';
 import { PUBLIC_LOCALES } from '@/lib/i18n/locales';
 import { ReportUpgradeLock } from '@/components/ReportUpgradeLock';
 
@@ -37,7 +38,7 @@ function KpiTile({ kpi, money }: { kpi: MoneyKpi; money: (amount: number) => str
           {kpi.compareAmount != null ? ` · ${money(kpi.compareAmount)}` : ''}
         </div>
       )}
-      <p className="text-xs text-[var(--text3)] mt-auto">{unavailable ? kpi.reason : kpi.note}</p>
+      <p className="text-xs text-[var(--text3)] mt-auto">{unavailable ? t(kpi.reason || '') : t(kpi.note || '')}</p>
     </article>
   );
 }
@@ -119,6 +120,7 @@ function DetailedSections({
   money: (amount: number) => string;
 }) {
   const t = useT();
+  const { format } = useFormatDate();
   return (
     <>
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 mt-8">
@@ -135,8 +137,8 @@ function DetailedSections({
                   {metric.count} {metric.count === 1 ? t('row') : t('rows')}
                 </div>
               )}
-              <p className="text-xs text-[var(--text3)] mt-auto">{unavailable ? metric.reason : metric.note || metric.source}</p>
-              {!unavailable && metric.note && <p className="text-[11px] text-[var(--text3)]">Source: {metric.source}</p>}
+              <p className="text-xs text-[var(--text3)] mt-auto">{unavailable ? t(metric.reason || '') : t(metric.note || metric.source || '')}</p>
+              {!unavailable && metric.note && <p className="text-[11px] text-[var(--text3)]">{t('Source')}: {metric.source}</p>}
             </article>
           );
         })}
@@ -183,8 +185,8 @@ function DetailedSections({
                     </td>
                     <td className="px-3 py-2">{row.customer}</td>
                     <td className="px-3 py-2">{row.status}</td>
-                    <td className="px-3 py-2">{row.invoiceDate || '—'}</td>
-                    <td className="px-3 py-2">{row.dueDate || '—'}</td>
+                    <td className="px-3 py-2">{row.invoiceDate ? format(row.invoiceDate) : '—'}</td>
+                    <td className="px-3 py-2">{row.dueDate ? format(row.dueDate) : '—'}</td>
                     <td className="px-3 py-2 text-end" dir="ltr">
                       {money(row.total)}
                     </td>
@@ -297,6 +299,7 @@ function DetailedSections({
 
 export function FinancialReportingView({ report }: { report: FinancialReport }) {
   const t = useT();
+  const { format } = useFormatDate();
   const money = useMoney(report);
   const org = report.organizationName || (report.organizationId ? `Organization ${report.organizationId}` : t('No active organization'));
   const detail = report.detailIncluded !== false;
@@ -308,7 +311,7 @@ export function FinancialReportingView({ report }: { report: FinancialReport }) 
         {org}
         {report.organizationId ? ` · org ${report.organizationId}` : ''}
         {' · '}
-        {t('as of')} {report.asOfDate} UTC
+        {t('as of')} {format(report.asOfDate)} UTC
         {' · '}
         <span dir="ltr">{report.currencyCode || 'USD'}</span>
       </p>

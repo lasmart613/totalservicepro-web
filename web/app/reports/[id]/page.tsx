@@ -1,4 +1,6 @@
 'use client';
+import { useFormatDate } from '@/lib/use-format-date';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -27,6 +29,8 @@ function parseMaybeJson(val: any): any {
 }
 
 export default function ReportDetail() {
+  const t = useT();
+  const { format, locale } = useFormatDate();
   const params = useParams<{ id: string }>();
   const id = params?.id;
   const supabase = getSupabaseClient();
@@ -116,10 +120,10 @@ export default function ReportDetail() {
   function openPrint() {
     if (!report) return;
     try {
-      const html = buildServiceReportPrintHTML({ ...report, theme, themeScope: 'document' });
+      const html = buildServiceReportPrintHTML({ ...report, theme, themeScope: 'document', locale });
       const w = window.open('', '_blank');
       if (!w) {
-        toast.error('Pop-up blocked — allow pop-ups to print');
+        toast.error(t('Pop-up blocked — allow pop-ups to print'));
         return;
       }
       w.document.write(html);
@@ -133,7 +137,7 @@ export default function ReportDetail() {
         }
       }, 400);
     } catch (e: any) {
-      toast.error(e?.message || 'Print failed');
+      toast.error(e?.message || t('Print failed'));
     }
   }
 
@@ -147,7 +151,7 @@ export default function ReportDetail() {
     });
     setEmailOnFile(dest.email);
     if (!dest.email) {
-      toast.error('No email on file for this customer. Add one on the customer/clinic profile or the report.');
+      toast.error(t('No email on file for this customer. Add one on the customer/clinic profile or the report.'));
       return;
     }
 
@@ -157,10 +161,10 @@ export default function ReportDetail() {
         data: { session },
       } = await supabase.auth.getSession();
       if (!session?.access_token) {
-        toast.error('Session expired — sign in again');
+        toast.error(t('Session expired — sign in again'));
         return;
       }
-      const html = buildServiceReportPrintHTML({ ...report, theme, themeScope: 'email' });
+      const html = buildServiceReportPrintHTML({ ...report, theme, themeScope: 'email', locale });
       const result = await sendBillingDocEmail({
         kind: 'report',
         accessToken: session.access_token,
@@ -179,10 +183,10 @@ export default function ReportDetail() {
       if (result.emailSent) {
         toast.success(`Service report emailed to ${result.to || dest.email}`);
       } else {
-        toast.error(result.error || 'Email was not sent.');
+        toast.error(result.error || t('Email was not sent.'));
       }
     } catch (e: any) {
-      toast.error(e?.message || 'Email failed');
+      toast.error(e?.message || t('Email failed'));
     } finally {
       setEmailing(false);
     }
@@ -195,19 +199,15 @@ export default function ReportDetail() {
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="max-w-6xl mx-auto p-6 w-full">
-        <Link href="/reports" className="text-[var(--gold)]">
-          ← Back to list
-        </Link>
+        <Link href="/reports" className="text-[var(--gold)]">{t('← Back to list')}</Link>
         <div className="flex flex-wrap items-start justify-between gap-3 mt-4 mb-2">
           <h1 className="text-2xl font-bold">
-            Service Report {report?.report_number || id}
+            {t('Service Report')} {report?.report_number || id}
           </h1>
           <div className="flex flex-col items-end gap-1">
             <div className="flex flex-wrap gap-2 justify-end">
               {report && (
-                <button type="button" className="btn btn-secondary text-sm" onClick={openPrint}>
-                  Print / PDF
-                </button>
+                <button type="button" className="btn btn-secondary text-sm" onClick={openPrint}>{t('Print / PDF')}</button>
               )}
               {report && (
                 <button
@@ -216,21 +216,19 @@ export default function ReportDetail() {
                   onClick={emailReportToCustomer}
                   disabled={emailing}
                 >
-                  {emailing ? 'Emailing…' : 'Email report'}
+                  {emailing ? t('Emailing…') : t('Email report')}
                 </button>
               )}
               {!viewOnly && report && (
-                <Link href={`/reports/new?id=${id}`} className="btn btn-secondary text-sm">
-                  Open in Editor
-                </Link>
+                <Link href={`/reports/new?id=${id}`} className="btn btn-secondary text-sm">{t('Open in Editor')}</Link>
               )}
             </div>
             {report && (
               <div className="text-xs text-[var(--text3)]">
                 {emailOnFile
-                  ? `Email on file: ${emailOnFile}`
+                  ? t('Email on file: {email}').replace('{email}', emailOnFile)
                   : isComplete
-                    ? 'No email on file for this customer'
+                    ? t('No email on file for this customer')
                     : ''}
               </div>
             )}
@@ -238,9 +236,7 @@ export default function ReportDetail() {
         </div>
 
         {viewOnly && (
-          <div className="mb-4 text-sm px-3 py-2 rounded border border-[var(--border)] bg-[var(--surface3)] text-[var(--text3)]">
-            View-only (facility account). Contact your service provider to request changes.
-          </div>
+          <div className="mb-4 text-sm px-3 py-2 rounded border border-[var(--border)] bg-[var(--surface3)] text-[var(--text3)]">{t('View-only (facility account). Contact your service provider to request changes.')}</div>
         )}
 
         {theme.branded && (
@@ -258,49 +254,47 @@ export default function ReportDetail() {
               ) : null}
               <div className="font-bold">{theme.companyName}</div>
             </div>
-            <div className="text-sm font-semibold">Service Report</div>
+            <div className="text-sm font-semibold">{t('Service Report')}</div>
           </div>
         )}
 
         <div className="card p-6">
           {loading ? (
-            <p className="text-[var(--text3)]">Loading…</p>
+            <p className="text-[var(--text3)]">{t('Loading…')}</p>
           ) : report ? (
             <div className="space-y-4 text-sm">
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <span className="text-[var(--text3)]">Status:</span>{' '}
+                  <span className="text-[var(--text3)]">{t('Status:')}</span>{' '}
                   <span className="capitalize font-medium">{report.status}</span>
                 </div>
                 <div>
-                  <span className="text-[var(--text3)]">Service type:</span> {report.service_type || '—'}
+                  <span className="text-[var(--text3)]">{t('Service type:')}</span> {report.service_type || '—'}
                 </div>
                 <div>
-                  <span className="text-[var(--text3)]">Customer:</span> {report.customer_name || '—'}
+                  <span className="text-[var(--text3)]">{t('Customer:')}</span> {report.customer_name || '—'}
                 </div>
                 <div>
-                  <span className="text-[var(--text3)]">Engineer (FSE):</span> {engineer}
+                  <span className="text-[var(--text3)]">{t('Engineer (FSE):')}</span> {engineer}
                 </div>
                 <div>
-                  <span className="text-[var(--text3)]">Equipment:</span>{' '}
+                  <span className="text-[var(--text3)]">{t('Equipment:')}</span>{' '}
                   {report.equipment_name || report.model_type || '—'}
                 </div>
                 <div>
-                  <span className="text-[var(--text3)]">Serial:</span> {report.serial_number || '—'}
+                  <span className="text-[var(--text3)]">{t('Serial:')}</span> {report.serial_number || '—'}
                 </div>
                 <div>
-                  <span className="text-[var(--text3)]">Date:</span> {report.date_out || '—'}
+                  <span className="text-[var(--text3)]">{t('Date:')}</span> {report.date_out ? format(report.date_out) : '—'}
                 </div>
                 <div>
-                  <span className="text-[var(--text3)]">Next PM:</span> {report.next_pm_due || '—'}
+                  <span className="text-[var(--text3)]">{t('Next PM:')}</span> {report.next_pm_due ? format(report.next_pm_due) : '—'}
                 </div>
                 {report.equipment_id != null && (
                   <div>
-                    <span className="text-[var(--text3)]">Equipment ID:</span> {report.equipment_id}
+                    <span className="text-[var(--text3)]">{t('Equipment ID:')}</span> {report.equipment_id}
                     {report.serial_number && (
-                      <span className="text-[var(--text3)] text-xs ml-2">
-                        (history follows this laser via serial / equipment link)
-                      </span>
+                      <span className="text-[var(--text3)] text-xs ml-2">{t('(history follows this laser via serial / equipment link)')}</span>
                     )}
                   </div>
                 )}
@@ -315,12 +309,12 @@ export default function ReportDetail() {
                 if (!data || typeof data !== 'object' || !Object.keys(data).length) return null;
                 return (
                   <div key={String(title)}>
-                    <h3 className="font-bold text-[var(--gold)] mb-2">{title as string}</h3>
+                    <h3 className="font-bold text-[var(--gold)] mb-2">{t(title as string)}</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs">
                       {Object.entries(data as Record<string, string>).map(([k, v]) => (
                         <div key={k} className="flex justify-between gap-2 border-b border-[var(--border)] py-1">
-                          <span className="text-[var(--text2)]">{k}</span>
-                          <span className="font-bold">{v || '—'}</span>
+                          <span className="text-[var(--text2)]">{t(k)}</span>
+                          <span className="font-bold">{v ? t(String(v)) : '—'}</span>
                         </div>
                       ))}
                     </div>
@@ -330,17 +324,17 @@ export default function ReportDetail() {
 
               {Array.isArray(report.power_measurements) && report.power_measurements.length > 0 && (
                 <div>
-                  <h3 className="font-bold text-[var(--gold)] mb-2">Performance Testing</h3>
+                  <h3 className="font-bold text-[var(--gold)] mb-2">{t('Performance Testing')}</h3>
                   <div className="overflow-x-auto">
                     <table className="w-full text-xs border-collapse">
                       <thead>
                         <tr className="text-left text-[var(--text3)]">
-                          <th className="p-2 border-b border-[var(--border)]">Wavelength</th>
-                          <th className="p-2 border-b border-[var(--border)]">Spot</th>
-                          <th className="p-2 border-b border-[var(--border)]">Set</th>
-                          <th className="p-2 border-b border-[var(--border)]">Measured</th>
-                          <th className="p-2 border-b border-[var(--border)]">Result</th>
-                          <th className="p-2 border-b border-[var(--border)]">Error %</th>
+                          <th className="p-2 border-b border-[var(--border)]">{t('Wavelength')}</th>
+                          <th className="p-2 border-b border-[var(--border)]">{t('Spot')}</th>
+                          <th className="p-2 border-b border-[var(--border)]">{t('Set')}</th>
+                          <th className="p-2 border-b border-[var(--border)]">{t('Measured')}</th>
+                          <th className="p-2 border-b border-[var(--border)]">{t('Result')}</th>
+                          <th className="p-2 border-b border-[var(--border)]">{t('Error %')}</th>
                         </tr>
                       </thead>
                       <tbody>
@@ -386,11 +380,11 @@ export default function ReportDetail() {
                 if (!parameterRows.length) return null;
                 return (
                   <div>
-                    <h3 className="font-bold text-[var(--gold)] mb-2">System Parameters</h3>
+                    <h3 className="font-bold text-[var(--gold)] mb-2">{t('System Parameters')}</h3>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-1 text-xs">
                       {parameterRows.map((row) => (
                         <div key={row.key} className="flex justify-between gap-2 border-b border-[var(--border)] py-1">
-                          <span className="text-[var(--text2)]">{row.label}</span>
+                          <span className="text-[var(--text2)]">{t(row.label)}</span>
                           <span className="font-bold">{row.value}</span>
                         </div>
                       ))}
@@ -401,27 +395,27 @@ export default function ReportDetail() {
 
               {report.comments && (
                 <div className="pt-3 border-t border-[var(--border)]">
-                  <div className="text-[var(--text3)] mb-1">Notes</div>
+                  <div className="text-[var(--text3)] mb-1">{t('Notes')}</div>
                   <p className="whitespace-pre-wrap">{report.comments}</p>
                 </div>
               )}
 
               {report.tech_signature && String(report.tech_signature).startsWith('data:image') && (
                 <div className="pt-3 border-t border-[var(--border)]">
-                  <div className="text-[var(--text3)] mb-1">Technician signature</div>
+                  <div className="text-[var(--text3)] mb-1">{t('Technician signature')}</div>
                   <img
                     src={report.tech_signature}
-                    alt="Signature"
+                    alt={t('Signature')}
                     className="h-12 max-w-[200px] bg-white border border-[var(--border)] rounded"
                   />
                   {report.signed_date && (
-                    <div className="text-xs text-[var(--text3)] mt-1">Date: {report.signed_date}</div>
+                    <div className="text-xs text-[var(--text3)] mt-1">{t('Date:')} {format(report.signed_date)}</div>
                   )}
                 </div>
               )}
             </div>
           ) : (
-            <p className="mb-4">Report not found or you do not have access.</p>
+            <p className="mb-4">{t('Report not found or you do not have access.')}</p>
           )}
         </div>
       </div>

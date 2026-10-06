@@ -87,7 +87,7 @@ test('request body cannot choose the document id fields used as mail', () => {
     },
     'invoice_id'
   );
-  assert.deepEqual(request, { documentId: 42, includePaymentLink: false });
+  assert.deepEqual(request, { documentId: 42, includePaymentLink: false, locale: null });
   assert.equal(ownedSendRequest({ html: '<p>hi</p>', to_email: 'a@b.c' }, 'invoice_id').documentId, null);
   assert.equal(ownedSendRequest({ estimate_id: 'new', to: 'a@b.c' }, 'estimate_id').documentId, null);
   assert.equal(ownedSendRequest({ report_id: 'rep-1' }, 'report_id').documentId, 'rep-1');
@@ -433,7 +433,7 @@ test('send routes stay locked to owned-document mail', () => {
     assert.match(src, /documentOwnedByOrganization\(/, rel);
     assert.match(src, /resolveOwnedRecipient\(/, rel);
     assert.match(src, /documentAccountLinks\(/, rel);
-    assert.match(src, /ownedDocumentSubject\([^)]*company\.company_name\s*\)/, rel);
+    assert.match(src, /ownedDocumentSubject\([^)]*company\.company_name/, rel);
     assert.doesNotMatch(src, /from Total Service Pro/, rel);
     assert.match(src, /sanitizeMailResponse\(/, rel);
     assert.match(src, /fetchDirectoryContactSources\(\s*supabase/, rel);

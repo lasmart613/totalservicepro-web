@@ -1,4 +1,5 @@
 'use client';
+import { formatLocaleDate } from '@/lib/i18n/format-date';
 
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
@@ -669,7 +670,7 @@ export default function EstimateFormClient() {
         (docNumber && !/^draft$/i.test(docNumber) ? docNumber : '') ||
         allocatedNumberRef.current ||
         '',
-      dateStr: new Date().toLocaleDateString(),
+      dateStr: formatLocaleDate(new Date(), locale),
       manufacturer,
       model: modelName,
       serial,
@@ -786,9 +787,7 @@ export default function EstimateFormClient() {
     return (
       <div className="min-h-screen flex flex-col">
         <Header />
-        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">
-          Loading estimate…
-        </div>
+        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">{t('Loading estimate…')}</div>
       </div>
     );
   }
@@ -799,11 +798,9 @@ export default function EstimateFormClient() {
       <div className="max-w-4xl mx-auto w-full px-4 py-6 pb-36 scroll-pb-36">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
-            <Link href="/estimates" className="text-sm text-[var(--gold)] hover:underline">
-              ← Estimates
-            </Link>
+            <Link href="/estimates" className="text-sm text-[var(--gold)] hover:underline">{t('← Estimates')}</Link>
             <h1 className="text-2xl font-extrabold mt-1">
-              {savedId ? 'Edit Estimate' : 'New Estimate'}
+              {savedId ? t('Edit Estimate') : t('New Estimate')}
             </h1>
             <div className="text-sm text-[var(--text3)] mt-0.5 flex flex-wrap gap-2 items-center">
               {docNumber && (
@@ -821,18 +818,16 @@ export default function EstimateFormClient() {
               type="button"
               className="btn btn-primary text-sm"
               onClick={convertToInvoice}
-              title="Converts to one invoice. Parts/travel deposit is due now; remainder stays due on completion until you collect it."
-            >
-              Convert to Invoice
-            </button>
+              title={t('Converts to one invoice. Parts/travel deposit is due now; remainder stays due on completion until you collect it.')}
+            >{t('Convert to Invoice')}</button>
           )}
         </div>
 
         {/* Customer */}
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Customer</h2>
+          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Customer')}</h2>
           <div className="relative mb-3">
-            <label className="text-xs text-[var(--text3)] font-semibold">Search / name</label>
+            <label className="text-xs text-[var(--text3)] font-semibold">{t('Search / name')}</label>
             <input
               className="input mt-1"
               value={custSearch}
@@ -843,7 +838,7 @@ export default function EstimateFormClient() {
                 if (!e.target.value) setCustomerOrgId(null);
               }}
               onFocus={() => setShowCustDrop(true)}
-              placeholder="Type customer name…"
+              placeholder={t('Type customer name…')}
               autoComplete="off"
             />
             {showCustDrop && filteredCustomers.length > 0 && (
@@ -867,33 +862,33 @@ export default function EstimateFormClient() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div className="sm:col-span-2">
-              <label className="text-xs text-[var(--text3)]">Address</label>
+              <label className="text-xs text-[var(--text3)]">{t('Address')}</label>
               <input className="input mt-1" value={custAddress} onChange={(e) => setCustAddress(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">City</label>
+              <label className="text-xs text-[var(--text3)]">{t('City')}</label>
               <input className="input mt-1 scroll-mb-36" value={custCity} onChange={(e) => setCustCity(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-xs text-[var(--text3)]">State</label>
+                <label className="text-xs text-[var(--text3)]">{t('State')}</label>
                 <input className="input mt-1 scroll-mb-36" maxLength={2} value={custState} onChange={(e) => setCustState(e.target.value)} />
               </div>
               <div>
-                <label className="text-xs text-[var(--text3)]">ZIP</label>
+                <label className="text-xs text-[var(--text3)]">{t('ZIP')}</label>
                 <input className="input mt-1 scroll-mb-36" value={custZip} onChange={(e) => setCustZip(e.target.value)} />
               </div>
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Contact</label>
+              <label className="text-xs text-[var(--text3)]">{t('Contact')}</label>
               <input className="input mt-1" value={custContact} onChange={(e) => setCustContact(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Phone</label>
+              <label className="text-xs text-[var(--text3)]">{t('Phone')}</label>
               <input className="input mt-1" value={custPhone} onChange={(e) => setCustPhone(e.target.value)} />
             </div>
             <div className="sm:col-span-2">
-              <label className="text-xs text-[var(--text3)]">Email</label>
+              <label className="text-xs text-[var(--text3)]">{t('Email')}</label>
               <input className="input mt-1" type="email" value={custEmail} onChange={(e) => setCustEmail(e.target.value)} />
             </div>
           </div>
@@ -901,10 +896,10 @@ export default function EstimateFormClient() {
 
         {/* Equipment */}
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Equipment</h2>
+          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Equipment')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-[var(--text3)]">Equipment type</label>
+              <label className="text-xs text-[var(--text3)]">{t('Equipment type')}</label>
               <select
                 className="input select mt-1"
                 value={equipmentType}
@@ -922,15 +917,15 @@ export default function EstimateFormClient() {
                   }
                 }}
               >
-                {EQUIPMENT_TYPES.map((t) => (
-                  <option key={t.value} value={t.value}>
-                    {t.label}
+                {EQUIPMENT_TYPES.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {t(item.label)}
                   </option>
                 ))}
               </select>
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Manufacturer</label>
+              <label className="text-xs text-[var(--text3)]">{t('Manufacturer')}</label>
               <select
                 className="input select mt-1"
                 value={manufacturer}
@@ -940,7 +935,7 @@ export default function EstimateFormClient() {
                   setCustomModel('');
                 }}
               >
-                <option value="">— Select —</option>
+                <option value="">{t('— Select —')}</option>
                 {manufacturers.map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
@@ -949,36 +944,36 @@ export default function EstimateFormClient() {
               </select>
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Model</label>
+              <label className="text-xs text-[var(--text3)]">{t('Model')}</label>
               <select
                 className="input select mt-1"
                 value={model}
                 disabled={!manufacturer}
                 onChange={(e) => setModel(e.target.value)}
               >
-                <option value="">— Select —</option>
+                <option value="">{t('— Select —')}</option>
                 {models.map((m) => (
                   <option key={m.value} value={m.value}>
                     {m.label}
                   </option>
                 ))}
-                <option value="__other__">Other / custom…</option>
+                <option value="__other__">{t('Other / custom…')}</option>
               </select>
               {model === '__other__' && (
                 <input
                   className="input mt-2"
-                  placeholder="Custom model name"
+                  placeholder={t('Custom model name')}
                   value={customModel}
                   onChange={(e) => setCustomModel(e.target.value)}
                 />
               )}
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Serial #</label>
+              <label className="text-xs text-[var(--text3)]">{t('Serial #')}</label>
               <input className="input mt-1" value={serial} onChange={(e) => setSerial(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Pulse count</label>
+              <label className="text-xs text-[var(--text3)]">{t('Pulse count')}</label>
               <input
                 className="input mt-1"
                 type="number"
@@ -992,7 +987,7 @@ export default function EstimateFormClient() {
 
         {/* Service types */}
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Service Type(s)</h2>
+          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Service Type(s)')}</h2>
           <div>
             {SERVICE_TYPES.map((s) => (
               <label
@@ -1021,7 +1016,7 @@ export default function EstimateFormClient() {
                   }}
                 />
                 <span className="service-type-label" style={{ display: 'block' }}>
-                  {SERVICE_TYPE_LABELS[s] || s}
+                  {t(SERVICE_TYPE_LABELS[s] || s)}
                 </span>
               </label>
             ))}
@@ -1029,28 +1024,28 @@ export default function EstimateFormClient() {
           <textarea
             className="input mt-3"
             rows={2}
-            placeholder="Describe repair details or custom work…"
+            placeholder={t('Describe repair details or custom work…')}
             value={otherService}
             onChange={(e) => setOtherService(e.target.value)}
           />
         </section>
 
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Reported Issues / Notes</h2>
+          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Reported Issues / Notes')}</h2>
           <textarea
             className="input"
             rows={4}
-            placeholder="e.g. Low energy output, error code E-12…"
+            placeholder={t('e.g. Low energy output, error code E-12…')}
             value={issues}
             onChange={(e) => setIssues(e.target.value)}
           />
         </section>
 
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Travel & Urgency</h2>
+          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Travel & Urgency')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-[var(--text3)]">Miles (round-trip)</label>
+              <label className="text-xs text-[var(--text3)]">{t('Miles (round-trip)')}</label>
               <input
                 className="input mt-1"
                 type="number"
@@ -1060,15 +1055,15 @@ export default function EstimateFormClient() {
               />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Urgency</label>
+              <label className="text-xs text-[var(--text3)]">{t('Urgency')}</label>
               <select
                 className="input select mt-1"
                 value={urgency}
                 onChange={(e) => setUrgency(e.target.value)}
               >
-                <option value="standard">Standard (next available)</option>
-                <option value="rush">Rush (within 48h)</option>
-                <option value="emergency">Emergency (same/next day)</option>
+                <option value="standard">{t('Standard (next available)')}</option>
+                <option value="rush">{t('Rush (within 48h)')}</option>
+                <option value="emergency">{t('Emergency (same/next day)')}</option>
               </select>
             </div>
           </div>
@@ -1076,7 +1071,7 @@ export default function EstimateFormClient() {
 
         {/* Pricing */}
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Pricing</h2>
+          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Pricing')}</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {(
               [
@@ -1088,7 +1083,7 @@ export default function EstimateFormClient() {
               ] as [string, string, number, (n: number) => void][]
             ).map(([id, label, val, set]) => (
               <div key={id}>
-                <label className="text-xs text-[var(--text3)]">{label.includes('{symbol}') ? moneyLabel(label) : label}</label>
+                <label className="text-xs text-[var(--text3)]">{label.includes('{symbol}') ? moneyLabel(t(label)) : t(label)}</label>
                 <input
                   className="input mt-1"
                   type="number"
@@ -1101,7 +1096,7 @@ export default function EstimateFormClient() {
             ))}
           </div>
 
-          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Reimbursable expenses</h3>
+          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">{t('Reimbursable expenses')}</h3>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
             {(
               [
@@ -1114,7 +1109,7 @@ export default function EstimateFormClient() {
               ] as [string, string, number, (n: number) => void][]
             ).map(([id, label, val, set]) => (
               <div key={id}>
-                <label className="text-xs text-[var(--text3)]">{label.includes('{symbol}') ? moneyLabel(label) : label}</label>
+                <label className="text-xs text-[var(--text3)]">{label.includes('{symbol}') ? moneyLabel(t(label)) : t(label)}</label>
                 <input
                   className="input mt-1"
                   type="number"
@@ -1127,16 +1122,16 @@ export default function EstimateFormClient() {
             ))}
           </div>
 
-          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Parts line items</h3>
+          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">{t('Parts line items')}</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[560px]">
               <thead>
                 <tr className="text-left text-[var(--text3)] text-xs border-b border-[var(--border2)]">
-                  <th className="py-2 pr-2">Part #</th>
-                  <th className="py-2 pr-2">Description</th>
-                  <th className="py-2 pr-2 w-16">Qty</th>
-                  <th className="py-2 pr-2 w-24">Price</th>
-                  <th className="py-2 pr-2 w-24">Ext</th>
+                  <th className="py-2 pr-2">{t('Part #')}</th>
+                  <th className="py-2 pr-2">{t('Description')}</th>
+                  <th className="py-2 pr-2 w-16">{t('Qty')}</th>
+                  <th className="py-2 pr-2 w-24">{t('Price')}</th>
+                  <th className="py-2 pr-2 w-24">{t('Ext')}</th>
                   <th className="w-8" />
                 </tr>
               </thead>
@@ -1163,7 +1158,7 @@ export default function EstimateFormClient() {
                             });
                           }
                         }}
-                        placeholder="Part #"
+                        placeholder={t('Part #')}
                       />
                       <datalist id={`parts-${li.id}`}>
                         {suggestParts(li.part_number).map((p) => (
@@ -1178,7 +1173,7 @@ export default function EstimateFormClient() {
                         className="input text-sm py-1.5"
                         value={li.description}
                         onChange={(e) => updatePartLine(li.id, { description: e.target.value })}
-                        placeholder="Description"
+                        placeholder={t('Description')}
                       />
                     </td>
                     <td className="py-1.5 pr-2">
@@ -1225,7 +1220,7 @@ export default function EstimateFormClient() {
                               : rows.filter((r) => r.id !== li.id)
                           )
                         }
-                        title="Remove"
+                        title={t('Remove')}
                       >
                         ×
                       </button>
@@ -1239,9 +1234,7 @@ export default function EstimateFormClient() {
             type="button"
             className="btn btn-secondary text-sm mt-2"
             onClick={() => setPartLines((r) => [...r, emptyLineItem('EP')])}
-          >
-            + Add part row
-          </button>
+          >{t('+ Add part row')}</button>
           <p className="text-xs text-[var(--text3)] mt-2">
             Parts total: {money(totals.partsTotal)}
           </p>
@@ -1256,9 +1249,7 @@ export default function EstimateFormClient() {
                   if (!e.target.checked) setDepositManual(false);
                 }}
                 className="accent-[var(--gold)] w-4 h-4"
-              />
-              Require parts / travel deposit on this estimate
-            </label>
+              />{t('Require parts / travel deposit on this estimate')}</label>
             {depositRequired && (
               <div className="mt-2">
                 <label className="text-xs text-[var(--text3)]">{moneyLabel('Deposit amount ({symbol})')}</label>
@@ -1278,29 +1269,29 @@ export default function EstimateFormClient() {
           </div>
 
           <div className="mt-4 grid grid-cols-2 gap-2 text-sm">
-            <div className="text-[var(--text3)]">Labor</div>
+            <div className="text-[var(--text3)]">{t('Labor')}</div>
             <div className="text-right font-semibold">{money(totals.labor)}</div>
-            <div className="text-[var(--text3)]">Travel (mileage)</div>
+            <div className="text-[var(--text3)]">{t('Travel (mileage)')}</div>
             <div className="text-right font-semibold">{money(totals.mileage)}</div>
-            <div className="text-[var(--text3)]">Reimbursements + per diem</div>
+            <div className="text-[var(--text3)]">{t('Reimbursements + per diem')}</div>
             <div className="text-right font-semibold">
               {money(totals.reimbTotal + totals.perDiem)}
             </div>
-            <div className="text-[var(--text3)]">Parts</div>
+            <div className="text-[var(--text3)]">{t('Parts')}</div>
             <div className="text-right font-semibold">{money(totals.partsTotal)}</div>
-            <div className="text-[var(--text3)]">Subtotal</div>
+            <div className="text-[var(--text3)]">{t('Subtotal')}</div>
             <div className="text-right font-semibold">{money(totals.subtotal)}</div>
-            <div className="text-[var(--text3)]">Tax</div>
+            <div className="text-[var(--text3)]">{t('Tax')}</div>
             <div className="text-right font-semibold">{money(totals.tax)}</div>
-            <div className="font-bold text-[var(--gold)]">Total</div>
+            <div className="font-bold text-[var(--gold)]">{t('Total')}</div>
             <div className="text-right font-extrabold text-[var(--gold)] text-lg">
               {money(totals.grandTotal)}
             </div>
             {depositRequired && (
               <>
-                <div className="text-[var(--text3)]">Deposit</div>
+                <div className="text-[var(--text3)]">{t('Deposit')}</div>
                 <div className="text-right">{money(totals.depositAmt)}</div>
-                <div className="font-semibold">Balance due</div>
+                <div className="font-semibold">{t('Balance due')}</div>
                 <div className="text-right font-bold">{money(totals.balanceDue)}</div>
               </>
             )}
@@ -1308,50 +1299,42 @@ export default function EstimateFormClient() {
         </section>
 
         {!isValidOrgId(userOrgId) && (
-          <p className="text-xs text-amber-400 mt-4">
-            No organization on your profile — estimate may save without org scope.
-          </p>
+          <p className="text-xs text-amber-400 mt-4">{t('No organization on your profile — estimate may save without org scope.')}</p>
         )}
       </div>
 
       <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-[var(--gold)] bg-[var(--surface)] px-3 py-2.5">
         <div className="max-w-4xl mx-auto flex flex-wrap gap-2 justify-center">
-          <Link href="/estimates" className="btn btn-secondary min-w-[80px] text-center">
-            Cancel
-          </Link>
+          <Link href="/estimates" className="btn btn-secondary min-w-[80px] text-center">{t('Cancel')}</Link>
           <button
             type="button"
             className="btn btn-secondary min-w-[100px]"
             disabled={saving || emailing}
             onClick={() => saveEstimate('draft')}
           >
-            {saving ? 'Saving…' : 'Save Draft'}
+            {saving ? t('Saving…') : t('Save Draft')}
           </button>
           <button
             type="button"
             className="btn btn-secondary min-w-[120px]"
             onClick={openEstimatePreview}
-          >
-            Preview / PDF
-          </button>
+          >{t('Preview / PDF')}</button>
           <button
             type="button"
             className="btn btn-primary min-w-[140px]"
             disabled={saving || emailing}
             onClick={() => finalizeAndEmailEstimate()}
           >
-            {emailing ? 'Emailing…' : 'Finalize & Email'}
+            {emailing ? t('Emailing…') : t('Finalize & Email')}
           </button>
           <button
             type="button"
             className="btn btn-secondary min-w-[100px] text-xs"
             disabled={saving || emailing}
             onClick={() => markSentWithoutEmail()}
-            aria-label="Mark sent (no email)"
-            title="Sets status to sent without calling Resend"
-          >
-            Mark sent (no email)
-          </button>
+            aria-label={t('Mark sent (no email)')}
+            title={t('Sets status to sent without calling Resend')}
+          >{t('Mark sent (no email)')}</button>
         </div>
         <p className="text-[10px] text-[var(--text3)] mt-1.5 text-center">
           Finalize &amp; Email only marks the estimate sent after Resend accepts the message.

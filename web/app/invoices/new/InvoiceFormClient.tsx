@@ -801,9 +801,7 @@ export default function InvoiceFormClient() {
     return (
       <div className="min-h-screen flex flex-col">
         <Header />
-        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">
-          Loading invoice…
-        </div>
+        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">{t('Loading invoice…')}</div>
       </div>
     );
   }
@@ -814,11 +812,9 @@ export default function InvoiceFormClient() {
       <div className="max-w-4xl mx-auto w-full px-4 py-6 pb-28">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
-            <Link href="/invoices" className="text-sm text-[var(--gold)] hover:underline">
-              ← Invoices
-            </Link>
+            <Link href="/invoices" className="text-sm text-[var(--gold)] hover:underline">{t('← Invoices')}</Link>
             <h1 className="text-2xl font-extrabold mt-1">
-              {savedId ? 'Edit Invoice' : sourceEstimateId ? 'Invoice from Estimate' : 'New Invoice'}
+              {savedId ? t('Edit Invoice') : sourceEstimateId ? t('Invoice from Estimate') : t('New Invoice')}
             </h1>
             <div className="text-sm text-[var(--text3)] mt-0.5 flex flex-wrap gap-2 items-center">
               {docNumber && (
@@ -840,9 +836,9 @@ export default function InvoiceFormClient() {
         </div>
 
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Customer</h2>
+          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Customer')}</h2>
           <div className="relative mb-3">
-            <label className="text-xs text-[var(--text3)] font-semibold">Search / name</label>
+            <label className="text-xs text-[var(--text3)] font-semibold">{t('Search / name')}</label>
             <input
               className="input mt-1"
               value={custSearch}
@@ -853,7 +849,7 @@ export default function InvoiceFormClient() {
                 if (!e.target.value) setCustomerOrgId(null);
               }}
               onFocus={() => setShowCustDrop(true)}
-              placeholder="Type customer name…"
+              placeholder={t('Type customer name…')}
               autoComplete="off"
             />
             {showCustDrop && filteredCustomers.length > 0 && (
@@ -877,32 +873,32 @@ export default function InvoiceFormClient() {
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-[var(--text3)]">Address</label>
+              <label className="text-xs text-[var(--text3)]">{t('Address')}</label>
               <input className="input mt-1" value={custAddress} onChange={(e) => setCustAddress(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Contact</label>
+              <label className="text-xs text-[var(--text3)]">{t('Contact')}</label>
               <input className="input mt-1" value={custContact} onChange={(e) => setCustContact(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Phone</label>
+              <label className="text-xs text-[var(--text3)]">{t('Phone')}</label>
               <input className="input mt-1" value={custPhone} onChange={(e) => setCustPhone(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Email</label>
+              <label className="text-xs text-[var(--text3)]">{t('Email')}</label>
               <input className="input mt-1" type="email" value={custEmail} onChange={(e) => setCustEmail(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">City</label>
+              <label className="text-xs text-[var(--text3)]">{t('City')}</label>
               <input className="input mt-1" value={custCity} onChange={(e) => setCustCity(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-2">
               <div>
-                <label className="text-xs text-[var(--text3)]">State</label>
+                <label className="text-xs text-[var(--text3)]">{t('State')}</label>
                 <input className="input mt-1" maxLength={2} value={custState} onChange={(e) => setCustState(e.target.value)} />
               </div>
               <div>
-                <label className="text-xs text-[var(--text3)]">ZIP</label>
+                <label className="text-xs text-[var(--text3)]">{t('ZIP')}</label>
                 <input className="input mt-1" value={custZip} onChange={(e) => setCustZip(e.target.value)} />
               </div>
             </div>
@@ -910,10 +906,10 @@ export default function InvoiceFormClient() {
         </section>
 
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Equipment (optional)</h2>
+          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Equipment (optional)')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-[var(--text3)]">Manufacturer</label>
+              <label className="text-xs text-[var(--text3)]">{t('Manufacturer')}</label>
               <select
                 className="input select mt-1"
                 value={manufacturer}
@@ -922,7 +918,7 @@ export default function InvoiceFormClient() {
                   setModel('');
                 }}
               >
-                <option value="">— Select —</option>
+                <option value="">{t('— Select —')}</option>
                 {manufacturers.map((m) => (
                   <option key={m} value={m}>
                     {m}
@@ -931,14 +927,14 @@ export default function InvoiceFormClient() {
               </select>
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Model</label>
+              <label className="text-xs text-[var(--text3)]">{t('Model')}</label>
               <select
                 className="input select mt-1"
                 value={model}
                 disabled={!manufacturer}
                 onChange={(e) => setModel(e.target.value)}
               >
-                <option value="">— Select —</option>
+                <option value="">{t('— Select —')}</option>
                 {models.map((m) => (
                   <option key={m} value={m}>
                     {m}
@@ -947,11 +943,11 @@ export default function InvoiceFormClient() {
               </select>
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Serial #</label>
+              <label className="text-xs text-[var(--text3)]">{t('Serial #')}</label>
               <input className="input mt-1" value={serial} onChange={(e) => setSerial(e.target.value)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Pulse count</label>
+              <label className="text-xs text-[var(--text3)]">{t('Pulse count')}</label>
               <input
                 className="input mt-1"
                 type="number"
@@ -964,10 +960,10 @@ export default function InvoiceFormClient() {
         </section>
 
         <section className="card p-4 mb-4">
-          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Invoice Details</h2>
+          <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">{t('Invoice Details')}</h2>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
             <div>
-              <label className="text-xs text-[var(--text3)]">Invoice date</label>
+              <label className="text-xs text-[var(--text3)]">{t('Invoice date')}</label>
               <input
                 className="input mt-1"
                 type="date"
@@ -976,7 +972,7 @@ export default function InvoiceFormClient() {
               />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Due date</label>
+              <label className="text-xs text-[var(--text3)]">{t('Due date')}</label>
               <input
                 className="input mt-1"
                 type="date"
@@ -986,26 +982,26 @@ export default function InvoiceFormClient() {
             </div>
           </div>
           <div>
-            <label className="text-xs text-[var(--text3)]">Notes / description</label>
+            <label className="text-xs text-[var(--text3)]">{t('Notes / description')}</label>
             <textarea
               className="input mt-1"
               rows={2}
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Optional notes (service summary, PO #, etc.)"
+              placeholder={t('Optional notes (service summary, PO #, etc.)')}
             />
           </div>
 
-          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Line Items</h3>
+          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">{t('Line Items')}</h3>
           <div className="overflow-x-auto">
             <table className="w-full text-sm min-w-[560px]">
               <thead>
                 <tr className="text-left text-[var(--text3)] text-xs border-b border-[var(--border2)]">
-                  <th className="py-2 pr-2">Part #</th>
-                  <th className="py-2 pr-2">Description</th>
-                  <th className="py-2 pr-2 w-16">Qty</th>
-                  <th className="py-2 pr-2 w-24">Price</th>
-                  <th className="py-2 pr-2 w-24">Ext</th>
+                  <th className="py-2 pr-2">{t('Part #')}</th>
+                  <th className="py-2 pr-2">{t('Description')}</th>
+                  <th className="py-2 pr-2 w-16">{t('Qty')}</th>
+                  <th className="py-2 pr-2 w-24">{t('Price')}</th>
+                  <th className="py-2 pr-2 w-24">{t('Ext')}</th>
                   <th className="w-8" />
                 </tr>
               </thead>
@@ -1032,7 +1028,7 @@ export default function InvoiceFormClient() {
                             });
                           }
                         }}
-                        placeholder="Part #"
+                        placeholder={t('Part #')}
                       />
                       <datalist id={`inv-parts-${li.id}`}>
                         {suggestParts(li.part_number).map((p) => (
@@ -1047,7 +1043,7 @@ export default function InvoiceFormClient() {
                         className="input text-sm py-1.5"
                         value={li.description}
                         onChange={(e) => updateLine(li.id, { description: e.target.value })}
-                        placeholder="Description"
+                        placeholder={t('Description')}
                       />
                       {li.marketplace_listing_id ? (
                         <Link
@@ -1121,11 +1117,11 @@ export default function InvoiceFormClient() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
             <div>
-              <label className="text-xs text-[var(--text3)]">Subtotal (from line items)</label>
+              <label className="text-xs text-[var(--text3)]">{t('Subtotal (from line items)')}</label>
               <input className="input mt-1 opacity-90" readOnly value={subtotal.toFixed(2)} />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Tax</label>
+              <label className="text-xs text-[var(--text3)]">{t('Tax')}</label>
               <input
                 className="input mt-1"
                 type="number"
@@ -1137,7 +1133,7 @@ export default function InvoiceFormClient() {
             </div>
           </div>
 
-          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Payment split</h3>
+          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">{t('Payment split')}</h3>
           {(sourceEstimateId || dueNowAmount != null) && (
             <label className="flex items-start gap-2 text-sm mb-3">
               <input
@@ -1159,7 +1155,7 @@ export default function InvoiceFormClient() {
           {collectable.hasDeferredSplit && (
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-3">
               <div>
-                <label className="text-xs text-[var(--text3)]">Due now (parts/travel deposit)</label>
+                <label className="text-xs text-[var(--text3)]">{t('Due now (parts/travel deposit)')}</label>
                 <input
                   className="input mt-1"
                   type="number"
@@ -1171,7 +1167,7 @@ export default function InvoiceFormClient() {
                 />
               </div>
               <div>
-                <label className="text-xs text-[var(--text3)]">Remaining (due on completion)</label>
+                <label className="text-xs text-[var(--text3)]">{t('Remaining (due on completion)')}</label>
                 <input
                   className="input mt-1 opacity-90"
                   readOnly
@@ -1182,7 +1178,7 @@ export default function InvoiceFormClient() {
           )}
           <div className="rounded-lg border border-[var(--border2)] bg-[var(--surface2)] p-3 mb-3 text-sm">
             <div className="flex justify-between gap-3">
-              <span className="text-[var(--text3)]">Stripe pay button</span>
+              <span className="text-[var(--text3)]">{t('Stripe pay button')}</span>
               <strong className="text-[var(--gold)]">{money(collectable.stripeAmount)}</strong>
             </div>
             {collectable.hasDeferredSplit && !collectable.deferredReleased && (
@@ -1198,7 +1194,7 @@ export default function InvoiceFormClient() {
             )}
           </div>
 
-          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Amount received</h3>
+          <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">{t('Amount received')}</h3>
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>
               <label className="text-xs text-[var(--text3)]">{moneyLabel('Amount received ({symbol})')}</label>
@@ -1212,7 +1208,7 @@ export default function InvoiceFormClient() {
               />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Received date</label>
+              <label className="text-xs text-[var(--text3)]">{t('Received date')}</label>
               <input
                 className="input mt-1"
                 type="date"
@@ -1221,19 +1217,19 @@ export default function InvoiceFormClient() {
               />
             </div>
             <div>
-              <label className="text-xs text-[var(--text3)]">Payment method</label>
+              <label className="text-xs text-[var(--text3)]">{t('Payment method')}</label>
               <select
                 className="input select mt-1"
                 value={depositMethod}
                 onChange={(e) => setDepositMethod(e.target.value)}
               >
-                <option value="">— Select —</option>
-                <option value="Cash">Cash</option>
-                <option value="Check">Check</option>
-                <option value="Credit Card">Credit Card</option>
-                <option value="ACH / Wire">ACH / Wire</option>
+                <option value="">{t('— Select —')}</option>
+                <option value="Cash">{t('Cash')}</option>
+                <option value="Check">{t('Check')}</option>
+                <option value="Credit Card">{t('Credit Card')}</option>
+                <option value="ACH / Wire">{t('ACH / Wire')}</option>
                 <option value="Stripe">Stripe</option>
-                <option value="Other">Other</option>
+                <option value="Other">{t('Other')}</option>
               </select>
             </div>
           </div>
@@ -1244,7 +1240,7 @@ export default function InvoiceFormClient() {
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
             <div>
-              <label className="text-xs text-[var(--text3)] font-bold">Total Due</label>
+              <label className="text-xs text-[var(--text3)] font-bold">{t('Total Due')}</label>
               <input
                 className="input mt-1 font-bold text-lg"
                 type="number"
@@ -1256,8 +1252,7 @@ export default function InvoiceFormClient() {
             <div>
               <label className="text-xs text-[var(--text3)] font-bold">
                 {collectable.hasDeferredSplit && !collectable.deferredReleased
-                  ? 'Still owed (incl. due on completion)'
-                  : 'Balance remaining'}
+                  ? 'Still owed (incl. due on completion)' : t('Balance remaining')}
               </label>
               <input
                 className="input mt-1 font-bold text-lg opacity-90"
@@ -1272,31 +1267,27 @@ export default function InvoiceFormClient() {
         </section>
 
         <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
-          <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">
-            Cancel
-          </Link>
+          <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">{t('Cancel')}</Link>
           <button
             type="button"
             className="btn btn-secondary min-w-[100px]"
             disabled={saving || emailing}
             onClick={() => saveInvoice('draft')}
           >
-            {saving ? 'Saving…' : 'Save Draft'}
+            {saving ? t('Saving…') : t('Save Draft')}
           </button>
           <button
             type="button"
             className="btn btn-secondary min-w-[120px]"
             onClick={openInvoicePreview}
-          >
-            Preview / PDF
-          </button>
+          >{t('Preview / PDF')}</button>
           <button
             type="button"
             className="btn btn-primary min-w-[140px]"
             disabled={saving || emailing}
             onClick={() => finalizeAndEmail()}
           >
-            {emailing ? 'Emailing…' : 'Finalize & Email'}
+            {emailing ? t('Emailing…') : t('Finalize & Email')}
           </button>
           {status === 'sent' && (
             <button
@@ -1313,11 +1304,9 @@ export default function InvoiceFormClient() {
             className="btn btn-secondary min-w-[100px] text-xs"
             disabled={saving || emailing}
             onClick={() => markSentWithoutEmail()}
-            aria-label="Mark sent (no email)"
-            title="Sets status to sent without calling Resend"
-          >
-            Mark sent (no email)
-          </button>
+            aria-label={t('Mark sent (no email)')}
+            title={t('Sets status to sent without calling Resend')}
+          >{t('Mark sent (no email)')}</button>
           {collectable.hasDeferredSplit && !collectable.deferredReleased && (
             <button
               type="button"

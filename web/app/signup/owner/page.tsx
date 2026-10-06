@@ -472,17 +472,17 @@ function OwnerSignupInner() {
                       value={currentModel} 
                       onChange={e => setCurrentModel(e.target.value)}
                     >
-                      <option value="">Select model...</option>
+                      <option value="">{t('Select model...')}</option>
                       {modelKeys.map(key => (
                         <option key={key} value={key}>{MODELS[key]?.label || key}</option>
                       ))}
                     </select>
                   </div>
                   <div>
-                    <label className="text-xs text-[var(--text3)]">Serial Number</label>
+                    <label className="text-xs text-[var(--text3)]">{t('Serial Number')}</label>
                     <input 
                       className="input" 
-                      placeholder="Serial #" 
+                      placeholder={t('Serial #')} 
                       value={currentSerial} 
                       onChange={e => setCurrentSerial(e.target.value)} 
                     />
@@ -492,9 +492,7 @@ function OwnerSignupInner() {
                       type="button" 
                       onClick={addEquipment} 
                       className="btn btn-secondary w-full"
-                    >
-                      Add Equipment
-                    </button>
+                    >{t('Add Equipment')}</button>
                   </div>
                 </div>
 
@@ -510,15 +508,13 @@ function OwnerSignupInner() {
                           type="button" 
                           onClick={() => removeEquipment(index)} 
                           className="text-red-400 hover:text-red-500 text-xs"
-                        >
-                          Remove
-                        </button>
+                        >{t('Remove')}</button>
                       </div>
                     ))}
                   </div>
                 )}
               </div>
-              <p className="text-[10px] text-[var(--text3)] mt-1">Add each medical device you own with its serial number.</p>
+              <p className="text-[10px] text-[var(--text3)] mt-1">{t('Add each medical device you own with its serial number.')}</p>
             </div>
 
             <div>

@@ -120,8 +120,8 @@ export async function POST(req: NextRequest) {
         ? await loadSenderCompany(supabase, callerOrgId, techName)
         : senderCompanyFromOrg(null, techName);
     const theme = callerOrgId != null ? await getCompanyTheme(callerOrgId, supabase) : null;
-    const subject = ownedDocumentSubject('report', report.report_number, company.company_name);
-    const html = buildOwnedReportMessage(report, theme);
+    const subject = ownedDocumentSubject('report', report.report_number, company.company_name, request.locale);
+    const html = buildOwnedReportMessage(report, theme, request.locale);
     const { signupUrl, loginUrl } = documentAccountLinks(publicSiteOrigin(req));
     const wrapped = wrapCustomerFacingDocumentEmail({
       subject,
@@ -130,6 +130,7 @@ export async function POST(req: NextRequest) {
       loginUrl,
       companyName: String(report.customer_name || '').trim(),
       theme,
+      locale: request.locale,
     });
 
     const resendKey = process.env.RESEND_API_KEY;

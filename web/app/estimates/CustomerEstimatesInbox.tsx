@@ -1,4 +1,6 @@
 'use client';
+import { useFormatDate } from '@/lib/use-format-date';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -279,8 +281,10 @@ function InboxCard({
   onToggleNote: () => void;
   onSubmit: (row: InboxRow, action: EstimateEmailAction) => void;
 }) {
+  const t = useT();
+  const { format, locale } = useFormatDate();
   const busy = submitting?.startsWith(`${row.estimateId}:`);
-  const until = validUntilLabel(row.createdAt);
+  const until = validUntilLabel(row.createdAt, locale);
   const expired = row.expired || isEstimateExpired({ created_at: row.createdAt, status: row.status });
   const actionLabel = customerActionLabel(row.customerAction);
 
@@ -292,7 +296,7 @@ function InboxCard({
             {row.estimateNumber || 'Estimate'} · {row.companyName}
           </Link>
           <div className="text-xs text-[var(--text3)] mt-1">
-            {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : '—'}
+            {row.createdAt ? format(row.createdAt) : '—'}
             {expired ? ' · Expired' : until ? ` · Valid thru ${until}` : ''}
             {row.deviceModel ? ` · ${row.deviceModel}` : ''}
           </div>
@@ -324,7 +328,7 @@ function InboxCard({
             disabled={!!busy}
             onClick={() => onSubmit(row, 'approve')}
           >
-            {submitting === `${row.estimateId}:approve` ? 'Approving…' : 'Approve'}
+            {submitting === `${row.estimateId}:approve` ? 'Approving…' : t('Approve')}
           </button>
           <button
             type="button"
@@ -333,16 +337,14 @@ function InboxCard({
             disabled={!!busy}
             onClick={() => onSubmit(row, 'reject')}
           >
-            {submitting === `${row.estimateId}:reject` ? 'Rejecting…' : 'Reject'}
+            {submitting === `${row.estimateId}:reject` ? 'Rejecting…' : t('Reject')}
           </button>
           <button
             type="button"
             className="btn btn-secondary text-sm py-2.5"
             disabled={!!busy}
             onClick={onToggleNote}
-          >
-            Modify
-          </button>
+          >{t('Modify')}</button>
         </div>
       )}
 

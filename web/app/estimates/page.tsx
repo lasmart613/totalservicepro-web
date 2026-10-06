@@ -1,4 +1,5 @@
 'use client';
+import { useFormatDate } from '@/lib/use-format-date';
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -119,6 +120,7 @@ export default function EstimatesPage() {
 
 function ShopEstimatesList() {
   const t = useT();
+  const { format, locale } = useFormatDate();
   const { money } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
@@ -418,15 +420,11 @@ function ShopEstimatesList() {
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-[var(--gold)]">{loading ? '—' : drafts}</div>
-            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              DRAFTS
-            </div>
+            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">{t('DRAFTS')}</div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-blue-300">{loading ? '—' : sent}</div>
-            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              SENT
-            </div>
+            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">{t('SENT')}</div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-purple-300">{loading ? '—' : invoiced}</div>
@@ -492,7 +490,7 @@ function ShopEstimatesList() {
           <div className="space-y-3">
             {filtered.map((est) => {
               const st = effectiveStatus(est);
-              const until = validUntilLabel(est.created_at);
+              const until = validUntilLabel(est.created_at, locale);
               const num = docNumber(est);
               const canConvert = st !== 'invoiced' && st !== 'cancelled' && st !== 'expired';
               const cust = customerActionFromEstimate(est);
@@ -526,7 +524,7 @@ function ShopEstimatesList() {
                         )}
                         <span>
                           {est.created_at
-                            ? new Date(est.created_at).toLocaleDateString()
+                            ? format(est.created_at)
                             : '—'}
                         </span>
                         {' '}
@@ -599,9 +597,7 @@ function ShopEstimatesList() {
                           className="btn btn-primary text-xs px-3 py-1.5"
                           style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
                           title="Parts/travel deposit is due now; remainder stays on the invoice until you collect it."
-                        >
-                          Convert to Invoice
-                        </Link>
+                        >{t('Convert to Invoice')}</Link>
                       )}
                       {st !== 'expired' &&
                         st !== 'invoiced' &&
@@ -614,25 +610,19 @@ function ShopEstimatesList() {
                             className="btn text-xs px-3 py-1.5"
                             style={{ display: 'inline-block', margin: '0 8px 8px 0', background: '#14532d', color: '#bbf7d0', borderColor: '#166534' }}
                             onClick={() => recordCustomerAction(est, 'approved')}
-                          >
-                            Approve
-                          </button>
+                          >{t('Approve')}</button>
                           <button
                             type="button"
                             className="btn text-xs px-3 py-1.5"
                             style={{ display: 'inline-block', margin: '0 8px 8px 0', background: '#7f1d1d', color: '#fecaca', borderColor: '#991b1b' }}
                             onClick={() => recordCustomerAction(est, 'rejected')}
-                          >
-                            Reject
-                          </button>
+                          >{t('Reject')}</button>
                           <button
                             type="button"
                             className="btn btn-secondary text-xs px-3 py-1.5"
                             style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
                             onClick={() => recordCustomerAction(est, 'changes_requested')}
-                          >
-                            Modify
-                          </button>
+                          >{t('Modify')}</button>
                         </>
                       )}
                       {cust.token && (

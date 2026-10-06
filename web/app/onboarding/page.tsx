@@ -1,4 +1,5 @@
 'use client';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Header } from '@/components/Header';
@@ -55,6 +56,7 @@ const ADDITIONAL_ROLES = ['fse', 'dispatcher', 'service_manager', 'billing_manag
 const ADMIN_ROLES = ['company_admin', 'admin'];
 
 export default function Onboarding() {
+  const t = useT();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [step, setStep] = useState(1);
@@ -393,9 +395,9 @@ export default function Onboarding() {
                     className={`text-[10px] px-1.5 py-px border rounded ${m.additionalRoles.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{roleLabel(ar)}</button>
                 ))}
                 {m.isCreator ? (
-                  <span className="text-[10px] text-[var(--gold)]">(creator - must keep &gt;=1 admin)</span>
+                  <span className="text-[10px] text-[var(--gold)]">{t('(creator - must keep >=1 admin)')}</span>
                 ) : (
-                  <button onClick={() => removeTeamMember(idx)} className="text-red-400 text-xs ml-2">Remove</button>
+                  <button onClick={() => removeTeamMember(idx)} className="text-red-400 text-xs ml-2">{t('Remove')}</button>
                 )}
               </div>
             </div>
@@ -589,8 +591,7 @@ export default function Onboarding() {
             (metaType === 'laser_rental'
               ? 'Rental company'
               : metaType === 'laser_reseller'
-                ? 'Reseller inventory'
-                : 'Clinic');
+                ? 'Reseller inventory' : t('Clinic'));
           ({ data: newOrg, error: iErr } = await supabase
             .from('organizations')
             .insert(orgPayload)
@@ -856,14 +857,14 @@ export default function Onboarding() {
     if (step > 1) setStep(step - 1);
   }
 
-  if (loading) return <div className="min-h-screen flex items-center justify-center"><Header /><div>Loading setup…</div></div>;
+  if (loading) return <div className="min-h-screen flex items-center justify-center"><Header /><div>{t('Loading setup…')}</div></div>;
 
   return (
     <div className="min-h-screen bg-[var(--bg)]">
       <Header />
       <div className="max-w-6xl mx-auto px-6 py-8">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold">Complete Your Setup</h1>
+          <h1 className="text-3xl font-bold">{t('Complete Your Setup')}</h1>
           <p className="text-[var(--text2)]">
             {orgType === 'clinic'
               ? 'Register your facility and lasers.'
@@ -879,38 +880,38 @@ export default function Onboarding() {
 
         {step === 1 && (
           <div>
-            <h2 className="text-2xl font-semibold text-center mb-6">Confirm your organization type</h2>
+            <h2 className="text-2xl font-semibold text-center mb-6">{t('Confirm your organization type')}</h2>
             <div className="grid md:grid-cols-3 gap-4">
               {(['service','clinic','supplier'] as OrgType[]).map(t => (
                 <button key={t} onClick={() => handleTypeSelect(t)} className={`card p-6 text-left hover:border-[var(--gold)] ${orgType===t ? 'border-[var(--gold)]' : ''}`}>
                   <div className="text-2xl mb-2">{t==='service'?'👷':t==='clinic'?'🏥':'📦'}</div>
-                  <div className="font-bold">{t==='service' ? 'Repair company' : t==='clinic' ? 'Laser Owner (Clinic / Rental / Reseller)' : 'Parts Supplier'}</div>
-                  <div className="text-sm text-[var(--text3)]">Click to select</div>
+                  <div className="font-bold">{t==='service' ? 'Repair company' : t==='clinic' ? 'Laser Owner (Clinic / Rental / Reseller)' : t('Parts Supplier')}</div>
+                  <div className="text-sm text-[var(--text3)]">{t('Click to select')}</div>
                 </button>
               ))}
             </div>
-            <div className="mt-6 text-xs text-[var(--text3)]">Field engineers and service techs are added as roles inside a repair company (you can add them during this flow or later in Company &gt; Team).</div>
+            <div className="mt-6 text-xs text-[var(--text3)]">{t('Field engineers and service techs are added as roles inside a repair company (you can add them during this flow or later in Company > Team).')}</div>
           </div>
         )}
 
         {step === 2 && (
           <div className="max-w-xl mx-auto space-y-6">
-            <h2 className="text-2xl font-bold">Review &amp; Complete Your Details</h2>
-            <p className="text-sm text-[var(--text3)] -mt-3">Prefilled from your signup. Edit only if needed — these save to your profile and company record.</p>
+            <h2 className="text-2xl font-bold">{t('Review & Complete Your Details')}</h2>
+            <p className="text-sm text-[var(--text3)] -mt-3">{t('Prefilled from your signup. Edit only if needed — these save to your profile and company record.')}</p>
             <div className="grid grid-cols-2 gap-4">
-              <div><label className="label">First Name *</label><input className="input" value={formData.firstName||''} onChange={e=>updateForm('firstName',e.target.value)} /></div>
-              <div><label className="label">Last Name *</label><input className="input" value={formData.lastName||''} onChange={e=>updateForm('lastName',e.target.value)} /></div>
+              <div><label className="label">{t('First Name *')}</label><input className="input" value={formData.firstName||''} onChange={e=>updateForm('firstName',e.target.value)} /></div>
+              <div><label className="label">{t('Last Name *')}</label><input className="input" value={formData.lastName||''} onChange={e=>updateForm('lastName',e.target.value)} /></div>
             </div>
-            <div><label className="label">Job Title</label><input className="input" value={formData.jobTitle||''} onChange={e=>updateForm('jobTitle',e.target.value)} /></div>
-            <div><label className="label">{orgType==='clinic' ? 'Facility Name *' : 'Company Name *'}</label><input className="input" value={formData.companyName||''} onChange={e=>updateForm('companyName',e.target.value)} /></div>
-            <div><label className="label">Address</label><input className="input" value={formData.address||''} onChange={e=>updateForm('address',e.target.value)} /></div>
+            <div><label className="label">{t('Job Title')}</label><input className="input" value={formData.jobTitle||''} onChange={e=>updateForm('jobTitle',e.target.value)} /></div>
+            <div><label className="label">{orgType==='clinic' ? t('Facility Name *') : t('Company Name *')}</label><input className="input" value={formData.companyName||''} onChange={e=>updateForm('companyName',e.target.value)} /></div>
+            <div><label className="label">{t('Address')}</label><input className="input" value={formData.address||''} onChange={e=>updateForm('address',e.target.value)} /></div>
             <div className="grid grid-cols-2 gap-4">
-              <div><label className="label">City</label><input className="input" value={formData.city||''} onChange={e=>updateForm('city',e.target.value)} /></div>
-              <div><label className="label">State</label><input className="input" value={formData.state||''} onChange={e=>updateForm('state',e.target.value)} /></div>
+              <div><label className="label">{t('City')}</label><input className="input" value={formData.city||''} onChange={e=>updateForm('city',e.target.value)} /></div>
+              <div><label className="label">{t('State')}</label><input className="input" value={formData.state||''} onChange={e=>updateForm('state',e.target.value)} /></div>
             </div>
             <div className="grid grid-cols-2 gap-4">
-              <div><label className="label">Phone</label><input className="input" value={formData.phone||''} onChange={e=>updateForm('phone',e.target.value)} /></div>
-              <div><label className="label">Website</label><input className="input" value={formData.website||''} onChange={e=>updateForm('website',e.target.value)} /></div>
+              <div><label className="label">{t('Phone')}</label><input className="input" value={formData.phone||''} onChange={e=>updateForm('phone',e.target.value)} /></div>
+              <div><label className="label">{t('Website')}</label><input className="input" value={formData.website||''} onChange={e=>updateForm('website',e.target.value)} /></div>
             </div>
             <label className="flex items-start gap-3 cursor-pointer card p-4">
               <input
@@ -920,7 +921,7 @@ export default function Onboarding() {
                 onChange={(e) => updateForm('listInDirectory', e.target.checked)}
               />
               <span className="text-sm leading-snug">
-                <strong>List my organization in the Total Service Pro directory for free</strong>
+                <strong>{t('List my organization in the Total Service Pro directory for free')}</strong>
                 <span className="block text-xs text-[var(--text3)] mt-1 font-normal">
                   Appears in the company directory so other users can find you. Change anytime in Company Profile. Free for all org types.
                 </span>
@@ -932,13 +933,13 @@ export default function Onboarding() {
         {/* Step 3: service team OR clinic lasers OR supplier skip note */}
         {step === 3 && orgType === 'service' && (
           <div>
-            <h2 className="text-2xl font-bold mb-2">Team Members &amp; Roles</h2>
-            <p className="text-sm text-[var(--text2)] mb-4">You (creator) start as admin. Change your role if needed. Add others (they get invited if not signed up yet). Must have ≥1 admin always. Sole props: check below for multi-role on one person.</p>
+            <h2 className="text-2xl font-bold mb-2">{t('Team Members & Roles')}</h2>
+            <p className="text-sm text-[var(--text2)] mb-4">{t('You (creator) start as admin. Change your role if needed. Add others (they get invited if not signed up yet). Must have ≥1 admin always. Sole props: check below for multi-role on one person.')}</p>
 
             <div className="mb-4">
               <label className="flex items-center gap-2 cursor-pointer">
                 <input type="checkbox" checked={isSoleProp} onChange={toggleSoleProp} />
-                <span>Sole proprietorship (I handle multiple roles: admin + field engineer etc.)</span>
+                <span>{t('Sole proprietorship (I handle multiple roles: admin + field engineer etc.)')}</span>
               </label>
             </div>
 
@@ -947,15 +948,15 @@ export default function Onboarding() {
             {!isSoleProp && (
               <div className="card p-4 mb-4">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                  <input className="input" placeholder="Email" value={teamEmail} onChange={e=>setTeamEmail(e.target.value)} />
-                  <input className="input" placeholder="First Name" value={teamFirst} onChange={e=>setTeamFirst(e.target.value)} />
-                  <input className="input" placeholder="Last Name" value={teamLast} onChange={e=>setTeamLast(e.target.value)} />
+                  <input className="input" placeholder={t('Email')} value={teamEmail} onChange={e=>setTeamEmail(e.target.value)} />
+                  <input className="input" placeholder={t('First Name')} value={teamFirst} onChange={e=>setTeamFirst(e.target.value)} />
+                  <input className="input" placeholder={t('Last Name')} value={teamLast} onChange={e=>setTeamLast(e.target.value)} />
                   <select className="select" value={teamRole} onChange={e=>setTeamRole(e.target.value)}>
                     {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
                   </select>
                 </div>
                 <div className="mt-2">
-                  <div className="text-xs text-[var(--text3)] mb-1">Additional roles (optional, for multi-role members)</div>
+                  <div className="text-xs text-[var(--text3)] mb-1">{t('Additional roles (optional, for multi-role members)')}</div>
                   <div className="flex flex-wrap gap-1">
                     {ADDITIONAL_ROLES.map(ar => (
                       <button key={ar} type="button" onClick={() => toggleTeamAdditional(ar)}
@@ -963,23 +964,23 @@ export default function Onboarding() {
                     ))}
                   </div>
                 </div>
-                <button onClick={addTeamMember} className="btn btn-secondary mt-3 w-full text-sm">+ Add Team Member</button>
-                <div className="text-[10px] text-[var(--text3)] mt-1">If they don&apos;t have an account yet, an invitation is created. They sign up then get assigned (auto-claim on their login).</div>
+                <button onClick={addTeamMember} className="btn btn-secondary mt-3 w-full text-sm">{t('+ Add Team Member')}</button>
+                <div className="text-[10px] text-[var(--text3)] mt-1">{t("If they don't have an account yet, an invitation is created. They sign up then get assigned (auto-claim on their login).")}</div>
               </div>
             )}
 
-            <div className="text-xs text-[var(--text3)]">Validation: at least one admin required before continuing.</div>
+            <div className="text-xs text-[var(--text3)]">{t('Validation: at least one admin required before continuing.')}</div>
           </div>
         )}
 
         {step === 3 && orgType === 'clinic' && (
           <div className="max-w-xl mx-auto">
-            <h2 className="text-2xl font-bold mb-2">Lasers you own</h2>
-            <p className="text-sm text-[var(--text3)] mb-4">Add systems registered to your facility (optional now — you can manage later in My Lasers).</p>
+            <h2 className="text-2xl font-bold mb-2">{t('Lasers you own')}</h2>
+            <p className="text-sm text-[var(--text3)] mb-4">{t('Add systems registered to your facility (optional now — you can manage later in My Lasers).')}</p>
 
             <div className="card p-4 space-y-3 mb-4">
               <div>
-                <label className="label">Manufacturer *</label>
+                <label className="label">{t('Manufacturer *')}</label>
                 <select
                   className="input"
                   value={laserMfr}
@@ -989,26 +990,26 @@ export default function Onboarding() {
                     setLaserModelOther('');
                   }}
                 >
-                  <option value="">Select brand…</option>
+                  <option value="">{t('Select brand…')}</option>
                   {BRANDS.map((b) => (
                     <option key={b} value={b}>{b}</option>
                   ))}
-                  <option value="Other">Other</option>
+                  <option value="Other">{t('Other')}</option>
                 </select>
               </div>
               <div>
-                <label className="label">Model *</label>
+                <label className="label">{t('Model *')}</label>
                 <select
                   className="input"
                   value={laserModel}
                   onChange={(e) => setLaserModel(e.target.value)}
                   disabled={!laserMfr}
                 >
-                  <option value="">{laserMfr ? 'Select model…' : 'Select manufacturer first'}</option>
+                  <option value="">{laserMfr ? t('Select model…') : 'Select manufacturer first'}</option>
                   {laserModelsForMfr.map((m) => (
                     <option key={m} value={m}>{m}</option>
                   ))}
-                  <option value={OTHER_MODEL}>Other / not listed…</option>
+                  <option value={OTHER_MODEL}>{t('Other / not listed…')}</option>
                 </select>
                 {laserModel === OTHER_MODEL && (
                   <input
@@ -1020,14 +1021,14 @@ export default function Onboarding() {
                 )}
               </div>
               <div>
-                <label className="label">Serial #</label>
+                <label className="label">{t('Serial #')}</label>
                 <input className="input" value={laserSerial} onChange={e=>setLaserSerial(e.target.value)} placeholder="Optional" />
               </div>
               <div>
-                <label className="label">Room / notes</label>
+                <label className="label">{t('Room / notes')}</label>
                 <input className="input" value={laserNotes} onChange={e=>setLaserNotes(e.target.value)} placeholder="Room, handpiece…" />
               </div>
-              <button type="button" onClick={addLaserDraft} className="btn btn-secondary w-full text-sm">+ Add laser</button>
+              <button type="button" onClick={addLaserDraft} className="btn btn-secondary w-full text-sm">{t('+ Add laser')}</button>
             </div>
 
             {lasers.length > 0 && (
@@ -1038,7 +1039,7 @@ export default function Onboarding() {
                       <div className="font-bold text-[var(--gold)]">{l.manufacturer} {l.model}</div>
                       <div className="text-xs text-[var(--text3)]">{l.serial_number ? `SN ${l.serial_number}` : 'No serial'}{l.notes ? ` · ${l.notes}` : ''}</div>
                     </div>
-                    <button type="button" className="text-red-400 text-xs" onClick={() => removeLaserDraft(l.id)}>Remove</button>
+                    <button type="button" className="text-red-400 text-xs" onClick={() => removeLaserDraft(l.id)}>{t('Remove')}</button>
                   </li>
                 ))}
               </ul>
@@ -1048,8 +1049,8 @@ export default function Onboarding() {
 
         {step === 3 && orgType === 'supplier' && (
           <div className="max-w-xl mx-auto">
-            <h2 className="text-2xl font-bold mb-2">Parts categories</h2>
-            <p className="text-sm text-[var(--text3)] mb-4">Select categories you supply (optional — refine later on Supplier Profile).</p>
+            <h2 className="text-2xl font-bold mb-2">{t('Parts categories')}</h2>
+            <p className="text-sm text-[var(--text3)] mb-4">{t('Select categories you supply (optional — refine later on Supplier Profile).')}</p>
             <div className="flex flex-wrap gap-2">
               {SUPPLIER_CATEGORIES.map(c => (
                 <button
@@ -1058,7 +1059,7 @@ export default function Onboarding() {
                   onClick={() => toggleCategory(c)}
                   className={`px-3 py-1.5 rounded-full border text-sm ${selectedCategories.includes(c) ? 'bg-[var(--gold)] text-black border-[var(--gold)]' : 'border-[var(--border)]'}`}
                 >
-                  {c}
+                  {t(c)}
                 </button>
               ))}
             </div>
@@ -1067,7 +1068,7 @@ export default function Onboarding() {
 
         {step === 4 && (
           <div className="max-w-2xl mx-auto">
-            <h2 className="text-2xl font-bold mb-2">Branding</h2>
+            <h2 className="text-2xl font-bold mb-2">{t('Branding')}</h2>
             <p className="text-sm text-[var(--text3)] mb-4">
               Your logo appears on invoices, estimates, and service reports. Premium plans can also set the header colors.
             </p>
@@ -1114,7 +1115,7 @@ export default function Onboarding() {
         {step === 6 && (
           <div className="text-center">
             <Check className="mx-auto mb-4 text-[var(--gold)]" size={64} />
-            <h2 className="text-3xl font-bold">Ready to go!</h2>
+            <h2 className="text-3xl font-bold">{t('Ready to go!')}</h2>
             <p className="my-4">
               {orgType === 'clinic'
                 ? 'Your facility profile and lasers will be saved. Role stays owner.'
@@ -1122,13 +1123,13 @@ export default function Onboarding() {
                   ? 'Your supplier profile, categories, and brands will be saved. Role stays parts_supplier.'
                   : 'Your organization, profile, and team (if you are a repair company) will be saved. You can always edit from Company page or Settings.'}
             </p>
-            <button onClick={saveOnboarding} disabled={loading} className="btn btn-primary px-10">Finish &amp; Continue →</button>
+            <button onClick={saveOnboarding} disabled={loading} className="btn btn-primary px-10">{t('Finish & Continue →')}</button>
           </div>
         )}
 
         <div className="flex justify-between mt-10 max-w-xl mx-auto">
           <button onClick={prevStep} disabled={step===1} className="btn btn-secondary">Back</button>
-          {step < 6 && <button onClick={nextStep} className="btn btn-primary flex items-center gap-2">Continue <ArrowRight size={18} /></button>}
+          {step < 6 && <button onClick={nextStep} className="btn btn-primary flex items-center gap-2">{t('Continue')}<ArrowRight size={18} /></button>}
         </div>
       </div>
     </div>
