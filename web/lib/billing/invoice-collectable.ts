@@ -5,6 +5,7 @@
  */
 
 import { money2, parseInvoiceData } from './apply-invoice-payment.ts';
+import { activeEstimateDepositAmount } from './estimate-deposit.ts';
 
 export type InvoicePaymentKind = 'deposit' | 'balance' | 'full';
 
@@ -38,25 +39,13 @@ function asMoney(val: unknown): number {
   return Number.isFinite(n) ? money2(n) : 0;
 }
 
-function depositRequired(data: Record<string, unknown>): boolean {
-  const raw = data.deposit_required;
-  if (raw === false || raw === 0 || raw === '0' || raw === 'false') return false;
-  return true;
-}
-
 /**
- * Parts/travel deposit requested on an estimate (unpaid). 0 if none or if the
- * amount covers the whole job (no deferred remainder).
+ * Parts/travel deposit requested on an estimate (unpaid). 0 when the deposit
+ * flag is off, when none was stored, or when the amount covers the whole job
+ * (no deferred remainder). A stored amount is ignored unless the flag is on.
  */
 export function estimatePartsDeposit(estimateData: unknown, total?: number): number {
-  const data = parseInvoiceData(estimateData);
-  if (!depositRequired(data)) return 0;
-  const raw = data.deposit ?? data.travelDeposit ?? data.parts_deposit ?? data.partsDeposit;
-  const amt = asMoney(raw);
-  if (amt <= 0) return 0;
-  const t = asMoney(total);
-  if (t > 0 && amt >= t - 0.004) return 0;
-  return amt;
+  return activeEstimateDepositAmount(estimateData, total);
 }
 
 function paidFromInvoiceData(data: Record<string, unknown>, amountPaidCol?: unknown): number {
