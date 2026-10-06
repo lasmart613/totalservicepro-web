@@ -1,5 +1,7 @@
 -- Supabase security-advisor hardening.
--- Idempotent. Apply in the SQL editor or CLI. This file does not rewrite rows.
+-- Idempotent. Apply AFTER 20261006_000400 and 20261006_000401.
+-- Both 000400 and this file replace get_my_org_id(); this version must win.
+-- This file does not rewrite rows.
 -- Live catalog was not queried from this repo (no database credentials).
 -- Names below are the latest definitions in web/supabase/migrations.
 -- A DO block at the end NOTICE-lists any extra public functions still missing
@@ -75,69 +77,44 @@ END $$;
 -- ---------------------------------------------------------------------------
 CREATE OR REPLACE FUNCTION public.get_my_org_id()
 RETURNS bigint
-LANGUAGE plpgsql
+LANGUAGE sql
 STABLE
 SECURITY DEFINER
 SET search_path = public, pg_temp
 AS $$
-DECLARE
-  uid uuid := auth.uid();
-  active_org bigint;
-  member_org bigint;
-  profile_org bigint;
-BEGIN
-  IF uid IS NULL THEN
-    RETURN NULL;
-  END IF;
-
-  IF to_regclass('public.organization_memberships') IS NOT NULL
-     AND EXISTS (
-       SELECT 1 FROM information_schema.columns
-       WHERE table_schema = 'public'
-         AND table_name = 'user_profiles'
-         AND column_name = 'active_organization_id'
-     ) THEN
-    SELECT p.active_organization_id
-      INTO active_org
-    FROM public.user_profiles p
-    WHERE p.id = uid
-      AND p.active_organization_id IS NOT NULL
-      AND EXISTS (
-        SELECT 1
-        FROM public.organization_memberships m
-        WHERE m.user_id = uid
-          AND m.organization_id = p.active_organization_id
-      )
-    LIMIT 1;
-    IF active_org IS NOT NULL THEN
-      RETURN active_org;
-    END IF;
-  END IF;
-
-  IF to_regclass('public.organization_memberships') IS NOT NULL THEN
-    SELECT m.organization_id
-      INTO member_org
-    FROM public.organization_memberships m
-    WHERE m.user_id = uid
-    ORDER BY m.is_home DESC NULLS LAST, m.created_at ASC NULLS LAST
-    LIMIT 1;
-    IF member_org IS NOT NULL THEN
-      RETURN member_org;
-    END IF;
-  END IF;
-
-  SELECT p.organization_id
-    INTO profile_org
-  FROM public.user_profiles p
-  JOIN public.organizations o ON o.id = p.organization_id
-  WHERE p.id = uid
-    AND o.created_by IS DISTINCT FROM uid
-    AND lower(coalesce(o.type, '')) IN (
-      'customer', 'laser_clinic', 'laser_rental', 'laser_reseller'
+  SELECT COALESCE(
+    (
+      SELECT p.active_organization_id
+      FROM public.user_profiles p
+      WHERE p.id = auth.uid()
+        AND p.active_organization_id IS NOT NULL
+        AND EXISTS (
+          SELECT 1
+          FROM public.organization_memberships m
+          WHERE m.user_id = auth.uid()
+            AND m.organization_id = p.active_organization_id
+        )
+      LIMIT 1
+    ),
+    (
+      SELECT m.organization_id
+      FROM public.organization_memberships m
+      WHERE m.user_id = auth.uid()
+      ORDER BY m.is_home DESC NULLS LAST, m.created_at ASC NULLS LAST
+      LIMIT 1
+    ),
+    (
+      SELECT p.organization_id
+      FROM public.user_profiles p
+      JOIN public.organizations o ON o.id = p.organization_id
+      WHERE p.id = auth.uid()
+        AND o.created_by IS DISTINCT FROM auth.uid()
+        AND lower(coalesce(o.type, '')) IN (
+          'customer', 'laser_clinic', 'laser_rental', 'laser_reseller'
+        )
+      LIMIT 1
     )
-  LIMIT 1;
-  RETURN profile_org;
-END;
+  );
 $$;
 
 COMMENT ON FUNCTION public.get_my_org_id() IS
@@ -272,10 +249,11 @@ END $$;
 --      god_email_sends         god invite/blast routes and /unsubscribe
 --      manual_search_index     god reindex + search API via service role or
 --                              search_manual_catalog (authenticated RPC)
---    manufacturers and laser_models enable RLS and are read/written by signed-in
---    clients (dropdowns, add-manufacturer). Their SELECT/INSERT policies are
---    recreated here in case CREATE POLICY IF NOT EXISTS never landed on live
---    (likely the other two of the advisor's six).
+--    manufacturers and laser_models are shared catalogs. Signed-in clients
+--    SELECT both. Reports, service requests, and marketplace listings insert
+--    a manufacturer name when it is not already in the list. Those writes
+--    require a signed-in user and a non-empty name. laser_models stays
+--    read-only here (000401 revokes client writes).
 --    Any further zero-policy public table is NOTICE'd and loses anon writes.
 --    No policy is invented for an unknown table.
 -- ---------------------------------------------------------------------------
@@ -283,12 +261,30 @@ DO $$
 BEGIN
   IF to_regclass('public.manufacturers') IS NOT NULL THEN
     EXECUTE 'ALTER TABLE public.manufacturers ENABLE ROW LEVEL SECURITY';
+    EXECUTE 'REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.manufacturers FROM PUBLIC, anon';
+    EXECUTE 'GRANT SELECT ON TABLE public.manufacturers TO anon, authenticated';
+    EXECUTE 'GRANT INSERT, UPDATE ON TABLE public.manufacturers TO authenticated';
     EXECUTE 'DROP POLICY IF EXISTS "read manufacturers" ON public.manufacturers';
     EXECUTE 'CREATE POLICY "read manufacturers" ON public.manufacturers FOR SELECT TO authenticated, anon USING (true)';
+    EXECUTE 'DROP POLICY IF EXISTS manufacturers_authenticated_insert ON public.manufacturers';
     EXECUTE 'DROP POLICY IF EXISTS manufacturers_authenticated_write ON public.manufacturers';
-    EXECUTE 'CREATE POLICY manufacturers_authenticated_write ON public.manufacturers FOR INSERT TO authenticated WITH CHECK (true)';
     EXECUTE 'DROP POLICY IF EXISTS manufacturers_authenticated_update ON public.manufacturers';
-    EXECUTE 'CREATE POLICY manufacturers_authenticated_update ON public.manufacturers FOR UPDATE TO authenticated USING (true) WITH CHECK (true)';
+    EXECUTE 'DROP POLICY IF EXISTS manufacturers_insert_name ON public.manufacturers';
+    EXECUTE 'DROP POLICY IF EXISTS manufacturers_update_name ON public.manufacturers';
+    EXECUTE $policy$
+      CREATE POLICY manufacturers_insert_name ON public.manufacturers
+        FOR INSERT TO authenticated
+        WITH CHECK (
+          auth.uid() IS NOT NULL
+          AND nullif(btrim(name), '') IS NOT NULL
+        )
+    $policy$;
+    EXECUTE $policy$
+      CREATE POLICY manufacturers_update_name ON public.manufacturers
+        FOR UPDATE TO authenticated
+        USING (auth.uid() IS NOT NULL)
+        WITH CHECK (nullif(btrim(name), '') IS NOT NULL)
+    $policy$;
   END IF;
   IF to_regclass('public.laser_models') IS NOT NULL THEN
     EXECUTE 'ALTER TABLE public.laser_models ENABLE ROW LEVEL SECURITY';

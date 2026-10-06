@@ -29,6 +29,18 @@ test('definer functions are revoked from anon and get_my_org_id requires a membe
     sql,
     /SELECT organization_id FROM public\.user_profiles WHERE id = auth\.uid\(\) LIMIT 1/
   );
+  const orgFn = sql.slice(
+    sql.indexOf('CREATE OR REPLACE FUNCTION public.get_my_org_id()'),
+    sql.indexOf('COMMENT ON FUNCTION public.get_my_org_id()')
+  );
+  assert.match(orgFn, /LANGUAGE sql/);
+  assert.doesNotMatch(orgFn, /information_schema|to_regclass|LANGUAGE plpgsql/);
+  const userOrg = sql.slice(
+    sql.indexOf('CREATE OR REPLACE FUNCTION public.user_org_id()'),
+    sql.indexOf('COMMENT ON FUNCTION public.user_org_id()')
+  );
+  assert.match(userOrg, /LANGUAGE sql/);
+  assert.match(userOrg, /get_my_org_id\(\)/);
 });
 
 test('open service request view is security invoker over a redacted definer', () => {
@@ -53,5 +65,11 @@ test('zero-policy tables stay service-role except catalog reads and issue insert
   }
   assert.match(sql, /CREATE POLICY "read manufacturers"/);
   assert.match(sql, /CREATE POLICY "read laser_models"/);
+  assert.match(sql, /manufacturers_insert_name/);
+  assert.match(sql, /nullif\(btrim\(name\), ''\) IS NOT NULL/);
+  assert.doesNotMatch(sql, /FOR INSERT TO authenticated WITH CHECK \(true\)/);
+  assert.doesNotMatch(sql, /FOR UPDATE TO authenticated USING \(true\)/);
   assert.match(sql, /RLS enabled with no policy/);
+  assert.match(sql, /list_open_service_requests/);
+  assert.match(sql, /security_invoker = true/);
 });
