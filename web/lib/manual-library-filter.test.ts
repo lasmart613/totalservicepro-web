@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -14,6 +14,7 @@ import {
   MANUAL_LIBRARY_SELECT_WITH_LANGUAGE,
   fetchManualLibraryRows,
   isManualsSelectSchemaError,
+  manualCatalogLanguage,
   manualLibraryFiltersActive,
   manualLibrarySearchParams,
   manualMatchesQuery,
@@ -239,6 +240,30 @@ test('language filter defaults to all and still matches brand and model', () => 
   assert.match(qs, /lang=de/);
   assert.equal(parseManualLibrarySearchParams(`?${qs}`).language, 'de');
   assert.equal(parseManualLibrarySearchParams('?lang=all').language, '');
+});
+
+test('locale-prefixed manuals URLs use that catalog language and do not 404', () => {
+  assert.equal(manualCatalogLanguage('/de/manuals', ''), 'de');
+  assert.equal(manualCatalogLanguage('/es/manuals', ''), 'es');
+  assert.equal(manualCatalogLanguage('/de/manuals', '?q=laser&make=Candela'), 'de');
+  assert.equal(parseManualLibrarySearchParams('?q=laser&make=Candela').query, 'laser');
+  assert.equal(parseManualLibrarySearchParams('?q=laser&make=Candela').brand, 'Candela');
+  assert.equal(manualCatalogLanguage('/es/manuals', '?lang=fr&q=lumenis'), 'fr');
+  assert.equal(manualCatalogLanguage('/manuals', ''), '');
+  assert.equal(manualCatalogLanguage('/manuals', '?lang=de'), 'de');
+  assert.equal(manualCatalogLanguage('/ar/manuals/view', '?id=9'), 'ar');
+  const pageSrc = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
+  assert.match(pageSrc, /manualCatalogLanguage\(window\.location\.pathname/);
+  for (const id of ['fa', 'es', 'fr', 'he', 'it', 'de', 'pt', 'ar']) {
+    const page = join(here, `../app/${id}/manuals/page.tsx`);
+    const view = join(here, `../app/${id}/manuals/view/page.tsx`);
+    const layout = join(here, `../app/${id}/manuals/layout.tsx`);
+    assert.equal(existsSync(page), true, `${id} manuals page`);
+    assert.match(readFileSync(page, 'utf8'), /from '\.\.\/\.\.\/manuals\/page'/);
+    assert.equal(existsSync(view), true, `${id} manuals view`);
+    assert.match(readFileSync(view, 'utf8'), /from '\.\.\/\.\.\/\.\.\/manuals\/view\/page'/);
+    assert.match(readFileSync(layout, 'utf8'), /RequireAuth/);
+  }
 });
 
 test('library page wires search UI and keeps open/get-manual-url gating', () => {

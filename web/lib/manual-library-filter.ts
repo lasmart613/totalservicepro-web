@@ -18,6 +18,7 @@ import {
   inferEquipmentType,
   type EquipmentType,
 } from './equipment-types.ts';
+import { localeFromPathname } from './i18n/locales.ts';
 import {
   ALL_MANUAL_LANGUAGES,
   manualLanguageLabel,
@@ -288,6 +289,18 @@ export function parseManualLibrarySearchParams(search: string): ManualLibraryFil
     library: libRaw === 'operators' || libRaw === 'operator' ? 'operators' : DEFAULT_MANUAL_LIBRARY,
     language: langRaw && langRaw !== ALL_MANUAL_LANGUAGES ? langRaw : '',
   };
+}
+
+/**
+ * Catalog language for /manuals and /<locale>/manuals.
+ * An explicit ?lang= wins. Otherwise a public locale prefix selects that language,
+ * the same filter as /manuals?lang=<locale>. English /manuals stays unfiltered.
+ */
+export function manualCatalogLanguage(pathname: string, search: string): string {
+  const parsed = parseManualLibrarySearchParams(search);
+  if (parsed.language) return parsed.language;
+  const locale = localeFromPathname(pathname);
+  return locale === 'en' ? '' : locale;
 }
 
 export function manualLibrarySearchParams(filters: ManualLibraryFilters): string {

@@ -44,6 +44,7 @@ import {
   fetchManualLibraryRows,
   manufacturerShelves,
   manualLibraryFiltersActive,
+  manualCatalogLanguage,
   manualLibrarySearchParams,
   parseManualLibrarySearchParams,
   uniqueManualBrands,
@@ -98,7 +99,8 @@ export default function ManualsLibrary() {
     else if (parsed.room) setRoom(equipmentTypeOrDefault(parsed.room));
     if (parsed.query) setQuery(parsed.query);
     if (parsed.brand) setSelectedBrand(parsed.brand);
-    if (parsed.language) setSelectedLanguage(parsed.language);
+    const catalogLanguage = manualCatalogLanguage(window.location.pathname, window.location.search);
+    if (catalogLanguage) setSelectedLanguage(catalogLanguage);
     if (parsed.incompleteOnly) setIncompleteOnly(true);
     loadData();
   }, []);
