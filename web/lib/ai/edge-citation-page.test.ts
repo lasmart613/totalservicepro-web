@@ -18,7 +18,7 @@ const FN_DIR = join(here, '../../../supabase/functions/grok-assistant');
 const CO2RE_SHA256 = '74db371f64e5a29cbe73b45737ce87211580393b850876e371b29d0f83d262c6';
 const CO2RE_BYTES = 7_728_071;
 
-type Cite = { manualId: number; title?: string; page?: number; section?: string; page_out_of_range?: boolean };
+type Cite = { manualId: number; title?: string; page?: number; section?: string; pageOutOfRange?: boolean };
 type Part = {
   text: string;
   source: string;
@@ -201,13 +201,35 @@ test('edge cites a PRO PLUS passage as manual 5, not the open Pro manual', async
   assert.ok(plus, JSON.stringify(cites));
   assert.equal(plus!.page, 121);
   assert.match(plus!.title || '', /GentleMAX PRO PLUS Service Manual/);
-  assert.equal(plus!.page_out_of_range, undefined);
+  assert.equal(plus!.pageOutOfRange, undefined);
   const pro = cites.find((c) => c.manualId === 110);
   assert.ok(pro, JSON.stringify(cites));
   assert.equal(pro!.page, 12);
-  assert.equal(pro!.page_out_of_range, undefined);
+  assert.equal(pro!.pageOutOfRange, undefined);
   assert.equal(
     cites.some((c) => c.manualId === 110 && c.page === 120),
     false
   );
+});
+
+test('edge citation label spaces the page and drops a repeated manual page', async () => {
+  const edge = await loadEdge();
+  const line = edge.formatCitationLine([{ manualId: 9, title: 'Rev A', page: 166 }], '');
+  assert.match(line, /Rev A, p\. 166/);
+  assert.doesNotMatch(line, /Rev A,p\.166|p\.166/);
+
+  const cites = edge.citationsFromParts(
+    [
+      { text: 'first', source: 'chunk-a', page: 166, section: '1.1' },
+      { text: 'again', source: 'chunk-b', page: 166, section: '9.9' },
+      { text: 'other', source: 'chunk-c', page: 10 },
+    ],
+    9,
+    'Rev A'
+  );
+  assert.deepEqual(
+    cites.map((c) => c.page),
+    [166, 10]
+  );
+  assert.equal(cites[0].section, '1.1');
 });

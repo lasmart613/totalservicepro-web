@@ -12,6 +12,8 @@ import { formatListingPrice, partsDetailPath } from '@/lib/marketplace/parts';
 import { GUEST_SIGNUP_HREF } from '@/lib/marketplace/guest';
 import { useSignedIn } from '@/lib/use-signed-in';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
+import { displayModelName } from '@/lib/model-display';
+import { StorageImage } from '@/components/StorageImage';
 
 type Seller = {
   name: string;
@@ -176,7 +178,7 @@ export default function SellerStorefrontPage() {
                 <div key={l.id} className="card p-6 text-left">
                   {img && (
                     <Link href={href}>
-                      <img src={img} alt={l.title || 'Part'} className="w-full h-40 object-cover rounded mb-3" />
+                      <StorageImage src={img} alt={l.title || 'Part'} className="w-full h-40 object-cover rounded mb-3" width={480} />
                     </Link>
                   )}
                   <Link href={href}>
@@ -185,7 +187,7 @@ export default function SellerStorefrontPage() {
                   <ListingDescriptionSnippet text={l.description} className="mb-1" />
                   <p className="text-sm text-[var(--text3)] mb-2">PN: {l.part_number || 'N/A'}</p>
                   <p className="text-sm mb-1">
-                    {[l.manufacturer, l.model].filter(Boolean).join(' ')}
+                    {[l.manufacturer, displayModelName(l.model)].filter(Boolean).join(' ')}
                     {l.condition ? ` • ${l.condition}` : ''}
                   </p>
                   <GuestAwarePrice

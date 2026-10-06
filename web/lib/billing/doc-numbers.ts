@@ -7,6 +7,8 @@
  * Sequence advances per org + day by scanning saved numbers (column + JSON fallbacks).
  */
 
+import { resolveNumberingTimeZone, ymdInTimeZone } from '../org-timezone.ts';
+
 export type DocKind = 'TKT' | 'SR' | 'EST' | 'INV' | 'PO';
 
 export const DOC_KIND = {
@@ -26,6 +28,8 @@ export type GenerateDocNumberOpts = {
   orgId?: string | number | null;
   kind?: DocKind | string;
   date?: string | Date | null;
+  /** IANA zone for the YYYYMMDD segment. Omit to load the organization zone. */
+  timeZone?: string | null;
   /** Keep existing number if already assigned */
   existing?: string | null;
   client?: DocNumberClient | null;
@@ -42,18 +46,28 @@ function coerceOrgId(orgId: string | number | null | undefined): string | number
   return orgId;
 }
 
-export function ymdFrom(dateLike?: string | Date | null): string {
+export function ymdFrom(dateLike?: string | Date | null, timeZone?: string | null): string {
+  if (typeof dateLike === 'string') {
+    const s = dateLike.trim();
+    if (/^\d{8}$/.test(s)) return s;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s.slice(0, 10)) && !/[T\s]/.test(s.slice(10))) {
+      return s.slice(0, 10).replace(/-/g, '');
+    }
+  }
   let d: Date;
   if (!dateLike) d = new Date();
   else if (dateLike instanceof Date) d = dateLike;
   else {
-    const s = String(dateLike).trim();
-    if (/^\d{8}$/.test(s)) return s;
-    if (/^\d{4}-\d{2}-\d{2}/.test(s)) {
-      return s.slice(0, 10).replace(/-/g, '');
-    }
-    d = new Date(s);
+    d = new Date(String(dateLike));
     if (isNaN(d.getTime())) d = new Date();
+  }
+  const zone = String(timeZone || '').trim();
+  if (zone) {
+    try {
+      return ymdInTimeZone(d, zone);
+    } catch {
+      /* fall through to local calendar fields */
+    }
   }
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
@@ -325,7 +339,12 @@ export async function generateDocNumber(
   const sb = opts.client || null;
   const orgId = coerceOrgId(opts.orgId);
   const prefix = await getOrgDocPrefix(orgId, sb);
-  const ymd = ymdFrom(opts.date);
+  let zone = String(opts.timeZone || '').trim();
+  if (!zone) {
+    const resolved = await resolveNumberingTimeZone(sb, orgId);
+    zone = resolved.timeZone;
+  }
+  const ymd = ymdFrom(opts.date, zone);
   const stem = `${prefix}-${kind}-${ymd}-`;
 
   let seq = 1;

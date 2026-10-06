@@ -419,6 +419,12 @@ test('landing hero makes Find-a-rep primary and keeps the TSP product story', ()
     form.indexOf('Equipment type') < form.indexOf('Clinic or organization'),
     'equipment type must sit near the top of the form'
   );
+  assert.match(css, /\.lp-hp\s*\{[^}]*inset-inline-start:\s*0/);
+  assert.match(css, /\.lp-hp\s*\{[^}]*clip-path:\s*inset\(50%\)/);
+  assert.doesNotMatch(css, /left:\s*-9999px/);
+  assert.match(form, /aria-hidden="true"/);
+  assert.match(form, /tabIndex=\{-1\}/);
+  assert.match(form, /autoComplete="off"/);
   assert.match(css, /\.lp-find-card\s*\{/);
   assert.match(css, /\.lp-hero-find\s*\{/);
   assert.match(css, /\.lp-find-card\.is-hero/);

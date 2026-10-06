@@ -347,11 +347,13 @@ html.landing-mode body {
   width: 1px;
   height: 1px;
   padding: 0;
-  margin: -1px;
+  margin: 0;
   overflow: hidden;
   clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
   white-space: nowrap;
   border: 0;
+  inset-inline-start: 0;
 }
 
 .lp-audience {
@@ -746,12 +748,19 @@ html.landing-mode body {
   color: #9CA3AF;
 }
 
+/* Direction-safe hide. A physical negative left offset becomes a huge scrollWidth under dir=rtl. */
 .lp-hp {
   position: absolute;
-  left: -9999px;
   width: 1px;
   height: 1px;
+  padding: 0;
+  margin: 0;
   overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+  inset-inline-start: 0;
 }
 
 .lp-modal-actions {

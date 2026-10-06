@@ -30,7 +30,6 @@ import {
 } from '@/lib/manuals-access';
 import {
   DEFAULT_EQUIPMENT_TYPE,
-  EQUIPMENT_TYPES,
   EQUIPMENT_TYPE_VALUES,
   equipmentTypeMeta,
   equipmentTypeOrDefault,
@@ -43,16 +42,18 @@ import {
   filterManualLibrary,
   fetchManualLibraryRows,
   manufacturerShelves,
+  manualLanguageOptionsForView,
+  manualRoomsForView,
   manualLibraryFiltersActive,
   manualLibrarySearchParams,
   parseManualLibrarySearchParams,
+  manualSearchBodyQuery,
   uniqueManualBrands,
   type ManualLibraryRoom,
 } from '@/lib/manual-library-filter';
 import {
   ALL_MANUAL_LANGUAGES,
   manualLanguageBadge,
-  manualLanguageFilterOptions,
   resolveManualLanguage,
 } from '@/lib/manual-language';
 
@@ -534,7 +535,7 @@ export default function ManualsLibrary() {
   });
 
   useEffect(() => {
-    const q = query.trim();
+    const q = manualSearchBodyQuery(query);
     if (!q) {
       setBodyMatchIds(null);
       setBodySearchReady(true);
@@ -656,15 +657,37 @@ export default function ManualsLibrary() {
     return counts;
   }, [sourceManuals, query, selectedBrand, selectedLanguage, incompleteOnly, library, bodyMatchIds]);
 
+  const shelfRooms = useMemo(
+    () =>
+      manualRoomsForView(
+        sourceManuals,
+        {
+          query,
+          brand: selectedBrand,
+          language: selectedLanguage,
+          incompleteOnly,
+          library,
+        },
+        bodyMatchIds
+      ),
+    [sourceManuals, query, selectedBrand, selectedLanguage, incompleteOnly, library, bodyMatchIds]
+  );
+
   const brandShelves = useMemo(() => manufacturerShelves(filteredManuals), [filteredManuals]);
   const makeOptions = useMemo(
     () => uniqueManualBrands(manuals.filter((m) => manualLibraryShelf(m) === library)),
     [manuals, library]
   );
   const languageOptions = useMemo(
-    () => manualLanguageFilterOptions(manuals.filter((m) => manualLibraryShelf(m) === library)),
-    [manuals, library]
+    () => manualLanguageOptionsForView(sourceManuals, { room, library }),
+    [sourceManuals, room, library]
   );
+  useEffect(() => {
+    if (loading || !selectedLanguage || selectedLanguage === ALL_MANUAL_LANGUAGES) return;
+    if (languageOptions.some((option) => option.value === selectedLanguage)) return;
+    setSelectedLanguage('');
+    syncFilterUrl({ language: '' });
+  }, [loading, languageOptions, selectedLanguage]);
   const filtersOn = discoveryActive || selectedWavelength !== '';
   const activeRoom =
     room === ALL_MANUAL_ROOMS
@@ -931,7 +954,7 @@ export default function ManualsLibrary() {
                 </span>
               </span>
             </button>
-            {EQUIPMENT_TYPES.map((t) => {
+            {shelfRooms.map((t) => {
               const selected = room === t.value;
               const count = roomCounts[t.value];
               return (
@@ -1153,6 +1176,11 @@ export default function ManualsLibrary() {
                               ))}
                             </div>
                           )}
+                          {languageBadge && (
+                            <div className="manual-language-badge" title={languageBadge.label}>
+                              {languageBadge.code}
+                            </div>
+                          )}
                         </div>
                         {showOperatorBadge(m) && (
                           <div
@@ -1168,14 +1196,6 @@ export default function ManualsLibrary() {
                             title="This document is incomplete"
                           >
                             Incomplete
-                          </div>
-                        )}
-                        {languageBadge && (
-                          <div
-                            className="absolute -bottom-1 -right-1 z-10 rounded-full bg-sky-900 text-white text-[8px] font-extrabold px-1 py-0.5 shadow"
-                            title={languageBadge.label}
-                          >
-                            {languageBadge.code}
                           </div>
                         )}
                         {isOwned(m) && (

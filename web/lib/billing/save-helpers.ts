@@ -1,6 +1,12 @@
 /** Shared helpers for estimates / invoices Supabase writes (schema-drift tolerant). */
 
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
+import {
+  DEFAULT_ORG_TIMEZONE,
+  formatDateInTimeZone,
+  isoDateInTimeZone,
+  isValidTimeZone,
+} from '../org-timezone.ts';
 
 export function isValidOrgId(val: unknown): boolean {
   if (val == null) return false;
@@ -262,12 +268,41 @@ export function isEstimateExpired(est: { status?: string | null; created_at?: st
   return estimateAgeDays(est.created_at) >= ESTIMATE_VALID_DAYS;
 }
 
-export function validUntilLabel(createdAt?: string | null): string {
+export function validUntilLabel(createdAt?: string | null, timeZone?: string | null): string {
   if (!createdAt) return '';
-  const d = new Date(createdAt);
+  const start = new Date(createdAt);
+  if (isNaN(start.getTime())) return '';
+  const zone = timeZone && isValidTimeZone(timeZone) ? timeZone : DEFAULT_ORG_TIMEZONE;
+  const ymd = isoDateInTimeZone(start, zone);
+  const [y, m, d] = ymd.split('-').map(Number);
+  const next = new Date(Date.UTC(y, (m || 1) - 1, (d || 1) + ESTIMATE_VALID_DAYS, 12));
+  const nextYmd = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
+  return formatDateInTimeZone(nextYmd, zone);
+}
+
+/** Fixed UTC calendar day so server and browser render the same validity line. */
+export function formatUtcCalendarDay(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
   if (isNaN(d.getTime())) return '';
-  d.setDate(d.getDate() + ESTIMATE_VALID_DAYS);
-  return d.toLocaleDateString();
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(d);
+}
+
+export function estimateValidityText(opts: {
+  expired: boolean;
+  validDays: number;
+  validUntil: string | null;
+}): string {
+  const through = formatUtcCalendarDay(opts.validUntil);
+  if (opts.expired) return through ? `Expired on ${through}` : 'Expired';
+  return through
+    ? `Good for ${opts.validDays} days (through ${through})`
+    : `Good for ${opts.validDays} days`;
 }
 
 export type CustomerActionKind = 'approved' | 'rejected' | 'changes_requested';
@@ -367,6 +402,31 @@ export function customerActionConfirmationTitle(
   if (action === 'rejected') return 'Estimate rejected';
   if (action === 'changes_requested') return 'Modification requested';
   return '';
+}
+
+export type EstimateConfirmMode =
+  | { kind: 'final'; action: 'approved' | 'rejected' }
+  | { kind: 'expired' }
+  | { kind: 'choose'; priorModification: boolean }
+  | { kind: 'confirm'; action: EstimateEmailAction; priorModification: boolean };
+
+/**
+ * What the public /e/<token> page may show.
+ * Approved and rejected are final. A modification request is not:
+ * the customer can still approve or reject. Nothing here writes state.
+ */
+export function estimateConfirmMode(opts: {
+  expired?: boolean;
+  customerAction: CustomerActionKind | null | undefined;
+  requested: EstimateEmailAction | null;
+}): EstimateConfirmMode {
+  if (opts.customerAction === 'approved' || opts.customerAction === 'rejected') {
+    return { kind: 'final', action: opts.customerAction };
+  }
+  if (opts.expired) return { kind: 'expired' };
+  const priorModification = opts.customerAction === 'changes_requested';
+  if (!opts.requested) return { kind: 'choose', priorModification };
+  return { kind: 'confirm', action: opts.requested, priorModification };
 }
 
 /** Sent estimates the clinic can still Approve / Reject / Modify. */

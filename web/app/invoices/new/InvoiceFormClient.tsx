@@ -15,6 +15,7 @@ import { getCompanyTheme, type CompanyTheme } from '@/lib/company-theme';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
   coerceOrgId,
+  customerActionFromEstimate,
   emptyLineItem,
   isValidOrgId,
   lineItemsSubtotal,
@@ -24,6 +25,9 @@ import {
   type LineItem,
 } from '@/lib/billing/save-helpers';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
+import { displayModelName, displayModelText } from '@/lib/model-display';
+import { orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
+import { canVoidInvoice, isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 import {
@@ -32,14 +36,10 @@ import {
   resolveInvoiceCollectable,
 } from '@/lib/billing/invoice-collectable';
 import { invoiceDataForSave } from '@/lib/billing/invoice-form-data';
+import { REJECTED_ESTIMATE_CONVERT_ERROR } from '@/lib/billing/estimate-display';
 import { lineItemFromStored } from '@/lib/billing/listing-invoice';
 
 type CustomerOpt = LinkedCustomerOpt;
-
-function todayYmd() {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
-}
 
 export default function InvoiceFormClient() {
   const t = useT();
@@ -62,6 +62,12 @@ export default function InvoiceFormClient() {
   const [userId, setUserId] = useState<string | null>(null);
   const [docNumber, setDocNumber] = useState('');
   const [status, setStatus] = useState('draft');
+  const [callerRole, setCallerRole] = useState('');
+  const [orgTimeZone, setOrgTimeZone] = useState<string | null>(null);
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [voiding, setVoiding] = useState(false);
+  const [storedVoidReason, setStoredVoidReason] = useState<string | null>(null);
   const [company, setCompany] = useState<DocCompany>({});
   const [companyTheme, setCompanyTheme] = useState<CompanyTheme | null>(null);
   const [emailing, setEmailing] = useState(false);
@@ -93,7 +99,9 @@ export default function InvoiceFormClient() {
     [manufacturer, catalog.manufacturers, catalog.models]
   );
 
-  const [invoiceDate, setInvoiceDate] = useState(todayYmd());
+  const invoiceDateTouched = useRef(false);
+  const orgTodayRef = useRef(orgTodayIso());
+  const [invoiceDate, setInvoiceDate] = useState(() => orgTodayRef.current);
   const [dueDate, setDueDate] = useState('');
   const [description, setDescription] = useState('');
   const [lineItems, setLineItems] = useState<LineItem[]>([emptyLineItem('LI')]);
@@ -210,14 +218,16 @@ export default function InvoiceFormClient() {
       savedIdRef.current = data.id;
       setSavedId(data.id);
       setStatus(data.status || 'draft');
+      setStoredVoidReason(data.void_reason || parseJsonField(data.invoice_data).void_reason || null);
       setCustomerName(data.customer_name || '');
       setCustSearch(data.customer_name || '');
       setCustomerOrgId(data.customer_organization_id || null);
       setSourceEstimateId(data.estimate_id || null);
+      invoiceDateTouched.current = true;
       setInvoiceDate(
         data.invoice_date
           ? String(data.invoice_date).slice(0, 10)
-          : todayYmd()
+          : orgTodayRef.current
       );
       setDueDate(data.due_date ? String(data.due_date).slice(0, 10) : '');
       setDescription(data.description || '');
@@ -262,6 +272,25 @@ export default function InvoiceFormClient() {
     [supabase]
   );
 
+  async function guardRejectedEstimateConvert(id: string | number): Promise<string | null> {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) return 'Session expired — sign in again';
+    const res = await fetch('/api/billing/estimate-convert', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ estimate_id: id }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.status === 409) return json?.error || REJECTED_ESTIMATE_CONVERT_ERROR;
+    if (!res.ok) return json?.error || `Could not convert estimate (${res.status})`;
+    return null;
+  }
+
   const prefillFromEstimate = useCallback(
     async (estimateId: string) => {
       const { data, error } = await supabase
@@ -271,6 +300,13 @@ export default function InvoiceFormClient() {
         .maybeSingle();
       if (error || !data) {
         toast.error('Could not load estimate for convert');
+        return;
+      }
+      const refusal = await guardRejectedEstimateConvert(data.id);
+      if (refusal || customerActionFromEstimate(data).action === 'rejected') {
+        toast.error(refusal || REJECTED_ESTIMATE_CONVERT_ERROR);
+        setSourceEstimateId(null);
+        router.replace('/estimates');
         return;
       }
       setSourceEstimateId(data.id);
@@ -291,17 +327,14 @@ export default function InvoiceFormClient() {
       setCustContact(ed.custContact || '');
       setTax(Number(ed.tax) || 0);
       if (data.total != null) setTotalOverride(Number(data.total));
-      const estDeposit = estimatePartsDeposit({
-        ...ed,
-        deposit_required: ed.deposit_required,
-        deposit: ed.deposit ?? ed.travelDeposit ?? ed.parts_deposit,
-      });
-      // Estimate deposit is due now — not already received.
+      const estDeposit = estimatePartsDeposit(ed, Number(data.total) || Number(ed.total) || undefined);
+      // Estimate deposit is due now — not already received. A stored amount
+      // counts only when the estimate deposit flag is on.
       setDeposit(0);
       setDepositDate('');
       setDepositMethod('');
       setDueNowAmount(estDeposit > 0 ? estDeposit : null);
-      setChargeDepositOnly(true);
+      setChargeDepositOnly(estDeposit > 0);
       setDeferredReleased(false);
 
       let lines: any[] = ed.line_items || ed.part_lines || [];
@@ -346,7 +379,7 @@ export default function InvoiceFormClient() {
       }
 
       const parts: string[] = [];
-      if (data.device_model) parts.push(`Device: ${data.device_model}`);
+      if (data.device_model) parts.push(`Device: ${displayModelText(data.device_model)}`);
       if (data.serial_pulses) parts.push(`Serial/Pulses: ${data.serial_pulses}`);
       let svcs = data.services;
       if (typeof svcs === 'string') {
@@ -366,7 +399,7 @@ export default function InvoiceFormClient() {
           : 'Prefilling invoice from estimate — review and save.'
       );
     },
-    [supabase]
+    [supabase, router]
   );
 
   useEffect(() => {
@@ -384,15 +417,27 @@ export default function InvoiceFormClient() {
         const { data: profile } = await supabase
           .from('user_profiles')
           .select(
-            'organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url, slogan)'
+            'role, organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url, slogan)'
           )
           .eq('id', user.id)
           .maybeSingle();
         const orgId = coerceOrgId(profile?.organization_id);
         setUserOrgId(orgId);
+        setCallerRole(String((profile as { role?: string } | null)?.role || ''));
+        let storedZone: string | null = null;
+        if (orgId) {
+          const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();
+          if (zoneRow.error) console.warn('organizations.timezone', zoneRow.error.message);
+          else if (zoneRow.data?.timezone) {
+            storedZone = String(zoneRow.data.timezone);
+            setOrgTimeZone(storedZone);
+          }
+        }
         const org = Array.isArray((profile as any)?.organizations)
           ? (profile as any).organizations[0]
           : (profile as any)?.organizations;
+        orgTodayRef.current = orgTodayIso({ stored: storedZone, state: org?.state });
+        if (!editIdParam && !invoiceDateTouched.current) setInvoiceDate(orgTodayRef.current);
         const techName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ');
         if (org || techName) {
           setCompany({
@@ -466,12 +511,21 @@ export default function InvoiceFormClient() {
     }
     setSaving(true);
     try {
+      const existingIdBefore = savedIdRef.current;
+      if (!existingIdBefore && sourceEstimateId) {
+        const refusal = await guardRejectedEstimateConvert(sourceEstimateId);
+        if (refusal) {
+          toast.error(refusal);
+          return null;
+        }
+      }
       let invNum = editIdParam ? docNumber : '';
       if (!invNum && userOrgId) {
+        const dated = invoiceDate || orgTodayRef.current;
         invNum = await allocateDocNumber(supabase, {
           orgId: userOrgId,
           kind: 'INV',
-          date: invoiceDate || new Date(),
+          date: dated,
         });
         setDocNumber(invNum);
       }
@@ -530,7 +584,7 @@ export default function InvoiceFormClient() {
         organization_id: userOrgId || null,
         customer_organization_id: customerOrgId || null,
         estimate_id: sourceEstimateId || null,
-        invoice_date: invoiceDate || todayYmd(),
+        invoice_date: invoiceDate || orgTodayRef.current,
         due_date: dueDate || null,
         description: description || null,
         subtotal: Math.round(subtotal * 100) / 100,
@@ -623,7 +677,7 @@ export default function InvoiceFormClient() {
         email: custEmail,
       },
       invNumber: docNumber || 'Draft',
-      invoiceDate: invoiceDate || todayYmd(),
+      invoiceDate: invoiceDate || orgTodayRef.current,
       dueDate: dueDate || undefined,
       description: description || undefined,
       preparedBy: company.tech_name,
@@ -644,6 +698,11 @@ export default function InvoiceFormClient() {
       themeScope,
       moneyPrefs: prefs,
       locale,
+      timeZone: resolveOrgTimeZone({
+        stored: orgTimeZone,
+        state: company.state,
+        allowBrowser: false,
+      }).timeZone,
     });
   }
 
@@ -797,6 +856,39 @@ export default function InvoiceFormClient() {
     saveInvoice('sent');
   }
 
+  const voided = isVoidInvoiceStatus(status);
+  const voidable =
+    Boolean(savedId) && canVoidInvoice({ status, amount_paid: received, role: callerRole }).ok;
+
+  async function submitVoid() {
+    if (!savedId) return;
+    setVoiding(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const access = sessionData.session?.access_token;
+      if (!access) throw new Error('Sign in required');
+      const res = await fetch('/api/billing/invoices/void', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${access}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ invoice_id: savedId, reason: voidReason }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.error || 'Could not void invoice');
+      setStatus('void');
+      setStoredVoidReason(json.void_reason || voidReason.trim() || null);
+      setVoidOpen(false);
+      setVoidReason('');
+      toast.success('Invoice voided');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not void invoice');
+    } finally {
+      setVoiding(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col">
@@ -811,7 +903,7 @@ export default function InvoiceFormClient() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-4xl mx-auto w-full px-4 py-6 pb-28">
+      <div className="doc-action-page-compact max-w-4xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
             <Link href="/invoices" className="text-sm text-[var(--gold)] hover:underline">
@@ -824,7 +916,13 @@ export default function InvoiceFormClient() {
               {docNumber && (
                 <span className="text-[var(--gold)] font-bold">{docNumber}</span>
               )}
-              <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-[var(--border2)] bg-[var(--surface2)]">
+              <span
+                className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                  isVoidInvoiceStatus(status)
+                    ? 'bg-rose-900/40 text-rose-200 border-rose-700'
+                    : 'border-[var(--border2)] bg-[var(--surface2)]'
+                }`}
+              >
                 {(status || 'draft').toUpperCase()}
               </span>
               {sourceEstimateId && (
@@ -941,7 +1039,7 @@ export default function InvoiceFormClient() {
                 <option value="">— Select —</option>
                 {models.map((m) => (
                   <option key={m} value={m}>
-                    {m}
+                    {displayModelName(m)}
                   </option>
                 ))}
               </select>
@@ -972,7 +1070,10 @@ export default function InvoiceFormClient() {
                 className="input mt-1"
                 type="date"
                 value={invoiceDate}
-                onChange={(e) => setInvoiceDate(e.target.value)}
+                onChange={(e) => {
+                  invoiceDateTouched.current = true;
+                  setInvoiceDate(e.target.value);
+                }}
               />
             </div>
             <div>
@@ -1138,7 +1239,7 @@ export default function InvoiceFormClient() {
           </div>
 
           <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Payment split</h3>
-          {(sourceEstimateId || dueNowAmount != null) && (
+          {((dueNowAmount != null && dueNowAmount > 0) || collectable.hasDeferredSplit) && (
             <label className="flex items-start gap-2 text-sm mb-3">
               <input
                 type="checkbox"
@@ -1271,10 +1372,18 @@ export default function InvoiceFormClient() {
           </div>
         </section>
 
-        <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
+        {voided && (
+          <div className="card p-4 mb-4 border border-rose-700 bg-rose-950/40">
+            <p className="font-bold">{VOIDED_INVOICE_MESSAGE}</p>
+            {storedVoidReason ? <p className="text-sm text-[var(--text3)] mt-1">{storedVoidReason}</p> : null}
+          </div>
+        )}
+
+        <div className="doc-action-bar flex flex-wrap gap-2 sticky bottom-4 z-10">
           <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">
             Cancel
           </Link>
+          {!voided && (
           <button
             type="button"
             className="btn btn-secondary min-w-[100px]"
@@ -1283,6 +1392,7 @@ export default function InvoiceFormClient() {
           >
             {saving ? 'Saving…' : 'Save Draft'}
           </button>
+          )}
           <button
             type="button"
             className="btn btn-secondary min-w-[120px]"
@@ -1290,6 +1400,8 @@ export default function InvoiceFormClient() {
           >
             Preview / PDF
           </button>
+          {!voided && (
+          <>
           <button
             type="button"
             className="btn btn-primary min-w-[140px]"
@@ -1352,7 +1464,44 @@ export default function InvoiceFormClient() {
           >
             Mark paid
           </button>
+          {voidable && (
+            <button
+              type="button"
+              className="btn btn-secondary min-w-[120px]"
+              disabled={saving || emailing || voiding}
+              onClick={() => setVoidOpen(true)}
+            >
+              Void invoice
+            </button>
+          )}
+          </>
+          )}
         </div>
+        {voidOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setVoidOpen(false)}>
+            <div className="card w-full max-w-sm p-5 hover:transform-none" onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-lg font-extrabold mb-1">Void invoice</h2>
+              <p className="text-xs text-[var(--text3)] mb-3">
+                This unpaid invoice will be voided. An open payment link is expired. No charge or refund is made.
+              </p>
+              <label className="text-xs text-[var(--text3)] font-bold">Reason (optional)</label>
+              <textarea
+                className="input mt-1 min-h-[80px]"
+                value={voidReason}
+                maxLength={500}
+                onChange={(e) => setVoidReason(e.target.value)}
+              />
+              <div className="flex gap-2 mt-4 justify-end">
+                <button type="button" className="btn btn-secondary" onClick={() => setVoidOpen(false)}>
+                  Cancel
+                </button>
+                <button type="button" className="btn btn-primary" disabled={voiding} onClick={() => submitVoid()}>
+                  {voiding ? 'Voiding…' : 'Void invoice'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <p className="text-[10px] text-[var(--text3)] mt-2">
           Finalize &amp; Email only sets status to <strong>sent</strong> after Resend accepts the
           message. Requires customer email + verified From domain (contact@medicalrepairnetwork.com).

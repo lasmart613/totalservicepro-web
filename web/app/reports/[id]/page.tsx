@@ -12,6 +12,7 @@ import { systemParameterRows } from '@/lib/models';
 import { getCompanyTheme, REPAIR_PLANET_THEME, type CompanyTheme } from '@/lib/company-theme';
 import { resolveCustomerEmailOnFile, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import { toast } from 'sonner';
+import { displayModelText } from '@/lib/model-display';
 
 function parseMaybeJson(val: any): any {
   if (val == null) return val;
@@ -283,7 +284,7 @@ export default function ReportDetail() {
                 </div>
                 <div>
                   <span className="text-[var(--text3)]">Equipment:</span>{' '}
-                  {report.equipment_name || report.model_type || '—'}
+                  {displayModelText(report.equipment_name || report.model_type || '') || '—'}
                 </div>
                 <div>
                   <span className="text-[var(--text3)]">Serial:</span> {report.serial_number || '—'}

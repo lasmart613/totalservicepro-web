@@ -31,7 +31,12 @@ import { toast } from 'sonner';
 import { catalogManualTitle } from '@/lib/manual-catalog';
 import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
 import { canAccessRepairAi } from '@/lib/roles';
+import { currentOrgPlanLabel, type OrgPlanFields } from '@/lib/org-plan';
+import { ORG_PLAN_SELECTS } from '@/lib/org-plan-load';
 import { useSiteLocale } from '@/lib/fa/locale';
+import { AssistantCitedManual } from '@/components/AssistantCitedManual';
+import { useAssistantCitationOpen } from '@/components/useAssistantCitationOpen';
+import { canAskAssistant, getVoiceMode } from '@/lib/ai/citation-auto-open';
 
 type ManualRow = {
   id: number;
@@ -61,10 +66,14 @@ const QUICK_CHIPS: { label: string; prompt: string }[] = [
   { label: '⚠️ Safety', prompt: 'What are the laser safety precautions?' },
 ];
 
+function answerTimestamp(): number {
+  return Date.now();
+}
+
 function defaultUsage(): AiUsage {
   return {
     text: { used: 0, limit: 5 },
-    voice: { used: 0, limit: 1 },
+    voice: { used: 0, limit: 5 },
     tier: 'free',
   };
 }
@@ -74,6 +83,8 @@ export default function AIAssistantClient() {
   const siteLanguage = useSiteLocale();
   const supabase = getSupabaseClient();
   const listRef = useRef<HTMLDivElement | null>(null);
+  const sendingRef = useRef(false);
+  const sendPromptRef = useRef<(text: string) => boolean>(() => false);
 
   const [ready, setReady] = useState(false);
   const [token, setToken] = useState<string | null>(null);
@@ -89,6 +100,11 @@ export default function AIAssistantClient() {
   const [sending, setSending] = useState(false);
   const [usage, setUsage] = useState<AiUsage>(defaultUsage());
   const [limitBanner, setLimitBanner] = useState('');
+  const [caller, setCaller] = useState<{ role: string | null; orgType: string | null }>({
+    role: null,
+    orgType: null,
+  });
+  const [planLabel, setPlanLabel] = useState<string | null>(null);
 
   const brands = useMemo(() => {
     const set = new Set<string>();
@@ -151,6 +167,8 @@ export default function AIAssistantClient() {
 
       // Resolve org for isolation — chat history must not cross organizations
       let resolvedOrg: string | number | null = null;
+      let callerRole: string | null = null;
+      let callerOrgType: string | null = null;
       try {
         const { data: prof } = await supabase
           .from('user_profiles')
@@ -161,6 +179,8 @@ export default function AIAssistantClient() {
           (prof?.organizations as { type?: string } | null)?.type ||
           session.user.user_metadata?.organization_type ||
           null;
+        callerRole = typeof prof?.role === 'string' ? prof.role : null;
+        callerOrgType = orgType;
         if (!canAccessRepairAi(prof?.role, orgType)) {
           toast.error('Repair AI is for service companies.');
           router.replace('/hub');
@@ -172,6 +192,23 @@ export default function AIAssistantClient() {
       }
       if (cancelled) return;
       setOrgId(resolvedOrg);
+      setCaller({ role: callerRole, orgType: callerOrgType });
+      if (resolvedOrg != null) {
+        let planRow: OrgPlanFields | null = null;
+        for (const columns of ORG_PLAN_SELECTS) {
+          const { data, error } = await supabase
+            .from('organizations')
+            .select(columns)
+            .eq('id', resolvedOrg)
+            .maybeSingle();
+          if (!error) {
+            planRow = (data as OrgPlanFields | null) || null;
+            break;
+          }
+          if (!/subscription_tier|manual_slots|\bplan\b|premium_|column/i.test(error.message || '')) break;
+        }
+        if (!cancelled) setPlanLabel(currentOrgPlanLabel(planRow));
+      }
 
       let urlManualId: number | null = null;
       let urlPrompt = '';
@@ -305,6 +342,16 @@ export default function AIAssistantClient() {
     el.scrollTop = el.scrollHeight;
   }, [messages, sending]);
 
+  const citedManual = useAssistantCitationOpen({
+    messages,
+    sending,
+    ready,
+    manuals,
+    caller,
+    listRef,
+    askAssistant: (text) => sendPromptRef.current(text),
+  });
+
   function onBrandChange(v: string) {
     setBrand(v);
     setManualPath('');
@@ -321,20 +368,32 @@ export default function AIAssistantClient() {
     saveState(messages, path, brand, id);
   }
 
-  async function sendPrompt(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed || sending || !token) return;
+  function sendPrompt(text: string): boolean {
+    const trimmed = String(text ?? '').trim();
+    const accessToken = token;
+    if (
+      !canAskAssistant({
+        ready,
+        sending: sendingRef.current || sending,
+        hasToken: !!accessToken,
+        text: trimmed,
+      })
+    ) {
+      return false;
+    }
+    if (!accessToken) return false;
 
     if (usage.text.used >= usage.text.limit) {
       const msg = `Daily text limit reached (${usage.text.used}/${usage.text.limit}). Resets at midnight.`;
       setLimitBanner(msg);
       toast.error(msg);
-      return;
+      return false;
     }
 
     const nextMsgs: ChatMessage[] = [...messages, { role: 'user', content: trimmed }];
     setMessages(nextMsgs);
     setInput('');
+    sendingRef.current = true;
     setSending(true);
     setLimitBanner('');
     const currentId = selectedManual?.id ?? manualId;
@@ -352,65 +411,81 @@ export default function AIAssistantClient() {
       replyLanguage: siteLanguage,
       lastSentManualId: lastSentRef.current.id,
       lastSentManualPath: lastSentRef.current.path,
+      voiceMode: getVoiceMode(),
     });
     lastSentRef.current = { id: payload.manualId, path: payload.manualPath || '' };
 
-    const result = await grokChat({
-      accessToken: token,
-      messages: payload.messages,
-      manualPath: payload.manualPath,
-      manualId: payload.manualId,
-      manualTitle: payload.manualTitle,
-      manualBrand: payload.manualBrand,
-      manualModel: payload.manualModel,
-      manualLanguage: payload.manualLanguage,
-      replyLanguage: payload.replyLanguage,
-      scopeChanged: payload.scopeChanged,
-    });
+    void (async () => {
+      try {
+        const result = await grokChat({
+          accessToken,
+          messages: payload.messages,
+          manualPath: payload.manualPath,
+          manualId: payload.manualId,
+          manualTitle: payload.manualTitle,
+          manualBrand: payload.manualBrand,
+          manualModel: payload.manualModel,
+          manualLanguage: payload.manualLanguage,
+          replyLanguage: payload.replyLanguage,
+          scopeChanged: payload.scopeChanged,
+          voiceMode: payload.voiceMode,
+        });
 
-    if (!result.ok) {
-      if (result.status === 429) {
-        setLimitBanner(result.message || result.error);
-        if (result.usage) setUsage((u) => ({ ...u, ...result.usage }));
-        toast.error(result.message || 'Daily limit reached');
-      } else if (result.status === 401) {
-        toast.error('Session expired — sign in again');
-        router.push('/login?next=/ai-assistant');
-      } else {
-        const fail: ChatMessage[] = [
+        if (!result.ok) {
+          if (result.status === 429) {
+            setLimitBanner(result.message || result.error);
+            if (result.usage) setUsage((u) => ({ ...u, ...result.usage }));
+            toast.error(result.message || 'Daily limit reached');
+          } else if (result.status === 401) {
+            toast.error('Session expired — sign in again');
+            router.push('/login?next=/ai-assistant');
+          } else {
+            const fail: ChatMessage[] = [
+              ...nextMsgs,
+              { role: 'assistant', content: `⚠️ ${result.error}${result.message ? `: ${result.message}` : ''}` },
+            ];
+            setMessages(fail);
+            saveState(fail, currentPath, brand, currentId);
+            toast.error(result.error);
+          }
+          return;
+        }
+
+        const citations = mergeCitations(result.citations, parseCitationMarkers(result.content));
+        const answerTs = answerTimestamp();
+        const withReply: ChatMessage[] = [
           ...nextMsgs,
-          { role: 'assistant', content: `⚠️ ${result.error}${result.message ? `: ${result.message}` : ''}` },
+          { role: 'assistant', content: result.content, citations, ts: answerTs },
         ];
-        setMessages(fail);
-        saveState(fail, currentPath, brand, currentId);
-        toast.error(result.error);
+        citedManual.markFresh(String(answerTs));
+        setMessages(withReply);
+        saveState(withReply, currentPath, brand, currentId);
+        if (result.usage) {
+          setUsage((u) => ({
+            text: result.usage!.text || u.text,
+            voice: result.usage!.voice || u.voice,
+            tier: result.usage!.tier || u.tier,
+          }));
+        } else {
+          const u = await fetchAiUsage(accessToken);
+          if (u) setUsage(u);
+        }
+      } finally {
+        sendingRef.current = false;
+        setSending(false);
       }
-      setSending(false);
-      return;
-    }
-
-    const citations = mergeCitations(result.citations, parseCitationMarkers(result.content));
-    const withReply: ChatMessage[] = [
-      ...nextMsgs,
-      { role: 'assistant', content: result.content, citations, ts: Date.now() },
-    ];
-    setMessages(withReply);
-    saveState(withReply, currentPath, brand, currentId);
-    if (result.usage) {
-      setUsage((u) => ({
-        text: result.usage!.text || u.text,
-        voice: result.usage!.voice || u.voice,
-        tier: result.usage!.tier || u.tier,
-      }));
-    } else {
-      const u = await fetchAiUsage(token);
-      if (u) setUsage(u);
-    }
-    setSending(false);
+    })();
+    return true;
   }
+
+  useEffect(() => {
+    sendPromptRef.current = sendPrompt;
+  });
 
   function clearHistory() {
     if (!confirm('Clear conversation history?')) return;
+    citedManual.cancelPending();
+    citedManual.close();
     setMessages([]);
     saveState([], manualPath, brand, manualId);
   }
@@ -427,12 +502,14 @@ export default function AIAssistantClient() {
   }
 
   const textLimitHit = usage.text.used >= usage.text.limit;
+  const split = citedManual.open && citedManual.presentation === 'panel' && !!citedManual.cited;
 
   return (
     <div className="fixed inset-0 z-30 flex flex-col bg-[var(--bg)]">
       <Header />
 
-      <div className="max-w-3xl mx-auto w-full px-4 py-3 flex flex-col flex-1 min-h-0">
+      <div className={`flex-1 min-h-0 flex ${split ? 'flex-row' : 'justify-center'}`}>
+      <div className={`px-4 py-3 flex flex-col flex-1 min-h-0 ${split ? 'ai-assistant-split border-r border-[var(--border)]' : 'w-full min-w-0 max-w-3xl'}`}>
         <div className="shrink-0 flex items-start justify-between gap-3 mb-3">
           <div>
             <h1 className="text-2xl font-extrabold text-[var(--text)]">🤖 AI Assistant</h1>
@@ -457,14 +534,23 @@ export default function AIAssistantClient() {
             <strong className={textLimitHit ? 'text-red-400' : 'text-[var(--gold)]'}>
               {usage.text.used}/{usage.text.limit}
             </strong>
-            {usage.tier && (
-              <span className="opacity-70 capitalize">· {usage.tier}</span>
-            )}
+            {planLabel && <span className="opacity-70">· {planLabel}</span>}
           </span>
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface2)] opacity-70">
             🎙️ Voice {usage.voice.used}/{usage.voice.limit}
             <span className="hidden sm:inline">(mobile)</span>
           </span>
+          <button
+            type="button"
+            onClick={citedManual.toggleAutoOpen}
+            aria-pressed={citedManual.autoOpen}
+            aria-label="Auto-open cited manual page"
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface2)] hover:border-[var(--gold)] ${
+              citedManual.autoOpen ? 'text-[var(--gold)]' : ''
+            }`}
+          >
+            Auto-open page {citedManual.autoOpen ? 'ON' : 'OFF'}
+          </button>
         </div>
 
         {/* Manual context */}
@@ -555,9 +641,11 @@ export default function AIAssistantClient() {
         <div
           ref={listRef}
           className="ai-chat-thread flex-1 min-h-0 overflow-y-auto p-4 mb-3 space-y-3 rounded-xl border border-[var(--border)] bg-[var(--surface2)]"
-          tabIndex={0}
+          tabIndex={-1}
+          data-answer-thread=""
           role="log"
           aria-label="AI Assistant conversation"
+          onClick={citedManual.onThreadClick}
         >
           {messages.length === 0 && (
             <div className="text-center text-sm text-[var(--text3)] py-10 leading-relaxed">
@@ -635,6 +723,14 @@ export default function AIAssistantClient() {
             Manual library
           </Link>
         </div>
+      </div>
+      {citedManual.open && citedManual.cited && (
+        <AssistantCitedManual
+          cited={citedManual.cited}
+          presentation={citedManual.presentation}
+          onClose={citedManual.close}
+        />
+      )}
       </div>
     </div>
   );

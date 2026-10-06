@@ -25,7 +25,8 @@ export default async function FinancialReportingPage() {
     );
   }
 
-  const result = await loadAuthorizedFinancialReport(token);
+  const browserTimeZone = jar.get('rp-tz')?.value || '';
+  const result = await loadAuthorizedFinancialReport(token, { browserTimeZone });
   if (!result.ok) {
     return (
       <div className="min-h-screen flex flex-col">
