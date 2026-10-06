@@ -13,7 +13,9 @@ import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-
 import { getCompanyTheme } from '@/lib/company-theme';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import { resolveNumberingTimeZone } from '@/lib/org-timezone';
+import { readEstimateDocumentLocale } from '@/lib/billing/estimate-action';
 import { isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
+import { stampLangOnEstimateLinks } from '@/lib/share';
 import { loadInvoiceRow, mergePaymentFieldsIntoInvoiceData } from '@/lib/billing/invoice-row-load';
 import {
   buildOwnedInvoiceMessage,
@@ -230,7 +232,19 @@ export async function POST(req: NextRequest) {
         : 'Balance due is under $0.50 — no Stripe pay link added.';
     }
 
-    const subject = ownedDocumentSubject('invoice', inv.invoice_number, company.company_name);
+    let mailLocale: string | null = request.locale;
+    const sourceEstimateId = inv.estimate_id;
+    if (sourceEstimateId != null && String(sourceEstimateId).trim() !== '') {
+      try {
+        const reader = hasServiceRole() ? getSupabaseAdmin() : supabase;
+        const stored = await readEstimateDocumentLocale(reader, sourceEstimateId);
+        if (stored) mailLocale = stored;
+      } catch (e) {
+        console.warn('could not read estimate document locale', e);
+      }
+    }
+
+    const subject = ownedDocumentSubject('invoice', inv.invoice_number, company.company_name, mailLocale);
     const moneyPrefs = callerOrgId != null ? await loadOrgMoneyPrefs(supabase, callerOrgId) : null;
     const zone = await resolveNumberingTimeZone(supabase, callerOrgId, { allowBrowser: false });
     const sitePayUrl =
@@ -243,6 +257,7 @@ export async function POST(req: NextRequest) {
       theme,
       paymentUrl: sitePayUrl,
       moneyPrefs,
+      locale: mailLocale,
       timeZone: zone.timeZone,
     });
     const { signupUrl, loginUrl } = documentAccountLinks(publicSiteOrigin(req));
@@ -253,7 +268,9 @@ export async function POST(req: NextRequest) {
       loginUrl,
       companyName: String(inv.customer_name || '').trim(),
       theme,
+      locale: mailLocale,
     });
+    const mailedHtml = stampLangOnEstimateLinks(wrapped, mailLocale);
 
     const resendKey = process.env.RESEND_API_KEY;
     const from =
@@ -288,7 +305,7 @@ export async function POST(req: NextRequest) {
           from,
           to: recipient.email,
           subject,
-          html: wrapped,
+          html: mailedHtml,
           replyTo: company.email,
         })
       ),

@@ -1,4 +1,5 @@
 'use client';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -22,6 +23,7 @@ import {
  * (Server layout used browser localStorage client → always "not logged in".)
  */
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
+  const t = useT();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const pathname = usePathname();
@@ -108,9 +110,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return (
       <div className="min-h-screen flex flex-col">
         <Header />
-        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">
-          Loading Admin Portal…
-        </div>
+        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">{t('Loading Admin Portal…')}</div>
       </div>
     );
   }
@@ -121,10 +121,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         <Header />
         <div className="max-w-lg mx-auto w-full px-4 py-16 text-center">
           <h1 className="text-3xl font-extrabold">404</h1>
-          <p className="text-[var(--text3)] mt-2 mb-6">This page could not be found.</p>
-          <Link href="/" className="btn btn-primary">
-            Dashboard
-          </Link>
+          <p className="text-[var(--text3)] mt-2 mb-6">{t('This page could not be found.')}</p>
+          <Link href="/" className="btn btn-primary">{t('Dashboard')}</Link>
         </div>
       </div>
     );
@@ -135,20 +133,16 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <div className="min-h-screen flex flex-col">
         <Header />
         <div className="max-w-lg mx-auto w-full px-4 py-16 text-center">
-          <h1 className="text-2xl font-extrabold mb-2">Admin access required</h1>
+          <h1 className="text-2xl font-extrabold mb-2">{t('Admin access required')}</h1>
           <p className="text-sm text-[var(--text3)] mb-6">
-            The Admin Portal is for organization admins (
+            {t('The Admin Portal is for organization admins')} (
             <code className="text-[var(--gold)]">admin</code> /{' '}
             <code className="text-[var(--gold)]">company_admin</code>
-            ). Your account is signed in but does not have that role.
+            ). {t('Your account is signed in but does not have that role.')}
           </p>
           <div className="flex gap-3 justify-center flex-wrap">
-            <Link href="/" className="btn btn-primary">
-              Dashboard
-            </Link>
-            <Link href="/company" className="btn btn-secondary">
-              Company Profile
-            </Link>
+            <Link href="/" className="btn btn-primary">{t('Dashboard')}</Link>
+            <Link href="/company" className="btn btn-secondary">{t('Company Profile')}</Link>
           </div>
         </div>
       </div>
@@ -159,9 +153,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
     return (
       <div className="min-h-screen flex flex-col">
         <Header />
-        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">
-          Redirecting to sign in…
-        </div>
+        <div className="flex-1 flex items-center justify-center text-[var(--text3)]">{t('Redirecting to sign in…')}</div>
       </div>
     );
   }
@@ -192,7 +184,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
       <div className="flex flex-1 w-full min-w-0">
         <aside className="w-64 shrink-0 bg-[var(--surface)] border-r border-[var(--border)] p-6 hidden lg:block">
           <div className="mb-8">
-            <h2 className="text-2xl font-bold text-[var(--gold)]">Admin Portal</h2>
+            <h2 className="text-2xl font-bold text-[var(--gold)]">{t('Admin Portal')}</h2>
             <p className="text-sm text-[var(--text3)] truncate" title={orgName}>
               {orgName}
             </p>
@@ -213,7 +205,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     (active ? 'bg-[var(--surface3)] text-[var(--gold)] font-semibold' : '')
                   }
                 >
-                  {item.label}
+                  {t(item.label)}
                 </Link>
               );
             })}
@@ -227,16 +219,12 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 }
                 target={upgrade.target}
               >
-                {UPGRADE_LABEL}
+                {t(UPGRADE_LABEL)}
               </UpgradePlanLink>
             )}
             <div className="pt-4 mt-4 border-t border-[var(--border)]">
-              <Link href="/" className="block px-4 py-2.5 rounded-lg hover:bg-[var(--surface3)] text-[var(--text3)]">
-                ← Main Dashboard
-              </Link>
-              <Link href="/company" className="block px-4 py-2.5 rounded-lg hover:bg-[var(--surface3)] text-[var(--text3)]">
-                Company Profile
-              </Link>
+              <Link href="/" className="block px-4 py-2.5 rounded-lg hover:bg-[var(--surface3)] text-[var(--text3)]">{t('← Main Dashboard')}</Link>
+              <Link href="/company" className="block px-4 py-2.5 rounded-lg hover:bg-[var(--surface3)] text-[var(--text3)]">{t('Company Profile')}</Link>
             </div>
           </nav>
         </aside>
@@ -246,7 +234,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <div className="lg:hidden flex gap-2 overflow-x-auto mb-4 pb-1">
             {nav.map((item) => (
               <Link key={item.href} href={item.href} className="btn btn-secondary text-xs whitespace-nowrap">
-                {item.label}
+                {t(item.label)}
               </Link>
             ))}
             {upgrade.show && (
@@ -254,7 +242,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                 className="btn btn-secondary text-xs whitespace-nowrap"
                 target={upgrade.target}
               >
-                {UPGRADE_LABEL}
+                {t(UPGRADE_LABEL)}
               </UpgradePlanLink>
             )}
           </div>

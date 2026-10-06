@@ -7,6 +7,7 @@ import {
   supplierSignupUrl,
   wrapSupplierFacingDocumentEmail,
 } from '@/lib/customer-invite';
+import { parseMailLocale, translateAppFill } from '@/lib/i18n/translate-app';
 
 const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
 
@@ -137,11 +138,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const subject =
-      String(body.subject || '').trim() ||
-      (poNumber
-        ? `Purchase Order ${poNumber} from ${body.company_name || 'Total Service Pro'}`
-        : 'Purchase Order from Total Service Pro');
+    const mailLocale = parseMailLocale(body.locale);
+    const shopName = String(body.company_name || 'Total Service Pro');
+    const localizedSubject = poNumber
+      ? translateAppFill(mailLocale, 'Purchase Order {num} from {shop}', {
+          num: poNumber,
+          shop: shopName,
+        })
+      : translateAppFill(mailLocale, 'Purchase Order from {shop}', { shop: shopName });
+    const subject = mailLocale
+      ? localizedSubject
+      : String(body.subject || '').trim() || localizedSubject;
 
     const resendKey = process.env.RESEND_API_KEY;
     const from =
@@ -168,6 +175,7 @@ export async function POST(req: NextRequest) {
       documentHtml: html,
       signupUrl: supplierSignupUrl(origin, supplierEmail),
       loginUrl: supplierLoginUrl(origin),
+      locale: mailLocale,
     });
 
     const rr = await fetch('https://api.resend.com/emails', {

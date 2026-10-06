@@ -3,6 +3,7 @@
  */
 
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '../customer-contacts.ts';
+import { readSiteLanguage } from '../i18n/preference.ts';
 
 export type SendDocResult = {
   ok: boolean;
@@ -89,7 +90,7 @@ export async function sendBillingDocEmail(opts: {
         'Content-Type': 'application/json',
         Authorization: `Bearer ${opts.accessToken}`,
       },
-      body: JSON.stringify(opts.payload),
+      body: JSON.stringify({ ...opts.payload, locale: readSiteLanguage() }),
     });
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {

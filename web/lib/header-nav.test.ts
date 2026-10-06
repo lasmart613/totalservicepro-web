@@ -44,7 +44,7 @@ test('company invite email is not the organization email field', () => {
   assert.match(page, /id="company-details-email"/);
   const details = page.split('Company Details Form')[1]?.split('id="team-invite"')[0] || '';
   assert.match(details, /htmlFor="company-details-email"[\s\S]{0,240}id="company-details-email"/);
-  assert.match(details, />Email</);
+  assert.match(details, /\{t\('Email'\)\}/);
 });
 
 test('phone chrome keeps only brand, menu, and account — no overlapping top-bar links', () => {

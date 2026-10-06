@@ -1,4 +1,5 @@
 'use client';
+import { useFormatDate } from '@/lib/use-format-date';
 
 import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import Link from 'next/link';
@@ -135,6 +136,7 @@ const EMPTY_FORM = (presetDate?: string): TicketForm => ({
 
 export default function ServiceSchedule() {
   const t = useT();
+  const { format, locale } = useFormatDate();
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
   // Keep full date so Day view and month→day click land on the correct day
   const [cursor, setCursor] = useState(() => {
@@ -520,7 +522,7 @@ export default function ServiceSchedule() {
     return () => subscription.unsubscribe();
   }, [fetchServiceCalls, supabase]);
 
-  const monthName = cursor.toLocaleString('default', { month: 'long' });
+  const monthName = format(cursor, { month: 'long' });
 
   const nextMonth = () =>
     setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth() + 1, Math.min(prev.getDate(), 28), 12, 0, 0));
@@ -838,7 +840,7 @@ export default function ServiceSchedule() {
               {datedThisMonth} dated this month
               {' · '}
               {unscheduledCalls.length} unscheduled
-              {userRole ? ` · ${t(roleLabel(userRole))}` : ''}
+              {userRole ? ` · ${roleLabel(userRole, locale)}` : ''}
               {fseOnlyView ? ' · your assignments only' : ' · full shop'}
               {!canCreate && userId ? ' · read-only' : ''}
             </span>
@@ -855,7 +857,7 @@ export default function ServiceSchedule() {
         {shopLeadView && (
           <div className="card p-4 mb-6">
             <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
-              <h2 className="font-bold text-sm">Assigned FSE</h2>
+              <h2 className="font-bold text-sm">{t('Assigned FSE')}</h2>
               <button
                 type="button"
                 className={`btn text-xs ${legendFilter == null ? 'btn-primary' : 'btn-secondary'}`}
@@ -964,11 +966,14 @@ export default function ServiceSchedule() {
             </div>
 
             <div className="grid grid-cols-7 gap-px bg-[var(--border)]">
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((d) => (
-                <div key={d} className="bg-[var(--surface)] py-3 text-center font-medium text-sm">
-                  {d}
-                </div>
-              ))}
+              {Array.from({ length: 7 }, (_, idx) => {
+                const d = format(new Date(2026, 0, 4 + idx), { weekday: 'short' });
+                return (
+                  <div key={idx} className="bg-[var(--surface)] py-3 text-center font-medium text-sm">
+                    {d}
+                  </div>
+                );
+              })}
               {calendarDays.map((day, i) => {
                 const dayCalls = day
                   ? visibleCalls.filter((c) => ymdEqualsDay(c.date, year, month1, day))
@@ -1065,8 +1070,8 @@ export default function ServiceSchedule() {
                 <ChevronLeft size={20} />
               </button>
               <div className="text-xl font-bold">
-                Week of{' '}
-                {weekStart.toLocaleDateString('en-US', {
+                {t('Week of')}{' '}
+                {format(weekStart, {
                   month: 'short',
                   day: 'numeric',
                   year: 'numeric',
@@ -1079,15 +1084,16 @@ export default function ServiceSchedule() {
 
             <div className="grid grid-cols-8 gap-px bg-[var(--border)] min-w-[1100px]">
               <div className="bg-[var(--surface)]" />
-              {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map((dayName, idx) => {
+              {Array.from({ length: 7 }, (_, idx) => {
                 const dayDate = new Date(
                   weekStart.getFullYear(),
                   weekStart.getMonth(),
                   weekStart.getDate() + idx
                 );
+                const dayName = format(new Date(2026, 0, 4 + idx), { weekday: 'short' });
                 const dayStr = toLocalYmd(dayDate);
                 return (
-                  <div key={dayName} className="bg-[var(--surface)] p-2 text-center">
+                  <div key={dayStr} className="bg-[var(--surface)] p-2 text-center">
                     <div className="font-medium">{dayName}</div>
                     <div className="text-xs text-[var(--text3)]">{dayDate.getDate()}</div>
                     <div
@@ -1110,7 +1116,7 @@ export default function ServiceSchedule() {
                               className="cursor-grab select-none opacity-70"
                               draggable
                               onDragStart={(e) => handleDragStart(e, call)}
-                              title="Drag to reschedule"
+                              title={t('Drag to reschedule')}
                             >
                               ⋮⋮
                             </span>
@@ -1141,7 +1147,7 @@ export default function ServiceSchedule() {
                 <ChevronLeft size={20} />
               </button>
               <div className="text-xl font-bold">
-                {cursor.toLocaleDateString('en-US', {
+                {format(cursor, {
                   weekday: 'long',
                   month: 'long',
                   day: 'numeric',
@@ -1203,7 +1209,7 @@ export default function ServiceSchedule() {
         {view === 'agenda' && (
           <div className="card p-6">
             <div className="flex justify-between items-center mb-4">
-              <h2 className="text-xl font-bold">Upcoming</h2>
+              <h2 className="text-xl font-bold">{t('Upcoming')}</h2>
               {canCreate && (
                 <button type="button" className="btn btn-primary text-sm" onClick={() => openNewModal()}>
                   + New
@@ -1299,9 +1305,7 @@ export default function ServiceSchedule() {
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex justify-between items-center px-6 pt-5 pb-3 shrink-0 border-b border-[var(--border)]">
-              <h2 className="text-xl font-bold" style={{ color: 'var(--gold)' }}>
-                New Service Call
-              </h2>
+              <h2 className="text-xl font-bold" style={{ color: 'var(--gold)' }}>{t('New Service Call')}</h2>
               <button
                 type="button"
                 className="text-2xl leading-none text-[var(--text3)] hover:text-[var(--text)]"
@@ -1326,7 +1330,7 @@ export default function ServiceSchedule() {
                 style={{ overflowY: 'auto', minHeight: 0, flex: '1 1 auto', overscrollBehavior: 'contain' }}
               >
               <div className="relative">
-                <label className="label">Customer *</label>
+                <label className="label">{t('Customer *')}</label>
                 <input
                   className="input"
                   value={form.customer_name}
@@ -1404,7 +1408,7 @@ export default function ServiceSchedule() {
                 }}
               />
               <div>
-                <label className="label">Assign to FSE</label>
+                <label className="label">{t('Assign to FSE')}</label>
                 <AssignFseSelect
                   className="select"
                   value={assignedTo}
@@ -1416,7 +1420,7 @@ export default function ServiceSchedule() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Service date</label>
+                  <label className="label">{t('Service date')}</label>
                   <input
                     type="date"
                     className="input"
@@ -1425,22 +1429,22 @@ export default function ServiceSchedule() {
                   />
                 </div>
                 <div>
-                  <label className="label">Priority</label>
+                  <label className="label">{t('Priority')}</label>
                   <select
                     className="select"
                     value={form.priority}
                     onChange={(e) => setForm({ ...form, priority: e.target.value })}
                   >
-                    <option>Low</option>
-                    <option>Medium</option>
-                    <option>High</option>
-                    <option>Emergency</option>
+                    <option>{t('Low')}</option>
+                    <option>{t('Medium')}</option>
+                    <option>{t('High')}</option>
+                    <option>{t('Emergency')}</option>
                   </select>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Start time</label>
+                  <label className="label">{t('Start time')}</label>
                   <input
                     type="time"
                     className="input"
@@ -1449,7 +1453,7 @@ export default function ServiceSchedule() {
                   />
                 </div>
                 <div>
-                  <label className="label">End time</label>
+                  <label className="label">{t('End time')}</label>
                   <input
                     type="time"
                     className="input"
@@ -1460,37 +1464,37 @@ export default function ServiceSchedule() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Service type</label>
+                  <label className="label">{t('Service type')}</label>
                   <select
                     className="select"
                     value={form.service_type}
                     onChange={(e) => setForm({ ...form, service_type: e.target.value })}
                   >
-                    <option>Repair</option>
-                    <option>PM</option>
-                    <option>Install</option>
-                    <option>Calibration</option>
-                    <option>Training</option>
-                    <option>Other</option>
+                    <option>{t('Repair')}</option>
+                    <option>{t('PM')}</option>
+                    <option>{t('Install')}</option>
+                    <option>{t('Calibration')}</option>
+                    <option>{t('Training')}</option>
+                    <option>{t('Other')}</option>
                   </select>
                 </div>
                 <div>
-                  <label className="label">Status</label>
+                  <label className="label">{t('Status')}</label>
                   <select
                     className="select"
                     value={form.status}
                     onChange={(e) => setForm({ ...form, status: e.target.value })}
                   >
-                    <option>Scheduled</option>
-                    <option>Awaiting Scheduling</option>
-                    <option>In Progress</option>
-                    <option>Completed</option>
+                    <option>{t('Scheduled')}</option>
+                    <option>{t('Awaiting Scheduling')}</option>
+                    <option>{t('In Progress')}</option>
+                    <option>{t('Completed')}</option>
                   </select>
                 </div>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">Manufacturer</label>
+                  <label className="label">{t('Manufacturer')}</label>
                   <select
                     className="select"
                     value={makeValue}
@@ -1504,13 +1508,13 @@ export default function ServiceSchedule() {
                       });
                     }}
                   >
-                    <option value="">— Select —</option>
+                    <option value="">{t('— Select —')}</option>
                     {makeChoices.map((mfr) => (
                       <option key={mfr.value} value={mfr.value}>
                         {mfr.label}
                       </option>
                     ))}
-                    <option value={OTHER_MANUFACTURER}>Other / custom…</option>
+                    <option value={OTHER_MANUFACTURER}>{t('Other / custom…')}</option>
                   </select>
                   {form.equipment_make === OTHER_MANUFACTURER && (
                     <input
@@ -1523,7 +1527,7 @@ export default function ServiceSchedule() {
                   )}
                 </div>
                 <div>
-                  <label className="label">Model</label>
+                  <label className="label">{t('Model')}</label>
                   <select
                     className="select"
                     value={modelValue}
@@ -1538,14 +1542,14 @@ export default function ServiceSchedule() {
                     }}
                   >
                     <option value="">
-                      {form.equipment_make ? '— Select —' : 'Select manufacturer first'}
+                      {form.equipment_make ? t('— Select —') : 'Select manufacturer first'}
                     </option>
                     {modelChoices.map((modelChoice) => (
                       <option key={modelChoice.value} value={modelChoice.value}>
                         {modelChoice.label}
                       </option>
                     ))}
-                    <option value={OTHER_MODEL}>Other / custom…</option>
+                    <option value={OTHER_MODEL}>{t('Other / custom…')}</option>
                   </select>
                   {(form.equipment_model === OTHER_MODEL ||
                     form.equipment_make === OTHER_MANUFACTURER) && (
@@ -1560,7 +1564,7 @@ export default function ServiceSchedule() {
                 </div>
               </div>
               <div>
-                <label className="label">Serial number</label>
+                <label className="label">{t('Serial number')}</label>
                 <input
                   className="input"
                   value={form.serial_number}
@@ -1568,7 +1572,7 @@ export default function ServiceSchedule() {
                 />
               </div>
               <div>
-                <label className="label">Address</label>
+                <label className="label">{t('Address')}</label>
                 <input
                   className="input"
                   value={form.customer_address}
@@ -1577,7 +1581,7 @@ export default function ServiceSchedule() {
               </div>
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
                 <div>
-                  <label className="label">City</label>
+                  <label className="label">{t('City')}</label>
                   <input
                     className="input"
                     value={form.customer_city}
@@ -1585,7 +1589,7 @@ export default function ServiceSchedule() {
                   />
                 </div>
                 <div>
-                  <label className="label">State</label>
+                  <label className="label">{t('State')}</label>
                   <input
                     className="input"
                     value={form.customer_state}
@@ -1595,7 +1599,7 @@ export default function ServiceSchedule() {
                   />
                 </div>
                 <div>
-                  <label className="label">ZIP</label>
+                  <label className="label">{t('ZIP')}</label>
                   <input
                     className="input"
                     value={form.customer_zip}
@@ -1604,7 +1608,7 @@ export default function ServiceSchedule() {
                   />
                 </div>
                 <div>
-                  <label className="label">Phone</label>
+                  <label className="label">{t('Phone')}</label>
                   <input
                     className="input"
                     value={form.customer_phone}
@@ -1612,7 +1616,7 @@ export default function ServiceSchedule() {
                   />
                 </div>
                 <div>
-                  <label className="label">Contact</label>
+                  <label className="label">{t('Contact')}</label>
                   <input
                     className="input"
                     value={form.customer_contact}
@@ -1621,7 +1625,7 @@ export default function ServiceSchedule() {
                 </div>
               </div>
               <div>
-                <label className="label">Notes / problem</label>
+                <label className="label">{t('Notes / problem')}</label>
                 <textarea
                   className="input"
                   rows={2}
@@ -1637,9 +1641,7 @@ export default function ServiceSchedule() {
                   className="btn btn-secondary flex-1"
                   disabled={saving}
                   onClick={() => setShowNew(false)}
-                >
-                  Cancel
-                </button>
+                >{t('Cancel')}</button>
                 <button type="submit" className="btn btn-primary flex-1" disabled={saving}>
                   {saving ? 'Creating…' : 'Create ticket'}
                 </button>

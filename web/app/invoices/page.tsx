@@ -1,4 +1,5 @@
 'use client';
+import { useFormatDate } from '@/lib/use-format-date';
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -59,6 +60,7 @@ function docNumber(inv: InvoiceRow): string {
 export default function InvoicesListPage() {
   const { money } = useOrgMoney();
   const t = useT();
+  const { locale } = useFormatDate();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [rows, setRows] = useState<InvoiceRow[]>([]);
@@ -393,7 +395,7 @@ export default function InvoicesListPage() {
               const st = String(inv.status || 'draft').toLowerCase();
               const num = docNumber(inv);
               const dateStr =
-                formatOrgDocumentDate(inv.invoice_date || inv.created_at, docZone) || '—';
+                formatOrgDocumentDate(inv.invoice_date || inv.created_at, docZone, locale) || '—';
               const alreadyPaid = st === 'paid' || isVoidInvoiceStatus(st);
               const voidable = canVoidInvoice({
                 status: inv.status,
@@ -477,7 +479,7 @@ export default function InvoicesListPage() {
                           )
                         }
                       >
-                        Mark paid
+                        {t('Mark paid')}
                       </button>
                       {(() => {
                         const split = resolveInvoiceCollectable({
@@ -528,7 +530,7 @@ export default function InvoicesListPage() {
             <p className="text-xs text-[var(--text3)] mb-3">
               {payRow.customer_name || 'Customer'} · {money(Number(payRow.total) || 0)} due
             </p>
-            <label className="label">Amount received</label>
+            <label className="label">{t('Amount received')}</label>
             <input
               className="input mb-2"
               type="number"
@@ -537,26 +539,24 @@ export default function InvoicesListPage() {
               value={payAmt}
               onChange={(e) => setPayAmt(e.target.value)}
             />
-            <label className="label">Method</label>
+            <label className="label">{t('Method')}</label>
             <select className="select mb-4" value={payMethod} onChange={(e) => setPayMethod(e.target.value)}>
-              <option>Cash</option>
-              <option>Check</option>
-              <option>Credit Card</option>
-              <option>ACH / Wire</option>
+              <option>{t('Cash')}</option>
+              <option>{t('Check')}</option>
+              <option>{t('Credit Card')}</option>
+              <option>{t('ACH / Wire')}</option>
               <option>Stripe</option>
-              <option>Other</option>
+              <option>{t('Other')}</option>
             </select>
             <div className="flex gap-2">
-              <button type="button" className="btn btn-secondary flex-1" onClick={() => setPayRow(null)}>
-                Cancel
-              </button>
+              <button type="button" className="btn btn-secondary flex-1" onClick={() => setPayRow(null)}>{t('Cancel')}</button>
               <button
                 type="button"
                 className="btn btn-primary flex-1"
                 disabled={paying}
                 onClick={() => applyManualPayment(payRow, Number(payAmt) || 0, payMethod)}
               >
-                {paying ? 'Saving…' : 'Save'}
+                {paying ? t('Saving…') : t('Save')}
               </button>
             </div>
           </div>

@@ -5,6 +5,8 @@
  */
 
 import type { CompanyTheme } from '../company-theme.ts';
+import type { PublicLocale } from '../i18n/locales.ts';
+import { localeToBcp47, parseMailLocale, translateApp, translateAppFill } from '../i18n/translate-app.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
 import { DEFAULT_ORG_TIMEZONE, formatDateInTimeZone } from '../org-timezone.ts';
 import {
@@ -51,15 +53,16 @@ export function documentOwnedByOrganization(
   return String(row.organization_id) === String(callerOrgId);
 }
 
-/** Only the document id (and the invoice pay-link flag) is read from the body. */
+/** Document id, pay-link flag, and a validated site language. HTML, recipient, and subject stay off the body. */
 export function ownedSendRequest(
   body: unknown,
   idKey: 'invoice_id' | 'estimate_id' | 'report_id'
-): { documentId: string | number | null; includePaymentLink: boolean } {
+): { documentId: string | number | null; includePaymentLink: boolean; locale: PublicLocale | null } {
   const record = body && typeof body === 'object' ? (body as Record<string, unknown>) : {};
   return {
     documentId: parseDocumentId(record[idKey]),
     includePaymentLink: record.include_payment_link !== false,
+    locale: parseMailLocale(record.locale),
   };
 }
 
@@ -133,18 +136,18 @@ export function documentAccountLinks(
 export function ownedDocumentSubject(
   kind: 'invoice' | 'estimate' | 'report',
   docNumber: unknown,
-  shopName: unknown
+  shopName: unknown,
+  locale?: string | null
 ): string {
   const num = String(docNumber || '').trim();
   const shop = String(shopName ?? '').trim();
-  const fromShop = shop ? ` from ${shop}` : '';
-  if (kind === 'invoice') {
-    return num ? `Invoice ${num}${fromShop}` : `Invoice${fromShop}`;
-  }
-  if (kind === 'estimate') {
-    return num ? `Estimate ${num}${fromShop}` : `Service estimate${fromShop}`;
-  }
-  return num ? `Service Report ${num}${fromShop}` : `Service report${fromShop}`;
+  const noun =
+    kind === 'invoice' ? 'Invoice' : kind === 'estimate' ? 'Estimate' : 'Service Report';
+  const bare = kind === 'estimate' ? 'Service estimate' : kind === 'report' ? 'Service report' : 'Invoice';
+  if (num && shop) return translateAppFill(locale, `${noun} {num} from {shop}`, { num, shop });
+  if (num) return translateAppFill(locale, `${noun} {num}`, { num });
+  if (shop) return translateAppFill(locale, `${bare} from {shop}`, { shop });
+  return translateApp(locale, bare);
 }
 
 export function senderCompanyFromOrg(
@@ -315,7 +318,7 @@ function ownedEstimateHtmlInput(input: {
       email: String(data.custEmail || ''),
     },
     estNumber: String(input.row.estimate_number || data.estimate_number || data.estNumber || ''),
-    dateStr: formatDocDate(input.row.created_at, input.timeZone),
+    dateStr: formatDocDate(input.row.created_at, input.timeZone, input.locale),
     manufacturer: String(data.manufacturer || ''),
     model: String(data.model || ''),
     serial: String(data.serial || ''),
@@ -403,7 +406,8 @@ function formatBarePartAmount(
 
 export function buildOwnedReportMessage(
   row: Record<string, unknown>,
-  theme: CompanyTheme | null
+  theme: CompanyTheme | null,
+  locale?: string | null
 ): string {
   const printable = { ...row };
   delete printable.html;
@@ -411,6 +415,7 @@ export function buildOwnedReportMessage(
     ...printable,
     theme,
     themeScope: 'email',
+    locale,
   });
 }
 
@@ -541,7 +546,12 @@ function num(value: unknown): number {
   return Number.isFinite(n) ? n : 0;
 }
 
-function formatDocDate(value: unknown, timeZone?: string | null): string {
+function formatDocDate(value: unknown, timeZone?: string | null, locale?: string | null): string {
   const zone = String(timeZone || '').trim() || DEFAULT_ORG_TIMEZONE;
-  return formatDateInTimeZone(value == null || value === '' ? new Date() : String(value), zone);
+  const bcp = locale ? localeToBcp47(locale) : 'en-US';
+  return formatDateInTimeZone(
+    value == null || value === '' ? new Date() : String(value),
+    zone,
+    bcp === 'en' ? 'en-US' : bcp,
+  );
 }
