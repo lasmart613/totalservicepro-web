@@ -188,6 +188,80 @@ html {
   font-size: 12px;
   line-height: 1.45;
 }
+.ai-cite-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: #0d1117;
+  color: #e5e7eb;
+  overflow: hidden;
+}
+.ai-assistant-split {
+  flex: 1 0 32rem;
+  width: auto;
+  min-width: 32rem;
+  max-width: 40rem;
+}
+.ai-chat-thread:focus {
+  outline: 2px solid var(--gold, #fbbf24);
+  outline-offset: 2px;
+}
+.ai-cite-panel.is-docked {
+  flex: 1 1 0%;
+  min-width: 18rem;
+}
+.ai-cite-panel.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+}
+.ai-cite-panel:focus {
+  outline: none;
+}
+.ai-cite-panel-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  background: #1f2937;
+  border-bottom: 1px solid #374151;
+  flex-shrink: 0;
+}
+.ai-cite-panel-back {
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--gold, #fbbf24);
+  color: #111827;
+  font-size: 0.875rem;
+  font-weight: 800;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ai-cite-panel-back:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.ai-cite-panel-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+  font-weight: 650;
+  color: var(--gold, #fbbf24);
+}
+.ai-cite-panel-page {
+  color: #9ca3af;
+  font-weight: 600;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.ai-cite-panel-viewer {
+  flex: 1;
+  min-height: 0;
+}
 .viewer-layout {
   display: grid;
   grid-template-columns: minmax(15.5rem, 17.5rem) minmax(0, 1fr);

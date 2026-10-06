@@ -9,6 +9,7 @@ import { MembershipsSettings } from '@/components/OrgSwitcher';
 import { APP_CHANNEL, APP_VERSION, buildLabel } from '@/lib/app-version';
 import { useSetSiteLanguage, useSiteLocale, useT } from '@/lib/fa/locale';
 import { PUBLIC_LOCALES, type PublicLocale } from '@/lib/i18n/locales';
+import { useAutoOpenCitedManual } from '@/components/useAssistantCitationOpen';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,6 +29,7 @@ export default function Settings() {
   const [browserNotif, setBrowserNotif] = useState(true);
   const [sound, setSound] = useState(true);
   const [theme, setTheme] = useState<'light' | 'dark'>('dark');
+  const [autoOpenCited, setAutoOpenCited] = useAutoOpenCitedManual();
 
   const TIME_ZONES = [
     'UTC',
@@ -127,6 +129,10 @@ export default function Settings() {
     const next = !sound;
     setSound(next);
     save('notificationSound', next);
+  };
+
+  const toggleAutoOpenCited = () => {
+    setAutoOpenCited(!autoOpenCited);
   };
 
   return (
@@ -239,6 +245,26 @@ export default function Settings() {
               <div>{t('Sound')}</div>
               <button onClick={toggleSound} className={`px-3 py-1 rounded text-xs ${sound ? 'bg-green-600' : 'bg-[var(--surface)] border'}`}>
                 {sound ? t('ON') : t('OFF')}
+              </button>
+            </div>
+          </div>
+
+          <div>
+            <div className="font-semibold mb-2">{t('AI Assistant')}</div>
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div>{t('Auto-open cited manual page')}</div>
+                <div className="text-xs text-[var(--text3)] mt-1">
+                  {t('When an answer cites a manual page, open it next to the answer. On a phone it opens full screen after the answer is shown. Saved on this device.')}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={toggleAutoOpenCited}
+                aria-pressed={autoOpenCited}
+                className={`px-3 py-1 rounded text-xs shrink-0 ${autoOpenCited ? 'bg-green-600' : 'bg-[var(--surface)] border'}`}
+              >
+                {autoOpenCited ? t('ON') : t('OFF')}
               </button>
             </div>
           </div>

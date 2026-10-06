@@ -14,7 +14,7 @@ import {
   type ManualViewPayload,
 } from '@/lib/manuals';
 import { asPositivePage } from '@/lib/ai/citations';
-import { fittedPageBoxHeight, viewerPhysicalPage } from '@/lib/pdf-viewer-page';
+import { fittedPageBoxHeight, viewerCitedPageNotice, viewerPhysicalPage } from '@/lib/pdf-viewer-page';
 import { ViewerAiPanel } from '@/components/ViewerAiPanel';
 import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
 
@@ -302,6 +302,8 @@ export function ManualPdfViewer({
   initialPage,
   initialSection,
   initialFind,
+  pageOutOfRange = false,
+  embedded = false,
 }: {
   manualId?: string | null;
   title?: string | null;
@@ -311,6 +313,10 @@ export function ManualPdfViewer({
   initialPage?: string | number | null;
   initialSection?: string | null;
   initialFind?: string | null;
+  /** Citation flag `page_out_of_range` / `oor=1`. Do not scroll to `initialPage`. */
+  pageOutOfRange?: boolean;
+  /** Assistant side panel. Parent owns Back/Close so this view does not navigate away. */
+  embedded?: boolean;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const pdfRef = useRef<PdfDoc | null>(null);
@@ -325,7 +331,7 @@ export function ManualPdfViewer({
   const [catalogModel, setCatalogModel] = useState<string | null>(null);
   const [isIncomplete, setIsIncomplete] = useState(false);
   const [languageCode, setLanguageCode] = useState<string | null>(null);
-  const [showRail, setShowRail] = useState(true);
+  const [showRail, setShowRail] = useState(!embedded);
   const [chapters, setChapters] = useState<ManualChapter[]>([]);
   const [showChapters, setShowChapters] = useState(false);
   const [page, setPage] = useState(1);
@@ -641,6 +647,9 @@ export function ManualPdfViewer({
     if (loading || !pageCount || !pageBoxHeight) return;
     const requested = asPositivePage(initialPage);
     if (requested) {
+      // Flagged past the PDF, or past the loaded page count: leave the document
+      // where it is and show the notice. Do not clamp the deep link onto page 1.
+      if (pageOutOfRange) return;
       const target = viewerPhysicalPage(requested, pageCount);
       if (!target) return;
       let cancelled = false;
@@ -661,7 +670,7 @@ export function ManualPdfViewer({
     void runSearch(0, find);
     // Deep-link jump after the fitted page height is known.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [docEpoch, loading, pageCount, pageBoxHeight, initialPage, jumpToPhysicalPage]);
+  }, [docEpoch, loading, pageCount, pageBoxHeight, initialPage, pageOutOfRange, jumpToPhysicalPage]);
 
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
@@ -701,16 +710,23 @@ export function ManualPdfViewer({
   const pdf = pdfRef.current;
   const pages = pageCount && pdf ? Array.from({ length: pageCount }, (_, i) => i + 1) : [];
   const languageBadge = manualLanguageBadge(languageCode);
+  const requestedPage = asPositivePage(initialPage);
+  const pageNotice =
+    pageOutOfRange || (!loading && pageCount > 0)
+      ? viewerCitedPageNotice(requestedPage, pageCount, pageOutOfRange)
+      : null;
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-[#0d1117] text-[#E5E7EB]">
       <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-[#1F2937] border-b border-[#374151] shrink-0">
-        <Link
-          href={sourceUrl ? '/' : '/manuals'}
-          className="rounded-lg bg-[var(--gold,#FBBF24)] text-[#111827] font-bold text-sm px-3 py-1.5"
-        >
-          {sourceUrl ? '← Home' : '← Library'}
-        </Link>
+        {!embedded && (
+          <Link
+            href={sourceUrl ? '/' : '/manuals'}
+            className="rounded-lg bg-[var(--gold,#FBBF24)] text-[#111827] font-bold text-sm px-3 py-1.5"
+          >
+            {sourceUrl ? '← Home' : '← Library'}
+          </Link>
+        )}
         <div className="flex-1 min-w-[8rem] font-semibold text-[var(--gold,#FBBF24)] truncate">{title}</div>
         {isIncomplete && (
           <span
@@ -797,6 +813,16 @@ export function ManualPdfViewer({
         </div>
       </div>
 
+      {pageNotice && (
+        <div
+          role="alert"
+          data-testid="pdf-page-notice"
+          className="shrink-0 px-3 py-2 text-sm font-semibold bg-amber-950 text-amber-100 border-b border-amber-500/50"
+        >
+          {pageNotice}
+        </div>
+      )}
+
       <div className={`viewer-layout ${showRail ? 'is-rail-open' : ''}`}>
         <aside id="viewer-rail" className="viewer-rail" aria-label="Manual search and AI tools">
           <div className="viewer-rail-label">Search tools</div>
@@ -867,9 +893,11 @@ export function ManualPdfViewer({
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center z-10">
               <div className="text-lg font-bold text-red-400">Could not open manual</div>
               <div className="text-sm text-[#9CA3AF] max-w-md">{error}</div>
-              <Link href={sourceUrl ? '/' : '/manuals'} className="btn btn-primary text-sm px-4 py-2">
-                {sourceUrl ? 'Back home' : 'Back to library'}
-              </Link>
+              {!embedded && (
+                <Link href={sourceUrl ? '/' : '/manuals'} className="btn btn-primary text-sm px-4 py-2">
+                  {sourceUrl ? 'Back home' : 'Back to library'}
+                </Link>
+              )}
             </div>
           )}
           {showChapters && chapters.length > 0 && (
