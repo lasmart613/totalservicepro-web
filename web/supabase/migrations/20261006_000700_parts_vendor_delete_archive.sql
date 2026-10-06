@@ -4,6 +4,8 @@
 -- inventory_transactions.part_id references parts_catalog(id) with no ON DELETE CASCADE,
 -- so parts are archived (is_active = false) instead of deleted.
 -- Same-org admin is organization_memberships.role in (admin, company_admin).
+-- part_vendors INSERT and UPDATE policies are left unchanged (#215 scopes those).
+-- This file only replaces parts_catalog UPDATE and adds part_vendors DELETE.
 
 ALTER TABLE public.parts_catalog
   ADD COLUMN IF NOT EXISTS is_active boolean DEFAULT true;

@@ -701,16 +701,42 @@
         renderParts();
     }
 
+    function partsApiOrigin() {
+        try {
+            if (location.protocol === 'https:' || location.protocol === 'http:') return location.origin;
+        } catch (e) {}
+        return 'https://repairplanet.net';
+    }
+
+    async function postPartsApi(path, body) {
+        try {
+            const { data: { session } } = await supabaseClient.auth.getSession();
+            const token = session && session.access_token;
+            if (!token) return { ok: false, error: 'Sign in required' };
+            const res = await fetch(partsApiOrigin() + path, {
+                method: 'POST',
+                headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const json = await res.json().catch(function () { return {}; });
+            return { ok: res.ok, error: json.error || (res.ok ? '' : "Couldn't save this part.") };
+        } catch (e) {
+            return { ok: false, error: "Couldn't save this part." };
+        }
+    }
+
     async function savePartStock(partId, inStock, qtyRaw) {
         const quantity_on_hand = Math.max(0, parseInt(qtyRaw, 10) || 0);
         const in_stock = !!inStock || quantity_on_hand > 0;
         const qty = in_stock && quantity_on_hand === 0 ? 1 : quantity_on_hand;
-        let { error } = await supabaseClient.from('parts_catalog').update({ in_stock, quantity_on_hand: qty }).eq('id', partId);
-        if (error && /column|in_stock|quantity_on_hand/i.test(error.message || '')) {
-            ({ error } = await supabaseClient.from('parts_catalog').update({ quantity_on_hand: qty }).eq('id', partId));
-        }
-        if (error) {
-            alert(error.message || 'Could not save stock');
+        const result = await postPartsApi('/api/parts/catalog', {
+            action: 'stock',
+            id: partId,
+            in_stock: in_stock,
+            quantity_on_hand: qty
+        });
+        if (!result.ok) {
+            alert(result.error || "Couldn't save stock.");
             return;
         }
         const part = allParts.find(p => String(p.id) === String(partId));
@@ -1046,13 +1072,15 @@
         const vendorName = (document.getElementById('newPartVendor') || {}).value.trim();
         const vendorCostRaw = parseFloat((document.getElementById('newPartVendorCost') || {}).value || '');
         if (created && created.id && vendorName) {
-            await supabaseClient.from('part_vendors').insert({
-                part_id: created.id,
+            const added = await postPartsApi('/api/parts/vendors', {
+                action: 'insert',
+                partId: created.id,
                 vendor_name: vendorName,
                 vendor_part_number: (document.getElementById('newPartVendorPn') || {}).value.trim() || null,
                 unit_cost: Number.isFinite(vendorCostRaw) ? vendorCostRaw : null,
                 is_preferred: true
             });
+            if (!added.ok) alert(added.error || "Couldn't add this vendor.");
         }
         closeAddPartModal();
         await loadParts();
@@ -1077,8 +1105,9 @@
         const cost = document.getElementById('vendorCost').value;
         const lead = document.getElementById('vendorLeadTime').value;
 
-        const { error } = await supabaseClient.from('part_vendors').insert({
-            part_id: currentVendorPartId,
+        const added = await postPartsApi('/api/parts/vendors', {
+            action: 'insert',
+            partId: currentVendorPartId,
             vendor_name: name,
             vendor_part_number: document.getElementById('vendorPartNum').value.trim() || null,
             unit_cost: cost ? parseFloat(cost) : null,
@@ -1088,7 +1117,7 @@
             is_preferred: document.getElementById('vendorPreferred').value === 'true'
         });
 
-        if (error) { errEl.textContent = error.message; return; }
+        if (!added.ok) { errEl.textContent = added.error || "Couldn't add this vendor."; return; }
         closeAddVendorModal();
         await loadParts();
     }

@@ -1,7 +1,11 @@
 /** Who may archive a catalog part or delete its vendor rows. */
 
 export const VENDOR_REMOVE_ERROR = "Couldn't remove this vendor.";
+export const VENDOR_ADD_ERROR = "Couldn't add this vendor.";
+export const VENDOR_PREFER_ERROR = "Couldn't update this vendor.";
 export const PART_ARCHIVE_ERROR = "Couldn't archive this part.";
+export const CATALOG_SAVE_ERROR = "Couldn't save this part.";
+export const STOCK_SAVE_ERROR = "Couldn't save stock.";
 
 export type CatalogMembership = {
   user_id?: string | null;
@@ -42,4 +46,22 @@ export function canArchiveCatalogPart(input: {
 /** PostgREST delete/update with .select() returns the rows actually changed. */
 export function changedRowCount(data: unknown): number {
   return Array.isArray(data) ? data.length : 0;
+}
+
+export async function postPartsJson(
+  path: string,
+  token: string,
+  body: Record<string, unknown>
+): Promise<{ ok: boolean; status: number; error: string }> {
+  const res = await fetch(path, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+  const json = (await res.json().catch(() => ({}))) as { error?: string };
+  if (!res.ok) console.error('[parts-catalog]', path, res.status, json.error || '');
+  return { ok: res.ok, status: res.status, error: json.error || '' };
 }

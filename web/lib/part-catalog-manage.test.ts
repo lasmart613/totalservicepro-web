@@ -10,6 +10,7 @@ import {
   changedRowCount,
 } from './part-catalog-manage.ts';
 import { PART_IMAGE_BUCKET, partPhotoContentType, partPhotoPath } from './part-photo-upload.ts';
+import { catalogWritePatch, vendorInsertPatch } from './part-catalog-write.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -36,10 +37,13 @@ test('archived parts are hidden from the catalog list and search load', () => {
   const list = readFileSync(join(here, '../app/parts/page.tsx'), 'utf8');
   assert.match(list, /\.or\('is_active\.eq\.true,is_active\.is\.null'\)/);
   const detail = readFileSync(join(here, '../app/parts/[id]/page.tsx'), 'utf8');
-  assert.match(detail, /is_active: false/);
-  assert.match(detail, /changedRowCount\(data\) === 0/);
+  const catalogRoute = readFileSync(join(here, '../app/api/parts/catalog/route.ts'), 'utf8');
+  assert.match(detail, /action: 'archive'/);
   assert.match(detail, /PART_ARCHIVE_ERROR/);
   assert.match(detail, /canArchive && part\.is_active !== false/);
+  assert.match(catalogRoute, /getSupabaseAdmin\(\)/);
+  assert.match(catalogRoute, /catalogManagerStatus/);
+  assert.doesNotMatch(detail, /from\('parts_catalog'\)\.update/);
   assert.equal(PART_ARCHIVE_ERROR, "Couldn't archive this part.");
   const sql = readFileSync(
     join(here, '../supabase/migrations/20261006_000700_parts_vendor_delete_archive.sql'),
@@ -54,6 +58,21 @@ test('archived parts are hidden from the catalog list and search load', () => {
   assert.match(sql, /company_admin/);
   assert.doesNotMatch(sql, /user_profiles/);
   assert.doesNotMatch(sql, /FOR DELETE[\s\S]*ON public\.parts_catalog/);
+  assert.doesNotMatch(sql, /CREATE POLICY part_vendors_insert/);
+  assert.doesNotMatch(sql, /CREATE POLICY part_vendors_update/);
+  const archive = catalogWritePatch('archive', { created_by: 'attacker', is_active: true });
+  assert.equal(archive && archive.is_active, false);
+  assert.equal(archive && 'created_by' in archive, false);
+  const edit = catalogWritePatch('edit', { name: 'Lamp', created_by: 'attacker', sale_price: 12 });
+  assert.equal(edit && edit.name, 'Lamp');
+  assert.equal(edit && edit.sale_price, 12);
+  assert.equal(edit && 'created_by' in edit, false);
+  const stock = catalogWritePatch('stock', { in_stock: false, quantity_on_hand: 3 });
+  assert.equal(stock && stock.in_stock, true);
+  assert.equal(stock && stock.quantity_on_hand, 3);
+  const vendor = vendorInsertPatch({ vendor_name: 'Acme', created_by: 'attacker' }, 'user-1');
+  assert.equal(vendor && vendor.created_by, 'user-1');
+  assert.equal(vendor && vendor.vendor_name, 'Acme');
 });
 
 test('archive is the part creator or a same-org admin membership', () => {
@@ -89,4 +108,15 @@ test('part photos upload straight to part-images with a content type', () => {
   assert.match(route, /getSupabaseAdmin\(\)/);
   assert.match(route, /contentType/);
   assert.match(route, /partPhotoPath/);
+  const vendorsRoute = readFileSync(join(here, '../app/api/parts/vendors/route.ts'), 'utf8');
+  assert.match(vendorsRoute, /getSupabaseAdmin\(\)/);
+  assert.match(vendorsRoute, /catalogManagerStatus/);
+  assert.doesNotMatch(modal, /from\('part_vendors'\)/);
+  assert.doesNotMatch(detail, /from\('part_vendors'\)\.update/);
+  const android = readFileSync(join(here, '../../app/src/main/assets/parts_catalog.html'), 'utf8');
+  assert.match(android, /\/api\/parts\/catalog/);
+  assert.match(android, /\/api\/parts\/vendors/);
+  assert.doesNotMatch(android, /from\('parts_catalog'\)\.update/);
+  assert.doesNotMatch(android, /from\('part_vendors'\)\.insert/);
+  assert.match(android, /from\('parts_catalog'\)\.insert/);
 });
