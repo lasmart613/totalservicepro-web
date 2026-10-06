@@ -637,4 +637,11 @@ export const PT_COPY: Record<string, string> = {
   'Sign-in code re-sent. Check inbox and spam.':
     'Reenviamos o código de acesso. Veja a caixa de entrada e o spam.',
   'Sent to': 'Enviado para',
+
+  'Terms of Service': 'Termos de Serviço',
+  'Privacy Policy': 'Política de Privacidade',
+  'Draft, pending owner review': 'Rascunho, aguardando revisão do responsável',
+  'I agree to the {terms} and the {privacy}.': 'Eu concordo com os {terms} e a {privacy}.',
+  'Please agree to the Terms of Service and Privacy Policy.':
+    'Concorde com os Termos de Serviço e a Política de Privacidade.',
 };

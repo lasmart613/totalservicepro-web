@@ -637,4 +637,11 @@ export const HE_COPY: Record<string, string> = {
   'Sign-in code re-sent. Check inbox and spam.':
     'קוד הכניסה נשלח שוב. בדקו את התיבה ואת דואר הזבל.',
   'Sent to': 'נשלח אל',
+
+  'Terms of Service': 'תנאי השירות',
+  'Privacy Policy': 'מדיניות הפרטיות',
+  'Draft, pending owner review': 'טיוטה, ממתינה לבדיקת הבעלים',
+  'I agree to the {terms} and the {privacy}.': 'אני מסכים/ה ל{terms} ול{privacy}.',
+  'Please agree to the Terms of Service and Privacy Policy.':
+    'יש לאשר את תנאי השירות ואת מדיניות הפרטיות.',
 };

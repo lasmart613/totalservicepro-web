@@ -58,6 +58,8 @@ export function PublicContentShell({ children }: { children: ReactNode }) {
           <Link href="/plans">Free plan</Link>
           <Link href="/signup">Sign up</Link>
           <Link href="/login">Sign in</Link>
+          <Link href="/terms">Terms of Service</Link>
+          <Link href="/privacy">Privacy Policy</Link>
         </div>
       </footer>
     </div>

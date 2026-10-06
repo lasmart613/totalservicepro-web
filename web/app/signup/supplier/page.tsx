@@ -7,7 +7,9 @@ import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib
 import { prepareFreshSignup } from '@/lib/auth-session';
 import { useRedirectSignedInOrgToPlans } from '@/lib/use-redirect-signed-in-org';
 import AuthOtpBox from '@/components/AuthOtpBox';
+import { SignupConsent } from '@/components/legal/SignupConsent';
 import { PublicLink, useT } from '@/lib/fa/locale';
+import { CONSENT_REQUIRED } from '@/lib/legal/consent';
 import { useRouter } from 'next/navigation';
 
 const PARTS_OPTIONS = [
@@ -41,6 +43,7 @@ export default function SupplierSignup() {
   const [message, setMessage] = useState('');
   const [messageOk, setMessageOk] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const router = useRouter();
@@ -106,6 +109,10 @@ export default function SupplierSignup() {
     }
     if (password !== confirmPassword) {
       setMessage('Passwords do not match.');
+      return;
+    }
+    if (!agreed) {
+      setMessage(CONSENT_REQUIRED);
       return;
     }
     setLoading(true);
@@ -186,7 +193,7 @@ export default function SupplierSignup() {
         <div className="card p-6">
           {message && (
             <div className={`mb-4 p-3 rounded text-sm ${messageOk || message.includes('created') || message.includes('Check') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
-              {message}
+              {t(message)}
             </div>
           )}
 
@@ -308,13 +315,16 @@ export default function SupplierSignup() {
             </div>
 
             {!awaitingConfirm && (
-              <button
-                type="submit"
-                disabled={loading}
-                className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
-              >
-                {loading ? t('Creating supplier account...') : t('Create Parts Supplier Account & Organization')}
-              </button>
+              <>
+                <SignupConsent checked={agreed} onChange={setAgreed} />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
+                >
+                  {loading ? t('Creating supplier account...') : t('Create Parts Supplier Account & Organization')}
+                </button>
+              </>
             )}
           </form>
 

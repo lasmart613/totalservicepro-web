@@ -8,6 +8,8 @@ Allow: /signup
 Allow: /login
 Allow: /find-a-rep
 Allow: /unsubscribe
+Allow: /terms
+Allow: /privacy
 Disallow: /admin
 Disallow: /admin/god
 Disallow: /god

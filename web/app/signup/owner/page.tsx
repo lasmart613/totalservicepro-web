@@ -13,7 +13,9 @@ import {
   type OwnerOrgType,
 } from '@/lib/org-types';
 import AuthOtpBox from '@/components/AuthOtpBox';
+import { SignupConsent } from '@/components/legal/SignupConsent';
 import { PublicLink, useT } from '@/lib/fa/locale';
+import { CONSENT_REQUIRED } from '@/lib/legal/consent';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 const FACILITY_TYPES = [
@@ -83,6 +85,7 @@ function OwnerSignupInner() {
   const [message, setMessage] = useState('');
   const [messageOk, setMessageOk] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const [claimToken, setClaimToken] = useState<string | null>(null);
@@ -225,6 +228,10 @@ function OwnerSignupInner() {
       setMessage('Passwords do not match.');
       return;
     }
+    if (!agreed) {
+      setMessage(CONSENT_REQUIRED);
+      return;
+    }
 
     setLoading(true);
 
@@ -311,7 +318,7 @@ function OwnerSignupInner() {
         <div className="card p-6">
           {message && (
             <div className={`mb-4 p-3 rounded text-sm ${messageOk || message.includes('created') || message.includes('Check') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
-              {message}
+              {t(message)}
             </div>
           )}
 
@@ -543,13 +550,16 @@ function OwnerSignupInner() {
             </div>
 
             {!awaitingConfirm && (
-              <button
-                type="submit"
-                disabled={loading}
-                className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
-              >
-                {loading ? t('Creating account...') : claimLocked ? t('Create free account & claim profile') : t('Create Owner Account')}
-              </button>
+              <>
+                <SignupConsent checked={agreed} onChange={setAgreed} />
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="btn btn-primary w-full py-3 text-base disabled:opacity-60 mt-2"
+                >
+                  {loading ? t('Creating account...') : claimLocked ? t('Create free account & claim profile') : t('Create Owner Account')}
+                </button>
+              </>
             )}
           </form>
 

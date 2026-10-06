@@ -658,4 +658,11 @@ export const FA_COPY: Record<string, string> = {
   'Sign-in code re-sent. Check inbox and spam.':
     'کد ورود دوباره ارسال شد. صندوق و هرزنامه را ببینید.',
   'Sent to': 'ارسال شد به',
+
+  'Terms of Service': 'شرایط استفاده',
+  'Privacy Policy': 'سیاست حریم خصوصی',
+  'Draft, pending owner review': 'پیش‌نویس، در انتظار بازبینی مالک',
+  'I agree to the {terms} and the {privacy}.': 'با {terms} و {privacy} موافقم.',
+  'Please agree to the Terms of Service and Privacy Policy.':
+    'لطفاً با شرایط استفاده و سیاست حریم خصوصی موافقت کنید.',
 };

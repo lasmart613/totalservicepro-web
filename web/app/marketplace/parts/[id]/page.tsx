@@ -4,6 +4,7 @@ import React, { Suspense, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter, useSearchParams } from 'next/navigation';
 import { Header } from '@/components/Header';
+import { LegalLinks } from '@/components/legal/LegalLinks';
 import { ShareButton } from '@/components/ShareButton';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { listingShareText } from '@/lib/share';
@@ -485,6 +486,7 @@ function PartDetail() {
                 <p className="text-xs text-center text-[var(--text3)]">
                   Secure Stripe Checkout on RepairPlanet. Login is not required to buy.
                 </p>
+                <LegalLinks className="text-center" />
                 <AddListingToInvoiceButton
                   listing={{
                     id: listing.id || id,
