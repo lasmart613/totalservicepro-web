@@ -13,6 +13,7 @@ import {
   type OwnerOrgType,
 } from '@/lib/org-types';
 import AuthOtpBox from '@/components/AuthOtpBox';
+import { clientAuthOrigin } from '@/lib/site-origin';
 import { PublicLink, useT } from '@/lib/fa/locale';
 import { useRouter, useSearchParams } from 'next/navigation';
 
@@ -229,8 +230,7 @@ function OwnerSignupInner() {
     setLoading(true);
 
     try {
-      const origin =
-        typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+      const origin = clientAuthOrigin();
       await prepareFreshSignup(supabase);
       savePendingSignup(pendingPayload());
       const { data: authData, error: authError } = await supabase.auth.signUp({

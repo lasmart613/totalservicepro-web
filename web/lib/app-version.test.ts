@@ -13,15 +13,15 @@ test('product version is the live-customer beta line', () => {
   assert.equal(versionLabel(), '0.5.0-beta');
 });
 
-test('Android gradle version is 0.5.0-beta / 6 and loads production', () => {
+test('Android gradle version is 0.5.1-beta / 7 and loads production', () => {
   const gradle = readFileSync(join(here, '../../app/build.gradle'), 'utf8');
-  assert.match(gradle, /versionCode\s+6/);
-  assert.match(gradle, /versionName\s+"0\.5\.0-beta"/);
+  assert.match(gradle, /versionCode\s+7/);
+  assert.match(gradle, /versionName\s+"0\.5\.1-beta"/);
   assert.doesNotMatch(gradle, /play-services-ads/);
   const main = readFileSync(join(here, '../../app/src/main/java/com/photometrytools/MainActivity.java'), 'utf8');
   assert.match(main, /https:\/\/repairplanet\.net/);
   assert.match(main, /PRODUCTION_ORIGIN/);
-  assert.match(main, /TSPAndroid\/0\.5\.0-beta/);
+  assert.match(main, /TSPAndroid\/0\.5\.1-beta/);
   assert.match(main, /totalservicepro:\/\//);
   assert.match(main, /__tspRestoreAndroidSession/);
   assert.doesNotMatch(main, /MobileAds|AdView|play-services-ads/);
@@ -31,11 +31,11 @@ test('Android gradle version is 0.5.0-beta / 6 and loads production', () => {
   assert.match(manifest, /android:scheme="totalservicepro"/);
   assert.match(manifest, /android:host="repairplanet\.net"/);
   const assets = readFileSync(join(here, '../../app/src/main/assets/app-version.js'), 'utf8');
-  assert.match(assets, /TSP_ANDROID_VERSION_NAME = '0\.5\.0-beta'/);
-  assert.match(assets, /TSP_ANDROID_VERSION_CODE = 6/);
+  assert.match(assets, /TSP_ANDROID_VERSION_NAME = '0\.5\.1-beta'/);
+  assert.match(assets, /TSP_ANDROID_VERSION_CODE = 7/);
   const settings = readFileSync(join(here, '../../app/src/main/assets/settings.html'), 'utf8');
   assert.match(settings, /id="aboutVersion"/);
-  assert.match(settings, /0\.5\.0-beta/);
+  assert.match(settings, /0\.5\.1-beta/);
   const webSettings = readFileSync(join(here, '../app/settings/page.tsx'), 'utf8');
   assert.match(webSettings, /\{APP_VERSION\}/);
 });

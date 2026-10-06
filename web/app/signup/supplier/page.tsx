@@ -6,6 +6,7 @@ import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
 import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup } from '@/lib/auth-session';
 import { useRedirectSignedInOrgToPlans } from '@/lib/use-redirect-signed-in-org';
+import { clientAuthOrigin } from '@/lib/site-origin';
 import AuthOtpBox from '@/components/AuthOtpBox';
 import { PublicLink, useT } from '@/lib/fa/locale';
 import { useRouter } from 'next/navigation';
@@ -111,8 +112,7 @@ export default function SupplierSignup() {
     setLoading(true);
 
     try {
-      const origin =
-        typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+      const origin = clientAuthOrigin();
       await prepareFreshSignup(supabase);
       savePendingSignup(pendingPayload());
       const { data: authData, error: authError } = await supabase.auth.signUp({

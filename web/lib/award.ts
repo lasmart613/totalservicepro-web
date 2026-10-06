@@ -146,44 +146,23 @@ export async function acceptServiceBid(
     /* optional table */
   }
 
-  // Notify winning bidder
-  if (winnerId) {
-    const title = req.title || 'Service request';
-    try {
-      await supabase.from('notifications').insert({
-        user_id: winnerId,
-        type: 'bid_accepted',
-        message: `Your bid was accepted on "${title}". Customer contact details are now available.`,
-        triggered_by: actorUserId,
-        is_read: false,
-        // Winners land on Accepted Bids (contacts). RFQ detail share URL is 403 once awarded.
-        link: `/accepted-bids?id=${encodeURIComponent(requestId)}`,
-        data: {
-          request_id: requestId,
-          bid_id: bidId,
-          event: 'bid_accepted',
+  // Notifications are written with the service role. The client cannot insert
+  // a row for the winner or the poster.
+  try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (token) {
+      await fetch('/api/marketplace/award-notify', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ requestId, bidId }),
       });
-    } catch {
-      /* ignore */
     }
-  }
-
-  // Confirm to owner
-  if (posterId && posterId !== actorUserId) {
-    try {
-      await supabase.from('notifications').insert({
-        user_id: posterId,
-        type: 'bid_awarded',
-        message: `You awarded a bid on "${req.title || 'Service request'}".`,
-        triggered_by: actorUserId,
-        is_read: false,
-        link: `/accepted-bids?id=${encodeURIComponent(requestId)}`,
-        data: { request_id: requestId, bid_id: bidId, event: 'bid_awarded' },
-      });
-    } catch {
-      /* ignore */
-    }
+  } catch {
+    /* award already succeeded */
   }
 
   return { ok: true };

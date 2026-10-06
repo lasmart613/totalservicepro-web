@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -12,6 +12,15 @@ import {
   PART_CATEGORIES,
   PART_UNITS,
 } from '@/components/AddPartModal';
+import {
+  PART_ARCHIVE_ERROR,
+  STOCK_SAVE_ERROR,
+  VENDOR_PREFER_ERROR,
+  VENDOR_REMOVE_ERROR,
+  canArchiveCatalogPart,
+  changedRowCount,
+  postPartsJson,
+} from '@/lib/part-catalog-manage';
 import { partCatalogSaveMessage, partsCatalogManufacturerLabel, partsCatalogWritePayload } from '@/lib/parts-catalog-columns';
 import { StorageImage } from '@/components/StorageImage';
 
@@ -41,10 +50,6 @@ function stockQty(n: unknown): number {
   return Math.floor(v);
 }
 
-function missingColumn(message?: string): string | null {
-  return message?.match(/Could not find the '([^']+)' column/i)?.[1] || null;
-}
-
 function gallery(part: PartRow): string[] {
   const urls: string[] = [];
   if (part.image_url) urls.push(String(part.image_url));
@@ -59,6 +64,7 @@ function gallery(part: PartRow): string[] {
 
 export default function PartDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const partId = params.id as string;
   const supabase = getSupabaseClient();
   const brands = useMemo(() => [...listManufacturers(), 'Generic/Other'], []);
@@ -74,6 +80,7 @@ export default function PartDetailPage() {
   const [form, setForm] = useState<PartRow>({});
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
+  const [canArchive, setCanArchive] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -90,8 +97,24 @@ export default function PartDetailPage() {
           .eq('part_id', data.id)
           .order('is_preferred', { ascending: false });
         setVendors((vrows || []) as VendorRow[]);
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        const createdBy = data.created_by ? String(data.created_by) : '';
+        const memberFilter = [user?.id, createdBy].filter(Boolean).map((id) => `user_id.eq.${id}`).join(',');
+        const { data: memberships } = memberFilter
+          ? await supabase.from('organization_memberships').select('user_id, organization_id, role').or(memberFilter)
+          : { data: [] };
+        setCanArchive(
+          canArchiveCatalogPart({
+            userId: user?.id,
+            createdBy,
+            memberships: memberships || [],
+          })
+        );
       } else {
         setVendors([]);
+        setCanArchive(false);
       }
     } catch (e: any) {
       console.error('part detail', e);
@@ -116,28 +139,26 @@ export default function PartDetailPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function uploadNewPhotos(userId: string): Promise<string[]> {
-    const urls: string[] = [];
-    const buckets = ['marketplace-images', 'equipment-photos', 'equipment', 'logos'];
-    for (let i = 0; i < imageFiles.length; i++) {
-      const file = imageFiles[i];
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-      const path = `parts/${userId}/${Date.now()}_${i}.${ext}`;
-      for (const bucket of buckets) {
-        const { error } = await supabase.storage.from(bucket).upload(path, file, {
-          upsert: true,
-          contentType: file.type || `image/${ext}`,
-        });
-        if (!error) {
-          const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-          if (data?.publicUrl) {
-            urls.push(data.publicUrl);
-            break;
-          }
-        }
-      }
+  async function uploadNewPhotos(): Promise<string[]> {
+    if (!imageFiles.length) return [];
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error('Sign in to add a photo.');
+    const body = new FormData();
+    for (const file of imageFiles) body.append('file', file);
+    const res = await fetch('/api/parts/photos', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body,
+    });
+    const json = (await res.json().catch(() => ({}))) as { urls?: string[]; error?: string };
+    if (!res.ok) {
+      console.error('[part-photos]', res.status, json.error || '');
+      throw new Error(json.error || "Couldn't upload this photo.");
     }
-    return urls;
+    return Array.isArray(json.urls) ? json.urls : [];
   }
 
   async function saveEdit() {
@@ -151,7 +172,7 @@ export default function PartDetailPage() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      const uploaded = user ? await uploadNewPhotos(user.id) : [];
+      const uploaded = user ? await uploadNewPhotos() : [];
       const existing = gallery(form);
       const images = uploaded.length ? [...uploaded, ...existing] : existing;
       const modelsRaw = Array.isArray(form.compatible_models)
@@ -161,7 +182,12 @@ export default function PartDetailPage() {
             .map((m: string) => m.trim())
             .filter(Boolean);
 
-      const payload: Record<string, unknown> = partsCatalogWritePayload({
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error('Sign in required');
+      const payload = partsCatalogWritePayload({
         name: String(form.name || '').trim(),
         part_number: String(form.part_number || '').trim(),
         brand: String(form.brand || form.manufacturer || '').trim() || null,
@@ -171,30 +197,19 @@ export default function PartDetailPage() {
         compatible_models: modelsRaw.length ? modelsRaw : null,
         is_consumable: !!form.is_consumable,
         is_active: form.is_active !== false,
-        sale_price:
-          form.sale_price === '' || form.sale_price == null ? null : Number(form.sale_price),
+        sale_price: form.sale_price === '' || form.sale_price == null ? null : Number(form.sale_price),
         quantity_on_hand: stockQty(form.quantity_on_hand),
         in_stock: !!form.in_stock || stockQty(form.quantity_on_hand) > 0,
         image_url: images[0] || null,
         updated_at: new Date().toISOString(),
       });
-
-      let lastError: { message?: string } | null = null;
-      for (let attempt = 0; attempt < 10; attempt++) {
-        const { error } = await supabase.from('parts_catalog').update(payload).eq('id', part.id);
-        if (!error) {
-          lastError = null;
-          break;
-        }
-        lastError = error;
-        const col = missingColumn(error.message);
-        if (col && col in payload) {
-          delete payload[col];
-          continue;
-        }
-        break;
-      }
-      if (lastError) throw new Error(lastError.message || 'Save failed');
+      delete payload.created_by;
+      const result = await postPartsJson('/api/parts/catalog', token, {
+        action: 'edit',
+        id: part.id,
+        ...payload,
+      });
+      if (!result.ok) throw new Error(result.error || 'Save failed');
       toast.success('Part updated.');
       setEditing(false);
       setImageFiles([]);
@@ -212,41 +227,57 @@ export default function PartDetailPage() {
 
   async function removeVendor(id: number | string) {
     if (!confirm('Remove this vendor from the part?')) return;
-    const { error } = await supabase.from('part_vendors').delete().eq('id', id);
-    if (error) {
-      toast.error(error.message);
+    const { data, error } = await supabase.from('part_vendors').delete().eq('id', id).select('id');
+    if (error || changedRowCount(data) === 0) {
+      console.error('[part-vendors] delete', error?.message || '0 rows');
+      toast.error(VENDOR_REMOVE_ERROR);
       return;
     }
     setVendors((rows) => rows.filter((v) => String(v.id) !== String(id)));
     toast.success('Vendor removed.');
   }
 
+  async function archivePart() {
+    if (!part?.id || !canArchive) return;
+    if (!confirm('Archive this part? It leaves the catalog list. Inventory history stays.')) return;
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      toast.error(PART_ARCHIVE_ERROR);
+      return;
+    }
+    const result = await postPartsJson('/api/parts/catalog', token, { action: 'archive', id: part.id });
+    if (!result.ok) {
+      toast.error(result.error || PART_ARCHIVE_ERROR);
+      return;
+    }
+    toast.success('Part archived.');
+    router.push('/parts');
+  }
+
   async function persistStock(inStock: boolean, qty: number) {
     if (!part?.id) return;
     const quantity_on_hand = stockQty(qty);
     const in_stock = inStock || quantity_on_hand > 0;
-    const payload: Record<string, unknown> = {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      toast.error(STOCK_SAVE_ERROR);
+      return;
+    }
+    const result = await postPartsJson('/api/parts/catalog', token, {
+      action: 'stock',
+      id: part.id,
       in_stock,
       quantity_on_hand,
-      updated_at: new Date().toISOString(),
-    };
-    let lastError: { message?: string } | null = null;
-    for (let attempt = 0; attempt < 6; attempt++) {
-      const { error } = await supabase.from('parts_catalog').update(payload).eq('id', part.id);
-      if (!error) {
-        lastError = null;
-        break;
-      }
-      lastError = error;
-      const col = missingColumn(error.message);
-      if (col && col in payload) {
-        delete payload[col];
-        continue;
-      }
-      break;
-    }
-    if (lastError) {
-      toast.error(lastError.message || 'Could not save stock');
+    });
+    if (!result.ok) {
+      toast.error(result.error || STOCK_SAVE_ERROR);
+      await load();
       return;
     }
     setPart((prev) => (prev ? { ...prev, in_stock, quantity_on_hand } : prev));
@@ -254,9 +285,20 @@ export default function PartDetailPage() {
   }
 
   async function markPreferred(id: number | string) {
-    await supabase.from('part_vendors').update({ is_preferred: false }).eq('part_id', partId);
-    const { error } = await supabase.from('part_vendors').update({ is_preferred: true }).eq('id', id);
-    if (error) toast.error(error.message);
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      toast.error(VENDOR_PREFER_ERROR);
+      return;
+    }
+    const result = await postPartsJson('/api/parts/vendors', token, {
+      action: 'prefer',
+      partId,
+      vendorId: id,
+    });
+    if (!result.ok) toast.error(result.error || VENDOR_PREFER_ERROR);
     else await load();
   }
 
@@ -297,6 +339,7 @@ export default function PartDetailPage() {
               ← Parts Catalog
             </Link>
             <h1 className="text-3xl font-extrabold mt-1">{part.name}</h1>
+            {part.is_active === false && <p className="text-sm text-[var(--text3)]">Archived</p>}
             <p className="text-[var(--text3)]">
               {part.part_number}
               {partsCatalogManufacturerLabel(part) ? ` • ${partsCatalogManufacturerLabel(part)}` : ''}
@@ -310,11 +353,17 @@ export default function PartDetailPage() {
             <button type="button" className="btn btn-secondary" onClick={() => setShowVendors((v) => !v)}>
               {showVendors ? 'Hide vendors' : 'Show vendors'}
             </button>
-            {!editing ? (
+            {canArchive && part.is_active !== false && (
+              <button type="button" className="btn btn-secondary" onClick={archivePart}>
+                Archive
+              </button>
+            )}
+            {canArchive && !editing && (
               <button type="button" className="btn btn-primary" onClick={() => setEditing(true)}>
                 Edit part
               </button>
-            ) : (
+            )}
+            {canArchive && editing && (
               <>
                 <button
                   type="button"
@@ -373,6 +422,7 @@ export default function PartDetailPage() {
                   </div>
                 </div>
                 <p className="text-sm whitespace-pre-wrap">{part.description || 'No description yet.'}</p>
+                {canArchive && (
                 <div className="rounded-lg border border-[var(--border)] p-3 space-y-2">
                   <label className="flex items-center gap-2 text-sm font-medium">
                     <input
@@ -405,6 +455,7 @@ export default function PartDetailPage() {
                     />
                   </div>
                 </div>
+                )}
                 <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">
                   <dt className="text-[var(--text3)]">Unit</dt>
                   <dd>{part.unit_of_measure || 'Each'}</dd>
@@ -549,9 +600,11 @@ export default function PartDetailPage() {
                   {showVendors ? 'Hide vendors' : 'Show vendors'}
                 </button>
               )}
-              <button type="button" className="btn btn-secondary text-sm" onClick={() => setShowVendor(true)}>
-                + Add vendor
-              </button>
+              {canArchive && (
+                <button type="button" className="btn btn-secondary text-sm" onClick={() => setShowVendor(true)}>
+                  + Add vendor
+                </button>
+              )}
             </div>
           </div>
           {vendors.length === 0 ? (
@@ -589,7 +642,7 @@ export default function PartDetailPage() {
                       <td className="py-2 pr-3 text-[var(--gold)] font-semibold">{money(v.unit_cost)}</td>
                       <td className="py-2 pr-3">{v.lead_time_days != null ? `${v.lead_time_days}d` : '—'}</td>
                       <td className="py-2 text-right whitespace-nowrap">
-                        {!v.is_preferred && (
+                        {canArchive && !v.is_preferred && (
                           <button type="button" className="text-xs text-[var(--gold)] mr-3" onClick={() => markPreferred(v.id)}>
                             Preferred
                           </button>

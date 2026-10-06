@@ -6,6 +6,7 @@
 import { createHmac, timingSafeEqual } from 'crypto';
 import type { CompanyTheme } from './company-theme.ts';
 import { documentDirection, translateApp, translateAppFill, withDocDirection } from './i18n/translate-app.ts';
+export { publicSiteOrigin } from './site-origin.ts';
 
 export const CUSTOMER_INVITE_TTL_SEC = 60 * 60 * 24 * 30; // 30 days
 
@@ -99,17 +100,6 @@ export function customerInviteSignupUrl(origin: string, token: string | null, co
   if (companyName) params.set('company', companyName);
   if (email) params.set('email', email);
   return `${base}/signup/owner?${params.toString()}`;
-}
-
-export function publicSiteOrigin(req?: { headers: { get: (name: string) => string | null } }): string {
-  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.URL || process.env.DEPLOY_PRIME_URL;
-  if (env) return String(env).replace(/\/$/, '');
-  if (req) {
-    const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
-    const proto = req.headers.get('x-forwarded-proto') || 'https';
-    if (host) return `${proto}://${host}`;
-  }
-  return 'https://repairplanet.net';
 }
 
 /** Same destination as the Directory invite — claim token when we know the customer org + email. */

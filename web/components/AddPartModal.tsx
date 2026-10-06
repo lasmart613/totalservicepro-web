@@ -9,6 +9,7 @@ import {
   partsCatalogWritePayload,
 } from '@/lib/parts-catalog-columns';
 import { listManufacturers } from '@/lib/laser-catalog';
+import { VENDOR_ADD_ERROR, postPartsJson } from '@/lib/part-catalog-manage';
 
 export const PART_CATEGORIES = PARTS_CATALOG_CATEGORIES;
 
@@ -71,8 +72,14 @@ export function AddVendorModal({
     }
     setSaving(true);
     try {
-      const row: Record<string, unknown> = {
-        part_id: partId,
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token;
+      if (!token) throw new Error('Sign in required');
+      const result = await postPartsJson('/api/parts/vendors', token, {
+        action: 'insert',
+        partId,
         vendor_name: vendor.vendor_name.trim(),
         vendor_part_number: vendor.vendor_part_number.trim() || null,
         unit_cost: vendor.unit_cost.trim() ? Number(vendor.unit_cost) : null,
@@ -80,20 +87,14 @@ export function AddVendorModal({
         url: vendor.url.trim() || null,
         notes: vendor.notes.trim() || null,
         is_preferred: vendor.is_preferred,
-        currency: 'USD',
-        is_active: true,
-      };
-      let { error } = await supabase.from('part_vendors').insert(row);
-      if (error && missingColumn(error.message) && missingColumn(error.message)! in row) {
-        delete row[missingColumn(error.message)!];
-        ({ error } = await supabase.from('part_vendors').insert(row));
-      }
-      if (error) throw error;
+      });
+      if (!result.ok) throw new Error(result.error || VENDOR_ADD_ERROR);
       toast.success('Vendor added.');
       onSaved();
       onClose();
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : 'Could not add vendor');
+      console.error('[part-vendors] insert', e);
+      toast.error(e instanceof Error && e.message === 'Sign in required' ? e.message : VENDOR_ADD_ERROR);
     } finally {
       setSaving(false);
     }
@@ -190,28 +191,26 @@ export function AddPartModal({ onClose, onCreated }: Props) {
     setVendors((rows) => rows.map((row) => (row.key === key ? { ...row, ...patch } : row)));
   }
 
-  async function uploadImages(userId: string): Promise<string[]> {
-    const urls: string[] = [];
-    const buckets = ['marketplace-images', 'equipment-photos', 'equipment', 'logos'];
-    for (let i = 0; i < imageFiles.length; i++) {
-      const file = imageFiles[i];
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-      const path = `parts/${userId}/${Date.now()}_${i}.${ext}`;
-      for (const bucket of buckets) {
-        const { error } = await supabase.storage.from(bucket).upload(path, file, {
-          upsert: true,
-          contentType: file.type || `image/${ext}`,
-        });
-        if (!error) {
-          const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-          if (data?.publicUrl) {
-            urls.push(data.publicUrl);
-            break;
-          }
-        }
-      }
+  async function uploadImages(): Promise<string[]> {
+    if (!imageFiles.length) return [];
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error('Sign in to add a part.');
+    const body = new FormData();
+    for (const file of imageFiles) body.append('file', file);
+    const res = await fetch('/api/parts/photos', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body,
+    });
+    const json = (await res.json().catch(() => ({}))) as { urls?: string[]; error?: string };
+    if (!res.ok) {
+      console.error('[part-photos]', res.status, json.error || '');
+      throw new Error(json.error || "Couldn't upload this photo.");
     }
-    return urls;
+    return Array.isArray(json.urls) ? json.urls : [];
   }
 
   async function handleSave() {
@@ -230,7 +229,7 @@ export function AddPartModal({ onClose, onCreated }: Props) {
       } = await supabase.auth.getUser();
       if (!user) throw new Error('Sign in to add a part.');
 
-      const imageUrls = await uploadImages(user.id);
+      const imageUrls = await uploadImages();
       const compatible = models
         .split(',')
         .map((m) => m.trim())
@@ -275,10 +274,18 @@ export function AddPartModal({ onClose, onCreated }: Props) {
       if (!created) throw new Error(lastError?.message || 'Could not save part');
 
       const filledVendors = vendors.filter((v) => v.vendor_name.trim());
-
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+      const token = session?.access_token || '';
       for (const v of filledVendors) {
-        const row: Record<string, unknown> = {
-          part_id: created.id,
+        if (!token) {
+          console.warn('vendor insert', 'Sign in required');
+          continue;
+        }
+        const result = await postPartsJson('/api/parts/vendors', token, {
+          action: 'insert',
+          partId: created.id,
           vendor_name: v.vendor_name.trim(),
           vendor_part_number: v.vendor_part_number.trim() || null,
           unit_cost: v.unit_cost.trim() ? Number(v.unit_cost) : null,
@@ -286,15 +293,8 @@ export function AddPartModal({ onClose, onCreated }: Props) {
           url: v.url.trim() || null,
           notes: v.notes.trim() || null,
           is_preferred: v.is_preferred,
-          currency: 'USD',
-          is_active: true,
-        };
-        let { error } = await supabase.from('part_vendors').insert(row);
-        if (error && missingColumn(error.message) && missingColumn(error.message)! in row) {
-          delete row[missingColumn(error.message)!];
-          ({ error } = await supabase.from('part_vendors').insert(row));
-        }
-        if (error) console.warn('vendor insert', error.message);
+        });
+        if (!result.ok) console.warn('vendor insert', result.error || VENDOR_ADD_ERROR);
       }
 
       toast.success('Part added to the catalog.');

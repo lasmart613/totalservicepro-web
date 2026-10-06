@@ -6,9 +6,29 @@ import React, { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { TestEquipmentRoster } from '@/components/TestEquipmentRoster';
-import { canAssignShopTestEquipment } from '@/lib/roles';
+import { canAssignShopTestEquipment, isAdmin } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { teamInviteEmailError } from '@/lib/team-invite';
+import { invitationIsOpen } from '@/lib/org-membership';
+
+function inviteListStatus(
+  inv: {
+    id?: number | string;
+    accepted?: boolean | null;
+    expires_at?: string | null;
+    created_at?: string | null;
+  },
+  byId: Record<string, string>
+): string {
+  const reported = inv.id != null ? byId[String(inv.id)] : '';
+  if (reported === 'expired') return 'Expired';
+  if (reported === 'on team') return 'On team';
+  if (reported === 'accepted') return 'Accepted';
+  if (reported === 'pending') return 'Pending';
+  if (inv.accepted === true) return 'Accepted';
+  if (!invitationIsOpen(inv)) return 'Expired';
+  return 'Pending';
+}
 
 const ROLES = [
   'fse',
@@ -41,6 +61,7 @@ export default function TeamManagement() {
   const [adding, setAdding] = useState(false);
   const [lastInviteUrl, setLastInviteUrl] = useState<string | null>(null);
   const [lastInviteEmail, setLastInviteEmail] = useState<string | null>(null);
+  const [inviteStatusById, setInviteStatusById] = useState<Record<string, string>>({});
   const supabase = getSupabaseClient();
 
   const fetchTeam = async () => {
@@ -85,8 +106,12 @@ export default function TeamManagement() {
           if (Array.isArray(json.members)) {
             syncedMembers = json.members;
           }
-          if (json.linked > 0) {
-            toast.success(json.message || `Linked ${json.linked} member(s)`);
+          if (Array.isArray(json.invites)) {
+            const map: Record<string, string> = {};
+            for (const inv of json.invites) {
+              if (inv?.id != null && inv.status) map[String(inv.id)] = String(inv.status);
+            }
+            setInviteStatusById(map);
           }
         }
       }
@@ -132,7 +157,7 @@ export default function TeamManagement() {
 
     const { data: invites } = await supabase
       .from('engineer_invitations')
-      .select('id, email, role, first_name, last_name, created_at, accepted')
+      .select('id, email, role, first_name, last_name, created_at, expires_at, accepted')
       .eq('organization_id', profile.organization_id)
       .eq('accepted', false)
       .order('created_at', { ascending: false });
@@ -234,6 +259,32 @@ export default function TeamManagement() {
     }
   };
 
+  const changeMemberRole = async (memberId: string, role: string) => {
+    if (!orgId || !memberId) return;
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      toast.error(t('Sign in required.'));
+      return;
+    }
+    const { postMemberRole } = await import('@/lib/org-founder-client');
+    const result = await postMemberRole(token, {
+      userId: memberId,
+      organizationId: orgId,
+      role,
+    });
+    if (!result.ok) {
+      toast.error(result.error || t('Could not change that role.'));
+      return;
+    }
+    setTeamMembers((prev) =>
+      prev.map((row) => (row.id === memberId ? { ...row, role: result.role || role } : row))
+    );
+    toast.success(t('Role updated'));
+  };
+
   const resendInvite = async (email: string, role?: string) => {
     try {
       const {
@@ -283,7 +334,7 @@ export default function TeamManagement() {
       <h1 className="text-3xl font-extrabold mb-2">{t('Team Management')}</h1>
       <p className="text-[var(--text3)] mb-8" dir="auto">
         <bdi>
-          {t('Invite FSEs and staff. An email that already owns another shop is valid — they join this company as a second membership (moonlight) and keep their home org.')}
+          {t('Invite FSEs and staff. An email that already owns another shop is valid — they keep their home org and join this company only after they accept.')}
         </bdi>
       </p>
 
@@ -385,7 +436,7 @@ export default function TeamManagement() {
             </button>
             <p className="text-xs text-[var(--text3)] mt-2" dir="auto">
               <bdi>
-                {t('Sends a RepairPlanet invite email. Existing users (including shop owners) are added as a membership — default FSE — and keep their home shop. New users set a password from the email.')}
+                {t('Sends a RepairPlanet invite email. Existing users (including shop owners) join when they sign in and accept — default FSE — and keep their home shop. New users set a password from the email.')}
               </bdi>
             </p>
           </div>
@@ -403,6 +454,7 @@ export default function TeamManagement() {
                   <th className="py-3 px-4">{t('Email')}</th>
                   <th className="py-3 px-4">{t('Role')}</th>
                   <th className="py-3 px-4">{t('Invited')}</th>
+                  <th className="py-3 px-4">{t('Status')}</th>
                   <th className="py-3 px-4"></th>
                 </tr>
               </thead>
@@ -416,6 +468,9 @@ export default function TeamManagement() {
                     <td className="py-3 px-4 text-sm">{roleLabel(inv.role || 'fse', locale)}</td>
                     <td className="py-3 px-4 text-sm text-[var(--text3)]">
                       {inv.created_at ? format(inv.created_at) : '—'}
+                    </td>
+                    <td className="py-3 px-4 text-sm">
+                      {t(inviteListStatus(inv, inviteStatusById))}
                     </td>
                     <td className="py-3 px-4 text-right">
                       <button
@@ -468,9 +523,24 @@ export default function TeamManagement() {
                     </td>
                     <td className="py-3 px-4 text-sm">{member.email}</td>
                     <td className="py-3 px-4">
-                      <span className="px-2 py-1 text-xs rounded-full bg-[var(--surface3)]">
-                        {roleLabel(member.role, locale)}
-                      </span>
+                      {(isAdmin(userRole) || userRole === 'owner') && member.id !== userId ? (
+                        <select
+                          className="select text-xs"
+                          aria-label={t('Role for {name}').replace('{name}', member.email || member.first_name || t('Member'))}
+                          value={member.role || 'fse'}
+                          onChange={(e) => changeMemberRole(String(member.id), e.target.value)}
+                        >
+                          {(member.role && !ROLES.includes(member.role) ? [member.role, ...ROLES] : ROLES).map((role) => (
+                            <option key={role} value={role}>
+                              {roleLabel(role, locale)}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="px-2 py-1 text-xs rounded-full bg-[var(--surface3)]">
+                          {roleLabel(member.role, locale)}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-sm text-[var(--text3)]">
                       {member.job_title || '—'}
