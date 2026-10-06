@@ -15,12 +15,13 @@ import {
   canStartStripeConnect,
   emptyPayoutAccount,
   normalizeStripeAccountId,
-  orgTakesCardPayments,
   partnerReferralFromEnv,
+  authorizeConnectCallback,
   safeConnectNext,
   sellerConnectPrompt,
   signConnectState,
   verifyConnectState,
+  type ConnectCallbackActor,
   type PayoutAccount,
   type StripeConnectPrompt,
 } from '@/lib/billing/stripe-connect';
@@ -56,8 +57,17 @@ export type LoadedPayoutAccount = {
 const ORG_STRIPE_SELECT =
   'id, type, name, email, stripe_account_id, stripe_charges_enabled, stripe_payouts_enabled, stripe_details_submitted';
 
-function missingColumn(message?: string): boolean {
-  return /column|does not exist|schema cache/i.test(message || '');
+/** Column missing: Postgres 42703, PostgREST PGRST204, or a schema-cache message. */
+export function isMissingStripeColumn(
+  error?: { message?: string; code?: string } | string | null
+): boolean {
+  if (!error) return false;
+  if (typeof error === 'string') {
+    return /column|does not exist|schema cache|PGRST204|42703/i.test(error);
+  }
+  const code = String(error.code || '').toUpperCase();
+  if (code === 'PGRST204' || code === '42703') return true;
+  return /column|does not exist|schema cache|PGRST204|42703/i.test(error.message || '');
 }
 
 export async function loadSellerPayoutAccount(
@@ -70,7 +80,7 @@ export async function loadSellerPayoutAccount(
   if (!client) return { account: emptyPayoutAccount(), schemaReady: false };
   const { data, error } = await client.from('organizations').select(ORG_STRIPE_SELECT).eq('id', orgId).maybeSingle();
   if (error) {
-    if (missingColumn(error.message)) return { account: emptyPayoutAccount(), schemaReady: false };
+    if (isMissingStripeColumn(error)) return { account: emptyPayoutAccount(), schemaReady: false };
     console.warn('[stripe-connect] load org', error.message);
     return { account: emptyPayoutAccount(), schemaReady: true };
   }
@@ -154,10 +164,10 @@ export async function saveOrgStripeAccount(
   if (error) {
     return {
       ok: false,
-      message: missingColumn(error.message)
+      message: isMissingStripeColumn(error)
         ? 'Stripe Connect columns are not on organizations yet. Apply the Stripe Connect migration, then try again.'
         : error.message,
-      schemaReady: !missingColumn(error.message),
+      schemaReady: !isMissingStripeColumn(error),
     };
   }
   return { ok: true };
@@ -220,13 +230,19 @@ export function connectLinkUrls(origin: string, state: string): { refresh: strin
 export async function createOnboardingLink(input: {
   accountId: string;
   orgId: string | number;
+  userId: string;
   next: string;
   origin: string;
 }): Promise<string> {
   const secret = getStripeSecret();
   if (!secret) throw new StripeConnectApiError('Stripe is not configured.', 503, 'stripe_unavailable');
   const state = signConnectState(
-    { orgId: String(input.orgId), accountId: input.accountId, next: safeConnectNext(input.next) },
+    {
+      orgId: String(input.orgId),
+      accountId: input.accountId,
+      userId: input.userId,
+      next: safeConnectNext(input.next),
+    },
     secret
   );
   const urls = connectLinkUrls(input.origin || stripeSiteOrigin(), state);
@@ -286,7 +302,7 @@ export async function loadConnectCaller(input: {
     /* profile role is enough when memberships are unavailable */
   }
   const { data: org, error } = await admin.from('organizations').select(ORG_STRIPE_SELECT).eq('id', orgId).maybeSingle();
-  if (error && missingColumn(error.message)) {
+  if (error && isMissingStripeColumn(error)) {
     const { data: basic } = await admin.from('organizations').select('id, type, name, email').eq('id', orgId).maybeSingle();
     return {
       userId: input.userId,
@@ -322,9 +338,9 @@ export async function loadConnectCaller(input: {
 }
 
 export function connectStatusPayload(caller: ConnectCaller) {
-  const eligible = orgTakesCardPayments(caller.role, caller.orgType);
+  const canStartRole = canStartStripeConnect(caller.role, caller.orgType);
   const partnerUrl = partnerReferralFromEnv();
-  if (!eligible) {
+  if (!canStartRole) {
     return {
       eligible: false,
       connected: false,
@@ -343,7 +359,7 @@ export function connectStatusPayload(caller: ConnectCaller) {
     });
     prompt.title = 'Card payments need a database update';
     prompt.message =
-      'Stripe Connect is not stored for organizations yet. Ask your platform admin to apply the Stripe Connect migration. Card payments stay off until then — we will not charge the platform account.';
+      'Stripe Connect columns are not on organizations yet. Card payments still use the platform Stripe account until Connect is enforced. Apply the migration before starting Connect onboarding.';
     return {
       eligible: true,
       connected: false,
@@ -407,9 +423,28 @@ export function readConnectState(token: string | null | undefined) {
   return verifyConnectState(String(token || ''), secret);
 }
 
-export async function refreshOnboardingFromState(stateToken: string, origin: string): Promise<string> {
+function assertConnectActor(
+  state: { orgId: string; userId?: string | null },
+  actor: ConnectCallbackActor | null | undefined
+) {
+  const allowed = authorizeConnectCallback(state, actor);
+  if (!allowed.ok) {
+    throw new StripeConnectApiError(
+      'Sign in as a company admin of this organization to finish Stripe setup.',
+      403,
+      'forbidden'
+    );
+  }
+}
+
+export async function refreshOnboardingFromState(
+  stateToken: string,
+  origin: string,
+  actor: ConnectCallbackActor | null
+): Promise<string> {
   const state = readConnectState(stateToken);
   if (!state) throw new StripeConnectApiError('This Stripe setup link expired. Start again from the app.', 400);
+  assertConnectActor(state, actor);
   const loaded = await loadSellerPayoutAccount(state.orgId);
   if (loaded.account.accountId && loaded.account.accountId !== state.accountId) {
     throw new StripeConnectApiError('This Stripe account does not match the organization.', 409);
@@ -417,16 +452,22 @@ export async function refreshOnboardingFromState(stateToken: string, origin: str
   return createOnboardingLink({
     accountId: state.accountId,
     orgId: state.orgId,
+    userId: state.userId || actor!.userId,
     next: state.next,
     origin,
   });
 }
 
-export async function completeOnboardingReturn(stateToken: string): Promise<{ next: string; connected: boolean }> {
+export async function completeOnboardingReturn(
+  stateToken: string,
+  actor: ConnectCallbackActor | null,
+  writer?: SupabaseClient | null
+): Promise<{ next: string; connected: boolean }> {
   const state = readConnectState(stateToken);
   if (!state) throw new StripeConnectApiError('This Stripe setup link expired. Start again from the app.', 400);
+  assertConnectActor(state, actor);
   const account = await stripeGet(`accounts/${encodeURIComponent(state.accountId)}`);
-  const saved = await saveOrgStripeAccount(state.orgId, account);
+  const saved = await saveOrgStripeAccount(state.orgId, account, writer);
   if (!saved.ok) throw new StripeConnectApiError(saved.message, saved.schemaReady ? 500 : 503);
   const flags = accountFlags(account);
   return { next: state.next, connected: flags.stripe_charges_enabled === true };

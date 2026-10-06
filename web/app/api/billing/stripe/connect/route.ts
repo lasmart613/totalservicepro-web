@@ -98,6 +98,7 @@ export async function POST(req: NextRequest) {
     const url = await createOnboardingLink({
       accountId: String(account.id),
       orgId: caller.orgId,
+      userId: caller.userId,
       next,
       origin: originOf(req),
     });

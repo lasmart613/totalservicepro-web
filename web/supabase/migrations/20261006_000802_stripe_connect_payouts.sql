@@ -13,6 +13,8 @@
 --
 -- Do not apply this file to production from the app. Ship the SQL only.
 
+SET LOCAL lock_timeout = '5s';
+
 alter table public.organizations
   add column if not exists stripe_account_id text,
   add column if not exists stripe_charges_enabled boolean not null default false,
@@ -34,6 +36,67 @@ revoke update (
   stripe_payouts_enabled,
   stripe_details_submitted
 ) on table public.organizations from public, anon, authenticated;
+
+-- Same client-write guard as 20261006_000400, plus the Stripe columns.
+-- auth.uid() is null for the service role, so the webhook and Connect route
+-- still write these columns. A signed-in client cannot.
+CREATE OR REPLACE FUNCTION public.organizations_guard_privilege()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  newj jsonb := to_jsonb(NEW);
+  oldj jsonb := CASE WHEN TG_OP = 'UPDATE' THEN to_jsonb(OLD) ELSE NULL END;
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'INSERT' THEN
+    IF NEW.created_by IS NOT NULL AND NEW.created_by IS DISTINCT FROM auth.uid() THEN
+      RAISE EXCEPTION 'created_by must be the signed-in user';
+    END IF;
+    IF coalesce((newj->>'is_premium')::boolean, false) IS TRUE THEN
+      RAISE EXCEPTION 'is_premium cannot be self-granted';
+    END IF;
+    IF nullif(newj->>'premium_until', '') IS NOT NULL
+       OR nullif(newj->>'premium_grant', '') IS NOT NULL THEN
+      RAISE EXCEPTION 'premium fields cannot be self-granted';
+    END IF;
+    IF lower(coalesce(newj->>'subscription_tier', '')) NOT IN ('', 'free')
+       OR lower(coalesce(newj->>'plan', '')) NOT IN ('', 'free') THEN
+      RAISE EXCEPTION 'plan cannot be self-granted';
+    END IF;
+    IF nullif(newj->>'stripe_account_id', '') IS NOT NULL
+       OR coalesce((newj->>'stripe_charges_enabled')::boolean, false)
+       OR coalesce((newj->>'stripe_payouts_enabled')::boolean, false)
+       OR coalesce((newj->>'stripe_details_submitted')::boolean, false) THEN
+      RAISE EXCEPTION 'stripe connect fields cannot be set by the client';
+    END IF;
+    RETURN NEW;
+  END IF;
+
+  IF NEW.created_by IS DISTINCT FROM OLD.created_by THEN
+    RAISE EXCEPTION 'created_by cannot be changed';
+  END IF;
+  IF (newj->>'is_premium') IS DISTINCT FROM (oldj->>'is_premium')
+     OR (newj->>'premium_until') IS DISTINCT FROM (oldj->>'premium_until')
+     OR (newj->>'premium_grant') IS DISTINCT FROM (oldj->>'premium_grant')
+     OR (newj->>'subscription_tier') IS DISTINCT FROM (oldj->>'subscription_tier')
+     OR (newj->>'plan') IS DISTINCT FROM (oldj->>'plan') THEN
+    RAISE EXCEPTION 'plan and premium fields cannot be changed by the client';
+  END IF;
+  IF (newj->>'stripe_account_id') IS DISTINCT FROM (oldj->>'stripe_account_id')
+     OR (newj->>'stripe_charges_enabled') IS DISTINCT FROM (oldj->>'stripe_charges_enabled')
+     OR (newj->>'stripe_payouts_enabled') IS DISTINCT FROM (oldj->>'stripe_payouts_enabled')
+     OR (newj->>'stripe_details_submitted') IS DISTINCT FROM (oldj->>'stripe_details_submitted') THEN
+    RAISE EXCEPTION 'stripe connect fields cannot be changed by the client';
+  END IF;
+  RETURN NEW;
+END;
+$$;
 
 create table if not exists public.marketplace_orders (
   id uuid primary key default gen_random_uuid(),
@@ -64,17 +127,33 @@ create policy "Sellers read own marketplace orders"
   for select
   to authenticated
   using (
-    seller_organization_id in (
-      select organization_id from public.user_profiles where id = auth.uid()
+    seller_organization_id is not null
+    and (
+      exists (
+        select 1
+        from public.organization_memberships m
+        where m.user_id = (select auth.uid())
+          and m.organization_id = marketplace_orders.seller_organization_id
+          and lower(btrim(m.role)) in ('admin', 'company_admin', 'billing_manager')
+      )
+      or exists (
+        select 1
+        from public.user_profiles p
+        where p.id = (select auth.uid())
+          and p.organization_id = marketplace_orders.seller_organization_id
+          and lower(btrim(p.role)) in ('admin', 'company_admin', 'billing_manager')
+      )
     )
   );
 
 create index if not exists marketplace_orders_seller_idx
   on public.marketplace_orders (seller_organization_id, created_at desc);
 
--- New table. Sellers may read their own rows. Clients do not insert or update
--- orders; the webhook does that with the service role.
-revoke insert, update, delete, truncate on table public.marketplace_orders from public, anon, authenticated;
+-- New table. Admin, company_admin, and billing_manager of the seller org may
+-- read orders. Anon gets nothing (default privileges include SELECT and
+-- MAINTAIN). Clients do not insert or update; the webhook uses the service role.
+revoke all on table public.marketplace_orders from public, anon;
+revoke insert, update, delete, truncate, maintain on table public.marketplace_orders from authenticated;
 grant select on table public.marketplace_orders to authenticated;
 
 notify pgrst, 'reload schema';

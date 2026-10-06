@@ -1,9 +1,11 @@
 /**
  * Create a one-time Stripe Checkout Session URL for an invoice balance.
  *
- * The platform secret creates the session. The charge is a destination charge
- * to the selling organization's Stripe Connect account. There is no silent
- * fallback that leaves the money on the platform account.
+ * The platform secret creates the session. A connected, non-exempt seller
+ * gets a destination charge. STRIPE_CONNECT_ENFORCE off (the default), an
+ * exempt org, or missing Stripe columns keep the pre-Connect platform charge:
+ * the same Checkout params, with no transfer_data, application fee, or
+ * on_behalf_of.
  *
  * Production (repairplanet.net / Netlify CONTEXT=production) must use the
  * existing live RepairPlanet / TSP invoice secret — never a sandbox key.
@@ -121,11 +123,13 @@ export type InvoicePayLinkInput = {
   customerEmail?: string | null;
   companyName?: string | null;
   paymentKind?: 'deposit' | 'balance' | 'full';
-  /** Connected account that receives the charge. Required. */
-  destinationAccountId: string;
-  payoutStatus: PayoutStatus;
+  /** Connected account that receives a destination charge. Omit for a platform charge. */
+  destinationAccountId?: string;
+  payoutStatus?: PayoutStatus;
   applicationFeeCents?: number;
   organizationId?: string | number | null;
+  /** Pre-Connect platform charge. Same Stripe params main sends today. */
+  legacyPlatformCharge?: boolean;
 };
 
 export type InvoiceCheckoutOutcome =
@@ -145,12 +149,62 @@ export type InvoicePayLinkResult = {
 };
 
 /**
- * Checkout form fields for an invoice. Returns null when there is no connected
+ * Pre-Connect platform charge. Field set matches main's
+ * createInvoiceCheckoutSession: no transfer_data, application fee, or on_behalf_of.
+ */
+export function buildLegacyInvoiceCheckoutParams(
+  input: InvoicePayLinkInput
+): URLSearchParams | null {
+  const amount = Math.round(Number(input.amountCents) || 0);
+  if (amount < 50) return null;
+
+  const site = stripeSiteOrigin();
+  const currency = (input.currency || 'usd').toLowerCase();
+  const desc =
+    input.description ||
+    `Invoice ${input.invoiceNumber || ''}`.trim() ||
+    'Service invoice';
+
+  const params = new URLSearchParams();
+  params.set('mode', 'payment');
+  params.set('success_url', `${site}/invoice-paid?session_id={CHECKOUT_SESSION_ID}`);
+  params.set('cancel_url', `${site}/invoice-paid?canceled=1`);
+  params.set('metadata[kind]', 'invoice_pay');
+  if (input.paymentKind) {
+    params.set('metadata[payment_kind]', input.paymentKind);
+    params.set('payment_intent_data[metadata][payment_kind]', input.paymentKind);
+  }
+  params.set('line_items[0][quantity]', '1');
+  params.set('line_items[0][price_data][currency]', currency);
+  params.set('line_items[0][price_data][unit_amount]', String(amount));
+  params.set('line_items[0][price_data][product_data][name]', desc.slice(0, 120));
+  if (input.companyName) {
+    params.set(
+      'line_items[0][price_data][product_data][description]',
+      `Payment to ${input.companyName}`.slice(0, 500)
+    );
+  }
+  if (input.customerEmail) {
+    params.set('customer_email', String(input.customerEmail).trim());
+  }
+  if (input.invoiceId != null) {
+    params.set('metadata[invoice_id]', String(input.invoiceId));
+  }
+  if (input.invoiceNumber) {
+    params.set('metadata[invoice_number]', String(input.invoiceNumber));
+  }
+  params.set('payment_intent_data[metadata][invoice_id]', String(input.invoiceId || ''));
+  params.set('payment_intent_data[metadata][invoice_number]', String(input.invoiceNumber || ''));
+  return params;
+}
+
+/**
+ * Destination-charge Checkout fields. Returns null when there is no connected
  * account — callers must not POST those fields to Stripe.
  */
 export function buildInvoiceCheckoutParams(input: InvoicePayLinkInput): URLSearchParams | null {
   const accountId = normalizeStripeAccountId(input.destinationAccountId);
-  if (!accountId) return null;
+  if (!accountId || !input.payoutStatus) return null;
   const amount = Math.round(Number(input.amountCents) || 0);
   if (amount < 50) return null;
 
@@ -229,8 +283,10 @@ export async function createInvoiceCheckoutSession(
       prompt: null,
     };
   }
-  const params = buildInvoiceCheckoutParams(input);
-  if (!params) return connectRefusal(input.destinationAccountId);
+  const params = input.legacyPlatformCharge
+    ? buildLegacyInvoiceCheckoutParams(input)
+    : buildInvoiceCheckoutParams(input);
+  if (!params) return connectRefusal(input.destinationAccountId || '');
 
   const resolved = resolveStripeSecret();
   const secret = resolved.secret;

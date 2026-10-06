@@ -1,8 +1,8 @@
 /**
  * Sync marketplace parts listings to Stripe Products + Prices on the platform
- * account, then charge the buyer with a destination transfer to the seller's
- * connected account. Uses the same secret as invoice pay. Reuses product IDs
- * when present. Does not charge the platform account when Connect is missing.
+ * account. A connected, non-exempt seller is charged with a destination
+ * transfer. Enforce off, an exempt org, or missing Stripe columns keep the
+ * pre-Connect platform Checkout params. Uses the same secret as invoice pay.
  */
 
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
@@ -27,7 +27,7 @@ import {
 import { loadSellerPayoutAccount } from '@/lib/billing/stripe-connect-api';
 import {
   buyerConnectBlockedMessage,
-  routeSellerCardPayment,
+  decideSellerChargeRoute,
   type StripeConnectPrompt,
 } from '@/lib/billing/stripe-connect';
 
@@ -348,6 +348,62 @@ export async function syncPartStripeCatalog(listing: MarketplaceListingLike & { 
   return { productId: String(product.id), priceId, amountCents, reused };
 }
 
+export function buildPartCheckoutSessionFields(input: {
+  site: string;
+  listingId: string;
+  priceId: string;
+  quantity: number;
+  maxQuantity: number | null;
+  customerEmail?: string | null;
+  charge:
+    | { mode: 'legacy' }
+    | {
+        mode: 'destination';
+        fields: Record<string, string | number>;
+        applicationFeeCents: number;
+        sellerOrganizationId?: string | null;
+      };
+}): Record<string, string | number | boolean> {
+  const id = String(input.listingId);
+  const qty = input.quantity;
+  const success = `${input.site}/marketplace/parts/${encodeURIComponent(id)}?paid=1&session_id={CHECKOUT_SESSION_ID}`;
+  const cancel = `${input.site}/marketplace/parts/${encodeURIComponent(id)}?paid=0`;
+  const email = input.customerEmail ? String(input.customerEmail).trim() : '';
+  const fields: Record<string, string | number | boolean> = {
+    mode: 'payment',
+    success_url: success,
+    cancel_url: cancel,
+    'line_items[0][price]': input.priceId,
+    'line_items[0][quantity]': qty,
+    [`metadata[${LISTING_META}]`]: id,
+    [`metadata[${KIND_META}]`]: 'part',
+    'payment_intent_data[metadata][marketplace_listing_id]': id,
+    'payment_intent_data[metadata][marketplace_kind]': 'part',
+    'shipping_address_collection[allowed_countries][0]': 'US',
+    billing_address_collection: 'auto',
+  };
+  if (input.charge.mode === 'destination') {
+    fields['metadata[quantity]'] = qty;
+    fields['metadata[application_fee_cents]'] = input.charge.applicationFeeCents;
+    fields['payment_intent_data[metadata][quantity]'] = qty;
+    const orgId = input.charge.sellerOrganizationId ? String(input.charge.sellerOrganizationId) : '';
+    if (orgId) {
+      fields['metadata[seller_organization_id]'] = orgId;
+      fields['payment_intent_data[metadata][seller_organization_id]'] = orgId;
+    }
+    Object.assign(fields, input.charge.fields);
+  }
+  if (input.maxQuantity != null && input.maxQuantity > 1) {
+    fields['line_items[0][adjustable_quantity][enabled]'] = 'true';
+    fields['line_items[0][adjustable_quantity][minimum]'] = 1;
+    fields['line_items[0][adjustable_quantity][maximum]'] = input.maxQuantity;
+  }
+  if (email && email.includes('@')) {
+    fields.customer_email = email;
+  }
+  return fields;
+}
+
 export async function createPartCheckoutSession(input: {
   listing: MarketplaceListingLike & { id?: string; title?: string; description?: string; notes?: string };
   customerEmail?: string | null;
@@ -363,46 +419,35 @@ export async function createPartCheckoutSession(input: {
   const adjustable = maxQty != null && maxQty > 1;
   const feeBaseCents = adjustable ? catalog.amountCents : catalog.amountCents * qty;
   const loaded = await loadSellerPayoutAccount(input.listing.organization_id);
-  const route = routeSellerCardPayment({ account: loaded.account, amountCents: feeBaseCents });
-  if (!route.ok) {
-    throw new StripeConnectRequiredError(route.prompt);
+  const decision = decideSellerChargeRoute({
+    organizationId: input.listing.organization_id,
+    account: loaded.account,
+    amountCents: feeBaseCents,
+    schemaReady: loaded.schemaReady,
+  });
+  if (decision.mode === 'refuse') {
+    throw new StripeConnectRequiredError(decision.prompt);
   }
   const site = stripeSiteOrigin();
   const id = String(input.listing.id);
   const orgId = input.listing.organization_id != null ? String(input.listing.organization_id) : '';
-  const success = `${site}/marketplace/parts/${encodeURIComponent(id)}?paid=1&session_id={CHECKOUT_SESSION_ID}`;
-  const cancel = `${site}/marketplace/parts/${encodeURIComponent(id)}?paid=0`;
-  const email = input.customerEmail ? String(input.customerEmail).trim() : '';
-
-  const fields: Record<string, string | number | boolean> = {
-    mode: 'payment',
-    success_url: success,
-    cancel_url: cancel,
-    'line_items[0][price]': catalog.priceId,
-    'line_items[0][quantity]': qty,
-    [`metadata[${LISTING_META}]`]: id,
-    [`metadata[${KIND_META}]`]: 'part',
-    'metadata[quantity]': qty,
-    'metadata[application_fee_cents]': route.applicationFeeCents,
-    'payment_intent_data[metadata][marketplace_listing_id]': id,
-    'payment_intent_data[metadata][marketplace_kind]': 'part',
-    'payment_intent_data[metadata][quantity]': qty,
-    'shipping_address_collection[allowed_countries][0]': 'US',
-    'billing_address_collection': 'auto',
-    ...route.fields,
-  };
-  if (orgId) {
-    fields['metadata[seller_organization_id]'] = orgId;
-    fields['payment_intent_data[metadata][seller_organization_id]'] = orgId;
-  }
-  if (maxQty != null && maxQty > 1) {
-    fields['line_items[0][adjustable_quantity][enabled]'] = 'true';
-    fields['line_items[0][adjustable_quantity][minimum]'] = 1;
-    fields['line_items[0][adjustable_quantity][maximum]'] = maxQty;
-  }
-  if (email && email.includes('@')) {
-    fields.customer_email = email;
-  }
+  const fields = buildPartCheckoutSessionFields({
+    site,
+    listingId: id,
+    priceId: catalog.priceId,
+    quantity: qty,
+    maxQuantity: maxQty,
+    customerEmail: input.customerEmail,
+    charge:
+      decision.mode === 'destination'
+        ? {
+            mode: 'destination',
+            fields: decision.fields,
+            applicationFeeCents: decision.applicationFeeCents,
+            sellerOrganizationId: orgId || null,
+          }
+        : { mode: 'legacy' },
+  });
 
   const session = await stripeRequest('checkout/sessions', 'POST', fields);
   if (!session?.url) {

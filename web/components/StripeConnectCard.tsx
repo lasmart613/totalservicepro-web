@@ -44,9 +44,9 @@ export function StripeConnectCard({ returnTo = '/company' }: { returnTo?: string
           cache: 'no-store',
         });
         const json = (await res.json().catch(() => ({}))) as Status;
-        if (!cancelled) setStatus(res.ok ? json : { eligible: true, error: json.error || 'Could not check Stripe payout setup.' });
+        if (!cancelled) setStatus(res.ok ? json : { eligible: false, error: json.error || 'Could not check Stripe payout setup.' });
       } catch {
-        if (!cancelled) setStatus({ eligible: true, error: 'Could not check Stripe payout setup.' });
+        if (!cancelled) setStatus({ eligible: false, error: 'Could not check Stripe payout setup.' });
       }
     })();
     return () => {

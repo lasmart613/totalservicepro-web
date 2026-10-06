@@ -1,20 +1,27 @@
 /**
  * Seller card-payment routing.
  *
- * Invoice and marketplace parts charges go to the selling organization's
- * Stripe Connect account. A missing account does not fall back to the
- * platform Stripe account. If charges are enabled but bank payouts are not,
- * the charge still targets the connected account and the order is marked held.
+ * STRIPE_CONNECT_ENFORCE defaults off. An unconnected company then keeps
+ * today's platform charge: no transfer_data, application fee, or on_behalf_of.
+ * A charges-enabled connected account uses a destination charge. Exempt orgs
+ * (STRIPE_CONNECT_EXEMPT_ORG_IDS, default 4) always stay on the platform
+ * charge. Missing Stripe columns fall back to that same platform charge.
+ * With enforce on, an unconnected non-exempt org is refused.
+ * If charges are enabled but bank payouts are not, the destination charge
+ * still targets the connected account and the order is marked held.
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { isServiceOrgType, isSupplierOrgType, isOwnerOrgType } from '../org-types.ts';
+import { isOwnerOrgType } from '../org-types.ts';
 import { checkoutLooksLikeInvoicePay } from './apply-invoice-payment.ts';
 
 export const STRIPE_PARTNER_REFERRAL_ENV = 'STRIPE_PARTNER_REFERRAL_URL';
 export const STRIPE_PLATFORM_FEE_BPS_ENV = 'STRIPE_PLATFORM_FEE_BPS';
+export const STRIPE_CONNECT_ENFORCE_ENV = 'STRIPE_CONNECT_ENFORCE';
+export const STRIPE_CONNECT_EXEMPT_ORG_IDS_ENV = 'STRIPE_CONNECT_EXEMPT_ORG_IDS';
 export const CONNECT_REQUIRED_CODE = 'stripe_connect_required';
 export const CONNECT_PATH = '/api/billing/stripe/connect';
+const DEFAULT_EXEMPT_ORG_IDS = '4';
 
 const PARTNER_ADMIN_MESSAGE = 'Ask your platform admin for the Stripe partner signup link.';
 
@@ -83,6 +90,33 @@ export function partnerReferralFromEnv(): string | null {
   return readPartnerReferralUrl(process.env[STRIPE_PARTNER_REFERRAL_ENV]);
 }
 
+/** Unset, empty, false, 0, and off leave enforcement off. */
+export function stripeConnectEnforceEnabled(raw?: unknown): boolean {
+  const value = raw === undefined ? process.env[STRIPE_CONNECT_ENFORCE_ENV] : raw;
+  const token = String(value ?? '').trim().toLowerCase();
+  return token === '1' || token === 'true' || token === 'yes' || token === 'on';
+}
+
+/** Comma-separated org ids. Unset or blank defaults to org 4. */
+export function stripeConnectExemptOrgIds(raw?: unknown): Set<string> {
+  const value = raw === undefined ? process.env[STRIPE_CONNECT_EXEMPT_ORG_IDS_ENV] : raw;
+  const text = value == null || String(value).trim() === '' ? DEFAULT_EXEMPT_ORG_IDS : String(value);
+  return new Set(
+    text
+      .split(',')
+      .map((part) => part.trim())
+      .filter(Boolean)
+  );
+}
+
+export function isStripeConnectExemptOrg(
+  orgId: string | number | null | undefined,
+  raw?: unknown
+): boolean {
+  if (orgId == null || orgId === '') return false;
+  return stripeConnectExemptOrgIds(raw).has(String(orgId).trim());
+}
+
 /**
  * Basis points of the charge kept by the platform. Default 0.
  * A fee that would consume the whole charge is omitted.
@@ -123,22 +157,16 @@ export function buyerConnectBlockedMessage(): string {
   return 'This seller has not connected Stripe for card payments. Your card was not charged.';
 }
 
+/** Only an admin or company_admin of the org may start Connect onboarding. */
 export function canStartStripeConnect(role: string | null | undefined, orgType: string | null | undefined): boolean {
   if (isOwnerOrgType(orgType)) return false;
   const r = String(role || '').toLowerCase().trim();
-  if (isSupplierOrgType(orgType) || r === 'parts_supplier' || r === 'supplier') return true;
-  if (isServiceOrgType(orgType)) {
-    return r === 'admin' || r === 'company_admin' || r === 'billing_manager' || r === 'service_manager';
-  }
-  return false;
+  return r === 'admin' || r === 'company_admin';
 }
 
+/** Card visibility matches who may start Connect: admin and company_admin only. */
 export function orgTakesCardPayments(role: string | null | undefined, orgType: string | null | undefined): boolean {
-  if (isOwnerOrgType(orgType)) return false;
-  const r = String(role || '').toLowerCase().trim();
-  if (isSupplierOrgType(orgType) || r === 'parts_supplier' || r === 'supplier') return true;
-  if (isServiceOrgType(orgType)) return true;
-  return r === 'admin' || r === 'company_admin' || r === 'billing_manager' || r === 'service_manager';
+  return canStartStripeConnect(role, orgType);
 }
 
 export function destinationChargeFields(input: {
@@ -193,6 +221,59 @@ export function routeSellerCardPayment(input: {
     payoutStatus,
     fields: destinationChargeFields({ accountId, applicationFeeCents, payoutStatus }),
   };
+}
+
+export type SellerChargeDecision =
+  | { mode: 'legacy' }
+  | {
+      mode: 'destination';
+      accountId: string;
+      applicationFeeCents: number;
+      payoutStatus: PayoutStatus;
+      fields: Record<string, string | number>;
+    }
+  | {
+      mode: 'refuse';
+      code: typeof CONNECT_REQUIRED_CODE;
+      message: string;
+      prompt: StripeConnectPrompt;
+    };
+
+/**
+ * Legacy platform charge when the columns are missing, the org is exempt,
+ * or enforce is off and the seller is not charges-enabled. Destination
+ * charge when a non-exempt seller can take charges. Refuse only when
+ * enforce is on, the schema is ready, and that seller is not connected.
+ */
+export function decideSellerChargeRoute(input: {
+  organizationId?: string | number | null;
+  account: PayoutAccount;
+  amountCents: number;
+  schemaReady: boolean;
+  partnerUrl?: string | null;
+  enforce?: boolean;
+  exemptOrgIds?: string | null;
+}): SellerChargeDecision {
+  const enforce = input.enforce === undefined ? stripeConnectEnforceEnabled() : input.enforce;
+  if (!input.schemaReady || isStripeConnectExemptOrg(input.organizationId, input.exemptOrgIds)) {
+    return { mode: 'legacy' };
+  }
+  const routed = routeSellerCardPayment({
+    account: input.account,
+    amountCents: input.amountCents,
+    partnerUrl: input.partnerUrl,
+  });
+  if (routed.ok) {
+    return {
+      mode: 'destination',
+      accountId: routed.accountId,
+      applicationFeeCents: routed.applicationFeeCents,
+      payoutStatus: routed.payoutStatus,
+      fields: routed.fields,
+    };
+  }
+  if (!enforce) return { mode: 'legacy' };
+  return { mode: 'refuse', code: routed.code, message: routed.message, prompt: routed.prompt };
 }
 
 function asRecord(value: unknown): Record<string, unknown> | null {
@@ -356,10 +437,10 @@ export function safeConnectNext(next: string | null | undefined): string {
   return '/company';
 }
 
-type ConnectState = { orgId: string; accountId: string; next: string; exp: number };
+type ConnectState = { orgId: string; accountId: string; next: string; exp: number; userId?: string };
 
 export function signConnectState(
-  input: { orgId: string; accountId: string; next: string },
+  input: { orgId: string; accountId: string; next: string; userId?: string | null },
   secret: string,
   nowMs = Date.now()
 ): string {
@@ -368,6 +449,7 @@ export function signConnectState(
     accountId: String(input.accountId),
     next: safeConnectNext(input.next),
     exp: nowMs + 2 * 60 * 60 * 1000,
+    ...(input.userId ? { userId: String(input.userId) } : {}),
   };
   const body = Buffer.from(JSON.stringify(payload)).toString('base64url');
   const sig = createHmac('sha256', secret).update(body).digest('base64url');
@@ -392,8 +474,36 @@ export function verifyConnectState(token: string, secret: string, nowMs = Date.n
       accountId: String(parsed.accountId),
       next: safeConnectNext(parsed.next),
       exp: parsed.exp,
+      ...(parsed.userId ? { userId: String(parsed.userId) } : {}),
     };
   } catch {
     return null;
   }
+}
+
+export type ConnectCallbackActor = {
+  userId: string;
+  orgId: string | number;
+  role: string | null | undefined;
+  orgType?: string | null;
+};
+
+/**
+ * Return and refresh may save flags or mint an Account Link only for a
+ * signed-in admin or company_admin of the org named in the state. When the
+ * state names the user who started Connect, that same user is required.
+ */
+export function authorizeConnectCallback(
+  state: { orgId: string; userId?: string | null },
+  actor: ConnectCallbackActor | null | undefined
+): { ok: true } | { ok: false; reason: 'signed_out' | 'other_org' | 'not_admin' | 'not_starter' } {
+  if (!actor?.userId) return { ok: false, reason: 'signed_out' };
+  if (actor.orgId == null || String(actor.orgId) !== String(state.orgId)) {
+    return { ok: false, reason: 'other_org' };
+  }
+  if (!canStartStripeConnect(actor.role, actor.orgType)) return { ok: false, reason: 'not_admin' };
+  if (state.userId && String(state.userId) !== String(actor.userId)) {
+    return { ok: false, reason: 'not_starter' };
+  }
+  return { ok: true };
 }

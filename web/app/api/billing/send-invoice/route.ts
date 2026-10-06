@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createInvoiceCheckoutSession, stripeSecretProblem } from '@/lib/billing/stripe-pay';
-import { routeSellerCardPayment, CONNECT_REQUIRED_CODE } from '@/lib/billing/stripe-connect';
+import { decideSellerChargeRoute, CONNECT_REQUIRED_CODE } from '@/lib/billing/stripe-connect';
 import { loadSellerPayoutAccount } from '@/lib/billing/stripe-connect-api';
 import {
   invoiceCheckoutDescription,
@@ -156,41 +156,40 @@ export async function POST(req: NextRequest) {
             ? invoiceOrgId
             : callerOrgId;
         const loaded = await loadSellerPayoutAccount(sellerOrgId);
-        const route = routeSellerCardPayment({ account: loaded.account, amountCents });
-        if (!loaded.schemaReady || !route.ok) {
+        const decision = decideSellerChargeRoute({
+          organizationId: sellerOrgId,
+          account: loaded.account,
+          amountCents,
+          schemaReady: loaded.schemaReady,
+        });
+        if (decision.mode === 'refuse') {
           connectRequired = true;
-          const schemaMessage =
-            'Stripe Connect is not stored for this organization yet. Ask your platform admin to apply the migration. The card was not charged on the platform account.';
-          if (!route.ok) {
-            stripeConnect = {
-              ...route.prompt,
-              ...(loaded.schemaReady
-                ? {}
-                : { title: 'Card payments need a database update', message: schemaMessage }),
-            };
-            stripeSkippedReason = loaded.schemaReady ? route.message : schemaMessage;
-          } else {
-            stripeSkippedReason = schemaMessage;
-          }
+          stripeConnect = decision.prompt;
+          stripeSkippedReason = decision.message;
         }
-        const pay = !connectRequired && route.ok
-          ? await createInvoiceCheckoutSession({
-              amountCents,
-              description: invoiceCheckoutDescription(
-                collectable,
-                String(inv.invoice_number || `Invoice #${invoiceId}`)
-              ),
-              invoiceId,
-              invoiceNumber: inv.invoice_number ? String(inv.invoice_number) : null,
-              customerEmail: recipient.email,
-              companyName: company.company_name || null,
-              paymentKind: collectable.paymentKind,
-              destinationAccountId: route.accountId,
-              payoutStatus: route.payoutStatus,
-              applicationFeeCents: route.applicationFeeCents,
-              organizationId: sellerOrgId,
-            })
-          : null;
+        const pay =
+          decision.mode === 'refuse'
+            ? null
+            : await createInvoiceCheckoutSession({
+                amountCents,
+                description: invoiceCheckoutDescription(
+                  collectable,
+                  String(inv.invoice_number || `Invoice #${invoiceId}`)
+                ),
+                invoiceId,
+                invoiceNumber: inv.invoice_number ? String(inv.invoice_number) : null,
+                customerEmail: recipient.email,
+                companyName: company.company_name || null,
+                paymentKind: collectable.paymentKind,
+                ...(decision.mode === 'destination'
+                  ? {
+                      destinationAccountId: decision.accountId,
+                      payoutStatus: decision.payoutStatus,
+                      applicationFeeCents: decision.applicationFeeCents,
+                      organizationId: sellerOrgId,
+                    }
+                  : { legacyPlatformCharge: true as const }),
+              });
         if (pay && !pay.ok && pay.code === CONNECT_REQUIRED_CODE) {
           connectRequired = true;
           stripeConnect = pay.prompt;
