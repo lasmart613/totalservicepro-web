@@ -11,6 +11,14 @@ import { useT } from '@/lib/fa/locale';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { buildEstimateHtml, type DocCompany, type DocThemeScope } from '@/lib/billing/doc-html';
+import { estimateDepositSaveFields, isEstimateDepositEnabled } from '@/lib/billing/estimate-deposit';
+import {
+  estimateListBadge,
+  estimateStatusBadgeClass,
+  estimateStatusLabel,
+  REJECTED_ESTIMATE_ERROR,
+  REJECTED_ESTIMATE_NOTE,
+} from '@/lib/billing/estimate-display';
 import { getCompanyTheme, type CompanyTheme } from '@/lib/company-theme';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
@@ -40,6 +48,7 @@ import {
   type EquipmentType,
 } from '@/lib/equipment-types';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
+import { formatDateInTimeZone, orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
 
 type CustomerOpt = LinkedCustomerOpt;
 
@@ -57,12 +66,14 @@ export default function EstimateFormClient() {
   const [savedId, setSavedId] = useState<string | number | null>(editIdParam);
   const savedIdRef = useRef<string | number | null>(editIdParam);
   const [customerAction, setCustomerAction] = useState<CustomerActionKind | null>(null);
+  const [createdAt, setCreatedAt] = useState<string | null>(null);
   const [userOrgId, setUserOrgId] = useState<string | number | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [docNumber, setDocNumber] = useState('');
   const allocatedNumberRef = useRef('');
   const [status, setStatus] = useState('draft');
   const [company, setCompany] = useState<DocCompany>({});
+  const [orgTimeZone, setOrgTimeZone] = useState<string | null>(null);
   const [companyTheme, setCompanyTheme] = useState<CompanyTheme | null>(null);
   const [emailing, setEmailing] = useState(false);
 
@@ -120,7 +131,7 @@ export default function EstimateFormClient() {
   const [perDiemRate, setPerDiemRate] = useState(0);
   const [perDiemDays, setPerDiemDays] = useState(0);
   const [partLines, setPartLines] = useState<LineItem[]>([emptyLineItem('EP')]);
-  const [depositRequired, setDepositRequired] = useState(true);
+  const [depositRequired, setDepositRequired] = useState(false);
   const [deposit, setDeposit] = useState(0);
   const [depositManual, setDepositManual] = useState(false);
 
@@ -260,6 +271,7 @@ export default function EstimateFormClient() {
       setSavedId(data.id);
       setStatus(data.status || 'draft');
       setCustomerAction(customerActionFromEstimate(data).action);
+      setCreatedAt(data.created_at || null);
       setCustomerName(data.customer_name || '');
       setCustSearch(data.customer_name || '');
       setCustomerOrgId(data.customer_organization_id || null);
@@ -333,10 +345,14 @@ export default function EstimateFormClient() {
           )
         );
       }
-      setDepositRequired(ed.deposit_required !== false && ed.deposit_required !== 0);
-      if (ed.deposit != null || ed.travelDeposit != null) {
-        setDeposit(Number(ed.deposit ?? ed.travelDeposit) || 0);
+      const depositOn = isEstimateDepositEnabled(ed);
+      setDepositRequired(depositOn);
+      if (depositOn && (ed.deposit != null || ed.travelDeposit != null || ed.parts_deposit != null)) {
+        setDeposit(Number(ed.deposit ?? ed.travelDeposit ?? ed.parts_deposit) || 0);
         setDepositManual(true);
+      } else {
+        setDeposit(0);
+        setDepositManual(false);
       }
     },
     [supabase]
@@ -381,6 +397,10 @@ export default function EstimateFormClient() {
             slogan: org?.slogan || '',
             tech_name: techName,
           });
+        }
+        if (orgId) {
+          const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();
+          if (!zoneRow.error && zoneRow.data?.timezone) setOrgTimeZone(String(zoneRow.data.timezone));
         }
         if (orgId) {
           await loadCustomers(orgId);
@@ -453,6 +473,28 @@ export default function EstimateFormClient() {
       .slice(0, 8);
   }
 
+  async function guardEstimateStatusChange(
+    id: string | number,
+    nextStatus: string
+  ): Promise<string | null> {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) return 'Session expired — sign in again';
+    const res = await fetch('/api/billing/estimate-status', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ estimate_id: id, status: nextStatus }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.status === 409) return json?.error || REJECTED_ESTIMATE_ERROR;
+    if (!res.ok) return json?.error || `Could not update estimate status (${res.status})`;
+    return null;
+  }
+
   async function saveEstimate(
     nextStatus: string,
     opts?: { quiet?: boolean; preserveStatus?: boolean }
@@ -462,8 +504,20 @@ export default function EstimateFormClient() {
       toast.error('Customer name is required');
       return null;
     }
+    if (customerAction === 'rejected') {
+      toast.error(REJECTED_ESTIMATE_ERROR);
+      return null;
+    }
     setSaving(true);
     try {
+      const idForGuard = savedIdRef.current ?? savedId;
+      if (idForGuard) {
+        const refusal = await guardEstimateStatusChange(idForGuard, nextStatus);
+        if (refusal) {
+          toast.error(refusal);
+          return null;
+        }
+      }
       let estNum =
         (docNumber && !/^draft$/i.test(docNumber) ? docNumber : '') ||
         allocatedNumberRef.current;
@@ -471,7 +525,7 @@ export default function EstimateFormClient() {
         estNum = await allocateDocNumber(supabase, {
           orgId: userOrgId,
           kind: 'EST',
-          date: new Date(),
+          date: orgTodayIso({ stored: orgTimeZone, state: company.state }),
         });
         setDocNumber(estNum);
       }
@@ -525,15 +579,16 @@ export default function EstimateFormClient() {
           perDiemRate,
           perDiemDays,
           partsTotal: totals.partsTotal,
+          ...estimateDepositSaveFields({
+            enabled: depositRequired,
+            amount: totals.depositAmt,
+            total: totals.grandTotal,
+          }),
           part_lines: partLines.filter((p) => p.part_number || p.description || p.qty || p.unit_price),
           partsText: partLines
             .filter((p) => p.description || p.part_number)
             .map((p) => `${[p.part_number, p.description].filter(Boolean).join(' ')}: ${p.ext.toFixed(2)}`)
             .join('\n'),
-          deposit_required: depositRequired,
-          deposit: totals.depositAmt,
-          travelDeposit: totals.depositAmt,
-          balanceDue: totals.balanceDue,
           laborHours,
           miles,
           urgency,
@@ -684,7 +739,14 @@ export default function EstimateFormClient() {
         (docNumber && !/^draft$/i.test(docNumber) ? docNumber : '') ||
         allocatedNumberRef.current ||
         '',
-      dateStr: new Date().toLocaleDateString(),
+      dateStr: formatDateInTimeZone(
+        new Date(),
+        resolveOrgTimeZone({
+          stored: orgTimeZone,
+          state: company.state,
+          allowBrowser: false,
+        }).timeZone
+      ),
       manufacturer,
       model: modelName,
       serial,
@@ -713,6 +775,7 @@ export default function EstimateFormClient() {
       tax: totals.tax,
       total: totals.grandTotal,
       deposit: totals.depositAmt,
+      depositRequired,
       balanceDue: totals.balanceDue,
       validDays: 30,
       theme: companyTheme,
@@ -829,9 +892,21 @@ export default function EstimateFormClient() {
                 <span className="text-[var(--gold)] font-bold">{docNumber}</span>
               )}
               <span
-                className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-[var(--border2)] bg-[var(--surface2)]"
+                className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${estimateStatusBadgeClass(
+                  estimateListBadge({
+                    status,
+                    created_at: createdAt,
+                    customer_action: customerAction,
+                  })
+                )}`}
               >
-                {(status || 'draft').toUpperCase()}
+                {estimateStatusLabel(
+                  estimateListBadge({
+                    status,
+                    created_at: createdAt,
+                    customer_action: customerAction,
+                  })
+                )}
               </span>
             </div>
           </div>
@@ -848,6 +923,16 @@ export default function EstimateFormClient() {
           )}
         </div>
 
+        {customerAction === 'rejected' && (
+          <p className="mb-4 rounded-lg border border-red-700 bg-red-900/30 px-3 py-2 text-sm text-red-100">
+            {REJECTED_ESTIMATE_NOTE}
+          </p>
+        )}
+
+        <fieldset
+          disabled={customerAction === 'rejected'}
+          className="border-0 p-0 m-0 min-w-0"
+        >
         {/* Customer */}
         <section className="card p-4 mb-4">
           <h2 className="font-bold text-lg mb-3 text-[var(--gold)]">Customer</h2>
@@ -1326,6 +1411,7 @@ export default function EstimateFormClient() {
             )}
           </div>
         </section>
+        </fieldset>
 
         {!isValidOrgId(userOrgId) && (
           <p className="text-xs text-amber-400 mt-4">
@@ -1341,37 +1427,41 @@ export default function EstimateFormClient() {
           </Link>
           <button
             type="button"
-            className="btn btn-secondary min-w-[100px]"
-            disabled={saving || emailing}
-            onClick={() => saveEstimate('draft')}
-          >
-            {saving ? 'Saving…' : 'Save Draft'}
-          </button>
-          <button
-            type="button"
             className="btn btn-secondary min-w-[120px]"
             onClick={openEstimatePreview}
           >
             Preview / PDF
           </button>
-          <button
-            type="button"
-            className="btn btn-primary min-w-[140px]"
-            disabled={saving || emailing}
-            onClick={() => finalizeAndEmailEstimate()}
-          >
-            {emailing ? 'Emailing…' : 'Finalize & Email'}
-          </button>
-          <button
-            type="button"
-            className="btn btn-secondary min-w-[100px] text-xs"
-            disabled={saving || emailing}
-            onClick={() => markSentWithoutEmail()}
-            aria-label="Mark sent (no email)"
-            title="Sets status to sent without calling Resend"
-          >
-            Mark sent (no email)
-          </button>
+          {customerAction !== 'rejected' && (
+            <>
+              <button
+                type="button"
+                className="btn btn-secondary min-w-[100px]"
+                disabled={saving || emailing}
+                onClick={() => saveEstimate('draft')}
+              >
+                {saving ? 'Saving…' : 'Save Draft'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary min-w-[140px]"
+                disabled={saving || emailing}
+                onClick={() => finalizeAndEmailEstimate()}
+              >
+                {emailing ? 'Emailing…' : 'Finalize & Email'}
+              </button>
+              <button
+                type="button"
+                className="btn btn-secondary min-w-[100px] text-xs"
+                disabled={saving || emailing}
+                onClick={() => markSentWithoutEmail()}
+                aria-label="Mark sent (no email)"
+                title="Sets status to sent without calling Resend"
+              >
+                Mark sent (no email)
+              </button>
+            </>
+          )}
         </div>
         <p className="text-[10px] text-[var(--text3)] mt-1.5 text-center">
           Finalize &amp; Email only marks the estimate sent after Resend accepts the message.

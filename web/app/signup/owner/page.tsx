@@ -15,6 +15,7 @@ import {
 import AuthOtpBox from '@/components/AuthOtpBox';
 import { ContinuingConsent } from '@/components/legal/ContinuingConsent';
 import { SignupConsent } from '@/components/legal/SignupConsent';
+import { clientAuthOrigin } from '@/lib/site-origin';
 import { PublicLink, useT } from '@/lib/fa/locale';
 import { CONSENT_REQUIRED } from '@/lib/legal/consent';
 import { signUpWithConsent } from '@/lib/legal/signup-client';
@@ -238,8 +239,7 @@ function OwnerSignupInner() {
     setLoading(true);
 
     try {
-      const origin =
-        typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+      const origin = clientAuthOrigin();
       await prepareFreshSignup(supabase);
       savePendingSignup(pendingPayload());
       const { data: authData, error: authError } = await signUpWithConsent({

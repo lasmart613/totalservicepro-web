@@ -10,6 +10,12 @@ import { useOrgMoney } from '@/lib/use-org-money';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { canConvertEstimateToInvoice } from '@/lib/billing/finalize-estimate';
 import {
+  estimateCountsTowardSent,
+  estimateListBadge,
+  estimateStatusBadgeClass,
+  estimateStatusLabel,
+} from '@/lib/billing/estimate-display';
+import {
   coerceOrgId,
   customerActionFromEstimate,
   customerActionLabel,
@@ -20,6 +26,8 @@ import {
   type CustomerActionKind,
 } from '@/lib/billing/save-helpers';
 import { approvedTicketRefFromEstimate } from '@/lib/billing/approve-estimate';
+import { displayModelText } from '@/lib/model-display';
+import { DEFAULT_ORG_TIMEZONE, formatOrgDocumentDate, resolveNumberingTimeZone } from '@/lib/org-timezone';
 import {
   ESTIMATE_LIST_POLL_MS,
   estimateRowBelongsToViewer,
@@ -47,14 +55,6 @@ type EstimateRow = {
   customer_action_note?: string | null;
   customer_action_token?: string | null;
 };
-
-function statusBadgeClass(st: string): string {
-  if (st === 'draft') return 'bg-gray-700/40 text-gray-200 border-gray-600';
-  if (st === 'pending' || st === 'sent') return 'bg-blue-900/40 text-blue-200 border-blue-700';
-  if (st === 'invoiced' || st === 'completed') return 'bg-purple-900/40 text-purple-200 border-purple-700';
-  if (st === 'expired') return 'bg-red-900/40 text-red-200 border-red-700';
-  return 'bg-[var(--surface2)] text-[var(--text2)] border-[var(--border2)]';
-}
 
 function effectiveStatus(est: EstimateRow): string {
   let st = String(est.status || 'draft').toLowerCase();
@@ -131,6 +131,7 @@ function ShopEstimatesList() {
   const [viewer, setViewer] = useState<{ orgId: string | number | null; userId: string } | null>(
     null
   );
+  const [docZone, setDocZone] = useState(DEFAULT_ORG_TIMEZONE);
 
   useEffect(() => {
     init();
@@ -159,6 +160,10 @@ function ShopEstimatesList() {
 
       const orgId = coerceOrgId(profile?.organization_id);
       setViewer({ orgId, userId: user.id });
+      const zone = await resolveNumberingTimeZone(supabase, isValidOrgId(orgId) ? orgId : null, {
+        allowBrowser: false,
+      });
+      setDocZone(zone.timeZone);
       await loadEstimates(orgId, user.id);
     } catch (e) {
       console.error(e);
@@ -312,7 +317,8 @@ function ShopEstimatesList() {
     } else if (activeFilter === 'pending') {
       res = res.filter((e) => {
         const st = String(e.status || '').toLowerCase();
-        return st === 'pending' || st === 'sent';
+        if (st !== 'pending' && st !== 'sent') return false;
+        return customerActionFromEstimate(e).action !== 'rejected';
       });
     } else {
       res = res.filter((e) => {
@@ -388,10 +394,7 @@ function ShopEstimatesList() {
   }
 
   const drafts = rows.filter((r) => effectiveStatus(r) === 'draft').length;
-  const sent = rows.filter((r) => {
-    const s = effectiveStatus(r);
-    return s === 'pending' || s === 'sent';
-  }).length;
+  const sent = rows.filter((r) => estimateCountsTowardSent(r)).length;
   const invoiced = rows.filter((r) => effectiveStatus(r) === 'invoiced').length;
   const expired = rows.filter((r) => isEstimateExpired(r)).length;
 
@@ -493,7 +496,8 @@ function ShopEstimatesList() {
           <div className="space-y-3">
             {filtered.map((est) => {
               const st = effectiveStatus(est);
-              const until = validUntilLabel(est.created_at);
+              const badge = estimateListBadge(est);
+              const until = validUntilLabel(est.created_at, docZone);
               const num = docNumber(est);
               const canConvert =
                 st !== 'expired' && canConvertEstimateToInvoice(est);
@@ -526,18 +530,14 @@ function ShopEstimatesList() {
                         {num && (
                           <span className="text-[var(--gold)] font-bold">{num} </span>
                         )}
-                        <span>
-                          {est.created_at
-                            ? new Date(est.created_at).toLocaleDateString()
-                            : '—'}
-                        </span>
+                        <span>{formatOrgDocumentDate(est.created_at, docZone) || '—'}</span>
                         {' '}
                         <span
-                          className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${statusBadgeClass(
-                            st
+                          className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${estimateStatusBadgeClass(
+                            badge
                           )}`}
                         >
-                          {st.charAt(0).toUpperCase() + st.slice(1)}
+                          {estimateStatusLabel(badge)}
                         </span>
                         {st === 'expired' ? (
                           <span> · Expired</span>
@@ -546,16 +546,8 @@ function ShopEstimatesList() {
                         ) : (
                           <span> · Valid 30 days</span>
                         )}
-                        {actionLabel && (
-                          <span
-                            className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ml-1 ${
-                              cust.action === 'approved'
-                                ? 'bg-green-900/40 text-green-200 border-green-700'
-                                : cust.action === 'rejected'
-                                  ? 'bg-red-900/40 text-red-200 border-red-700'
-                                  : 'bg-amber-900/40 text-amber-200 border-amber-700'
-                            }`}
-                          >
+                        {actionLabel && cust.action !== 'approved' && cust.action !== 'rejected' && (
+                          <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ml-1 bg-amber-900/40 text-amber-200 border-amber-700">
                             {actionLabel}
                           </span>
                         )}
@@ -567,7 +559,7 @@ function ShopEstimatesList() {
                       </div>
                       {est.device_model && (
                         <div className="text-xs text-[var(--text3)] mt-0.5 truncate">
-                          {est.device_model}
+                          {displayModelText(est.device_model)}
                         </div>
                       )}
                       {cust.note && (

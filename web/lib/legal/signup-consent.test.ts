@@ -69,7 +69,9 @@ test('email signup without consent is rejected before an account is created', as
 
   const route = read('app/api/auth/signup/route.ts');
   assert.match(route, /consent_required/);
-  assert.match(route, /runEmailSignup/);
+  assert.match(route, /writeUserLegalConsent/);
+  assert.match(route, /signupAssignsTenant/);
+  assert.match(route, /publicSiteOrigin/);
   assert.doesNotMatch(read('supabase/migrations/20260813_000001_auth_trigger_no_default_fse.sql'), /legal_consent/);
 });
 
@@ -279,11 +281,14 @@ test('missing consent columns do not break email or google signup', async () => 
 });
 
 test('signup pages send consent and the migration only adds nullable columns', () => {
-  const sql = read('supabase/migrations/20261006_000100_user_profile_legal_consent.sql');
+  const sql = read('supabase/migrations/20261006_000900_user_profile_legal_consent.sql');
   assert.match(sql, /ADD COLUMN IF NOT EXISTS legal_consent_at timestamptz/);
   assert.match(sql, /ADD COLUMN IF NOT EXISTS legal_consent_version text/);
   assert.doesNotMatch(sql, /NOT NULL/);
-  assert.doesNotMatch(sql, /\bUPDATE\b/i);
+  assert.doesNotMatch(sql, /UPDATE\s+public\.user_profiles/i);
+  assert.match(sql, /REVOKE UPDATE \(legal_consent_at, legal_consent_version\)/);
+  assert.match(sql, /TO service_role/);
+  assert.doesNotMatch(sql, /GRANT UPDATE \(legal_consent_at, legal_consent_version\) ON TABLE public\.user_profiles TO authenticated/);
 
   for (const rel of [
     'app/signup/company/page.tsx',
@@ -292,8 +297,16 @@ test('signup pages send consent and the migration only adds nullable columns', (
     'app/login/page.tsx',
   ]) {
     const source = read(rel);
-    assert.match(source, /signUpWithConsent/, rel);
-    assert.match(source, /consent: agreed/, rel);
+    if (rel === 'app/login/page.tsx') {
+      assert.match(source, /clientAuthOrigin\(\)/, rel);
+      assert.match(source, /if \(!agreed\)/, rel);
+      assert.match(source, /fetch\('\/api\/auth\/signup'/, rel);
+      assert.match(source, /consent: true/, rel);
+      assert.match(source, /legalVersion: LEGAL_VERSION/, rel);
+    } else {
+      assert.match(source, /signUpWithConsent/, rel);
+      assert.match(source, /consent: agreed/, rel);
+    }
     assert.doesNotMatch(source, /auth\.signUp\(/, rel);
   }
   assert.match(read('app/login/page.tsx'), /ContinuingConsent/);

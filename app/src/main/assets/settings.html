@@ -456,6 +456,28 @@
 
     <div class="setting-row">
         <div class="setting-info">
+            <div class="setting-label">Voice engine</div>
+            <div class="setting-sub">Grok voice uses xAI speech. Device voice uses this phone's built-in reader if Grok is off or unreachable.</div>
+        </div>
+        <select class="setting-select" id="zappVoiceEngine" style="width:130px;flex-shrink:0;" onchange="saveSettings()">
+            <option value="grok">Grok voice</option>
+            <option value="device">Device voice</option>
+        </select>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
+            <div class="setting-label">Auto-open cited manual page</div>
+            <div class="setting-sub">After Zapp finishes speaking, open the top manual citation. Say “open” to open it yourself. On the live site the assistant page does this; this switch is the same setting.</div>
+        </div>
+        <label class="toggle-switch">
+            <input type="checkbox" id="autoOpenCitedManual" checked onchange="saveSettings()">
+            <span class="toggle-track"></span>
+        </label>
+    </div>
+
+    <div class="setting-row">
+        <div class="setting-info">
             <div class="setting-label">Voice Gender</div>
             <div class="setting-sub">Choose a male or female voice for Zapp voice responses</div>
         </div>
@@ -468,12 +490,13 @@
     <div class="setting-row" id="zappVoiceRow">
         <div class="setting-info">
             <div class="setting-label">Voice</div>
-            <div class="setting-sub" id="zappVoiceSub">Choose from available male voices</div>
+            <div class="setting-sub" id="zappVoiceSub">Default is Eve. Grok voices: Eve, Ara, Rex, Sal, Leo.</div>
         </div>
-        <select class="setting-select" id="zappVoice" style="width:110px;flex-shrink:0;" onchange="saveSettings()">
-            <option value="sage">Sage — warm &amp; clear</option>
-            <option value="rex">Rex — confident</option>
-            <option value="sal">Sal — versatile</option>
+        <select class="setting-select" id="zappVoice" style="width:180px;flex-shrink:0;" onchange="saveSettings()">
+            <option value="eve">Eve — energetic &amp; upbeat</option>
+            <option value="ara">Ara — warm &amp; friendly</option>
+            <option value="rex">Rex — confident &amp; clear</option>
+            <option value="sal">Sal — smooth &amp; balanced</option>
             <option value="leo">Leo — authoritative</option>
         </select>
     </div>
@@ -515,7 +538,7 @@
     </div>
     <div class="about-row">
         <span class="about-key">Version</span>
-        <span class="about-val gold" id="aboutVersion">0.5.0-beta</span>
+        <span class="about-val gold" id="aboutVersion">0.5.1-beta</span>
     </div>
     <div class="about-row">
         <span class="about-key">Build</span>
@@ -597,6 +620,7 @@
 <div class="toast" id="toast"></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="grok-voice.js"></script>
 <script>
     // ═══════════════════════════════════════════════════
     //  SUPABASE
@@ -621,8 +645,12 @@
         }
     } catch(e) {}
 
+    const SUPABASE_URL = 'https://yljztfajyvjzqikxdddf.supabase.co';
+    const GROK_TTS_URL = (window.TSPGrokVoice && TSPGrokVoice.ttsUrlFromProject(SUPABASE_URL))
+        || (SUPABASE_URL + '/functions/v1/grok-tts');
+
     const supabaseClient = supabase.createClient(
-        'https://yljztfajyvjzqikxdddf.supabase.co',
+        SUPABASE_URL,
         'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Inlsanp0ZmFqeXZqenFpa3hkZGRmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njk2MjMzMDYsImV4cCI6MjA4NTE5OTMwNn0.O3qRONKT4XdEoSZTPg0Lg_tLyThMxRAMWjGwHy5W5JM',
         {
             auth: {
@@ -692,8 +720,10 @@
         notifSound:     false,
         notifDot:       true,
         zappPersona:    true,
-        zappVoiceGender:'male',
-        zappVoice:      'sage',
+        zappVoiceGender:'female',
+        zappVoice:      'eve',
+        zappVoiceEngine:'grok',
+        autoOpenCitedManual: true,
     };
 
     let settings = { ...DEFAULTS };
@@ -707,6 +737,9 @@
         if (saved) {
             try { settings = { ...DEFAULTS, ...JSON.parse(saved) }; }
             catch(e) { settings = { ...DEFAULTS }; }
+        }
+        if (window.TSPGrokVoice && TSPGrokVoice.migrateStoredVoice(settings)) {
+            try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
         }
 
         applySettings();
@@ -771,9 +804,17 @@
 
         // AI Assistant
         document.getElementById('zappPersona').checked     = settings.zappPersona !== false;
-        document.getElementById('zappVoiceGender').value   = settings.zappVoiceGender || 'male';
-        document.getElementById('zappVoice').value         = settings.zappVoice || 'sage';
-        updateZappVoiceOptions(settings.zappVoiceGender || 'male', false);
+        document.getElementById('zappVoiceEngine').value   = settings.zappVoiceEngine === 'device' ? 'device' : 'grok';
+        try {
+            const directOpen = localStorage.getItem('autoOpenCitedManual');
+            if (directOpen === 'false') settings.autoOpenCitedManual = false;
+            else if (directOpen === 'true') settings.autoOpenCitedManual = true;
+        } catch (e) {}
+        document.getElementById('autoOpenCitedManual').checked = settings.autoOpenCitedManual !== false;
+        document.getElementById('zappVoiceGender').value   = settings.zappVoiceGender || 'female';
+        document.getElementById('zappVoice').value         = settings.zappVoice || 'eve';
+        updateZappVoiceOptions(settings.zappVoiceGender || 'female', false);
+        refreshGrokVoicePicker();
 
         // Native-backed settings
         try {
@@ -901,24 +942,58 @@
     // ═══════════════════════════════════════════════════
     //  AI ASSISTANT SETTINGS
     // ═══════════════════════════════════════════════════
-    const VOICES = {
-        male:   [
-            { id: 'sage', label: 'Sage — warm & clear' },
-            { id: 'rex',  label: 'Rex — confident' },
-            { id: 'sal',  label: 'Sal — versatile' },
-            { id: 'leo',  label: 'Leo — authoritative' },
-        ],
-        female: [
-            { id: 'eve',  label: 'Eve — expressive' },
-            { id: 'ara',  label: 'Ara — warm & conversational' },
-        ]
-    };
+    let grokVoiceCatalog = null;
+
+    function voiceListFor(gender) {
+        if (window.TSPGrokVoice) {
+            return TSPGrokVoice.voicesForGender(grokVoiceCatalog || TSPGrokVoice.allowlistVoices(), gender);
+        }
+        const fallback = {
+            male: [
+                { id: 'rex',  label: 'Rex — confident & clear' },
+                { id: 'sal',  label: 'Sal — smooth & balanced' },
+                { id: 'leo',  label: 'Leo — authoritative' },
+            ],
+            female: [
+                { id: 'eve',  label: 'Eve — energetic & upbeat' },
+                { id: 'ara',  label: 'Ara — warm & friendly' },
+            ]
+        };
+        return fallback[gender] || fallback.male;
+    }
+
+    async function refreshGrokVoicePicker() {
+        if (!window.TSPGrokVoice || !GROK_TTS_URL) return;
+        try {
+            const sess = await supabaseClient.auth.getSession();
+            const token = sess && sess.data && sess.data.session && sess.data.session.access_token;
+            if (!token) return;
+            const resp = await fetch(GROK_TTS_URL, {
+                method: 'GET',
+                headers: { 'Authorization': 'Bearer ' + token, 'Accept': 'application/json' }
+            });
+            if (!resp.ok) return;
+            const data = await resp.json();
+            const list = TSPGrokVoice.parseVoiceList(data);
+            if (!list || !list.length) return;
+            grokVoiceCatalog = list;
+            const gender = document.getElementById('zappVoiceGender').value || 'male';
+            const sel = document.getElementById('zappVoice');
+            const current = sel ? sel.value : settings.zappVoice;
+            const voices = voiceListFor(gender);
+            if (!sel) return;
+            sel.innerHTML = voices.map(v => `<option value="${v.id}">${v.label}</option>`).join('');
+            const wanted = TSPGrokVoice.normalizeVoiceId(current);
+            const match = voices.find(v => v.id === wanted);
+            sel.value = match ? wanted : voices[0].id;
+        } catch (e) {}
+    }
 
     function updateZappVoiceOptions(gender, resetValue = true) {
         const sel = document.getElementById('zappVoice');
         const sub = document.getElementById('zappVoiceSub');
         if (!sel) return;
-        const voices = VOICES[gender] || VOICES.male;
+        const voices = voiceListFor(gender);
         sel.innerHTML = voices.map(v => `<option value="${v.id}">${v.label}</option>`).join('');
         if (resetValue) {
             sel.value = voices[0].id;
@@ -929,7 +1004,11 @@
             const match = voices.find(v => v.id === saved);
             sel.value = match ? saved : voices[0].id;
         }
-        if (sub) sub.textContent = `Choose from available ${gender} voices`;
+        if (sub) {
+            sub.textContent = gender === 'female'
+                ? 'Eve (default) or Ara.'
+                : 'Rex, Sal, or Leo.';
+        }
         saveSettings();
     }
 
@@ -957,7 +1036,12 @@
         settings.notifDot      = document.getElementById('notifDot').checked;
         settings.zappPersona    = document.getElementById('zappPersona').checked;
         settings.zappVoiceGender= document.getElementById('zappVoiceGender').value;
-        settings.zappVoice      = document.getElementById('zappVoice').value;
+        settings.zappVoiceEngine= document.getElementById('zappVoiceEngine').value === 'device' ? 'device' : 'grok';
+        settings.autoOpenCitedManual = document.getElementById('autoOpenCitedManual').checked;
+        localStorage.setItem('autoOpenCitedManual', settings.autoOpenCitedManual ? 'true' : 'false');
+        settings.zappVoice      = window.TSPGrokVoice
+            ? TSPGrokVoice.normalizeVoiceId(document.getElementById('zappVoice').value)
+            : document.getElementById('zappVoice').value;
 
         localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
         applySettings();
@@ -1019,7 +1103,7 @@
     }
 
     function checkForUpdates() {
-        const versionName = window.TSP_ANDROID_VERSION_NAME || '0.5.0-beta';
+        const versionName = window.TSP_ANDROID_VERSION_NAME || '0.5.1-beta';
         showToast('You\'re on the latest version (' + versionName + ')', 'success');
     }
 

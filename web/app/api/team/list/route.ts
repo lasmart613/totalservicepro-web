@@ -120,7 +120,7 @@ export async function GET(req: NextRequest) {
     // All invites for this org (history + pending) — client RLS often hides these
     const { data: allInvites } = await admin
       .from('engineer_invitations')
-      .select('id, email, role, first_name, last_name, created_at, accepted, accepted_at')
+      .select('id, email, role, first_name, last_name, created_at, expires_at, accepted, accepted_at')
       .eq('organization_id', orgId)
       .order('created_at', { ascending: false })
       .limit(50);

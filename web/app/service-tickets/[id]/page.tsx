@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { DEFAULT_ORG_TIMEZONE, formatOrgDocumentDate, resolveNumberingTimeZone } from '@/lib/org-timezone';
 import { ArrowLeft, Edit2, Save, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { filterLinkedCustomers, loadLinkedCustomers, type LinkedCustomerOpt } from '@/lib/customer-form';
@@ -77,6 +78,7 @@ export default function ServiceTicketDetail() {
   const [viewerRole, setViewerRole] = useState<string | null>(null);
   const [viewerOrgType, setViewerOrgType] = useState<string | null>(null);
   const [existingReports, setExistingReports] = useState<ExistingTicketReport[]>([]);
+  const [docZone, setDocZone] = useState(DEFAULT_ORG_TIMEZONE);
 
   // DB dropdowns for equipment
   const [dbMfrs, setDbMfrs] = useState<any[]>([]);
@@ -126,6 +128,10 @@ export default function ServiceTicketDetail() {
         }
 
         const nextShopId = ticketData.organization_id;
+        if (nextShopId != null && nextShopId !== '') {
+          const zone = await resolveNumberingTimeZone(supabase, nextShopId, { allowBrowser: false });
+          setDocZone(zone.timeZone);
+        }
         setCustSearch(ticketData.customer_name || '');
         if (nextShopId != null) {
           setOrganizations(await loadLinkedCustomers(supabase, nextShopId));
@@ -503,7 +509,7 @@ export default function ServiceTicketDetail() {
               ) : catalogChoiceLabel(ticket.equipment_model)} />
               <Field label="Equipment Type" value={isEditing ? <input className="input" value={formData.equipment_type || ''} onChange={(e) => handleInputChange('equipment_type', e.target.value)} /> : ticket.equipment_type} />
               <Field label="Serial Number" value={isEditing ? <input className="input" value={formData.serial_number || ''} onChange={(e) => handleInputChange('serial_number', e.target.value)} /> : ticket.serial_number} />
-              <Field label="PM Due Date" value={isEditing ? <input type="date" className="input" value={formData.service_date || ''} onChange={(e) => handleInputChange('service_date', e.target.value)} /> : ticket.service_date} />
+              <Field label="PM Due Date" value={isEditing ? <input type="date" className="input" value={formData.service_date || ''} onChange={(e) => handleInputChange('service_date', e.target.value)} /> : displayStoredDay(ticket.service_date, docZone)} />
             </div>
           </div>
 
@@ -511,7 +517,7 @@ export default function ServiceTicketDetail() {
           <div className="card p-6">
             <h2 className="text-xl font-bold mb-4 border-b border-[var(--border)] pb-3">Scheduling</h2>
             <div className="space-y-4">
-              <Field label="Service Date" value={isEditing ? <input type="date" className="input" value={formData.service_date || ''} onChange={(e) => handleInputChange('service_date', e.target.value)} /> : ticket.service_date} />
+              <Field label="Service Date" value={isEditing ? <input type="date" className="input" value={formData.service_date || ''} onChange={(e) => handleInputChange('service_date', e.target.value)} /> : displayStoredDay(ticket.service_date, docZone)} />
               <Field label="Scheduled Time" value={isEditing ? <input type="time" className="input" value={formData.scheduled_time || ''} onChange={(e) => handleInputChange('scheduled_time', e.target.value)} /> : ticket.scheduled_time} />
               <Field label="End Time" value={isEditing ? <input type="time" className="input" value={formData.end_time || ''} onChange={(e) => handleInputChange('end_time', e.target.value)} /> : ticket.end_time} />
               <Field
@@ -546,8 +552,8 @@ export default function ServiceTicketDetail() {
               <Field label="PO Number" value={isEditing ? <input className="input" value={formData.po_number || ''} onChange={(e) => handleInputChange('po_number', e.target.value)} /> : ticket.po_number} />
               <Field label="Contract Number" value={isEditing ? <input className="input" value={formData.contract_number || ''} onChange={(e) => handleInputChange('contract_number', e.target.value)} /> : ticket.contract_number} />
               <Field label="Billable" value={ticket.billable ? 'Yes' : 'No'} />
-              <Field label="Created At" value={ticket.created_at} />
-              <Field label="Last Updated" value={ticket.updated_at} />
+              <Field label="Created At" value={formatOrgDocumentDate(ticket.created_at, docZone)} />
+              <Field label="Last Updated" value={formatOrgDocumentDate(ticket.updated_at, docZone)} />
             </div>
           </div>
         </div>
@@ -560,6 +566,13 @@ export default function ServiceTicketDetail() {
       />
     </div>
   );
+}
+
+function displayStoredDay(value: unknown, timeZone: string): string {
+  if (value == null || value === '') return '';
+  const text = String(value).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) return formatOrgDocumentDate(text, timeZone);
+  return formatOrgDocumentDate(text, timeZone) || text;
 }
 
 function Field({ label, value, multiline = false }: { label: string; value: any; multiline?: boolean }) {

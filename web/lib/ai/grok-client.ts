@@ -1,6 +1,9 @@
 /**
  * Client for Supabase edge function `grok-assistant` (shared with Android AI).
  * Text chat only on web for Sprint A — voice/TTS remains mobile.
+ * Mobile voice calls Supabase `grok-tts` with the user JWT. The xAI key stays
+ * a Supabase function secret (same XAI_API_KEY as grok-assistant).
+ * Omit voice_id to use eve. sage is rejected (xAI: Voice 'sage' not found).
  */
 
 import { getSupabaseUrl } from '@/lib/supabase/client';
@@ -85,7 +88,7 @@ export async function fetchAiUsage(accessToken: string): Promise<AiUsage | null>
       },
       voice: {
         used: Number(json.voice?.used ?? 0),
-        limit: Number(json.voice?.limit ?? 1),
+        limit: Number(json.voice?.limit ?? 5),
       },
       tier: json.tier || 'free',
     };
@@ -150,7 +153,7 @@ export async function grokChat(opts: {
           : json?.used != null
             ? {
                 text: { used: json.used, limit: json.limit ?? 5 },
-                voice: { used: 0, limit: 1 },
+                voice: { used: 0, limit: 5 },
               }
             : undefined,
       };

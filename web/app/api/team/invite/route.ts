@@ -1,19 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { ensureTeamMemberProfile, findAuthUserByEmail } from '@/lib/team-profile';
-import { applyInviteToExistingUser } from '@/lib/org-membership-server';
+import { findAuthUserByEmail } from '@/lib/team-profile';
 import { DEFAULT_STAFF_ROLE } from '@/lib/org-membership';
+import { freshTeamInviteFields } from '@/lib/team-invite-guard';
+import { decideMemberRoleChange } from '@/lib/tenant-lockdown';
 import {
   buildTeamInviteHtml,
   buildTeamInviteText,
   teamInviteEmailError,
-  resolveInviteSiteOrigin,
   teamInviteLoginUrl,
   teamInviteNeedsPasswordSetup,
   teamInviteRoleLabel,
   teamInviteSubject,
 } from '@/lib/team-invite';
+import { publicSiteOrigin } from '@/lib/site-origin';
 
 const ADMIN_ROLES = new Set([
   'admin',
@@ -32,23 +33,6 @@ type InviteBody = {
   resend?: boolean;
 };
 
-function siteUrl(req: NextRequest): string {
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
-  const proto = req.headers.get('x-forwarded-proto') || 'https';
-  const requestOrigin = host ? `${proto}://${host}` : '';
-  return resolveInviteSiteOrigin(
-    {
-      NEXT_PUBLIC_SITE_URL: process.env.NEXT_PUBLIC_SITE_URL,
-      URL: process.env.URL,
-      DEPLOY_PRIME_URL: process.env.DEPLOY_PRIME_URL,
-      DEPLOY_URL: process.env.DEPLOY_URL,
-      CONTEXT: process.env.CONTEXT,
-      NETLIFY_CONTEXT: process.env.NETLIFY_CONTEXT,
-    },
-    requestOrigin,
-  );
-}
-
 function isRateLimitError(msg: string): boolean {
   return /rate.?limit|too many|429|email.*limit/i.test(msg || '');
 }
@@ -56,13 +40,15 @@ function isRateLimitError(msg: string): boolean {
 /**
  * Invite a team member:
  * 1) Verify caller is authenticated admin of an org
- * 2) Existing RepairPlanet user → add membership (moonlight / first-org attach),
- *    never reject just because they already have another company.
- *    Always send branded email, including already_on_team. Prefer set-password
- *    when they never signed in / onboarding is incomplete; otherwise Sign in.
+ * 2) Write only the engineer_invitations row (accepted false, expires_at now+7 days).
+ *    An existing profile does not get a membership here — they join via
+ *    POST /api/team/claim after the invite is open and their email is confirmed.
+ *    Never reject just because they already have another company (moonlight).
+ *    Always send branded email. Prefer set-password when they never signed in
+ *    or onboarding is incomplete; otherwise Sign in.
  * 3) New user → generateLink (no Supabase Auth mail) + branded set-password email
  * 4) If Resend is not configured or send fails, still return a copyable link
- * 5) Do not mark the invite accepted until they actually finish setup
+ * 5) Do not mark the invite accepted until they claim it
  *
  * Does not send the generic Auth invite mail (avoids double send with Resend).
  */
@@ -115,36 +101,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: emailError }, { status: 400 });
     }
 
-    const inviteRole = (body.role || DEFAULT_STAFF_ROLE).toLowerCase();
+    const requestedRole = (body.role || DEFAULT_STAFF_ROLE).toLowerCase();
+    const roleGate = decideMemberRoleChange({
+      callerRole: role,
+      targetRole: requestedRole,
+      sameOrganization: true,
+      allowServiceManager: true,
+    });
+    if (!roleGate.ok) {
+      return NextResponse.json({ error: roleGate.error }, { status: roleGate.status });
+    }
+    const inviteRole = roleGate.role;
     const firstName = (body.firstName || '').trim() || null;
     const lastName = (body.lastName || '').trim() || null;
     const jobTitle = (body.jobTitle || '').trim() || null;
     const orgId = profile.organization_id;
-    const base = siteUrl(req);
+    const base = publicSiteOrigin(req);
     const redirectTo = `${base}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`;
     const roleLabel = teamInviteRoleLabel(inviteRole);
 
     if (!hasServiceRole()) {
-      const { error: invErr } = await userClient.from('engineer_invitations').insert({
-        organization_id: orgId,
-        email,
-        role: inviteRole,
-        first_name: firstName,
-        last_name: lastName,
-        invited_by: user.id,
-        accepted: false,
-      });
-      if (invErr) {
-        return NextResponse.json({ error: invErr.message }, { status: 400 });
-      }
-      return NextResponse.json({
-        ok: true,
-        emailed: false,
-        message:
-          'Invitation saved, but the server cannot send email (missing SUPABASE_SERVICE_ROLE_KEY). ' +
-          'Contact support to configure email, or share the signup link manually.',
-        signupUrl: `${base}/login`,
-      });
+      return NextResponse.json(
+        { error: 'Server cannot create team invites (missing service role).' },
+        { status: 503 }
+      );
     }
 
     const admin = getSupabaseAdmin();
@@ -211,7 +191,7 @@ export async function POST(req: NextRequest) {
         return NextResponse.json({
           ok: true,
           emailed: false,
-          linked: opts.alreadyRegistered,
+          linked: false,
           alreadyRegistered: opts.alreadyRegistered,
           moonlight: !!opts.moonlight,
           inviteUrl: copyUrl,
@@ -239,14 +219,14 @@ export async function POST(req: NextRequest) {
           return NextResponse.json({
             ok: true,
             emailed: true,
-            linked: opts.alreadyRegistered || !!opts.needsSetup,
+            linked: false,
             alreadyRegistered: opts.alreadyRegistered,
             moonlight: !!opts.moonlight,
             inviteUrl: copyUrl,
             message: opts.needsSetup
               ? `Invite email sent to ${email}. They have not finished setup — ask them to set a password from the email. If they don't see it, check spam or copy the link.`
               : opts.moonlight
-                ? `Invite email sent to ${email}. They already have a company — added as ${inviteRole} here without changing their home shop. Ask them to sign in and switch companies.`
+                ? `Invite email sent to ${email}. They already have a company — they join this shop when they sign in and accept (moonlight). Their home shop is not changed.`
                 : opts.alreadyRegistered
                   ? `Invite email sent to ${email}. They already have a RepairPlanet account — ask them to sign in with this email.`
                   : `Invite email sent to ${email}. If they don't see it within a few minutes, check spam — or copy the invite link from the toast / pending list.`,
@@ -259,7 +239,7 @@ export async function POST(req: NextRequest) {
             ok: true,
             emailed: false,
             rateLimited: true,
-            linked: opts.alreadyRegistered,
+            linked: false,
             alreadyRegistered: opts.alreadyRegistered,
             moonlight: !!opts.moonlight,
             inviteUrl: copyUrl,
@@ -270,7 +250,7 @@ export async function POST(req: NextRequest) {
           ok: true,
           emailed: false,
           warning: sendMsg,
-          linked: opts.alreadyRegistered,
+          linked: false,
           alreadyRegistered: opts.alreadyRegistered,
           moonlight: !!opts.moonlight,
           inviteUrl: copyUrl,
@@ -282,7 +262,7 @@ export async function POST(req: NextRequest) {
           ok: true,
           emailed: false,
           warning: sendErr?.message || 'send failed',
-          linked: opts.alreadyRegistered,
+          linked: false,
           alreadyRegistered: opts.alreadyRegistered,
           moonlight: !!opts.moonlight,
           inviteUrl: copyUrl,
@@ -291,7 +271,8 @@ export async function POST(req: NextRequest) {
       }
     };
 
-    const recordInvitation = async (accepted: boolean) => {
+    const recordInvitation = async () => {
+      const fresh = freshTeamInviteFields();
       const { data: existingInv } = await admin
         .from('engineer_invitations')
         .select('id, first_name, last_name')
@@ -310,39 +291,23 @@ export async function POST(req: NextRequest) {
           first_name: names.first_name,
           last_name: names.last_name,
           invited_by: user.id,
-          accepted,
-          accepted_at: accepted ? new Date().toISOString() : null,
+          accepted: fresh.accepted,
+          accepted_at: fresh.accepted_at,
+          expires_at: fresh.expires_at,
         });
         return;
       }
-      const patch: Record<string, unknown> = {
-        role: inviteRole,
-        ...names,
-      };
-      if (accepted) {
-        patch.accepted = true;
-        patch.accepted_at = new Date().toISOString();
-      } else {
-        // Re-invite / resend: keep unanswered so Pending + Resend stay visible.
-        patch.accepted = false;
-        patch.accepted_at = null;
-      }
-      await admin.from('engineer_invitations').update(patch).eq('id', existingInv.id);
-    };
-
-    const ensureProfileForUserId = async (userId: string) => {
-      const r = await ensureTeamMemberProfile(admin, {
-        userId,
-        email,
-        organizationId: orgId,
-        role: inviteRole,
-        firstName,
-        lastName,
-        jobTitle,
-        onboardingCompleted: false,
-      });
-      if (!r.ok) console.warn('profile ensure failed', r.error);
-      return r;
+      // Resend / re-invite: clear accepted state and extend expires_at so the new link can be claimed.
+      await admin
+        .from('engineer_invitations')
+        .update({
+          role: inviteRole,
+          ...names,
+          accepted: fresh.accepted,
+          accepted_at: fresh.accepted_at,
+          expires_at: fresh.expires_at,
+        })
+        .eq('id', existingInv.id);
     };
 
     /** Build a copyable invite/recovery link without sending Supabase mail. */
@@ -400,9 +365,6 @@ export async function POST(req: NextRequest) {
       if (needsSetup) {
         const generated = await buildActionLink(false);
         acceptUrl = generated.url;
-        if (generated.userId) {
-          await ensureProfileForUserId(generated.userId);
-        }
       }
       return deliverBrandedInvite({
         alreadyRegistered: !needsSetup || !acceptUrl,
@@ -413,7 +375,7 @@ export async function POST(req: NextRequest) {
       });
     };
 
-    // Existing profile → add a membership (moonlight) instead of a conflict / steal.
+    // Existing profile: invite row only. Membership is created later by /api/team/claim.
     // Always send branded email when the caller is inviting — including already_on_team.
     const { data: existingProfile } = await admin
       .from('user_profiles')
@@ -422,41 +384,27 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (existingProfile?.id) {
-      const applied = await applyInviteToExistingUser(admin, {
-        userId: existingProfile.id,
-        email,
-        inviteOrgId: orgId,
-        inviteRole,
-        profileOrgId: existingProfile.organization_id,
-        profileRole: existingProfile.role,
-        firstName,
-        lastName,
-        jobTitle,
-      });
-      if (!applied.ok) {
-        return NextResponse.json({ error: applied.error || 'Could not add membership' }, { status: 400 });
-      }
-
-      const onboarded = (existingProfile as { onboarding_completed?: boolean | null }).onboarding_completed === true;
-      await recordInvitation(onboarded);
+      await recordInvitation();
 
       const existingAuth = await findAuthUserByEmail(admin, email);
       const greetName = firstName || (existingProfile as { first_name?: string | null }).first_name || null;
+      const otherOrg =
+        existingProfile.organization_id != null &&
+        String(existingProfile.organization_id) !== String(orgId);
       return deliverForExistingAccount({
         greetName,
-        moonlight: !!applied.moonlight,
+        moonlight: otherOrg,
         onboardingCompleted: (existingProfile as { onboarding_completed?: boolean | null }).onboarding_completed,
         lastSignInAt: existingAuth?.last_sign_in_at || null,
       });
     }
 
-    // Pending invitation row for a new email
-    await recordInvitation(false);
+    // Pending invitation row for a new email. No membership until they claim.
+    await recordInvitation();
 
     // Auth exists but no profile yet — still email; prefer set-password if they never signed in.
     const existingAuth = await findAuthUserByEmail(admin, email);
     if (existingAuth?.id) {
-      await ensureProfileForUserId(existingAuth.id);
       return deliverForExistingAccount({
         onboardingCompleted: false,
         lastSignInAt: existingAuth.last_sign_in_at || null,
@@ -465,10 +413,6 @@ export async function POST(req: NextRequest) {
 
     const generated = await buildActionLink(true);
     const inviteUrl = generated.url;
-    const newUserId = generated.userId;
-    if (newUserId) {
-      await ensureProfileForUserId(newUserId);
-    }
 
     if (!inviteUrl) {
       return NextResponse.json({

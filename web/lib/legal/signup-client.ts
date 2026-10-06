@@ -21,8 +21,14 @@ export async function signUpWithConsent(input: {
   };
   error: { message: string } | null;
 }> {
+  const meta = input.data || {};
+  const firstName =
+    typeof meta.first_name === 'string' ? meta.first_name : typeof meta.firstName === 'string' ? meta.firstName : '';
+  const lastName =
+    typeof meta.last_name === 'string' ? meta.last_name : typeof meta.lastName === 'string' ? meta.lastName : '';
   let json: {
     error?: string;
+    userId?: string | null;
     user?: { id: string; email?: string | null; identities?: unknown[] | null } | null;
     session?: SignupSession | null;
   } | null = null;
@@ -34,9 +40,10 @@ export async function signUpWithConsent(input: {
       body: JSON.stringify({
         email: input.email,
         password: input.password,
+        firstName,
+        lastName,
         consent: input.consent,
         legalVersion: LEGAL_VERSION,
-        data: input.data,
         emailRedirectTo: input.emailRedirectTo,
       }),
     });
@@ -55,6 +62,9 @@ export async function signUpWithConsent(input: {
 
   const session =
     json?.session?.access_token && json.session.refresh_token ? json.session : null;
+  const user =
+    json?.user ??
+    (json?.userId ? { id: json.userId, email: input.email, identities: [{ provider: 'email' }] } : null);
   if (session) {
     const supabase = getSupabaseClient();
     const { error } = await supabase.auth.setSession({
@@ -62,10 +72,10 @@ export async function signUpWithConsent(input: {
       refresh_token: session.refresh_token,
     });
     if (error) {
-      return { data: { user: json?.user ?? null, session: null }, error: { message: error.message } };
+      return { data: { user, session: null }, error: { message: error.message } };
     }
   }
-  return { data: { user: json?.user ?? null, session }, error: null };
+  return { data: { user, session }, error: null };
 }
 
 /** Asks the server to stamp a brand-new invited account. The route decides. Failures do not block navigation. */

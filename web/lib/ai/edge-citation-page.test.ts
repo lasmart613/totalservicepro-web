@@ -144,3 +144,25 @@ test('real CO2RE extract: error 43 cites physical page 150, never printed 7', as
   assert.equal((text.match(/\[\[pdfpage:\d+\]\]/g) || []).length, 161);
   await assertPhysical150(await loadEdge(), text);
 });
+
+test('edge citation label spaces the page and drops a repeated manual page', async () => {
+  const edge = await loadEdge();
+  const line = edge.formatCitationLine([{ manualId: 9, title: 'Rev A', page: 166 }], '');
+  assert.match(line, /Rev A, p\. 166/);
+  assert.doesNotMatch(line, /Rev A,p\.166|p\.166/);
+
+  const cites = edge.citationsFromParts(
+    [
+      { text: 'first', source: 'chunk-a', page: 166, section: '1.1' },
+      { text: 'again', source: 'chunk-b', page: 166, section: '9.9' },
+      { text: 'other', source: 'chunk-c', page: 10 },
+    ],
+    9,
+    'Rev A'
+  );
+  assert.deepEqual(
+    cites.map((c) => c.page),
+    [166, 10]
+  );
+  assert.equal(cites[0].section, '1.1');
+});

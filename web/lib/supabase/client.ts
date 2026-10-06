@@ -219,81 +219,16 @@ export async function claimPendingInvitations(
           }
           return res;
         }
+        return res;
       }
     } catch (apiErr) {
-      console.warn('claim API fallback to client', apiErr);
+      console.warn('claim API failed', apiErr);
+      return { ok: false, error: apiErr instanceof Error ? apiErr.message : 'claim failed' };
     }
 
-    const { data: existingProf } = await supabase
-      .from('user_profiles')
-      .select('organization_id, role')
-      .eq('id', userId)
-      .maybeSingle();
-
-    const { data: invites, error: selErr } = await supabase
-      .from('engineer_invitations')
-      .select('*')
-      .ilike('email', clean)
-      .eq('accepted', false)
-      .order('created_at', { ascending: false })
-      .limit(1);
-    if (selErr) console.warn('claimPendingInvitations select', selErr);
-
-    const inv = invites?.[0];
-    // Only a real invitation row may attach org/role. Never trust user_metadata.organization_id.
-    const orgId = inv?.organization_id ?? null;
-    if (!orgId) {
-      console.warn('[TSP] No invitation/org to claim for', clean);
-      return { ok: false, status: 404, error: 'No pending invitation found for this email.' };
-    }
-
-    const { data: { user } } = await supabase.auth.getUser();
-    const meta = user?.user_metadata || {};
-
-    await ensureOrganizationMembership(supabase, {
-      user_id: userId,
-      organization_id: orgId,
-      role: inv?.role || 'fse',
-      is_home: false,
-    });
-
-    if (!existingProf?.organization_id) {
-      const update: any = {
-        organization_id: orgId,
-        active_organization_id: orgId,
-        role: inv?.role || 'fse',
-        onboarding_completed: true,
-      };
-      if (inv?.first_name || meta.first_name) update.first_name = inv?.first_name || meta.first_name;
-      if (inv?.last_name || meta.last_name) update.last_name = inv?.last_name || meta.last_name;
-
-      const { error: upErr } = await supabase.from('user_profiles').update(update).eq('id', userId);
-      if (upErr) {
-        await supabase.from('user_profiles').upsert({
-          id: userId,
-          email: clean,
-          ...update,
-        }, { onConflict: 'id' });
-      }
-    }
-    if (inv?.id) {
-      await supabase.from('engineer_invitations').update({
-        accepted: true,
-        accepted_at: new Date().toISOString()
-      }).eq('id', inv.id);
-    }
-    console.log('[TSP] Claimed pending invitation for', clean, 'org', orgId);
-    return {
-      ok: true,
-      claimed: true,
-      pendingInvite: true,
-      inviteAccepted: true,
-      organization_id: orgId,
-      role: inv?.role || existingProf?.role || 'fse',
-      needsMemberOnboarding: existingProf?.organization_id
-        ? undefined
-        : true,
-    };
+    // No client fallback. organization_id, active_organization_id, and role
+    // are not writable by the signed-in user. POST /api/team/claim is the only path.
+    return { ok: false, error: 'Not signed in' };
   } catch (e) {
     console.warn('claimPendingInvitations non-fatal:', e);
     return { ok: false, error: e instanceof Error ? e.message : 'claim failed' };

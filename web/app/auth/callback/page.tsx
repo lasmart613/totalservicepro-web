@@ -206,19 +206,9 @@ function AuthCallbackInner() {
           founderRoles.has(metaRole) ||
           meta.organization_type === 'service_company';
 
-        // If trigger defaulted them to fse but metadata says they are a founder, restore role
-        if (
-          isFounder &&
-          prof &&
-          (!prof.role || String(prof.role).toLowerCase() === 'fse') &&
-          metaRole &&
-          founderRoles.has(metaRole)
-        ) {
-          await supabase.from('user_profiles').update({ role: metaRole }).eq('id', user.id);
-          prof = { ...prof, role: metaRole };
-        }
-
-        // Only auto-complete for invitees — founders still need the wizard
+        // If trigger defaulted them to fse, founder role is applied by
+        // POST /api/org/founder when they finish the org they created.
+        // user_metadata.role is client-writable and must not be copied here.
         if (prof?.organization_id && !prof?.onboarding_completed && invitedMember && !isFounder) {
           await supabase
             .from('user_profiles')

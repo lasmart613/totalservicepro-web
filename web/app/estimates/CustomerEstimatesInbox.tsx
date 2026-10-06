@@ -15,6 +15,7 @@ import {
   type EstimateEmailAction,
 } from '@/lib/billing/save-helpers';
 import { ESTIMATE_LIST_POLL_MS } from '@/lib/billing/estimate-list-live';
+import { formatOrgDocumentDate } from '@/lib/org-timezone';
 import { isUnreadPollVisible } from '@/lib/unread-poll';
 
 type InboxRow = {
@@ -33,6 +34,7 @@ type InboxRow = {
   awaitingAction: boolean;
   currencyCode?: string | null;
   numberFormat?: string | null;
+  timeZone?: string | null;
 };
 
 export default function CustomerEstimatesInbox() {
@@ -280,7 +282,7 @@ function InboxCard({
   onSubmit: (row: InboxRow, action: EstimateEmailAction) => void;
 }) {
   const busy = submitting?.startsWith(`${row.estimateId}:`);
-  const until = validUntilLabel(row.createdAt);
+  const until = validUntilLabel(row.createdAt, row.timeZone);
   const expired = row.expired || isEstimateExpired({ created_at: row.createdAt, status: row.status });
   const actionLabel = customerActionLabel(row.customerAction);
 
@@ -292,7 +294,7 @@ function InboxCard({
             {row.estimateNumber || 'Estimate'} · {row.companyName}
           </Link>
           <div className="text-xs text-[var(--text3)] mt-1">
-            {row.createdAt ? new Date(row.createdAt).toLocaleDateString() : '—'}
+            {formatOrgDocumentDate(row.createdAt, row.timeZone) || '—'}
             {expired ? ' · Expired' : until ? ` · Valid thru ${until}` : ''}
             {row.deviceModel ? ` · ${row.deviceModel}` : ''}
           </div>

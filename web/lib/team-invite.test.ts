@@ -230,7 +230,11 @@ test('already-on-team still takes the branded email path (no silent emailed:fals
   assert.doesNotMatch(source, /\/already\/i\.test/);
   assert.doesNotMatch(source, /emailed:\s*false,\s*\n\s*moonlight:\s*false/);
   assert.doesNotMatch(source, /await recordInvitation\(true\)/);
-  assert.match(source, /recordInvitation\(onboarded\)/);
+  assert.doesNotMatch(source, /recordInvitation\(onboarded\)/);
+  assert.match(source, /await recordInvitation\(\)/);
+  assert.match(source, /freshTeamInviteFields/);
+  assert.doesNotMatch(source, /applyInviteToExistingUser/);
+  assert.doesNotMatch(source, /ensureTeamMemberProfile/);
 });
 
 test('resend preserves the invite or member role instead of hardcoding fse', () => {
@@ -281,7 +285,8 @@ test('team invite API uses the builders and does not send the generic Supabase i
   assert.match(source, /generateLink/);
   assert.match(source, /RESEND_API_KEY/);
   assert.match(source, /alreadyRegistered:/);
-  assert.match(source, /applyInviteToExistingUser/);
+  assert.doesNotMatch(source, /applyInviteToExistingUser/);
+  assert.doesNotMatch(source, /ensureTeamMemberProfile/);
   assert.match(source, /moonlight/);
   assert.doesNotMatch(source, /already belongs to another organization/);
   assert.doesNotMatch(source, /status: 409/);
@@ -293,7 +298,9 @@ test('team invite API uses the builders and does not send the generic Supabase i
   const page = readFileSync(join(here, '../app/admin/team/page.tsx'), 'utf8');
   assert.match(page, /teamInviteEmailError/);
   assert.match(page, /noValidate/);
-  assert.match(source, /resolveInviteSiteOrigin/);
+  assert.match(source, /publicSiteOrigin\(req\)/);
+  assert.doesNotMatch(source, /resolveInviteSiteOrigin/);
+  assert.doesNotMatch(source, /function siteUrl/);
 });
 
 test('team invite links use the preview origin and stay on repairplanet.net in production', () => {

@@ -447,7 +447,7 @@ test('company page reads laser_models by name, not a label column', () => {
 });
 
 test('internal codes display a human label and duplicate spellings collapse', () => {
-  assert.equal(catalogChoiceLabel('alex_trivantage'), 'Alex Trivantage');
+  assert.equal(catalogChoiceLabel('alex_trivantage'), 'Alexandrite TriVantage');
   assert.equal(catalogChoiceLabel('candela_core', 'Candela Core'), 'Candela Core');
   assert.equal(catalogChoiceLabel('Xeo'), 'Xeo');
 

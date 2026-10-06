@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { clientAuthOrigin } from '@/lib/site-origin';
 
 type Props = {
   email: string;
@@ -34,7 +35,7 @@ export default function AuthOtpBox({
 
   function redirectUrl() {
     if (emailRedirectTo) return emailRedirectTo;
-    const origin = typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+    const origin = clientAuthOrigin();
     return `${origin}/auth/callback?next=/onboarding`;
   }
 

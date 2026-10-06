@@ -19,6 +19,8 @@ import com.android.billingclient.api.QueryPurchasesParams;
 
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -247,19 +249,28 @@ public class BillingManager implements PurchasesUpdatedListener {
 
         int responseCode = conn.getResponseCode();
         if (responseCode == HttpURLConnection.HTTP_OK) {
-            java.io.InputStream is = conn.getInputStream();
-            String response        = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+            String response        = readUtf8(conn.getInputStream());
             JSONObject json        = new JSONObject(response);
             String tier            = json.optString("tier", "premium");
             Log.d(TAG, "✅ Server verified purchase: tier=" + tier);
             if (callback != null) callback.onPurchaseSuccess(tier, sku);
         } else {
-            java.io.InputStream es = conn.getErrorStream();
-            String errBody = es != null
-                    ? new String(es.readAllBytes(), StandardCharsets.UTF_8)
-                    : "unknown";
+            String errBody = readUtf8(conn.getErrorStream());
+            if (errBody.isEmpty()) errBody = "unknown";
             throw new Exception("Server returned " + responseCode + ": " + errBody);
         }
+    }
+
+    /** Read a response body on API 24+. InputStream.readAllBytes is API 33. */
+    private static String readUtf8(InputStream in) throws java.io.IOException {
+        if (in == null) return "";
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[4096];
+        int n;
+        while ((n = in.read(buf)) != -1) {
+            if (n > 0) out.write(buf, 0, n);
+        }
+        return new String(out.toByteArray(), StandardCharsets.UTF_8);
     }
 
     // ── Check existing subscription on app launch ─────────────────
