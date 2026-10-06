@@ -1,5 +1,7 @@
 -- Supabase security-advisor hardening.
 -- Idempotent. Apply AFTER 20261006_000400 and 20261006_000401.
+-- 000300 (organizations.timezone) and 000301 (invoice void) are already on
+-- live and are earlier in this branch via main. They do not replace this file.
 -- Both 000400 and this file replace get_my_org_id(); this version must win.
 -- This file does not rewrite rows.
 -- Live catalog was not queried from this repo (no database credentials).
