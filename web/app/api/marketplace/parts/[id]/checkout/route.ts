@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import {
   createPartCheckoutSession,
   loadMarketplaceListing,
+  StripeConnectRequiredError,
   StripeMarketplaceError,
   syncPartStripeCatalog,
 } from '@/lib/billing/stripe-marketplace';
@@ -84,6 +85,12 @@ export async function POST(
       livemode: session.livemode,
     });
   } catch (e: unknown) {
+    if (e instanceof StripeConnectRequiredError) {
+      return NextResponse.json(
+        { error: e.buyerMessage, code: e.code, connectRequired: true },
+        { status: e.status }
+      );
+    }
     const status = e instanceof StripeMarketplaceError ? e.status : 500;
     const message = e instanceof Error ? e.message : 'Checkout failed';
     console.error('[marketplace/parts checkout]', e);

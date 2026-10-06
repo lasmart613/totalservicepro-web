@@ -25,6 +25,7 @@ import { ArrowLeft, Image as ImageIcon, Package } from 'lucide-react';
 import { useGuestSignupRedirect } from '@/lib/use-signed-in';
 import { displayModelName, displayModelText } from '@/lib/model-display';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
+import { StripeConnectCard } from '@/components/StripeConnectCard';
 import { StorageImage } from '@/components/StorageImage';
 
 function PartDetail() {
@@ -199,7 +200,11 @@ function PartDetail() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok || !json?.url) {
-        toast.error(json?.error || 'Could not start Stripe Checkout');
+        const blocked =
+          json?.connectRequired || json?.code === 'stripe_connect_required'
+            ? json?.error || 'This seller has not connected Stripe for card payments. Your card was not charged.'
+            : json?.error || 'Could not start Stripe Checkout';
+        toast.error(blocked);
         return;
       }
       const host = window.location.hostname;
@@ -484,8 +489,11 @@ function PartDetail() {
                     {availability.soldOut ? 'Sold out' : availability.reason || 'Unavailable'}
                   </div>
                 )}
+                {canManage ? (
+                  <StripeConnectCard returnTo={detailHref} />
+                ) : null}
                 <p className="text-xs text-center text-[var(--text3)]">
-                  Secure Stripe Checkout on RepairPlanet. Login is not required to buy.
+                  Card payments go to the seller&apos;s connected Stripe account. Login is not required to buy.
                 </p>
                 <AddListingToInvoiceButton
                   listing={{

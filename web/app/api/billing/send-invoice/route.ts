@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { createInvoiceCheckoutSession, stripeSecretProblem } from '@/lib/billing/stripe-pay';
+import { decideSellerChargeRoute, CONNECT_REQUIRED_CODE } from '@/lib/billing/stripe-connect';
+import { loadSellerPayoutAccount } from '@/lib/billing/stripe-connect-api';
 import {
   invoiceCheckoutDescription,
   resolveInvoiceCollectable,
@@ -138,6 +140,8 @@ export async function POST(req: NextRequest) {
     let paymentUrl: string | null = null;
     let stripeSessionId: string | null = null;
     let stripeSkippedReason: string | null = null;
+    let connectRequired = false;
+    let stripeConnect: Record<string, unknown> | null = null;
     const stripeProblem = stripeSecretProblem();
     if (isVoidInvoiceStatus(inv.status)) {
       stripeSkippedReason = VOIDED_INVOICE_MESSAGE;
@@ -145,19 +149,54 @@ export async function POST(req: NextRequest) {
       if (stripeProblem) {
         stripeSkippedReason = stripeProblem;
       } else {
-        const pay = await createInvoiceCheckoutSession({
-          amountCents: Math.round(payAmount * 100),
-          description: invoiceCheckoutDescription(
-            collectable,
-            String(inv.invoice_number || `Invoice #${invoiceId}`)
-          ),
-          invoiceId,
-          invoiceNumber: inv.invoice_number ? String(inv.invoice_number) : null,
-          customerEmail: recipient.email,
-          companyName: company.company_name || null,
-          paymentKind: collectable.paymentKind,
+        const amountCents = Math.round(payAmount * 100);
+        const invoiceOrgId = inv.organization_id;
+        const sellerOrgId =
+          typeof invoiceOrgId === 'string' || typeof invoiceOrgId === 'number'
+            ? invoiceOrgId
+            : callerOrgId;
+        const loaded = await loadSellerPayoutAccount(sellerOrgId);
+        const decision = decideSellerChargeRoute({
+          organizationId: sellerOrgId,
+          account: loaded.account,
+          amountCents,
+          schemaReady: loaded.schemaReady,
         });
-        if (pay) {
+        if (decision.mode === 'refuse') {
+          connectRequired = true;
+          stripeConnect = decision.prompt;
+          stripeSkippedReason = decision.message;
+        }
+        const pay =
+          decision.mode === 'refuse'
+            ? null
+            : await createInvoiceCheckoutSession({
+                amountCents,
+                description: invoiceCheckoutDescription(
+                  collectable,
+                  String(inv.invoice_number || `Invoice #${invoiceId}`)
+                ),
+                invoiceId,
+                invoiceNumber: inv.invoice_number ? String(inv.invoice_number) : null,
+                customerEmail: recipient.email,
+                companyName: company.company_name || null,
+                paymentKind: collectable.paymentKind,
+                ...(decision.mode === 'destination'
+                  ? {
+                      destinationAccountId: decision.accountId,
+                      payoutStatus: decision.payoutStatus,
+                      applicationFeeCents: decision.applicationFeeCents,
+                      organizationId: sellerOrgId,
+                    }
+                  : { legacyPlatformCharge: true as const }),
+              });
+        if (pay && !pay.ok && pay.code === CONNECT_REQUIRED_CODE) {
+          connectRequired = true;
+          stripeConnect = pay.prompt;
+          stripeSkippedReason = pay.message;
+        } else if (pay && !pay.ok) {
+          stripeSkippedReason = pay.message;
+        } else if (pay?.ok) {
           paymentUrl = pay.url;
           stripeSessionId = pay.sessionId;
           if (invoiceId && inv) {
@@ -182,9 +221,6 @@ export async function POST(req: NextRequest) {
               console.warn('could not persist payment_url', e);
             }
           }
-        } else {
-          stripeSkippedReason =
-            'Stripe Checkout session could not be created — check STRIPE_SECRET_KEY and amount.';
         }
       }
     } else if (includePay && payAmount < 0.5) {
@@ -249,6 +285,8 @@ export async function POST(req: NextRequest) {
             'Email delivery is not configured (RESEND_API_KEY). Invoice was finalized; export PDF or set up Resend to send mail.',
           needsConfig: true,
           paymentUrl,
+          connectRequired,
+          stripeConnect,
         },
         503,
         [recipient.email]
@@ -281,7 +319,7 @@ export async function POST(req: NextRequest) {
           ? `${msg} — Verify medicalrepairnetwork.com in Resend (DNS: resend._domainkey + send MX/TXT). Until verified, delivery may be limited to your Resend account email.`
           : msg;
       return respond(
-        { ok: false, emailSent: false, error: friendly, paymentUrl },
+        { ok: false, emailSent: false, error: friendly, paymentUrl, connectRequired, stripeConnect },
         502,
         [recipient.email]
       );
@@ -299,6 +337,8 @@ export async function POST(req: NextRequest) {
         paymentUrl,
         stripeSessionId,
         stripeSkippedReason: paymentUrl ? null : stripeSkippedReason,
+        connectRequired,
+        stripeConnect,
       },
       200,
       [recipient.email]

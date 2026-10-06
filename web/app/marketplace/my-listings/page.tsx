@@ -14,6 +14,7 @@ import {
   type MarketplaceListingLike,
 } from '@/lib/marketplace/parts';
 import { toast } from 'sonner';
+import { StripeConnectCard } from '@/components/StripeConnectCard';
 import { StorageImage } from '@/components/StorageImage';
 
 type SellerListing = MarketplaceListingLike & {
@@ -149,6 +150,10 @@ export default function MyListings() {
               + Create New Listing
             </Link>
           </div>
+        </div>
+
+        <div className="mb-6">
+          <StripeConnectCard returnTo="/marketplace/my-listings" />
         </div>
 
         {listings.length === 0 ? (

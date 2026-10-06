@@ -21,6 +21,7 @@ import {
   missingComplimentaryColumn,
   stripUnbackedComplimentaryPremium,
 } from '@/lib/complimentary-premium';
+import { StripeConnectCard } from '@/components/StripeConnectCard';
 
 type OrgType = 'service' | 'clinic' | 'supplier';
 type TeamMember = {
@@ -1128,6 +1129,11 @@ export default function Onboarding() {
                   : 'Your organization, profile, and team (if you are a repair company) will be saved. You can always edit from Company page or Settings.'}
             </p>
             <button onClick={saveOnboarding} disabled={loading} className="btn btn-primary px-10">{t('Finish & Continue →')}</button>
+            {(orgType === 'service' || orgType === 'supplier') && (
+              <div className="max-w-xl mx-auto mt-6 text-left">
+                <StripeConnectCard returnTo="/onboarding" />
+              </div>
+            )}
           </div>
         )}
 

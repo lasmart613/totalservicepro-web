@@ -13,6 +13,7 @@ import {
 import type { StripeObject } from './stripe-subscription.ts';
 import { formatOrgMoney } from '../money-format.ts';
 import { loadOrgMoneyPrefs } from '../org-money.ts';
+import { invoicePayoutRecord } from './stripe-connect.ts';
 import { flagVoidInvoicePayment, isVoidInvoiceStatus } from './void-invoice.ts';
 
 export type AppliedInvoicePayment = {
@@ -85,6 +86,7 @@ export async function applyInvoiceCheckoutSession(input: {
     method: 'Stripe',
     sessionId,
   });
+  Object.assign(patch.invoice_data, invoicePayoutRecord(m));
 
   let payload: Record<string, unknown> = { ...patch };
   let lastErr: { message?: string } | null = null;

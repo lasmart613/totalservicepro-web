@@ -69,6 +69,18 @@ test('a void invoice rejects payment and a late checkout is flagged without chan
   );
 });
 
+test('send-invoice skips a pay link when the invoice is voided', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const src = readFileSync(join(here, '../../app/api/billing/send-invoice/route.ts'), 'utf8');
+  const voidAt = src.indexOf('if (isVoidInvoiceStatus(inv.status))');
+  const checkoutAt = src.indexOf('await createInvoiceCheckoutSession');
+  assert.ok(voidAt > 0);
+  assert.ok(checkoutAt > voidAt);
+  assert.match(src, /stripeSkippedReason = VOIDED_INVOICE_MESSAGE/);
+  const between = src.slice(voidAt, checkoutAt);
+  assert.match(between, /\} else if \(includePay && payAmount >= 0\.5\)/);
+});
+
 test('Stripe expire treats an open session as expired and a completed session as not voidable', () => {
   assert.equal(classifyCheckoutExpire(200, { id: 'cs_1', status: 'expired' }), 'expired');
   assert.equal(
