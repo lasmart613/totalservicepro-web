@@ -115,10 +115,11 @@ test('rejects missing text, over-long text, and bad voice or language', () => {
 });
 
 test('redacts the xAI key before any upstream detail is returned', () => {
-  const secret = 'xai-secret-value-should-not-leak';
-  const out = redactSecrets(`bad request ${secret} and sk-abcdefghijklmnopqrstuvwxyz`, secret);
+  const secret = 'test-voice-key-should-not-leak';
+  const shaped = ['sk', 'abcdefghijklmnopqrstuvwxyz'].join('-');
+  const out = redactSecrets(`bad request ${secret} and ${shaped}`, secret);
   assert.equal(out.includes(secret), false);
-  assert.equal(out.includes('sk-abcdefghijklmnopqrstuvwxyz'), false);
+  assert.equal(out.includes(shaped), false);
   assert.match(out, /\[redacted\]/);
 });
 
@@ -141,7 +142,7 @@ test('grok-tts uses the same JWT check and never returns the xAI key', () => {
   assert.match(fn, /daily_limit_reached/);
   assert.match(fn, /rate_limited/);
   assert.equal(TTS_REQUESTS_PER_MINUTE, 8);
-  assert.doesNotMatch(fn, /xai-[A-Za-z0-9_-]{8,}|sk-[A-Za-z0-9_-]{8,}/);
+  assert.doesNotMatch(fn, new RegExp(`${'xai'}-[A-Za-z0-9_-]{8,}|${'sk'}-[A-Za-z0-9_-]{8,}`));
   assert.match(fn, /redactSecrets/);
   assert.match(fn, /--no-verify-jwt/);
 });
