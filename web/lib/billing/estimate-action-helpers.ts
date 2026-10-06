@@ -3,7 +3,7 @@
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
-import { SITE_ORIGIN } from '../share.ts';
+import { publicSiteOrigin } from '../site-origin.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
 import {
   customerActionFromEstimate,
@@ -84,7 +84,7 @@ export function buildOrgNotifyEmail(opts: {
     : rejected
       ? `Estimate ${num} rejected by ${opts.customerName}`
       : `Modification requested on estimate ${num} by ${opts.customerName}`;
-  const detailUrl = `${(SITE_ORIGIN || 'https://repairplanet.net').replace(/\/$/, '')}/estimates/new?id=${encodeURIComponent(String(opts.estimateId))}`;
+  const detailUrl = `${publicSiteOrigin()}/estimates/new?id=${encodeURIComponent(String(opts.estimateId))}`;
   const noteBlock =
     opts.note && opts.note.trim()
       ? `<div style="margin:16px 0;padding:12px;background:#f8f4e8;border:1px solid #e8d9a0;border-radius:6px;">` +

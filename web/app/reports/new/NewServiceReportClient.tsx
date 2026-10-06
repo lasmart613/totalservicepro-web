@@ -1135,7 +1135,8 @@ export default function NewServiceReport() {
         phone: newCustomer.phone || null,
         email: newCustomer.email || null,
         contact_name: newCustomer.contactName || null,
-        type: 'customer'
+        type: 'customer',
+        created_by: currentUser?.id || null,
       }).select().single();
       if (error) throw error;
 
@@ -1471,6 +1472,12 @@ export default function NewServiceReport() {
       // 22P02 (invalid uuid) drops ticket_id even when the message does not name the column.
       async function writeReport(payload: Record<string, any>, id: any) {
         let body = { ...payload };
+        // Updates echo organization_id and created_by. A client change of either
+        // column is rejected, so a teammate save must leave them untouched.
+        if (id) {
+          delete body.organization_id;
+          delete body.created_by;
+        }
         for (let attempt = 0; attempt < 6; attempt++) {
           if (id) {
             const { error } = await supabase.from('service_reports').update(body).eq('id', id);

@@ -4,8 +4,10 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { ensureTeamMemberProfile } from '@/lib/team-profile';
 import {
   decideClaim,
+  invitationIsOpen,
   inviteMustNotLeaveHome,
 } from '@/lib/org-membership';
+import { authorizeInviteAccept } from '@/lib/tenant-lockdown';
 import {
   deleteMembership,
   listMembershipsForUser,
@@ -117,6 +119,13 @@ export async function POST(req: NextRequest) {
       inv = anyInv;
     }
 
+    if (inv?.organization_id && inv.accepted !== true && !invitationIsOpen(inv)) {
+      if (body.inviteId) {
+        return NextResponse.json({ ok: false, error: 'This invitation has expired.' }, { status: 410 });
+      }
+      inv = null;
+    }
+
     if (!inv?.organization_id) {
       if (existingProf?.organization_id) {
         return NextResponse.json({
@@ -135,6 +144,16 @@ export async function POST(req: NextRequest) {
         claimed: false,
         pendingInvite: false,
       });
+    }
+
+    const accept = authorizeInviteAccept({
+      callerEmail: email,
+      inviteEmail: inv.email,
+      inviteOrgId: inv.organization_id,
+      inviteRole: inv.role,
+    });
+    if (!accept.ok) {
+      return NextResponse.json({ ok: false, error: accept.error }, { status: accept.status });
     }
 
     const leaveGuard = inviteMustNotLeaveHome({

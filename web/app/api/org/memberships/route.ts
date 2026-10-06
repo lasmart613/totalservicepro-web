@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { invitationIsOpen } from '@/lib/org-membership';
 import { listMembershipsWithOrgs, upsertMembership } from '@/lib/org-membership-server';
 
 /**
@@ -95,14 +96,17 @@ export async function GET(req: NextRequest) {
       if (email) {
         const { data: invites } = await admin
           .from('engineer_invitations')
-          .select('id, organization_id, role, first_name, last_name, created_at, accepted')
+          .select('id, organization_id, role, first_name, last_name, created_at, expires_at, accepted')
           .ilike('email', email)
           .eq('accepted', false)
           .order('created_at', { ascending: false })
           .limit(20);
         const memberOrgIds = new Set(memberships.map((m) => String(m.organizationId)));
         const pendingRaw = (invites || []).filter(
-          (inv: any) => inv.organization_id && !memberOrgIds.has(String(inv.organization_id))
+          (inv: any) =>
+            inv.organization_id &&
+            !memberOrgIds.has(String(inv.organization_id)) &&
+            invitationIsOpen(inv)
         );
         const orgIds = Array.from(
           new Set(pendingRaw.map((inv: any) => inv.organization_id).filter(Boolean))
