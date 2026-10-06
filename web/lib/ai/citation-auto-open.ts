@@ -25,6 +25,10 @@ export const ASSISTANT_SETTINGS_BLOB_KEY = 'tsp_settings';
 export const CITATION_OPEN_EVENT = 'assistant:citation-open';
 export const CITATION_OPEN_REQUEST_EVENT = 'assistant:open-citation';
 export const VOICE_STATE_EVENT = 'assistant:voice-state';
+/** Native → web, or web → native after `TSP.setVoiceMode`. Detail `{ on: boolean }`. */
+export const VOICE_MODE_EVENT = 'assistant:voice-mode';
+/** Web → native once per fresh settled answer, before the auto-open hold is evaluated. */
+export const ANSWER_EVENT = 'assistant:answer';
 
 /** Wide web layout. Below this, and always inside the Android shell, use full screen. */
 export const CITATION_PANEL_MIN_WIDTH = 1024;
@@ -43,6 +47,14 @@ export type TspCitationApi = {
   openCitation?: (manualId: number, page: number) => void;
   /** Native voice mode sets this while TTS is playing. */
   isVoiceSpeaking?: () => boolean;
+  /** Session flag. Default off. Not persisted. While on, chat requests send `voiceMode: true`. */
+  setVoiceMode?: (on: boolean) => void;
+  getVoiceMode?: () => boolean;
+  /**
+   * Submit a question through the page's own send path.
+   * Returns false when the page is not ready or a send is already in flight.
+   */
+  askAssistant?: (text: string) => boolean;
 };
 
 declare global {
@@ -267,4 +279,184 @@ export function dispatchCitationOpen(target: EventTarget, detail: CitationOpenDe
   const safe = normalizeCitationTarget(detail.manualId, detail.page);
   if (!safe) return;
   target.dispatchEvent(new CustomEvent(CITATION_OPEN_EVENT, { detail: { ...safe } }));
+}
+
+/** In-memory only. A reload starts off. Native calls `setVoiceMode(false)` when leaving voice. */
+let voiceModeOn = false;
+
+export function getVoiceMode(): boolean {
+  return voiceModeOn;
+}
+
+export function setVoiceMode(on: boolean): boolean {
+  voiceModeOn = on === true;
+  return voiceModeOn;
+}
+
+export function parseVoiceModeDetail(detail: unknown): boolean | null {
+  if (!detail || typeof detail !== 'object') return null;
+  const on = (detail as { on?: unknown }).on;
+  return typeof on === 'boolean' ? on : null;
+}
+
+export function dispatchVoiceMode(target: EventTarget, on: boolean): void {
+  target.dispatchEvent(new CustomEvent(VOICE_MODE_EVENT, { detail: { on: on === true } }));
+}
+
+export function canAskAssistant(opts: {
+  ready: boolean;
+  sending: boolean;
+  hasToken: boolean;
+  text: unknown;
+}): boolean {
+  return (
+    opts.ready === true &&
+    opts.sending !== true &&
+    opts.hasToken === true &&
+    String(opts.text ?? '').trim().length > 0
+  );
+}
+
+/** Plain text for native TTS: citation tokens and light markdown removed. */
+export function spokenAnswerText(content: string): string {
+  let text = stripCitationMarkers(content);
+  text = text.replace(/\[\[pdfpage:\d+\]\]/gi, '');
+  text = text.replace(/```[\s\S]*?```/g, ' ');
+  text = text.replace(/`([^`]+)`/g, '$1');
+  text = text.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1');
+  text = text.replace(/\*\*([^*]+)\*\*/g, '$1');
+  text = text.replace(/__([^_]+)__/g, '$1');
+  text = text.replace(/(^|\s)\*([^*\n]+)\*(?=\s|$)/g, '$1$2');
+  text = text.replace(/^#{1,6}\s+/gm, '');
+  text = text.replace(/[ \t]+\n/g, '\n').replace(/\n{2,}/g, '\n').trim();
+  return text;
+}
+
+/** Every cited physical page on the answer, in chip order. */
+export function assistantCitationPairs(reply: {
+  content?: string;
+  citations?: ManualCitation[] | null;
+}): CitationOpenDetail[] {
+  const citations = attachProsePages(
+    mergeCitations(reply.citations, parseCitationMarkers(reply.content || '')),
+    stripCitationMarkers(reply.content || '')
+  );
+  const pairs: CitationOpenDetail[] = [];
+  for (const cite of citations) {
+    const target = normalizeCitationTarget(cite.manualId, cite.page);
+    if (target) pairs.push(target);
+  }
+  return pairs;
+}
+
+export type AssistantAnswerDetail = {
+  ts: number;
+  text: string;
+  citations: CitationOpenDetail[];
+  top: CitationOpenDetail | null;
+  voiceMode: boolean;
+};
+
+export function buildAssistantAnswerDetail(input: {
+  ts: number;
+  content: string;
+  citations?: ManualCitation[] | null;
+  voiceMode: boolean;
+}): AssistantAnswerDetail | null {
+  if (!Number.isFinite(input.ts)) return null;
+  const reply = { content: input.content, citations: input.citations };
+  return {
+    ts: input.ts,
+    text: spokenAnswerText(input.content),
+    citations: assistantCitationPairs(reply),
+    top: autoOpenTargetFromReply(reply),
+    voiceMode: input.voiceMode === true,
+  };
+}
+
+export function dispatchAssistantAnswer(target: EventTarget, detail: AssistantAnswerDetail): void {
+  target.dispatchEvent(
+    new CustomEvent(ANSWER_EVENT, {
+      detail: {
+        ts: detail.ts,
+        text: detail.text,
+        citations: detail.citations.map((cite) => ({ manualId: cite.manualId, page: cite.page })),
+        top: detail.top ? { manualId: detail.top.manualId, page: detail.top.page } : null,
+        voiceMode: detail.voiceMode === true,
+      },
+    })
+  );
+}
+
+export type AnswerTurnState = {
+  pendingKey: string | null;
+  announcedKeys: string[];
+  openedKeys: string[];
+};
+
+export function emptyAnswerTurn(): AnswerTurnState {
+  return { pendingKey: null, announcedKeys: [], openedKeys: [] };
+}
+
+export function markAnswerFresh(state: AnswerTurnState, key: string): AnswerTurnState {
+  if (!key) return state;
+  return { ...state, pendingKey: key };
+}
+
+/**
+ * Announce once, only for the fresh key, and only after the reply has settled.
+ * History never calls `markAnswerFresh`, so a reload cannot announce.
+ */
+export function onAnswerSettled(
+  state: AnswerTurnState,
+  key: string,
+  settled: boolean
+): { state: AnswerTurnState; announce: boolean } {
+  if (!settled || !key || state.pendingKey !== key || state.announcedKeys.includes(key)) {
+    return { state, announce: false };
+  }
+  return {
+    state: { ...state, announcedKeys: [...state.announcedKeys, key] },
+    announce: true,
+  };
+}
+
+/**
+ * Inbound `openCitation` / Back / Close consumes the pending auto-open.
+ * A later voice-idle must not open the viewer again for this answer.
+ */
+export function onViewerTakenOver(state: AnswerTurnState): AnswerTurnState {
+  const key = state.pendingKey;
+  if (!key) return state;
+  if (state.openedKeys.includes(key)) return { ...state, pendingKey: null };
+  return { ...state, pendingKey: null, openedKeys: [...state.openedKeys, key] };
+}
+
+/**
+ * After the answer event. `speaking` keeps the pending key (voice hold).
+ * `canOpen` false consumes it (setting off, no page, or no access).
+ */
+export function autoOpenAfterVoice(
+  state: AnswerTurnState,
+  speaking: boolean,
+  canOpen: boolean
+): { state: AnswerTurnState; open: boolean } {
+  const key = state.pendingKey;
+  if (!key) return { state, open: false };
+  if (state.openedKeys.includes(key)) return { state: { ...state, pendingKey: null }, open: false };
+  if (speaking) return { state, open: false };
+  const openedKeys = [...state.openedKeys, key];
+  return {
+    state: { ...state, pendingKey: null, openedKeys },
+    open: canOpen,
+  };
+}
+
+const announcedAnswerKeys = new Set<string>();
+
+/** Survives a strict-mode remount so one fresh answer dispatches `assistant:answer` once. */
+export function claimAnswerAnnouncement(key: string): boolean {
+  if (!key || announcedAnswerKeys.has(key)) return false;
+  announcedAnswerKeys.add(key);
+  return true;
 }

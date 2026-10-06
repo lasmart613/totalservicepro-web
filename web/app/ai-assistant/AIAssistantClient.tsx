@@ -34,6 +34,7 @@ import { canAccessRepairAi } from '@/lib/roles';
 import { useSiteLocale } from '@/lib/fa/locale';
 import { AssistantCitedManual } from '@/components/AssistantCitedManual';
 import { useAssistantCitationOpen } from '@/components/useAssistantCitationOpen';
+import { canAskAssistant, getVoiceMode } from '@/lib/ai/citation-auto-open';
 
 type ManualRow = {
   id: number;
@@ -80,6 +81,8 @@ export default function AIAssistantClient() {
   const siteLanguage = useSiteLocale();
   const supabase = getSupabaseClient();
   const listRef = useRef<HTMLDivElement | null>(null);
+  const sendingRef = useRef(false);
+  const sendPromptRef = useRef<(text: string) => boolean>(() => false);
 
   const [ready, setReady] = useState(false);
   const [token, setToken] = useState<string | null>(null);
@@ -327,6 +330,7 @@ export default function AIAssistantClient() {
     manuals,
     caller,
     listRef,
+    askAssistant: (text) => sendPromptRef.current(text),
   });
 
   function onBrandChange(v: string) {
@@ -345,20 +349,32 @@ export default function AIAssistantClient() {
     saveState(messages, path, brand, id);
   }
 
-  async function sendPrompt(text: string) {
-    const trimmed = text.trim();
-    if (!trimmed || sending || !token) return;
+  function sendPrompt(text: string): boolean {
+    const trimmed = String(text ?? '').trim();
+    const accessToken = token;
+    if (
+      !canAskAssistant({
+        ready,
+        sending: sendingRef.current || sending,
+        hasToken: !!accessToken,
+        text: trimmed,
+      })
+    ) {
+      return false;
+    }
+    if (!accessToken) return false;
 
     if (usage.text.used >= usage.text.limit) {
       const msg = `Daily text limit reached (${usage.text.used}/${usage.text.limit}). Resets at midnight.`;
       setLimitBanner(msg);
       toast.error(msg);
-      return;
+      return false;
     }
 
     const nextMsgs: ChatMessage[] = [...messages, { role: 'user', content: trimmed }];
     setMessages(nextMsgs);
     setInput('');
+    sendingRef.current = true;
     setSending(true);
     setLimitBanner('');
     const currentId = selectedManual?.id ?? manualId;
@@ -376,64 +392,76 @@ export default function AIAssistantClient() {
       replyLanguage: siteLanguage,
       lastSentManualId: lastSentRef.current.id,
       lastSentManualPath: lastSentRef.current.path,
+      voiceMode: getVoiceMode(),
     });
     lastSentRef.current = { id: payload.manualId, path: payload.manualPath || '' };
 
-    const result = await grokChat({
-      accessToken: token,
-      messages: payload.messages,
-      manualPath: payload.manualPath,
-      manualId: payload.manualId,
-      manualTitle: payload.manualTitle,
-      manualBrand: payload.manualBrand,
-      manualModel: payload.manualModel,
-      manualLanguage: payload.manualLanguage,
-      replyLanguage: payload.replyLanguage,
-      scopeChanged: payload.scopeChanged,
-    });
+    void (async () => {
+      try {
+        const result = await grokChat({
+          accessToken,
+          messages: payload.messages,
+          manualPath: payload.manualPath,
+          manualId: payload.manualId,
+          manualTitle: payload.manualTitle,
+          manualBrand: payload.manualBrand,
+          manualModel: payload.manualModel,
+          manualLanguage: payload.manualLanguage,
+          replyLanguage: payload.replyLanguage,
+          scopeChanged: payload.scopeChanged,
+          voiceMode: payload.voiceMode,
+        });
 
-    if (!result.ok) {
-      if (result.status === 429) {
-        setLimitBanner(result.message || result.error);
-        if (result.usage) setUsage((u) => ({ ...u, ...result.usage }));
-        toast.error(result.message || 'Daily limit reached');
-      } else if (result.status === 401) {
-        toast.error('Session expired — sign in again');
-        router.push('/login?next=/ai-assistant');
-      } else {
-        const fail: ChatMessage[] = [
+        if (!result.ok) {
+          if (result.status === 429) {
+            setLimitBanner(result.message || result.error);
+            if (result.usage) setUsage((u) => ({ ...u, ...result.usage }));
+            toast.error(result.message || 'Daily limit reached');
+          } else if (result.status === 401) {
+            toast.error('Session expired — sign in again');
+            router.push('/login?next=/ai-assistant');
+          } else {
+            const fail: ChatMessage[] = [
+              ...nextMsgs,
+              { role: 'assistant', content: `⚠️ ${result.error}${result.message ? `: ${result.message}` : ''}` },
+            ];
+            setMessages(fail);
+            saveState(fail, currentPath, brand, currentId);
+            toast.error(result.error);
+          }
+          return;
+        }
+
+        const citations = mergeCitations(result.citations, parseCitationMarkers(result.content));
+        const answerTs = answerTimestamp();
+        const withReply: ChatMessage[] = [
           ...nextMsgs,
-          { role: 'assistant', content: `⚠️ ${result.error}${result.message ? `: ${result.message}` : ''}` },
+          { role: 'assistant', content: result.content, citations, ts: answerTs },
         ];
-        setMessages(fail);
-        saveState(fail, currentPath, brand, currentId);
-        toast.error(result.error);
+        citedManual.markFresh(String(answerTs));
+        setMessages(withReply);
+        saveState(withReply, currentPath, brand, currentId);
+        if (result.usage) {
+          setUsage((u) => ({
+            text: result.usage!.text || u.text,
+            voice: result.usage!.voice || u.voice,
+            tier: result.usage!.tier || u.tier,
+          }));
+        } else {
+          const u = await fetchAiUsage(accessToken);
+          if (u) setUsage(u);
+        }
+      } finally {
+        sendingRef.current = false;
+        setSending(false);
       }
-      setSending(false);
-      return;
-    }
-
-    const citations = mergeCitations(result.citations, parseCitationMarkers(result.content));
-    const answerTs = answerTimestamp();
-    const withReply: ChatMessage[] = [
-      ...nextMsgs,
-      { role: 'assistant', content: result.content, citations, ts: answerTs },
-    ];
-    citedManual.markFresh(String(answerTs));
-    setMessages(withReply);
-    saveState(withReply, currentPath, brand, currentId);
-    if (result.usage) {
-      setUsage((u) => ({
-        text: result.usage!.text || u.text,
-        voice: result.usage!.voice || u.voice,
-        tier: result.usage!.tier || u.tier,
-      }));
-    } else {
-      const u = await fetchAiUsage(token);
-      if (u) setUsage(u);
-    }
-    setSending(false);
+    })();
+    return true;
   }
+
+  useEffect(() => {
+    sendPromptRef.current = sendPrompt;
+  });
 
   function clearHistory() {
     if (!confirm('Clear conversation history?')) return;

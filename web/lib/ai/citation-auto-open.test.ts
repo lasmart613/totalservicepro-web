@@ -4,19 +4,37 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'url';
 import { formatAssistantHtml } from './citations.ts';
+import { buildGrokChatPayload } from './manual-scope.ts';
 import {
+  ANSWER_EVENT,
   ASSISTANT_SETTINGS_BLOB_KEY,
   AUTO_OPEN_CITED_MANUAL_KEY,
   CITATION_OPEN_EVENT,
+  VOICE_MODE_EVENT,
+  assistantCitationPairs,
+  autoOpenAfterVoice,
   autoOpenTarget,
   autoOpenTargetFromReply,
+  buildAssistantAnswerDetail,
+  canAskAssistant,
   citationAutoOpenAllowed,
   citationOpenPresentation,
+  claimAnswerAnnouncement,
+  dispatchAssistantAnswer,
   dispatchCitationOpen,
+  dispatchVoiceMode,
+  emptyAnswerTurn,
+  getVoiceMode,
+  markAnswerFresh,
+  onAnswerSettled,
+  onViewerTakenOver,
   parseCitationOpenDetail,
+  parseVoiceModeDetail,
   planCitationAutoOpen,
   readAutoOpenCitedManual,
   readVoiceSpeaking,
+  setVoiceMode,
+  spokenAnswerText,
   writeAutoOpenCitedManual,
   type AutoOpenDecision,
 } from './citation-auto-open.ts';
@@ -231,18 +249,170 @@ test('assistant UI wires the setting, once-per-answer plan, and JS contract', ()
   const panel = readFileSync(join(here, '../../components/AssistantCitedManual.tsx'), 'utf8');
   const settings = readFileSync(join(here, '../../app/settings/page.tsx'), 'utf8');
   const client = readFileSync(join(here, '../../app/ai-assistant/AIAssistantClient.tsx'), 'utf8');
+  const grok = readFileSync(join(here, 'grok-client.ts'), 'utf8');
   assert.match(lib, /assistant:citation-open/);
   assert.match(lib, /assistant:open-citation/);
+  assert.match(lib, /assistant:answer/);
+  assert.match(lib, /assistant:voice-mode/);
   assert.match(hook, /planCitationAutoOpen/);
   assert.match(hook, /openCitation/);
+  assert.match(hook, /setVoiceMode/);
+  assert.match(hook, /askAssistant/);
   assert.match(hook, /dispatchCitationOpen/);
+  assert.match(hook, /dispatchAssistantAnswer/);
+  assert.match(hook, /onViewerTakenOver/);
+  const answerCall = hook.indexOf('dispatchAssistantAnswer(window');
+  const planCall = hook.indexOf('planCitationAutoOpen({');
+  assert.ok(answerCall > 0 && planCall > answerCall);
+  assert.doesNotMatch(hook, /MutationObserver/);
   assert.match(hook, /markFresh/);
   assert.match(client, /markFresh/);
   assert.match(client, /useAssistantCitationOpen/);
+  assert.match(client, /getVoiceMode\(\)/);
+  assert.match(client, /voiceMode: payload\.voiceMode/);
+  assert.match(grok, /voiceMode: opts\.voiceMode === true/);
   assert.match(panel, /Back to answer/);
   assert.match(panel, /Escape/);
   assert.match(panel, /ManualPdfViewer/);
   assert.match(panel, /embedded/);
   assert.match(settings, /Auto-open cited manual page/);
   assert.match(settings, /useAutoOpenCitedManual/);
+});
+
+test('voice mode defaults off and reaches the grok chat payload', () => {
+  assert.equal(getVoiceMode(), false);
+  assert.equal(parseVoiceModeDetail({ on: true }), true);
+  assert.equal(parseVoiceModeDetail({ on: 'true' }), null);
+  const off = buildGrokChatPayload({
+    messages: [{ role: 'user', content: 'Check the flow switch' }],
+    voiceMode: getVoiceMode(),
+  });
+  assert.equal(off.voiceMode, false);
+
+  assert.equal(setVoiceMode(true), true);
+  assert.equal(getVoiceMode(), true);
+  const on = buildGrokChatPayload({
+    messages: [{ role: 'user', content: 'Check the flow switch' }],
+    voiceMode: getVoiceMode(),
+  });
+  assert.equal(on.voiceMode, true);
+  assert.equal(on.action, 'chat');
+
+  let heard: unknown = null;
+  const target = new EventTarget();
+  target.addEventListener(VOICE_MODE_EVENT, (event) => {
+    heard = (event as CustomEvent).detail;
+  });
+  dispatchVoiceMode(target, getVoiceMode());
+  assert.deepEqual(heard, { on: true });
+
+  setVoiceMode(false);
+  assert.equal(getVoiceMode(), false);
+  assert.equal(
+    buildGrokChatPayload({
+      messages: [{ role: 'user', content: 'Check the flow switch' }],
+      voiceMode: getVoiceMode(),
+    }).voiceMode,
+    false
+  );
+});
+
+test('askAssistant refuses when the page is not ready or a send is in flight', () => {
+  const ready = { ready: true, sending: false, hasToken: true, text: ' Check the flow switch ' };
+  assert.equal(canAskAssistant(ready), true);
+  assert.equal(canAskAssistant({ ...ready, ready: false }), false);
+  assert.equal(canAskAssistant({ ...ready, sending: true }), false);
+  assert.equal(canAskAssistant({ ...ready, hasToken: false }), false);
+  assert.equal(canAskAssistant({ ...ready, text: '   ' }), false);
+  assert.equal(canAskAssistant({ ...ready, text: null }), false);
+});
+
+test('assistant:answer is once per fresh settled answer and is spoken text', () => {
+  let state = emptyAnswerTurn();
+  assert.equal(onAnswerSettled(state, '10', true).announce, false);
+
+  state = markAnswerFresh(state, '10');
+  const streaming = onAnswerSettled(state, '10', false);
+  assert.equal(streaming.announce, false);
+  assert.equal(streaming.state.pendingKey, '10');
+  assert.deepEqual(streaming.state.announcedKeys, []);
+
+  const first = onAnswerSettled(streaming.state, '10', true);
+  assert.equal(first.announce, true);
+  const again = onAnswerSettled(first.state, '10', true);
+  assert.equal(again.announce, false);
+  const rerender = onAnswerSettled(again.state, '10', true);
+  assert.equal(rerender.announce, false);
+
+  assert.equal(claimAnswerAnnouncement('answer-10'), true);
+  assert.equal(claimAnswerAnnouncement('answer-10'), false);
+
+  const content = 'Check the **flow switch**.\n[[cite:id=105&p=42&t=Xeo]]\nSee [the diagram](https://example.com/x).\n[[cite:id=16&p=7]]';
+  assert.equal(spokenAnswerText(content), 'Check the flow switch.\nSee the diagram.');
+  const detail = buildAssistantAnswerDetail({
+    ts: 10,
+    content,
+    voiceMode: true,
+  });
+  assert.ok(detail);
+  assert.equal(detail.text, 'Check the flow switch.\nSee the diagram.');
+  assert.deepEqual(detail.citations, [
+    { manualId: 105, page: 42 },
+    { manualId: 16, page: 7 },
+  ]);
+  assert.deepEqual(assistantCitationPairs({ content }), detail.citations);
+  assert.deepEqual(detail.top, { manualId: 105, page: 42 });
+  assert.equal(detail.voiceMode, true);
+  assert.equal(detail.ts, 10);
+
+  const sectionFirst = buildAssistantAnswerDetail({
+    ts: 11,
+    content: '[[cite:id=105&s=4.2]]\n[[cite:id=105&p=42]]',
+    voiceMode: false,
+  });
+  assert.equal(sectionFirst?.top, null);
+  assert.deepEqual(sectionFirst?.citations, [{ manualId: 105, page: 42 }]);
+  assert.equal(sectionFirst?.voiceMode, false);
+
+  let heard: unknown = null;
+  const target = new EventTarget();
+  target.addEventListener(ANSWER_EVENT, (event) => {
+    heard = (event as CustomEvent).detail;
+  });
+  dispatchAssistantAnswer(target, detail);
+  assert.deepEqual(heard, {
+    ts: 10,
+    text: detail.text,
+    citations: [
+      { manualId: 105, page: 42 },
+      { manualId: 16, page: 7 },
+    ],
+    top: { manualId: 105, page: 42 },
+    voiceMode: true,
+  });
+  assert.equal(buildAssistantAnswerDetail({ ts: Number.NaN, content: 'x', voiceMode: false }), null);
+});
+
+test('voice hold does not reopen after an inbound open or Back', () => {
+  let state = markAnswerFresh(emptyAnswerTurn(), '10');
+  state = onAnswerSettled(state, '10', true).state;
+
+  const held = autoOpenAfterVoice(state, true, true);
+  assert.equal(held.open, false);
+  assert.equal(held.state.pendingKey, '10');
+
+  const inbound = onViewerTakenOver(held.state);
+  assert.equal(inbound.pendingKey, null);
+  assert.deepEqual(inbound.openedKeys, ['10']);
+  assert.equal(autoOpenAfterVoice(inbound, false, true).open, false);
+
+  const heldForBack = autoOpenAfterVoice(state, true, true);
+  const closed = onViewerTakenOver(heldForBack.state);
+  assert.equal(autoOpenAfterVoice(closed, false, true).open, false);
+  assert.equal(onViewerTakenOver(closed).pendingKey, null);
+
+  const released = autoOpenAfterVoice(held.state, false, true);
+  assert.equal(released.open, true);
+  assert.equal(released.state.pendingKey, null);
+  assert.equal(autoOpenAfterVoice(released.state, false, true).open, false);
 });

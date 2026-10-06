@@ -6,18 +6,31 @@ import { catalogManualTitle } from '@/lib/manual-catalog';
 import { asManualId } from '@/lib/ai/manual-scope';
 import {
   CITATION_OPEN_REQUEST_EVENT,
+  VOICE_MODE_EVENT,
   VOICE_STATE_EVENT,
+  autoOpenAfterVoice,
   autoOpenTargetFromReply,
+  buildAssistantAnswerDetail,
+  claimAnswerAnnouncement,
   citationAutoOpenAllowed,
   citationOpenPresentation,
+  dispatchAssistantAnswer,
   dispatchCitationOpen,
+  dispatchVoiceMode,
+  emptyAnswerTurn,
+  getVoiceMode,
+  markAnswerFresh,
+  onViewerTakenOver,
   parseCitationOpenDetail,
+  parseVoiceModeDetail,
   parseVoiceSpeakingDetail,
   planCitationAutoOpen,
   readAutoOpenCitedManual,
   readVoiceSpeaking,
+  setVoiceMode,
   subscribeAutoOpenCitedManual,
   writeAutoOpenCitedManual,
+  type AnswerTurnState,
   type CitationOpenDetail,
 } from '@/lib/ai/citation-auto-open';
 
@@ -73,6 +86,8 @@ export function useAssistantCitationOpen(opts: {
   manuals: ManualOption[];
   caller: { role: string | null; orgType: string | null };
   listRef: RefObject<HTMLDivElement | null>;
+  /** Page send path. Returns false when a send cannot start. */
+  askAssistant: (text: string) => boolean;
 }) {
   const { messages, sending, ready, manuals, caller, listRef } = opts;
   const [autoOpen, setAutoOpen] = useAutoOpenCitedManual();
@@ -82,8 +97,9 @@ export function useAssistantCitationOpen(opts: {
   const [speaking, setSpeaking] = useState(false);
   const [voiceEpoch, setVoiceEpoch] = useState(0);
 
-  const pendingRef = useRef<string | null>(null);
-  const openedRef = useRef<Set<string>>(new Set());
+  const turnRef = useRef<AnswerTurnState>(emptyAnswerTurn());
+  const speakingRef = useRef(false);
+  const askRef = useRef(opts.askAssistant);
   const scrollSnapshotRef = useRef(0);
   const presentationRef = useRef(presentation);
   const manualsRef = useRef(manuals);
@@ -93,6 +109,7 @@ export function useAssistantCitationOpen(opts: {
     presentationRef.current = presentation;
     manualsRef.current = manuals;
     callerRef.current = caller;
+    askRef.current = opts.askAssistant;
   });
 
   const lookup = useCallback((manualId: number) => {
@@ -114,6 +131,7 @@ export function useAssistantCitationOpen(opts: {
 
   const openCited = useCallback(
     (detail: CitedManual, announce: boolean) => {
+      turnRef.current = onViewerTakenOver(turnRef.current);
       const nextPresentation = currentPresentation();
       if (nextPresentation === 'fullscreen') {
         scrollSnapshotRef.current = listRef.current?.scrollTop ?? 0;
@@ -132,7 +150,12 @@ export function useAssistantCitationOpen(opts: {
     openCitedRef.current = openCited;
   });
 
+  const consumePendingAutoOpen = useCallback(() => {
+    turnRef.current = onViewerTakenOver(turnRef.current);
+  }, []);
+
   const close = useCallback(() => {
+    consumePendingAutoOpen();
     const top = scrollSnapshotRef.current;
     const wasFullscreen = presentationRef.current === 'fullscreen';
     setOpen(false);
@@ -141,42 +164,54 @@ export function useAssistantCitationOpen(opts: {
       const el = listRef.current;
       if (el) el.scrollTop = top;
     });
-  }, [listRef]);
+  }, [consumePendingAutoOpen, listRef]);
 
   const toggleAutoOpen = useCallback(() => {
     setAutoOpen(!autoOpen);
   }, [autoOpen, setAutoOpen]);
 
   const markFresh = useCallback((answerKey: string) => {
-    if (!answerKey) return;
-    pendingRef.current = answerKey;
+    turnRef.current = markAnswerFresh(turnRef.current, answerKey);
   }, []);
 
   const cancelPending = useCallback(() => {
-    pendingRef.current = null;
-  }, []);
+    consumePendingAutoOpen();
+  }, [consumePendingAutoOpen]);
 
   useEffect(() => {
     if (!ready || sending) return;
-    const key = pendingRef.current;
+    const key = turnRef.current.pendingKey;
     if (!key) return;
     const msg = [...messages].reverse().find((row) => row.role === 'assistant' && String(row.ts ?? '') === key);
     if (!msg) return;
+
+    const announced = onAnswerSettled(turnRef.current, key, true);
+    turnRef.current = announced.state;
+    if (announced.announce && claimAnswerAnnouncement(key)) {
+      const detail = buildAssistantAnswerDetail({
+        ts: typeof msg.ts === 'number' ? msg.ts : Number(key),
+        content: msg.content,
+        citations: msg.citations,
+        voiceMode: getVoiceMode(),
+      });
+      if (detail) dispatchAssistantAnswer(window, detail);
+    }
+
+    const speakingNow = speakingRef.current || speaking || readVoiceSpeaking(window);
     const citation = autoOpenTargetFromReply(msg);
     const row = citation ? lookup(citation.manualId) : null;
     const decision = planCitationAutoOpen({
       enabled: autoOpen,
       fresh: true,
-      alreadyOpened: openedRef.current.has(key),
+      alreadyOpened: turnRef.current.openedKeys.includes(key),
       settled: true,
-      speaking: speaking || readVoiceSpeaking(window),
+      speaking: speakingNow,
       citation,
       canView: citation ? allowed(citation.manualId) : false,
     });
     if (decision.action === 'wait') return;
     if (decision.action === 'skip') {
-      pendingRef.current = null;
-      openedRef.current.add(key);
+      turnRef.current = autoOpenAfterVoice(turnRef.current, false, false).state;
       return;
     }
     const title = row ? catalogManualTitle(row) : undefined;
@@ -185,9 +220,10 @@ export function useAssistantCitationOpen(opts: {
     const outer = window.requestAnimationFrame(() => {
       inner = window.requestAnimationFrame(() => {
         if (cancelled) return;
-        if (pendingRef.current !== key || openedRef.current.has(key)) return;
-        pendingRef.current = null;
-        openedRef.current.add(key);
+        if (turnRef.current.pendingKey !== key) return;
+        const finished = autoOpenAfterVoice(turnRef.current, false, true);
+        turnRef.current = finished.state;
+        if (!finished.open) return;
         openCitedRef.current({ manualId: decision.manualId, page: decision.page, title }, true);
       });
     });
@@ -202,6 +238,7 @@ export function useAssistantCitationOpen(opts: {
     function tryOpen(manualId: unknown, page: unknown) {
       const target = parseCitationOpenDetail({ manualId, page });
       if (!target || !allowed(target.manualId)) return;
+      turnRef.current = onViewerTakenOver(turnRef.current);
       const row = lookup(target.manualId);
       openCitedRef.current(
         { ...target, title: row ? catalogManualTitle(row) : undefined },
@@ -209,9 +246,23 @@ export function useAssistantCitationOpen(opts: {
       );
     }
 
-    const previous = window.TSP?.openCitation;
+    const previousOpen = window.TSP?.openCitation;
+    const previousSetVoice = window.TSP?.setVoiceMode;
+    const previousGetVoice = window.TSP?.getVoiceMode;
+    const previousAsk = window.TSP?.askAssistant;
     if (!window.TSP) window.TSP = {};
     window.TSP.openCitation = (manualId: number, page: number) => tryOpen(manualId, page);
+    window.TSP.setVoiceMode = (on: boolean) => {
+      dispatchVoiceMode(window, setVoiceMode(on));
+    };
+    window.TSP.getVoiceMode = () => getVoiceMode();
+    window.TSP.askAssistant = (text: string) => {
+      try {
+        return askRef.current(text) === true;
+      } catch {
+        return false;
+      }
+    };
 
     const onRequest = (event: Event) => {
       const detail = (event as CustomEvent).detail;
@@ -225,10 +276,17 @@ export function useAssistantCitationOpen(opts: {
         setVoiceEpoch((n) => n + 1);
         return;
       }
+      speakingRef.current = next;
       setSpeaking(next);
+    };
+    const onVoiceMode = (event: Event) => {
+      const next = parseVoiceModeDetail((event as CustomEvent).detail);
+      if (next == null || next === getVoiceMode()) return;
+      setVoiceMode(next);
     };
     window.addEventListener(CITATION_OPEN_REQUEST_EVENT, onRequest);
     window.addEventListener(VOICE_STATE_EVENT, onVoice);
+    window.addEventListener(VOICE_MODE_EVENT, onVoiceMode);
     const synth = window.speechSynthesis;
     const bump = () => setVoiceEpoch((n) => n + 1);
     synth?.addEventListener?.('end', bump);
@@ -237,11 +295,18 @@ export function useAssistantCitationOpen(opts: {
     return () => {
       window.removeEventListener(CITATION_OPEN_REQUEST_EVENT, onRequest);
       window.removeEventListener(VOICE_STATE_EVENT, onVoice);
+      window.removeEventListener(VOICE_MODE_EVENT, onVoiceMode);
       synth?.removeEventListener?.('end', bump);
       synth?.removeEventListener?.('cancel', bump);
       if (!window.TSP) return;
-      if (previous) window.TSP.openCitation = previous;
+      if (previousOpen) window.TSP.openCitation = previousOpen;
       else delete window.TSP.openCitation;
+      if (previousSetVoice) window.TSP.setVoiceMode = previousSetVoice;
+      else delete window.TSP.setVoiceMode;
+      if (previousGetVoice) window.TSP.getVoiceMode = previousGetVoice;
+      else delete window.TSP.getVoiceMode;
+      if (previousAsk) window.TSP.askAssistant = previousAsk;
+      else delete window.TSP.askAssistant;
     };
   }, [allowed, lookup]);
 
