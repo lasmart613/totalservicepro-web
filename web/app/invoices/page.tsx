@@ -20,6 +20,7 @@ import {
   resolveInvoiceCollectable,
 } from '@/lib/billing/invoice-collectable';
 import { toast } from 'sonner';
+import { DEFAULT_ORG_TIMEZONE, formatOrgDocumentDate, resolveNumberingTimeZone } from '@/lib/org-timezone';
 
 type InvFilter = 'all' | 'draft' | 'sent' | 'paid' | 'partially_paid' | 'void';
 
@@ -73,6 +74,7 @@ export default function InvoicesListPage() {
   const [voidRow, setVoidRow] = useState<InvoiceRow | null>(null);
   const [voidReason, setVoidReason] = useState('');
   const [voiding, setVoiding] = useState(false);
+  const [docZone, setDocZone] = useState(DEFAULT_ORG_TIMEZONE);
 
   useEffect(() => {
     init();
@@ -115,6 +117,10 @@ export default function InvoicesListPage() {
         .maybeSingle();
       const orgId = coerceOrgId(profile?.organization_id);
       setCallerRole(String((profile as { role?: string } | null)?.role || ''));
+      const zone = await resolveNumberingTimeZone(supabase, isValidOrgId(orgId) ? orgId : null, {
+        allowBrowser: false,
+      });
+      setDocZone(zone.timeZone);
       await loadInvoices(orgId, user.id);
     } catch (e) {
       console.error(e);
@@ -386,11 +392,8 @@ export default function InvoicesListPage() {
             {filtered.map((inv) => {
               const st = String(inv.status || 'draft').toLowerCase();
               const num = docNumber(inv);
-              const dateStr = inv.invoice_date
-                ? new Date(inv.invoice_date + 'T00:00:00').toLocaleDateString()
-                : inv.created_at
-                  ? new Date(inv.created_at).toLocaleDateString()
-                  : '—';
+              const dateStr =
+                formatOrgDocumentDate(inv.invoice_date || inv.created_at, docZone) || '—';
               const alreadyPaid = st === 'paid' || isVoidInvoiceStatus(st);
               const voidable = canVoidInvoice({
                 status: inv.status,

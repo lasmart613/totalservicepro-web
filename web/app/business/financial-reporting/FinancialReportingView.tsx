@@ -326,7 +326,7 @@ export function FinancialReportingView({ report }: { report: FinancialReport }) 
       </p>
       <p className="text-sm text-[var(--text2)] mt-3 max-w-3xl">
         {t(
-          'Figures are sums of stored rows for this organization. Amounts use the organization currency and are not converted. A metric that has no table or column says unavailable and has no total.'
+          "This page compares what you billed with what you've collected."
         )}
       </p>
 

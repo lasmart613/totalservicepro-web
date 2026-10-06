@@ -914,8 +914,8 @@ export function assembleFinancialReport(input: {
     unavailable(
       'bank_balance',
       'Bank balance',
-      'No bank or ledger table',
-      'There is no bank, general-ledger, or reconciliation table.'
+      'Not recorded',
+      "Bank balances aren't recorded yet."
     ),
     unavailable(
       'payroll',

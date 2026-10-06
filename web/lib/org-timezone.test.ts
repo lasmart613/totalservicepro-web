@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
   DEFAULT_ORG_TIMEZONE,
   formatDateInTimeZone,
+  formatOrgDocumentDate,
   isoDateInTimeZone,
   orgTodayIso,
   parseOrgTimeZone,
@@ -11,6 +12,8 @@ import {
   ymdInTimeZone,
 } from './org-timezone.ts';
 import { generateDocNumber, ymdFrom } from './billing/doc-numbers.ts';
+import { validUntilLabel } from './billing/save-helpers.ts';
+import { ticketDateYmd } from './tickets.ts';
 import { approveEstimateCreatingUnscheduledRequest } from './billing/approve-estimate.ts';
 import { buildInvoiceHtml } from './billing/doc-html.ts';
 import { buildOwnedEstimateMessage } from './billing/owned-doc-mail.ts';
@@ -232,6 +235,43 @@ test('23:30 org time stays on that calendar day when UTC is already the next day
       assert.doesNotMatch(fromInstant, /20261006/);
     }
   }
+});
+
+test('list and detail dates use the org day for timestamps and keep a calendar date', () => {
+  const evening = '2026-10-06T00:52:00.000Z';
+  const late = '2026-10-06T06:30:00.000Z';
+  assert.equal(formatOrgDocumentDate(evening, 'America/Los_Angeles'), '10/5/2026');
+  assert.equal(formatOrgDocumentDate(evening, 'America/Phoenix'), '10/5/2026');
+  assert.equal(formatOrgDocumentDate(late, 'America/Los_Angeles'), '10/5/2026');
+  assert.equal(formatOrgDocumentDate(late, 'America/Phoenix'), '10/5/2026');
+  assert.equal(formatOrgDocumentDate(evening, 'UTC'), '10/6/2026');
+  assert.equal(formatOrgDocumentDate('2026-10-05', 'UTC'), '10/5/2026');
+  assert.equal(formatOrgDocumentDate('2026-10-05', 'America/Phoenix'), '10/5/2026');
+  assert.equal(formatOrgDocumentDate('', 'America/Los_Angeles'), '');
+  assert.equal(formatOrgDocumentDate(null, 'America/Phoenix'), '');
+
+  const fromState = resolveOrgTimeZone({
+    stored: null,
+    state: 'AZ',
+    browserTimeZone: 'UTC',
+    allowBrowser: false,
+  }).timeZone;
+  assert.equal(formatOrgDocumentDate(evening, fromState), '10/5/2026');
+  const fallback = resolveOrgTimeZone({
+    stored: null,
+    state: null,
+    browserTimeZone: 'UTC',
+    allowBrowser: false,
+  }).timeZone;
+  assert.equal(fallback, DEFAULT_ORG_TIMEZONE);
+  assert.equal(formatOrgDocumentDate(evening, fallback), '10/5/2026');
+  assert.equal(formatOrgDocumentDate(evening), '10/5/2026');
+
+  assert.equal(validUntilLabel(evening, 'America/Phoenix'), '11/4/2026');
+  assert.equal(validUntilLabel(evening, 'UTC'), '11/5/2026');
+  assert.equal(ticketDateYmd('2026-10-05', 'UTC'), '2026-10-05');
+  assert.equal(ticketDateYmd(evening, 'America/Phoenix'), '2026-10-05');
+  assert.equal(ticketDateYmd(evening, 'UTC'), '2026-10-06');
 });
 
 test('timezone setting accepts IANA names and clears on auto', () => {

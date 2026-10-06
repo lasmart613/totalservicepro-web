@@ -284,6 +284,22 @@ export function formatDateInTimeZone(value: Date | string | null | undefined, ti
   }).format(date);
 }
 
+/**
+ * Label for a list or detail date. Uses the organization zone
+ * (stored timezone, then state, then America/Los_Angeles).
+ * A YYYY-MM-DD string stays on that calendar day. A timestamp uses the zone's day.
+ * An empty value stays empty. The browser zone is not used.
+ */
+export function formatOrgDocumentDate(
+  value: Date | string | null | undefined,
+  timeZone?: string | null,
+  locale = 'en-US'
+): string {
+  if (value == null) return '';
+  if (!(value instanceof Date) && String(value).trim() === '') return '';
+  return formatDateInTimeZone(value, timeZone || DEFAULT_ORG_TIMEZONE, locale);
+}
+
 export function timeZoneShortName(date: Date, timeZone: string): string {
   const zone = isValidTimeZone(timeZone) ? timeZone : DEFAULT_ORG_TIMEZONE;
   try {

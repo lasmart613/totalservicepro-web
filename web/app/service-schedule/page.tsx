@@ -11,7 +11,7 @@ import { canSeeAllShopTickets, isAdmin, isFieldEngineer, isPro } from '@/lib/rol
 import { roleLabel } from '@/lib/labels';
 import { useT } from '@/lib/fa/locale';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
-import { orgTodayIso } from '@/lib/org-timezone';
+import { orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
 import { ticketDateYmd, toLocalYmd } from '@/lib/tickets';
 import {
   UNASSIGNED_ASSIGNEE,
@@ -202,7 +202,7 @@ export default function ServiceSchedule() {
   const shopLeadView = canSeeAllShopTickets(userRole);
   const fseOnlyView = isFieldEngineer(userRole) || !shopLeadView;
 
-  const formatTicket = useCallback((ticket: any) => {
+  const formatTicket = useCallback((ticket: any, timeZone?: string) => {
     const start = ticket.scheduled_time;
     const end = ticket.end_time;
     let duration = 60;
@@ -211,7 +211,14 @@ export default function ServiceSchedule() {
       const [eh, em] = String(end).split(':').map(Number);
       duration = eh * 60 + em - (sh * 60 + sm);
     }
-    const dateStr = ticketDateYmd(ticket.service_date);
+    const docZone =
+      timeZone ||
+      resolveOrgTimeZone({
+        stored: orgZone.stored,
+        state: orgZone.state,
+        allowBrowser: false,
+      }).timeZone;
+    const dateStr = ticketDateYmd(ticket.service_date, docZone);
     return {
       id: ticket.id,
       ticket_number: ticket.ticket_number,
@@ -230,7 +237,7 @@ export default function ServiceSchedule() {
       customer_state: ticket.customer_state || ticket.state || '',
       zip: ticket.zip || ticket.customer_zip || '',
     };
-  }, []);
+  }, [orgZone.stored, orgZone.state]);
 
   const fetchServiceCalls = useCallback(async () => {
     setLoading(true);
@@ -265,19 +272,25 @@ export default function ServiceSchedule() {
       setSelfName(mine);
       const oId = coerceOrgId(profile?.organization_id ?? null);
       setOrgId(oId);
+      let zoneStored: string | null = null;
+      let zoneState: string | null = null;
       if (oId != null) {
         const zoneRow = await supabase.from('organizations').select('timezone, state').eq('id', oId).maybeSingle();
         if (!zoneRow.error) {
-          setOrgZone({
-            stored: zoneRow.data?.timezone ? String(zoneRow.data.timezone) : null,
-            state: zoneRow.data?.state ? String(zoneRow.data.state) : null,
-          });
+          zoneStored = zoneRow.data?.timezone ? String(zoneRow.data.timezone) : null;
+          zoneState = zoneRow.data?.state ? String(zoneRow.data.state) : null;
         } else {
           console.warn('organizations.timezone', zoneRow.error.message);
           const stateRow = await supabase.from('organizations').select('state').eq('id', oId).maybeSingle();
-          setOrgZone({ stored: null, state: stateRow.data?.state ? String(stateRow.data.state) : null });
+          zoneState = stateRow.data?.state ? String(stateRow.data.state) : null;
         }
+        setOrgZone({ stored: zoneStored, state: zoneState });
       }
+      const loadedZone = resolveOrgTimeZone({
+        stored: zoneStored,
+        state: zoneState,
+        allowBrowser: false,
+      }).timeZone;
 
       const selectCols = `
             id,
@@ -363,7 +376,7 @@ export default function ServiceSchedule() {
         role,
         userId: user.id,
       });
-      const formatted = scoped.map(formatTicket);
+      const formatted = scoped.map((ticket) => formatTicket(ticket, loadedZone));
       setServiceCalls(formatted);
     } catch (err: any) {
       console.error('Error fetching service calls:', err);
