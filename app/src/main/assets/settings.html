@@ -471,7 +471,6 @@
             <div class="setting-sub" id="zappVoiceSub">Choose from available male voices</div>
         </div>
         <select class="setting-select" id="zappVoice" style="width:110px;flex-shrink:0;" onchange="saveSettings()">
-            <option value="sage">Sage — warm &amp; clear</option>
             <option value="rex">Rex — confident</option>
             <option value="sal">Sal — versatile</option>
             <option value="leo">Leo — authoritative</option>
@@ -692,8 +691,8 @@
         notifSound:     false,
         notifDot:       true,
         zappPersona:    true,
-        zappVoiceGender:'male',
-        zappVoice:      'sage',
+        zappVoiceGender:'female',
+        zappVoice:      'eve',
     };
 
     let settings = { ...DEFAULTS };
@@ -772,7 +771,7 @@
         // AI Assistant
         document.getElementById('zappPersona').checked     = settings.zappPersona !== false;
         document.getElementById('zappVoiceGender').value   = settings.zappVoiceGender || 'male';
-        document.getElementById('zappVoice').value         = settings.zappVoice || 'sage';
+        document.getElementById('zappVoice').value         = settings.zappVoice || 'eve';
         updateZappVoiceOptions(settings.zappVoiceGender || 'male', false);
 
         // Native-backed settings
@@ -901,9 +900,9 @@
     // ═══════════════════════════════════════════════════
     //  AI ASSISTANT SETTINGS
     // ═══════════════════════════════════════════════════
+    // grok-tts default is eve. sage is not an xAI TTS voice (HTTP 400).
     const VOICES = {
         male:   [
-            { id: 'sage', label: 'Sage — warm & clear' },
             { id: 'rex',  label: 'Rex — confident' },
             { id: 'sal',  label: 'Sal — versatile' },
             { id: 'leo',  label: 'Leo — authoritative' },

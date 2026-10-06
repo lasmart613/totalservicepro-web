@@ -9,6 +9,9 @@
  *   GET  https://<project>.supabase.co/functions/v1/grok-tts
  *   Authorization: Bearer <supabase user access token>
  *
+ * Omitted voice_id defaults to eve. sage is not a valid xAI TTS voice.
+ * GET returns the upstream voice list with any id outside the allow-list removed.
+ *
  * Deploy with JWT verification off, same as grok-assistant — this function
  * checks the user session itself:
  *   supabase functions deploy grok-tts --project-ref yljztfajyvjzqikxdddf --no-verify-jwt
@@ -19,6 +22,7 @@ import { createClient } from 'https://esm.sh/@supabase/supabase-js@2'
 import {
   dailyLimitMessage,
   dailyVoiceLimit,
+  filterListedVoices,
   effectiveTier,
   MAX_TTS_CHARS,
   parseTtsBody,
@@ -153,7 +157,7 @@ serve(async (req) => {
           message: 'Could not record voice usage. Try again.',
         })
       }
-      return json(200, parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : { voices: parsed })
+      return json(200, filterListedVoices(parsed))
     }
 
     const declared = Number(req.headers.get('Content-Length') || 0)
