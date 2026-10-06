@@ -644,4 +644,6 @@ export const HE_COPY: Record<string, string> = {
   'I agree to the {terms} and the {privacy}.': 'אני מסכים/ה ל{terms} ול{privacy}.',
   'Please agree to the Terms of Service and Privacy Policy.':
     'יש לאשר את תנאי השירות ואת מדיניות הפרטיות.',
+  'By continuing you agree to the {terms} and the {privacy}.':
+    'בהמשך השימוש אתם מסכימים ל{terms} ול{privacy}.',
 };

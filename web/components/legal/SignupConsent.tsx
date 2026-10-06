@@ -5,8 +5,8 @@ import { CONSENT_TEMPLATE, consentPieces } from '@/lib/legal/consent';
 
 /**
  * Required checkbox on account-creation forms.
- * The choice is enforced in the browser only. It is not written to the database.
- * A later change could store legal_consent_at and legal_consent_version on user_profiles.
+ * The browser blocks submit until it is checked. /api/auth/signup also rejects
+ * the request and writes legal_consent_at plus legal_consent_version.
  */
 export function SignupConsent({
   checked,

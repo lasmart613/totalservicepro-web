@@ -13,9 +13,11 @@ import {
   type OwnerOrgType,
 } from '@/lib/org-types';
 import AuthOtpBox from '@/components/AuthOtpBox';
+import { ContinuingConsent } from '@/components/legal/ContinuingConsent';
 import { SignupConsent } from '@/components/legal/SignupConsent';
 import { PublicLink, useT } from '@/lib/fa/locale';
 import { CONSENT_REQUIRED } from '@/lib/legal/consent';
+import { signUpWithConsent } from '@/lib/legal/signup-client';
 import { useRouter, useSearchParams } from 'next/navigation';
 
 const FACILITY_TYPES = [
@@ -240,30 +242,29 @@ function OwnerSignupInner() {
         typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
       await prepareFreshSignup(supabase);
       savePendingSignup(pendingPayload());
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const { data: authData, error: authError } = await signUpWithConsent({
         email,
         password,
-        options: {
-          data: {
-            first_name: firstName,
-            last_name: lastName,
-            facility: facilityName,
-            company: facilityName,
-            role: 'owner',
-            organization_type: orgKind,
-            signup_kind: 'owner',
-            address: address || '',
-            city: city || '',
-            state: state || '',
-            phone: phone || '',
-            facility_type: facilityType,
-            preferred_services: selectedServices.length ? selectedServices.join(' | ') : '',
-            claim_token: claimToken || '',
-          },
-          emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
-            claimToken ? '/company?justSetup=1' : '/my-lasers'
-          )}`,
+        consent: agreed,
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+          facility: facilityName,
+          company: facilityName,
+          role: 'owner',
+          organization_type: orgKind,
+          signup_kind: 'owner',
+          address: address || '',
+          city: city || '',
+          state: state || '',
+          phone: phone || '',
+          facility_type: facilityType,
+          preferred_services: selectedServices.length ? selectedServices.join(' | ') : '',
+          claim_token: claimToken || '',
         },
+        emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
+          claimToken ? '/company?justSetup=1' : '/my-lasers'
+        )}`,
       });
       if (authError) throw authError;
 
@@ -551,6 +552,7 @@ function OwnerSignupInner() {
 
             {!awaitingConfirm && (
               <>
+                {rentalSignup && <ContinuingConsent className="mb-3" />}
                 <SignupConsent checked={agreed} onChange={setAgreed} />
                 <button
                   type="submit"

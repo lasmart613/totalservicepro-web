@@ -10,6 +10,10 @@ import { clearPendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session';
 import { postTeamClaim, routeAfterTeamClaim } from '@/lib/invite-claim';
 import { publicAuthMessage } from '@/lib/auth-errors';
+import { ContinuingConsent } from '@/components/legal/ContinuingConsent';
+import { SignupConsent } from '@/components/legal/SignupConsent';
+import { CONSENT_REQUIRED } from '@/lib/legal/consent';
+import { signUpWithConsent } from '@/lib/legal/signup-client';
 
 function LoginInner() {
   const [email, setEmail] = useState('');
@@ -21,6 +25,7 @@ function LoginInner() {
   const [message, setMessage] = useState('');
   const [messageOk, setMessageOk] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [agreed, setAgreed] = useState(false);
   const [showOtp, setShowOtp] = useState(false);
   const [otpCode, setOtpCode] = useState('');
   const [otpMode, setOtpMode] = useState<'signup' | 'magic'>('signup');
@@ -117,18 +122,22 @@ function LoginInner() {
           setLoading(false);
           return;
         }
+        if (!agreed) {
+          setMsg(CONSENT_REQUIRED);
+          setLoading(false);
+          return;
+        }
         const origin =
           typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
         await prepareFreshSignup(supabase);
-        const { data, error } = await supabase.auth.signUp({
+        const { data, error } = await signUpWithConsent({
           email: cleanEmail,
           password,
-          options: {
-            data: { first_name: firstName, last_name: lastName },
-            emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
-              nextPath && nextPath !== '/' ? nextPath : '/onboarding'
-            )}`,
-          },
+          consent: agreed,
+          data: { first_name: firstName, last_name: lastName },
+          emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
+            nextPath && nextPath !== '/' ? nextPath : '/onboarding'
+          )}`,
         });
         if (error) {
           if (/already|registered|exists/i.test(error.message || '')) {
@@ -402,6 +411,7 @@ function LoginInner() {
             </div>
           )}
 
+          <ContinuingConsent className="mb-3" />
           <button
             type="button"
             onClick={signInWithGoogle}
@@ -472,6 +482,8 @@ function LoginInner() {
                 />
               </div>
             )}
+
+            {isSignUp && <SignupConsent checked={agreed} onChange={setAgreed} />}
 
             <button
               type="submit"

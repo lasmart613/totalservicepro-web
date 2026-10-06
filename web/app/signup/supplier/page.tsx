@@ -10,6 +10,7 @@ import AuthOtpBox from '@/components/AuthOtpBox';
 import { SignupConsent } from '@/components/legal/SignupConsent';
 import { PublicLink, useT } from '@/lib/fa/locale';
 import { CONSENT_REQUIRED } from '@/lib/legal/consent';
+import { signUpWithConsent } from '@/lib/legal/signup-client';
 import { useRouter } from 'next/navigation';
 
 const PARTS_OPTIONS = [
@@ -122,25 +123,24 @@ export default function SupplierSignup() {
         typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
       await prepareFreshSignup(supabase);
       savePendingSignup(pendingPayload());
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const { data: authData, error: authError } = await signUpWithConsent({
         email,
         password,
-        options: {
-          data: {
-            first_name: firstName,
-            last_name: lastName,
-            company: companyName,
-            role: 'parts_supplier',
-            organization_type: 'parts_supplier',
-            signup_kind: 'supplier',
-            address: address || '',
-            city: city || '',
-            state: state || '',
-            phone: phone || '',
-            website: website || '',
-          },
-          emailRedirectTo: `${origin}/auth/callback?next=/`,
+        consent: agreed,
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+          company: companyName,
+          role: 'parts_supplier',
+          organization_type: 'parts_supplier',
+          signup_kind: 'supplier',
+          address: address || '',
+          city: city || '',
+          state: state || '',
+          phone: phone || '',
+          website: website || '',
         },
+        emailRedirectTo: `${origin}/auth/callback?next=/`,
       });
       if (authError) throw authError;
 

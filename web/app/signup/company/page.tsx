@@ -6,6 +6,7 @@ import AuthOtpBox from '@/components/AuthOtpBox';
 import { SignupConsent } from '@/components/legal/SignupConsent';
 import { PublicLink, useT } from '@/lib/fa/locale';
 import { CONSENT_REQUIRED } from '@/lib/legal/consent';
+import { signUpWithConsent } from '@/lib/legal/signup-client';
 import { useRouter } from 'next/navigation';
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
 import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
@@ -102,26 +103,25 @@ export default function CompanySignup() {
         typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
       await prepareFreshSignup(supabase);
       savePendingSignup(pendingPayload());
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const { data: authData, error: authError } = await signUpWithConsent({
         email,
         password,
-        options: {
-          data: {
-            first_name: firstName,
-            last_name: lastName,
-            company: companyName,
-            role: 'company_admin',
-            organization_type: 'service_company',
-            signup_kind: 'company',
-            address: address || '',
-            city: city || '',
-            state: state || '',
-            phone: phone || '',
-            website: website || '',
-            services_offered: selectedServices.length ? selectedServices.join(' | ') : '',
-          },
-          emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
+        consent: agreed,
+        data: {
+          first_name: firstName,
+          last_name: lastName,
+          company: companyName,
+          role: 'company_admin',
+          organization_type: 'service_company',
+          signup_kind: 'company',
+          address: address || '',
+          city: city || '',
+          state: state || '',
+          phone: phone || '',
+          website: website || '',
+          services_offered: selectedServices.length ? selectedServices.join(' | ') : '',
         },
+        emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
       });
       if (authError) throw authError;
 

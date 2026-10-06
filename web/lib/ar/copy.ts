@@ -645,4 +645,6 @@ export const AR_COPY: Record<string, string> = {
   'I agree to the {terms} and the {privacy}.': 'أوافق على {terms} وعلى {privacy}.',
   'Please agree to the Terms of Service and Privacy Policy.':
     'يُرجى الموافقة على شروط الخدمة وسياسة الخصوصية.',
+  'By continuing you agree to the {terms} and the {privacy}.':
+    'بمتابعتكم توافقون على {terms} وعلى {privacy}.',
 };
