@@ -717,9 +717,15 @@ BEGIN
 END $$;
 
 -- Anon cannot UPDATE owner or org columns on any public table.
--- Authenticated UPDATE of created_by / organization_id / user_id stays on
--- tables whose saves send those columns (reports, listings, tickets).
--- Those tables are not in the open-policy list; their RLS is the control.
+-- Authenticated UPDATE of created_by / organization_id stays granted where
+-- saves echo those columns. Echoing the same value is fine. Changing it is
+-- not: service_reports WITH CHECK is created_by = auth.uid() OR the profile
+-- org, so a creator can point organization_id at another tenant. Listing
+-- policies are seller_id = auth.uid() OR created_by = auth.uid() and do not
+-- mention organization_id, so a listing can move org or owner. The trigger
+-- below rejects those client changes. service_tickets WITH CHECK is
+-- auth_member_of_org(organization_id) on the new row, so a ticket cannot
+-- move to an org the caller is not a member of.
 DO $$
 DECLARE
   r record;
@@ -749,6 +755,61 @@ BEGIN
       r.table_name
     );
   END LOOP;
+END $$;
+
+-- Freeze owner columns when a signed-in client changes them. Service role
+-- (auth.uid() IS NULL) and an unchanged echo both pass.
+CREATE OR REPLACE FUNCTION public.reject_client_owner_column_change()
+RETURNS trigger
+LANGUAGE plpgsql
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF auth.uid() IS NULL THEN
+    RETURN NEW;
+  END IF;
+
+  IF TG_TABLE_NAME = 'service_reports' THEN
+    IF NEW.organization_id IS DISTINCT FROM OLD.organization_id
+       OR NEW.created_by IS DISTINCT FROM OLD.created_by THEN
+      RAISE EXCEPTION 'service_reports organization_id and created_by cannot be changed by a signed-in client'
+        USING ERRCODE = '42501';
+    END IF;
+  ELSIF TG_TABLE_NAME = 'marketplace_listings' THEN
+    IF NEW.organization_id IS DISTINCT FROM OLD.organization_id
+       OR NEW.created_by IS DISTINCT FROM OLD.created_by
+       OR NEW.seller_id IS DISTINCT FROM OLD.seller_id THEN
+      RAISE EXCEPTION 'marketplace_listings organization_id, created_by, and seller_id cannot be changed by a signed-in client'
+        USING ERRCODE = '42501';
+    END IF;
+  END IF;
+
+  RETURN NEW;
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.reject_client_owner_column_change() FROM PUBLIC;
+
+DO $$
+BEGIN
+  IF to_regclass('public.service_reports') IS NOT NULL THEN
+    EXECUTE 'DROP TRIGGER IF EXISTS service_reports_reject_client_owner_change ON public.service_reports';
+    EXECUTE $trg$
+      CREATE TRIGGER service_reports_reject_client_owner_change
+        BEFORE UPDATE ON public.service_reports
+        FOR EACH ROW
+        EXECUTE FUNCTION public.reject_client_owner_column_change()
+    $trg$;
+  END IF;
+  IF to_regclass('public.marketplace_listings') IS NOT NULL THEN
+    EXECUTE 'DROP TRIGGER IF EXISTS marketplace_listings_reject_client_owner_change ON public.marketplace_listings';
+    EXECUTE $trg$
+      CREATE TRIGGER marketplace_listings_reject_client_owner_change
+        BEFORE UPDATE ON public.marketplace_listings
+        FOR EACH ROW
+        EXECUTE FUNCTION public.reject_client_owner_column_change()
+    $trg$;
+  END IF;
 END $$;
 
 NOTIFY pgrst, 'reload schema';

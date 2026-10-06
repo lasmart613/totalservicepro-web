@@ -307,6 +307,30 @@ BEGIN
   IF NOT has_column_privilege('authenticated', 'public.organizations', 'name', 'INSERT') THEN
     RAISE EXCEPTION 'FAIL authenticated lost INSERT on organizations.name';
   END IF;
+  IF NOT (
+    has_column_privilege('authenticated', 'public.organizations', 'timezone', 'INSERT')
+    AND has_column_privilege('authenticated', 'public.organizations', 'timezone', 'UPDATE')
+  ) THEN
+    RAISE EXCEPTION 'FAIL authenticated lost organizations.timezone';
+  END IF;
+  IF to_regclass('public.service_reports') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_trigger
+       WHERE tgname = 'service_reports_reject_client_owner_change'
+         AND tgrelid = 'public.service_reports'::regclass
+         AND NOT tgisinternal
+     ) THEN
+    RAISE EXCEPTION 'FAIL service_reports can still move organization_id or created_by from a client';
+  END IF;
+  IF to_regclass('public.marketplace_listings') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_trigger
+       WHERE tgname = 'marketplace_listings_reject_client_owner_change'
+         AND tgrelid = 'public.marketplace_listings'::regclass
+         AND NOT tgisinternal
+     ) THEN
+    RAISE EXCEPTION 'FAIL marketplace_listings can still move organization_id, seller_id, or created_by from a client';
+  END IF;
 END $$;
 
 ROLLBACK;

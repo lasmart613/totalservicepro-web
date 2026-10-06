@@ -714,8 +714,9 @@ CREATE TRIGGER organizations_guard_privilege
 
 -- Table INSERT/UPDATE revoked, then safe columns only. Column-level REVOKE
 -- does nothing while the table privilege remains, so the table privilege goes
--- first. Premium and plan columns are not re-granted. created_by may be set
--- on INSERT (the guard requires it to be the caller) and cannot be UPDATEd.
+-- first. Premium, plan, and subscription columns are not re-granted. created_by
+-- may be set on INSERT (the guard requires it to be the caller) and cannot be
+-- UPDATEd. timezone is included so company and onboarding saves can store it.
 DO $$
 DECLARE
   col text;
@@ -727,7 +728,8 @@ DECLARE
     'num_laser_systems', 'laser_models', 'facility_type', 'preferred_services',
     'bio', 'slogan', 'alt_phone', 'num_locations', 'contact_name', 'list_in_directory',
     'directory_contacts', 'storefront_enabled', 'storefront_slug', 'storefront_bio',
-    'brand_primary_color', 'brand_accent_color', 'currency_code', 'number_format'
+    'brand_primary_color', 'brand_accent_color', 'currency_code', 'number_format',
+    'timezone'
   ];
   present_ins text[] := ARRAY[]::text[];
   present_upd text[] := ARRAY[]::text[];

@@ -182,6 +182,9 @@ test('migration revokes tenant columns and the trigger raises instead of downgra
   assert.match(sql, /profile_role_from_membership/);
   assert.match(sql, /REVOKE ALL ON TABLE public\.engineer_invitations FROM anon/);
   assert.match(sql, /GRANT INSERT \(%s\) ON TABLE public\.organizations TO authenticated/);
+  const orgGrantCols = sql.slice(sql.indexOf('insert_cols text[]'), sql.indexOf('present_ins text[]'));
+  assert.match(orgGrantCols, /'timezone'/);
+  assert.doesNotMatch(orgGrantCols, /is_premium|premium_until|premium_grant|subscription_tier|'plan'/);
   assert.match(sql, /organization_memberships admin -> company_admin/);
 });
 
@@ -228,6 +231,10 @@ test('open write policies are replaced and catalog update is left for 000700', (
   assert.doesNotMatch(sql, /DROP POLICY IF EXISTS parts_catalog_update/);
   assert.doesNotMatch(sql, /DROP POLICY IF EXISTS "public insert waitlist"/);
   assert.match(sql, /REVOKE UPDATE \(%I\) ON TABLE public\.%I FROM PUBLIC, anon/);
+  assert.match(sql, /reject_client_owner_column_change/);
+  assert.match(sql, /service_reports_reject_client_owner_change/);
+  assert.match(sql, /marketplace_listings_reject_client_owner_change/);
+  assert.match(sql, /auth\.uid\(\) IS NULL/);
   assert.match(sql, /customer_org_link_allowed/);
   assert.match(sql, /organization_customers_insert_linked/);
   assert.match(sql, /forum_bookmarks_read/);
