@@ -6,6 +6,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { ArrowLeft, DollarSign, Calendar, Tag } from 'lucide-react';
 import { useGuestSignupRedirect } from '@/lib/use-signed-in';
+import { displayModelName } from '@/lib/model-display';
 import { StorageImage } from '@/components/StorageImage';
 
 export default function UsedSystemDetail() {
@@ -81,7 +82,7 @@ export default function UsedSystemDetail() {
               {images.length > 0 ? (
                 <StorageImage
                   src={images[0]}
-                  alt={`${system.manufacturer} ${system.model}`}
+                  alt={`${system.manufacturer} ${displayModelName(system.model)}`}
                   className="w-full h-full object-cover"
                   width={960}
                   loading="eager"
@@ -112,7 +113,7 @@ export default function UsedSystemDetail() {
           <div className="space-y-8">
             <div>
               <h1 className="text-4xl font-bold text-white mb-2">
-                {system.manufacturer} {system.model}
+                {system.manufacturer} {displayModelName(system.model)}
               </h1>
               {system.serial_number && (
                 <p className="text-gray-400">Serial Number: {system.serial_number}</p>

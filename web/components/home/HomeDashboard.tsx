@@ -23,12 +23,12 @@ import {
   isClosedTicketStatus,
   isCompleteReport,
   ticketDateYmd,
-  toLocalYmd,
   upcomingOpenTickets,
 } from '@/lib/tickets';
 import { isEstimateAwaitingCustomerAction } from '@/lib/billing/save-helpers';
 import { TicketAddressLink } from '@/components/AddressLink';
 import { useT } from '@/lib/fa/locale';
+import { DEFAULT_ORG_TIMEZONE, isoDateInTimeZone, resolveNumberingTimeZone } from '@/lib/org-timezone';
 
 export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
   const t = useT();
@@ -47,6 +47,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
     openServiceRequests: 0,
   });
   const [statsError, setStatsError] = useState<string | null>(null);
+  const [docZone, setDocZone] = useState(DEFAULT_ORG_TIMEZONE);
   const [ownerStats, setOwnerStats] = useState({
     lasers: 0,
     openRequests: 0,
@@ -210,7 +211,9 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
       let totalReports = 0;
 
       try {
-        const today = toLocalYmd(new Date());
+        const zone = await resolveNumberingTimeZone(supabase, orgId, { allowBrowser: false });
+        setDocZone(zone.timeZone);
+        const today = isoDateInTimeZone(new Date(), zone.timeZone);
 
         const { data: tickets, error: tErr } = await supabase
           .from('service_tickets')
@@ -225,9 +228,9 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
           const list = tickets || [];
           openTickets = list.filter((t) => !isClosedTicketStatus(t.status)).length;
           todayCalls = list.filter(
-            (t) => ticketDateYmd(t.service_date) === today && !isClosedTicketStatus(t.status)
+            (t) => ticketDateYmd(t.service_date, zone.timeZone) === today && !isClosedTicketStatus(t.status)
           ).length;
-          setUpcoming(upcomingOpenTickets(list, today, 5));
+          setUpcoming(upcomingOpenTickets(list, today, 5, zone.timeZone));
         }
       } catch (e: any) {
         console.warn('tickets load failed', e);
@@ -697,7 +700,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
                               {(t.service_type || 'Service') + ' — ' + (t.customer_name || 'Customer')}
                             </div>
                             <div className="text-xs text-[var(--text3)] mt-0.5">
-                              {ticketDateYmd(t.service_date)}
+                              {ticketDateYmd(t.service_date, docZone)}
                               {t.scheduled_time ? ` · ${String(t.scheduled_time).slice(0, 5)}` : ''}
                             </div>
                           </Link>

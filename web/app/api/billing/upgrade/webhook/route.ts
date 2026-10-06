@@ -70,6 +70,9 @@ export async function POST(req: NextRequest) {
           alreadyApplied: invoicePay.applied.alreadyApplied,
         });
       }
+      if (invoicePay.reason === 'invoice_void') {
+        return NextResponse.json({ ok: true, ignored: 'invoice_void' });
+      }
       const result = await applyPaidCheckoutSession({
         writer,
         session,

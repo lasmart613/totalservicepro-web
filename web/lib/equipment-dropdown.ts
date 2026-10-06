@@ -15,6 +15,7 @@ import {
   normalizeEquipmentType,
   type EquipmentType,
 } from './equipment-types.ts';
+import { lookupModelDisplayName } from './model-display.ts';
 import { MODELS } from './models.ts';
 import { fetchAllPages } from './supabase/paginate.ts';
 
@@ -395,6 +396,11 @@ export function catalogChoiceLabel(value: string, explicit?: string | null): str
     '';
   if (mapped) return polishModelLabel(mapped);
   if (display && !isPlainLowercaseCode(display)) return polishModelLabel(display);
+  const code = isPlainLowercaseCode(raw) ? raw : isPlainLowercaseCode(display) ? display : '';
+  if (code && /[_-]/.test(code)) {
+    const known = lookupModelDisplayName(code);
+    if (known) return known;
+  }
   return humanizeModelCode(raw || display);
 }
 

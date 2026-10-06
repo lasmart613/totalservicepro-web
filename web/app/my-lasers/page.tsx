@@ -8,6 +8,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { toast } from 'sonner';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { displayModelName } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { StorageImage } from '@/components/StorageImage';
 
@@ -209,7 +210,7 @@ export default function MyLasersPage() {
                     )}
                     <div className="min-w-0">
                       <div className="font-extrabold text-[var(--gold)]">
-                        {r.manufacturer} {r.model}
+                        {r.manufacturer} {displayModelName(r.model)}
                       </div>
                       <div className="text-xs text-[var(--text3)] mt-1">
                         {r.serial_number ? `SN ${r.serial_number}` : 'No SN'}
@@ -272,7 +273,7 @@ export default function MyLasersPage() {
                 >
                   <option value="">{mfr ? 'Select model…' : 'Select manufacturer first'}</option>
                   {modelOptions.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m} value={m}>{displayModelName(m)}</option>
                   ))}
                   <option value={OTHER_MODEL}>Other / not listed…</option>
                 </select>
