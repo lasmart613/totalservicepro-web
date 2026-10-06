@@ -28,7 +28,7 @@ import { OrgSwitcher } from '@/components/OrgSwitcher';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
 import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
 import { isUnreadPollBackoffError, startDocumentUnreadPoll } from '@/lib/unread-poll';
-import { useLocalizedPublic, useT } from '@/lib/fa/locale';
+import { useLocalizedPublic, useSiteLocale, useT } from '@/lib/fa/locale';
 import { FaPublicHeader } from '@/components/fa/FaPublicHeader';
 import { LanguageSelector } from '@/components/i18n/LanguageSelector';
 
@@ -115,6 +115,7 @@ function NavDropdown({
 export function Header({ authPending = false }: { authPending?: boolean }) {
   const localizedPublic = useLocalizedPublic();
   const t = useT();
+  const locale = useSiteLocale();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -554,7 +555,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
                   ) : null}
                   <div className="text-xs text-[var(--text3)] truncate">{user.email}</div>
                   {profile?.role && (
-                    <div className="text-[10px] mt-0.5 text-[var(--text3)]">{t('Role:')} {t(roleLabel(profile.role))}</div>
+                    <div className="text-[10px] mt-0.5 text-[var(--text3)]">{t('Role:')} {roleLabel(profile.role, locale)}</div>
                   )}
                   <div className="mt-2">
                     <OrgSwitcher variant="menu" />

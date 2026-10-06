@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
 import { toast } from 'sonner';
+import { useSiteLocale } from '@/lib/fa/locale';
 import { roleLabel } from '@/lib/labels';
 
 /**
@@ -14,6 +15,7 @@ import { roleLabel } from '@/lib/labels';
  */
 export default function MemberOnboardingPage() {
   const router = useRouter();
+  const locale = useSiteLocale();
   const supabase = getSupabaseClient();
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -171,7 +173,7 @@ export default function MemberOnboardingPage() {
               <label className="label">Role</label>
               <input
                 className="input opacity-80 capitalize"
-                value={roleLabel(role || 'fse')}
+                value={roleLabel(role || 'fse', locale)}
                 disabled
                 readOnly
               />

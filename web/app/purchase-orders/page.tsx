@@ -1,4 +1,6 @@
 'use client';
+import { useFormatDate } from '@/lib/use-format-date';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -41,6 +43,8 @@ function docNumber(row: PoRow): string {
 }
 
 export default function PurchaseOrdersListPage() {
+  const t = useT();
+  const { locale } = useFormatDate();
   const { money } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
@@ -138,11 +142,11 @@ export default function PurchaseOrdersListPage() {
         <div className="grid grid-cols-2 gap-3 mb-5">
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-[var(--gold)]">{loading ? '—' : drafts}</div>
-            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">DRAFTS</div>
+            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">{t('DRAFTS')}</div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-blue-300">{loading ? '—' : sent}</div>
-            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">SENT</div>
+            <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">{t('SENT')}</div>
           </div>
         </div>
 
@@ -194,7 +198,7 @@ export default function PurchaseOrdersListPage() {
             {filtered.map((row) => {
               const st = String(row.status || 'draft').toLowerCase();
               const num = docNumber(row);
-              const dateStr = formatOrgDocumentDate(row.po_date || row.created_at, docZone) || '—';
+              const dateStr = formatOrgDocumentDate(row.po_date || row.created_at, docZone, locale) || '—';
               return (
                 <Link
                   key={String(row.id)}

@@ -7,6 +7,7 @@ import { AddCustomerModal } from '@/components/AddCustomerModal';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { chunkIds, fetchAllPages, uniqueLinkedIds } from '@/lib/supabase/paginate';
 import { applyDirectoryContactToLinked, type DirectoryContactRow } from '@/lib/customer-contacts';
+import { orgTypeLabel } from '@/lib/labels';
 import { canAddCustomers, isOwnerish, isServiceCompany, isSupplier } from '@/lib/roles';
 import { useT } from '@/lib/fa/locale';
 
@@ -185,8 +186,8 @@ export default function CustomersDirectory() {
 
   const allowAdd = canAddCustomers(userRole, userOrgType);
   const addDeniedReason = isSupplier(userRole, userOrgType)
-    ? 'Parts suppliers can view the directory but cannot add customers.'
-    : 'Only service company staff can add customers.';
+    ? t('Parts suppliers can view the directory but cannot add customers.')
+    : t('Only service company staff can add customers.');
 
   if (accessDenied) {
     return (
@@ -220,7 +221,7 @@ export default function CustomersDirectory() {
           </div>
           {allowAdd && (
             <button type="button" className="btn btn-primary text-sm" onClick={() => setShowAdd(true)}>
-              + Add Customer
+              + {t('Add Customer')}
             </button>
           )}
         </div>
@@ -239,7 +240,7 @@ export default function CustomersDirectory() {
         </div>
 
         {loading ? (
-          <div className="card p-8 text-center text-[var(--text3)]">Loading customers...</div>
+          <div className="card p-8 text-center text-[var(--text3)]">{t('Loading customers...')}</div>
         ) : filtered.length === 0 ? (
           <div className="card p-8 text-center">
             <div className="text-4xl mb-3">👥</div>
@@ -248,14 +249,14 @@ export default function CustomersDirectory() {
             </p>
             <p className="text-sm text-[var(--text3)] mb-4">
               {search.trim()
-                ? 'Try a different name, city, or state.'
+                ? t('Try a different name, city, or state.')
                 : allowAdd
-                  ? 'Add a customer to build your CRM directory.'
+                  ? t('Add a customer to build your CRM directory.')
                   : addDeniedReason}
             </p>
             {!search.trim() && allowAdd && (
               <button type="button" className="btn btn-primary inline-block" onClick={() => setShowAdd(true)}>
-                + Add Customer
+                + {t('Add Customer')}
               </button>
             )}
           </div>
@@ -282,7 +283,7 @@ export default function CustomersDirectory() {
                     )}
                   </div>
                   <div className="font-semibold text-lg text-[var(--text)] min-w-0 pt-1">
-                    {c.name || 'Unnamed Customer'}
+                    {c.name || t('Unnamed Customer')}
                   </div>
                 </div>
                 <div className="text-sm text-[var(--text3)] mb-2">
@@ -301,26 +302,33 @@ export default function CustomersDirectory() {
                 {c.laser_models && (
                   <div className="mt-3 pt-3 border-t border-[var(--border)]">
                     <div className="text-xs uppercase tracking-widest text-[var(--text3)] mb-1">
-                      Equipment
+                      {t('Equipment')}
                     </div>
                     <div className="text-sm text-[var(--text)] line-clamp-2">{c.laser_models}</div>
                   </div>
                 )}
 
                 {c.facility_type && (
-                  <div className="mt-2 text-xs text-[var(--text3)]">Type: {c.facility_type}</div>
+                  <div className="mt-2 text-xs text-[var(--text3)]">{t('Type')}: <bdi dir="auto">{c.facility_type}</bdi></div>
                 )}
 
-                <div className="mt-3 text-xs font-semibold text-[var(--gold)]">View profile →</div>
+                <div className="mt-3 text-xs font-semibold text-[var(--gold)]">{t('View profile →')}</div>
               </Link>
             ))}
           </div>
         )}
 
         <div className="mt-8 text-xs text-[var(--text3)]">
-          Showing only customers linked to your organization
-          {userOrgType ? ` (${userOrgType})` : ''}. Access limited to service companies and parts
-          suppliers.
+          <span dir="auto">
+            {t('Showing only customers linked to your organization')}
+            {userOrgType ? (
+              <>
+                {' '}
+                (<bdi>{t(orgTypeLabel(userOrgType))}</bdi>)
+              </>
+            ) : null}
+            . {t('Access limited to service companies and parts suppliers.')}
+          </span>
         </div>
       </div>
 

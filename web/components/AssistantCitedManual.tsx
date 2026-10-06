@@ -3,6 +3,7 @@
 import React, { useEffect, useRef } from 'react';
 import { ManualPdfViewer } from '@/components/ManualPdfViewer';
 import type { CitedManual } from '@/components/useAssistantCitationOpen';
+import { useT } from '@/lib/fa/locale';
 
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
@@ -27,6 +28,7 @@ export function AssistantCitedManual({
   presentation: 'panel' | 'fullscreen';
   onClose: () => void;
 }) {
+  const t = useT();
   const panelRef = useRef<HTMLDivElement | null>(null);
   const closeBtnRef = useRef<HTMLButtonElement | null>(null);
   const fullscreen = presentation === 'fullscreen';
@@ -77,7 +79,7 @@ export function AssistantCitedManual({
       className={`ai-cite-panel ${fullscreen ? 'is-fullscreen' : 'is-docked'}`}
       role="dialog"
       aria-modal={fullscreen ? true : undefined}
-      aria-label={fullscreen ? 'Cited manual, full screen' : 'Cited manual'}
+      aria-label={fullscreen ? t('Cited manual, full screen') : t('Cited manual')}
       tabIndex={-1}
       data-testid="cited-manual-panel"
       onKeyDown={trapTab}
@@ -90,15 +92,17 @@ export function AssistantCitedManual({
           onClick={onClose}
           data-testid={fullscreen ? 'back-to-answer' : 'close-cited-manual'}
         >
-          {fullscreen ? '← Back to answer' : 'Close'}
+          {fullscreen ? t('← Back to answer') : t('Close')}
         </button>
         <div className="ai-cite-panel-title">
-          <span className="truncate">{cited.title || 'Service manual'}</span>
-          <span className="ai-cite-panel-page">p.{cited.page}</span>
+          <span className="truncate">{cited.title || t('Service manual')}</span>
+          <span className="ai-cite-panel-page">{t('p. {page}').replace('{page}', String(cited.page))}</span>
         </div>
       </div>
       <p className="sr-only" role="status" aria-live="polite">
-        Opened {cited.title || 'service manual'}, page {cited.page}.
+        {t('Opened {title}, page {page}.')
+          .replace('{title}', cited.title || t('Service manual'))
+          .replace('{page}', String(cited.page))}
       </p>
       <div className="ai-cite-panel-viewer">
         <ManualPdfViewer

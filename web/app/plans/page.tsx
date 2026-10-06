@@ -251,8 +251,8 @@ function SignedInPlans() {
     <div className="min-h-screen flex flex-col">
       <Header />
       <div className="max-w-5xl mx-auto w-full px-4 py-8">
-        <p className="text-xs uppercase tracking-wide text-[var(--gold)] font-semibold mb-2">Upgrade</p>
-        <h1 className="text-3xl font-extrabold tracking-tight">Plans and prices</h1>
+        <p className="text-xs uppercase tracking-wide text-[var(--gold)] font-semibold mb-2">{t('Upgrade')}</p>
+        <h1 className="text-3xl font-extrabold tracking-tight">{t('Plans and prices')}</h1>
         <p className="text-[var(--text3)] mt-2 max-w-2xl">
           Stay signed in. Choose a paid plan for{orgName ? ` ${orgName}` : ' your current organization'}.
           Stripe Checkout attaches to this account — it does not create a second one. Cancel anytime
@@ -270,7 +270,7 @@ function SignedInPlans() {
                 : ' Upgrade from this page without creating a second account.'}
           </div>
         ) : (
-          <div className="mt-6 text-sm text-[var(--text3)]">Loading current plan…</div>
+          <div className="mt-6 text-sm text-[var(--text3)]">{t('Loading current plan…')}</div>
         )}
 
         <PlanAudienceSelector value={audience} onChange={setAudience} variant="app">
@@ -279,23 +279,19 @@ function SignedInPlans() {
             type="button"
             className={`btn text-sm ${cycle === 'monthly' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setCycle('monthly')}
-          >
-            Monthly
-          </button>
+          >{t('Monthly')}</button>
           <button
             type="button"
             className={`btn text-sm ${cycle === 'annual' ? 'btn-primary' : 'btn-secondary'}`}
             onClick={() => setCycle('annual')}
-          >
-            Annual · save 33%
-          </button>
+          >{t('Annual · save 33%')}</button>
         </div>
 
         <div className="mt-6 grid grid-cols-1 md:grid-cols-3 gap-4">
           <article className="card p-6 flex flex-col">
-            <h2 className="text-xl font-bold">Free</h2>
+            <h2 className="text-xl font-bold">{t('Free')}</h2>
             <p className="text-3xl font-extrabold text-[var(--gold)] mt-2">
-              $0 <span className="text-sm font-semibold text-[var(--text3)]">/ month</span>
+              $0 <span className="text-sm font-semibold text-[var(--text3)]">{t('/ month')}</span>
             </p>
             <TileLines
               audience={audience}
@@ -303,7 +299,7 @@ function SignedInPlans() {
               className="text-sm text-[var(--text2)] mt-4 space-y-1.5 flex-1"
             />
             <div className="btn btn-secondary w-full text-center mt-5 pointer-events-none opacity-70">
-              {!orgReady ? '…' : namedPlan === 'free' ? 'Current plan' : 'Included'}
+              {!orgReady ? '…' : namedPlan === 'free' ? t('Current plan') : t('Included')}
             </div>
           </article>
 
@@ -334,8 +330,7 @@ function SignedInPlans() {
                   : namedPlan === 'premium'
                     ? 'Current plan'
                     : paid
-                      ? 'Included'
-                      : 'Upgrade to Premium'}
+                      ? t('Included') : t('Upgrade to Premium')}
             </button>
           </article>
 
@@ -364,8 +359,7 @@ function SignedInPlans() {
                 : !orgReady
                   ? '…'
                   : topPaid
-                    ? 'Current plan'
-                    : 'Upgrade to Team'}
+                    ? t('Current plan') : 'Upgrade to Team'}
             </button>
           </article>
         </div>

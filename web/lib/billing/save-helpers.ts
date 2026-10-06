@@ -1,5 +1,6 @@
 /** Shared helpers for estimates / invoices Supabase writes (schema-drift tolerant). */
 
+import { localeToBcp47 } from '../i18n/translate-app.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
 import {
   DEFAULT_ORG_TIMEZONE,
@@ -268,7 +269,11 @@ export function isEstimateExpired(est: { status?: string | null; created_at?: st
   return estimateAgeDays(est.created_at) >= ESTIMATE_VALID_DAYS;
 }
 
-export function validUntilLabel(createdAt?: string | null, timeZone?: string | null): string {
+export function validUntilLabel(
+  createdAt?: string | null,
+  timeZone?: string | null,
+  locale?: string | null,
+): string {
   if (!createdAt) return '';
   const start = new Date(createdAt);
   if (isNaN(start.getTime())) return '';
@@ -277,7 +282,8 @@ export function validUntilLabel(createdAt?: string | null, timeZone?: string | n
   const [y, m, d] = ymd.split('-').map(Number);
   const next = new Date(Date.UTC(y, (m || 1) - 1, (d || 1) + ESTIMATE_VALID_DAYS, 12));
   const nextYmd = `${next.getUTCFullYear()}-${String(next.getUTCMonth() + 1).padStart(2, '0')}-${String(next.getUTCDate()).padStart(2, '0')}`;
-  return formatDateInTimeZone(nextYmd, zone);
+  const intlLocale = locale ? localeToBcp47(locale) : 'en-US';
+  return formatDateInTimeZone(nextYmd, zone, intlLocale === 'en' ? 'en-US' : intlLocale);
 }
 
 /** Fixed UTC calendar day so server and browser render the same validity line. */

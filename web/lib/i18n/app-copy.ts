@@ -3,6 +3,7 @@
  * Product names (RepairPlanet, Total Service Pro, Premium, Team) stay in Latin script.
  * Prices, record text, and manual PDF text are not in this table.
  */
+import { GAP_STRINGS } from './gap-copy.ts';
 import type { PublicLocale } from './locales.ts';
 
 type Loc = Exclude<PublicLocale, 'en'>;
@@ -1176,6 +1177,10 @@ const TABLE: Record<string, Record<Loc, string>> = {
     'المجموعات تقارن تاريخ الاستحقاق مع اليوم في المنطقة الزمنية للمنظمة.',
   ),
 };
+
+for (const [key, value] of Object.entries(GAP_STRINGS)) {
+  if (!TABLE[key]) TABLE[key] = value;
+}
 
 export function appStrings(locale: Loc): Record<string, string> {
   const out: Record<string, string> = {};
