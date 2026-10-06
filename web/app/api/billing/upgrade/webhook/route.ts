@@ -3,13 +3,13 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { applyBillingSubscriptionEvent } from '@/lib/billing/apply-org-downgrade';
 import { applyPaidCheckoutSession } from '@/lib/billing/apply-org-upgrade';
 import {
-  getStripeWebhookSecret,
   isCheckoutSessionCompleted,
   isInvoicePaymentFailed,
   isSubscriptionDeleted,
   isSubscriptionLifecycle,
   stripeWebhookObject,
-  verifyStripeWebhookSignature,
+  stripeWebhookSecrets,
+  verifyStripeWebhookAgainstSecrets,
   type StripeWebhookEventLike,
 } from '@/lib/billing/stripe-webhook';
 import {
@@ -19,6 +19,9 @@ import {
   StripeSubscriptionError,
 } from '@/lib/billing/stripe-subscription';
 import { applyInvoiceCheckoutSession } from '@/lib/billing/persist-invoice-payment';
+import { applyPartCheckoutSession } from '@/lib/billing/apply-part-order';
+import { webhookCheckoutAction } from '@/lib/billing/stripe-connect';
+import { syncConnectedAccount } from '@/lib/billing/stripe-connect-api';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,10 +36,11 @@ export const dynamic = 'force-dynamic';
  * - customer.subscription.updated
  * - customer.subscription.deleted
  * - invoice.payment_failed
+ * - account.updated (Connect endpoint, STRIPE_CONNECT_WEBHOOK_SECRET)
  */
 export async function POST(req: NextRequest) {
-  const secret = getStripeWebhookSecret();
-  if (!secret) {
+  const secrets = stripeWebhookSecrets();
+  if (secrets.length === 0) {
     return NextResponse.json(
       { error: 'STRIPE_WEBHOOK_SECRET is not set on the server.' },
       { status: 503 }
@@ -51,7 +55,7 @@ export async function POST(req: NextRequest) {
 
   const rawBody = await req.text();
   const header = req.headers.get('stripe-signature') || '';
-  if (!verifyStripeWebhookSignature(rawBody, header, secret)) {
+  if (!verifyStripeWebhookAgainstSecrets(rawBody, header, secrets)) {
     return NextResponse.json({ error: 'Invalid Stripe signature' }, { status: 400 });
   }
 
@@ -65,11 +69,35 @@ export async function POST(req: NextRequest) {
   const writer = getSupabaseAdmin();
 
   try {
+    if (event.type === 'account.updated') {
+      const synced = await syncConnectedAccount(writer, stripeWebhookObject(event));
+      return NextResponse.json({ ok: true, kind: 'connect_account', ...synced });
+    }
+
     if (isCheckoutSessionCompleted(event.type)) {
       const obj = stripeWebhookObject(event);
       const sessionId = obj && typeof obj.id === 'string' ? obj.id : '';
       if (!sessionId) return NextResponse.json({ ok: true, ignored: 'missing_session_id' });
       const session = await retrieveCheckoutSession(sessionId);
+      const action = webhookCheckoutAction(session);
+      if (action === 'part') {
+        const part = await applyPartCheckoutSession({ writer, session });
+        if (!part.ok) {
+          if (part.retry) {
+            return NextResponse.json({ error: part.reason }, { status: 500 });
+          }
+          return NextResponse.json({ ok: true, ignored: part.reason, kind: 'part' });
+        }
+        return NextResponse.json({
+          ok: true,
+          applied: true,
+          kind: 'part',
+          orderId: part.applied.orderId,
+          listingId: part.applied.listingId,
+          payoutStatus: part.applied.payoutStatus,
+          alreadyApplied: part.applied.alreadyApplied,
+        });
+      }
       const invoicePay = await applyInvoiceCheckoutSession({ writer, session });
       if (invoicePay.ok) {
         return NextResponse.json({

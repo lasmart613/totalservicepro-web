@@ -379,7 +379,7 @@ test('webhook and sync routes persist the existing org and never sign up', () =>
   const here = dirname(fileURLToPath(import.meta.url));
   const webhook = readFileSync(join(here, '../app/api/billing/upgrade/webhook/route.ts'), 'utf8');
   const sync = readFileSync(join(here, '../app/api/billing/upgrade/sync/route.ts'), 'utf8');
-  assert.match(webhook, /verifyStripeWebhookSignature/);
+  assert.match(webhook, /verifyStripeWebhookAgainstSecrets/);
   assert.match(webhook, /applyPaidCheckoutSession/);
   assert.doesNotMatch(webhook, /signUp|createUser|from\('organizations'\)\.insert/);
   assert.match(sync, /pickLatestPaidUpgradeSession/);

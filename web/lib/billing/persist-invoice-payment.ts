@@ -15,6 +15,7 @@ import {
 import type { StripeObject } from './stripe-subscription.ts';
 import { formatOrgMoney } from '../money-format.ts';
 import { loadOrgMoneyPrefs } from '../org-money.ts';
+import { invoicePayoutRecord } from './stripe-connect.ts';
 import { flagVoidInvoicePayment, isVoidInvoiceStatus } from './void-invoice.ts';
 
 export type AppliedInvoicePayment = {
@@ -87,6 +88,7 @@ export async function applyInvoiceCheckoutSession(input: {
     method: 'Stripe',
     sessionId,
   });
+  Object.assign(patch.invoice_data, invoicePayoutRecord(m));
 
   const claim = await claimInvoicePayment(input.writer, invoiceId, patch, sessionId);
   if (!claim.ok) return { ok: false, reason: claim.reason };
