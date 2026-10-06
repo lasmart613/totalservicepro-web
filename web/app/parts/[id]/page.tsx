@@ -353,11 +353,12 @@ export default function PartDetailPage() {
                 Archive
               </button>
             )}
-            {canArchive && !editing ? (
+            {canArchive && !editing && (
               <button type="button" className="btn btn-primary" onClick={() => setEditing(true)}>
                 Edit part
               </button>
-            ) : canArchive ? (
+            )}
+            {canArchive && editing && (
               <>
                 <button
                   type="button"
