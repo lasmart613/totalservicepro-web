@@ -190,6 +190,14 @@ test('migration revokes tenant columns and the trigger raises instead of downgra
   assert.doesNotMatch(sql, /CREATE TRIGGER on_auth_user_created/);
   assert.match(sql, /organization_memberships_role_not_platform_admin/);
   assert.match(sql, /ALTER FUNCTION public\.generate_ticket_number\(bigint\) SET search_path/);
+  assert.match(sql, /ALTER FUNCTION public\.handle_new_user\(\) SET search_path/);
+  assert.match(sql, /ALTER FUNCTION public\.set_organization_created_by\(\) SET search_path/);
+  assert.match(sql, /generate_ticket_number\(uuid\) already has search_path public/);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.leave_organization\(p_organization_id bigint\)/);
+  assert.match(sql, /'left_organization_id', p_organization_id/);
+  assert.match(sql, /'account_kept', true/);
+  assert.match(sql, /lower\(btrim\(kept_role\)\) = 'admin' THEN\s+next_role := 'admin'/);
+  assert.match(sql, /profile_role_from_membership\(next_mem\.role\)/);
   assert.match(sql, /invitation_is_open\(i\.accepted, i\.expires_at, i\.created_at\)/);
   assert.doesNotMatch(sql, /NOT IN \('admin', 'company_admin'\)/);
   assert.match(sql, /invitation_is_open/);

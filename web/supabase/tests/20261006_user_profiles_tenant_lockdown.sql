@@ -408,7 +408,10 @@ BEGIN
      ) THEN
     RAISE EXCEPTION 'FAIL user_profiles_guard_identity is not an invoker current_user bypass';
   END IF;
-  IF position('profile_role_from_membership' IN pg_get_functiondef('public.leave_organization(bigint)'::regprocedure)) = 0 THEN
+  IF position('profile_role_from_membership' IN pg_get_functiondef('public.leave_organization(bigint)'::regprocedure)) = 0
+     OR position('left_organization_id' IN pg_get_functiondef('public.leave_organization(bigint)'::regprocedure)) = 0
+     OR position('account_kept' IN pg_get_functiondef('public.leave_organization(bigint)'::regprocedure)) = 0
+     OR position('pg_temp' IN pg_get_functiondef('public.leave_organization(bigint)'::regprocedure)) = 0 THEN
     RAISE EXCEPTION 'FAIL leave_organization still copies a raw membership role';
   END IF;
   IF position('email_confirmed_at' IN pg_get_functiondef('public.handle_new_auth_user()'::regprocedure)) = 0 THEN

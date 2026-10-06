@@ -984,9 +984,22 @@ $$;
 REVOKE ALL ON FUNCTION public.switch_active_organization(bigint) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.switch_active_organization(bigint) TO authenticated;
 
--- Live leave_organization(bigint), plus profile-role mapping. A platform
--- admin (user_profiles.role = 'admin') stays admin. Every other next
--- membership role is copied through profile_role_from_membership.
+-- Live leave_organization(bigint) as of 2026-10-05 ~8:10 PM PT.
+-- Same control flow and return keys (ok, left_organization_id,
+-- organization_id, role, account_kept). organization_id in the return is
+-- still the next membership, including when the left org was not active.
+-- role is no longer next_mem.role raw: profile role admin stays admin, and
+-- every other next membership role goes through profile_role_from_membership.
+-- A missing next membership still returns role null (the mapper would turn
+-- that into fse). search_path adds pg_temp.
+--
+-- Other live functions from that same read:
+--   handle_new_auth_user() is not attached to auth.users (dropped above).
+--   handle_new_user() is SECURITY DEFINER with no search_path and inserts role 'engineer'.
+--   generate_ticket_number(bigint) is SECURITY DEFINER with no search_path and uses ticket_number_seq.
+--   generate_ticket_number(uuid) already has search_path public and is left as-is.
+--   set_organization_created_by() is SECURITY DEFINER with no search_path.
+-- The three with no search_path are altered at the end of this file.
 CREATE OR REPLACE FUNCTION public.leave_organization(p_organization_id bigint)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -1209,7 +1222,10 @@ BEGIN
     CHECK (role IS NULL OR lower(btrim(role)) <> 'admin');
 END $$;
 
--- Pre-existing SECURITY DEFINER functions that shipped without search_path.
+-- Live nits: these SECURITY DEFINER functions have no search_path.
+-- handle_new_user() inserts role 'engineer'. generate_ticket_number(bigint)
+-- uses ticket_number_seq. set_organization_created_by() sets organizations.created_by.
+-- generate_ticket_number(uuid) already has search_path public and is not altered.
 DO $$
 BEGIN
   IF EXISTS (
