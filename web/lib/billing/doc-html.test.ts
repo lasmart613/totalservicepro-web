@@ -80,6 +80,22 @@ test('estimate email renders the unique-links sentence once and does not glue th
   assert.match(text, /Laser tip: \$10\.00/);
 });
 
+test('estimate plain text includes diagnostic fee and labor with currency', () => {
+  const text = buildEstimatePlainText({
+    ...estimateMail,
+    diagFee: 50,
+    laborHours: 1,
+    laborRate: 40,
+    labor: 40,
+    subtotal: 100,
+    total: 100,
+    moneyPrefs: { currencyCode: 'USD', numberFormat: 'auto' },
+  });
+  assert.match(text, /Diagnostic Fee: \$50\.00/);
+  assert.match(text, /Labor: 1 hrs @ \$40\.00\/hr = \$40\.00/);
+  assert.match(text, /Subtotal: \$100\.00/);
+});
+
 const invoiceBase = {
   company: { company_name: 'Lux Service' },
   customer: { name: 'Clinic' },

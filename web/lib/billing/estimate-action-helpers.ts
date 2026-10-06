@@ -8,9 +8,11 @@ import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
 import {
   customerActionFromEstimate,
   parseCustomerActionKind,
+  parseEstimateEmailAction,
   parseJsonField,
   resolveCustomerActionApply,
   type CustomerActionKind,
+  type EstimateEmailAction,
 } from './save-helpers.ts';
 
 export const CUSTOMER_ACTION_APPROVED = 'approved' as const;
@@ -132,41 +134,69 @@ export type CustomerActionPatch = {
   estimate_data: Record<string, unknown>;
 };
 
+export type EstimateActionConfirms = Record<EstimateEmailAction, string>;
+
 /**
- * Signed field the confirm form must POST. Bound to the estimate token.
- * A GET, a query string, or a POST without this field cannot act.
+ * Signed field one confirm button must POST.
+ * Bound to the estimate token and that button's action:
+ * `estimate-confirm.<token>.<action>.<exp>`.
+ * An action-less nonce, or a nonce for a different action, does not verify.
  */
 export function signEstimateActionConfirm(
   token: string,
+  action: unknown,
   secret: string,
   nowSec = Math.floor(Date.now() / 1000)
 ): string {
+  const emailAction = parseEstimateEmailAction(action);
+  if (!emailAction) return '';
   const exp = nowSec + ESTIMATE_ACTION_CONFIRM_TTL_SEC;
-  const payload = `${CONFIRM_PURPOSE}.${String(token || '').trim()}.${exp}`;
+  const payload = confirmMacPayload(token, emailAction, exp);
   const sig = createHmac('sha256', secret).update(payload).digest('base64url');
   return `${exp}.${sig}`;
 }
 
+export function signEstimateActionConfirms(
+  token: string,
+  secret: string,
+  nowSec = Math.floor(Date.now() / 1000)
+): EstimateActionConfirms {
+  return {
+    approve: signEstimateActionConfirm(token, 'approve', secret, nowSec),
+    reject: signEstimateActionConfirm(token, 'reject', secret, nowSec),
+    modify: signEstimateActionConfirm(token, 'modify', secret, nowSec),
+  };
+}
+
 export function verifyEstimateActionConfirm(
   token: string,
+  action: unknown,
   confirm: unknown,
   secret: string,
   nowSec = Math.floor(Date.now() / 1000)
 ): boolean {
+  const emailAction = parseEstimateEmailAction(action);
   const trimmed = String(token || '').trim();
-  if (!secret || !isValidEstimateActionToken(trimmed)) return false;
+  if (!secret || !emailAction || !isValidEstimateActionToken(trimmed)) return false;
   const raw = String(confirm ?? '').trim();
   const dot = raw.indexOf('.');
   if (dot < 1) return false;
-  const exp = Number(raw.slice(0, dot));
+  const expRaw = raw.slice(0, dot);
   const sig = raw.slice(dot + 1);
-  if (!Number.isFinite(exp) || exp < nowSec || !sig) return false;
-  const payload = `${CONFIRM_PURPOSE}.${trimmed}.${exp}`;
-  const expected = createHmac('sha256', secret).update(payload).digest('base64url');
+  if (!/^\d+$/.test(expRaw) || !sig) return false;
+  const exp = Number(expRaw);
+  if (!Number.isFinite(exp) || exp < nowSec) return false;
+  const expected = createHmac('sha256', secret)
+    .update(confirmMacPayload(trimmed, emailAction, exp))
+    .digest('base64url');
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
   if (a.length !== b.length) return false;
   return timingSafeEqual(a, b);
+}
+
+function confirmMacPayload(token: string, action: EstimateEmailAction, exp: number): string {
+  return `${CONFIRM_PURPOSE}.${String(token || '').trim()}.${action}.${exp}`;
 }
 
 export type EstimateActionHttpDecision =
@@ -175,7 +205,7 @@ export type EstimateActionHttpDecision =
 
 /**
  * GET never mutates, even when the body already contains a valid confirm nonce.
- * POST mutates only with a token, a known action, and a confirm nonce.
+ * POST mutates only with a token, a known action, and a confirm nonce for that action.
  */
 export function decideEstimateActionHttp(input: {
   method: string;
@@ -198,17 +228,91 @@ export function decideEstimateActionHttp(input: {
       error: 'This page is temporarily unavailable. Please contact the company that sent the estimate.',
     };
   }
-  if (!verifyEstimateActionConfirm(token, body.confirm, input.secret, input.nowSec)) {
+  const action = parseCustomerActionKind(body.action);
+  if (!action) return { effect: 'none', status: 400, error: 'Unknown action' };
+  if (!verifyEstimateActionConfirm(token, action, body.confirm, input.secret, input.nowSec)) {
     return {
       effect: 'none',
       status: 400,
       error: 'Use the button on the estimate page. Opening the link does not approve or reject it.',
     };
   }
-  const action = parseCustomerActionKind(body.action);
-  if (!action) return { effect: 'none', status: 400, error: 'Unknown action' };
   const note = String(body.note || '').trim() || null;
   return { effect: 'mutate', token, action, note };
+}
+
+/**
+ * Hosts a form-POST redirect may name. A Netlify deploy permalink is not included.
+ * Production customers stay on repairplanet.net.
+ */
+export function isAllowedEstimateRedirectHost(host: string): boolean {
+  const hostname = headerHost(host).replace(/:\d+$/, '');
+  if (!hostname || hostname.includes('/') || hostname.includes(' ')) return false;
+  if (hostname === 'repairplanet.net' || hostname === 'www.repairplanet.net') return true;
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return true;
+  return /^deploy-preview-[a-z0-9-]+--totalservicepro\.netlify\.app$/.test(hostname);
+}
+
+/** Relative `/e/<token>` path for a confirm form result. Never an absolute URL. */
+export function estimateActionFormRedirectPath(input: {
+  token: string;
+  status: number;
+  action?: unknown;
+  already?: boolean;
+  notice?: unknown;
+}): string | null {
+  const token = String(input.token || '').trim();
+  if (!isValidEstimateActionToken(token)) return null;
+  const params = new URLSearchParams();
+  const done = parseCustomerActionKind(input.action);
+  if (input.status === 200 && done && !input.already) {
+    params.set('done', done);
+  } else if (input.status !== 200 && input.notice) {
+    const emailAction = parseEstimateEmailAction(input.action);
+    if (emailAction) params.set('action', emailAction);
+    params.set('notice', String(input.notice));
+  }
+  const path = `/e/${encodeURIComponent(token)}`;
+  const query = params.toString();
+  return query ? `${path}?${query}` : path;
+}
+
+/**
+ * Location for the confirm form's 303. Prefer the public request host when it
+ * is allowlisted. Otherwise return a relative path. Never reads Netlify URL env.
+ */
+export function estimateActionRedirectLocation(input: {
+  token: string;
+  status: number;
+  action?: unknown;
+  already?: boolean;
+  notice?: unknown;
+  forwardedHost?: string | null;
+  host?: string | null;
+  forwardedProto?: string | null;
+}): string | null {
+  const path = estimateActionFormRedirectPath(input);
+  if (!path) return null;
+  const host = headerHost(input.forwardedHost) || headerHost(input.host);
+  if (!host || !isAllowedEstimateRedirectHost(host)) return path;
+  return `${redirectProto(host, input.forwardedProto)}://${host}${path}`;
+}
+
+function headerHost(value: string | null | undefined): string {
+  return String(value || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+}
+
+function redirectProto(host: string, forwardedProto: string | null | undefined): string {
+  const hostname = host.replace(/:\d+$/, '');
+  if (hostname === 'localhost' || hostname === '127.0.0.1') return 'http';
+  const proto = String(forwardedProto || '')
+    .split(',')[0]
+    .trim()
+    .toLowerCase();
+  return proto === 'http' || proto === 'https' ? proto : 'https';
 }
 
 /**

@@ -820,6 +820,12 @@ export function buildEstimatePlainText(input: EstimateHtmlInput): string {
   lines.push('', `Customer: ${input.customer.name || 'Customer'}`);
   if (input.customer.email) lines.push(`Email: ${input.customer.email}`);
   if (input.services?.length) lines.push('', 'Services:', ...input.services.map((s) => `- ${s}`));
+  if (input.diagFee) lines.push(`Diagnostic Fee: ${amount(input.diagFee)}`);
+  if (input.labor) {
+    lines.push(
+      `Labor: ${input.laborHours ?? 0} hrs @ ${amount(input.laborRate)}/hr = ${amount(input.labor)}`
+    );
+  }
   if (input.partsLines?.length) {
     lines.push('', 'Parts:');
     for (const line of input.partsLines) lines.push(line);

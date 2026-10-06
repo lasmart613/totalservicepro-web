@@ -270,6 +270,31 @@ export function validUntilLabel(createdAt?: string | null): string {
   return d.toLocaleDateString();
 }
 
+/** Fixed UTC calendar day so server and browser render the same validity line. */
+export function formatUtcCalendarDay(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(d);
+}
+
+export function estimateValidityText(opts: {
+  expired: boolean;
+  validDays: number;
+  validUntil: string | null;
+}): string {
+  const through = formatUtcCalendarDay(opts.validUntil);
+  if (opts.expired) return through ? `Expired on ${through}` : 'Expired';
+  return through
+    ? `Good for ${opts.validDays} days (through ${through})`
+    : `Good for ${opts.validDays} days`;
+}
+
 export type CustomerActionKind = 'approved' | 'rejected' | 'changes_requested';
 export type EstimateEmailAction = 'approve' | 'reject' | 'modify';
 

@@ -18,6 +18,7 @@ type PublicEstimate = {
   companyName: string;
   validDays: number;
   validUntil: string | null;
+  validityText?: string;
   createdAt: string | null;
   expired: boolean;
   customerAction: CustomerActionKind | null;
@@ -29,13 +30,6 @@ type PublicEstimate = {
 
 function money(n: number, currencyCode?: string | null, numberFormat?: string | null) {
   return formatOrgMoney(n, { currencyCode, numberFormat });
-}
-
-function formatDate(iso: string | null) {
-  if (!iso) return '';
-  const d = new Date(iso);
-  if (isNaN(d.getTime())) return '';
-  return d.toLocaleDateString();
 }
 
 function noticeMessage(notice: string) {
@@ -57,14 +51,14 @@ function actionVerb(action: CustomerActionKind | null) {
 
 export default function EstimateActionClient({
   token,
-  confirm,
+  confirms,
   estimate,
   requested,
   justCompleted,
   notice,
 }: {
   token: string;
-  confirm: string;
+  confirms: Record<EstimateEmailAction, string>;
   estimate: PublicEstimate;
   requested: EstimateEmailAction | null;
   justCompleted: CustomerActionKind | null;
@@ -86,6 +80,7 @@ export default function EstimateActionClient({
   const [already, setAlready] = useState(
     (estimate.customerAction === 'approved' || estimate.customerAction === 'rejected') && !freshCompletion
   );
+  const [notified, setNotified] = useState(freshCompletion != null);
 
   async function submit(emailAction: EstimateEmailAction, extraNote?: string) {
     const kind = parseCustomerActionKind(emailAction);
@@ -98,12 +93,20 @@ export default function EstimateActionClient({
         headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
         body: JSON.stringify({
           token,
-          confirm,
+          confirm: confirms[emailAction],
           action: emailAction,
           note: extraNote,
         }),
       });
       const json = await res.json().catch(() => ({}));
+      if (res.status === 409 && json?.already && json?.conflict) {
+        if (json.estimate) setEst(json.estimate);
+        setDone(parseCustomerActionKind(json.action) || kind);
+        setAlready(true);
+        setNotified(false);
+        setError('');
+        return;
+      }
       if (!res.ok) {
         setError(json?.error || 'Something went wrong. Please contact the company.');
         if (json?.estimate) setEst(json.estimate);
@@ -112,6 +115,7 @@ export default function EstimateActionClient({
       if (json.estimate) setEst(json.estimate);
       setDone(parseCustomerActionKind(json.action) || kind);
       setAlready(!!json.already);
+      setNotified(!json.already);
     } catch {
       setError('Network error. Please try again or call the company.');
     } finally {
@@ -154,8 +158,15 @@ export default function EstimateActionClient({
               </div>
               <h1 className="text-2xl font-extrabold mb-2">{confirmation}</h1>
               <p className="text-[var(--text2)] leading-relaxed">
-                {already ? `This estimate was already ${actionVerb(done)}. ` : null}
-                We’ve notified <strong className="text-[var(--text)]">{company}</strong>.
+                {already
+                  ? `This estimate was already ${actionVerb(done)}.`
+                  : notified
+                    ? (
+                      <>
+                        We’ve notified <strong className="text-[var(--text)]">{company}</strong>.
+                      </>
+                    )
+                    : null}
               </p>
               {est.estimateNumber && (
                 <p className="text-sm text-[var(--text3)] mt-4">
@@ -202,13 +213,7 @@ export default function EstimateActionClient({
                 </div>
                 <div className="col-span-2">
                   <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Validity</div>
-                  <div>
-                    {est.expired
-                      ? `Expired${est.validUntil ? ` on ${formatDate(est.validUntil)}` : ''}`
-                      : `Good for ${est.validDays} days${
-                          est.validUntil ? ` (through ${formatDate(est.validUntil)})` : ''
-                        }`}
-                  </div>
+                  <div>{est.validityText || `Good for ${est.validDays} days`}</div>
                 </div>
               </div>
 
@@ -233,7 +238,7 @@ export default function EstimateActionClient({
                   {(mode.kind === 'choose' || (mode.kind === 'confirm' && mode.action === 'approve')) && (
                     <ConfirmForm
                       token={token}
-                      confirm={confirm}
+                      confirm={confirms.approve}
                       action="approve"
                       label="Approve estimate"
                       className="btn btn-primary w-full text-base py-3"
@@ -252,7 +257,7 @@ export default function EstimateActionClient({
                       }}
                     >
                       <input type="hidden" name="token" value={token} />
-                      <input type="hidden" name="confirm" value={confirm} />
+                      <input type="hidden" name="confirm" value={confirms.reject} />
                       <input type="hidden" name="action" value="reject" />
                       <label className="text-xs text-[var(--text3)] font-semibold" htmlFor="reject-reason">
                         Reason for rejecting (optional)
@@ -286,7 +291,7 @@ export default function EstimateActionClient({
                       }}
                     >
                       <input type="hidden" name="token" value={token} />
-                      <input type="hidden" name="confirm" value={confirm} />
+                      <input type="hidden" name="confirm" value={confirms.modify} />
                       <input type="hidden" name="action" value="modify" />
                       <label className="text-xs text-[var(--text3)] font-semibold" htmlFor="modify-note">
                         Optional note for the service company

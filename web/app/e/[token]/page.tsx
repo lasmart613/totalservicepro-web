@@ -59,7 +59,7 @@ export default async function EstimateActionPage({
   return (
     <EstimateActionClient
       token={token}
-      confirm={loaded.confirm}
+      confirms={loaded.confirms}
       estimate={loaded.estimate}
       requested={requested}
       justCompleted={justCompleted}

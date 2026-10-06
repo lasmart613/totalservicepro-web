@@ -252,6 +252,28 @@ test('server-built estimate and report ignore a stored HTML blob', () => {
   assert.match(text, /Approve: /);
   assert.doesNotMatch(text, /approveReject|ApproveReject|RejectModify/);
 
+  const withLabor = buildOwnedEstimatePlainText({
+    row: {
+      customer_name: 'Clinic',
+      estimate_number: 'EST-9',
+      total: 100,
+      estimate_data: {
+        laborHours: 1,
+        labor: 40,
+        pricing: { laborRate: 40, diagFee: 50 },
+        subtotal: 100,
+        tax: 0,
+      },
+    },
+    company: { company_name: 'Owned Shop' },
+    theme: null,
+    actionUrl: 'https://repairplanet.net/e/action-token',
+    moneyPrefs: { currencyCode: 'USD', numberFormat: 'auto' },
+  });
+  assert.match(withLabor, /Diagnostic Fee: \$50\.00/);
+  assert.match(withLabor, /Labor: 1 hrs @ \$40\.00\/hr = \$40\.00/);
+  assert.match(withLabor, /Subtotal: \$100\.00/);
+
   const report = buildOwnedReportMessage(
     {
       report_number: 'SR-4',

@@ -4,6 +4,7 @@ import {
   applyEstimateCustomerAction,
   decideEstimateActionHttp,
   estimateActionConfirmSecret,
+  estimateActionRedirectLocation,
   findEstimateByActionToken,
   isValidEstimateActionToken,
   notifyShopOfCustomerAction,
@@ -13,7 +14,6 @@ import {
 import {
   customerActionConfirmationTitle,
   isEstimateExpired,
-  parseEstimateEmailAction,
 } from '@/lib/billing/save-helpers';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
 
@@ -112,8 +112,9 @@ export async function POST(req: NextRequest) {
       await notifyShopOfCustomerAction(admin, est, applied, decision.note);
     }
 
-    return finish(req, formPost, 200, {
-      ok: true,
+    const terminalConflict = result.already && result.conflict;
+    return finish(req, formPost, terminalConflict ? 409 : 200, {
+      ok: !terminalConflict,
       already: result.already,
       conflict: result.conflict,
       action: applied,
@@ -168,18 +169,22 @@ function finish(
 ) {
   const token = String(body.token || '').trim();
   if (formPost && isValidEstimateActionToken(token)) {
-    const back = new URL(`/e/${encodeURIComponent(token)}`, req.url);
-    const action = parseEstimateEmailAction(body.action);
-    if (status === 200 && body.action) {
-      const done = String(body.action);
-      if (done === 'approved' || done === 'rejected' || done === 'changes_requested') {
-        back.searchParams.set('done', done);
-      }
-    } else if (body.notice) {
-      if (action) back.searchParams.set('action', action);
-      back.searchParams.set('notice', String(body.notice));
+    const location = estimateActionRedirectLocation({
+      token,
+      status,
+      action: body.action,
+      already: body.already === true,
+      notice: body.notice,
+      forwardedHost: req.headers.get('x-forwarded-host'),
+      host: req.headers.get('host'),
+      forwardedProto: req.headers.get('x-forwarded-proto'),
+    });
+    if (location) {
+      return new NextResponse(null, {
+        status: 303,
+        headers: { Location: location, 'Cache-Control': 'no-store' },
+      });
     }
-    return NextResponse.redirect(back, 303);
   }
   const json = { ...body };
   delete json.token;

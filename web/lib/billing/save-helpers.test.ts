@@ -5,6 +5,7 @@ import {
   customerActionFromEstimate,
   customerActionLabel,
   estimateConfirmMode,
+  estimateValidityText,
   isEstimateAwaitingCustomerAction,
   parseCustomerActionKind,
   parseEstimateEmailAction,
@@ -118,4 +119,17 @@ test('isEstimateAwaitingCustomerAction is sent + not terminal + not expired', ()
   );
   assert.equal(isEstimateAwaitingCustomerAction({ status: 'draft', created_at: fresh }), false);
   assert.equal(isEstimateAwaitingCustomerAction({ status: 'invoiced', created_at: fresh }), false);
+});
+
+test('estimate validity text is a stable UTC string', () => {
+  const text = estimateValidityText({
+    expired: false,
+    validDays: 30,
+    validUntil: '2026-11-04T00:00:00.000Z',
+  });
+  assert.equal(text, 'Good for 30 days (through Nov 4, 2026)');
+  assert.equal(
+    estimateValidityText({ expired: true, validDays: 30, validUntil: '2026-11-04T00:00:00.000Z' }),
+    'Expired on Nov 4, 2026'
+  );
 });

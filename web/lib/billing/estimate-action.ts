@@ -14,6 +14,7 @@ import {
   ESTIMATE_VALID_DAYS,
   customerActionFromEstimate,
   customerActionLabel,
+  estimateValidityText,
   isEstimateExpired,
   parseJsonField,
   resolveCustomerActionApply,
@@ -29,7 +30,7 @@ import {
   generateEstimateActionToken,
   isValidEstimateActionToken,
   mergeCustomerActionIntoEstimateData,
-  signEstimateActionConfirm,
+  signEstimateActionConfirms,
 } from '@/lib/billing/estimate-action-helpers';
 
 export { customerActionFromEstimate, customerActionLabel, estimateActionUrl };
@@ -44,7 +45,9 @@ export {
   isValidEstimateActionToken,
   mergeCustomerActionIntoEstimateData,
   signEstimateActionConfirm,
+  signEstimateActionConfirms,
   verifyEstimateActionConfirm,
+  estimateActionRedirectLocation,
 } from '@/lib/billing/estimate-action-helpers';
 export type { CustomerActionKind };
 export type { EstimateCustomerAction } from '@/lib/billing/estimate-action-helpers';
@@ -115,7 +118,7 @@ export async function loadPublicEstimateForToken(token: string): Promise<
   | {
       ok: true;
       estimate: ReturnType<typeof publicEstimatePayload>;
-      confirm: string;
+      confirms: ReturnType<typeof signEstimateActionConfirms>;
     }
   | { ok: false; message: string }
 > {
@@ -138,7 +141,7 @@ export async function loadPublicEstimateForToken(token: string): Promise<
   return {
     ok: true,
     estimate: publicEstimatePayload(est, companyName, moneyPrefs),
-    confirm: signEstimateActionConfirm(token, secret),
+    confirms: signEstimateActionConfirms(token, secret),
   };
 }
 
@@ -367,6 +370,11 @@ export function publicEstimatePayload(estimate: any, companyName: string, money?
     companyName,
     validDays: ESTIMATE_VALID_DAYS,
     validUntil,
+    validityText: estimateValidityText({
+      expired,
+      validDays: ESTIMATE_VALID_DAYS,
+      validUntil,
+    }),
     createdAt,
     expired,
     customerAction: action.action,
