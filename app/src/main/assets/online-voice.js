@@ -1,12 +1,13 @@
 /**
  * Online Android voice for the live Next.js assistant (repairplanet.net/ai-assistant).
  *
- * Prefer the page hooks from draft #202 when they are installed:
- *   TSP.setVoiceMode / TSP.getVoiceMode, TSP.askAssistant, and the
- *   assistant:answer event { ts, text, citations, top, voiceMode }.
- * Today's production page has none of those, so the fetch rewrite and the
- * Send-button shim stay as the fallback. This script never loads a viewer
- * and never dispatches assistant:citation-open.
+ * Prefer the #202 page hooks when they are installed. Voice mode is a session
+ * flag that resets on load, so setVoiceMode(true) is applied again after each
+ * load and navigation while the shell voice control is on. askAssistant
+ * returning false shows a toast and does not use the shim. The shim (fetch
+ * rewrite and the Send button) runs only when those hooks are missing.
+ * This script never loads a viewer and never dispatches assistant:citation-open.
+ * It only adds TSP.isVoiceSpeaking; it does not replace the page's other TSP methods.
  */
 (function (root) {
     var TTS_PROJECT = 'https://yljztfajyvjzqikxdddf.supabase.co';
@@ -67,6 +68,15 @@
         return String(detail.text);
     }
 
+    /**
+     * Hooks present: 'sent' or 'toast'. Never 'shim' just because askAssistant
+     * returned false. 'shim' is only when the page has no askAssistant.
+     */
+    function askOutcome(tsp, started) {
+        if (!hasFn(tsp, 'askAssistant')) return 'shim';
+        return started === true ? 'sent' : 'toast';
+    }
+
     var api = {
         isAssistantPath: isAssistantPath,
         isLiveHost: isLiveHost,
@@ -74,7 +84,8 @@
         assistantReplyText: assistantReplyText,
         pageOwnsVoice: pageOwnsVoice,
         submitKind: submitKind,
-        answerText: answerText
+        answerText: answerText,
+        askOutcome: askOutcome
     };
 
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -82,7 +93,10 @@
 
     if (typeof window === 'undefined' || typeof document === 'undefined') return;
     if (!isLiveHost(location.hostname)) return;
-    if (window.__tspOnlineVoiceBoot) return;
+    if (window.__tspOnlineVoiceBoot) {
+        if (window.__tspReapplyVoiceMode) window.__tspReapplyVoiceMode();
+        return;
+    }
     window.__tspOnlineVoiceBoot = true;
 
     var voiceOn = false;
@@ -298,26 +312,15 @@
         el.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
-    function beginVoiceTurn() {
-        chatGen += 1;
-        if (window.Android && Android.interruptSpeech) Android.interruptSpeech();
-        markPageSpeaking(true);
-        return chatGen;
-    }
-
     function submitSpokenQuestion(text) {
         if (hasFn(window.TSP, 'askAssistant')) {
-            var gen = beginVoiceTurn();
-            try {
-                var result = window.TSP.askAssistant(text);
-                if (result && typeof result.then === 'function') {
-                    result.then(null, function () {
-                        if (gen !== chatGen || answerEventSeen) return;
-                        markPageSpeaking(false);
-                    });
-                }
-            } catch (e) {
-                if (gen === chatGen) markPageSpeaking(false);
+            if (hasFn(window.TSP, 'setVoiceMode')) {
+                try { window.TSP.setVoiceMode(true); } catch (e) {}
+            }
+            var started = false;
+            try { started = window.TSP.askAssistant(text) === true; } catch (e2) { started = false; }
+            if (askOutcome(window.TSP, started) === 'toast' && window.Android && Android.showToast) {
+                Android.showToast('Could not send that. Sign in, or wait for the current answer.');
             }
             return;
         }
@@ -364,13 +367,7 @@
         rememberAnswerTop(detail);
         var raw = answerText(detail);
         var spoken = window.TSPGrokVoice ? TSPGrokVoice.prepareSpeechText(raw) : raw.trim();
-        if (!spoken || !window.Android || !Android.speakAnswer) {
-            markPageSpeaking(false);
-            return;
-        }
-        if (window.__tspNativeVoiceSpeaking !== true && window.Android.interruptSpeech) {
-            Android.interruptSpeech();
-        }
+        if (!spoken || !window.Android || !Android.speakAnswer) return;
         markPageSpeaking(true);
         var prefs = readPrefs();
         Android.speakAnswer(spoken, prefs.voice, prefs.engine, readToken());
@@ -421,6 +418,15 @@
             var speaking = !!(ev && ev.detail && ev.detail.speaking);
             var stop = document.getElementById('tsp-voice-stop');
             if (stop) stop.style.display = speaking ? 'inline-flex' : 'none';
+        });
+        window.addEventListener('assistant:voice-mode', function (ev) {
+            var detail = ev && ev.detail;
+            if (!detail || typeof detail.on !== 'boolean') return;
+            if (detail.on === voiceOn) return;
+            voiceOn = detail.on;
+            try { localStorage.setItem('tspAndroidVoiceMode', voiceOn ? '1' : '0'); } catch (e) {}
+            syncBar();
+            if (!voiceOn && window.Android && Android.stopSpeaking) Android.stopSpeaking();
         });
     }
 
@@ -494,29 +500,29 @@
 
     var shimTimer = null;
     function scheduleShim() {
-        if (shimTimer || pageOwnsVoice(window.TSP)) {
-            if (pageOwnsVoice(window.TSP)) {
-                unpatchFetch();
-                pushStoredVoiceMode();
-            }
-            return;
+        if (pageOwnsVoice(window.TSP)) {
+            unpatchFetch();
+            pushStoredVoiceMode();
         }
+        if (shimTimer) return;
         var started = Date.now();
+        var sawHooks = pageOwnsVoice(window.TSP);
         shimTimer = setInterval(function () {
             if (!isAssistantPath(location.pathname)) return;
             if (pageOwnsVoice(window.TSP)) {
+                sawHooks = true;
                 unpatchFetch();
                 pushStoredVoiceMode();
-                clearInterval(shimTimer);
-                shimTimer = null;
                 return;
             }
-            if (Date.now() - started > 400) {
-                clearInterval(shimTimer);
-                shimTimer = null;
+            if (!sawHooks && Date.now() - started > 400 && !(window.fetch && window.fetch.__tspOnlineVoice)) {
                 ensureShimFetch();
             }
-        }, 50);
+            if (!sawHooks && Date.now() - started > 8000) {
+                clearInterval(shimTimer);
+                shimTimer = null;
+            }
+        }, 200);
     }
 
     function installNav() {
@@ -537,20 +543,33 @@
         window.addEventListener('popstate', function () { setTimeout(syncRoute, 0); });
     }
 
-    function pushStoredVoiceMode() {
-        if (!hasFn(window.TSP, 'setVoiceMode') && !hasFn(window.TSP, 'getVoiceMode')) return false;
-        var stored = null;
-        try {
-            var flag = localStorage.getItem('tspAndroidVoiceMode');
-            if (flag === '1' || flag === '0') stored = flag === '1';
-        } catch (e) {}
-        if (stored === null && hasFn(window.TSP, 'getVoiceMode')) {
-            try { writeVoiceOn(!!window.TSP.getVoiceMode()); } catch (e2) {}
-        } else if (stored !== null && hasFn(window.TSP, 'setVoiceMode')) {
-            voiceOn = stored;
-            try { window.TSP.setVoiceMode(stored); } catch (e3) {}
+    function shellWantsVoice() {
+        try { return localStorage.getItem('tspAndroidVoiceMode') === '1'; } catch (e) { return false; }
+    }
+
+    /**
+     * The page flag resets on every load and is not stored. While the shell
+     * voice control is on, put it back after load, navigation, or reinjection.
+     * Does not call setVoiceMode(false); that happens only when the user turns voice off.
+     */
+    function reapplyShellVoiceMode() {
+        if (!shellWantsVoice() || !hasFn(window.TSP, 'setVoiceMode')) return false;
+        voiceOn = true;
+        var already = false;
+        if (hasFn(window.TSP, 'getVoiceMode')) {
+            try { already = window.TSP.getVoiceMode() === true; } catch (e) {}
+        }
+        if (!already) {
+            try { window.TSP.setVoiceMode(true); } catch (e2) {}
         }
         syncBar();
+        return true;
+    }
+    window.__tspReapplyVoiceMode = reapplyShellVoiceMode;
+
+    function pushStoredVoiceMode() {
+        if (!hasFn(window.TSP, 'setVoiceMode')) return false;
+        reapplyShellVoiceMode();
         return true;
     }
 
