@@ -13,6 +13,7 @@ import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import { resolveNumberingTimeZone } from '@/lib/org-timezone';
 import { readEstimateDocumentLocale } from '@/lib/billing/estimate-action';
 import { isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
+import { takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
 import { stampLangOnEstimateLinks } from '@/lib/share';
 import { loadInvoiceRow, mergePaymentFieldsIntoInvoiceData } from '@/lib/billing/invoice-row-load';
 import {
@@ -253,6 +254,14 @@ export async function POST(req: NextRequest) {
         503,
         [recipient.email]
       );
+    }
+
+    const sendLimit = takeDocumentSendSlot({
+      organizationId: callerOrgId,
+      documentId: invoiceId,
+    });
+    if (!sendLimit.ok) {
+      return respond({ error: sendLimit.message, rateLimited: true }, 429);
     }
 
     const rr = await fetch('https://api.resend.com/emails', {

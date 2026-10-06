@@ -292,6 +292,24 @@ export async function listActiveSubscriptionsForCustomer(
   return Array.isArray(listed.data) ? listed.data : [];
 }
 
+/**
+ * Live org-plan subscriptions for this Stripe customer.
+ * status=all then keep active and trialing — one list call, not event order.
+ */
+export async function listLiveSubscriptionsForCustomer(
+  customerId: string,
+  limit = 100
+): Promise<StripeObject[]> {
+  const id = String(customerId || '').trim();
+  if (!id || !id.startsWith('cus_')) return [];
+  const listed = await stripeRequest(
+    `subscriptions?customer=${encodeURIComponent(id)}&status=all&limit=${Math.min(limit, 100)}`,
+    'GET'
+  );
+  const rows = Array.isArray(listed.data) ? listed.data : [];
+  return rows.filter((row) => row.status === 'active' || row.status === 'trialing');
+}
+
 export async function retrieveStripeSubscription(subscriptionId: string): Promise<StripeObject> {
   const id = String(subscriptionId || '').trim();
   if (!id || !/^sub_/.test(id)) {

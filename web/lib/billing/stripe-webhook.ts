@@ -73,3 +73,13 @@ export function isCheckoutSessionCompleted(type: string | null | undefined): boo
 export function isSubscriptionLifecycle(type: string | null | undefined): boolean {
   return type === 'customer.subscription.created' || type === 'customer.subscription.updated';
 }
+
+/** Stripe Dashboard must also send this event or a cancel never reaches us. */
+export function isSubscriptionDeleted(type: string | null | undefined): boolean {
+  return type === 'customer.subscription.deleted';
+}
+
+/** Stripe Dashboard must also send this event or a failed renewal never reaches us. */
+export function isInvoicePaymentFailed(type: string | null | undefined): boolean {
+  return type === 'invoice.payment_failed';
+}

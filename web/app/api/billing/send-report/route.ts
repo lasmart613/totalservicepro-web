@@ -19,6 +19,7 @@ import {
   senderCompanyFromOrg,
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
+import { takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
 
 const REPORT_SELECTS = [
   'id, created_by, organization_id, customer_name, customer_organization_id, customer_email, report_number, status',
@@ -149,6 +150,14 @@ export async function POST(req: NextRequest) {
         },
         503
       );
+    }
+
+    const sendLimit = takeDocumentSendSlot({
+      organizationId: callerOrgId,
+      documentId: reportId,
+    });
+    if (!sendLimit.ok) {
+      return respond({ error: sendLimit.message, rateLimited: true }, 429);
     }
 
     const rr = await fetch('https://api.resend.com/emails', {

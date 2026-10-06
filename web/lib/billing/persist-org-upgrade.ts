@@ -10,14 +10,14 @@ export function missingOrgColumn(message?: string): string | null {
   return message?.match(/Could not find the '([^']+)' column/i)?.[1] || null;
 }
 
-export async function writeOrgUpgrade(
+export async function writeOrgColumns(
   client: SupabaseClient,
   orgId: string,
-  plan: string
+  fields: Record<string, unknown>
 ): Promise<Record<string, unknown>> {
   const payload: Record<string, unknown> = {
-    ...orgUpgradeFields(plan),
-    updated_at: new Date().toISOString(),
+    ...fields,
+    updated_at: fields.updated_at || new Date().toISOString(),
   };
   let lastError: { message?: string } | null = null;
   for (let attempt = 0; attempt < 8; attempt++) {
@@ -37,6 +37,14 @@ export async function writeOrgUpgrade(
     break;
   }
   throw new Error(lastError?.message || 'Could not update the organization plan');
+}
+
+export async function writeOrgUpgrade(
+  client: SupabaseClient,
+  orgId: string,
+  plan: string
+): Promise<Record<string, unknown>> {
+  return writeOrgColumns(client, orgId, orgUpgradeFields(plan));
 }
 
 export async function persistPaidOrgUpgrade(input: {

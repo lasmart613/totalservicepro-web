@@ -4,7 +4,12 @@
  */
 
 import { getPlanOffer, isPlanSku, PLAN_OFFERS, type PlanOffer, type PlanSku } from './plan-catalog.ts';
-import { PAID_SUBSCRIPTION_TIERS, PREMIUM_MANUAL_SLOTS, UNLIMITED_MANUAL_SLOTS } from '../org-plan.ts';
+import {
+  FREE_MANUAL_SLOTS,
+  PAID_SUBSCRIPTION_TIERS,
+  PREMIUM_MANUAL_SLOTS,
+  UNLIMITED_MANUAL_SLOTS,
+} from '../org-plan.ts';
 
 export const UPGRADE_KIND = 'org_plan';
 
@@ -179,12 +184,17 @@ export type StripeSubscriptionLike = {
 
 const LIVE_SUBSCRIPTION_STATUSES = new Set(['active', 'trialing']);
 
+/** Active or trialing Stripe subscriptions are the only ones that grant a paid plan. */
+export function subscriptionGrantsPremium(status: string | null | undefined): boolean {
+  return LIVE_SUBSCRIPTION_STATUSES.has(String(status || ''));
+}
+
 /** Active Stripe subscription with org-plan metadata. Does not invent a plan. */
 export function parsePaidSubscriptionRecord(
   sub: StripeSubscriptionLike | null | undefined
 ): { ok: true } & ParsedPaidUpgrade | { ok: false; reason: string } {
   if (!sub) return { ok: false, reason: 'missing_subscription' };
-  if (!LIVE_SUBSCRIPTION_STATUSES.has(String(sub.status || ''))) {
+  if (!subscriptionGrantsPremium(sub.status)) {
     return { ok: false, reason: 'not_active' };
   }
   const meta = sub.metadata || {};
@@ -223,6 +233,25 @@ export function evaluateUpgradeSession(
   }
 
   return { ok: true, sku: parsed.sku, plan: parsed.plan };
+}
+
+/**
+ * Free plan written when a Stripe subscription ends.
+ * subscription_tier `free` is the non-paid value the org guard already allows.
+ * Does not set premium_until — that column is only the complimentary expiry.
+ */
+export function orgFreePlanFields(): {
+  is_premium: false;
+  subscription_tier: 'free';
+  plan: 'free';
+  manual_slots: number;
+} {
+  return {
+    is_premium: false,
+    subscription_tier: 'free',
+    plan: 'free',
+    manual_slots: FREE_MANUAL_SLOTS,
+  };
 }
 
 export function orgUpgradeFields(plan: string): Record<string, unknown> {
