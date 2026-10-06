@@ -285,7 +285,7 @@ test('stripe columns are not re-granted and are not written from the browser', (
   const here = dirname(fileURLToPath(import.meta.url));
   const migrationName = '20261006_000802_stripe_connect_payouts.sql';
   assert.ok(migrationName > '20261006_000801');
-  const sql = readFileSync(join(here, '../supabase/migrations', migrationName), 'utf8');
+  const sql = readFileSync(join(here, '../../supabase/migrations', migrationName), 'utf8');
   assert.match(sql, /stripe_account_id/);
   assert.doesNotMatch(sql, /GRANT\s+(INSERT|UPDATE|ALL|TRUNCATE)\b/i);
   assert.match(sql, /REVOKE UPDATE \(\s*stripe_account_id/i);
