@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { PublicLink, useT } from '@/lib/fa/locale';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { clientAuthOrigin } from '@/lib/site-origin';
 
 export default function ForgotPasswordPage() {
   const supabase = getSupabaseClient();
@@ -29,7 +30,7 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     setMessage('');
     try {
-      const origin = typeof window !== 'undefined' ? window.location.origin : 'https://repairplanet.net';
+      const origin = clientAuthOrigin();
       const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
         redirectTo: `${origin}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`,
       });

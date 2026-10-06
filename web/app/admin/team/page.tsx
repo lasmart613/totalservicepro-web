@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { TestEquipmentRoster } from '@/components/TestEquipmentRoster';
-import { canAssignShopTestEquipment } from '@/lib/roles';
+import { canAssignShopTestEquipment, isAdmin } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { teamInviteEmailError } from '@/lib/team-invite';
 
@@ -227,6 +227,32 @@ export default function TeamManagement() {
     } finally {
       setAdding(false);
     }
+  };
+
+  const changeMemberRole = async (memberId: string, role: string) => {
+    if (!orgId || !memberId) return;
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      toast.error('Sign in required.');
+      return;
+    }
+    const { postMemberRole } = await import('@/lib/org-founder-client');
+    const result = await postMemberRole(token, {
+      userId: memberId,
+      organizationId: orgId,
+      role,
+    });
+    if (!result.ok) {
+      toast.error(result.error || 'Could not change that role.');
+      return;
+    }
+    setTeamMembers((prev) =>
+      prev.map((row) => (row.id === memberId ? { ...row, role: result.role || role } : row))
+    );
+    toast.success('Role updated');
   };
 
   const resendInvite = async (email: string, role?: string) => {
@@ -462,9 +488,24 @@ export default function TeamManagement() {
                     </td>
                     <td className="py-3 px-4 text-sm">{member.email}</td>
                     <td className="py-3 px-4">
-                      <span className="px-2 py-1 text-xs rounded-full bg-[var(--surface3)]">
-                        {roleLabel(member.role)}
-                      </span>
+                      {(isAdmin(userRole) || userRole === 'owner') && member.id !== userId ? (
+                        <select
+                          className="select text-xs"
+                          aria-label={`Role for ${member.email || member.first_name || 'member'}`}
+                          value={member.role || 'fse'}
+                          onChange={(e) => changeMemberRole(String(member.id), e.target.value)}
+                        >
+                          {(member.role && !ROLES.includes(member.role) ? [member.role, ...ROLES] : ROLES).map((role) => (
+                            <option key={role} value={role}>
+                              {roleLabel(role)}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        <span className="px-2 py-1 text-xs rounded-full bg-[var(--surface3)]">
+                          {roleLabel(member.role)}
+                        </span>
+                      )}
                     </td>
                     <td className="py-3 px-4 text-sm text-[var(--text3)]">
                       {member.job_title || '—'}

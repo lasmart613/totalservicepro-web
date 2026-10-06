@@ -4,6 +4,7 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { ensureTeamMemberProfile, findAuthUserByEmail } from '@/lib/team-profile';
 import { applyInviteToExistingUser } from '@/lib/org-membership-server';
 import { DEFAULT_STAFF_ROLE } from '@/lib/org-membership';
+import { decideMemberRoleChange } from '@/lib/tenant-lockdown';
 import {
   buildTeamInviteHtml,
   buildTeamInviteText,
@@ -13,6 +14,7 @@ import {
   teamInviteRoleLabel,
   teamInviteSubject,
 } from '@/lib/team-invite';
+import { publicSiteOrigin } from '@/lib/site-origin';
 
 const ADMIN_ROLES = new Set([
   'admin',
@@ -30,15 +32,6 @@ type InviteBody = {
   /** UI Resend — same send path as a fresh invite. */
   resend?: boolean;
 };
-
-function siteUrl(req: NextRequest): string {
-  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.URL || process.env.DEPLOY_PRIME_URL;
-  if (env) return env.replace(/\/$/, '');
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
-  const proto = req.headers.get('x-forwarded-proto') || 'https';
-  if (host) return `${proto}://${host}`;
-  return 'https://repairplanet.net';
-}
 
 function isRateLimitError(msg: string): boolean {
   return /rate.?limit|too many|429|email.*limit/i.test(msg || '');
@@ -106,36 +99,30 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: emailError }, { status: 400 });
     }
 
-    const inviteRole = (body.role || DEFAULT_STAFF_ROLE).toLowerCase();
+    const requestedRole = (body.role || DEFAULT_STAFF_ROLE).toLowerCase();
+    const roleGate = decideMemberRoleChange({
+      callerRole: role,
+      targetRole: requestedRole,
+      sameOrganization: true,
+      allowServiceManager: true,
+    });
+    if (!roleGate.ok) {
+      return NextResponse.json({ error: roleGate.error }, { status: roleGate.status });
+    }
+    const inviteRole = roleGate.role;
     const firstName = (body.firstName || '').trim() || null;
     const lastName = (body.lastName || '').trim() || null;
     const jobTitle = (body.jobTitle || '').trim() || null;
     const orgId = profile.organization_id;
-    const base = siteUrl(req);
+    const base = publicSiteOrigin(req);
     const redirectTo = `${base}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`;
     const roleLabel = teamInviteRoleLabel(inviteRole);
 
     if (!hasServiceRole()) {
-      const { error: invErr } = await userClient.from('engineer_invitations').insert({
-        organization_id: orgId,
-        email,
-        role: inviteRole,
-        first_name: firstName,
-        last_name: lastName,
-        invited_by: user.id,
-        accepted: false,
-      });
-      if (invErr) {
-        return NextResponse.json({ error: invErr.message }, { status: 400 });
-      }
-      return NextResponse.json({
-        ok: true,
-        emailed: false,
-        message:
-          'Invitation saved, but the server cannot send email (missing SUPABASE_SERVICE_ROLE_KEY). ' +
-          'Contact support to configure email, or share the signup link manually.',
-        signupUrl: `${base}/login`,
-      });
+      return NextResponse.json(
+        { error: 'Server cannot create team invites (missing service role).' },
+        { status: 503 }
+      );
     }
 
     const admin = getSupabaseAdmin();

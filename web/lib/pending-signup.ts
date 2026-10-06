@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
+import { postFounderOrganization } from '@/lib/org-founder-client';
 import {
   applyComplimentarySignupFields,
   missingComplimentaryColumn,
@@ -337,64 +338,34 @@ async function linkFounderProfile(
   pending: PendingSignup
 ): Promise<void> {
   const founderComplete = pending.kind !== 'company';
-  const payload = {
-    id: userId,
-    first_name: pending.firstName,
-    last_name: pending.lastName,
-    email: pending.email,
-    phone: pending.phone || null,
-    role: pending.role,
-    job_title: pending.extra?.job_title || null,
-    organization_id: orgId,
-    onboarding_completed: founderComplete,
-    bio: pending.extra?.bio || null,
-  };
-
-  let { error: profErr } = await supabase.from('user_profiles').upsert(payload, { onConflict: 'id' });
-  if (profErr) {
-    const slim = {
-      organization_id: orgId,
-      role: pending.role,
-      first_name: pending.firstName || null,
-      last_name: pending.lastName || null,
-      onboarding_completed: founderComplete,
-    };
-    const { error: forceErr } = await supabase.from('user_profiles').update(slim).eq('id', userId);
-    if (forceErr) {
-      const r2 = await supabase
-        .from('user_profiles')
-        .update({ organization_id: orgId, role: pending.role, onboarding_completed: founderComplete })
-        .eq('id', userId);
-      if (r2.error) throw new Error(r2.error.message || 'Organization created but profile link failed.');
-    }
+  const {
+    data: { session },
+  } = await supabase.auth.getSession();
+  if (!session?.access_token) {
+    throw new Error('Sign in required to finish organization setup.');
+  }
+  const linked = await postFounderOrganization(session.access_token, {
+    organizationId: orgId,
+    profile: {
+      firstName: pending.firstName,
+      lastName: pending.lastName,
+      phone: pending.phone || null,
+      jobTitle: pending.extra?.job_title || null,
+      bio: pending.extra?.bio || null,
+      onboardingCompleted: founderComplete,
+    },
+  });
+  if (!linked.ok || linked.organizationId == null) {
+    throw new Error(linked.error || 'Organization created but profile link failed.');
   }
 
   const { data: check } = await supabase
     .from('user_profiles')
-    .select('organization_id, role, onboarding_completed')
+    .select('organization_id')
     .eq('id', userId)
     .maybeSingle();
-
   if (!check?.organization_id) {
-    const { error: lastErr } = await supabase
-      .from('user_profiles')
-      .update({
-        organization_id: orgId,
-        role: pending.role,
-        onboarding_completed: founderComplete,
-      })
-      .eq('id', userId);
-    const { data: check2 } = await supabase
-      .from('user_profiles')
-      .select('organization_id')
-      .eq('id', userId)
-      .maybeSingle();
-    if (!check2?.organization_id) {
-      throw new Error(
-        lastErr?.message ||
-          'Organization created but could not link your account. Open Onboarding to finish.'
-      );
-    }
+    throw new Error('Organization created but could not link your account. Open Onboarding to finish.');
   }
 
   await ensureOrganizationMembership(supabase, {
@@ -405,7 +376,11 @@ async function linkFounderProfile(
   });
 }
 
-/** Insert a home membership only when one is not already there. Never upsert over RLS. */
+/**
+ * Home membership for an org this user created. Writes go through
+ * POST /api/org/founder (service role). The client does not INSERT
+ * organization_memberships and does not set role from the caller.
+ */
 export async function ensureOrganizationMembership(
   supabase: SupabaseClient,
   row: {
@@ -416,30 +391,21 @@ export async function ensureOrganizationMembership(
   }
 ): Promise<void> {
   try {
-    const { data: existing, error: selErr } = await supabase
-      .from('organization_memberships')
-      .select('user_id')
-      .eq('user_id', row.user_id)
-      .eq('organization_id', row.organization_id)
-      .maybeSingle();
-    if (existing?.user_id) return;
-    if (selErr && /schema cache|does not exist|relation/i.test(selErr.message || '')) return;
-
-    const { error } = await supabase.from('organization_memberships').insert(row);
-    if (!error) return;
-    if (/duplicate|23505/i.test(error.message || '')) return;
-    if (/42501|row-level security/i.test(error.message || '')) {
-      const { data: again } = await supabase
-        .from('organization_memberships')
-        .select('user_id')
-        .eq('user_id', row.user_id)
-        .eq('organization_id', row.organization_id)
-        .maybeSingle();
-      if (again?.user_id) return;
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      console.warn('organization_memberships insert skipped: not signed in');
+      return;
     }
-    console.warn('organization_memberships insert', error.message);
-  } catch {
-    /* migration may not be applied yet — profile pointer still works */
+    const linked = await postFounderOrganization(session.access_token, {
+      organizationId: row.organization_id,
+    });
+    if (!linked.ok) {
+      console.warn('organization_memberships insert', linked.error);
+    }
+  } catch (err) {
+    console.warn('organization_memberships insert', err);
   }
 }
 
@@ -494,10 +460,7 @@ export async function applyPendingSignup(
     if (ownOrg && pending.kind !== 'company' && existing.role !== pending.role) {
       const prior = String(existing.role || '').toLowerCase();
       if (!prior || prior === 'fse' || prior === 'pending' || prior === 'engineer') {
-        await supabase
-          .from('user_profiles')
-          .update({ role: pending.role, onboarding_completed: true })
-          .eq('id', userId);
+        await linkFounderProfile(supabase, userId, existing.organization_id, pending);
       }
     }
     if (ownOrg) {
@@ -508,9 +471,32 @@ export async function applyPendingSignup(
   }
 
   const orphan = await findCreatedOrganization(supabase, userId, pending.name);
-  const orgId = orphan || (await insertOrganizationForPending(supabase, userId, pending));
-
-  await linkFounderProfile(supabase, userId, orgId, pending);
+  let orgId = orphan;
+  if (!orgId) {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) {
+      throw new Error('Sign in required to finish organization setup.');
+    }
+    const created = await postFounderOrganization(session.access_token, {
+      pending: pending as unknown as Record<string, unknown>,
+      profile: {
+        firstName: pending.firstName,
+        lastName: pending.lastName,
+        phone: pending.phone || null,
+        jobTitle: pending.extra?.job_title || null,
+        bio: pending.extra?.bio || null,
+        onboardingCompleted: pending.kind !== 'company',
+      },
+    });
+    if (!created.ok || created.organizationId == null) {
+      throw new Error(created.error || 'Could not create your organization. Try again or sign in to finish setup.');
+    }
+    orgId = created.organizationId;
+  } else {
+    await linkFounderProfile(supabase, userId, orgId, pending);
+  }
   await insertPendingOwnerEquipment(supabase, orgId, pending);
 
   clearPendingSignup();
