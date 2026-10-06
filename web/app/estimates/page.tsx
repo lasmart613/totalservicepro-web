@@ -411,10 +411,7 @@ function ShopEstimatesList() {
         </div>
 
         <div className="note-30 text-xs text-[var(--text3)] bg-[var(--surface)] border border-[var(--border2)] rounded-xl p-3 mb-4 leading-relaxed">
-          Estimates are kept on file (not deleted). Drafts and open quotes are{' '}
-          <strong className="text-[var(--text)]">valid for 30 days</strong> from creation, then
-          move to <strong className="text-[var(--text)]">Expired</strong>. Use the Expired pill to
-          show older records. Convert before expiry when possible.
+          {t('Estimates are kept on file (not deleted). Drafts and open quotes are valid for 30 days from creation, then move to Expired. Use the Expired pill to show older records. Convert before expiry when possible.')}
         </div>
 
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-5">
@@ -429,13 +426,13 @@ function ShopEstimatesList() {
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-purple-300">{loading ? '—' : invoiced}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              INVOICED
+              {t('INVOICED')}
             </div>
           </div>
           <div className="stat-card card p-3 text-center">
             <div className="text-2xl font-extrabold text-red-300">{loading ? '—' : expired}</div>
             <div className="text-[10px] font-semibold tracking-wider text-[var(--text3)] mt-1">
-              EXPIRED
+              {t('EXPIRED')}
             </div>
           </div>
         </div>
@@ -466,7 +463,7 @@ function ShopEstimatesList() {
               className={`filter-chip ${activeFilter === key ? 'active' : ''}`}
               onClick={() => setActiveFilter(key)}
             >
-              {label}
+              {t(label)}
             </button>
           ))}
         </div>
@@ -481,7 +478,7 @@ function ShopEstimatesList() {
             <div className="font-semibold">
               {activeFilter === 'expired' ? t('No expired estimates.') : t('No estimates in this view')}
             </div>
-            <p className="text-sm mt-1 text-[var(--text3)]">Create your first estimate to get started.</p>
+            <p className="text-sm mt-1 text-[var(--text3)]">{t('Create your first estimate to get started.')}</p>
             <Link href="/estimates/new" className="btn btn-primary mt-4 inline-flex">
               + {t('New Estimate')}
             </Link>
@@ -533,12 +530,12 @@ function ShopEstimatesList() {
                             st
                           )}`}
                         >
-                          {st.charAt(0).toUpperCase() + st.slice(1)}
+                          {t(st.charAt(0).toUpperCase() + st.slice(1))}
                         </span>
                         {st === 'expired' ? (
-                          <span> · Expired</span>
+                          <span>{t(' · Expired')}</span>
                         ) : until ? (
-                          <span> · Valid thru {until}</span>
+                          <span>{t(' · Valid thru {date}').replace('{date}', until)}</span>
                         ) : (
                           <span> · Valid 30 days</span>
                         )}

@@ -38,6 +38,7 @@ type InboxRow = {
 };
 
 export default function CustomerEstimatesInbox() {
+  const t = useT();
   const supabase = getSupabaseClient();
   const [rows, setRows] = useState<InboxRow[]>([]);
   const [loading, setLoading] = useState(true);
@@ -64,14 +65,14 @@ export default function CustomerEstimatesInbox() {
       const res = await fetch('/api/billing/estimates', { cache: 'no-store', headers });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json?.error || 'Could not load estimates.');
+        setError(json?.error || t('Could not load estimates.'));
         return res.status >= 500;
       }
       setRows(json.estimates || []);
       setError('');
       return false;
     } catch {
-      setError('Could not load estimates.');
+      setError(t('Could not load estimates.'));
       return true;
     }
   }
@@ -145,7 +146,7 @@ export default function CustomerEstimatesInbox() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(json?.error || 'Could not update this estimate.');
+        setError(json?.error || t('Could not update this estimate.'));
         return;
       }
       const nextAction = parseCustomerActionKind(json.action) || parseCustomerActionKind(action);
@@ -162,11 +163,11 @@ export default function CustomerEstimatesInbox() {
             : r
         )
       );
-      setFlash(customerActionConfirmationTitle(nextAction) || 'Estimate updated');
+      setFlash(t(customerActionConfirmationTitle(nextAction) || 'Estimate updated'));
       setNoteFor(null);
       setNote('');
     } catch {
-      setError('Network error. Please try again.');
+      setError(t('Network error. Please try again.'));
     } finally {
       setSubmitting(null);
     }
@@ -200,9 +201,9 @@ export default function CustomerEstimatesInbox() {
         ) : rows.length === 0 ? (
           <div className="empty-state card p-8 text-center mt-6">
             <div className="text-4xl mb-3">📝</div>
-            <div className="font-semibold">No estimates yet</div>
+            <div className="font-semibold">{t('No estimates yet')}</div>
             <p className="text-sm mt-1 text-[var(--text3)]">
-              When a service company emails you a quote, it will show up here.
+              {t('When a service company emails you a quote, it will show up here.')}
             </p>
           </div>
         ) : (
@@ -210,7 +211,7 @@ export default function CustomerEstimatesInbox() {
             {awaiting.length > 0 && (
               <section className="mt-6">
                 <h2 className="text-sm font-extrabold uppercase tracking-wider text-[var(--gold)] mb-3">
-                  Awaiting your response ({awaiting.length})
+                  {t('Awaiting your response ({count})').replace('{count}', String(awaiting.length))}
                 </h2>
                 <div className="space-y-3">
                   {awaiting.map((row) => (
@@ -293,11 +294,11 @@ function InboxCard({
       <div className="flex items-start justify-between gap-3">
         <div>
           <Link href={`/estimates/${row.estimateId}`} className="font-bold text-base hover:text-[var(--gold)]">
-            {row.estimateNumber || 'Estimate'} · {row.companyName}
+            {row.estimateNumber || t('Estimate')} · {row.companyName}
           </Link>
           <div className="text-xs text-[var(--text3)] mt-1">
             {row.createdAt ? format(row.createdAt) : '—'}
-            {expired ? ' · Expired' : until ? ` · Valid thru ${until}` : ''}
+            {expired ? t(' · Expired') : until ? t(' · Valid thru {date}').replace('{date}', until) : ''}
             {row.deviceModel ? ` · ${row.deviceModel}` : ''}
           </div>
           {actionLabel && (
@@ -310,11 +311,11 @@ function InboxCard({
                     : 'bg-amber-900/40 text-amber-200 border-amber-700'
               }`}
             >
-              {actionLabel}
+              {t(actionLabel)}
             </span>
           )}
           {row.customerActionNote && (
-            <div className="text-xs text-[var(--text2)] mt-2">Note: {row.customerActionNote}</div>
+            <div className="text-xs text-[var(--text2)] mt-2">{t('Note: {note}').replace('{note}', row.customerActionNote)}</div>
           )}
         </div>
         <div className="font-extrabold text-[var(--gold)] text-lg whitespace-nowrap">{formatOrgMoney(row.total, { currencyCode: row.currencyCode, numberFormat: row.numberFormat })}</div>
@@ -328,7 +329,7 @@ function InboxCard({
             disabled={!!busy}
             onClick={() => onSubmit(row, 'approve')}
           >
-            {submitting === `${row.estimateId}:approve` ? 'Approving…' : t('Approve')}
+            {submitting === `${row.estimateId}:approve` ? t('Approving…') : t('Approve')}
           </button>
           <button
             type="button"
@@ -337,7 +338,7 @@ function InboxCard({
             disabled={!!busy}
             onClick={() => onSubmit(row, 'reject')}
           >
-            {submitting === `${row.estimateId}:reject` ? 'Rejecting…' : t('Reject')}
+            {submitting === `${row.estimateId}:reject` ? t('Rejecting…') : t('Reject')}
           </button>
           <button
             type="button"
@@ -360,10 +361,10 @@ function InboxCard({
             className="input min-h-[80px]"
             value={note}
             onChange={(e) => onNoteChange(e.target.value)}
-            placeholder="Optional note for the service company…"
+            placeholder={t('Optional note for the service company…')}
           />
           <button type="submit" className="btn btn-primary w-full mt-2" disabled={!!busy}>
-            {submitting === `${row.estimateId}:modify` ? 'Sending…' : 'Request modification'}
+            {submitting === `${row.estimateId}:modify` ? t('Sending…') : t('Request modification')}
           </button>
         </form>
       )}

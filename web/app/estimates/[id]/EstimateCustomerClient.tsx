@@ -16,6 +16,20 @@ import {
 } from '@/lib/billing/save-helpers';
 import { formatOrgMoney } from '@/lib/money-format';
 
+function fillEmphasis(template: string, slots: Record<string, string>) {
+  return template.split(/(\{[A-Za-z_]+\})/g).map((part, i) => {
+    const match = /^\{([A-Za-z_]+)\}$/.exec(part);
+    if (match && slots[match[1]]) {
+      return (
+        <strong key={i} className="text-[var(--text)]">
+          {slots[match[1]]}
+        </strong>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
+
 type EstimateView = {
   estimateId?: string | number | null;
   estimateNumber: string;
@@ -138,7 +152,7 @@ export default function EstimateCustomerClient({
         return;
       }
       if (!res.ok) {
-        setError(json?.error || 'Something went wrong. Please contact the company.');
+        setError(json?.error || t('Something went wrong. Please contact the company.'));
         if (json?.estimate) setEst(json.estimate);
         return;
       }
@@ -147,13 +161,13 @@ export default function EstimateCustomerClient({
       setDone(parseCustomerActionKind(json.action) || parseCustomerActionKind(action));
       if (action === 'modify') setShowChanges(false);
     } catch {
-      setError('Network error. Please try again or call the company.');
+      setError(t('Network error. Please try again or call the company.'));
     } finally {
       setSubmitting(null);
     }
   }
 
-  const company = est?.companyName || 'the company';
+  const company = est?.companyName || t('the company');
   const requestNumber = request?.number || '';
 
   return (
@@ -173,10 +187,10 @@ export default function EstimateCustomerClient({
               <div className="py-10 text-center text-[var(--text3)]">{t('Loading estimate…')}</div>
             ) : error && !est ? (
               <div className="py-6 text-center">
-                <h1 className="text-xl font-extrabold mb-2">Estimate not available</h1>
+                <h1 className="text-xl font-extrabold mb-2">{t('Estimate not available')}</h1>
                 <p className="text-sm text-[var(--text2)]">{error}</p>
                 <Link href="/" className="btn btn-secondary mt-6 inline-flex">
-                  Back to dashboard
+                  {t('Back to dashboard')}
                 </Link>
               </div>
             ) : est && done && !showChanges ? (
@@ -185,20 +199,15 @@ export default function EstimateCustomerClient({
                   {done === 'approved' ? '✓' : done === 'rejected' ? '✕' : '✎'}
                 </div>
                 <h1 className="text-2xl font-extrabold mb-2">
-                  {customerActionConfirmationTitle(done)}
+                  {t(customerActionConfirmationTitle(done))}
                 </h1>
                 <p className="text-[var(--text2)] leading-relaxed">
-                  {done === 'approved' && requestNumber ? (
-                    <>
-                      Service request <strong className="text-[var(--text)]">{requestNumber}</strong> is
-                      unscheduled with <strong className="text-[var(--text)]">{company}</strong>. Other
-                      shops cannot see it.
-                    </>
-                  ) : (
-                    <>
-                      We’ve notified <strong className="text-[var(--text)]">{company}</strong>.
-                    </>
-                  )}
+                  {done === 'approved' && requestNumber
+                    ? fillEmphasis(
+                        t('Service request {number} is unscheduled with {company}. Other shops cannot see it.'),
+                        { number: requestNumber, company },
+                      )
+                    : fillEmphasis(t('We’ve notified {company}.'), { company })}
                 </p>
                 {est.estimateNumber && (
                   <p className="text-sm text-[var(--text3)] mt-4">
@@ -209,7 +218,7 @@ export default function EstimateCustomerClient({
             ) : est ? (
               <>
                 <div className="text-xs font-bold uppercase tracking-wider text-[var(--gold)] mb-1">{t('Service estimate')}</div>
-                <h1 className="text-2xl font-extrabold">{est.estimateNumber || 'Estimate'}</h1>
+                <h1 className="text-2xl font-extrabold">{est.estimateNumber || t('Estimate')}</h1>
                 <p className="text-sm text-[var(--text3)] mt-1">{company}</p>
 
                 <div className="mt-5 grid grid-cols-2 gap-3 text-sm">
@@ -222,24 +231,27 @@ export default function EstimateCustomerClient({
                     <div className="font-extrabold text-[var(--gold)] text-lg">{money(est.total, est.currencyCode, est.numberFormat)}</div>
                   </div>
                   <div className="col-span-2">
-                    <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">Validity</div>
+                    <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">{t('Validity')}</div>
                     <div>
                       {est.expired
-                        ? `Expired${est.validUntil ? ` on ${format(est.validUntil)}` : ''}`
-                        : `Good for ${est.validDays} days${
-                            est.validUntil ? ` (through ${format(est.validUntil)})` : ''
-                          }`}
+                        ? (est.validUntil
+                            ? t('Expired on {date}').replace('{date}', format(est.validUntil))
+                            : t('Expired'))
+                        : est.validUntil
+                          ? t('Good for {days} days (through {date})')
+                              .replace('{days}', String(est.validDays))
+                              .replace('{date}', format(est.validUntil))
+                          : t('Good for {days} days').replace('{days}', String(est.validDays))}
                     </div>
                   </div>
                 </div>
 
                 {role === 'shop' && (
                   <div className="mt-5 p-3 rounded-xl border border-[var(--border2)] text-sm leading-relaxed">
-                    You are signed in as the service company that wrote this estimate. The clinic
-                    customer approves it here. It will become an unscheduled request only you can see.
+                    {t('You are signed in as the service company that wrote this estimate. The clinic customer approves it here. It will become an unscheduled request only you can see.')}
                     <div className="mt-3">
                       <Link href={`/estimates/new?id=${encodeURIComponent(estimateId)}`} className="btn btn-secondary text-sm">
-                        Open editor
+                        {t('Open editor')}
                       </Link>
                     </div>
                   </div>
@@ -247,16 +259,16 @@ export default function EstimateCustomerClient({
 
                 {est.customerAction === 'changes_requested' && est.customerActionNote && (
                   <div className="mt-4 p-3 rounded-xl border border-amber-700/40 bg-amber-950/20 text-sm">
-                    A modification request was already sent
-                    {est.customerActionAt ? ` on ${format(est.customerActionAt)}` : ''}.
+                    {est.customerActionAt
+                      ? t('A modification request was already sent on {date}.').replace('{date}', format(est.customerActionAt))
+                      : t('A modification request was already sent.')}
                   </div>
                 )}
 
                 {role === 'customer' &&
                   (est.expired ? (
                     <div className="mt-6 p-4 rounded-xl border border-red-700/50 bg-red-950/30 text-sm leading-relaxed">
-                      This estimate has expired and can no longer be updated online. Please contact{' '}
-                      <strong>{company}</strong> for an updated quote.
+                      {t('This estimate has expired and can no longer be updated online. Please contact {company} for an updated quote.').replace('{company}', company)}
                     </div>
                   ) : (
                     <div className="mt-6 grid grid-cols-1 sm:grid-cols-3 gap-3">
@@ -266,7 +278,7 @@ export default function EstimateCustomerClient({
                         disabled={!!submitting}
                         onClick={() => submit('approve')}
                       >
-                        {submitting === 'approve' ? 'Approving…' : t('Approve')}
+                        {submitting === 'approve' ? t('Approving…') : t('Approve')}
                       </button>
                       <button
                         type="button"
@@ -275,7 +287,7 @@ export default function EstimateCustomerClient({
                         disabled={!!submitting}
                         onClick={() => submit('reject')}
                       >
-                        {submitting === 'reject' ? 'Rejecting…' : t('Reject')}
+                        {submitting === 'reject' ? t('Rejecting…') : t('Reject')}
                       </button>
                       <button
                         type="button"
@@ -295,20 +307,20 @@ export default function EstimateCustomerClient({
                     }}
                   >
                     <label className="text-xs text-[var(--text3)] font-semibold">
-                      Optional note for the service company
+                      {t('Optional note for the service company')}
                     </label>
                     <textarea
                       className="input mt-1 min-h-[110px]"
                       value={note}
                       onChange={(e) => setNote(e.target.value)}
-                      placeholder="Short note (optional)…"
+                      placeholder={t('Short note (optional)…')}
                     />
                     <button
                       type="submit"
                       className="btn btn-primary w-full mt-3"
                       disabled={!!submitting}
                     >
-                      {submitting === 'modify' ? 'Sending…' : 'Request modification'}
+                      {submitting === 'modify' ? t('Sending…') : t('Request modification')}
                     </button>
                   </form>
                 )}
@@ -319,7 +331,7 @@ export default function EstimateCustomerClient({
           </div>
 
           <p className="text-center text-[11px] text-[var(--text3)] mt-6">
-            Approving creates one unscheduled request for {company} only — not the marketplace.
+            {t('Approving creates one unscheduled request for {company} only — not the marketplace.').replace('{company}', company)}
           </p>
         </div>
       </div>
