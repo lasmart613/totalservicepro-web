@@ -8,8 +8,10 @@ import {
   type CustomerActionKind,
   type EstimateEmailAction,
 } from '@/lib/billing/save-helpers';
-import { useT } from '@/lib/fa/locale';
-import { useFormatDate } from '@/lib/use-format-date';
+import { translate } from '@/lib/fa/locale';
+import { formatLocaleDate } from '@/lib/i18n/format-date';
+import type { PublicLocale } from '@/lib/i18n/locales';
+import { documentLocaleMeta } from '@/lib/i18n/preference';
 import { formatOrgMoney } from '@/lib/money-format';
 
 type PublicEstimate = {
@@ -55,11 +57,23 @@ function fillSlots(template: string, slots: Record<string, React.ReactNode>): Re
   });
 }
 
-export function EstimateLinkFallback({ message }: { message: string }) {
-  const t = useT();
+function actionHref(action: EstimateEmailAction, locale: PublicLocale): string {
+  const params = new URLSearchParams();
+  params.set('action', action);
+  if (locale !== 'en') params.set('lang', locale);
+  return `?${params.toString()}`;
+}
+
+export function EstimateLinkFallback({ message, locale }: { message: string; locale: PublicLocale }) {
+  const t = (text: string) => translate(locale, text);
+  const meta = documentLocaleMeta(locale);
   const unavailable = message.includes('temporarily unavailable');
   return (
-    <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center">
+    <div
+      lang={meta.lang}
+      dir={meta.dir}
+      className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center"
+    >
       <div className="text-[var(--gold)] font-extrabold tracking-wide text-sm uppercase">RepairPlanet</div>
       <h1 className="text-xl font-extrabold mb-2 mt-3">
         {unavailable ? t('Temporarily unavailable') : t('Link not valid')}
@@ -76,6 +90,7 @@ export default function EstimateActionClient({
   requested,
   justCompleted,
   notice,
+  locale,
 }: {
   token: string;
   confirms: Record<EstimateEmailAction, string>;
@@ -83,9 +98,10 @@ export default function EstimateActionClient({
   requested: EstimateEmailAction | null;
   justCompleted: CustomerActionKind | null;
   notice: string;
+  locale: PublicLocale;
 }) {
-  const t = useT();
-  const { format } = useFormatDate();
+  const t = (text: string) => translate(locale, text);
+  const meta = documentLocaleMeta(locale);
   const [est, setEst] = useState(estimate);
   const [note, setNote] = useState('');
   const [rejectNote, setRejectNote] = useState('');
@@ -147,7 +163,12 @@ export default function EstimateActionClient({
 
   const company = est.companyName || t('the company');
   const through = est.validUntil
-    ? format(est.validUntil, { timeZone: 'UTC', month: 'short', day: 'numeric', year: 'numeric' })
+    ? formatLocaleDate(est.validUntil, locale, {
+        timeZone: 'UTC',
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+      })
     : '';
   const validity = est.expired
     ? through
@@ -173,7 +194,7 @@ export default function EstimateActionClient({
   const showConfirmation = !!confirmation && (mode.kind === 'final' || done === 'changes_requested');
 
   return (
-    <div className="min-h-[80vh] flex flex-col items-center p-6">
+    <div lang={meta.lang} dir={meta.dir} className="min-h-[80vh] flex flex-col items-center p-6">
       <div className="w-full max-w-lg">
         <div className="text-center mb-6">
           <div className="text-[var(--gold)] font-extrabold tracking-wide text-sm uppercase">
@@ -220,12 +241,12 @@ export default function EstimateActionClient({
                 <p className="text-sm text-[var(--text2)] mt-4 leading-relaxed">
                   {fillSlots(t('You can still {approve} or {reject}.'), {
                     approve: (
-                      <a className="underline" href="?action=approve">
+                      <a className="underline" href={actionHref('approve', locale)}>
                         {t('approve this estimate')}
                       </a>
                     ),
                     reject: (
-                      <a className="underline" href="?action=reject">
+                      <a className="underline" href={actionHref('reject', locale)}>
                         {t('reject it')}
                       </a>
                     ),
@@ -357,14 +378,14 @@ export default function EstimateActionClient({
                   )}
                   {mode.kind === 'confirm' && mode.action === 'approve' && (
                     <p className="text-center text-sm mt-4">
-                      <a className="underline text-[var(--text3)]" href="?action=reject">
+                      <a className="underline text-[var(--text3)]" href={actionHref('reject', locale)}>
                         {t('Reject instead')}
                       </a>
                     </p>
                   )}
                   {mode.kind === 'confirm' && mode.action === 'reject' && (
                     <p className="text-center text-sm mt-4">
-                      <a className="underline text-[var(--text3)]" href="?action=approve">
+                      <a className="underline text-[var(--text3)]" href={actionHref('approve', locale)}>
                         {t('Approve instead')}
                       </a>
                     </p>
@@ -373,12 +394,12 @@ export default function EstimateActionClient({
                     <p className="text-center text-sm mt-4 text-[var(--text2)]">
                       {fillSlots(t('Or {approve} or {reject}.'), {
                         approve: (
-                          <a className="underline" href="?action=approve">
+                          <a className="underline" href={actionHref('approve', locale)}>
                             {t('approve this estimate')}
                           </a>
                         ),
                         reject: (
-                          <a className="underline" href="?action=reject">
+                          <a className="underline" href={actionHref('reject', locale)}>
                             {t('reject it')}
                           </a>
                         ),

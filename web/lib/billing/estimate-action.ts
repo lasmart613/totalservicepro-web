@@ -5,6 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { storedOrgLanguage } from '@/lib/i18n/stored-org-language';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { resolveOrgMoneyPrefs, type OrgMoneyPrefs } from '@/lib/money-format';
@@ -119,6 +120,7 @@ export async function loadPublicEstimateForToken(token: string): Promise<
       ok: true;
       estimate: ReturnType<typeof publicEstimatePayload>;
       confirms: ReturnType<typeof signEstimateActionConfirms>;
+      orgLanguage: string | null;
     }
   | { ok: false; message: string }
 > {
@@ -142,6 +144,7 @@ export async function loadPublicEstimateForToken(token: string): Promise<
     ok: true,
     estimate: publicEstimatePayload(est, companyName, moneyPrefs),
     confirms: signEstimateActionConfirms(token, secret),
+    orgLanguage: storedOrgLanguage(est?.estimate_data),
   };
 }
 
