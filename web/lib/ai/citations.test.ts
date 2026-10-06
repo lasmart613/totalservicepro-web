@@ -50,6 +50,24 @@ test('structured cite markers round-trip without scraping prose', () => {
   assert.equal(stripCitationMarkers(`Hello ${marker}\n`), 'Hello');
 });
 
+test('out-of-range cite marker round-trips page_out_of_range', () => {
+  const marker = embedCitationMarker({
+    manualId: 110,
+    page: 147,
+    title: 'GentleMAX Pro Service Manual',
+    page_out_of_range: true,
+  });
+  assert.match(marker, /oor=1/);
+  const parsed = parseCitationMarkers(marker);
+  assert.equal(parsed[0].page, 147);
+  assert.equal(parsed[0].page_out_of_range, true);
+  const fromMeta = citationsFromMeta({
+    citations: [{ manualId: 110, page: 147, title: 'GentleMAX Pro Service Manual', page_out_of_range: true }],
+  });
+  assert.equal(fromMeta[0].page_out_of_range, true);
+  assert.equal(fromMeta[0].page, 147);
+});
+
 test('assistant HTML links page/section phrases to the viewer, not a PDF', () => {
   const html = formatAssistantHtml(
     'Open page 42 and Section 4.2 of the Xeo book.\n\n— Source: Xeo Service Manual Rev B, p.42\n[[cite:id=105&p=42&s=4.2&t=Xeo+Service+Manual+Rev+B]]',

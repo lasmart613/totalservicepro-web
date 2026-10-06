@@ -14,7 +14,10 @@
  *
  * grok-assistant/index.ts INLINES this module for single-file GitHub bootstrap.
  * Keep the two copies in sync — do not add named imports of new symbols from here.
+ * Suffix checks and physical pages live in citation-scope.ts (imported by both).
  */
+
+import { modelSuffixConflict, reconcilePhysicalPage } from './citation-scope.ts'
 
 export type CollectionHit = {
   text: string
@@ -24,7 +27,14 @@ export type CollectionHit = {
   section?: string
 }
 
-export type Retrieved = { text: string; source: string; page?: number; section?: string }
+export type Retrieved = {
+  text: string
+  source: string
+  page?: number
+  section?: string
+  fileId?: string
+  fileName?: string
+}
 
 /** Heading-style section/chapter from a retrieved passage. */
 export function extractSectionRef(text: string): string | undefined {
@@ -57,10 +67,17 @@ export function extractPageRef(text: string): number | undefined {
 
 function hitPage(row: Record<string, unknown>, text = ''): number | undefined {
   const fields = row.fields && typeof row.fields === 'object' ? (row.fields as Record<string, unknown>) : {}
+  let reported: number | undefined
   for (const v of [row.page_number, row.page, fields.page_number, fields.page]) {
     const n = Number(v)
-    if (Number.isFinite(n) && n > 0 && n < 10000) return Math.floor(n)
+    if (Number.isFinite(n) && n >= 0 && n < 10000) {
+      reported = Math.floor(n)
+      break
+    }
   }
+  // [[pdfpage:N]] wins. xAI page_number is often 0-based or the chunk-start page.
+  const physical = reconcilePhysicalPage({ reported, passage: text })
+  if (physical) return physical
   return extractPageRef(text)
 }
 
@@ -310,8 +327,15 @@ function isWeakToken(token: string): boolean {
   return !t || t.length < 4 || BRAND_TOKENS.has(t) || GENERIC_TOKENS.has(t)
 }
 
-export function docMatchesManual(docName: string, tokens: string[], chapterKeys: string[] = []): boolean {
+export function docMatchesManual(
+  docName: string,
+  tokens: string[],
+  chapterKeys: string[] = [],
+  selectedNames: string[] = []
+): boolean {
   if (!docName) return false
+  // Pro vs PRO PLUS (and ii/2, max vs max pro, …) before chapter-key or token fallback.
+  if (modelSuffixConflict(docName, [...selectedNames, ...tokens].join(' '))) return false
   if (docHasForeignModel(docName, tokens)) return false
   const n = docName.toLowerCase().replace(/[^a-z0-9]+/g, ' ')
   const compact = n.replace(/\s+/g, '')
@@ -353,7 +377,7 @@ export function pickFileIdsForManual(
     if (ids.size) return ids
   }
   for (const [id, name] of entries) {
-    if (docMatchesManual(name, tokens, chapterKeys)) ids.add(id)
+    if (docMatchesManual(name, tokens, chapterKeys, expected)) ids.add(id)
   }
   return ids
 }
@@ -372,21 +396,30 @@ export function filterHitsForManual(
     return { parts: hits.slice(0, 12), filteredOut: 0 }
   }
   const expected = (opts.expectedFilenames || []).filter(Boolean)
+  const selectedBlob = [...opts.tokens, ...expected].join(' ')
   if (opts.fileIds && opts.fileIds.size) {
-    const matched = hits.filter((h) => h.fileId && opts.fileIds!.has(h.fileId))
+    const matched = hits.filter((h) => {
+      if (!h.fileId || !opts.fileIds!.has(h.fileId)) return false
+      if (h.source && modelSuffixConflict(h.source, selectedBlob)) return false
+      return true
+    })
     if (matched.length) {
       return { parts: matched.slice(0, 12), filteredOut: hits.length - matched.length }
     }
   }
   const named = expected.length
-    ? hits.filter((p) => expected.some((e) => namesAlign(e, p.source)))
+    ? hits.filter(
+        (p) =>
+          expected.some((e) => namesAlign(e, p.source)) && !modelSuffixConflict(p.source, selectedBlob)
+      )
     : []
   if (named.length) {
     return { parts: named.slice(0, 12), filteredOut: hits.length - named.length }
   }
   // No filename hit (short CO2RE.pdf vs a longer collection name): model tokens.
   // Foreign-model markers still reject CoolGlide when Xeo is selected.
-  const tokenMatched = hits.filter((p) => docMatchesManual(p.source, opts.tokens, opts.chapterKeys))
+  // Suffix qualifiers (pro vs pro plus) reject sibling models in that fallback.
+  const tokenMatched = hits.filter((p) => docMatchesManual(p.source, opts.tokens, opts.chapterKeys, expected))
   if (tokenMatched.length) {
     return { parts: tokenMatched.slice(0, 12), filteredOut: hits.length - tokenMatched.length }
   }
@@ -402,6 +435,8 @@ export function retrievedFromHits(hits: CollectionHit[], expectedFilenames: stri
     return {
       text: h.text,
       source: loc ? `${name} ${loc}` : name,
+      ...(h.fileId ? { fileId: h.fileId } : {}),
+      ...(h.source ? { fileName: h.source } : {}),
       ...(page ? { page } : {}),
       ...(section ? { section } : {}),
     }

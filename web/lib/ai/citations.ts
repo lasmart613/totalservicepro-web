@@ -16,6 +16,12 @@ export type ManualCitation = {
   title?: string;
   page?: number;
   section?: string;
+  /**
+   * Set by grok-assistant when `page` is past the cited PDF.
+   * Viewer (PR #202): read this and show "Page N isn't in this PDF".
+   * Do not scroll to `page` while it is true. `page` stays 1-based.
+   */
+  page_out_of_range?: boolean;
 };
 
 const CITE_RE = /\[\[cite:([^\]]+)\]\]/gi;
@@ -124,6 +130,7 @@ export function embedCitationMarker(c: ManualCitation): string {
   if (c.page) qs.set('p', String(c.page));
   if (c.section) qs.set('s', String(c.section).slice(0, 80));
   if (c.title) qs.set('t', String(c.title).slice(0, 80));
+  if (c.page_out_of_range) qs.set('oor', '1');
   return `[[cite:${qs.toString()}]]`;
 }
 
@@ -135,7 +142,14 @@ export function parseCitationMarkerQuery(raw: string): ManualCitation | null {
     const page = asPositivePage(qs.get('p') || qs.get('page'));
     const section = cleanSection(qs.get('s') || qs.get('section'));
     const title = cleanSection(qs.get('t') || qs.get('title'));
-    return { manualId: id, ...(page ? { page } : {}), ...(section ? { section } : {}), ...(title ? { title } : {}) };
+    const pageOutOfRange = qs.get('oor') === '1' || qs.get('page_out_of_range') === '1' || qs.get('page_out_of_range') === 'true';
+    return {
+      manualId: id,
+      ...(page ? { page } : {}),
+      ...(section ? { section } : {}),
+      ...(title ? { title } : {}),
+      ...(pageOutOfRange ? { page_out_of_range: true } : {}),
+    };
   } catch {
     return null;
   }
@@ -175,10 +189,17 @@ export function mergeCitations(...lists: Array<ManualCitation[] | undefined | nu
       const page = asPositivePage(c.page);
       const section = cleanSection(c.section);
       const title = cleanSection(c.title);
-      const key = `${id}|${page || ''}|${section || ''}`;
+      const pageOutOfRange = c.page_out_of_range === true;
+      const key = `${id}|${page || ''}|${section || ''}|${pageOutOfRange ? 1 : 0}`;
       if (seen.has(key)) continue;
       seen.add(key);
-      out.push({ manualId: id, ...(page ? { page } : {}), ...(section ? { section } : {}), ...(title ? { title } : {}) });
+      out.push({
+        manualId: id,
+        ...(page ? { page } : {}),
+        ...(section ? { section } : {}),
+        ...(title ? { title } : {}),
+        ...(pageOutOfRange ? { page_out_of_range: true } : {}),
+      });
     }
   }
   // A bare document cite (opens page 1) is redundant once the same manual has a physical page/section.
@@ -380,11 +401,13 @@ export function citationsFromMeta(meta: unknown, fallbackManualId?: number | nul
       const r = row as Record<string, unknown>;
       const id = Number(r.manualId ?? r.manual_id ?? fallbackId);
       if (!Number.isSafeInteger(id) || id < 1) return null;
+      const pageOutOfRange = r.page_out_of_range === true || r.page_out_of_range === 'true' || r.oor === 1 || r.oor === '1';
       return {
         manualId: id,
         title: cleanSection(r.title || r.label || obj.manualLabel),
         page: asPositivePage(r.page),
         section: cleanSection(r.section),
+        ...(pageOutOfRange ? { page_out_of_range: true } : {}),
       } satisfies ManualCitation;
     })
     .filter((c): c is ManualCitation => !!c);
