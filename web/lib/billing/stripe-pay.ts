@@ -10,6 +10,8 @@
  *   STRIPE_SECRET      (fallback alias)
  */
 
+import { classifyCheckoutExpire } from './void-invoice.ts';
+
 export const STRIPE_SECRET_ENV_NAMES = ['STRIPE_SECRET_KEY', 'STRIPE_SECRET'] as const;
 
 export type StripeSecretEnvName = (typeof STRIPE_SECRET_ENV_NAMES)[number];
@@ -191,4 +193,26 @@ export async function createInvoiceCheckoutSession(
     return null;
   }
   return { url: data.url as string, sessionId: data.id as string, livemode };
+}
+
+export type CheckoutExpireResult = {
+  classification: 'expired' | 'already_expired' | 'completed' | 'failed';
+  status: number;
+};
+
+/**
+ * Expire an open Checkout Session. Does not create a charge or a refund.
+ * A completed session is reported as completed so the caller can refuse to void.
+ */
+export async function expireCheckoutSession(sessionId: string): Promise<CheckoutExpireResult> {
+  const id = String(sessionId || '').trim();
+  if (!/^cs_/.test(id)) return { classification: 'failed', status: 0 };
+  const secret = getStripeSecret();
+  if (!secret) return { classification: 'failed', status: 0 };
+  const res = await fetch(`https://api.stripe.com/v1/checkout/sessions/${encodeURIComponent(id)}/expire`, {
+    method: 'POST',
+    headers: { Authorization: `Bearer ${secret}` },
+  });
+  const data = await res.json().catch(() => ({}));
+  return { classification: classifyCheckoutExpire(res.status, data), status: res.status };
 }

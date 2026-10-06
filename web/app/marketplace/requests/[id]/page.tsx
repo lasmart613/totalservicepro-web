@@ -16,6 +16,7 @@ import { acceptServiceBid } from '@/lib/award';
 import { ShareButton } from '@/components/ShareButton';
 import { serviceRequestShareText } from '@/lib/share';
 import { OPEN_SERVICE_REQUEST_COLUMNS } from '@/lib/org-scoped-read';
+import { displayModelName } from '@/lib/model-display';
 
 function money(n: number | null | undefined) {
   if (n == null || Number.isNaN(Number(n))) return '—';
@@ -510,7 +511,7 @@ export default function ServiceRequestDetail() {
                 )}
                 {request.model && (
                   <div>
-                    <span className="text-[var(--text3)]">Model:</span> {request.model}
+                    <span className="text-[var(--text3)]">Model:</span> {displayModelName(request.model)}
                   </div>
                 )}
                 {request.serial_number && (

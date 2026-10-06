@@ -7,6 +7,7 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { displayModelName, displayModelText } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { loadServiceHistoryForLaser } from '@/lib/equipment-ensure';
 import { StorageImage } from '@/components/StorageImage';
@@ -107,7 +108,7 @@ export default function LaserProfilePage() {
           title:
             (r.report_number ? `${r.report_number} · ` : '') + (r.service_type || 'Service report'),
           date: r.date_out || r.created_at,
-          detail: [r.equipment_name || r.model_type || '', r.service_engineer ? `FSE: ${r.service_engineer}` : '']
+          detail: [displayModelText(r.equipment_name || r.model_type || ''), r.service_engineer ? `FSE: ${r.service_engineer}` : '']
             .filter(Boolean)
             .join(' · '),
         });
@@ -294,7 +295,7 @@ export default function LaserProfilePage() {
         </div>
 
         <h1 className="text-3xl font-extrabold text-[var(--gold)] mt-4">
-          {laser.manufacturer} {laser.model}
+          {laser.manufacturer} {displayModelName(laser.model)}
         </h1>
         <p className="text-sm text-[var(--text3)] mt-1">
           {laser.serial_number ? `SN ${laser.serial_number}` : 'No serial on file'}
@@ -401,7 +402,7 @@ export default function LaserProfilePage() {
                 <select className="input" value={model} onChange={(e) => setModel(e.target.value)} disabled={!mfr}>
                   <option value="">Select model…</option>
                   {modelOptions.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m} value={m}>{displayModelName(m)}</option>
                   ))}
                   <option value={OTHER_MODEL}>Other / not listed…</option>
                 </select>

@@ -23,6 +23,7 @@ import {
 import { toast } from 'sonner';
 import { ArrowLeft, Image as ImageIcon, Package } from 'lucide-react';
 import { useGuestSignupRedirect } from '@/lib/use-signed-in';
+import { displayModelName, displayModelText } from '@/lib/model-display';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
 import { StorageImage } from '@/components/StorageImage';
 
@@ -339,7 +340,7 @@ function PartDetail() {
                   <h1 className="text-3xl font-extrabold mt-1">{listing.title}</h1>
                   {(listing.manufacturer || listing.model) && (
                     <p className="text-[var(--text2)] mt-1">
-                      {[listing.manufacturer, listing.model].filter(Boolean).join(' · ')}
+                      {[listing.manufacturer, displayModelName(listing.model)].filter(Boolean).join(' · ')}
                     </p>
                   )}
                 </div>
@@ -403,7 +404,7 @@ function PartDetail() {
                 {compatible && (
                   <div>
                     <div className="text-[var(--text3)] mb-1">Compatible models</div>
-                    <div>{compatible}</div>
+                    <div>{displayModelText(compatible)}</div>
                   </div>
                 )}
                 {oem && (

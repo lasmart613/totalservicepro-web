@@ -16,6 +16,8 @@ import {
   type CompanyTheme,
   type ThemeScope,
 } from '../company-theme.ts';
+import { displayModelName, displayModelText } from '../model-display.ts';
+import { DEFAULT_ORG_TIMEZONE, formatDateInTimeZone } from '../org-timezone.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
 
 export type DocThemeScope = ThemeScope;
@@ -327,28 +329,26 @@ export type InvoiceHtmlInput = {
   /** Organization display currency. Omitted values stay USD in the locale format. */
   moneyPrefs?: OrgMoneyPrefs | null;
   locale?: string | null;
+  /** IANA zone for the fallback "today" date. Date-only invoice dates are not shifted. */
+  timeZone?: string | null;
 };
+
+function docZone(timeZone: string | null | undefined): string {
+  const zone = String(timeZone || '').trim();
+  return zone || DEFAULT_ORG_TIMEZONE;
+}
+
+function docDateLabel(value: string | null | undefined, timeZone: string | null | undefined, locale?: string | null): string {
+  return formatDateInTimeZone(value || new Date(), docZone(timeZone), locale || 'en-US');
+}
 
 export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
   const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
+  const zone = docZone(input.timeZone);
   const dateLabel = input.invoiceDate
-    ? (() => {
-        try {
-          return new Date(input.invoiceDate + (input.invoiceDate.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
-        } catch {
-          return input.invoiceDate;
-        }
-      })()
-    : new Date().toLocaleDateString();
-  const dueLabel = input.dueDate
-    ? (() => {
-        try {
-          return new Date(input.dueDate + (input.dueDate.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
-        } catch {
-          return input.dueDate;
-        }
-      })()
-    : '—';
+    ? docDateLabel(input.invoiceDate, zone, input.locale)
+    : docDateLabel(null, zone, input.locale);
+  const dueLabel = input.dueDate ? docDateLabel(input.dueDate, zone, input.locale) : '—';
 
   const rule = documentRuleColor(input.theme, input.themeScope);
 
@@ -430,7 +430,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
     linesHtml +
     (input.description
       ? `<div style="margin:0 0 12px;font-size:11px;color:#444;"><strong>Notes:</strong> ${esc(
-          input.description
+          displayModelText(input.description)
         )}</div>`
       : '') +
     `<h3 style="margin:16px 0 8px;color:#111;border-bottom:2px solid ${rule};padding-bottom:4px;font-size:13px;">Amounts</h3>` +
@@ -448,17 +448,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         (deposit > 0
           ? `<div style="margin-top:8px;">Deposit received: <strong>${money(deposit)}</strong>` +
             (input.depositDate
-              ? ` on ${esc(
-                  (() => {
-                    try {
-                      return new Date(
-                        input.depositDate + (input.depositDate.length === 10 ? 'T12:00:00' : '')
-                      ).toLocaleDateString();
-                    } catch {
-                      return input.depositDate;
-                    }
-                  })()
-                )}`
+              ? ` on ${esc(docDateLabel(input.depositDate, zone, input.locale))}`
               : '') +
             (input.depositMethod ? ` via ${esc(input.depositMethod)}` : '') +
             `</div>` +
@@ -471,17 +461,7 @@ export function buildInvoiceHtml(input: InvoiceHtmlInput): string {
         ? `<div style="margin-top:10px;padding:10px;background:#fffbeb;border:1px solid ${rule};border-radius:6px;font-size:12px;">` +
           `<div>Deposit received: <strong>${money(deposit)}</strong>` +
           (input.depositDate
-            ? ` on ${esc(
-                (() => {
-                  try {
-                    return new Date(
-                      input.depositDate + (input.depositDate.length === 10 ? 'T12:00:00' : '')
-                    ).toLocaleDateString();
-                  } catch {
-                    return input.depositDate;
-                  }
-                })()
-              )}`
+            ? ` on ${esc(docDateLabel(input.depositDate, zone, input.locale))}`
             : '') +
           (input.depositMethod ? ` via ${esc(input.depositMethod)}` : '') +
           `</div>` +
@@ -541,22 +521,10 @@ export type PurchaseOrderHtmlInput = {
 export function buildPurchaseOrderHtml(input: PurchaseOrderHtmlInput): string {
   const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
   const dateLabel = input.poDate
-    ? (() => {
-        try {
-          return new Date(input.poDate + (input.poDate.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
-        } catch {
-          return input.poDate;
-        }
-      })()
-    : new Date().toLocaleDateString();
+    ? docDateLabel(input.poDate, DEFAULT_ORG_TIMEZONE, input.locale)
+    : docDateLabel(null, DEFAULT_ORG_TIMEZONE, input.locale);
   const neededLabel = input.neededBy
-    ? (() => {
-        try {
-          return new Date(input.neededBy + (input.neededBy.length === 10 ? 'T12:00:00' : '')).toLocaleDateString();
-        } catch {
-          return input.neededBy;
-        }
-      })()
+    ? docDateLabel(input.neededBy, DEFAULT_ORG_TIMEZONE, input.locale)
     : '—';
 
   let linesHtml =
@@ -772,7 +740,7 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
     `<div><span style="color:#666;font-size:8px;">MANUFACTURER</span> ${esc(
       input.manufacturer || '—'
     )}</div>` +
-    `<div><span style="color:#666;font-size:8px;">MODEL</span> ${esc(input.model || '—')}</div>` +
+    `<div><span style="color:#666;font-size:8px;">MODEL</span> ${esc(input.model ? displayModelName(input.model) : '—')}</div>` +
     `<div><span style="color:#666;font-size:8px;">SERIAL #</span> ${esc(input.serial || '—')}</div>` +
     `<div><span style="color:#666;font-size:8px;">PULSE COUNT</span> ${esc(
       input.pulseCount || '—'

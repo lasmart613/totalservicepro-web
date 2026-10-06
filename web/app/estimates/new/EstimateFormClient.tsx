@@ -48,6 +48,7 @@ import {
   type EquipmentType,
 } from '@/lib/equipment-types';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
+import { formatDateInTimeZone, orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
 
 type CustomerOpt = LinkedCustomerOpt;
 
@@ -72,6 +73,7 @@ export default function EstimateFormClient() {
   const allocatedNumberRef = useRef('');
   const [status, setStatus] = useState('draft');
   const [company, setCompany] = useState<DocCompany>({});
+  const [orgTimeZone, setOrgTimeZone] = useState<string | null>(null);
   const [companyTheme, setCompanyTheme] = useState<CompanyTheme | null>(null);
   const [emailing, setEmailing] = useState(false);
 
@@ -397,6 +399,10 @@ export default function EstimateFormClient() {
           });
         }
         if (orgId) {
+          const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();
+          if (!zoneRow.error && zoneRow.data?.timezone) setOrgTimeZone(String(zoneRow.data.timezone));
+        }
+        if (orgId) {
           await loadCustomers(orgId);
           try {
             setCompanyTheme(await getCompanyTheme(orgId, supabase));
@@ -519,7 +525,7 @@ export default function EstimateFormClient() {
         estNum = await allocateDocNumber(supabase, {
           orgId: userOrgId,
           kind: 'EST',
-          date: new Date(),
+          date: orgTodayIso({ stored: orgTimeZone, state: company.state }),
         });
         setDocNumber(estNum);
       }
@@ -733,7 +739,14 @@ export default function EstimateFormClient() {
         (docNumber && !/^draft$/i.test(docNumber) ? docNumber : '') ||
         allocatedNumberRef.current ||
         '',
-      dateStr: new Date().toLocaleDateString(),
+      dateStr: formatDateInTimeZone(
+        new Date(),
+        resolveOrgTimeZone({
+          stored: orgTimeZone,
+          state: company.state,
+          allowBrowser: false,
+        }).timeZone
+      ),
       manufacturer,
       model: modelName,
       serial,

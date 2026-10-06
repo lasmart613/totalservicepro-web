@@ -430,11 +430,11 @@
                 const s = JSON.parse(raw);
                 return {
                     zappPersona:    s.zappPersona !== false,
-                    zappVoice:      s.zappVoice || 'sage',
+                    zappVoice:      s.zappVoice || 'eve',
                 };
             }
         } catch(e) {}
-        return { zappPersona: true, zappVoice: 'sage' };
+        return { zappPersona: true, zappVoice: 'eve' };
     }
 
     let messages = [], selectedManualPath = '', selectedManualId = null, lastSentManualId = null, lastSentManualPath = '', isTyping = false;
@@ -989,9 +989,9 @@
         if (err && err !== 'cancelled') showToast('Voice error: ' + err);
     };
 
+    // grok-tts default is eve. sage is not an xAI TTS voice (HTTP 400).
     const VOICE_OPTIONS = {
         male:   [
-            { id: 'sage', label: 'Sage — warm & clear' },
             { id: 'rex',  label: 'Rex — confident' },
             { id: 'sal',  label: 'Sal — versatile' },
             { id: 'leo',  label: 'Leo — authoritative' },
@@ -1043,7 +1043,7 @@
     function saveVoiceSettings() {
         try {
             const persona = document.getElementById('vZappPersona')?.checked ?? true;
-            const voice   = document.getElementById('vVoice')?.value || 'sage';
+            const voice   = document.getElementById('vVoice')?.value || 'eve';
             const raw = localStorage.getItem('tsp_settings');
             const s = raw ? JSON.parse(raw) : {};
             const gender = ['eve','ara'].includes(voice) ? 'female' : 'male';
