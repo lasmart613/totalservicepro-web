@@ -1,6 +1,8 @@
 /**
  * Client for Supabase edge function `grok-assistant` (shared with Android AI).
  * Text chat only on web for Sprint A — voice/TTS remains mobile.
+ * Mobile voice calls Supabase `grok-tts` with the user JWT. The xAI key stays
+ * a Supabase function secret (same XAI_API_KEY as grok-assistant).
  */
 
 import { getSupabaseUrl } from '@/lib/supabase/client';
@@ -85,7 +87,7 @@ export async function fetchAiUsage(accessToken: string): Promise<AiUsage | null>
       },
       voice: {
         used: Number(json.voice?.used ?? 0),
-        limit: Number(json.voice?.limit ?? 1),
+        limit: Number(json.voice?.limit ?? 5),
       },
       tier: json.tier || 'free',
     };
@@ -107,7 +109,11 @@ export async function grokChat(opts: {
   manualTitle?: string | null;
   manualBrand?: string | null;
   manualModel?: string | null;
+  manualLanguage?: string | null;
+  replyLanguage?: string | null;
   scopeChanged?: boolean;
+  /** True only while `TSP.setVoiceMode(true)` is on. The viewer panel leaves this off. */
+  voiceMode?: boolean;
 }): Promise<GrokChatResult | GrokErrorResult> {
   const nonSys = opts.messages
     .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -117,12 +123,14 @@ export async function grokChat(opts: {
   try {
     const { status, json } = await postGrok(opts.accessToken, {
       action: 'chat',
-      voiceMode: false,
+      voiceMode: opts.voiceMode === true,
       manualPath: opts.manualPath || null,
       manualId: opts.manualId ?? null,
       manualTitle: opts.manualTitle || null,
       manualBrand: opts.manualBrand || null,
       manualModel: opts.manualModel || null,
+      manualLanguage: opts.manualLanguage || null,
+      replyLanguage: opts.replyLanguage || null,
       scopeChanged: opts.scopeChanged === true,
       messages: nonSys,
     });
@@ -144,7 +152,7 @@ export async function grokChat(opts: {
           : json?.used != null
             ? {
                 text: { used: json.used, limit: json.limit ?? 5 },
-                voice: { used: 0, limit: 1 },
+                voice: { used: 0, limit: 5 },
               }
             : undefined,
       };

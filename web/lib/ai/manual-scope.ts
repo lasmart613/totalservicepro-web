@@ -99,6 +99,10 @@ export type GrokChatPayload = {
   manualTitle: string | null;
   manualBrand: string | null;
   manualModel: string | null;
+  /** ISO 639-1 site language. The assistant answers in this language. */
+  replyLanguage: string | null;
+  /** ISO 639-1 of the selected manual. Null when no manual is selected. */
+  manualLanguage: string | null;
   messages: ChatMessage[];
   scopeChanged: boolean;
 };
@@ -123,6 +127,8 @@ export function buildGrokChatPayload(opts: {
   manualTitle?: unknown;
   manualBrand?: unknown;
   manualModel?: unknown;
+  manualLanguage?: unknown;
+  replyLanguage?: unknown;
   lastSentManualId?: unknown;
   lastSentManualPath?: unknown;
   voiceMode?: boolean;
@@ -151,6 +157,8 @@ export function buildGrokChatPayload(opts: {
     manualTitle: cleanManualHint(opts.manualTitle),
     manualBrand: cleanManualHint(opts.manualBrand),
     manualModel: cleanManualHint(opts.manualModel),
+    replyLanguage: cleanManualHint(opts.replyLanguage),
+    manualLanguage: cleanManualHint(opts.manualLanguage),
     messages,
     scopeChanged,
   };
@@ -224,7 +232,7 @@ const EXCERPT_STOPWORDS = new Set([
 function excerptQueryTerms(query: string): string[] {
   const tokens = String(query || '')
     .toLowerCase()
-    .split(/[^a-z0-9+]+/)
+    .split(/[^\p{L}\p{N}+]+/u)
     .filter(Boolean);
   const terms: string[] = [];
   const seen = new Set<string>();
@@ -249,7 +257,7 @@ function termAt(hay: string, term: string, from: number): number {
     if (at < 0) return -1;
     const before = at > 0 ? hay.charAt(at - 1) : '';
     const after = hay.charAt(at + term.length);
-    const edge = (ch: string) => ch === '' || /[^a-z0-9+]/.test(ch);
+    const edge = (ch: string) => ch === '' || !/[\p{L}\p{N}+]/u.test(ch);
     if (edge(before) && edge(after)) return at;
     i = at + 1;
   }

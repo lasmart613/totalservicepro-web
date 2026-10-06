@@ -137,3 +137,11 @@ test('logged-out directory redacts PII and sends card clicks to signup', () => {
   assert.doesNotMatch(card, /target="_blank"/);
   assert.match(deep, /useGuestSignupRedirect/);
 });
+
+test('signed-in directory labels do not read the auth hint during render', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const hook = readFileSync(join(here, '../use-signed-in.ts'), 'utf8');
+  assert.doesNotMatch(hook, /useState\(\{\s*ready:\s*false,\s*signedIn:\s*hasBrowserAuthHint\(\)/);
+  assert.match(hook, /signedIn:\s*false/);
+  assert.match(hook, /hasBrowserAuthHint\(\)/);
+});

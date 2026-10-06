@@ -6,6 +6,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
+import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { resolveOrgMoneyPrefs, type OrgMoneyPrefs } from '@/lib/money-format';
 import { estimateActionUrl } from '@/lib/share';
 import { approveEstimateCreatingUnscheduledRequest } from '@/lib/billing/approve-estimate';
@@ -13,6 +14,7 @@ import {
   ESTIMATE_VALID_DAYS,
   customerActionFromEstimate,
   customerActionLabel,
+  estimateValidityText,
   isEstimateExpired,
   parseJsonField,
   resolveCustomerActionApply,
@@ -23,10 +25,12 @@ import {
   CUSTOMER_ACTION_CHANGES,
   CUSTOMER_ACTION_REJECTED,
   buildOrgNotifyEmail,
+  customerActionWrite,
   escHtml,
   generateEstimateActionToken,
   isValidEstimateActionToken,
   mergeCustomerActionIntoEstimateData,
+  signEstimateActionConfirms,
 } from '@/lib/billing/estimate-action-helpers';
 
 export { customerActionFromEstimate, customerActionLabel, estimateActionUrl };
@@ -35,10 +39,16 @@ export {
   CUSTOMER_ACTION_CHANGES,
   CUSTOMER_ACTION_REJECTED,
   buildOrgNotifyEmail,
+  customerActionWrite,
+  decideEstimateActionHttp,
   generateEstimateActionToken,
   isValidEstimateActionToken,
   mergeCustomerActionIntoEstimateData,
-};
+  signEstimateActionConfirm,
+  signEstimateActionConfirms,
+  verifyEstimateActionConfirm,
+  estimateActionRedirectLocation,
+} from '@/lib/billing/estimate-action-helpers';
 export type { CustomerActionKind };
 export type { EstimateCustomerAction } from '@/lib/billing/estimate-action-helpers';
 
@@ -96,36 +106,58 @@ export async function findEstimateByActionToken(
   return viaJson || null;
 }
 
+export function estimateActionConfirmSecret(): string {
+  return (
+    process.env.ESTIMATE_ACTION_CONFIRM_SECRET ||
+    process.env.SUPABASE_SERVICE_ROLE_KEY ||
+    ''
+  );
+}
+
+export async function loadPublicEstimateForToken(token: string): Promise<
+  | {
+      ok: true;
+      estimate: ReturnType<typeof publicEstimatePayload>;
+      confirms: ReturnType<typeof signEstimateActionConfirms>;
+    }
+  | { ok: false; message: string }
+> {
+  const invalid = {
+    ok: false as const,
+    message: 'This estimate link is invalid or expired. Please contact the company that sent the estimate.',
+  };
+  const unavailable = {
+    ok: false as const,
+    message: 'This page is temporarily unavailable. Please contact the company that sent the estimate.',
+  };
+  if (!isValidEstimateActionToken(token)) return invalid;
+  const secret = estimateActionConfirmSecret();
+  if (!secret || !hasServiceRole()) return unavailable;
+  const admin = getSupabaseAdmin();
+  const est = await findEstimateByActionToken(admin, token);
+  if (!est) return invalid;
+  const { companyName } = await resolveOrgNotifyEmails(admin, est);
+  const moneyPrefs = await loadOrgMoneyPrefs(admin, est.organization_id);
+  return {
+    ok: true,
+    estimate: publicEstimatePayload(est, companyName, moneyPrefs),
+    confirms: signEstimateActionConfirms(token, secret),
+  };
+}
+
 export async function persistCustomerAction(
   client: SupabaseClient,
   estimate: any,
   action: CustomerActionKind,
   note: string | null
 ): Promise<{ already: boolean; conflict: boolean; action: CustomerActionKind }> {
-  const prev = customerActionFromEstimate(estimate);
-  const resolved = resolveCustomerActionApply(prev.action, action);
-  if (!resolved.apply) {
-    return { already: true, conflict: resolved.conflict, action: prev.action || action };
+  const written = customerActionWrite(estimate, action, note, new Date().toISOString());
+  if (!written.patch) {
+    return { already: true, conflict: written.conflict, action: written.action };
   }
-  const at = new Date().toISOString();
-  const nextNote =
-    action === CUSTOMER_ACTION_CHANGES
-      ? (note || '').trim() || prev.note
-      : prev.note;
-  const ed = mergeCustomerActionIntoEstimateData(estimate.estimate_data, {
-    token: prev.token,
-    action,
-    at,
-    note: nextNote,
-  });
   const attempts: Record<string, unknown>[] = [
-    {
-      customer_action: action,
-      customer_action_at: at,
-      customer_action_note: nextNote,
-      estimate_data: ed,
-    },
-    { estimate_data: ed },
+    written.patch,
+    { estimate_data: written.patch.estimate_data },
   ];
   for (const body of attempts) {
     const { error } = await client.from('service_estimates').update(body).eq('id', estimate.id);
@@ -299,7 +331,7 @@ export async function notifyShopOfCustomerAction(
     customerName: payload.customerName,
     estimateNumber: payload.estimateNumber,
     total: payload.total,
-    note: action === CUSTOMER_ACTION_CHANGES ? note : null,
+    note: action === CUSTOMER_ACTION_APPROVED ? null : note,
     moneyPrefs,
     estimateId: estimate.id,
   });
@@ -338,6 +370,11 @@ export function publicEstimatePayload(estimate: any, companyName: string, money?
     companyName,
     validDays: ESTIMATE_VALID_DAYS,
     validUntil,
+    validityText: estimateValidityText({
+      expired,
+      validDays: ESTIMATE_VALID_DAYS,
+      validUntil,
+    }),
     createdAt,
     expired,
     customerAction: action.action,

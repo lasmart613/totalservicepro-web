@@ -477,19 +477,20 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Manuals',
     group: 'catalog',
     description:
-      'Two libraries: Service Manuals (service / technical / parts) and Operators Manuals (operator / user / IFU). Set doc_kind so the book lands on the right shelf — Operators content must not sit on the Service shelf (e.g. Lyra 767). equipment_type is the room (laser, lithotriptor, c_arm, plus BMET rooms — no Other). Quanta Litho / Cyber Ho / Litho EVO and Dornier H20 / H30 (Medilas) are laser (holmium), not lithotriptor. is_incomplete marks a known-incomplete PDF (still indexable). PDF body text lives in manual_search_index; xai_collection_id marks rows already in the shared Grok collection.',
+      'Two libraries: Service Manuals (service / technical / parts) and Operators Manuals (operator / user / IFU). Set doc_kind so the book lands on the right shelf — Operators content must not sit on the Service shelf (e.g. Lyra 767). language is an ISO 639-1 code (default en); a trailing title suffix such as (German) is kept on the title. equipment_type is the room (laser, lithotriptor, c_arm, plus BMET rooms — no Other). Quanta Litho / Cyber Ho / Litho EVO and Dornier H20 / H30 (Medilas) are laser (holmium), not lithotriptor. is_incomplete marks a known-incomplete PDF (still indexable). PDF body text lives in manual_search_index; xai_collection_id marks rows already in the shared Grok collection.',
     listColumns: [
       'id',
       'brand',
       'title',
       'doc_kind',
+      'language',
       'equipment_type',
       'is_incomplete',
       'xai_collection_id',
       'storage_path',
       'created_at',
     ],
-    searchColumns: ['brand', 'title', 'equipment_type', 'doc_kind'],
+    searchColumns: ['brand', 'title', 'equipment_type', 'doc_kind', 'language'],
   }),
   crud({
     key: 'user_manuals',
@@ -515,8 +516,8 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Parts catalog',
     group: 'catalog',
     description: 'Shop parts catalog + stock flags.',
-    listColumns: ['id', 'name', 'part_number', 'brand', 'manufacturer', 'in_stock', 'quantity_on_hand'],
-    searchColumns: ['name', 'part_number', 'brand', 'manufacturer'],
+    listColumns: ['id', 'name', 'part_number', 'brand', 'in_stock', 'quantity_on_hand'],
+    searchColumns: ['name', 'part_number', 'brand'],
   }),
   crud({
     key: 'parts',
@@ -533,7 +534,7 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Part vendors',
     group: 'catalog',
     description: 'Vendor + cost rows for catalog parts.',
-    listColumns: ['id', 'part_id', 'vendor_name', 'cost'],
+    listColumns: ['id', 'part_id', 'vendor_name', 'unit_cost'],
     searchColumns: ['vendor_name'],
   }),
   crud({
@@ -588,8 +589,8 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Product issue reports',
     group: 'leads',
     description: 'In-app “report a problem” submissions.',
-    listColumns: ['id', 'email', 'created_at'],
-    searchColumns: ['email'],
+    listColumns: ['id', 'created_at', 'reporter_email', 'what_happened', 'page_url'],
+    searchColumns: ['reporter_email', 'what_happened', 'page_url'],
   }),
 
   crud({

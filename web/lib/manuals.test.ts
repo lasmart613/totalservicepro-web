@@ -147,6 +147,7 @@ test('viewer loads same-origin pdf.js, not a CDN, and can turn pages', () => {
   assert.match(viewer, /initialPage/);
   assert.match(viewPage, /initialPage|params\.get\('page'\)/);
   assert.match(viewer, /Incomplete/);
+  assert.match(viewer, /manualLanguageBadge/);
   assert.match(viewer, /isIncomplete|is_incomplete/);
   assert.match(viewer, /Next ►/);
   assert.match(viewer, /◄ Prev/);

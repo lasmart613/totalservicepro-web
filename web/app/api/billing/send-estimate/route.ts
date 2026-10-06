@@ -13,7 +13,12 @@ import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-
 import { getCompanyTheme } from '@/lib/company-theme';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import {
+  finalizeEstimateDelivery,
+  isEstimateMarkedSent,
+} from '@/lib/billing/finalize-estimate';
+import {
   buildOwnedEstimateMessage,
+  buildOwnedEstimatePlainText,
   documentAccountLinks,
   documentCustomerOrgId,
   documentOwnedByOrganization,
@@ -27,9 +32,10 @@ import {
   senderCompanyFromOrg,
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
+import { rejectedEstimateChangeRefusal } from '@/lib/billing/estimate-display';
 
 const EST_SELECTS = [
-  'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action_token, services, issues, created_at',
+  'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action, customer_action_token, services, issues, created_at',
   'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action_token',
   'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status',
 ];
@@ -41,6 +47,8 @@ const EST_SELECTS = [
  * The HTML and recipient come from that estimate. The body cannot supply them.
  * No customer-invite claim token is minted. Approve / reject links use the
  * estimate action token already stored on that estimate.
+ * The existing row is marked pending before mail is sent. A repeat call for an
+ * already pending/sent estimate does not send again and does not insert.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -95,6 +103,10 @@ export async function POST(req: NextRequest) {
     if (!documentOwnedByOrganization(est, callerOrgId)) {
       return respond({ error: 'This estimate belongs to another organization.' }, 403);
     }
+    const rejected = rejectedEstimateChangeRefusal(est);
+    if (rejected) {
+      return respond({ ok: false, emailSent: false, error: rejected.error }, rejected.status);
+    }
 
     let crm: { email: string; source: 'crm_org' | 'crm_contact' | 'form' | 'none' } | null = null;
     const custOrgId = documentCustomerOrgId(est, 'estimate_data');
@@ -121,6 +133,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (isEstimateMarkedSent(est.status)) {
+      return respond(
+        {
+          ok: true,
+          emailSent: false,
+          alreadySent: true,
+          to: recipient.email,
+          emailSource: recipient.source,
+          estimateId,
+        },
+        200,
+        [recipient.email]
+      );
+    }
+
     const techName = await readTechName(supabase, user.id);
     const company =
       callerOrgId != null
@@ -139,16 +166,23 @@ export async function POST(req: NextRequest) {
 
     const subject = ownedDocumentSubject('estimate', est.estimate_number, company.company_name);
     const moneyPrefs = callerOrgId != null ? await loadOrgMoneyPrefs(supabase, callerOrgId) : null;
-    let html = buildOwnedEstimateMessage({
+    const actionUrl = estimateActionUrl(actionToken);
+    const mailInput = {
       row: est,
       company,
       theme,
-      actionUrl: estimateActionUrl(actionToken),
+      actionUrl,
       moneyPrefs,
-    });
-    html = ensureEstimateActionCtas(html, estimateActionUrl(actionToken));
+    };
+    const html = ensureEstimateActionCtas(buildOwnedEstimateMessage(mailInput), actionUrl);
     const origin = publicSiteOrigin(req);
     const { signupUrl, loginUrl } = documentAccountLinks(origin, estimateCustomerPath(estimateId));
+    const text = [
+      buildOwnedEstimatePlainText(mailInput),
+      '',
+      `Create a free account: ${signupUrl}`,
+      `Sign in: ${loginUrl}`,
+    ].join('\n');
     const wrapped = wrapCustomerFacingDocumentEmail({
       subject,
       documentHtml: html,
@@ -176,39 +210,52 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const rr = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        'Content-Type': 'application/json',
+    const delivery = await finalizeEstimateDelivery({
+      client: writer,
+      estimateId,
+      row: est,
+      send: async () => {
+        const rr = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${resendKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(
+            resendMessage({
+              from,
+              to: recipient.email,
+              subject,
+              html: wrapped,
+              text,
+              replyTo: company.email,
+            })
+          ),
+        });
+        const result = await rr.json().catch(() => ({}));
+        if (!rr.ok) {
+          console.error('Resend estimate send failed', result);
+          const msg = result?.message || `Email provider error (${rr.status})`;
+          const friendly =
+            /verify a domain|own email address|testing emails|not verified/i.test(msg)
+              ? `${msg} — Verify medicalrepairnetwork.com DNS in Resend before sending to customers.`
+              : msg;
+          return { ok: false, error: friendly };
+        }
+        return { ok: true, id: result?.id || null };
       },
-      body: JSON.stringify(
-        resendMessage({
-          from,
-          to: recipient.email,
-          subject,
-          html: wrapped,
-          replyTo: company.email,
-        })
-      ),
     });
 
-    const result = await rr.json().catch(() => ({}));
-    if (!rr.ok) {
-      console.error('Resend estimate send failed', result);
-      const msg = result?.message || `Email provider error (${rr.status})`;
-      const friendly =
-        /verify a domain|own email address|testing emails|not verified/i.test(msg)
-          ? `${msg} — Verify medicalrepairnetwork.com DNS in Resend before sending to customers.`
-          : msg;
-      return respond({ ok: false, emailSent: false, error: friendly }, 502, [recipient.email]);
+    if (!delivery.ok) {
+      return respond({ ok: false, emailSent: false, error: delivery.error }, 502, [recipient.email]);
     }
 
     return respond(
       {
         ok: true,
-        emailSent: true,
-        id: result?.id || null,
+        emailSent: delivery.emailed,
+        alreadySent: delivery.alreadySent,
+        id: delivery.providerId,
         to: recipient.email,
         emailSource: recipient.source,
         estimateId,
