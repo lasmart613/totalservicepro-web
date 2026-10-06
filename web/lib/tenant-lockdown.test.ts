@@ -196,7 +196,8 @@ test('server routes call the authorizers and do not trust a client role on found
   assert.match(founder, /hasServiceRole/);
   assert.doesNotMatch(founder, /body\.role/);
   assert.ok(
-    founder.indexOf('decideFounderLink') < founder.indexOf('applyComplimentarySignupFields'),
+    founder.indexOf('const decision = decideFounderLink') <
+      founder.indexOf('applyComplimentarySignupFields(patch'),
     'complimentary premium runs only after the caller is the org creator'
   );
   assert.match(founder, /priorPremium/);
