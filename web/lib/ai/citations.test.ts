@@ -63,6 +63,33 @@ test('assistant HTML links page/section phrases to the viewer, not a PDF', () =>
   assert.doesNotMatch(html, /<script/i);
 });
 
+test('duplicate Source lines collapse to the one that names a page', () => {
+  const html = formatAssistantHtml(
+    [
+      'Check the calibration port.',
+      '',
+      '— Source: GentleMAX Pro Service Manual',
+      '— Source: GentleMAX Pro Service Manual, p.120',
+      '[[cite:id=110&p=120&t=GentleMAX+Pro+Service+Manual]]',
+    ].join('\n'),
+    []
+  );
+  assert.equal((html.match(/Source:/g) || []).length, 1);
+  assert.match(html, /p\.120/);
+  assert.match(html, /href="\/manuals\/view\?id=110[^"]*page=120/);
+  assert.doesNotMatch(html, /— Source: GentleMAX Pro Service Manual</);
+
+  const paged = citationViewerHref({
+    manualId: 5,
+    page: 142,
+    title: 'GentleMAX PRO PLUS Service Manual',
+  });
+  assert.equal(
+    paged,
+    '/manuals/view?id=5&title=GentleMAX+PRO+PLUS+Service+Manual&page=142'
+  );
+});
+
 test('document-only citation still opens that manual', () => {
   const html = formatAssistantHtml('Calibrate the flow switch.', [
     { manualId: 105, title: 'Xeo Service Manual Rev B' },

@@ -7,6 +7,13 @@ import type { CitedManual } from '@/components/useAssistantCitationOpen';
 const FOCUSABLE =
   'a[href],button:not([disabled]),input:not([disabled]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])';
 
+/** Skip body/html. Fullscreen Back focuses the answer thread after this cleanup. */
+function focusToRestore(prev: HTMLElement | null): HTMLElement | null {
+  if (!prev || !document.contains(prev)) return null;
+  if (prev === document.body || prev === document.documentElement) return null;
+  return prev;
+}
+
 /**
  * Secure manual viewer beside (or over) an assistant answer.
  * Same ManualPdfViewer as /manuals/view?page=, without leaving the thread.
@@ -29,7 +36,7 @@ export function AssistantCitedManual({
     const id = window.requestAnimationFrame(() => closeBtnRef.current?.focus());
     return () => {
       window.cancelAnimationFrame(id);
-      if (prev && document.contains(prev)) prev.focus();
+      focusToRestore(prev)?.focus({ preventScroll: true });
     };
   }, [presentation]);
 

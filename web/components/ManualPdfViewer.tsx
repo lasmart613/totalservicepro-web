@@ -14,7 +14,7 @@ import {
   type ManualViewPayload,
 } from '@/lib/manuals';
 import { asPositivePage } from '@/lib/ai/citations';
-import { fittedPageBoxHeight, viewerPhysicalPage } from '@/lib/pdf-viewer-page';
+import { fittedPageBoxHeight, viewerPageOutOfRangeNotice, viewerPhysicalPage } from '@/lib/pdf-viewer-page';
 import { ViewerAiPanel } from '@/components/ViewerAiPanel';
 import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
 
@@ -645,6 +645,8 @@ export function ManualPdfViewer({
     const requested = asPositivePage(initialPage);
     if (requested) {
       const target = viewerPhysicalPage(requested, pageCount);
+      // Past the last page: leave the document where it is and show the notice.
+      // Do not clamp the deep link onto page 1.
       if (!target) return;
       let cancelled = false;
       const jump = () => {
@@ -704,6 +706,8 @@ export function ManualPdfViewer({
   const pdf = pdfRef.current;
   const pages = pageCount && pdf ? Array.from({ length: pageCount }, (_, i) => i + 1) : [];
   const languageBadge = manualLanguageBadge(languageCode);
+  const pageNotice =
+    !loading && pageCount > 0 ? viewerPageOutOfRangeNotice(asPositivePage(initialPage), pageCount) : null;
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-[#0d1117] text-[#E5E7EB]">
@@ -804,6 +808,16 @@ export function ManualPdfViewer({
           )}
         </div>
       </div>
+
+      {pageNotice && (
+        <div
+          role="alert"
+          data-testid="pdf-page-notice"
+          className="shrink-0 px-3 py-2 text-sm font-semibold bg-amber-950 text-amber-100 border-b border-amber-500/50"
+        >
+          {pageNotice}
+        </div>
+      )}
 
       <div className={`viewer-layout ${showRail ? 'is-rail-open' : ''}`}>
         <aside id="viewer-rail" className="viewer-rail" aria-label="Manual search and AI tools">

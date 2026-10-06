@@ -20,6 +20,7 @@ import {
   emptyAnswerTurn,
   getVoiceMode,
   markAnswerFresh,
+  onAnswerSettled,
   onViewerTakenOver,
   parseCitationOpenDetail,
   parseVoiceModeDetail,
@@ -98,6 +99,7 @@ export function useAssistantCitationOpen(opts: {
   const [voiceEpoch, setVoiceEpoch] = useState(0);
 
   const turnRef = useRef<AnswerTurnState>(emptyAnswerTurn());
+  const pendingAnswerFocusRef = useRef(false);
   const speakingRef = useRef(false);
   const askRef = useRef(opts.askAssistant);
   const scrollSnapshotRef = useRef(0);
@@ -158,6 +160,7 @@ export function useAssistantCitationOpen(opts: {
     consumePendingAutoOpen();
     const top = scrollSnapshotRef.current;
     const wasFullscreen = presentationRef.current === 'fullscreen';
+    if (wasFullscreen) pendingAnswerFocusRef.current = true;
     setOpen(false);
     if (!wasFullscreen) return;
     window.requestAnimationFrame(() => {
@@ -165,6 +168,15 @@ export function useAssistantCitationOpen(opts: {
       if (el) el.scrollTop = top;
     });
   }, [consumePendingAutoOpen, listRef]);
+
+  useEffect(() => {
+    if (open || !pendingAnswerFocusRef.current) return;
+    pendingAnswerFocusRef.current = false;
+    const el = listRef.current;
+    if (!el) return;
+    el.scrollTop = scrollSnapshotRef.current;
+    el.focus({ preventScroll: true });
+  }, [open, listRef]);
 
   const toggleAutoOpen = useCallback(() => {
     setAutoOpen(!autoOpen);

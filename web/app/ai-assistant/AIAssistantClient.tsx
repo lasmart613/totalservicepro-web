@@ -31,6 +31,8 @@ import { toast } from 'sonner';
 import { catalogManualTitle } from '@/lib/manual-catalog';
 import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
 import { canAccessRepairAi } from '@/lib/roles';
+import { currentOrgPlanLabel, type OrgPlanFields } from '@/lib/org-plan';
+import { ORG_PLAN_SELECTS } from '@/lib/org-plan-load';
 import { useSiteLocale } from '@/lib/fa/locale';
 import { AssistantCitedManual } from '@/components/AssistantCitedManual';
 import { useAssistantCitationOpen } from '@/components/useAssistantCitationOpen';
@@ -102,6 +104,7 @@ export default function AIAssistantClient() {
     role: null,
     orgType: null,
   });
+  const [planLabel, setPlanLabel] = useState<string | null>(null);
 
   const brands = useMemo(() => {
     const set = new Set<string>();
@@ -190,6 +193,22 @@ export default function AIAssistantClient() {
       if (cancelled) return;
       setOrgId(resolvedOrg);
       setCaller({ role: callerRole, orgType: callerOrgType });
+      if (resolvedOrg != null) {
+        let planRow: OrgPlanFields | null = null;
+        for (const columns of ORG_PLAN_SELECTS) {
+          const { data, error } = await supabase
+            .from('organizations')
+            .select(columns)
+            .eq('id', resolvedOrg)
+            .maybeSingle();
+          if (!error) {
+            planRow = (data as OrgPlanFields | null) || null;
+            break;
+          }
+          if (!/subscription_tier|manual_slots|\bplan\b|premium_|column/i.test(error.message || '')) break;
+        }
+        if (!cancelled) setPlanLabel(currentOrgPlanLabel(planRow));
+      }
 
       let urlManualId: number | null = null;
       let urlPrompt = '';
@@ -490,7 +509,7 @@ export default function AIAssistantClient() {
       <Header />
 
       <div className={`flex-1 min-h-0 flex ${split ? 'flex-row' : 'justify-center'}`}>
-      <div className={`w-full px-4 py-3 flex flex-col flex-1 min-h-0 min-w-0 ${split ? 'max-w-[40rem] border-r border-[var(--border)]' : 'max-w-3xl'}`}>
+      <div className={`px-4 py-3 flex flex-col flex-1 min-h-0 ${split ? 'ai-assistant-split border-r border-[var(--border)]' : 'w-full min-w-0 max-w-3xl'}`}>
         <div className="shrink-0 flex items-start justify-between gap-3 mb-3">
           <div>
             <h1 className="text-2xl font-extrabold text-[var(--text)]">🤖 AI Assistant</h1>
@@ -515,9 +534,7 @@ export default function AIAssistantClient() {
             <strong className={textLimitHit ? 'text-red-400' : 'text-[var(--gold)]'}>
               {usage.text.used}/{usage.text.limit}
             </strong>
-            {usage.tier && (
-              <span className="opacity-70 capitalize">· {usage.tier}</span>
-            )}
+            {planLabel && <span className="opacity-70">· {planLabel}</span>}
           </span>
           <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border border-[var(--border)] bg-[var(--surface2)] opacity-70">
             🎙️ Voice {usage.voice.used}/{usage.voice.limit}
@@ -624,7 +641,8 @@ export default function AIAssistantClient() {
         <div
           ref={listRef}
           className="ai-chat-thread flex-1 min-h-0 overflow-y-auto p-4 mb-3 space-y-3 rounded-xl border border-[var(--border)] bg-[var(--surface2)]"
-          tabIndex={0}
+          tabIndex={-1}
+          data-answer-thread=""
           role="log"
           aria-label="AI Assistant conversation"
           onClick={citedManual.onThreadClick}

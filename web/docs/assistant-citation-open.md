@@ -97,7 +97,9 @@ When the setting is off, citations stay ordinary links. Nothing opens by itself.
 
 Wide web (viewport ≥ 1024px and not the Android shell): side panel. Escape closes it. Focus moves to **Close**.
 
-Mobile web and the Android WebView (`TSPAndroid` in the user agent, or `window.Android`): full screen. **Back to answer** restores the thread scroll position. Focus moves to that button.
+Mobile web and the Android WebView (`TSPAndroid` in the user agent, or `window.Android`): full screen. **Back to answer** restores the thread scroll position and moves focus to the answer thread (`tabindex="-1"`), not the page body.
+
+If the requested page is past the end of that PDF, the viewer does not jump to page 1. It shows “Page N isn't in this PDF”. A page that exists in the file still opens on that page (`/manuals/view?id=&page=`).
 
 Other chips stay links. With the setting on, a primary click jumps the open viewer to that manual and page.
 

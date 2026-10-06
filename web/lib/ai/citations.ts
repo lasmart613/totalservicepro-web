@@ -239,6 +239,29 @@ const SOURCE_TITLE_STOP = new Set([
   'for',
 ]);
 
+const SOURCE_LINE = /^\s*[—\-]\s*Source:\s*\S/i;
+const PAGE_IN_SOURCE = /\b(?:p\.?|pages?)\s*\d{1,4}\b/i;
+
+/** One "— Source:" line. Prefer the last line that names a page. */
+export function collapseDuplicateSourceLines(text: string): string {
+  const lines = String(text || '').split('\n');
+  const indexes: number[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (SOURCE_LINE.test(lines[i])) indexes.push(i);
+  }
+  if (indexes.length < 2) return text;
+  let keep = -1;
+  for (const i of indexes) {
+    if (PAGE_IN_SOURCE.test(lines[i])) keep = i;
+  }
+  if (keep < 0) keep = indexes[indexes.length - 1];
+  const drop = new Set(indexes.filter((i) => i !== keep));
+  return lines
+    .filter((_, i) => !drop.has(i))
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n');
+}
+
 export function sourceLineMatchesCitation(source: string, citation: ManualCitation | undefined): boolean {
   if (!citation) return false;
   const title = String(citation.title || '')
@@ -270,6 +293,7 @@ export function formatAssistantHtml(
   const scopedId = citations[0]?.manualId;
   // Device name on the general-guidance first line only. Never rewrite the reply body.
   let body = humanizeGeneralGuidanceDisplay(stripCitationMarkers(content));
+  body = collapseDuplicateSourceLines(body);
   body = escapeHtml(body);
   body = body.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   body = body.replace(/\[\[pdfpage:\d+\]\]/g, '');

@@ -156,8 +156,19 @@ html.landing-mode main {
   color: #e5e7eb;
   overflow: hidden;
 }
+.ai-assistant-split {
+  flex: 1 0 32rem;
+  width: auto;
+  min-width: 32rem;
+  max-width: 40rem;
+}
+.ai-chat-thread:focus {
+  outline: 2px solid var(--gold, #fbbf24);
+  outline-offset: 2px;
+}
 .ai-cite-panel.is-docked {
-  flex: 1 1 58%;
+  flex: 1 1 0%;
+  min-width: 18rem;
 }
 .ai-cite-panel.is-fullscreen {
   position: fixed;
