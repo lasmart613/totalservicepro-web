@@ -23,16 +23,11 @@ export default async function EstimateActionPage({
   params,
   searchParams,
 }: {
-  params: Promise<{ token: string }> | { token: string };
-  searchParams?: Promise<{ action?: string; changes?: string; done?: string; notice?: string }> | {
-    action?: string;
-    changes?: string;
-    done?: string;
-    notice?: string;
-  };
+  params: Promise<{ token: string }>;
+  searchParams?: Promise<{ action?: string; changes?: string; done?: string; notice?: string }>;
 }) {
-  const raw = await Promise.resolve(params);
-  const query = searchParams ? await Promise.resolve(searchParams) : {};
+  const raw = await params;
+  const query = searchParams ? await searchParams : {};
   const token = String(raw?.token || '').trim();
   const requested = requestedFromQuery(query);
   const justCompleted = parseCustomerActionKind(query.done);
