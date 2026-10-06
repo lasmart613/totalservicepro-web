@@ -37,8 +37,14 @@ test('company invite email is not the organization email field', () => {
   const invite = page.split('id="team-invite"')[1].split('Current Team')[0];
   assert.doesNotMatch(invite, /placeholder="Email"/);
   assert.match(invite, /type="email"/);
-  assert.match(css, /\.team-invite-panel\s*\{[^}]*z-index:\s*60/);
+  assert.doesNotMatch(css, /\.team-invite-panel\s*\{[^}]*z-index\s*:/);
+  assert.match(css, /\.header\s*\{[^}]*z-index:\s*50/);
   assert.match(css, /scroll-padding-top:\s*7\.5rem/);
+  assert.match(page, /htmlFor="company-details-email"/);
+  assert.match(page, /id="company-details-email"/);
+  const details = page.split('Company Details Form')[1]?.split('id="team-invite"')[0] || '';
+  assert.match(details, /htmlFor="company-details-email"[\s\S]{0,240}id="company-details-email"/);
+  assert.match(details, />Email</);
 });
 
 test('phone chrome keeps only brand, menu, and account — no overlapping top-bar links', () => {
