@@ -1,10 +1,11 @@
 /**
  * Online Android voice for the live Next.js assistant (repairplanet.net/ai-assistant).
  *
- * That page has no speechSynthesis and does not call Android.speak. This script
- * is injected by the shell. While Voice is on it asks grok-assistant for the
- * short voice reply, then Android.speakAnswer plays it through grok-tts.
- * The page still owns citation auto-open. This script never loads a viewer
+ * Prefer the page hooks from draft #202 when they are installed:
+ *   TSP.setVoiceMode / TSP.getVoiceMode, TSP.askAssistant, and the
+ *   assistant:answer event { ts, text, citations, top, voiceMode }.
+ * Today's production page has none of those, so the fetch rewrite and the
+ * Send-button shim stay as the fallback. This script never loads a viewer
  * and never dispatches assistant:citation-open.
  */
 (function (root) {
@@ -47,11 +48,33 @@
         return '';
     }
 
+    function hasFn(tsp, name) {
+        return !!(tsp && typeof tsp[name] === 'function');
+    }
+
+    /** Page owns voiceMode and fresh answers. Do not patch fetch in that case. */
+    function pageOwnsVoice(tsp) {
+        return hasFn(tsp, 'askAssistant') || hasFn(tsp, 'setVoiceMode');
+    }
+
+    /** 'hook' submits through TSP.askAssistant. 'shim' is the production fallback. */
+    function submitKind(tsp) {
+        return hasFn(tsp, 'askAssistant') ? 'hook' : 'shim';
+    }
+
+    function answerText(detail) {
+        if (!detail || detail.text == null) return '';
+        return String(detail.text);
+    }
+
     var api = {
         isAssistantPath: isAssistantPath,
         isLiveHost: isLiveHost,
         planVoiceChat: planVoiceChat,
-        assistantReplyText: assistantReplyText
+        assistantReplyText: assistantReplyText,
+        pageOwnsVoice: pageOwnsVoice,
+        submitKind: submitKind,
+        answerText: answerText
     };
 
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
@@ -129,11 +152,30 @@
         window.dispatchEvent(new CustomEvent('assistant:voice-state', { detail: { speaking: on } }));
     }
 
+    var answerEventSeen = false;
+    var lastSpokenTs = null;
+
+    function unpatchFetch() {
+        if (window.fetch && window.fetch.__tspOnlineVoice && window.__tspOrigFetch) {
+            window.fetch = window.__tspOrigFetch;
+        }
+    }
+
+    function ensureShimFetch() {
+        if (pageOwnsVoice(window.TSP) || answerEventSeen) {
+            unpatchFetch();
+            return;
+        }
+        installFetch();
+    }
+
     function installFetch() {
+        if (pageOwnsVoice(window.TSP) || answerEventSeen) return;
         if (!window.fetch || window.fetch.__tspOnlineVoice) return;
         var orig = window.fetch.bind(window);
         window.__tspOrigFetch = orig;
         function wrapped(input, init) {
+            if (pageOwnsVoice(window.TSP) || answerEventSeen) return orig(input, init);
             var nextInit = init;
             var generation = 0;
             var speak = false;
@@ -173,6 +215,7 @@
             markPageSpeaking(false);
         }
         pending.then(function (resp) {
+            if (answerEventSeen || pageOwnsVoice(window.TSP)) return;
             if (generation !== chatGen || !voiceOn) {
                 releaseIfCurrent();
                 return;
@@ -183,6 +226,7 @@
                 return;
             }
             copy.json().then(function (data) {
+                if (answerEventSeen || pageOwnsVoice(window.TSP)) return;
                 if (generation !== chatGen || !voiceOn || !resp.ok) {
                     releaseIfCurrent();
                     return;
@@ -222,7 +266,7 @@
     }
 
     function refreshVoiceLabels() {
-        var orig = window.__tspOrigFetch;
+        var orig = window.__tspOrigFetch || window.fetch;
         var token = readToken();
         if (!orig || !token) return;
         orig(ttsUrl(), {
@@ -254,7 +298,30 @@
         el.dispatchEvent(new Event('input', { bubbles: true }));
     }
 
+    function beginVoiceTurn() {
+        chatGen += 1;
+        if (window.Android && Android.interruptSpeech) Android.interruptSpeech();
+        markPageSpeaking(true);
+        return chatGen;
+    }
+
     function submitSpokenQuestion(text) {
+        if (hasFn(window.TSP, 'askAssistant')) {
+            var gen = beginVoiceTurn();
+            try {
+                var result = window.TSP.askAssistant(text);
+                if (result && typeof result.then === 'function') {
+                    result.then(null, function () {
+                        if (gen !== chatGen || answerEventSeen) return;
+                        markPageSpeaking(false);
+                    });
+                }
+            } catch (e) {
+                if (gen === chatGen) markPageSpeaking(false);
+            }
+            return;
+        }
+        ensureShimFetch();
         var area = document.querySelector('textarea.input');
         if (!area) return;
         setReactValue(area, text);
@@ -267,6 +334,46 @@
                 }
             }
         }, 30);
+    }
+
+    function rememberAnswerTop(detail) {
+        var top = detail && detail.top;
+        if (window.TSPGrokVoice && top) {
+            var normalized = TSPGrokVoice.normalizeCitationTarget(top.manualId, top.page);
+            if (normalized) {
+                lastTop = normalized;
+                return;
+            }
+        }
+        if (window.TSPGrokVoice) {
+            lastTop = TSPGrokVoice.topCitation(
+                { _meta: { citations: detail && detail.citations }, citations: detail && detail.citations },
+                detail && detail.text
+            );
+        }
+    }
+
+    function onAssistantAnswer(ev) {
+        answerEventSeen = true;
+        if (!isAssistantPath(location.pathname)) return;
+        var detail = (ev && ev.detail) || {};
+        if (detail.ts != null && detail.ts === lastSpokenTs) return;
+        var wantsVoice = voiceOn || detail.voiceMode === true;
+        if (!wantsVoice) return;
+        if (detail.ts != null) lastSpokenTs = detail.ts;
+        rememberAnswerTop(detail);
+        var raw = answerText(detail);
+        var spoken = window.TSPGrokVoice ? TSPGrokVoice.prepareSpeechText(raw) : raw.trim();
+        if (!spoken || !window.Android || !Android.speakAnswer) {
+            markPageSpeaking(false);
+            return;
+        }
+        if (window.__tspNativeVoiceSpeaking !== true && window.Android.interruptSpeech) {
+            Android.interruptSpeech();
+        }
+        markPageSpeaking(true);
+        var prefs = readPrefs();
+        Android.speakAnswer(spoken, prefs.voice, prefs.engine, readToken());
     }
 
     function handleVoiceResult(text) {
@@ -340,6 +447,11 @@
         if (voice && prefs.voice) voice.value = prefs.voice;
         document.getElementById('tsp-voice-toggle').addEventListener('click', function () {
             writeVoiceOn(!voiceOn);
+            if (hasFn(window.TSP, 'setVoiceMode')) {
+                try { window.TSP.setVoiceMode(voiceOn); } catch (e) {}
+            } else if (voiceOn) {
+                ensureShimFetch();
+            }
             if (!voiceOn && window.Android && Android.stopSpeaking) Android.stopSpeaking();
             syncBar();
             if (voiceOn) refreshVoiceLabels();
@@ -377,6 +489,34 @@
         var existing = document.getElementById('tsp-android-voice');
         if (existing) existing.style.display = 'flex';
         syncBar();
+        scheduleShim();
+    }
+
+    var shimTimer = null;
+    function scheduleShim() {
+        if (shimTimer || pageOwnsVoice(window.TSP)) {
+            if (pageOwnsVoice(window.TSP)) {
+                unpatchFetch();
+                pushStoredVoiceMode();
+            }
+            return;
+        }
+        var started = Date.now();
+        shimTimer = setInterval(function () {
+            if (!isAssistantPath(location.pathname)) return;
+            if (pageOwnsVoice(window.TSP)) {
+                unpatchFetch();
+                pushStoredVoiceMode();
+                clearInterval(shimTimer);
+                shimTimer = null;
+                return;
+            }
+            if (Date.now() - started > 400) {
+                clearInterval(shimTimer);
+                shimTimer = null;
+                ensureShimFetch();
+            }
+        }, 50);
     }
 
     function installNav() {
@@ -397,7 +537,24 @@
         window.addEventListener('popstate', function () { setTimeout(syncRoute, 0); });
     }
 
-    installFetch();
+    function pushStoredVoiceMode() {
+        if (!hasFn(window.TSP, 'setVoiceMode') && !hasFn(window.TSP, 'getVoiceMode')) return false;
+        var stored = null;
+        try {
+            var flag = localStorage.getItem('tspAndroidVoiceMode');
+            if (flag === '1' || flag === '0') stored = flag === '1';
+        } catch (e) {}
+        if (stored === null && hasFn(window.TSP, 'getVoiceMode')) {
+            try { writeVoiceOn(!!window.TSP.getVoiceMode()); } catch (e2) {}
+        } else if (stored !== null && hasFn(window.TSP, 'setVoiceMode')) {
+            voiceOn = stored;
+            try { window.TSP.setVoiceMode(stored); } catch (e3) {}
+        }
+        syncBar();
+        return true;
+    }
+
+    window.addEventListener('assistant:answer', onAssistantAnswer);
     installSpeechHooks();
     installNav();
     if (document.body) syncRoute();

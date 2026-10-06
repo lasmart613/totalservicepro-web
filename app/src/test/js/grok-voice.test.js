@@ -115,8 +115,20 @@ test('online voice rewrites only assistant chat and speaks through the native br
         online.assistantReplyText({ choices: [{ message: { content: 'Check the pot.' } }] }),
         'Check the pot.'
     );
+    assert.equal(online.pageOwnsVoice({ askAssistant: function () {} }), true);
+    assert.equal(online.pageOwnsVoice({ setVoiceMode: function () {} }), true);
+    assert.equal(online.pageOwnsVoice({}), false);
+    assert.equal(online.pageOwnsVoice(null), false);
+    assert.equal(online.submitKind({ askAssistant: function () {} }), 'hook');
+    assert.equal(online.submitKind({ setVoiceMode: function () {} }), 'shim');
+    assert.equal(online.submitKind({}), 'shim');
+    assert.equal(online.answerText({ text: 'Check the pot.', voiceMode: true, top: null }), 'Check the pot.');
 
     const src = fs.readFileSync(path.join(__dirname, '../../main/assets/online-voice.js'), 'utf8');
+    assert.match(src, /assistant:answer/);
+    assert.match(src, /setVoiceMode/);
+    assert.match(src, /getVoiceMode/);
+    assert.match(src, /askAssistant/);
     assert.match(src, /Android\.speakAnswer/);
     assert.match(src, /assistant:voice-state/);
     assert.match(src, /dataset\.assistantVoice/);
