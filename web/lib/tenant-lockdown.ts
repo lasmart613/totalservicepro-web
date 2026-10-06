@@ -169,8 +169,12 @@ export function decideMemberRoleChange(input: {
       error: 'Only an admin of this organization can change roles.',
     };
   }
-  if (target === PLATFORM_ADMIN_ROLE && caller !== PLATFORM_ADMIN_ROLE) {
-    return { ok: false, status: 403, error: 'Cannot grant platform admin.' };
+  if (target === PLATFORM_ADMIN_ROLE) {
+    return {
+      ok: false,
+      status: 403,
+      error: 'Organization memberships cannot use the platform admin role.',
+    };
   }
   if (roleRank(target) > roleRank(caller)) {
     return { ok: false, status: 403, error: 'Cannot assign a role above your own.' };

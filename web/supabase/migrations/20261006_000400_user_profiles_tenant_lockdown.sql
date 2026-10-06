@@ -47,7 +47,7 @@ $$;
 COMMENT ON FUNCTION public.auth_login_email() IS
   'Lowercased auth.users.email for auth.uid(). Never user_profiles.email.';
 
-REVOKE ALL ON FUNCTION public.auth_login_email() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.auth_login_email() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.auth_login_email() TO authenticated;
 
 -- NULL expires_at is expired unless created_at is within the last 14 days.
@@ -76,7 +76,7 @@ $$;
 COMMENT ON FUNCTION public.invitation_is_open(boolean, timestamptz, timestamptz) IS
   'Unaccepted invite that has not expired. NULL expires_at counts only when created_at is within 14 days; otherwise it is expired.';
 
-REVOKE ALL ON FUNCTION public.invitation_is_open(boolean, timestamptz, timestamptz) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.invitation_is_open(boolean, timestamptz, timestamptz) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.invitation_is_open(boolean, timestamptz, timestamptz) TO authenticated;
 
 -- Org-level membership role 'admin' is company_admin on the profile.
@@ -97,8 +97,42 @@ $$;
 COMMENT ON FUNCTION public.profile_role_from_membership(text) IS
   'Role copied from organization_memberships or an invite onto user_profiles. admin becomes company_admin. Never grants platform admin.';
 
-REVOKE ALL ON FUNCTION public.profile_role_from_membership(text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.profile_role_from_membership(text) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.profile_role_from_membership(text) TO authenticated;
+
+-- Replaces 20261005_235902. NULL expires_at follows invitation_is_open (14 days),
+-- not the hotfix's "null expires_at is open forever".
+CREATE OR REPLACE FUNCTION public.profile_org_change_allowed(p_uid uuid, p_org bigint)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = public, pg_temp
+SET row_security = off
+AS $$
+  SELECT p_org IS NULL
+    OR EXISTS (
+      SELECT 1 FROM public.organizations o
+      WHERE o.id = p_org AND o.created_by = p_uid
+    )
+    OR EXISTS (
+      SELECT 1 FROM public.organization_memberships m
+      WHERE m.user_id = p_uid AND m.organization_id = p_org
+    )
+    OR EXISTS (
+      SELECT 1 FROM public.engineer_invitations i
+      WHERE i.organization_id = p_org
+        AND public.auth_login_email() IS NOT NULL
+        AND lower(btrim(i.email)) = public.auth_login_email()
+        AND public.invitation_is_open(i.accepted, i.expires_at, i.created_at)
+    );
+$$;
+
+COMMENT ON FUNCTION public.profile_org_change_allowed(uuid, bigint) IS
+  'Profile may take this org: null, creator, member, or an open invite for the signed-in email. NULL expires_at is open only when created_at is within 14 days.';
+
+REVOKE ALL ON FUNCTION public.profile_org_change_allowed(uuid, bigint) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.profile_org_change_allowed(uuid, bigint) TO authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- 2) New-user trigger: metadata cannot mint an org or an elevated role.
@@ -121,6 +155,7 @@ BEGIN
   meta_org := NEW.raw_user_meta_data->>'organization_id';
 
   IF invited
+     AND NEW.email_confirmed_at IS NOT NULL
      AND meta_org IS NOT NULL
      AND meta_org ~ '^[0-9]+$'
      AND EXISTS (
@@ -164,7 +199,13 @@ END;
 $$;
 
 COMMENT ON FUNCTION public.handle_new_auth_user() IS
-  'Creates user_profiles. organization_id and role are copied only from a matching unaccepted engineer_invitations row, never from raw_user_meta_data.role.';
+  'Creates user_profiles. An invite-based org and role are copied only when NEW.email_confirmed_at is set and the invite is open. Not attached to auth.users: signup and team join go through /api/auth/signup and /api/team/claim. Do not recreate on_auth_user_created in this security migration.';
+
+-- Live has no trigger on auth.users. 20260717 created on_auth_user_created, but
+-- signup does not depend on it. Drop it if a replay of older files attached it.
+DROP TRIGGER IF EXISTS on_auth_user_created ON auth.users;
+
+REVOKE ALL ON FUNCTION public.handle_new_auth_user() FROM PUBLIC, anon;
 
 -- ---------------------------------------------------------------------------
 -- 3) Active-org helper. Same result as before; clients cannot write the column.
@@ -203,26 +244,39 @@ AS $$
     );
 $$;
 
-REVOKE ALL ON FUNCTION public.get_my_org_id() FROM PUBLIC;
-REVOKE ALL ON FUNCTION public.user_owns_or_created_org(bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.get_my_org_id() FROM PUBLIC, anon;
+REVOKE ALL ON FUNCTION public.user_owns_or_created_org(bigint) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.get_my_org_id() TO authenticated;
 GRANT EXECUTE ON FUNCTION public.user_owns_or_created_org(bigint) TO authenticated;
 
 -- ---------------------------------------------------------------------------
--- 4) Guard + membership sync. Client writes RAISE. Service role (auth.uid()
---    IS NULL) is trusted. BEFORE INSERT OR UPDATE.
+-- 4) Guard + membership sync.
+--    user_profiles_guard_identity replaces the 20261005_235902 hotfix (same
+--    trigger name, so it still sorts before user_profiles_sync_membership).
+--    The trigger function is SECURITY INVOKER. current_user not in
+--    (authenticated, anon) returns NEW. That is the hotfix bypass.
+--    auth.uid() IS NULL is not equivalent: SECURITY DEFINER functions run as
+--    postgres while auth.uid() stays the JWT user, so accept_team_invite,
+--    switch_active_organization, and leave_organization would be policed by
+--    an auth.uid() check and blocked by a DEFINER guard's current_user check
+--    (current_user would always be the owner). Those three keep their own
+--    role mapping, including preserving profile role admin.
+--    Client checks run in a DEFINER helper so RLS does not hide invitations.
 -- ---------------------------------------------------------------------------
-CREATE OR REPLACE FUNCTION public.user_profiles_guard_identity()
-RETURNS trigger
+CREATE OR REPLACE FUNCTION public.user_profiles_guard_identity_enforce(
+  p_op text,
+  new_row public.user_profiles,
+  old_row public.user_profiles
+) RETURNS void
 LANGUAGE plpgsql
 SECURITY DEFINER
 SET search_path = public, pg_temp
+SET row_security = off
 AS $$
 DECLARE
   actor uuid;
   own_created boolean;
   member_of_new boolean;
-  invited boolean;
   member_role text;
   elevated text[] := ARRAY[
     'admin', 'company_admin', 'owner', 'parts_supplier', 'supplier',
@@ -231,92 +285,122 @@ DECLARE
 BEGIN
   actor := auth.uid();
   IF actor IS NULL THEN
-    RETURN NEW;
+    RETURN;
   END IF;
 
-  IF TG_OP = 'INSERT' AND NEW.id IS DISTINCT FROM actor THEN
+  IF p_op = 'INSERT' AND new_row.id IS DISTINCT FROM actor THEN
     RAISE EXCEPTION 'user_profiles insert must be your own row';
   END IF;
 
-  IF TG_OP = 'UPDATE' AND NEW.id IS DISTINCT FROM OLD.id THEN
+  IF p_op = 'UPDATE' AND new_row.id IS DISTINCT FROM old_row.id THEN
     RAISE EXCEPTION 'user_profiles id cannot be changed';
   END IF;
 
-  IF TG_OP = 'UPDATE'
-     AND NEW.active_organization_id IS DISTINCT FROM OLD.active_organization_id
-     AND NEW.active_organization_id IS NOT NULL
+  IF lower(coalesce(new_row.role, '')) = 'admin'
+     AND (p_op = 'INSERT' OR lower(coalesce(old_row.role, '')) <> 'admin') THEN
+    RAISE EXCEPTION 'Not allowed to set this role' USING ERRCODE = '42501';
+  END IF;
+
+  IF (p_op = 'INSERT' OR new_row.organization_id IS DISTINCT FROM old_row.organization_id)
+     AND NOT public.profile_org_change_allowed(new_row.id, new_row.organization_id) THEN
+    RAISE EXCEPTION 'Not a member of that organization' USING ERRCODE = '42501';
+  END IF;
+
+  IF (p_op = 'INSERT' OR new_row.active_organization_id IS DISTINCT FROM old_row.active_organization_id)
+     AND NOT public.profile_org_change_allowed(new_row.id, new_row.active_organization_id) THEN
+    RAISE EXCEPTION 'Not a member of that organization' USING ERRCODE = '42501';
+  END IF;
+
+  IF p_op = 'UPDATE'
+     AND new_row.active_organization_id IS DISTINCT FROM old_row.active_organization_id
+     AND new_row.active_organization_id IS NOT NULL
      AND NOT EXISTS (
        SELECT 1 FROM public.organization_memberships m
-       WHERE m.user_id = actor AND m.organization_id = NEW.active_organization_id
+       WHERE m.user_id = actor AND m.organization_id = new_row.active_organization_id
      )
-     AND NEW.active_organization_id IS DISTINCT FROM NEW.organization_id THEN
+     AND new_row.active_organization_id IS DISTINCT FROM new_row.organization_id THEN
     RAISE EXCEPTION 'active_organization_id must reference an existing membership';
   END IF;
 
-  IF TG_OP = 'INSERT'
-     AND NEW.active_organization_id IS NOT NULL
-     AND NEW.active_organization_id IS DISTINCT FROM NEW.organization_id
+  IF p_op = 'INSERT'
+     AND new_row.active_organization_id IS NOT NULL
+     AND new_row.active_organization_id IS DISTINCT FROM new_row.organization_id
      AND NOT EXISTS (
        SELECT 1 FROM public.organization_memberships m
-       WHERE m.user_id = actor AND m.organization_id = NEW.active_organization_id
+       WHERE m.user_id = actor AND m.organization_id = new_row.active_organization_id
      ) THEN
     RAISE EXCEPTION 'active_organization_id must reference an existing membership';
   END IF;
 
-  IF (TG_OP = 'INSERT' AND NEW.organization_id IS NOT NULL)
-     OR (TG_OP = 'UPDATE' AND NEW.organization_id IS DISTINCT FROM OLD.organization_id AND NEW.organization_id IS NOT NULL) THEN
+  IF (p_op = 'INSERT' AND new_row.organization_id IS NOT NULL)
+     OR (p_op = 'UPDATE' AND new_row.organization_id IS DISTINCT FROM old_row.organization_id AND new_row.organization_id IS NOT NULL) THEN
     SELECT EXISTS (
       SELECT 1 FROM public.organizations o
-      WHERE o.id = NEW.organization_id AND o.created_by = actor
+      WHERE o.id = new_row.organization_id AND o.created_by = actor
     ) INTO own_created;
     SELECT EXISTS (
       SELECT 1 FROM public.organization_memberships m
-      WHERE m.user_id = actor AND m.organization_id = NEW.organization_id
+      WHERE m.user_id = actor AND m.organization_id = new_row.organization_id
     ) INTO member_of_new;
-    SELECT EXISTS (
-      SELECT 1 FROM public.engineer_invitations i
-      WHERE i.organization_id = NEW.organization_id
-        AND public.auth_login_email() IS NOT NULL
-        AND lower(btrim(i.email)) = public.auth_login_email()
-        AND public.invitation_is_open(i.accepted, i.expires_at, i.created_at)
-    ) INTO invited;
-    IF NOT own_created AND NOT member_of_new AND NOT invited THEN
-      RAISE EXCEPTION 'cannot join an organization you did not create, are not a member of, and were not invited to';
-    END IF;
-    IF own_created AND NOT member_of_new AND lower(COALESCE(NEW.role, '')) = ANY (elevated) THEN
+    IF own_created AND NOT member_of_new AND lower(COALESCE(new_row.role, '')) = ANY (elevated) THEN
       RAISE EXCEPTION 'cannot self-assign an elevated role';
     END IF;
   END IF;
 
-  IF (TG_OP = 'UPDATE' AND NEW.role IS DISTINCT FROM OLD.role)
-     OR TG_OP = 'INSERT' THEN
-    IF lower(COALESCE(NEW.role, '')) = ANY (elevated) THEN
+  IF (p_op = 'UPDATE' AND new_row.role IS DISTINCT FROM old_row.role)
+     OR p_op = 'INSERT' THEN
+    IF lower(COALESCE(new_row.role, '')) = ANY (elevated) THEN
       SELECT m.role INTO member_role
       FROM public.organization_memberships m
       WHERE m.user_id = actor
-        AND m.organization_id = COALESCE(NEW.organization_id, CASE WHEN TG_OP = 'UPDATE' THEN OLD.organization_id ELSE NULL END)
+        AND m.organization_id = COALESCE(new_row.organization_id, CASE WHEN p_op = 'UPDATE' THEN old_row.organization_id ELSE NULL END)
       LIMIT 1;
-      IF member_role IS NULL OR lower(btrim(member_role)) IS DISTINCT FROM lower(btrim(NEW.role)) THEN
+      IF member_role IS NULL
+         OR lower(public.profile_role_from_membership(member_role)) IS DISTINCT FROM lower(btrim(new_row.role)) THEN
         IF NOT EXISTS (
           SELECT 1 FROM public.engineer_invitations i
-          WHERE i.organization_id = NEW.organization_id
+          WHERE i.organization_id = new_row.organization_id
             AND public.auth_login_email() IS NOT NULL
             AND lower(btrim(i.email)) = public.auth_login_email()
             AND public.invitation_is_open(i.accepted, i.expires_at, i.created_at)
-            AND lower(btrim(COALESCE(i.role, ''))) = lower(btrim(NEW.role))
+            AND lower(public.profile_role_from_membership(COALESCE(i.role, ''))) = lower(btrim(new_row.role))
         ) THEN
           RAISE EXCEPTION 'cannot self-assign an elevated role';
         END IF;
       END IF;
     END IF;
   END IF;
+END;
+$$;
 
+REVOKE ALL ON FUNCTION public.user_profiles_guard_identity_enforce(text, public.user_profiles, public.user_profiles) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.user_profiles_guard_identity_enforce(text, public.user_profiles, public.user_profiles) TO authenticated, service_role;
+
+CREATE OR REPLACE FUNCTION public.user_profiles_guard_identity()
+RETURNS trigger
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
+BEGIN
+  IF current_user NOT IN ('authenticated', 'anon') THEN
+    RETURN NEW;
+  END IF;
+
+  IF TG_OP = 'UPDATE' THEN
+    PERFORM public.user_profiles_guard_identity_enforce(TG_OP, NEW, OLD);
+  ELSE
+    PERFORM public.user_profiles_guard_identity_enforce(TG_OP, NEW, NULL);
+  END IF;
   RETURN NEW;
 END;
 $$;
 
+REVOKE ALL ON FUNCTION public.user_profiles_guard_identity() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.user_profiles_guard_identity() TO authenticated, service_role;
+
 COMMENT ON FUNCTION public.user_profiles_guard_identity() IS
-  'BEFORE INSERT/UPDATE. Authenticated callers cannot self-join another tenant or self-assign an elevated role. auth.uid() IS NULL (service role) passes.';
+  'BEFORE INSERT/UPDATE, SECURITY INVOKER. Client roles cannot self-join another tenant, newly set role admin, or self-assign an elevated role. current_user outside authenticated/anon (service role and SECURITY DEFINER callers) passes. auth.uid() IS NULL is not the bypass.';
 
 CREATE OR REPLACE FUNCTION public.user_profiles_sync_membership()
 RETURNS trigger
@@ -349,8 +433,12 @@ BEGIN
     IF NEW.organization_id IS NULL THEN
       RETURN NEW;
     END IF;
-    grant_role := COALESCE(NULLIF(TRIM(NEW.role), ''), 'fse');
-    home := lower(grant_role) IN ('admin', 'company_admin', 'owner', 'parts_supplier', 'supplier');
+    grant_role := public.profile_role_from_membership(COALESCE(NULLIF(TRIM(NEW.role), ''), 'fse'));
+    SELECT EXISTS (
+      SELECT 1 FROM public.organizations o
+      WHERE o.id = NEW.organization_id AND o.created_by IS NOT DISTINCT FROM NEW.id
+    ) INTO own_created;
+    home := own_created;
     INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
     VALUES (NEW.id, NEW.organization_id, grant_role, home)
     ON CONFLICT (user_id, organization_id) DO UPDATE
@@ -395,7 +483,7 @@ BEGIN
         AND m.organization_id = COALESCE(NEW.organization_id, OLD.organization_id)
       LIMIT 1;
       IF existing_role IS NULL
-         OR lower(btrim(existing_role)) IS DISTINCT FROM lower(btrim(NEW.role)) THEN
+         OR lower(public.profile_role_from_membership(existing_role)) IS DISTINCT FROM lower(btrim(NEW.role)) THEN
         RAISE EXCEPTION 'cannot self-assign an elevated role';
       END IF;
     END IF;
@@ -423,12 +511,12 @@ BEGIN
   LIMIT 1;
 
   IF member_of_new THEN
-    grant_role := COALESCE(NULLIF(TRIM(existing_role), ''), 'fse');
+    grant_role := public.profile_role_from_membership(COALESCE(NULLIF(TRIM(existing_role), ''), 'fse'));
   ELSIF own_created THEN
     IF lower(COALESCE(NEW.role, '')) = ANY (elevated) THEN
       RAISE EXCEPTION 'cannot self-assign an elevated role';
     END IF;
-    grant_role := COALESCE(NULLIF(TRIM(NEW.role), ''), 'fse');
+    grant_role := public.profile_role_from_membership(COALESCE(NULLIF(TRIM(NEW.role), ''), 'fse'));
     IF lower(grant_role) = ANY (elevated) THEN
       RAISE EXCEPTION 'cannot self-assign an elevated role';
     END IF;
@@ -439,11 +527,15 @@ BEGIN
   END IF;
 
   IF lower(COALESCE(NEW.role, '')) = ANY (elevated)
+     AND NOT (TG_OP = 'UPDATE' AND lower(btrim(OLD.role)) = 'admin')
      AND lower(btrim(NEW.role)) IS DISTINCT FROM lower(btrim(grant_role)) THEN
     RAISE EXCEPTION 'cannot self-assign an elevated role';
   END IF;
 
-  NEW.role := grant_role;
+  NEW.role := CASE
+    WHEN TG_OP = 'UPDATE' AND lower(btrim(OLD.role)) = 'admin' THEN 'admin'
+    ELSE grant_role
+  END;
 
   INSERT INTO public.organization_memberships (user_id, organization_id, role, is_home)
   VALUES (NEW.id, NEW.organization_id, grant_role, false)
@@ -552,7 +644,7 @@ AS $$
   WHERE o.id = p_organization_id;
 $$;
 
-REVOKE ALL ON FUNCTION public.founder_role_for_org(bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.founder_role_for_org(bigint) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.founder_role_for_org(bigint) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.membership_insert_allowed(
@@ -599,7 +691,7 @@ $$;
 COMMENT ON FUNCTION public.membership_insert_allowed(uuid, bigint, text, boolean) IS
   'Client membership insert: own shop at the founder role for that org type (never platform admin), or an unexpired unaccepted invite whose role matches after admin is mapped to company_admin. NULL expires_at is open only when created_at is within 14 days. Invite inserts cannot set is_home.';
 
-REVOKE ALL ON FUNCTION public.membership_insert_allowed(uuid, bigint, text, boolean) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.membership_insert_allowed(uuid, bigint, text, boolean) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.membership_insert_allowed(uuid, bigint, text, boolean) TO authenticated;
 
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.organization_memberships FROM PUBLIC;
@@ -780,7 +872,28 @@ ALTER TABLE public.engineer_invitations ENABLE ROW LEVEL SECURITY;
 REVOKE ALL ON TABLE public.engineer_invitations FROM PUBLIC;
 REVOKE ALL ON TABLE public.engineer_invitations FROM anon;
 REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.engineer_invitations FROM authenticated;
-GRANT SELECT ON TABLE public.engineer_invitations TO authenticated;
+REVOKE SELECT ON TABLE public.engineer_invitations FROM authenticated;
+
+-- Same-org admins can read invite rows, not the token. Service role keeps
+-- its existing table grant and still reads token for /api/team/invite.
+DO $$
+DECLARE
+  cols text;
+BEGIN
+  SELECT string_agg(format('%I', column_name), ', ' ORDER BY ordinal_position)
+    INTO cols
+  FROM information_schema.columns
+  WHERE table_schema = 'public'
+    AND table_name = 'engineer_invitations'
+    AND column_name <> 'token';
+  IF cols IS NULL THEN
+    RAISE EXCEPTION 'engineer_invitations has no non-token columns';
+  END IF;
+  EXECUTE format(
+    'GRANT SELECT (%s) ON TABLE public.engineer_invitations TO authenticated',
+    cols
+  );
+END $$;
 
 DO $$
 DECLARE
@@ -845,7 +958,11 @@ BEGIN
     RAISE EXCEPTION 'not a member of that organization';
   END IF;
 
-  profile_role := public.profile_role_from_membership(mem.role);
+  SELECT role INTO profile_role FROM public.user_profiles WHERE id = actor;
+  profile_role := CASE
+    WHEN lower(btrim(profile_role)) = 'admin' THEN 'admin'
+    ELSE public.profile_role_from_membership(mem.role)
+  END;
 
   UPDATE public.user_profiles
   SET
@@ -864,8 +981,91 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.switch_active_organization(bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.switch_active_organization(bigint) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.switch_active_organization(bigint) TO authenticated;
+
+-- Live leave_organization(bigint), plus profile-role mapping. A platform
+-- admin (user_profiles.role = 'admin') stays admin. Every other next
+-- membership role is copied through profile_role_from_membership.
+CREATE OR REPLACE FUNCTION public.leave_organization(p_organization_id bigint)
+RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY DEFINER
+SET search_path = public, pg_temp
+AS $$
+DECLARE
+  actor uuid;
+  mem public.organization_memberships%ROWTYPE;
+  next_mem public.organization_memberships%ROWTYPE;
+  was_active bigint;
+  kept_role text;
+  next_role text;
+BEGIN
+  actor := auth.uid();
+  IF actor IS NULL THEN
+    RAISE EXCEPTION 'not signed in';
+  END IF;
+
+  SELECT * INTO mem
+  FROM public.organization_memberships
+  WHERE user_id = actor AND organization_id = p_organization_id;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'not a member of that organization';
+  END IF;
+
+  SELECT organization_id, role INTO was_active, kept_role
+  FROM public.user_profiles
+  WHERE id = actor;
+
+  DELETE FROM public.organization_memberships
+  WHERE user_id = actor AND organization_id = p_organization_id;
+
+  SELECT * INTO next_mem
+  FROM public.organization_memberships
+  WHERE user_id = actor
+  ORDER BY is_home DESC, created_at ASC
+  LIMIT 1;
+
+  IF next_mem.organization_id IS NULL THEN
+    next_role := NULL;
+  ELSIF lower(btrim(kept_role)) = 'admin' THEN
+    next_role := 'admin';
+  ELSE
+    next_role := public.profile_role_from_membership(next_mem.role);
+  END IF;
+
+  IF was_active IS NOT DISTINCT FROM p_organization_id THEN
+    IF next_mem.organization_id IS NOT NULL THEN
+      UPDATE public.user_profiles
+      SET
+        organization_id = next_mem.organization_id,
+        active_organization_id = next_mem.organization_id,
+        role = next_role,
+        updated_at = now()
+      WHERE id = actor;
+    ELSE
+      UPDATE public.user_profiles
+      SET
+        organization_id = NULL,
+        active_organization_id = NULL,
+        updated_at = now()
+      WHERE id = actor;
+    END IF;
+  END IF;
+
+  RETURN jsonb_build_object(
+    'ok', true,
+    'left_organization_id', p_organization_id,
+    'organization_id', next_mem.organization_id,
+    'role', next_role,
+    'account_kept', true
+  );
+END;
+$$;
+
+REVOKE ALL ON FUNCTION public.leave_organization(bigint) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.leave_organization(bigint) TO authenticated;
 
 CREATE OR REPLACE FUNCTION public.accept_team_invite(
   p_invite_id bigint,
@@ -955,7 +1155,10 @@ BEGIN
     SET
       organization_id = inv.organization_id,
       active_organization_id = inv.organization_id,
-      role = mapped_role,
+      role = CASE
+        WHEN lower(btrim(user_profiles.role)) = 'admin' THEN 'admin'
+        ELSE mapped_role
+      END,
       updated_at = now()
     WHERE id = actor;
   ELSIF p_leave_organization_id IS NOT NULL THEN
@@ -963,7 +1166,10 @@ BEGIN
     SET
       organization_id = inv.organization_id,
       active_organization_id = inv.organization_id,
-      role = mapped_role,
+      role = CASE
+        WHEN lower(btrim(user_profiles.role)) = 'admin' THEN 'admin'
+        ELSE mapped_role
+      END,
       updated_at = now()
     WHERE id = actor
       AND organization_id IS NOT DISTINCT FROM p_leave_organization_id;
@@ -981,7 +1187,7 @@ $$;
 COMMENT ON FUNCTION public.accept_team_invite(bigint, bigint) IS
   'Accept one unexpired invite for auth.users email. Membership role admin is stored as company_admin. NULL expires_at is open only when created_at is within 14 days.';
 
-REVOKE ALL ON FUNCTION public.accept_team_invite(bigint, bigint) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.accept_team_invite(bigint, bigint) FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.accept_team_invite(bigint, bigint) TO authenticated;
 
 -- Membership role admin is the org role, not platform admin.
@@ -995,6 +1201,47 @@ BEGIN
   WHERE lower(btrim(role)) = 'admin';
   GET DIAGNOSTICS n = ROW_COUNT;
   RAISE NOTICE 'organization_memberships admin -> company_admin: %', n;
+
+  ALTER TABLE public.organization_memberships
+    DROP CONSTRAINT IF EXISTS organization_memberships_role_not_platform_admin;
+  ALTER TABLE public.organization_memberships
+    ADD CONSTRAINT organization_memberships_role_not_platform_admin
+    CHECK (role IS NULL OR lower(btrim(role)) <> 'admin');
+END $$;
+
+-- Pre-existing SECURITY DEFINER functions that shipped without search_path.
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname = 'generate_ticket_number'
+      AND pg_get_function_identity_arguments(p.oid) = 'org_id bigint'
+  ) THEN
+    EXECUTE 'ALTER FUNCTION public.generate_ticket_number(bigint) SET search_path = public, pg_temp';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname = 'handle_new_user'
+      AND pg_get_function_identity_arguments(p.oid) = ''
+  ) THEN
+    EXECUTE 'ALTER FUNCTION public.handle_new_user() SET search_path = public, pg_temp';
+  END IF;
+  IF EXISTS (
+    SELECT 1
+    FROM pg_proc p
+    JOIN pg_namespace n ON n.oid = p.pronamespace
+    WHERE n.nspname = 'public'
+      AND p.proname = 'set_organization_created_by'
+      AND pg_get_function_identity_arguments(p.oid) = ''
+  ) THEN
+    EXECUTE 'ALTER FUNCTION public.set_organization_created_by() SET search_path = public, pg_temp';
+  END IF;
 END $$;
 
 -- ---------------------------------------------------------------------------

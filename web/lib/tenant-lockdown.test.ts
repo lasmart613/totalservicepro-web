@@ -149,7 +149,9 @@ test('role change refuses escalation and platform admin; same-org equal rank is 
     targetRole: 'admin',
     sameOrganization: true,
   });
-  assert.equal(platform.ok, true);
+  assert.equal(platform.ok, false);
+  if (platform.ok) return;
+  assert.match(platform.error, /memberships cannot use the platform admin role/i);
 });
 
 test('email signup rejects an organization or role in the body', () => {
@@ -176,7 +178,19 @@ test('migration revokes tenant columns and the trigger raises instead of downgra
   assert.match(sql, /RAISE EXCEPTION 'active_organization_id must reference an existing membership'/);
   assert.match(sql, /SET search_path = public, pg_temp/);
   assert.match(sql, /BEFORE INSERT OR UPDATE ON public\.user_profiles/);
-  assert.match(sql, /NEW\.role := grant_role/);
+  assert.match(
+    sql,
+    /NEW\.role := CASE\s+WHEN TG_OP = 'UPDATE' AND lower\(btrim\(OLD\.role\)\) = 'admin' THEN 'admin'\s+ELSE grant_role/
+  );
+  assert.match(sql, /SECURITY INVOKER/);
+  assert.match(sql, /current_user NOT IN \('authenticated', 'anon'\)/);
+  assert.match(sql, /FROM PUBLIC, anon/);
+  assert.match(sql, /email_confirmed_at IS NOT NULL/);
+  assert.match(sql, /DROP TRIGGER IF EXISTS on_auth_user_created ON auth\.users/);
+  assert.doesNotMatch(sql, /CREATE TRIGGER on_auth_user_created/);
+  assert.match(sql, /organization_memberships_role_not_platform_admin/);
+  assert.match(sql, /ALTER FUNCTION public\.generate_ticket_number\(bigint\) SET search_path/);
+  assert.match(sql, /invitation_is_open\(i\.accepted, i\.expires_at, i\.created_at\)/);
   assert.doesNotMatch(sql, /NOT IN \('admin', 'company_admin'\)/);
   assert.match(sql, /invitation_is_open/);
   assert.match(sql, /profile_role_from_membership/);
@@ -211,7 +225,7 @@ test('server routes call the authorizers and do not trust a client role on found
   assert.match(adminTeam, /postMemberRole/);
 });
 
-test('open write policies are replaced and catalog update is left for 000700', () => {
+test('open write policies replace catalog update and freeze identity columns', () => {
   const sql = readFileSync(
     join(here, '../supabase/migrations/20261006_000401_open_write_policies.sql'),
     'utf8'
@@ -228,13 +242,16 @@ test('open write policies are replaced and catalog update is left for 000700', (
   assert.match(sql, /created_by = auth\.uid\(\)/);
   assert.match(sql, /Authenticated can create customer orgs/);
   assert.match(sql, /laser_models_read/);
-  assert.doesNotMatch(sql, /DROP POLICY IF EXISTS parts_catalog_update/);
+  assert.match(sql, /DROP POLICY IF EXISTS parts_catalog_update ON public\.parts_catalog/);
+  assert.match(sql, /CREATE POLICY parts_catalog_update_owner/);
+  assert.match(sql, /lower\(admin_m\.role\) IN \('admin', 'company_admin'\)/);
   assert.doesNotMatch(sql, /DROP POLICY IF EXISTS "public insert waitlist"/);
   assert.match(sql, /REVOKE UPDATE \(%I\) ON TABLE public\.%I FROM PUBLIC, anon/);
-  assert.match(sql, /reject_client_owner_column_change/);
-  assert.match(sql, /service_reports_reject_client_owner_change/);
-  assert.match(sql, /marketplace_listings_reject_client_owner_change/);
-  assert.match(sql, /auth\.uid\(\) IS NULL/);
+  assert.match(sql, /REVOKE UPDATE ON TABLE public\.%I FROM PUBLIC, anon, authenticated/);
+  assert.match(sql, /guard_tenant_owner_cols/);
+  assert.match(sql, /current_user NOT IN \('authenticated', 'anon'\)/);
+  assert.match(sql, /get_my_org_id\(\)/);
+  assert.match(sql, /laser_clinic/);
   assert.match(sql, /customer_org_link_allowed/);
   assert.match(sql, /organization_customers_insert_linked/);
   assert.match(sql, /forum_bookmarks_read/);
@@ -244,7 +261,9 @@ test('open write policies are replaced and catalog update is left for 000700', (
   assert.doesNotMatch(sql, /CREATE POLICY part_vendors_write_owner/);
   assert.doesNotMatch(sql, /GRANT SELECT ON TABLE public\.parts TO authenticated/);
   const estimateRules = sql.slice(sql.indexOf('Null organization_id must not'));
-  assert.doesNotMatch(estimateRules, /organization_id IS NULL/);
+  assert.match(estimateRules, /organization_id = public\.get_my_org_id\(\)/);
+  assert.match(estimateRules, /organization_id IS NULL AND created_by = auth\.uid\(\)/);
+  assert.doesNotMatch(estimateRules, /OR created_by = auth\.uid\(\)/);
 
   const invite = readFileSync(join(here, '../app/api/team/invite/route.ts'), 'utf8');
   assert.doesNotMatch(invite, /userClient\.from\('engineer_invitations'\)\.insert/);

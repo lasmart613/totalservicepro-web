@@ -153,11 +153,22 @@ BEGIN
   ) THEN
     RAISE EXCEPTION 'FAIL laser_models insert policy still present';
   END IF;
-  IF NOT EXISTS (
+  IF EXISTS (
     SELECT 1 FROM pg_policies
     WHERE schemaname = 'public' AND tablename = 'parts_catalog' AND policyname = 'parts_catalog_update'
   ) THEN
-    RAISE EXCEPTION 'FAIL parts_catalog_update was replaced; leave it for 000700';
+    RAISE EXCEPTION 'FAIL parts_catalog_update is still USING true';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE schemaname = 'public' AND tablename = 'parts_catalog' AND policyname = 'parts_catalog_update_owner'
+      AND coalesce(qual, '') ILIKE '%company_admin%'
+      AND coalesce(with_check, '') ILIKE '%company_admin%'
+  ) THEN
+    RAISE EXCEPTION 'FAIL parts_catalog_update_owner is missing';
+  END IF;
+  IF has_column_privilege('authenticated', 'public.parts_catalog', 'created_by', 'UPDATE') THEN
+    RAISE EXCEPTION 'FAIL authenticated can still UPDATE parts_catalog.created_by';
   END IF;
   IF NOT EXISTS (
     SELECT 1 FROM pg_policies
@@ -316,7 +327,7 @@ BEGIN
   IF to_regclass('public.service_reports') IS NOT NULL
      AND NOT EXISTS (
        SELECT 1 FROM pg_trigger
-       WHERE tgname = 'service_reports_reject_client_owner_change'
+       WHERE tgname = 'guard_tenant_owner_cols'
          AND tgrelid = 'public.service_reports'::regclass
          AND NOT tgisinternal
      ) THEN
@@ -325,11 +336,109 @@ BEGIN
   IF to_regclass('public.marketplace_listings') IS NOT NULL
      AND NOT EXISTS (
        SELECT 1 FROM pg_trigger
-       WHERE tgname = 'marketplace_listings_reject_client_owner_change'
+       WHERE tgname = 'guard_tenant_owner_cols'
          AND tgrelid = 'public.marketplace_listings'::regclass
          AND NOT tgisinternal
      ) THEN
     RAISE EXCEPTION 'FAIL marketplace_listings can still move organization_id, seller_id, or created_by from a client';
+  END IF;
+  IF to_regclass('public.service_estimates') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_trigger
+       WHERE tgname = 'guard_tenant_owner_cols'
+         AND tgrelid = 'public.service_estimates'::regclass
+         AND NOT tgisinternal
+     ) THEN
+    RAISE EXCEPTION 'FAIL service_estimates has no guard_tenant_owner_cols trigger';
+  END IF;
+  IF to_regclass('public.service_invoices') IS NOT NULL
+     AND NOT EXISTS (
+       SELECT 1 FROM pg_trigger
+       WHERE tgname = 'guard_tenant_owner_cols'
+         AND tgrelid = 'public.service_invoices'::regclass
+         AND NOT tgisinternal
+     ) THEN
+    RAISE EXCEPTION 'FAIL service_invoices has no guard_tenant_owner_cols trigger';
+  END IF;
+  IF to_regclass('public.service_estimates') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM pg_policies
+       WHERE schemaname = 'public' AND tablename = 'service_estimates'
+         AND (
+           coalesce(qual, '') ~* 'or[[:space:]]+created_by[[:space:]]*=[[:space:]]*auth\.uid\(\)'
+           OR coalesce(with_check, '') ~* 'or[[:space:]]+created_by[[:space:]]*=[[:space:]]*auth\.uid\(\)'
+         )
+     ) THEN
+    RAISE EXCEPTION 'FAIL service_estimates still allows created_by to plant any organization_id';
+  END IF;
+  IF to_regclass('public.service_invoices') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM pg_policies
+       WHERE schemaname = 'public' AND tablename = 'service_invoices'
+         AND (
+           coalesce(qual, '') ~* 'or[[:space:]]+created_by[[:space:]]*=[[:space:]]*auth\.uid\(\)'
+           OR coalesce(with_check, '') ~* 'or[[:space:]]+created_by[[:space:]]*=[[:space:]]*auth\.uid\(\)'
+         )
+     ) THEN
+    RAISE EXCEPTION 'FAIL service_invoices still allows created_by to plant any organization_id';
+  END IF;
+  IF to_regclass('public.service_invoices') IS NOT NULL
+     AND EXISTS (
+       SELECT 1 FROM information_schema.columns
+       WHERE table_schema = 'public' AND table_name = 'service_invoices' AND column_name = 'voided_at'
+     )
+     AND NOT (
+       has_column_privilege('authenticated', 'public.service_invoices', 'voided_at', 'UPDATE')
+       AND has_column_privilege('authenticated', 'public.service_invoices', 'void_reason', 'UPDATE')
+       AND has_column_privilege('authenticated', 'public.service_invoices', 'status', 'UPDATE')
+     ) THEN
+    RAISE EXCEPTION 'FAIL authenticated lost service_invoices void columns';
+  END IF;
+  IF has_function_privilege('anon', 'public.profile_org_change_allowed(uuid, bigint)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'FAIL anon can still execute profile_org_change_allowed';
+  END IF;
+  IF position('invitation_is_open' IN pg_get_functiondef('public.profile_org_change_allowed(uuid,bigint)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'FAIL profile_org_change_allowed does not use the 14-day invite rule';
+  END IF;
+  IF position('current_user' IN pg_get_functiondef('public.user_profiles_guard_identity()'::regprocedure)) = 0
+     OR EXISTS (
+       SELECT 1 FROM pg_proc p
+       JOIN pg_namespace n ON n.oid = p.pronamespace
+       WHERE n.nspname = 'public' AND p.proname = 'user_profiles_guard_identity' AND p.prosecdef
+     ) THEN
+    RAISE EXCEPTION 'FAIL user_profiles_guard_identity is not an invoker current_user bypass';
+  END IF;
+  IF position('profile_role_from_membership' IN pg_get_functiondef('public.leave_organization(bigint)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'FAIL leave_organization still copies a raw membership role';
+  END IF;
+  IF position('email_confirmed_at' IN pg_get_functiondef('public.handle_new_auth_user()'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'FAIL handle_new_auth_user joins an unconfirmed invite email';
+  END IF;
+  IF EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgrelid = 'auth.users'::regclass
+      AND NOT tgisinternal
+      AND tgfoid = 'public.handle_new_auth_user()'::regprocedure
+  ) THEN
+    RAISE EXCEPTION 'FAIL handle_new_auth_user is attached to auth.users';
+  END IF;
+  IF position('get_my_org_id' IN pg_get_functiondef('public.customer_org_link_allowed(bigint,bigint)'::regprocedure)) = 0
+     OR position('laser_clinic' IN pg_get_functiondef('public.customer_org_link_allowed(bigint,bigint)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'FAIL customer_org_link_allowed is still the moonlighter check';
+  END IF;
+  IF to_regclass('public.organization_customers') IS NOT NULL
+     AND (
+       has_column_privilege('authenticated', 'public.organization_customers', 'customer_organization_id', 'UPDATE')
+       OR has_column_privilege('authenticated', 'public.organization_customers', 'service_organization_id', 'UPDATE')
+     ) THEN
+    RAISE EXCEPTION 'FAIL organization_customers link columns are still updatable';
+  END IF;
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint
+    WHERE conname = 'organization_memberships_role_not_platform_admin'
+      AND conrelid = 'public.organization_memberships'::regclass
+  ) THEN
+    RAISE EXCEPTION 'FAIL membership role admin is still allowed';
   END IF;
 END $$;
 

@@ -4,9 +4,11 @@
 --
 -- organization_manuals, service_reports, and test_equipment stay on
 -- user_profiles.organization_id. 000400 revokes client UPDATE of that column.
--- organization_customers INSERT/UPDATE must also prove the customer org was
--- created by a member of the service org, or accepted from that org's invite.
--- parts_catalog_update and part_vendors DELETE are left for 20261006_000700 (#217).
+-- organization_customers INSERT/UPDATE must prove the customer org is a
+-- customer-side org created by an S member, or an accepted owner invite
+-- sent by an S admin. parts_catalog UPDATE is replaced here with the same
+-- parts_catalog_update_owner definition as 20261006_000700 (#217), so that
+-- file's DROP/CREATE is a no-op. part_vendors DELETE stays in 000700.
 -- "public insert waitlist" stays: the waitlist is a public signup.
 
 -- ---------------------------------------------------------------------------
@@ -556,19 +558,54 @@ BEGIN
   $policy$;
 END $$;
 
--- parts_catalog insert must name the caller. UPDATE policy is #217's 000700.
+-- parts_catalog insert must name the caller. UPDATE is owner or same-org
+-- admin, the same policy 000700 creates. Table UPDATE is revoked below and
+-- created_by is not re-granted, so claiming a part by rewriting created_by
+-- fails even if a later GRANT UPDATE ON TABLE undoes the column list.
 DO $$
 BEGIN
   IF to_regclass('public.parts_catalog') IS NULL THEN
     RETURN;
   END IF;
   EXECUTE 'DROP POLICY IF EXISTS parts_catalog_insert ON public.parts_catalog';
-  EXECUTE 'REVOKE UPDATE (created_by) ON TABLE public.parts_catalog FROM PUBLIC, anon, authenticated';
+  EXECUTE 'REVOKE INSERT, UPDATE, DELETE, TRUNCATE ON TABLE public.parts_catalog FROM anon';
   EXECUTE 'DROP POLICY IF EXISTS parts_catalog_insert_owner ON public.parts_catalog';
   EXECUTE $policy$
     CREATE POLICY parts_catalog_insert_owner ON public.parts_catalog
       FOR INSERT TO authenticated
       WITH CHECK (created_by = auth.uid())
+  $policy$;
+  EXECUTE 'DROP POLICY IF EXISTS parts_catalog_update ON public.parts_catalog';
+  EXECUTE 'DROP POLICY IF EXISTS parts_catalog_update_owner ON public.parts_catalog';
+  EXECUTE $policy$
+    CREATE POLICY parts_catalog_update_owner
+      ON public.parts_catalog
+      FOR UPDATE
+      TO authenticated
+      USING (
+        created_by = auth.uid()
+        OR EXISTS (
+          SELECT 1
+          FROM public.organization_memberships owner_m
+          JOIN public.organization_memberships admin_m
+            ON admin_m.organization_id = owner_m.organization_id
+           AND admin_m.user_id = auth.uid()
+           AND lower(admin_m.role) IN ('admin', 'company_admin')
+          WHERE owner_m.user_id = parts_catalog.created_by
+        )
+      )
+      WITH CHECK (
+        created_by = auth.uid()
+        OR EXISTS (
+          SELECT 1
+          FROM public.organization_memberships owner_m
+          JOIN public.organization_memberships admin_m
+            ON admin_m.organization_id = owner_m.organization_id
+           AND admin_m.user_id = auth.uid()
+           AND lower(admin_m.role) IN ('admin', 'company_admin')
+          WHERE owner_m.user_id = parts_catalog.created_by
+        )
+      )
   $policy$;
 END $$;
 
@@ -582,9 +619,10 @@ BEGIN
   EXECUTE 'DROP POLICY IF EXISTS "Authenticated can create customer orgs" ON public.organizations';
 END $$;
 
--- A service org may link only a customer org its own member created,
--- or a customer org one of its members invited and that invite was accepted.
--- customer_organization_id cannot be retargeted.
+-- S is the caller's active org. The customer org must be a customer-side
+-- type, and either was created as type customer by someone who is now an
+-- S member, or received an accepted owner invite from an S admin.
+-- A moonlighting member who founded another shop does not make that shop linkable.
 CREATE OR REPLACE FUNCTION public.customer_org_link_allowed(
   p_service bigint,
   p_customer bigint
@@ -596,36 +634,33 @@ SET search_path = public, pg_temp
 AS $$
   SELECT p_service IS NOT NULL
     AND p_customer IS NOT NULL
-    AND public.caller_in_org(p_service)
+    AND p_service = public.get_my_org_id()
+    AND EXISTS (
+      SELECT 1 FROM public.organizations o
+      WHERE o.id = p_customer
+        AND o.type IN ('customer', 'laser_clinic', 'laser_rental', 'laser_reseller')
+    )
     AND (
       EXISTS (
-        SELECT 1
-        FROM public.organizations o
+        SELECT 1 FROM public.organizations o
         WHERE o.id = p_customer
+          AND o.type = 'customer'
           AND o.created_by IS NOT NULL
-          AND (
-            EXISTS (
-              SELECT 1
-              FROM public.organization_memberships m
-              WHERE m.user_id = o.created_by
-                AND m.organization_id = p_service
-            )
-            OR EXISTS (
-              SELECT 1
-              FROM public.user_profiles p
-              WHERE p.id = o.created_by
-                AND p.organization_id = p_service
-            )
+          AND EXISTS (
+            SELECT 1 FROM public.organization_memberships m
+            WHERE m.user_id = o.created_by
+              AND m.organization_id = p_service
           )
       )
       OR EXISTS (
-        SELECT 1
-        FROM public.engineer_invitations i
+        SELECT 1 FROM public.engineer_invitations i
         JOIN public.organization_memberships m
           ON m.user_id = i.invited_by
          AND m.organization_id = p_service
+         AND lower(m.role) IN ('company_admin', 'owner', 'service_manager', 'crm')
         WHERE i.organization_id = p_customer
-          AND COALESCE(i.accepted, false) = true
+          AND i.accepted IS TRUE
+          AND lower(coalesce(i.role, '')) = 'owner'
       )
     );
 $$;
@@ -663,8 +698,10 @@ BEGIN
 END $$;
 
 -- Null organization_id must not make every signed-in user able to read
--- estimates and invoices. The created_by branch stays so the author still
--- sees a row they wrote.
+-- estimates and invoices. A created_by match counts only while the row
+-- still has no organization. Table UPDATE stays granted so voided_at,
+-- void_reason, status, and a stamp onto the caller's own org still work.
+-- guard_tenant_owner_cols blocks planting the row in another tenant.
 DO $$
 BEGIN
   IF to_regclass('public.service_estimates') IS NOT NULL THEN
@@ -673,20 +710,12 @@ BEGIN
       CREATE POLICY service_estimates_member_all ON public.service_estimates
         FOR ALL TO authenticated
         USING (
-          organization_id IN (
-            SELECT user_profiles.organization_id
-            FROM public.user_profiles
-            WHERE user_profiles.id = auth.uid()
-          )
-          OR created_by = auth.uid()
+          organization_id = public.get_my_org_id()
+          OR (organization_id IS NULL AND created_by = auth.uid())
         )
         WITH CHECK (
-          organization_id IN (
-            SELECT user_profiles.organization_id
-            FROM public.user_profiles
-            WHERE user_profiles.id = auth.uid()
-          )
-          OR created_by = auth.uid()
+          organization_id = public.get_my_org_id()
+          OR (organization_id IS NULL AND created_by = auth.uid())
         )
     $policy$;
   END IF;
@@ -697,35 +726,23 @@ BEGIN
       CREATE POLICY service_invoices_member_all ON public.service_invoices
         FOR ALL TO authenticated
         USING (
-          organization_id IN (
-            SELECT user_profiles.organization_id
-            FROM public.user_profiles
-            WHERE user_profiles.id = auth.uid()
-          )
-          OR created_by = auth.uid()
+          organization_id = public.get_my_org_id()
+          OR (organization_id IS NULL AND created_by = auth.uid())
         )
         WITH CHECK (
-          organization_id IN (
-            SELECT user_profiles.organization_id
-            FROM public.user_profiles
-            WHERE user_profiles.id = auth.uid()
-          )
-          OR created_by = auth.uid()
+          organization_id = public.get_my_org_id()
+          OR (organization_id IS NULL AND created_by = auth.uid())
         )
     $policy$;
   END IF;
 END $$;
 
--- Anon cannot UPDATE owner or org columns on any public table.
--- Authenticated UPDATE of created_by / organization_id stays granted where
--- saves echo those columns. Echoing the same value is fine. Changing it is
--- not: service_reports WITH CHECK is created_by = auth.uid() OR the profile
--- org, so a creator can point organization_id at another tenant. Listing
--- policies are seller_id = auth.uid() OR created_by = auth.uid() and do not
--- mention organization_id, so a listing can move org or owner. The trigger
--- below rejects those client changes. service_tickets WITH CHECK is
--- auth_member_of_org(organization_id) on the new row, so a ticket cannot
--- move to an org the caller is not a member of.
+-- Anon column revoke. This does not stop authenticated: a table-level UPDATE
+-- grant makes a column REVOKE a no-op. The tables that used a column REVOKE
+-- get a real table-level UPDATE revoke and an explicit column grant later
+-- in this file. Other tables still echo organization_id on purpose
+-- (estimate/invoice stamp, equipment, tickets). service_tickets WITH CHECK
+-- is auth_member_of_org(organization_id), so no ticket trigger.
 DO $$
 DECLARE
   r record;
@@ -757,59 +774,132 @@ BEGIN
   END LOOP;
 END $$;
 
--- Freeze owner columns when a signed-in client changes them. Service role
--- (auth.uid() IS NULL) and an unchanged echo both pass.
-CREATE OR REPLACE FUNCTION public.reject_client_owner_column_change()
+-- Client roles cannot plant a row in an org they are not in, or hand
+-- created_by / seller_id to someone else. SECURITY INVOKER so current_user
+-- is the statement user: postgres inside a SECURITY DEFINER caller (bypass),
+-- authenticated for PostgREST. auth.uid() IS NULL would not bypass those
+-- definer callers, because auth.uid() stays set. Unchanged echoes pass.
+CREATE OR REPLACE FUNCTION public.guard_tenant_owner_cols()
 RETURNS trigger
 LANGUAGE plpgsql
+SECURITY INVOKER
 SET search_path = public, pg_temp
 AS $$
+DECLARE
+  n jsonb := to_jsonb(NEW);
+  o jsonb := CASE WHEN TG_OP = 'UPDATE' THEN to_jsonb(OLD) END;
+  c text;
 BEGIN
-  IF auth.uid() IS NULL THEN
+  IF current_user NOT IN ('authenticated', 'anon') THEN
     RETURN NEW;
   END IF;
-
-  IF TG_TABLE_NAME = 'service_reports' THEN
-    IF NEW.organization_id IS DISTINCT FROM OLD.organization_id
-       OR NEW.created_by IS DISTINCT FROM OLD.created_by THEN
-      RAISE EXCEPTION 'service_reports organization_id and created_by cannot be changed by a signed-in client'
-        USING ERRCODE = '42501';
-    END IF;
-  ELSIF TG_TABLE_NAME = 'marketplace_listings' THEN
-    IF NEW.organization_id IS DISTINCT FROM OLD.organization_id
-       OR NEW.created_by IS DISTINCT FROM OLD.created_by
-       OR NEW.seller_id IS DISTINCT FROM OLD.seller_id THEN
-      RAISE EXCEPTION 'marketplace_listings organization_id, created_by, and seller_id cannot be changed by a signed-in client'
-        USING ERRCODE = '42501';
-    END IF;
+  IF (n->>'organization_id') IS NOT NULL
+     AND (TG_OP = 'INSERT' OR (n->>'organization_id') IS DISTINCT FROM (o->>'organization_id'))
+     AND NOT public.caller_in_org((n->>'organization_id')::bigint) THEN
+    RAISE EXCEPTION 'organization_id must be an organization you belong to'
+      USING ERRCODE = '42501';
   END IF;
-
+  FOREACH c IN ARRAY ARRAY['created_by', 'seller_id']
+  LOOP
+    IF n ? c THEN
+      IF TG_OP = 'INSERT' AND (n->>c) IS NOT NULL AND (n->>c)::uuid <> auth.uid() THEN
+        RAISE EXCEPTION '% must be the signed-in user', c USING ERRCODE = '42501';
+      END IF;
+      IF TG_OP = 'UPDATE' AND (n->>c) IS DISTINCT FROM (o->>c) THEN
+        RAISE EXCEPTION '% cannot be changed', c USING ERRCODE = '42501';
+      END IF;
+    END IF;
+  END LOOP;
   RETURN NEW;
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public.reject_client_owner_column_change() FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.guard_tenant_owner_cols() FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.guard_tenant_owner_cols() TO authenticated, service_role;
 
 DO $$
+DECLARE
+  tbl text;
 BEGIN
-  IF to_regclass('public.service_reports') IS NOT NULL THEN
-    EXECUTE 'DROP TRIGGER IF EXISTS service_reports_reject_client_owner_change ON public.service_reports';
-    EXECUTE $trg$
-      CREATE TRIGGER service_reports_reject_client_owner_change
-        BEFORE UPDATE ON public.service_reports
-        FOR EACH ROW
-        EXECUTE FUNCTION public.reject_client_owner_column_change()
-    $trg$;
-  END IF;
-  IF to_regclass('public.marketplace_listings') IS NOT NULL THEN
-    EXECUTE 'DROP TRIGGER IF EXISTS marketplace_listings_reject_client_owner_change ON public.marketplace_listings';
-    EXECUTE $trg$
-      CREATE TRIGGER marketplace_listings_reject_client_owner_change
-        BEFORE UPDATE ON public.marketplace_listings
-        FOR EACH ROW
-        EXECUTE FUNCTION public.reject_client_owner_column_change()
-    $trg$;
-  END IF;
+  FOREACH tbl IN ARRAY ARRAY[
+    'service_estimates',
+    'service_invoices',
+    'service_reports',
+    'marketplace_listings'
+  ]
+  LOOP
+    IF to_regclass('public.' || tbl) IS NULL THEN
+      CONTINUE;
+    END IF;
+    EXECUTE format('DROP TRIGGER IF EXISTS guard_tenant_owner_cols ON public.%I', tbl);
+    EXECUTE format('DROP TRIGGER IF EXISTS %I ON public.%I', tbl || '_reject_client_owner_change', tbl);
+  END LOOP;
+  EXECUTE 'DROP FUNCTION IF EXISTS public.reject_client_owner_column_change()';
+  FOREACH tbl IN ARRAY ARRAY[
+    'service_estimates',
+    'service_invoices',
+    'service_reports',
+    'marketplace_listings'
+  ]
+  LOOP
+    IF to_regclass('public.' || tbl) IS NULL THEN
+      CONTINUE;
+    END IF;
+    EXECUTE format(
+      'CREATE TRIGGER guard_tenant_owner_cols BEFORE INSERT OR UPDATE ON public.%I FOR EACH ROW EXECUTE FUNCTION public.guard_tenant_owner_cols()',
+      tbl
+    );
+  END LOOP;
+END $$;
+
+-- Column REVOKE is a no-op while table UPDATE is granted. Revoke the table
+-- privilege and grant every column except the identity columns. New columns
+-- (organizations.timezone is granted in 000400; invoice voided_at, void_reason,
+-- and status stay on the service_invoices table grant above) are included
+-- automatically. Clients do not send the frozen columns on update.
+DO $$
+DECLARE
+  spec record;
+  cols text;
+BEGIN
+  FOR spec IN
+    SELECT *
+    FROM (VALUES
+      ('contacts', ARRAY['organization_id']::text[]),
+      ('notifications', ARRAY['user_id']::text[]),
+      ('sites', ARRAY['organization_id']::text[]),
+      ('forum_threads', ARRAY['author_id']::text[]),
+      ('forum_posts', ARRAY['author_id']::text[]),
+      ('forum_reactions', ARRAY['user_id']::text[]),
+      ('forum_bookmarks', ARRAY['user_id']::text[]),
+      ('forum_attachments', ARRAY['uploaded_by']::text[]),
+      ('inventory_locations', ARRAY['organization_id', 'owner_user_id']::text[]),
+      ('parts_catalog', ARRAY['created_by']::text[]),
+      ('organization_customers', ARRAY['customer_organization_id', 'service_organization_id']::text[])
+    ) AS t(table_name, frozen)
+  LOOP
+    IF to_regclass('public.' || spec.table_name) IS NULL THEN
+      CONTINUE;
+    END IF;
+    EXECUTE format(
+      'REVOKE UPDATE ON TABLE public.%I FROM PUBLIC, anon, authenticated',
+      spec.table_name
+    );
+    SELECT string_agg(format('%I', c.column_name), ', ' ORDER BY c.ordinal_position)
+      INTO cols
+    FROM information_schema.columns c
+    WHERE c.table_schema = 'public'
+      AND c.table_name = spec.table_name
+      AND NOT (c.column_name = ANY (spec.frozen));
+    IF cols IS NULL THEN
+      RAISE EXCEPTION 'no safe update columns for %', spec.table_name;
+    END IF;
+    EXECUTE format(
+      'GRANT UPDATE (%s) ON TABLE public.%I TO authenticated',
+      cols,
+      spec.table_name
+    );
+  END LOOP;
 END $$;
 
 NOTIFY pgrst, 'reload schema';
