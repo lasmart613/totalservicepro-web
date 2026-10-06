@@ -773,7 +773,7 @@ export default function Onboarding() {
             };
             const r2 = await supabase.from('equipment').insert(slim);
             if (r2.error) {
-              laserSaveErrors.push(`${l.manufacturer} ${l.model}: ${r2.error.message}`);
+              laserSaveErrors.push(`${l.manufacturer} ${displayModelName(l.model)}: ${r2.error.message}`);
               console.error('equipment insert failed', r2.error);
             } else {
               lasersSaved++;
@@ -1036,7 +1036,7 @@ export default function Onboarding() {
                 {lasers.map(l => (
                   <li key={l.id} className="card p-3 flex justify-between items-center text-sm">
                     <div>
-                      <div className="font-bold text-[var(--gold)]">{l.manufacturer} {l.model}</div>
+                      <div className="font-bold text-[var(--gold)]">{l.manufacturer} {displayModelName(l.model)}</div>
                       <div className="text-xs text-[var(--text3)]">{l.serial_number ? `SN ${l.serial_number}` : 'No serial'}{l.notes ? ` · ${l.notes}` : ''}</div>
                     </div>
                     <button type="button" className="text-red-400 text-xs" onClick={() => removeLaserDraft(l.id)}>Remove</button>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -8,6 +8,7 @@ import { Header } from '@/components/Header';
 import { useOrgMoney } from '@/lib/use-org-money';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
+import { orgTodayIso } from '@/lib/org-timezone';
 import { buildPurchaseOrderHtml, type DocCompany } from '@/lib/billing/doc-html';
 import { isValidOnFileEmail, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import { chunkIds, fetchAllPages } from '@/lib/supabase/paginate';
@@ -43,11 +44,6 @@ type SupplierOpt = {
   zip?: string | null;
 };
 
-function todayYmd() {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
-}
-
 export default function PurchaseOrderFormClient() {
   const { money, prefs, locale } = useOrgMoney();
   const supabase = getSupabaseClient();
@@ -76,7 +72,9 @@ export default function PurchaseOrderFormClient() {
   const [supPhone, setSupPhone] = useState('');
   const [supEmail, setSupEmail] = useState('');
 
-  const [poDate, setPoDate] = useState(todayYmd());
+  const poDateTouched = useRef(false);
+  const orgTodayRef = useRef(orgTodayIso());
+  const [poDate, setPoDate] = useState(() => orgTodayRef.current);
   const [neededBy, setNeededBy] = useState('');
   const [shipTo, setShipTo] = useState('');
   const [description, setDescription] = useState('');
@@ -244,7 +242,8 @@ export default function PurchaseOrderFormClient() {
       setSupSearch(data.supplier_name || '');
       setSupplierOrgId(data.supplier_organization_id || null);
       setSupEmail(data.supplier_email || '');
-      setPoDate(data.po_date ? String(data.po_date).slice(0, 10) : todayYmd());
+      poDateTouched.current = true;
+      setPoDate(data.po_date ? String(data.po_date).slice(0, 10) : orgTodayRef.current);
       setNeededBy(data.needed_by ? String(data.needed_by).slice(0, 10) : '');
       setDescription(data.description || '');
       setTax(Number(data.tax) || 0);
@@ -297,11 +296,17 @@ export default function PurchaseOrderFormClient() {
         setUserOrgId(orgId);
         const techName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ');
         if (orgId) {
+          let storedZone: string | null = null;
+          const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();
+          if (zoneRow.error) console.warn('organizations.timezone', zoneRow.error.message);
+          else if (zoneRow.data?.timezone) storedZone = String(zoneRow.data.timezone);
           const { data: org } = await supabase
             .from('organizations')
             .select('name, address, city, state, zip, phone, email, website, logo_url, slogan')
             .eq('id', orgId)
             .maybeSingle();
+          orgTodayRef.current = orgTodayIso({ stored: storedZone, state: org?.state });
+          if (!editIdParam && !poDateTouched.current) setPoDate(orgTodayRef.current);
           setCompany({
             company_name: org?.name || '',
             address: org?.address || '',
@@ -363,10 +368,11 @@ export default function PurchaseOrderFormClient() {
     try {
       let num = editIdParam ? docNumber : '';
       if (!num && userOrgId) {
+        const dated = poDate || orgTodayRef.current;
         num = await allocateDocNumber(supabase, {
           orgId: userOrgId,
           kind: 'PO',
-          date: poDate || new Date(),
+          date: dated,
         });
         setDocNumber(num);
       }
@@ -380,7 +386,7 @@ export default function PurchaseOrderFormClient() {
         organization_id: userOrgId,
         supplier_organization_id: supplierOrgId || null,
         supplier_email: supEmail.trim() || null,
-        po_date: poDate || todayYmd(),
+        po_date: poDate || orgTodayRef.current,
         needed_by: neededBy || null,
         description: description || null,
         subtotal: Math.round(subtotal * 100) / 100,
@@ -443,7 +449,7 @@ export default function PurchaseOrderFormClient() {
         email: supEmail,
       },
       poNumber: docNumber || 'Draft',
-      poDate: poDate || todayYmd(),
+      poDate: poDate || orgTodayRef.current,
       neededBy: neededBy || undefined,
       shipTo: shipTo || undefined,
       description: description || undefined,
@@ -515,7 +521,7 @@ export default function PurchaseOrderFormClient() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="page max-w-3xl mx-auto w-full px-4 py-6 pb-28">
+      <div className="doc-action-page-compact page max-w-3xl mx-auto w-full px-4 py-6">
         <div className="mb-4">
           <h1 className="text-2xl font-extrabold">Purchase Order</h1>
           <p className="text-sm text-[var(--text3)]">
@@ -606,7 +612,10 @@ export default function PurchaseOrderFormClient() {
                 className="input mt-1"
                 type="date"
                 value={poDate}
-                onChange={(e) => setPoDate(e.target.value)}
+                onChange={(e) => {
+                  poDateTouched.current = true;
+                  setPoDate(e.target.value);
+                }}
               />
             </div>
             <div>
@@ -778,7 +787,7 @@ export default function PurchaseOrderFormClient() {
           </div>
         </section>
 
-        <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
+        <div className="doc-action-bar flex flex-wrap gap-2 sticky bottom-4 z-10">
           <Link href="/purchase-orders" className="btn btn-secondary min-w-[80px] text-center">
             Cancel
           </Link>

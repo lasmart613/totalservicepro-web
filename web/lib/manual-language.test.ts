@@ -5,10 +5,12 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseManualCatalogInsert } from './manual-catalog-admin.ts';
 import {
+  MANUAL_TITLE_LANGUAGE_LAST_WORDS,
   MANUAL_TITLE_LANGUAGE_SUFFIXES,
   languageSuffixFromTitle,
   manualLanguageBadge,
   manualLanguageFilterOptions,
+  manualQueryLanguageMatch,
   resolveManualLanguage,
 } from './manual-language.ts';
 
@@ -24,11 +26,23 @@ test('title suffixes map to ISO 639-1 and other notes stay English', () => {
   assert.equal(languageSuffixFromTitle('Ho (Brazilian Portuguese)'), 'pt');
   assert.equal(languageSuffixFromTitle('AcuPulse (Chinese)'), 'zh');
   assert.equal(languageSuffixFromTitle('Litho IFU (EN)'), 'en');
+  assert.equal(languageSuffixFromTitle('GentleMax Pro (Service Manual, German)'), 'de');
+  assert.equal(languageSuffixFromTitle('GentleMax Pro (… German)'), 'de');
+  assert.equal(languageSuffixFromTitle('UltraPulse (notes in Spanish)'), 'es');
+  assert.equal(languageSuffixFromTitle('AcuPulse (Service Manual, Brazilian Portuguese)'), 'pt');
+  assert.equal(languageSuffixFromTitle('Elite (Service Manual, Deutsch)'), 'de');
   assert.equal(
     languageSuffixFromTitle('Siemens SONOLINE Antares Gebruiksaanwijzing (Dutch IFU/Operator; not service manual)'),
     null
   );
+  assert.equal(languageSuffixFromTitle('VBeam (French Operator Manual)'), null);
+  assert.equal(languageSuffixFromTitle('VBeam (Operator Manual)'), null);
+  assert.equal(languageSuffixFromTitle('VBeam (not service manual)'), null);
+  assert.equal(languageSuffixFromTitle('VBeam (Germanium handpiece)'), null);
+  assert.equal(languageSuffixFromTitle('VBeam (Service Manual, DE)'), null);
+  assert.equal(languageSuffixFromTitle('VBeam (German translation draft)'), null);
   assert.equal(languageSuffixFromTitle('VBeam Perfecta'), null);
+  assert.equal(languageSuffixFromTitle('How to speak Spanish'), null);
   assert.equal(resolveManualLanguage({ title: 'GentleMax Pro (German)', language: 'en' }), 'de');
   assert.equal(resolveManualLanguage({ title: 'GentleMax Pro', language: 'ja' }), 'ja');
   assert.equal(resolveManualLanguage({ title: 'GentleMax Pro' }), 'en');
@@ -95,4 +109,54 @@ test('catalog insert keeps the title suffix and stores the language code', () =>
     options.map((option) => option.value),
     ['all', 'en', 'de']
   );
+});
+
+test('last word of a bracket is a language, and empty languages stay out of the filter', () => {
+  const tagged = parseManualCatalogInsert({
+    brand: 'Candela',
+    model: 'GentleMax',
+    title: 'GentleMax Pro (Service Manual, German)',
+    storage_path: 'shared/candela/gentlemax/gentlemax-pro-de.pdf',
+  });
+  assert.equal(tagged.ok, true);
+  if (tagged.ok) {
+    assert.equal(tagged.row.title, 'GentleMax Pro (Service Manual, German)');
+    assert.equal(tagged.row.language, 'de');
+  }
+
+  assert.deepEqual(manualQueryLanguageMatch('Spanish'), { codes: ['es'], textQuery: '' });
+  assert.deepEqual(manualQueryLanguageMatch('español'), { codes: ['es'], textQuery: '' });
+  assert.deepEqual(manualQueryLanguageMatch('Candela Deutsch'), { codes: ['de'], textQuery: 'candela' });
+  assert.deepEqual(manualQueryLanguageMatch('brazilian portuguese'), { codes: ['pt'], textQuery: '' });
+
+  const onlyGerman = manualLanguageFilterOptions([
+    { title: 'GentleMax Pro (German)', language: 'de' },
+    { title: 'Another (Service Manual, German)', language: 'en' },
+  ]);
+  assert.deepEqual(
+    onlyGerman.map((option) => option.value),
+    ['all', 'de']
+  );
+  assert.deepEqual(
+    manualLanguageFilterOptions([]).map((option) => option.value),
+    ['all']
+  );
+});
+
+test('last-word language migration retags bracket suffixes and does not rewrite titles', () => {
+  const sql = readFileSync(
+    join(here, '../supabase/migrations/20261006_000000_manuals_language_bracket_last_word.sql'),
+    'utf8'
+  );
+  assert.match(sql, /Service Manual, German/);
+  assert.match(sql, /map\.code <> 'en'/);
+  assert.doesNotMatch(sql, /SET\s+title\b/i);
+  assert.doesNotMatch(sql, /\btitle\s*=/);
+  assert.doesNotMatch(sql, /\('en', 'en'\)/);
+  assert.doesNotMatch(sql, /\('de', 'de'\)/);
+  assert.doesNotMatch(sql, /\('no', 'no'\)/);
+  assert.doesNotMatch(sql, /\('id', 'id'\)/);
+  for (const [word, code] of MANUAL_TITLE_LANGUAGE_LAST_WORDS) {
+    assert.match(sql, new RegExp(`\\('${word.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}', '${code}'\\)`));
+  }
 });

@@ -320,6 +320,17 @@ function unavailable(id: string, label: string, source: string, reason: string):
   return { id, label, source, availability: 'unavailable', reason };
 }
 
+/** Table and column names stay in the log. The report shows a plain sentence. */
+function plainDiagnostic(raw: string | null | undefined, fallback: string): string | null {
+  const text = String(raw || '').trim();
+  if (!text) return null;
+  if (/[a-z][a-z0-9]*_[a-z0-9_]+|schema cache|does not exist|could not find the/i.test(text)) {
+    console.warn('[financial-reporting]', text);
+    return fallback;
+  }
+  return text;
+}
+
 function ageBucket(due: string | null, asOf: string): string {
   if (!due) return 'no_due_date';
   if (due >= asOf) return 'not_yet_due';
@@ -386,7 +397,9 @@ export function assembleFinancialReport(input: {
     numberFormat: input.numberFormat,
   });
   const columns = input.invoiceColumns;
-  const invoiceIssue = input.invoiceIssue || null;
+  const invoiceIssue = plainDiagnostic(input.invoiceIssue, 'Invoices could not be read.');
+  const purchaseOrderIssue = plainDiagnostic(input.purchaseOrderIssue, 'Purchase orders could not be read.');
+  const estimateIssue = plainDiagnostic(input.estimateIssue, 'Estimates could not be read.');
   const invoicesKnown = input.invoices != null && !invoiceIssue;
 
   let billedCents = 0;
@@ -629,7 +642,7 @@ export function assembleFinancialReport(input: {
           'cash_collected',
           'Cash collected',
           'Recorded payment or the deposit saved on the invoice',
-          'Neither amount_paid nor invoice_data was returned, so collected cash cannot be read.'
+          'Payment amounts were not returned, so collected cash cannot be read.'
         )
       );
     } else {
@@ -732,7 +745,7 @@ export function assembleFinancialReport(input: {
           count: monthBilledCount,
           note:
             monthBilledUndated > 0
-              ? `${monthBilledUndated} issued invoice${monthBilledUndated === 1 ? '' : 's'} have no invoice_date and are excluded from this month.`
+              ? `${monthBilledUndated} issued invoice${monthBilledUndated === 1 ? '' : 's'} have no invoice date and are excluded from this month.`
               : `Month ${month}.`,
         })
       );
@@ -753,7 +766,7 @@ export function assembleFinancialReport(input: {
           'collected_this_month',
           'Cash collected this month',
           'Payment date, or the deposit date saved on the invoice',
-          'No payment date column or invoice_data was returned.'
+          'No payment date was returned.'
         )
       );
     } else {
@@ -801,8 +814,8 @@ export function assembleFinancialReport(input: {
     );
   }
 
-  if (input.purchaseOrders == null || input.purchaseOrderIssue) {
-    const reason = input.purchaseOrderIssue || 'purchase_orders could not be read';
+  if (input.purchaseOrders == null || purchaseOrderIssue) {
+    const reason = purchaseOrderIssue || 'Purchase orders could not be read.';
     metrics.push(
       unavailable(
         'po_commitments',
@@ -850,14 +863,14 @@ export function assembleFinancialReport(input: {
 
   let pipelineCents = 0;
   let pipelineCount = 0;
-  const estimatesKnown = input.estimates != null && !input.estimateIssue;
+  const estimatesKnown = input.estimates != null && !estimateIssue;
   if (!estimatesKnown) {
     metrics.push(
       unavailable(
         'estimate_pipeline',
         'Open estimate pipeline',
         'Open estimate total',
-        input.estimateIssue || 'service_estimates could not be read'
+        estimateIssue || 'Estimates could not be read.'
       )
     );
   } else {
@@ -883,8 +896,8 @@ export function assembleFinancialReport(input: {
     unavailable(
       'cash_paid_out',
       'Cash paid to suppliers',
-      'purchase_orders',
-      'purchase_orders stores supplier, total, and status. It has no amount_paid, paid_at, or payment_method, so supplier payments are not recorded.'
+      'Supplier payments',
+      "Payment details aren't recorded yet."
     ),
     unavailable(
       'net_cash_flow',
@@ -908,7 +921,7 @@ export function assembleFinancialReport(input: {
       'payroll',
       'Payroll',
       'No payroll table',
-      'There is no payroll or labor-cost table. labor_log has hours, not wages.'
+      "Labor hours aren't recorded yet."
     ),
     unavailable(
       'marketplace_payouts',
@@ -1047,7 +1060,7 @@ export function assembleFinancialReport(input: {
           id: 'open_estimates',
           label: 'Open estimates',
           availability: 'unavailable',
-          reason: input.estimateIssue || 'service_estimates could not be read',
+          reason: estimateIssue || 'Estimates could not be read.',
         }
   );
 
@@ -1064,8 +1077,8 @@ export function assembleFinancialReport(input: {
     summary,
     invoiceRowCount: invoicesKnown ? (input.invoices || []).length : null,
     purchaseOrderRowCount:
-      input.purchaseOrders != null && !input.purchaseOrderIssue ? input.purchaseOrders.length : null,
-    estimateRowCount: input.estimates != null && !input.estimateIssue ? input.estimates.length : null,
+      input.purchaseOrders != null && !purchaseOrderIssue ? input.purchaseOrders.length : null,
+    estimateRowCount: input.estimates != null && !estimateIssue ? input.estimates.length : null,
     metrics,
     outstanding,
     unpricedInvoices: unpriced,

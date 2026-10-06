@@ -15,6 +15,7 @@ import { getCompanyTheme, type CompanyTheme } from '@/lib/company-theme';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
   coerceOrgId,
+  customerActionFromEstimate,
   emptyLineItem,
   isValidOrgId,
   lineItemsSubtotal,
@@ -24,8 +25,8 @@ import {
   type LineItem,
 } from '@/lib/billing/save-helpers';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
-import { displayModelName } from '@/lib/model-display';
-import { resolveOrgTimeZone } from '@/lib/org-timezone';
+import { displayModelName, displayModelText } from '@/lib/model-display';
+import { orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
 import { canVoidInvoice, isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
@@ -38,11 +39,6 @@ import { invoiceDataForSave } from '@/lib/billing/invoice-form-data';
 import { lineItemFromStored } from '@/lib/billing/listing-invoice';
 
 type CustomerOpt = LinkedCustomerOpt;
-
-function todayYmd() {
-  const n = new Date();
-  return `${n.getFullYear()}-${String(n.getMonth() + 1).padStart(2, '0')}-${String(n.getDate()).padStart(2, '0')}`;
-}
 
 export default function InvoiceFormClient() {
   const t = useT();
@@ -102,7 +98,9 @@ export default function InvoiceFormClient() {
     [manufacturer, catalog.manufacturers, catalog.models]
   );
 
-  const [invoiceDate, setInvoiceDate] = useState(todayYmd());
+  const invoiceDateTouched = useRef(false);
+  const orgTodayRef = useRef(orgTodayIso());
+  const [invoiceDate, setInvoiceDate] = useState(() => orgTodayRef.current);
   const [dueDate, setDueDate] = useState('');
   const [description, setDescription] = useState('');
   const [lineItems, setLineItems] = useState<LineItem[]>([emptyLineItem('LI')]);
@@ -224,10 +222,11 @@ export default function InvoiceFormClient() {
       setCustSearch(data.customer_name || '');
       setCustomerOrgId(data.customer_organization_id || null);
       setSourceEstimateId(data.estimate_id || null);
+      invoiceDateTouched.current = true;
       setInvoiceDate(
         data.invoice_date
           ? String(data.invoice_date).slice(0, 10)
-          : todayYmd()
+          : orgTodayRef.current
       );
       setDueDate(data.due_date ? String(data.due_date).slice(0, 10) : '');
       setDescription(data.description || '');
@@ -281,6 +280,11 @@ export default function InvoiceFormClient() {
         .maybeSingle();
       if (error || !data) {
         toast.error('Could not load estimate for convert');
+        return;
+      }
+      if (customerActionFromEstimate(data).action === 'rejected') {
+        toast.error('This estimate was rejected and cannot be converted to an invoice.');
+        router.replace('/estimates');
         return;
       }
       setSourceEstimateId(data.id);
@@ -356,7 +360,7 @@ export default function InvoiceFormClient() {
       }
 
       const parts: string[] = [];
-      if (data.device_model) parts.push(`Device: ${data.device_model}`);
+      if (data.device_model) parts.push(`Device: ${displayModelText(data.device_model)}`);
       if (data.serial_pulses) parts.push(`Serial/Pulses: ${data.serial_pulses}`);
       let svcs = data.services;
       if (typeof svcs === 'string') {
@@ -376,7 +380,7 @@ export default function InvoiceFormClient() {
           : 'Prefilling invoice from estimate — review and save.'
       );
     },
-    [supabase]
+    [supabase, router]
   );
 
   useEffect(() => {
@@ -401,13 +405,20 @@ export default function InvoiceFormClient() {
         const orgId = coerceOrgId(profile?.organization_id);
         setUserOrgId(orgId);
         setCallerRole(String((profile as { role?: string } | null)?.role || ''));
+        let storedZone: string | null = null;
         if (orgId) {
           const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();
-          if (!zoneRow.error && zoneRow.data?.timezone) setOrgTimeZone(String(zoneRow.data.timezone));
+          if (zoneRow.error) console.warn('organizations.timezone', zoneRow.error.message);
+          else if (zoneRow.data?.timezone) {
+            storedZone = String(zoneRow.data.timezone);
+            setOrgTimeZone(storedZone);
+          }
         }
         const org = Array.isArray((profile as any)?.organizations)
           ? (profile as any).organizations[0]
           : (profile as any)?.organizations;
+        orgTodayRef.current = orgTodayIso({ stored: storedZone, state: org?.state });
+        if (!editIdParam && !invoiceDateTouched.current) setInvoiceDate(orgTodayRef.current);
         const techName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ');
         if (org || techName) {
           setCompany({
@@ -483,10 +494,11 @@ export default function InvoiceFormClient() {
     try {
       let invNum = editIdParam ? docNumber : '';
       if (!invNum && userOrgId) {
+        const dated = invoiceDate || orgTodayRef.current;
         invNum = await allocateDocNumber(supabase, {
           orgId: userOrgId,
           kind: 'INV',
-          date: invoiceDate || new Date(),
+          date: dated,
         });
         setDocNumber(invNum);
       }
@@ -545,7 +557,7 @@ export default function InvoiceFormClient() {
         organization_id: userOrgId || null,
         customer_organization_id: customerOrgId || null,
         estimate_id: sourceEstimateId || null,
-        invoice_date: invoiceDate || todayYmd(),
+        invoice_date: invoiceDate || orgTodayRef.current,
         due_date: dueDate || null,
         description: description || null,
         subtotal: Math.round(subtotal * 100) / 100,
@@ -638,7 +650,7 @@ export default function InvoiceFormClient() {
         email: custEmail,
       },
       invNumber: docNumber || 'Draft',
-      invoiceDate: invoiceDate || todayYmd(),
+      invoiceDate: invoiceDate || orgTodayRef.current,
       dueDate: dueDate || undefined,
       description: description || undefined,
       preparedBy: company.tech_name,
@@ -864,7 +876,7 @@ export default function InvoiceFormClient() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-4xl mx-auto w-full px-4 py-6 pb-28">
+      <div className="doc-action-page-compact max-w-4xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
             <Link href="/invoices" className="text-sm text-[var(--gold)] hover:underline">
@@ -1031,7 +1043,10 @@ export default function InvoiceFormClient() {
                 className="input mt-1"
                 type="date"
                 value={invoiceDate}
-                onChange={(e) => setInvoiceDate(e.target.value)}
+                onChange={(e) => {
+                  invoiceDateTouched.current = true;
+                  setInvoiceDate(e.target.value);
+                }}
               />
             </div>
             <div>
@@ -1337,7 +1352,7 @@ export default function InvoiceFormClient() {
           </div>
         )}
 
-        <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
+        <div className="doc-action-bar flex flex-wrap gap-2 sticky bottom-4 z-10">
           <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">
             Cancel
           </Link>

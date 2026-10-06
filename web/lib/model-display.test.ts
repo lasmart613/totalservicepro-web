@@ -21,6 +21,7 @@ test('display helper does not rewrite stored strings that are already names, exc
   const stored = 'alex_trivantage';
   assert.equal(stored, 'alex_trivantage');
   assert.equal(displayModelText('Candela alex_trivantage handpiece'), 'Candela Alexandrite TriVantage handpiece');
+  assert.equal(displayModelText('Candela gentlemax_pro'), 'Candela GentleMax Pro');
   assert.equal(displayModelText('please_review the quote'), 'please_review the quote');
   assert.equal(displayModelText('QA-TEST-SN-01'), 'QA-TEST-SN-01');
 });

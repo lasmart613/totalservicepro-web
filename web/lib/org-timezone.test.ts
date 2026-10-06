@@ -4,6 +4,7 @@ import {
   DEFAULT_ORG_TIMEZONE,
   formatDateInTimeZone,
   isoDateInTimeZone,
+  orgTodayIso,
   parseOrgTimeZone,
   resolveOrgTimeZone,
   timeZoneFromState,
@@ -186,6 +187,51 @@ test('estimate email and invoice PDF dates use the org zone and show GentleMax P
   });
   assert.match(fallback, /10\/5\/2026/);
   assert.match(fallback, /GentleMax Pro/);
+});
+
+test('23:30 org time stays on that calendar day when UTC is already the next day', async () => {
+  const late = new Date('2026-10-06T06:30:00.000Z');
+  assert.equal(isoDateInTimeZone(late, 'UTC'), '2026-10-06');
+  assert.equal(orgTodayIso({ stored: 'America/Los_Angeles', now: late }), '2026-10-05');
+  assert.equal(orgTodayIso({ stored: 'America/Phoenix', now: late }), '2026-10-05');
+  assert.equal(orgTodayIso({ stored: null, state: 'AZ', now: late }), '2026-10-05');
+  assert.equal(orgTodayIso({ stored: null, state: null, now: late }), '2026-10-05');
+  assert.equal(
+    resolveOrgTimeZone({ stored: null, state: 'AZ', browserTimeZone: 'UTC', allowBrowser: false }).timeZone,
+    'America/Phoenix'
+  );
+  assert.equal(
+    resolveOrgTimeZone({ stored: null, state: null, browserTimeZone: 'UTC', allowBrowser: false }).timeZone,
+    DEFAULT_ORG_TIMEZONE
+  );
+
+  for (const org of [
+    { ticket_prefix: 'QAL', name: 'Quality', timezone: 'America/Los_Angeles', state: 'CA' },
+    { ticket_prefix: 'QAL', name: 'Quality', timezone: null, state: 'AZ' },
+    { ticket_prefix: 'QAL', name: 'Quality', timezone: null, state: null },
+  ]) {
+    const dated = orgTodayIso({
+      stored: org.timezone,
+      state: org.state,
+      now: late,
+    });
+    assert.equal(dated, '2026-10-05');
+    for (const kind of ['INV', 'EST', 'PO'] as const) {
+      const fromForm = await generateDocNumber(numberingClient(org), {
+        orgId: 9,
+        kind,
+        date: dated,
+      });
+      assert.match(fromForm, new RegExp(`^QAL-${kind}-20261005-`));
+      const fromInstant = await generateDocNumber(numberingClient(org), {
+        orgId: 9,
+        kind,
+        date: late,
+      });
+      assert.match(fromInstant, new RegExp(`^QAL-${kind}-20261005-`));
+      assert.doesNotMatch(fromInstant, /20261006/);
+    }
+  }
 });
 
 test('timezone setting accepts IANA names and clears on auto', () => {

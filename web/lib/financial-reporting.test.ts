@@ -239,10 +239,21 @@ test('figures come from invoice, purchase order, and estimate rows', () => {
 
   assert.equal(metric('cash_paid_out', report).availability, 'unavailable');
   assert.equal(metric('cash_paid_out', report).amount, undefined);
+  assert.match(metric('cash_paid_out', report).reason || '', /Payment details aren't recorded yet/);
+  assert.doesNotMatch(
+    `${metric('cash_paid_out', report).reason} ${metric('cash_paid_out', report).source}`,
+    /purchase_orders|amount_paid|paid_at|payment_method/
+  );
   assert.equal(metric('net_cash_flow', report).availability, 'unavailable');
   assert.equal(metric('processing_fees', report).availability, 'unavailable');
   assert.equal(metric('bank_balance', report).availability, 'unavailable');
   assert.equal(metric('payroll', report).availability, 'unavailable');
+  assert.match(metric('payroll', report).reason || '', /Labor hours aren't recorded yet/);
+  assert.doesNotMatch(metric('payroll', report).reason || '', /labor_log/);
+  for (const row of report.metrics) {
+    const shown = `${row.reason || ''} ${row.note || ''} ${row.source}`;
+    assert.doesNotMatch(shown, /purchase_orders|labor_log|service_invoices|service_estimates|amount_paid|paid_at|payment_method|invoice_data|invoice_date/);
+  }
   assert.equal(metric('marketplace_payouts', report).availability, 'unavailable');
 
   assert.equal(report.paymentMethods.find((row) => row.method === 'Stripe')?.amount, 300);
@@ -290,6 +301,11 @@ test('collected cash is unavailable when payment fields were not returned', () =
   assert.equal(metric('cash_collected', report).availability, 'unavailable');
   assert.equal(metric('cash_collected', report).amount, undefined);
   assert.equal(metric('po_commitments', report).availability, 'unavailable');
+  assert.match(metric('po_commitments', report).reason || '', /Purchase orders could not be read/);
+  assert.doesNotMatch(metric('po_commitments', report).reason || '', /purchase_orders/);
+  assert.match(metric('estimate_pipeline', report).reason || '', /Estimates could not be read/);
+  assert.doesNotMatch(metric('estimate_pipeline', report).reason || '', /service_estimates/);
+  assert.doesNotMatch(metric('cash_collected', report).reason || '', /amount_paid|invoice_data/);
   assert.equal(metric('estimate_pipeline', report).availability, 'unavailable');
   assert.equal(report.aging, null);
   assert.match(report.agingReason || '', /due date/);

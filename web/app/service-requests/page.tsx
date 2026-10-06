@@ -194,7 +194,7 @@ function ServiceRequestsInner() {
     const L = lasers.find((x) => String(x.id) === String(id));
     if (!L) return;
     setDesc(
-      `Service needed on ${L.manufacturer || ''} ${L.model || ''}` +
+      `Service needed on ${L.manufacturer || ''} ${displayModelName(L.model || '')}` +
         (L.serial_number ? ` (SN ${L.serial_number})` : '') +
         (L.room ? ` in ${L.room}` : '') +
         '.'
@@ -405,7 +405,7 @@ function ServiceRequestsInner() {
                   <div>
                     <h3 className="font-bold text-lg text-[var(--gold)]">{r.title || r.service_type || 'Service request'}</h3>
                     <p className="text-xs text-[var(--text3)] mt-1">
-                      {[r.manufacturer, r.model].filter(Boolean).join(' ')}
+                      {[r.manufacturer, displayModelName(r.model)].filter(Boolean).join(' ')}
                       {r.serial_number ? ` · SN ${r.serial_number}` : ''}
                       {(r.city || r.state || r.location)
                         ? ` · ${[r.city, r.state].filter(Boolean).join(', ') || r.location}`
@@ -487,7 +487,7 @@ function ServiceRequestsInner() {
                 >
                   {lasers.map((L) => (
                     <option key={L.id} value={String(L.id)}>
-                      {[L.manufacturer, L.model].filter(Boolean).join(' ')}
+                      {[L.manufacturer, displayModelName(L.model)].filter(Boolean).join(' ')}
                       {L.serial_number ? ` · SN ${L.serial_number}` : ''}
                       {L.room ? ` · ${L.room}` : ''}
                     </option>

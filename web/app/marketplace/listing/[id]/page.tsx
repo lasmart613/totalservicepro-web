@@ -12,6 +12,7 @@ import { isPartListing, partsDetailPath } from '@/lib/marketplace/parts';
 import { useGuestSignupRedirect } from '@/lib/use-signed-in';
 import { marketplaceAuthHeaders } from '@/lib/marketplace/client-auth';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
+import { displayModelName } from '@/lib/model-display';
 
 export default function ListingDetail() {
   const params = useParams();
@@ -211,7 +212,7 @@ export default function ListingDetail() {
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6 text-sm">
             {listing.manufacturer && <div><span className="text-[var(--text3)]">Manufacturer:</span> {listing.manufacturer}</div>}
-            {listing.model && <div><span className="text-[var(--text3)]">Model:</span> {listing.model}</div>}
+            {listing.model && <div><span className="text-[var(--text3)]">Model:</span> {displayModelName(listing.model)}</div>}
             {listing.condition && <div><span className="text-[var(--text3)]">Condition:</span> {listing.condition}</div>}
             {listing.year_manufactured && <div><span className="text-[var(--text3)]">Year:</span> {listing.year_manufactured}</div>}
             {listing.price && <div><span className="text-[var(--text3)]">Price:</span> <span className="font-semibold text-[var(--gold)]">${listing.price}</span></div>}

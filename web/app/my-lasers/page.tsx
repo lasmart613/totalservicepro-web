@@ -217,7 +217,7 @@ export default function MyLasersPage() {
                     )}
                     <div className="min-w-0">
                       <div className="font-extrabold text-[var(--gold)]">
-                        {r.manufacturer} {r.model}
+                        {r.manufacturer} {displayModelName(r.model)}
                       </div>
                       <div className="text-xs text-[var(--text3)] mt-1">
                         {r.serial_number ? `SN ${r.serial_number}` : 'No SN'}

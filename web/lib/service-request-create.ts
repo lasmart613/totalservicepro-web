@@ -8,6 +8,8 @@
  * Guest landing has no auth user — posted_by / created_by stay null.
  */
 
+import { displayModelName } from './model-display.ts';
+
 export const SERVICE_REQUEST_TYPES = [
   'Emergency Repair',
   'PM',
@@ -52,7 +54,7 @@ export function ownerServiceRequestTitle(opts: {
   manufacturer: string;
   model: string;
 }): string {
-  return `${opts.serviceType}: ${[opts.manufacturer, opts.model].filter(Boolean).join(' ')}`;
+  return `${opts.serviceType}: ${[opts.manufacturer, displayModelName(opts.model)].filter(Boolean).join(' ')}`;
 }
 
 export type OwnerServiceRequestInput = {

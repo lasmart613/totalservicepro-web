@@ -9,6 +9,7 @@ import { currentOrgPlan, currentOrgPlanLabel, type OrgPlanFields } from './org-p
 import { orgTypeLabel } from './labels.ts';
 import { isGodPlanName } from './god.ts';
 import { GOD_CRM_PATH, godTableHref } from './god-tables.ts';
+import { displayModelName } from './model-display.ts';
 
 export { GOD_CRM_PATH };
 
@@ -437,7 +438,7 @@ export function assembleGodCrm(input: GodCrmSources): GodCrmPayload {
 
   for (const row of input.requests || []) {
     const org = row.organization_id != null ? orgById.get(String(row.organization_id)) : undefined;
-    const equipment = [row.manufacturer, row.model || row.model_type].filter(Boolean).join(' ').trim();
+    const equipment = [row.manufacturer, displayModelName(row.model || row.model_type)].filter(Boolean).join(' ').trim();
     pipeline.push({
       id: `request:${row.id}`,
       source: 'service_request',

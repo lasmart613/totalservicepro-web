@@ -11,6 +11,7 @@ import { canSeeAllShopTickets, isAdmin, isFieldEngineer, isPro } from '@/lib/rol
 import { roleLabel } from '@/lib/labels';
 import { useT } from '@/lib/fa/locale';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
+import { orgTodayIso } from '@/lib/org-timezone';
 import { ticketDateYmd, toLocalYmd } from '@/lib/tickets';
 import {
   UNASSIGNED_ASSIGNEE,
@@ -111,7 +112,7 @@ type TicketForm = {
 
 const EMPTY_FORM = (presetDate?: string): TicketForm => ({
   customer_name: '',
-  service_date: presetDate || toLocalYmd(new Date()),
+  service_date: presetDate || orgTodayIso(),
   scheduled_time: '09:00',
   end_time: '10:00',
   service_type: 'Repair',
@@ -145,6 +146,10 @@ export default function ServiceSchedule() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [userRole, setUserRole] = useState<string>('');
   const [orgId, setOrgId] = useState<number | string | null>(null);
+  const [orgZone, setOrgZone] = useState<{ stored: string | null; state: string | null }>({
+    stored: null,
+    state: null,
+  });
   const [userId, setUserId] = useState<string | null>(null);
   const [selfName, setSelfName] = useState('');
   const [assignees, setAssignees] = useState<TicketAssignee[]>([]);
@@ -260,6 +265,19 @@ export default function ServiceSchedule() {
       setSelfName(mine);
       const oId = coerceOrgId(profile?.organization_id ?? null);
       setOrgId(oId);
+      if (oId != null) {
+        const zoneRow = await supabase.from('organizations').select('timezone, state').eq('id', oId).maybeSingle();
+        if (!zoneRow.error) {
+          setOrgZone({
+            stored: zoneRow.data?.timezone ? String(zoneRow.data.timezone) : null,
+            state: zoneRow.data?.state ? String(zoneRow.data.state) : null,
+          });
+        } else {
+          console.warn('organizations.timezone', zoneRow.error.message);
+          const stateRow = await supabase.from('organizations').select('state').eq('id', oId).maybeSingle();
+          setOrgZone({ stored: null, state: stateRow.data?.state ? String(stateRow.data.state) : null });
+        }
+      }
 
       const selectCols = `
             id,
@@ -505,8 +523,8 @@ export default function ServiceSchedule() {
     setCursor((prev) => new Date(prev.getFullYear(), prev.getMonth(), prev.getDate() - 1, 12, 0, 0));
 
   const goToday = () => {
-    const n = new Date();
-    setCursor(new Date(n.getFullYear(), n.getMonth(), n.getDate(), 12, 0, 0));
+    const [y, m, d] = orgTodayIso(orgZone).split('-').map(Number);
+    setCursor(new Date(y, (m || 1) - 1, d || 1, 12, 0, 0));
   };
 
   /** Open Day view for a calendar day (primary month interaction) */
@@ -564,7 +582,7 @@ export default function ServiceSchedule() {
   };
 
   function openNewModal(presetDate?: string) {
-    setForm(EMPTY_FORM(presetDate));
+    setForm(EMPTY_FORM(presetDate || orgTodayIso(orgZone)));
     setFormError(null);
     setCustomerOrgId(null);
     setCustomerLocations([]);
@@ -602,7 +620,7 @@ export default function ServiceSchedule() {
         ticketNumber = await generateDocNumber(supabase as any, {
           orgId,
           kind: 'TKT',
-          date: form.service_date ? new Date(form.service_date + 'T12:00:00') : new Date(),
+          date: form.service_date || orgTodayIso(orgZone),
         });
       } catch {
         ticketNumber = `TMP-TKT-${Date.now().toString().slice(-6)}`;
@@ -713,7 +731,7 @@ export default function ServiceSchedule() {
   }
 
   const dayYmd = toLocalYmd(cursor);
-  const todayYmd = toLocalYmd(new Date());
+  const todayYmd = orgTodayIso(orgZone);
 
   const unscheduledCalls = useMemo(
     () => serviceCalls.filter((c) => !c.date || !/^\d{4}-\d{2}-\d{2}$/.test(c.date)),

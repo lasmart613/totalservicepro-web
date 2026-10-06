@@ -242,6 +242,24 @@ export function isoDateInTimeZone(date: Date, timeZone: string): string {
   return `${ymd.slice(0, 4)}-${ymd.slice(4, 6)}-${ymd.slice(6, 8)}`;
 }
 
+/**
+ * Calendar date for a form default or a document number.
+ * Uses organizations.timezone, then the address state, then America/Los_Angeles.
+ * A missing timezone column is the same as null. The browser zone is never used.
+ */
+export function orgTodayIso(input?: {
+  stored?: string | null;
+  state?: string | null;
+  now?: Date;
+}): string {
+  const zone = resolveOrgTimeZone({
+    stored: input?.stored,
+    state: input?.state,
+    allowBrowser: false,
+  }).timeZone;
+  return isoDateInTimeZone(input?.now ?? new Date(), zone);
+}
+
 /** Locale calendar date in an IANA zone. Date-only strings are not shifted. */
 export function formatDateInTimeZone(value: Date | string | null | undefined, timeZone: string, locale = 'en-US'): string {
   const zone = isValidTimeZone(timeZone) ? timeZone : DEFAULT_ORG_TIMEZONE;

@@ -8,6 +8,7 @@ import { Header } from '@/components/Header';
 import { useT } from '@/lib/fa/locale';
 import { useOrgMoney } from '@/lib/use-org-money';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { canConvertEstimateToInvoice } from '@/lib/billing/finalize-estimate';
 import {
   coerceOrgId,
   customerActionFromEstimate,
@@ -19,6 +20,7 @@ import {
   type CustomerActionKind,
 } from '@/lib/billing/save-helpers';
 import { approvedTicketRefFromEstimate } from '@/lib/billing/approve-estimate';
+import { displayModelText } from '@/lib/model-display';
 import {
   ESTIMATE_LIST_POLL_MS,
   estimateRowBelongsToViewer,
@@ -494,7 +496,8 @@ function ShopEstimatesList() {
               const st = effectiveStatus(est);
               const until = validUntilLabel(est.created_at);
               const num = docNumber(est);
-              const canConvert = st !== 'invoiced' && st !== 'cancelled' && st !== 'expired';
+              const canConvert =
+                st !== 'expired' && canConvertEstimateToInvoice(est);
               const cust = customerActionFromEstimate(est);
               const actionLabel = customerActionLabel(cust.action);
               const approvedTicket = approvedTicketRefFromEstimate(est);
@@ -565,7 +568,7 @@ function ShopEstimatesList() {
                       </div>
                       {est.device_model && (
                         <div className="text-xs text-[var(--text3)] mt-0.5 truncate">
-                          {est.device_model}
+                          {displayModelText(est.device_model)}
                         </div>
                       )}
                       {cust.note && (

@@ -7,6 +7,16 @@ import { useSiteLocale, useT } from '@/lib/fa/locale';
 import { PUBLIC_LOCALES } from '@/lib/i18n/locales';
 import { ReportUpgradeLock } from '@/components/ReportUpgradeLock';
 
+function statusLabel(status: string | null | undefined): string {
+  const raw = String(status || '').trim();
+  if (!raw) return '—';
+  return raw
+    .split(/[_\s-]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+    .join(' ');
+}
+
 function useMoney(report: { currencyCode?: string; numberFormat?: string }) {
   const siteLocale = useSiteLocale();
   const locale = PUBLIC_LOCALES.find((item) => item.id === siteLocale)?.htmlLang || 'en';
@@ -182,7 +192,7 @@ function DetailedSections({
                       )}
                     </td>
                     <td className="px-3 py-2">{row.customer}</td>
-                    <td className="px-3 py-2">{row.status}</td>
+                    <td className="px-3 py-2">{statusLabel(row.status)}</td>
                     <td className="px-3 py-2">{row.invoiceDate || '—'}</td>
                     <td className="px-3 py-2">{row.dueDate || '—'}</td>
                     <td className="px-3 py-2 text-end" dir="ltr">
@@ -223,7 +233,7 @@ function DetailedSections({
                   <tr key={`${row.id}-${row.reason}-${index}`} className="border-t border-[var(--border)]">
                     <td className="px-3 py-2">{row.number || row.id || '—'}</td>
                     <td className="px-3 py-2">{row.customer}</td>
-                    <td className="px-3 py-2">{row.status}</td>
+                    <td className="px-3 py-2">{statusLabel(row.status)}</td>
                     <td className="px-3 py-2">{row.reason}</td>
                   </tr>
                 ))}

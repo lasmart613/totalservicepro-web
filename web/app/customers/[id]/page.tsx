@@ -13,7 +13,7 @@ import {
 } from '@/lib/roles';
 import { ownerOrgTypeLabel } from '@/lib/org-types';
 import { toast } from 'sonner';
-import { displayModelName } from '@/lib/model-display';
+import { displayModelName, displayModelText } from '@/lib/model-display';
 import { CustomerInfoForm } from '@/components/CustomerInfoForm';
 import { CustomerLocationsPanel } from '@/components/CustomerLocationsPanel';
 import {
@@ -924,7 +924,7 @@ export default function CustomerProfilePage() {
                       <div className="font-semibold text-sm truncate">
                         {r.service_type || 'Service'}
                         {r.equipment_name || r.model_type
-                          ? ` · ${r.equipment_name || r.model_type}`
+                          ? ` · ${displayModelText(r.equipment_name || r.model_type)}`
                           : ''}
                       </div>
                       <div className="text-xs text-[var(--text3)] mt-0.5">
