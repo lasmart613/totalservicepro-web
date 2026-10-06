@@ -5,6 +5,8 @@
  * Profile email is not membership. God access is not decided here.
  */
 
+import { signedThumbnailUrl } from './storage-display.ts';
+
 export const OPEN_SERVICE_REQUEST_COLUMNS =
   'id, title, description, status, urgency, manufacturer, model, service_type, city, state, location, category, created_at, budget_max, organization_id';
 
@@ -77,30 +79,106 @@ export function storageObjectFromPublicUrl(
   return { bucket, path };
 }
 
+const PRIVATE_PHOTO_BUCKETS = new Set(['equipment-photos', 'marketplace-images']);
+const PHOTO_SIGN_TTL_SECONDS = 60 * 60;
+
+type SignedUrlResult = { data: { signedUrl?: string } | null; error: { message?: string } | null };
+type SignedUrlsResult = {
+  data: Array<{ path?: string | null; signedUrl?: string | null; error?: string | null }> | null;
+  error: { message?: string } | null;
+};
+
+type BucketSigner = {
+  createSignedUrl: (path: string, expiresIn: number, options?: { transform?: { width: number; resize?: 'cover' | 'contain' } }) => Promise<SignedUrlResult>;
+  createSignedUrls?: (
+    paths: string[],
+    expiresIn: number,
+    options?: { transform?: { width: number; resize?: 'cover' | 'contain' } }
+  ) => Promise<SignedUrlsResult>;
+};
+
 type SignedStorage = {
   storage: {
-    from: (bucket: string) => {
-      createSignedUrl: (
-        path: string,
-        expiresIn: number
-      ) => Promise<{ data: { signedUrl?: string } | null; error: { message?: string } | null }>;
-    };
+    from: (bucket: string) => BucketSigner;
   };
 };
 
+async function signBucketPaths(
+  signer: BucketSigner,
+  paths: string[],
+  width?: number
+): Promise<Map<string, string>> {
+  const signed = new Map<string, string>();
+  if (!paths.length) return signed;
+  if (signer.createSignedUrls) {
+    const batch = await signer.createSignedUrls(paths, PHOTO_SIGN_TTL_SECONDS);
+    if (!batch.error && batch.data) {
+      for (const row of batch.data) {
+        if (row?.path && row.signedUrl) {
+          signed.set(row.path, width ? signedThumbnailUrl(row.signedUrl, width) : row.signedUrl);
+        }
+      }
+    } else if (batch.error) {
+      console.error('[equipment-photos] createSignedUrls', batch.error.message);
+    }
+  }
+  for (const path of paths) {
+    if (signed.has(path)) continue;
+    const transformed = width
+      ? await signer.createSignedUrl(path, PHOTO_SIGN_TTL_SECONDS, { transform: { width, resize: 'contain' } })
+      : await signer.createSignedUrl(path, PHOTO_SIGN_TTL_SECONDS);
+    if (!transformed.error && transformed.data?.signedUrl) {
+      signed.set(path, transformed.data.signedUrl);
+      continue;
+    }
+    if (width) {
+      const plain = await signer.createSignedUrl(path, PHOTO_SIGN_TTL_SECONDS);
+      if (!plain.error && plain.data?.signedUrl) signed.set(path, plain.data.signedUrl);
+    }
+  }
+  return signed;
+}
+
 /**
- * Equipment photos live in a private bucket. Members get a signed URL.
+ * Private buckets (equipment-photos, marketplace-images) need a signed URL.
  * A failed sign does not fall back to the public object URL.
+ * Many photos are one createSignedUrls call per bucket.
  */
+export async function equipmentPhotoDisplayUrls(
+  supabase: SignedStorage,
+  urls: Array<string | null | undefined>,
+  opts?: { width?: number }
+): Promise<Array<string | null>> {
+  const parsed = urls.map((url) => {
+    const raw = String(url || '').trim();
+    const object = storageObjectFromPublicUrl(raw);
+    if (!raw) return { raw, sign: false as const };
+    if (!object || !PRIVATE_PHOTO_BUCKETS.has(object.bucket)) return { raw, sign: false as const };
+    return { raw, sign: true as const, bucket: object.bucket, path: object.path };
+  });
+  const byBucket = new Map<string, string[]>();
+  for (const item of parsed) {
+    if (!item.sign) continue;
+    const list = byBucket.get(item.bucket) || [];
+    if (!list.includes(item.path)) list.push(item.path);
+    byBucket.set(item.bucket, list);
+  }
+  const signedByBucket = new Map<string, Map<string, string>>();
+  for (const [bucket, paths] of byBucket) {
+    signedByBucket.set(bucket, await signBucketPaths(supabase.storage.from(bucket), paths, opts?.width));
+  }
+  return parsed.map((item) => {
+    if (!item.raw) return null;
+    if (!item.sign) return item.raw;
+    return signedByBucket.get(item.bucket)?.get(item.path) || null;
+  });
+}
+
 export async function equipmentPhotoDisplayUrl(
   supabase: SignedStorage,
-  url: string | null | undefined
+  url: string | null | undefined,
+  opts?: { width?: number }
 ): Promise<string | null> {
-  const raw = String(url || '').trim();
-  if (!raw) return null;
-  const parsed = storageObjectFromPublicUrl(raw);
-  if (!parsed || parsed.bucket !== 'equipment-photos') return raw;
-  const { data, error } = await supabase.storage.from(parsed.bucket).createSignedUrl(parsed.path, 60 * 30);
-  if (error || !data?.signedUrl) return null;
-  return data.signedUrl;
+  const [signed] = await equipmentPhotoDisplayUrls(supabase, [url], opts);
+  return signed ?? null;
 }

@@ -9,7 +9,8 @@ import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { toast } from 'sonner';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
-import { equipmentPhotoDisplayUrl } from '@/lib/org-scoped-read';
+import { equipmentPhotoDisplayUrls } from '@/lib/org-scoped-read';
+import { photoImgOnError } from '@/lib/storage-display';
 
 type LaserRow = {
   id: number;
@@ -91,13 +92,13 @@ export default function MyLasersPage() {
       setRows([]);
       return;
     }
-    const withPhotos = await Promise.all(
-      ((data || []) as LaserRow[]).map(async (row) => ({
-        ...row,
-        photo_url: await equipmentPhotoDisplayUrl(supabase, row.photo_url),
-      }))
+    const rows = (data || []) as LaserRow[];
+    const photos = await equipmentPhotoDisplayUrls(
+      supabase,
+      rows.map((row) => row.photo_url),
+      { width: 160 }
     );
-    setRows(withPhotos);
+    setRows(rows.map((row, index) => ({ ...row, photo_url: photos[index] })));
   }
 
   function openAdd() {
@@ -210,7 +211,7 @@ export default function MyLasersPage() {
                   <Link href={`/my-lasers/${r.id}`} className="flex gap-3 flex-1 min-w-0 text-left">
                     {r.photo_url ? (
                       // eslint-disable-next-line @next/next/no-img-element
-                      <img src={r.photo_url} alt="" className="w-14 h-14 rounded-xl object-cover border border-[var(--border2)]" />
+                      <img src={r.photo_url} alt="" loading="lazy" onError={photoImgOnError} className="w-14 h-14 rounded-xl object-cover border border-[var(--border2)]" />
                     ) : (
                       <div className="w-14 h-14 rounded-xl bg-[var(--surface3)] flex items-center justify-center text-2xl">📷</div>
                     )}

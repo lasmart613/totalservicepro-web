@@ -120,12 +120,20 @@ function ServiceRequestsInner() {
 
     if (oId) {
       let eqList: Laser[] = [];
-      const { data: eq } = await supabase
+      let eqRes = await supabase
         .from('equipment')
         .select('id, manufacturer, model, serial_number, room')
         .eq('customer_organization_id', oId)
         .order('manufacturer');
-      eqList = (eq || []) as Laser[];
+      if (eqRes.error && /room|column|schema cache/i.test(eqRes.error.message || '')) {
+        console.error('[service-requests] equipment.room', eqRes.error.message);
+        eqRes = await supabase
+          .from('equipment')
+          .select('id, manufacturer, model, serial_number')
+          .eq('customer_organization_id', oId)
+          .order('manufacturer');
+      }
+      eqList = (eqRes.data || []) as Laser[];
       setLasers(eqList);
     }
 

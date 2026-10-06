@@ -10,6 +10,7 @@ import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { loadServiceHistoryForLaser } from '@/lib/equipment-ensure';
 import { equipmentPhotoDisplayUrl } from '@/lib/org-scoped-read';
+import { photoImgOnError } from '@/lib/storage-display';
 
 type Laser = {
   id: number;
@@ -84,7 +85,7 @@ export default function LaserProfilePage() {
       setLoading(false);
       return;
     }
-    const photo = await equipmentPhotoDisplayUrl(supabase, (data as Laser).photo_url);
+    const photo = await equipmentPhotoDisplayUrl(supabase, (data as Laser).photo_url, { width: 960 });
     setLaser({ ...(data as Laser), photo_url: photo });
     await loadHistory(data as Laser);
     setLoading(false);
@@ -289,7 +290,7 @@ export default function LaserProfilePage() {
         <div className="mt-4 rounded-2xl overflow-hidden border border-[var(--border2)] bg-[var(--surface3)] h-52 flex items-center justify-center">
           {laser.photo_url ? (
             // eslint-disable-next-line @next/next/no-img-element
-            <img src={laser.photo_url} alt="" className="w-full h-full object-cover" />
+            <img src={laser.photo_url} alt="" loading="lazy" onError={photoImgOnError} className="w-full h-full object-cover" />
           ) : (
             <span className="text-5xl opacity-50">📷</span>
           )}

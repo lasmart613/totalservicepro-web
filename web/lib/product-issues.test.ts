@@ -224,4 +224,9 @@ test('product-issues API emails the team inbox and one reporter confirmation', (
   assert.doesNotMatch(lib, /never emails the reporter/i);
   assert.doesNotMatch(lib, /Does not send a confirmation to the reporter/);
   assert.equal(PRODUCT_ISSUE_CONFIRM_REPLY_TO, 'FieldserviceTotalService+QA@gmail.com');
+  assert.match(route, /PRODUCT_ISSUE_LATER_MESSAGE/);
+  assert.doesNotMatch(route, /const retry = await admin\.from\('product_issue_reports'\)/);
+  const control = readFileSync(join(here, '../components/ReportIssueControl.tsx'), 'utf8');
+  assert.match(control, /PRODUCT_ISSUE_LATER_MESSAGE/);
+  assert.match(control, /console\.error\('\[product-issues\] send failed'/);
 });

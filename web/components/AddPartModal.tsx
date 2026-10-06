@@ -3,6 +3,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { toast } from 'sonner';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { partsCatalogWritePayload } from '@/lib/parts-catalog-columns';
 import { listManufacturers } from '@/lib/laser-catalog';
 
 export const PART_CATEGORIES = [
@@ -240,10 +241,9 @@ export function AddPartModal({ onClose, onCreated }: Props) {
         .map((m) => m.trim())
         .filter(Boolean);
 
-      const payload: Record<string, unknown> = {
+      const payload: Record<string, unknown> = partsCatalogWritePayload({
         part_number: pn,
         brand: resolvedBrand,
-        manufacturer: resolvedBrand,
         name: partName,
         description: description.trim() || partName,
         category,
@@ -253,9 +253,8 @@ export function AddPartModal({ onClose, onCreated }: Props) {
         is_active: true,
         created_by: user.id,
         image_url: imageUrls[0] || null,
-        image_urls: imageUrls.length ? imageUrls : null,
         sale_price: salePrice.trim() ? Number(salePrice) : null,
-      };
+      });
 
       let created: { id: number | string } | null = null;
       let lastError: { message?: string } | null = null;

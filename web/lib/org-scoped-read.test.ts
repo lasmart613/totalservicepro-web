@@ -8,6 +8,7 @@ import {
   PRIVATE_SHOP_FIELDS,
   canReadShopRecord,
   equipmentPhotoDisplayUrl,
+  equipmentPhotoDisplayUrls,
   refuseForeignShopRead,
   shopRecordForMember,
   storageObjectFromPublicUrl,
@@ -209,4 +210,37 @@ test('equipment photo display does not fall back to the public object URL', asyn
     await equipmentPhotoDisplayUrl(denied, 'https://cdn.example/marketplace-images/listing.jpg'),
     'https://cdn.example/marketplace-images/listing.jpg'
   );
+});
+
+test('private listing photos are signed in one batch and public part-images stay public', async () => {
+  const calls: string[][] = [];
+  const supabase = {
+    storage: {
+      from(bucket: string) {
+        return {
+          createSignedUrls: async (paths: string[]) => {
+            calls.push([bucket, ...paths]);
+            return {
+              data: paths.map((path) => ({ path, signedUrl: `https://signed.example/${bucket}/${path}` })),
+              error: null,
+            };
+          },
+          createSignedUrl: async () => {
+            throw new Error('expected createSignedUrls');
+          },
+        };
+      },
+    },
+  };
+  const equipment = 'https://db.example/storage/v1/object/public/equipment-photos/0d04a116-38a8-4ba0-8738-7981e398f551/listings/1787347953497_0.jpg';
+  const part = 'https://db.example/storage/v1/object/public/equipment-photos/parts/0d04a116-38a8-4ba0-8738-7981e398f551/1787667473597_0.webp?t=1';
+  const market = 'https://db.example/storage/v1/object/public/marketplace-images/user/listings/a.png';
+  const logo = 'https://db.example/storage/v1/object/public/logos/org/logo.png';
+  const signed = await equipmentPhotoDisplayUrls(supabase, [equipment, part, market, logo, equipment]);
+  assert.equal(calls.length, 2);
+  assert.equal(signed[0], 'https://signed.example/equipment-photos/0d04a116-38a8-4ba0-8738-7981e398f551/listings/1787347953497_0.jpg');
+  assert.equal(signed[1], 'https://signed.example/equipment-photos/parts/0d04a116-38a8-4ba0-8738-7981e398f551/1787667473597_0.webp');
+  assert.equal(signed[2], 'https://signed.example/marketplace-images/user/listings/a.png');
+  assert.equal(signed[3], logo);
+  assert.equal(signed[4], signed[0]);
 });

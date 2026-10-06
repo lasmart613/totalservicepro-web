@@ -516,8 +516,8 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Parts catalog',
     group: 'catalog',
     description: 'Shop parts catalog + stock flags.',
-    listColumns: ['id', 'name', 'part_number', 'brand', 'manufacturer', 'in_stock', 'quantity_on_hand'],
-    searchColumns: ['name', 'part_number', 'brand', 'manufacturer'],
+    listColumns: ['id', 'name', 'part_number', 'brand', 'in_stock', 'quantity_on_hand'],
+    searchColumns: ['name', 'part_number', 'brand'],
   }),
   crud({
     key: 'parts',
@@ -534,7 +534,7 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Part vendors',
     group: 'catalog',
     description: 'Vendor + cost rows for catalog parts.',
-    listColumns: ['id', 'part_id', 'vendor_name', 'cost'],
+    listColumns: ['id', 'part_id', 'vendor_name', 'unit_cost'],
     searchColumns: ['vendor_name'],
   }),
   crud({
@@ -589,8 +589,8 @@ export const GOD_TABLES: GodTableDef[] = [
     label: 'Product issue reports',
     group: 'leads',
     description: 'In-app “report a problem” submissions.',
-    listColumns: ['id', 'email', 'created_at'],
-    searchColumns: ['email'],
+    listColumns: ['id', 'created_at', 'reporter_email', 'what_happened', 'page_url'],
+    searchColumns: ['reporter_email', 'what_happened', 'page_url'],
   }),
 
   crud({
