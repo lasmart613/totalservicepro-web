@@ -857,8 +857,9 @@ function CompanyProfile() {
                 <input className="input" value={org.phone || ''} onChange={e => setOrg({ ...org, phone: e.target.value })} />
               </div>
               <div>
-                <label className="label">Email</label>
+                <label className="label" htmlFor="company-details-email">Email</label>
                 <input
+                  id="company-details-email"
                   className="input"
                   type="email"
                   value={org.email || ''}

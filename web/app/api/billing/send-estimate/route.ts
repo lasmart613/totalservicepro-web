@@ -19,6 +19,7 @@ import {
 } from '@/lib/billing/finalize-estimate';
 import {
   buildOwnedEstimateMessage,
+  buildOwnedEstimatePlainText,
   documentAccountLinks,
   documentCustomerOrgId,
   documentOwnedByOrganization,
@@ -162,17 +163,24 @@ export async function POST(req: NextRequest) {
     const subject = ownedDocumentSubject('estimate', est.estimate_number, company.company_name);
     const moneyPrefs = callerOrgId != null ? await loadOrgMoneyPrefs(supabase, callerOrgId) : null;
     const zone = await resolveNumberingTimeZone(supabase, callerOrgId, { allowBrowser: false });
-    let html = buildOwnedEstimateMessage({
+    const actionUrl = estimateActionUrl(actionToken);
+    const mailInput = {
       row: est,
       company,
       theme,
-      actionUrl: estimateActionUrl(actionToken),
+      actionUrl,
       moneyPrefs,
       timeZone: zone.timeZone,
-    });
-    html = ensureEstimateActionCtas(html, estimateActionUrl(actionToken));
+    };
+    const html = ensureEstimateActionCtas(buildOwnedEstimateMessage(mailInput), actionUrl);
     const origin = publicSiteOrigin(req);
     const { signupUrl, loginUrl } = documentAccountLinks(origin, estimateCustomerPath(estimateId));
+    const text = [
+      buildOwnedEstimatePlainText(mailInput),
+      '',
+      `Create a free account: ${signupUrl}`,
+      `Sign in: ${loginUrl}`,
+    ].join('\n');
     const wrapped = wrapCustomerFacingDocumentEmail({
       subject,
       documentHtml: html,
@@ -217,6 +225,7 @@ export async function POST(req: NextRequest) {
               to: recipient.email,
               subject,
               html: wrapped,
+              text,
               replyTo: company.email,
             })
           ),

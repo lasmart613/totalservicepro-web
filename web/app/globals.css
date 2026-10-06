@@ -94,10 +94,10 @@ html {
   scroll-margin-top: 7.5rem;
 }
 
-/* Invite form stacks above the sticky header so its fields stay clickable. */
+/* Invite form stays in normal flow under the sticky header (z-index 50).
+   scroll-margin keeps focused fields clear of the nav. Dialogs that must
+   cover the header keep their own higher z-index. */
 .team-invite-panel {
-  position: relative;
-  z-index: 60;
   scroll-margin-top: 7.5rem;
   border: 1px solid var(--gold-border);
   background: var(--surface3);
@@ -946,11 +946,13 @@ html {
   z-index: 3;
 }
 
-/* Language code on a spine. Desktop is a small corner mark that may sit slightly outside. */
+/* Language code anchored to the spine (not the book slot). Inside the spine
+   on every width, and not a tap target — the book underneath receives the click.
+   Size matches the previous desktop corner mark. */
 .manual-language-badge {
   position: absolute;
-  right: -4px;
-  bottom: -4px;
+  right: 0;
+  bottom: 0;
   z-index: 10;
   display: inline-flex;
   align-items: center;
@@ -966,6 +968,9 @@ html {
   line-height: 1;
   letter-spacing: 0.02em;
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+  writing-mode: horizontal-tb;
+  text-orientation: mixed;
+  pointer-events: none;
 }
 
 .manual-language-chip {
@@ -1018,7 +1023,9 @@ html {
 }
 
 .book-spine {
-  width: 52px;
+  box-sizing: border-box;
+  width: min(52px, 100%);
+  max-width: 100%;
   height: 148px;
   border-radius: 2px 3px 0 0;
   display: flex;
