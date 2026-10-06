@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import { ArrowLeft, Image as ImageIcon, Package } from 'lucide-react';
 import { useGuestSignupRedirect } from '@/lib/use-signed-in';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
+import { StorageImage } from '@/components/StorageImage';
 
 function PartDetail() {
   const params = useParams();
@@ -305,7 +306,7 @@ function PartDetail() {
             <div>
               <div className="aspect-square bg-[var(--surface3)] rounded-xl flex items-center justify-center border border-[var(--border)] overflow-hidden">
                 {mainPhoto ? (
-                  <img src={mainPhoto} alt={listing.title} className="w-full h-full object-contain" />
+                  <StorageImage src={mainPhoto} alt={listing.title || ''} className="w-full h-full object-contain" width={960} loading="eager" />
                 ) : (
                   <div className="flex flex-col items-center text-[var(--text3)]">
                     <ImageIcon size={80} />
@@ -324,7 +325,7 @@ function PartDetail() {
                         selectedPhoto === idx ? 'border-[var(--gold)]' : 'border-[var(--border)]'
                       }`}
                     >
-                      <img src={url} alt="" className="w-full h-full object-cover" />
+                      <StorageImage src={url} alt="" className="w-full h-full object-cover" width={160} />
                     </button>
                   ))}
                 </div>

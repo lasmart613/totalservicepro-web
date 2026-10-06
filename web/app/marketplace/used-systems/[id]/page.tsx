@@ -6,6 +6,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { Header } from '@/components/Header';
 import { ArrowLeft, DollarSign, Calendar, Tag } from 'lucide-react';
 import { useGuestSignupRedirect } from '@/lib/use-signed-in';
+import { StorageImage } from '@/components/StorageImage';
 
 export default function UsedSystemDetail() {
   const params = useParams();
@@ -78,10 +79,12 @@ export default function UsedSystemDetail() {
           <div className="space-y-4">
             <div className="bg-[#1a2233] rounded-3xl overflow-hidden border border-[#2a3749] aspect-video">
               {images.length > 0 ? (
-                <img 
-                  src={images[0]} 
+                <StorageImage
+                  src={images[0]}
                   alt={`${system.manufacturer} ${system.model}`}
                   className="w-full h-full object-cover"
+                  width={960}
+                  loading="eager"
                 />
               ) : (
                 <div className="w-full h-full flex items-center justify-center text-gray-500 text-xl">
@@ -93,10 +96,11 @@ export default function UsedSystemDetail() {
             {images.length > 1 && (
               <div className="flex gap-3 overflow-x-auto pb-2">
                 {images.map((url, idx) => (
-                  <img 
+                  <StorageImage
                     key={idx}
                     src={url}
                     alt={`View ${idx + 1}`}
+                    width={200}
                     className="w-24 h-24 object-cover rounded-xl border-2 border-transparent hover:border-[var(--gold)] cursor-pointer transition"
                   />
                 ))}
