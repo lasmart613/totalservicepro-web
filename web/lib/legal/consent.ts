@@ -9,7 +9,7 @@ export const CONSENT_TEMPLATE = 'I agree to the {terms} and the {privacy}.';
 
 /** Shown beside Google and rental-fleet signup. Locales translate this exact key. */
 export const CONTINUE_CONSENT_TEMPLATE =
-  'By continuing you agree to the {terms} and the {privacy}.';
+  'By continuing you agree to the {terms} and {privacy}.';
 
 /** Shown when submit runs without the checkbox. Locales translate this exact key. */
 export const CONSENT_REQUIRED = 'Please agree to the Terms of Service and Privacy Policy.';

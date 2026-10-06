@@ -645,6 +645,6 @@ export const FR_COPY: Record<string, string> = {
   'I agree to the {terms} and the {privacy}.': 'J’accepte les {terms} et la {privacy}.',
   'Please agree to the Terms of Service and Privacy Policy.':
     'Veuillez accepter les Conditions d’utilisation et la Politique de confidentialité.',
-  'By continuing you agree to the {terms} and the {privacy}.':
+  'By continuing you agree to the {terms} and {privacy}.':
     'En continuant, vous acceptez les {terms} et la {privacy}.',
 };

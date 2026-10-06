@@ -665,6 +665,6 @@ export const FA_COPY: Record<string, string> = {
   'I agree to the {terms} and the {privacy}.': 'با {terms} و {privacy} موافقم.',
   'Please agree to the Terms of Service and Privacy Policy.':
     'لطفاً با شرایط استفاده و سیاست حریم خصوصی موافقت کنید.',
-  'By continuing you agree to the {terms} and the {privacy}.':
+  'By continuing you agree to the {terms} and {privacy}.':
     'با ادامه دادن، {terms} و {privacy} را می‌پذیرید.',
 };
