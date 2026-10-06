@@ -62,7 +62,11 @@ export default function PartsCatalog() {
   const fetchParts = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('parts_catalog').select('*').order('name', { ascending: true });
+      const { data, error } = await supabase
+        .from('parts_catalog')
+        .select('*')
+        .or('is_active.eq.true,is_active.is.null')
+        .order('name', { ascending: true });
       if (error) throw error;
       const list = ((data || []) as CatalogPart[]).map((part) => ({
         ...part,
