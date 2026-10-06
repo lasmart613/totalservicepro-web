@@ -27,6 +27,20 @@ export type EstimateCustomerAction = {
 };
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{20,128}$/;
+const REDIRECT_LANGS = new Set(['en', 'fa', 'es', 'fr', 'he', 'it', 'de', 'pt', 'ar']);
+
+/** Keep a known page language on the no-JS confirm redirect. Unknown tags are dropped. */
+function redirectLang(raw: unknown): string | null {
+  const text = String(raw ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/_/g, '-');
+  if (!text) return null;
+  if (text === 'en' || text.startsWith('en-')) return 'en';
+  if (text === 'pt-br') return 'pt';
+  const id = text.split('-')[0];
+  return REDIRECT_LANGS.has(id) ? id : null;
+}
 
 export function isValidEstimateActionToken(token: unknown): token is string {
   return typeof token === 'string' && TOKEN_RE.test(token.trim());
@@ -260,6 +274,7 @@ export function estimateActionFormRedirectPath(input: {
   action?: unknown;
   already?: boolean;
   notice?: unknown;
+  lang?: unknown;
 }): string | null {
   const token = String(input.token || '').trim();
   if (!isValidEstimateActionToken(token)) return null;
@@ -272,6 +287,8 @@ export function estimateActionFormRedirectPath(input: {
     if (emailAction) params.set('action', emailAction);
     params.set('notice', String(input.notice));
   }
+  const lang = redirectLang(input.lang);
+  if (lang) params.set('lang', lang);
   const path = `/e/${encodeURIComponent(token)}`;
   const query = params.toString();
   return query ? `${path}?${query}` : path;
@@ -287,6 +304,7 @@ export function estimateActionRedirectLocation(input: {
   action?: unknown;
   already?: boolean;
   notice?: unknown;
+  lang?: unknown;
   forwardedHost?: string | null;
   host?: string | null;
   forwardedProto?: string | null;

@@ -719,14 +719,20 @@ export default function EstimateFormClient() {
     const modelName = model === '__other__' ? customModel.trim() : model;
     const svcLabels = services.map((s) => SERVICE_TYPE_LABELS[s] || s);
     if (otherService.trim()) svcLabels.push(otherService.trim());
-    const partsLines = partLines
-      .filter((p) => p.part_number || p.description || p.ext)
-      .map((p) => {
-        const qty = p.qty || 1;
-        const unit = money(p.unit_price || 0);
-        const ext = money(p.ext || 0);
-        return `${p.part_number || ''} ${p.description || ''} ×${qty} @ ${unit} = ${ext}`;
-      });
+    const visibleParts = partLines.filter((p) => p.part_number || p.description || p.ext);
+    const partsLines = visibleParts.map((p) => {
+      const qty = p.qty || 1;
+      const unit = money(p.unit_price || 0);
+      const ext = money(p.ext || 0);
+      return `${p.part_number || ''} ${p.description || ''} ×${qty} @ ${unit} = ${ext}`;
+    });
+    const partRows = visibleParts.map((p) => ({
+      partNumber: p.part_number,
+      description: p.description,
+      qty: p.qty || 1,
+      unitPrice: p.unit_price || 0,
+      ext: p.ext || 0,
+    }));
     return buildEstimateHtml({
       company,
       customer: {
@@ -774,6 +780,7 @@ export default function EstimateFormClient() {
       perDiemRate,
       perDiemDays,
       partsLines,
+      partRows,
       partsTotal: totals.partsTotal,
       subtotal: totals.subtotal,
       taxRate,

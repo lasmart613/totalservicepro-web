@@ -175,6 +175,7 @@ function finish(
       action: body.action,
       already: body.already === true,
       notice: body.notice,
+      lang: body.lang,
       forwardedHost: req.headers.get('x-forwarded-host'),
       host: req.headers.get('host'),
       forwardedProto: req.headers.get('x-forwarded-proto'),
