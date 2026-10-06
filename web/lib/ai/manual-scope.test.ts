@@ -39,6 +39,8 @@ import {
   prefixGeneralGuidance as edgePrefixGeneralGuidance,
   collectionSearchRequiresManualMatch as edgeCollectionSearchRequiresManualMatch,
   selectedManualContext as edgeSelectedManualContext,
+  assistantLanguageDirective,
+  normalizeReplyLanguage,
 } from '../../../supabase/functions/grok-assistant/manual-scope.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -202,6 +204,7 @@ test('single-file manuals attach the storage_path PDF; folders use chapters or a
   const feedsOnly = Array.from({ length: 151 }, () => 'handpiece notes').join('\f') + '\f RF deck calibration target value';
   assert.equal(indexedExcerptPage(feedsOnly, 'RF deck calibration'), 152);
   assert.equal(indexedExcerptPage('no markers here about calibration', 'calibration'), undefined);
+  assert.equal(indexedExcerptPage('[[pdfpage:12]]\nKühlung des Laserhandstücks prüfen.', 'Kühlung'), 12);
   const printed = 'Error 43 is described on pages 7-8 of the CO2RE handpiece chapter.';
   assert.equal(indexedExcerptPage(printed, 'handpiece'), undefined);
   const physical = `${'earlier page '.repeat(10)}\f`.repeat(149) + 'pages 7-8 RF deck calibration target';
@@ -301,6 +304,33 @@ test('scope change compares paths case-insensitively but sends original casing',
   });
   assert.equal(same.scopeChanged, false);
   assert.equal(same.manualPath, 'shared/cutera/xeo/Xeo Service Manual RevB.pdf');
+});
+
+test('assistant answers in the site language and still cites a non-English manual', () => {
+  assert.equal(normalizeReplyLanguage('pt-BR'), 'pt');
+  assert.equal(normalizeReplyLanguage(''), 'en');
+  const block = assistantLanguageDirective({ replyLanguage: 'es', manualLanguage: 'de' });
+  assert.match(block, /ANSWER LANGUAGE/);
+  assert.match(block, /Spanish \(es\)/);
+  assert.match(block, /German \(de\)/);
+  assert.match(block, /Still retrieve and cite this manual/);
+  assert.match(block, /Write the answer in Spanish/);
+  const fn = readFileSync(join(here, '../../../supabase/functions/grok-assistant/index.ts'), 'utf8');
+  assert.match(fn, /assistantLanguageDirective\(/);
+  assert.match(fn, /selectManualRows/);
+  assert.match(fn, /\\p\{L\}/);
+  assert.match(fn, /Language does not exclude a manual/);
+  const client = readFileSync(join(here, '../../app/ai-assistant/AIAssistantClient.tsx'), 'utf8');
+  assert.match(client, /replyLanguage: siteLanguage/);
+  assert.match(client, /manualLanguage/);
+  const payload = buildGrokChatPayload({
+    messages: [{ role: 'user', content: 'Was bedeutet Fehler 43?' }],
+    manualId: 16,
+    manualLanguage: 'de',
+    replyLanguage: 'es',
+  });
+  assert.equal(payload.manualLanguage, 'de');
+  assert.equal(payload.replyLanguage, 'es');
 });
 
 test('AI assistant and grok-assistant send current id/path and do not skip incomplete PDFs', () => {

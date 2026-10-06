@@ -3,6 +3,7 @@
  * Does not upload bytes — storage_path points at the existing `manuals` bucket.
  */
 import { catalogManualKind, normalizeManualDocKind, type ManualDocKind } from './manual-catalog.ts';
+import { languageSuffixFromTitle, normalizeManualLanguage } from './manual-language.ts';
 import { BIOMED_MANUAL_SEEDS, suggestedManualStoragePath } from './equipment-catalog.ts';
 import {
   DEFAULT_EQUIPMENT_TYPE,
@@ -25,6 +26,7 @@ export type ManualCatalogInsertInput = {
   filename?: unknown;
   is_incomplete?: unknown;
   isIncomplete?: unknown;
+  language?: unknown;
 };
 
 export type ManualCatalogInsertRow = {
@@ -35,6 +37,8 @@ export type ManualCatalogInsertRow = {
   doc_kind: ManualDocKind;
   storage_path: string;
   is_incomplete: boolean;
+  /** ISO 639-1. Inferred from a trailing "(German)" style suffix when omitted. */
+  language: string;
 };
 
 function truthyFlag(value: unknown): boolean {
@@ -82,6 +86,14 @@ export function parseManualCatalogInsert(
     return { ok: false, error: 'Use a bucket-relative path such as shared/brand/model/file.pdf.' };
   }
 
+  const languageRaw = body.language;
+  const explicitLanguage =
+    languageRaw == null || String(languageRaw).trim() === '' ? null : normalizeManualLanguage(languageRaw);
+  if (languageRaw != null && String(languageRaw).trim() !== '' && !explicitLanguage) {
+    return { ok: false, error: 'language must be an ISO 639-1 code such as en or de.' };
+  }
+  const language = explicitLanguage || languageSuffixFromTitle(title) || 'en';
+
   return {
     ok: true,
     row: {
@@ -92,6 +104,7 @@ export function parseManualCatalogInsert(
       doc_kind,
       storage_path,
       is_incomplete: truthyFlag(body.is_incomplete ?? body.isIncomplete),
+      language,
     },
   };
 }

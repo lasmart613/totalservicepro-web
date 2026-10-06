@@ -173,7 +173,8 @@ test('merged job costing and financial reporting stay in the signed-in chrome', 
   assert.match(header, /jobCostingNavLink/);
   assert.match(header, /financialReportingNavLink/);
   assert.match(header, /LanguageSelector variant="header"/);
-  assert.match(header, /user \? 'overflow-x-auto \[scrollbar-width:none\] \[&::-webkit-scrollbar\]:hidden' : 'overflow-visible'/);
+  assert.match(header, /hidden lg:flex flex-wrap items-center gap-x-2\.5 gap-y-1/);
+  assert.doesNotMatch(header, /overflow-x-auto \[scrollbar-width:none\]/);
   assert.match(hub, /\/business\/job-costing/);
   assert.match(hub, /\/business\/financial-reporting/);
   assert.match(home, /\/business\/job-costing/);
@@ -198,6 +199,8 @@ test('English fonts stay Geist, Geist Mono, and DM Sans', () => {
   assert.doesNotMatch(layout, /vazirmatn/i);
   assert.doesNotMatch(layout, /noto-sans-hebrew/i);
   assert.doesNotMatch(layout, /noto-sans-arabic/i);
+  assert.doesNotMatch(read('app/fa/layout.tsx'), /fa-draft-banner/);
+  assert.doesNotMatch(read('app/fa/fa-preview.css'), /fa-draft-banner/);
   assert.match(read('app/fa/fa-preview.css'), /vazirmatn/i);
   assert.match(read('app/he/he-preview.css'), /noto-sans-hebrew/i);
   assert.match(read('app/ar/ar-preview.css'), /noto-sans-arabic/i);

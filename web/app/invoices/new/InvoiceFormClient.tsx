@@ -15,6 +15,7 @@ import { getCompanyTheme, type CompanyTheme } from '@/lib/company-theme';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
   coerceOrgId,
+  customerActionFromEstimate,
   emptyLineItem,
   isValidOrgId,
   lineItemsSubtotal,
@@ -273,6 +274,11 @@ export default function InvoiceFormClient() {
         toast.error('Could not load estimate for convert');
         return;
       }
+      if (customerActionFromEstimate(data).action === 'rejected') {
+        toast.error('This estimate was rejected and cannot be converted to an invoice.');
+        router.replace('/estimates');
+        return;
+      }
       setSourceEstimateId(data.id);
       setCustomerName(data.customer_name || '');
       setCustSearch(data.customer_name || '');
@@ -366,7 +372,7 @@ export default function InvoiceFormClient() {
           : 'Prefilling invoice from estimate — review and save.'
       );
     },
-    [supabase]
+    [supabase, router]
   );
 
   useEffect(() => {
@@ -811,7 +817,7 @@ export default function InvoiceFormClient() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-4xl mx-auto w-full px-4 py-6 pb-28">
+      <div className="doc-action-page-compact max-w-4xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
             <Link href="/invoices" className="text-sm text-[var(--gold)] hover:underline">
@@ -1271,7 +1277,7 @@ export default function InvoiceFormClient() {
           </div>
         </section>
 
-        <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
+        <div className="doc-action-bar flex flex-wrap gap-2 sticky bottom-4 z-10">
           <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">
             Cancel
           </Link>

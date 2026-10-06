@@ -109,7 +109,11 @@ export async function grokChat(opts: {
   manualTitle?: string | null;
   manualBrand?: string | null;
   manualModel?: string | null;
+  manualLanguage?: string | null;
+  replyLanguage?: string | null;
   scopeChanged?: boolean;
+  /** True only while `TSP.setVoiceMode(true)` is on. The viewer panel leaves this off. */
+  voiceMode?: boolean;
 }): Promise<GrokChatResult | GrokErrorResult> {
   const nonSys = opts.messages
     .filter((m) => m.role === 'user' || m.role === 'assistant')
@@ -119,12 +123,14 @@ export async function grokChat(opts: {
   try {
     const { status, json } = await postGrok(opts.accessToken, {
       action: 'chat',
-      voiceMode: false,
+      voiceMode: opts.voiceMode === true,
       manualPath: opts.manualPath || null,
       manualId: opts.manualId ?? null,
       manualTitle: opts.manualTitle || null,
       manualBrand: opts.manualBrand || null,
       manualModel: opts.manualModel || null,
+      manualLanguage: opts.manualLanguage || null,
+      replyLanguage: opts.replyLanguage || null,
       scopeChanged: opts.scopeChanged === true,
       messages: nonSys,
     });

@@ -25,6 +25,7 @@ function PdfViewerDemoInner() {
       initialPage={params.get('page')}
       initialSection={params.get('section')}
       initialFind={params.get('q')}
+      pageOutOfRange={params.get('oor') === '1'}
     />
   );
 }
