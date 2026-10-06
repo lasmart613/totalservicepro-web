@@ -11,6 +11,7 @@ import { formatListingPrice } from '@/lib/marketplace/parts';
 import { useSignedIn } from '@/lib/use-signed-in';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
 import { toast } from 'sonner';
+import { StorageImage } from '@/components/StorageImage';
 
 export default function UsedSystemsMarketplace() {
   const [listings, setListings] = useState<any[]>([]);
@@ -98,7 +99,7 @@ export default function UsedSystemsMarketplace() {
                 <div key={l.id} className="card p-6">
                   {featured && (
                     <Link href={href}>
-                      <img src={featured} alt="Featured" className="w-full h-32 object-cover rounded mb-3 cursor-pointer" />
+                      <StorageImage src={featured} alt={t('Featured')} className="w-full h-32 object-cover rounded mb-3 cursor-pointer" width={480} />
                     </Link>
                   )}
                   <Link href={href}>
