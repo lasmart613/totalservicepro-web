@@ -23,8 +23,10 @@ import {
   manualSearchBodyQuery,
   parseManualLibrarySearchParams,
   manualLanguageOptionsForView,
+  manualRoomsForView,
   uniqueManualBrands,
 } from './manual-library-filter.ts';
+import { EQUIPMENT_TYPE_VALUES } from './equipment-types.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -356,6 +358,60 @@ test('language menu lists only languages in the current room and tab', () => {
   assert.deepEqual(operators, ['all', 'en']);
 });
 
+test('room rail lists only rooms that have manuals on the current shelf, in catalog order', () => {
+  const rows = [
+    { id: 1, title: 'Alpha notes', equipment_type: 'laser', doc_kind: 'operator', language: 'en' },
+    { id: 2, title: 'Beta notes', equipment_type: 'patient_monitor', doc_kind: 'operator', language: 'de' },
+    { id: 3, title: 'Gamma notes', equipment_type: 'patient_monitor', doc_kind: 'operator', language: 'de' },
+    { id: 4, title: 'Delta notes', equipment_type: 'ultrasound', doc_kind: 'operator', language: 'en' },
+    { id: 5, title: 'Epsilon notes', equipment_type: 'lithotriptor', doc_kind: 'operator', language: 'en' },
+    { id: 6, title: 'Zeta notes', equipment_type: 'anesthesia', doc_kind: 'operator', language: 'en' },
+    { id: 7, title: 'Eta notes', equipment_type: 'c_arm', doc_kind: 'service', language: 'en' },
+    { id: 8, title: 'Theta notes', equipment_type: 'beds', doc_kind: 'service', language: 'en' },
+    { id: 9, title: 'Iota notes', equipment_type: 'defibrillator', doc_kind: 'service', language: 'en' },
+    { id: 10, title: 'Kappa notes', equipment_type: 'endoscope', doc_kind: 'service', language: 'en' },
+    { id: 11, title: 'Lambda notes', equipment_type: 'infusion_pump', doc_kind: 'service', language: 'en' },
+    { id: 12, title: 'Mu notes', equipment_type: 'sterile_processing', doc_kind: 'service', language: 'en' },
+    { id: 13, title: 'Nu notes', equipment_type: 'ventilator', doc_kind: 'service', language: 'en' },
+    { id: 14, title: 'Xi notes', equipment_type: 'laser', doc_kind: 'service', language: 'en' },
+  ];
+  const values = (rooms: { value: string }[]) => rooms.map((room) => room.value);
+  const inCatalogOrder = (listed: string[]) => {
+    const indexes = listed.map((value) => EQUIPMENT_TYPE_VALUES.indexOf(value as (typeof EQUIPMENT_TYPE_VALUES)[number]));
+    assert.ok(indexes.every((index) => index >= 0));
+    assert.deepEqual(
+      indexes,
+      [...indexes].sort((a, b) => a - b)
+    );
+  };
+
+  const operators = values(manualRoomsForView(rows, { library: 'operators' }));
+  assert.deepEqual(operators, ['laser', 'lithotriptor', 'anesthesia', 'patient_monitor', 'ultrasound']);
+  for (const empty of ['c_arm', 'beds', 'defibrillator', 'endoscope', 'infusion_pump', 'sterile_processing', 'ventilator']) {
+    assert.equal(operators.includes(empty), false, empty);
+  }
+  inCatalogOrder(operators);
+
+  const service = values(manualRoomsForView(rows, { library: 'service' }));
+  assert.deepEqual(service, [
+    'laser',
+    'c_arm',
+    'beds',
+    'defibrillator',
+    'endoscope',
+    'infusion_pump',
+    'sterile_processing',
+    'ventilator',
+  ]);
+  assert.equal(service.includes('ultrasound'), false);
+  assert.equal(service.includes('lithotriptor'), false);
+  assert.equal(service.includes('anesthesia'), false);
+  inCatalogOrder(service);
+
+  assert.deepEqual(values(manualRoomsForView(rows, { library: 'operators', language: 'de' })), ['patient_monitor']);
+  assert.deepEqual(values(manualRoomsForView([], { library: 'operators' })), []);
+});
+
 test('mobile spine language badge stays inside its spine and ignores taps', () => {
   const cssPath = join(here, '../app/globals.css');
   const css = readFileSync(cssPath, 'utf8');
@@ -373,73 +429,131 @@ test('mobile spine language badge stays inside its spine and ignores taps', () =
 <meta charset="utf-8">
 <style>
 ${rules}
+.book, .book-spine, .manual-language-badge { box-sizing: border-box; }
 .book { position: relative; }
-.row { display: flex; align-items: flex-end; gap: 0; width: 100px; }
+.row { display: flex; align-items: flex-end; gap: 0; }
 </style>
 </head>
 <body>
 <div class="row">
-  <div class="book" style="width:50px">
-    <div class="book-spine" style="width:50px;height:138px">
+  <div class="book" id="wide" style="width:56px">
+    <div class="book-spine" style="width:52px;max-width:none;height:138px">
       <div class="book-title">Candela GentleMax Pro Service Manual</div>
+      <div class="manual-language-badge">DE</div>
     </div>
-    <div class="manual-language-badge">DE</div>
   </div>
-  <div class="book" id="next" style="width:50px">
-    <div class="book-spine" style="width:50px;height:138px">
-      <div class="book-title">Next</div>
+  <div class="book" id="narrow" style="width:50px">
+    <div class="book-spine" style="width:52px;max-width:none;height:138px">
+      <div class="book-title">Next book title</div>
+      <div class="manual-language-badge">ES</div>
     </div>
+  </div>
+</div>
+<div class="row">
+  <div class="book" id="fit" style="width:50px">
+    <div class="book-spine" style="height:138px"><div class="book-title">Fit</div></div>
+  </div>
+  <div class="book" id="fit56" style="width:56px">
+    <div class="book-spine" style="height:138px"><div class="book-title">Wide</div></div>
   </div>
 </div>
 <pre id="measure"></pre>
 <script>
-  const badge = document.querySelector('.manual-language-badge');
-  const spine = document.querySelector('.book-spine');
-  const title = document.querySelector('.book-title');
-  const next = document.querySelector('#next');
-  const br = badge.getBoundingClientRect();
-  const sr = spine.getBoundingClientRect();
-  const tr = title.getBoundingClientRect();
-  const nr = next.getBoundingClientRect();
-  const style = getComputedStyle(badge);
   const eps = 0.6;
-  const inside = br.width > 0 && br.left >= sr.left - eps && br.right <= sr.right + eps && br.top >= sr.top - eps && br.bottom <= sr.bottom + eps;
-  const hitsNext = br.right > nr.left + eps && br.left < nr.right - eps && br.bottom > nr.top + eps && br.top < nr.bottom - eps;
-  const hitsTitle = br.right > tr.left + eps && br.left < tr.right - eps && br.bottom > tr.top + eps && br.top < tr.bottom - eps;
+  const rect = (el) => {
+    const r = el.getBoundingClientRect();
+    return { left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width, height: r.height };
+  };
+  const inside = (inner, outer) => inner.width > 0 && inner.left >= outer.left - eps && inner.right <= outer.right + eps && inner.top >= outer.top - eps && inner.bottom <= outer.bottom + eps;
+  const overlaps = (a, b) => a.right > b.left + eps && a.left < b.right - eps && a.bottom > b.top + eps && a.top < b.bottom - eps;
+  const wide = document.querySelector('#wide');
+  const narrow = document.querySelector('#narrow');
+  const fit = document.querySelector('#fit');
+  const fit56 = document.querySelector('#fit56');
+  const wideBadge = rect(wide.querySelector('.manual-language-badge'));
+  const wideSpine = rect(wide.querySelector('.book-spine'));
+  const wideTitle = rect(wide.querySelector('.book-title'));
+  const narrowBadge = rect(narrow.querySelector('.manual-language-badge'));
+  const narrowSpine = rect(narrow.querySelector('.book-spine'));
+  const fitBook = rect(fit);
+  const fitSpine = rect(fit.querySelector('.book-spine'));
+  const fit56Book = rect(fit56);
+  const fit56Spine = rect(fit56.querySelector('.book-spine'));
+  const style = getComputedStyle(wide.querySelector('.manual-language-badge'));
   document.getElementById('measure').textContent = JSON.stringify({
-    inside, hitsNext, hitsTitle,
+    wideInside: inside(wideBadge, wideSpine),
+    narrowInside: inside(narrowBadge, narrowSpine),
+    wideHitsTitle: overlaps(wideBadge, wideTitle),
+    wideHitsNarrowSpine: overlaps(wideBadge, narrowSpine),
     pointer: style.pointerEvents,
     fontSize: parseFloat(style.fontSize),
-    height: br.height
+    height: wideBadge.height,
+    width: wideBadge.width,
+    fitSpineWithin: fitSpine.left >= fitBook.left - eps && fitSpine.right <= fitBook.right + eps,
+    fit56SpineWithin: fit56Spine.left >= fit56Book.left - eps && fit56Spine.right <= fit56Book.right + eps,
+    fitWidth: fitSpine.width,
+    fit56Width: fit56Spine.width
   });
 </script>
 </body>
 </html>`
   );
-  const chrome = spawnSync(
-    'google-chrome',
-    [
-      '--headless=new',
-      '--no-sandbox',
-      '--disable-gpu',
-      '--disable-dev-shm-usage',
-      '--window-size=390,844',
-      '--virtual-time-budget=800',
-      '--dump-dom',
-      `file://${htmlPath}`,
-    ],
-    { encoding: 'utf8', timeout: 30000 }
-  );
-  assert.equal(chrome.status, 0, chrome.stderr || chrome.stdout);
-  const match = String(chrome.stdout).match(/<pre id="measure">([^<]+)<\/pre>/);
-  assert.ok(match, chrome.stdout.slice(0, 500));
-  const box = JSON.parse(match[1].replace(/&quot;/g, '"'));
-  assert.equal(box.inside, true);
-  assert.equal(box.hitsNext, false);
-  assert.equal(box.hitsTitle, false);
-  assert.equal(box.pointer, 'none');
-  assert.ok(box.height >= 20 && box.height <= 24, `height ${box.height}`);
-  assert.ok(box.fontSize >= 10 && box.fontSize <= 11, `font ${box.fontSize}`);
+  function measure(windowSize: string) {
+    const chrome = spawnSync(
+      'google-chrome',
+      [
+        '--headless=new',
+        '--no-sandbox',
+        '--disable-gpu',
+        '--disable-dev-shm-usage',
+        `--window-size=${windowSize}`,
+        '--virtual-time-budget=800',
+        '--dump-dom',
+        `file://${htmlPath}`,
+      ],
+      { encoding: 'utf8', timeout: 30000 }
+    );
+    assert.equal(chrome.status, 0, chrome.stderr || chrome.stdout);
+    const match = String(chrome.stdout).match(/<pre id="measure">([^<]+)<\/pre>/);
+    assert.ok(match, chrome.stdout.slice(0, 500));
+    return JSON.parse(match[1].replace(/&quot;/g, '"')) as {
+      wideInside: boolean;
+      narrowInside: boolean;
+      wideHitsTitle: boolean;
+      wideHitsNarrowSpine: boolean;
+      pointer: string;
+      fontSize: number;
+      height: number;
+      width: number;
+      fitSpineWithin: boolean;
+      fit56SpineWithin: boolean;
+      fitWidth: number;
+      fit56Width: number;
+    };
+  }
+  const mobile = measure('390,844');
+  assert.equal(mobile.wideInside, true);
+  assert.equal(mobile.narrowInside, true);
+  assert.equal(mobile.wideHitsTitle, false);
+  assert.equal(mobile.wideHitsNarrowSpine, false);
+  assert.equal(mobile.pointer, 'none');
+  assert.ok(mobile.height >= 20 && mobile.height <= 24, `height ${mobile.height}`);
+  assert.ok(mobile.fontSize >= 10 && mobile.fontSize <= 11, `font ${mobile.fontSize}`);
+  assert.equal(mobile.fitSpineWithin, true, `50px slot spine ${mobile.fitWidth}`);
+  assert.equal(mobile.fit56SpineWithin, true, `56px slot spine ${mobile.fit56Width}`);
+  assert.ok(mobile.fitWidth <= 50.6, `spine in 50px slot is ${mobile.fitWidth}`);
+  assert.ok(mobile.fit56Width <= 52.6 && mobile.fit56Width >= 50, `spine in 56px slot is ${mobile.fit56Width}`);
+
+  const desktop = measure('1280,800');
+  assert.equal(desktop.wideInside, true);
+  assert.equal(desktop.narrowInside, true);
+  assert.equal(desktop.wideHitsNarrowSpine, false);
+  assert.equal(desktop.pointer, 'none');
+  assert.equal(desktop.fontSize, 8, `desktop font ${desktop.fontSize}`);
+  assert.ok(desktop.height >= 16 && desktop.height <= 22, `desktop height ${desktop.height}`);
+  assert.ok(desktop.width >= 18 && desktop.width <= 28, `desktop width ${desktop.width}`);
+  assert.equal(desktop.fitSpineWithin, true);
+  assert.equal(desktop.fit56SpineWithin, true);
 });
 
 test('locale-prefixed manuals URLs use that catalog language and do not 404', () => {
@@ -478,6 +592,8 @@ test('library page wires search UI and keeps open/get-manual-url gating', () => 
   assert.match(page, /All manufacturers|All makes/i);
   assert.match(page, /manuals-language/);
   assert.match(page, /manualLanguageOptionsForView\(sourceManuals, \{ room, library \}\)/);
+  assert.match(page, /manualRoomsForView\(\s*sourceManuals/);
+  assert.doesNotMatch(page, /EQUIPMENT_TYPES\.map/);
   assert.match(page, /manualLanguageBadge/);
   assert.match(page, /manualSearchBodyQuery/);
   assert.match(page, /manual-language-badge/);
