@@ -97,7 +97,7 @@ export function ReportIssueControl({
         aria-label={t('Report an Issue')}
       >
         <CircleAlert size={16} aria-hidden className={variant === 'landing' ? undefined : 'shrink-0'} />
-        <span className={variant === 'app' && !showLabel ? 'hidden xl:inline' : undefined}>
+        <span className={variant === 'app' && !showLabel ? 'hidden 2xl:inline' : undefined}>
           {t('Report an Issue')}
         </span>
       </button>
