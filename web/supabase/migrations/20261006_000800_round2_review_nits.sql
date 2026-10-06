@@ -13,6 +13,11 @@
 -- 10. The 235902 hotfix filename is 20261006030456, the live schema_migrations version.
 -- N7. Client roles cannot attribute labor_log or inventory_transactions to another user
 --     unless they are a company_admin of that org.
+--
+-- Apply inside the migration transaction. lock_timeout fails the apply
+-- instead of queueing catalog reads behind ACCESS EXCLUSIVE.
+
+SET LOCAL lock_timeout = '5s';
 
 -- 1. customer_org_link_allowed
 CREATE OR REPLACE FUNCTION public.customer_org_link_allowed(
@@ -66,8 +71,26 @@ REVOKE ALL ON FUNCTION public.customer_org_link_allowed(bigint, bigint) FROM PUB
 GRANT EXECUTE ON FUNCTION public.customer_org_link_allowed(bigint, bigint) TO authenticated;
 
 -- 2. parts_catalog UPDATE and part_vendors DELETE.
--- The part's org is the creator's home membership (is_home), not every org
--- the creator happens to share with an admin.
+-- Home org when the creator has one; otherwise every org they still belong to.
+-- DEFINER so a foreign home row is visible. An inline join would hide it and
+-- treat a moonlighter as having no home.
+CREATE OR REPLACE FUNCTION public.caller_is_part_creator_admin(p_creator uuid)
+RETURNS boolean LANGUAGE sql STABLE SECURITY DEFINER
+SET search_path = public, pg_temp SET row_security = off AS $$
+  WITH creator_orgs AS (
+    SELECT organization_id, is_home FROM public.organization_memberships WHERE user_id = p_creator
+  ), scope AS (
+    SELECT organization_id FROM creator_orgs
+    WHERE is_home OR NOT EXISTS (SELECT 1 FROM creator_orgs WHERE is_home)
+  )
+  SELECT p_creator IS NOT NULL AND auth.uid() IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.organization_memberships a
+    JOIN scope s ON s.organization_id = a.organization_id
+    WHERE a.user_id = auth.uid() AND lower(btrim(a.role)) IN ('admin', 'company_admin'));
+$$;
+REVOKE ALL ON FUNCTION public.caller_is_part_creator_admin(uuid) FROM PUBLIC, anon;
+GRANT EXECUTE ON FUNCTION public.caller_is_part_creator_admin(uuid) TO authenticated, service_role;
+
 DROP POLICY IF EXISTS parts_catalog_update ON public.parts_catalog;
 DROP POLICY IF EXISTS parts_catalog_update_owner ON public.parts_catalog;
 CREATE POLICY parts_catalog_update_owner
@@ -76,29 +99,11 @@ CREATE POLICY parts_catalog_update_owner
   TO authenticated
   USING (
     created_by = auth.uid()
-    OR EXISTS (
-      SELECT 1
-      FROM public.organization_memberships part_home
-      JOIN public.organization_memberships admin_m
-        ON admin_m.organization_id = part_home.organization_id
-       AND admin_m.user_id = auth.uid()
-       AND lower(btrim(admin_m.role)) IN ('admin', 'company_admin')
-      WHERE part_home.user_id = parts_catalog.created_by
-        AND part_home.is_home IS TRUE
-    )
+    OR public.caller_is_part_creator_admin(created_by)
   )
   WITH CHECK (
     created_by = auth.uid()
-    OR EXISTS (
-      SELECT 1
-      FROM public.organization_memberships part_home
-      JOIN public.organization_memberships admin_m
-        ON admin_m.organization_id = part_home.organization_id
-       AND admin_m.user_id = auth.uid()
-       AND lower(btrim(admin_m.role)) IN ('admin', 'company_admin')
-      WHERE part_home.user_id = parts_catalog.created_by
-        AND part_home.is_home IS TRUE
-    )
+    OR public.caller_is_part_creator_admin(created_by)
   );
 
 DROP POLICY IF EXISTS part_vendors_delete_owner ON public.part_vendors;
@@ -109,24 +114,41 @@ CREATE POLICY part_vendors_delete_owner
   USING (
     created_by = auth.uid()
     OR EXISTS (
-      SELECT 1
-      FROM public.parts_catalog p
+      SELECT 1 FROM public.parts_catalog p
       WHERE p.id = part_vendors.part_id
         AND p.created_by = auth.uid()
     )
     OR EXISTS (
-      SELECT 1
-      FROM public.parts_catalog p
-      JOIN public.organization_memberships part_home
-        ON part_home.user_id = p.created_by
-       AND part_home.is_home IS TRUE
-      JOIN public.organization_memberships admin_m
-        ON admin_m.organization_id = part_home.organization_id
-       AND admin_m.user_id = auth.uid()
-       AND lower(btrim(admin_m.role)) IN ('admin', 'company_admin')
+      SELECT 1 FROM public.parts_catalog p
       WHERE p.id = part_vendors.part_id
+        AND public.caller_is_part_creator_admin(p.created_by)
     )
   );
+
+-- Signed-in users cannot change part_vendors.created_by. Table UPDATE is
+-- revoked, then every column except id, created_by, and created_at is re-granted.
+DO $$
+DECLARE
+  cols text;
+BEGIN
+  IF to_regclass('public.part_vendors') IS NULL THEN
+    RETURN;
+  END IF;
+  EXECUTE 'REVOKE UPDATE ON TABLE public.part_vendors FROM PUBLIC, anon, authenticated';
+  SELECT string_agg(format('%I', c.column_name), ', ' ORDER BY c.ordinal_position)
+    INTO cols
+  FROM information_schema.columns c
+  WHERE c.table_schema = 'public'
+    AND c.table_name = 'part_vendors'
+    AND NOT (c.column_name = ANY (ARRAY['id', 'created_by', 'created_at']::text[]));
+  IF cols IS NULL THEN
+    RAISE EXCEPTION 'no safe update columns for part_vendors';
+  END IF;
+  EXECUTE format(
+    'GRANT UPDATE (%s) ON TABLE public.part_vendors TO authenticated',
+    cols
+  );
+END $$;
 
 -- 4. profile_org_change_allowed(bigint). Create the new signature, point the
 -- guard at it, then drop (uuid, bigint).

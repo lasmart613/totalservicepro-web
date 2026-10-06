@@ -48,7 +48,9 @@ function clientRpcCalls(fn: string): string[] {
 test('round-2 migration covers the review nits and attribution guard', () => {
   const sql = read('../supabase/migrations/20261006_000800_round2_review_nits.sql');
   assert.match(sql, /existing\.service_organization_id IS DISTINCT FROM p_service/);
-  assert.match(sql, /part_home\.is_home IS TRUE/);
+  assert.match(sql, /caller_is_part_creator_admin\(created_by\)/);
+  assert.match(sql, /caller_is_part_creator_admin\(p\.created_by\)/);
+  assert.match(sql, /SET LOCAL lock_timeout = '5s'/);
   assert.match(sql, /CREATE OR REPLACE FUNCTION public\.profile_org_change_allowed\(p_org bigint\)/);
   assert.match(sql, /profile_org_change_allowed\(new_row\.organization_id\)/);
   assert.match(sql, /DROP FUNCTION IF EXISTS public\.profile_org_change_allowed\(uuid, bigint\)/);

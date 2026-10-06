@@ -1,29 +1,45 @@
 import { NextRequest } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
-import { canArchiveCatalogPart } from '@/lib/part-catalog-manage';
 import { missingCatalogColumn } from '@/lib/part-catalog-write';
 
-export async function bearerUserId(req: NextRequest): Promise<string | null> {
+function bearerClient(req: NextRequest): { token: string; client: SupabaseClient } | null {
   const token = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '').trim();
   if (!token) return null;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
   const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
   if (!url || !anon) return null;
-  const supabase = createClient(url, anon, {
-    global: { headers: { Authorization: `Bearer ${token}` } },
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+  return {
+    token,
+    client: createClient(url, anon, {
+      global: { headers: { Authorization: `Bearer ${token}` } },
+      auth: { persistSession: false, autoRefreshToken: false },
+    }),
+  };
+}
+
+export async function bearerUserId(req: NextRequest): Promise<string | null> {
+  const session = bearerClient(req);
+  if (!session) return null;
   const {
     data: { user },
-  } = await supabase.auth.getUser(token);
+  } = await session.client.auth.getUser(session.token);
   return user?.id || null;
 }
 
-/** Creator or same-org admin. A null created_by is not manageable by a client. */
+/** The caller's JWT, so caller_is_part_creator_admin sees auth.uid(). */
+export function bearerCaller(req: NextRequest): SupabaseClient | null {
+  return bearerClient(req)?.client ?? null;
+}
+
+/**
+ * Part creator, or caller_is_part_creator_admin. A null created_by is not manageable.
+ * The helper is the rule. Service role would see auth.uid() as null, so this uses the caller JWT.
+ */
 export async function catalogManagerStatus(
   admin: SupabaseClient,
   userId: string,
-  partId: unknown
+  partId: unknown,
+  caller: SupabaseClient | null
 ): Promise<{ ok: true } | { ok: false; status: number }> {
   if (partId == null || partId === '') return { ok: false, status: 400 };
   const { data: part, error } = await admin
@@ -33,19 +49,13 @@ export async function catalogManagerStatus(
     .maybeSingle();
   if (error || !part) return { ok: false, status: 404 };
   const createdBy = part.created_by ? String(part.created_by) : '';
-  const ids = [userId, createdBy].filter(Boolean);
-  const { data: memberships } = ids.length
-    ? await admin
-        .from('organization_memberships')
-        .select('user_id, organization_id, role, is_home')
-        .in('user_id', ids)
-    : { data: [] };
-  const allowed = canArchiveCatalogPart({
-    userId,
-    createdBy,
-    memberships: memberships || [],
+  if (!createdBy || !userId) return { ok: false, status: 403 };
+  if (userId === createdBy) return { ok: true };
+  if (!caller) return { ok: false, status: 403 };
+  const { data, error: rpcError } = await caller.rpc('caller_is_part_creator_admin', {
+    p_creator: createdBy,
   });
-  if (!allowed) return { ok: false, status: 403 };
+  if (rpcError || data !== true) return { ok: false, status: 403 };
   return { ok: true };
 }
 

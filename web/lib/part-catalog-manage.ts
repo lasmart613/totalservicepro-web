@@ -20,8 +20,9 @@ export function isSameOrgCatalogAdmin(role: string | null | undefined): boolean 
 }
 
 /**
- * Part creator, or an admin/company_admin of the creator's home organization.
- * A membership in some other shared org does not count.
+ * Same rule as caller_is_part_creator_admin, for tests.
+ * Live checks call that function. A client membership read cannot see a
+ * moonlighter's foreign home row, so this must not be the authorization check.
  */
 export function canArchiveCatalogPart(input: {
   userId: string | null | undefined;
@@ -32,18 +33,19 @@ export function canArchiveCatalogPart(input: {
   const createdBy = String(input.createdBy || '');
   if (!userId || !createdBy) return false;
   if (userId === createdBy) return true;
-  const homeOrgs = new Set(
-    input.memberships
-      .filter((row) => String(row.user_id || '') === createdBy && row.is_home === true)
+  const creatorRows = input.memberships.filter((row) => String(row.user_id || '') === createdBy);
+  const homeRows = creatorRows.filter((row) => row.is_home === true);
+  const scopeOrgs = new Set(
+    (homeRows.length ? homeRows : creatorRows)
       .map((row) => String(row.organization_id ?? ''))
       .filter(Boolean)
   );
-  if (!homeOrgs.size) return false;
+  if (!scopeOrgs.size) return false;
   return input.memberships.some(
     (row) =>
       String(row.user_id || '') === userId &&
       isSameOrgCatalogAdmin(row.role) &&
-      homeOrgs.has(String(row.organization_id ?? ''))
+      scopeOrgs.has(String(row.organization_id ?? ''))
   );
 }
 

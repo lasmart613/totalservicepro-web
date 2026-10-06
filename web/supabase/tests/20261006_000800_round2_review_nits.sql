@@ -16,9 +16,10 @@ BEGIN
     WHERE n.nspname = 'public'
       AND c.relname = 'parts_catalog'
       AND pol.polname = 'parts_catalog_update_owner'
-      AND position('is_home IS TRUE' IN pg_get_expr(pol.polqual, pol.polrelid)) > 0
+      AND position('caller_is_part_creator_admin' IN pg_get_expr(pol.polqual, pol.polrelid)) > 0
+      AND position('caller_is_part_creator_admin' IN pg_get_expr(pol.polwithcheck, pol.polrelid)) > 0
   ) THEN
-    RAISE EXCEPTION 'FAIL parts_catalog_update_owner is not limited to the part home org';
+    RAISE EXCEPTION 'FAIL parts_catalog_update_owner does not use caller_is_part_creator_admin';
   END IF;
 
   IF NOT EXISTS (
@@ -29,9 +30,23 @@ BEGIN
     WHERE n.nspname = 'public'
       AND c.relname = 'part_vendors'
       AND pol.polname = 'part_vendors_delete_owner'
-      AND position('is_home IS TRUE' IN pg_get_expr(pol.polqual, pol.polrelid)) > 0
+      AND position('caller_is_part_creator_admin' IN pg_get_expr(pol.polqual, pol.polrelid)) > 0
   ) THEN
-    RAISE EXCEPTION 'FAIL part_vendors_delete_owner is not limited to the part home org';
+    RAISE EXCEPTION 'FAIL part_vendors_delete_owner does not use caller_is_part_creator_admin';
+  END IF;
+  IF has_function_privilege('anon', 'public.caller_is_part_creator_admin(uuid)', 'EXECUTE')
+     OR NOT has_function_privilege('authenticated', 'public.caller_is_part_creator_admin(uuid)', 'EXECUTE')
+     OR NOT has_function_privilege('service_role', 'public.caller_is_part_creator_admin(uuid)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'FAIL caller_is_part_creator_admin grants';
+  END IF;
+  IF position('row_security' IN pg_get_functiondef('public.caller_is_part_creator_admin(uuid)'::regprocedure)) = 0
+     OR position('NOT EXISTS' IN pg_get_functiondef('public.caller_is_part_creator_admin(uuid)'::regprocedure)) = 0 THEN
+    RAISE EXCEPTION 'FAIL caller_is_part_creator_admin is not the home-org fallback';
+  END IF;
+  IF has_table_privilege('authenticated', 'public.part_vendors', 'UPDATE')
+     OR has_column_privilege('authenticated', 'public.part_vendors', 'created_by', 'UPDATE')
+     OR NOT has_column_privilege('authenticated', 'public.part_vendors', 'vendor_name', 'UPDATE') THEN
+    RAISE EXCEPTION 'FAIL part_vendors created_by is still client-writable';
   END IF;
 
   IF to_regprocedure('public.profile_org_change_allowed(uuid, bigint)') IS NOT NULL THEN
