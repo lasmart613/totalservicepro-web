@@ -22,6 +22,11 @@ import {
 import { getCompanyTheme, type CompanyTheme } from '@/lib/company-theme';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
+  canConvertEstimateToInvoice,
+  estimateWritePayload,
+  persistServiceEstimate,
+} from '@/lib/billing/finalize-estimate';
+import {
   coerceOrgId,
   customerActionFromEstimate,
   emptyLineItem,
@@ -31,7 +36,6 @@ import {
   recomputeExt,
   SERVICE_TYPE_LABELS,
   SERVICE_TYPES,
-  writeWithColumnRetry,
   type CustomerActionKind,
   type LineItem,
 } from '@/lib/billing/save-helpers';
@@ -59,6 +63,7 @@ export default function EstimateFormClient() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savedId, setSavedId] = useState<string | number | null>(editIdParam);
+  const savedIdRef = useRef<string | number | null>(editIdParam);
   const [customerAction, setCustomerAction] = useState<CustomerActionKind | null>(null);
   const [createdAt, setCreatedAt] = useState<string | null>(null);
   const [userOrgId, setUserOrgId] = useState<string | number | null>(null);
@@ -260,6 +265,7 @@ export default function EstimateFormClient() {
         toast.error('Could not load estimate');
         return;
       }
+      savedIdRef.current = data.id;
       setSavedId(data.id);
       setStatus(data.status || 'draft');
       setCustomerAction(customerActionFromEstimate(data).action);
@@ -485,7 +491,7 @@ export default function EstimateFormClient() {
 
   async function saveEstimate(
     nextStatus: string,
-    opts?: { quiet?: boolean }
+    opts?: { quiet?: boolean; preserveStatus?: boolean }
   ): Promise<string | number | null> {
     const name = customerName.trim() || custSearch.trim();
     if (!name) {
@@ -498,8 +504,9 @@ export default function EstimateFormClient() {
     }
     setSaving(true);
     try {
-      if (savedId) {
-        const refusal = await guardEstimateStatusChange(savedId, nextStatus);
+      const idForGuard = savedIdRef.current ?? savedId;
+      if (idForGuard) {
+        const refusal = await guardEstimateStatusChange(idForGuard, nextStatus);
         if (refusal) {
           toast.error(refusal);
           return null;
@@ -520,6 +527,11 @@ export default function EstimateFormClient() {
       if (!estNum) {
         throw new Error('Could not allocate an estimate number. Try again.');
       }
+
+      if ((savedIdRef.current == null || savedIdRef.current === '') && editIdParam) {
+        savedIdRef.current = editIdParam;
+      }
+      const existingId = savedIdRef.current;
 
       const modelName = model === '__other__' ? customModel.trim() : model;
       const mfr = manufacturer === '__other__' ? '' : manufacturer;
@@ -644,21 +656,21 @@ export default function EstimateFormClient() {
         },
       };
 
-      if (!savedId) {
+      if (!existingId) {
         payload.created_by = userId;
       }
 
-      const result = await writeWithColumnRetry(
+      const result = await persistServiceEstimate(
         supabase,
-        'service_estimates',
-        payload,
-        savedId
+        estimateWritePayload(payload, existingId, opts),
+        existingId
       );
       if (result.error) throw result.error;
 
       if (result.id) {
+        savedIdRef.current = result.id;
         setSavedId(result.id);
-        setStatus(nextStatus);
+        if (!(opts?.preserveStatus && existingId)) setStatus(nextStatus);
         try {
           const url = new URL(window.location.href);
           url.searchParams.set('id', String(result.id));
@@ -679,7 +691,7 @@ export default function EstimateFormClient() {
           toast.success('Estimate saved.');
         }
       }
-      return result.id || savedId;
+      return result.id || existingId;
     } catch (err: any) {
       const em = err?.message || String(err);
       if (/service_estimates|schema cache|does not exist/i.test(em)) {
@@ -778,7 +790,7 @@ export default function EstimateFormClient() {
     }
     setEmailing(true);
     try {
-      const id = await saveEstimate('draft', { quiet: true });
+      const id = await saveEstimate('draft', { quiet: true, preserveStatus: true });
       if (!id) return;
       const {
         data: { session },
@@ -802,15 +814,19 @@ export default function EstimateFormClient() {
           html: buildEstimateEmailHtml(),
         },
       });
-      if (!result.emailSent) {
+      if (!result.emailSent && !result.alreadySent) {
         toast.error(
           result.error ||
             'Email was not sent. Estimate remains a draft. Fix Resend/domain or use “Mark sent without email”.'
         );
         return;
       }
-      await saveEstimate('pending', { quiet: true });
-      toast.success(`Estimate emailed to ${result.to}.`);
+      setStatus('pending');
+      toast.success(
+        result.alreadySent
+          ? `Estimate was already sent${result.to ? ` to ${result.to}` : ''}.`
+          : `Estimate emailed to ${result.to}.`
+      );
     } finally {
       setEmailing(false);
     }
@@ -849,7 +865,7 @@ export default function EstimateFormClient() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-4xl mx-auto w-full px-4 py-6 pb-36 scroll-pb-36">
+      <div className="doc-action-page max-w-4xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
             <Link href="/estimates" className="text-sm text-[var(--gold)] hover:underline">
@@ -881,7 +897,8 @@ export default function EstimateFormClient() {
               </span>
             </div>
           </div>
-          {savedId && status !== 'invoiced' && status !== 'expired' && (
+          {savedId &&
+            canConvertEstimateToInvoice({ status, customer_action: customerAction }) && (
             <button
               type="button"
               className="btn btn-primary text-sm"
@@ -1390,7 +1407,7 @@ export default function EstimateFormClient() {
         )}
       </div>
 
-      <div className="fixed bottom-0 left-0 right-0 z-40 border-t border-[var(--gold)] bg-[var(--surface)] px-3 py-2.5">
+      <div className="doc-action-bar fixed bottom-0 inset-x-0 z-40 border-t border-[var(--gold)] bg-[var(--surface)] px-3 py-2.5">
         <div className="max-w-4xl mx-auto flex flex-wrap gap-2 justify-center">
           <Link href="/estimates" className="btn btn-secondary min-w-[80px] text-center">
             Cancel

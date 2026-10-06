@@ -15,6 +15,7 @@ import { getCompanyTheme, type CompanyTheme } from '@/lib/company-theme';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
   coerceOrgId,
+  customerActionFromEstimate,
   emptyLineItem,
   isValidOrgId,
   lineItemsSubtotal,
@@ -32,6 +33,7 @@ import {
   resolveInvoiceCollectable,
 } from '@/lib/billing/invoice-collectable';
 import { invoiceDataForSave } from '@/lib/billing/invoice-form-data';
+import { REJECTED_ESTIMATE_CONVERT_ERROR } from '@/lib/billing/estimate-display';
 import { lineItemFromStored } from '@/lib/billing/listing-invoice';
 
 type CustomerOpt = LinkedCustomerOpt;
@@ -262,6 +264,25 @@ export default function InvoiceFormClient() {
     [supabase]
   );
 
+  async function guardRejectedEstimateConvert(id: string | number): Promise<string | null> {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) return 'Session expired — sign in again';
+    const res = await fetch('/api/billing/estimate-convert', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ estimate_id: id }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.status === 409) return json?.error || REJECTED_ESTIMATE_CONVERT_ERROR;
+    if (!res.ok) return json?.error || `Could not convert estimate (${res.status})`;
+    return null;
+  }
+
   const prefillFromEstimate = useCallback(
     async (estimateId: string) => {
       const { data, error } = await supabase
@@ -271,6 +292,13 @@ export default function InvoiceFormClient() {
         .maybeSingle();
       if (error || !data) {
         toast.error('Could not load estimate for convert');
+        return;
+      }
+      const refusal = await guardRejectedEstimateConvert(data.id);
+      if (refusal || customerActionFromEstimate(data).action === 'rejected') {
+        toast.error(refusal || REJECTED_ESTIMATE_CONVERT_ERROR);
+        setSourceEstimateId(null);
+        router.replace('/estimates');
         return;
       }
       setSourceEstimateId(data.id);
@@ -363,7 +391,7 @@ export default function InvoiceFormClient() {
           : 'Prefilling invoice from estimate — review and save.'
       );
     },
-    [supabase]
+    [supabase, router]
   );
 
   useEffect(() => {
@@ -463,6 +491,14 @@ export default function InvoiceFormClient() {
     }
     setSaving(true);
     try {
+      const existingIdBefore = savedIdRef.current;
+      if (!existingIdBefore && sourceEstimateId) {
+        const refusal = await guardRejectedEstimateConvert(sourceEstimateId);
+        if (refusal) {
+          toast.error(refusal);
+          return null;
+        }
+      }
       let invNum = editIdParam ? docNumber : '';
       if (!invNum && userOrgId) {
         invNum = await allocateDocNumber(supabase, {
@@ -808,7 +844,7 @@ export default function InvoiceFormClient() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="max-w-4xl mx-auto w-full px-4 py-6 pb-28">
+      <div className="doc-action-page-compact max-w-4xl mx-auto w-full px-4 py-6">
         <div className="flex items-center justify-between mb-4 gap-3 flex-wrap">
           <div>
             <Link href="/invoices" className="text-sm text-[var(--gold)] hover:underline">
@@ -1268,7 +1304,7 @@ export default function InvoiceFormClient() {
           </div>
         </section>
 
-        <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
+        <div className="doc-action-bar flex flex-wrap gap-2 sticky bottom-4 z-10">
           <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">
             Cancel
           </Link>

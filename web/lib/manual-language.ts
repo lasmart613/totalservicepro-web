@@ -2,7 +2,7 @@
  * Catalog language for public.manuals.
  *
  * ISO 639-1 codes. English is the default and is not badged.
- * A trailing title suffix such as "(German)" is parsed into the code.
+ * A trailing title suffix such as "(German)" or "(Service Manual, German)" is parsed into the code.
  * The stored title keeps that suffix: it is how copies are told apart on
  * the shelf, in citations, and in doc-kind classifiers. The column is the
  * filter key. A non-English suffix still wins over a stored "en" so the
@@ -163,12 +163,85 @@ export function normalizeManualLanguage(raw: unknown): string | null {
   return null;
 }
 
-/** Language named by a trailing parenthetical, or null when the suffix is not a language. */
-export function languageSuffixFromTitle(title: unknown): string | null {
+/**
+ * Single-word language names used when the trailing brackets contain more
+ * than the language. "(Service Manual, German)" and "(… German)" match
+ * because the last word is a known name. Bare ISO codes are not last-word
+ * names, so "(Model No)" and "(Service Manual, DE)" stay untagged.
+ * Keep in sync with the last-word backfill migration.
+ */
+export const MANUAL_TITLE_LANGUAGE_LAST_WORDS: ReadonlyArray<readonly [string, string]> =
+  MANUAL_TITLE_LANGUAGE_SUFFIXES.filter(
+    ([suffix]) => !suffix.includes(' ') && !/^[a-z]{2}$/.test(suffix)
+  );
+
+const LAST_WORD_TO_CODE = new Map(MANUAL_TITLE_LANGUAGE_LAST_WORDS);
+
+/** Longer phrases first so "brazilian portuguese" is not split into a leftover word. */
+const LANGUAGE_NAME_ALIASES: ReadonlyArray<readonly [string, string]> = MANUAL_TITLE_LANGUAGE_SUFFIXES.filter(
+  ([suffix]) => !/^[a-z]{2}$/.test(suffix)
+).sort((a, b) => b[0].length - a[0].length);
+
+function trailingParenInner(title: unknown): string | null {
   const match = String(title ?? '').match(/\(\s*([^)]+?)\s*\)\s*$/u);
   if (!match) return null;
-  const suffix = match[1].replace(/\s+/g, ' ').trim().toLowerCase();
-  return SUFFIX_TO_CODE.get(suffix) || null;
+  return match[1].replace(/\s+/g, ' ').trim().toLowerCase();
+}
+
+function lastParenWord(inner: string): string {
+  const parts = inner
+    .split(/[^\p{L}\p{N}]+/u)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.length ? parts[parts.length - 1] : '';
+}
+
+/**
+ * Language named by a trailing parenthetical, or null when that note is not a language.
+ * The whole bracket can be a language ("(German)", "(Brazilian Portuguese)", "(EN)").
+ * Otherwise only the last word counts ("(Service Manual, German)").
+ */
+export function languageSuffixFromTitle(title: unknown): string | null {
+  const suffix = trailingParenInner(title);
+  if (!suffix) return null;
+  const exact = SUFFIX_TO_CODE.get(suffix);
+  if (exact) return exact;
+  return LAST_WORD_TO_CODE.get(lastParenWord(suffix)) || null;
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Language names in a library query are tag filters, not text.
+ * "spanish" and "español" both require language es. Leftover words stay a text query.
+ * Two-letter codes are not names, so a query of "id" or "no" still searches text.
+ */
+export function manualQueryLanguageMatch(query: string): { codes: string[]; textQuery: string } {
+  let rest = String(query ?? '')
+    .replace(/[^\p{L}\p{N}\s._/-]+/gu, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+  const codes: string[] = [];
+  const seen = new Set<string>();
+  for (let guard = 0; rest && guard < LANGUAGE_NAME_ALIASES.length; guard += 1) {
+    let hit = false;
+    for (const [alias, code] of LANGUAGE_NAME_ALIASES) {
+      const re = new RegExp(`(?<![\\p{L}\\p{N}])${escapeRegExp(alias)}(?![\\p{L}\\p{N}])`, 'u');
+      if (!re.test(rest)) continue;
+      rest = rest.replace(re, ' ').replace(/\s+/g, ' ').trim();
+      if (!seen.has(code)) {
+        seen.add(code);
+        codes.push(code);
+      }
+      hit = true;
+      break;
+    }
+    if (!hit) break;
+  }
+  return { codes, textQuery: rest };
 }
 
 /**
@@ -200,18 +273,23 @@ export function manualLanguageBadge(code: string | null | undefined): { code: st
 
 export type ManualLanguageOption = { value: string; label: string };
 
-/** All, then English, then any other languages present on these rows. */
+/**
+ * All, then English, then other languages that these rows actually use.
+ * A language with no manuals on this list is omitted, including English.
+ */
 export function manualLanguageFilterOptions(
   rows: Array<{ language?: unknown; title?: string | null }>
 ): ManualLanguageOption[] {
-  const codes = new Set<string>();
-  for (const row of rows) codes.add(resolveManualLanguage(row));
-  const rest = [...codes]
-    .filter((code) => code !== 'en')
+  const counts = new Map<string, number>();
+  for (const row of rows) {
+    const code = resolveManualLanguage(row);
+    counts.set(code, (counts.get(code) || 0) + 1);
+  }
+  const rest = [...counts.keys()]
+    .filter((code) => code !== 'en' && (counts.get(code) || 0) > 0)
     .sort((a, b) => manualLanguageLabel(a).localeCompare(manualLanguageLabel(b), 'en'));
-  return [
-    { value: ALL_MANUAL_LANGUAGES, label: 'All languages' },
-    { value: 'en', label: 'English' },
-    ...rest.map((code) => ({ value: code, label: manualLanguageLabel(code) })),
-  ];
+  const options: ManualLanguageOption[] = [{ value: ALL_MANUAL_LANGUAGES, label: 'All languages' }];
+  if ((counts.get('en') || 0) > 0) options.push({ value: 'en', label: 'English' });
+  for (const code of rest) options.push({ value: code, label: manualLanguageLabel(code) });
+  return options;
 }

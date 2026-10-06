@@ -13,6 +13,9 @@ import {
 export const REJECTED_ESTIMATE_ERROR =
   'This estimate was rejected and cannot be sent or reopened.';
 
+export const REJECTED_ESTIMATE_CONVERT_ERROR =
+  'This estimate was rejected and cannot be converted to an invoice.';
+
 export const REJECTED_ESTIMATE_NOTE = 'This estimate was rejected';
 
 export type EstimateStatusRow = {
@@ -89,6 +92,15 @@ export function rejectedEstimateChangeRefusal(est: EstimateStatusRow): {
 } | null {
   if (!isRejectedEstimate(est)) return null;
   return { status: 409, error: REJECTED_ESTIMATE_ERROR };
+}
+
+/** Shop may not turn a rejected estimate into an invoice. */
+export function rejectedEstimateConvertRefusal(est: EstimateStatusRow): {
+  status: 409;
+  error: string;
+} | null {
+  if (!isRejectedEstimate(est)) return null;
+  return { status: 409, error: REJECTED_ESTIMATE_CONVERT_ERROR };
 }
 
 export function estimateCustomerAction(

@@ -515,7 +515,7 @@ export default function PurchaseOrderFormClient() {
   return (
     <div className="min-h-screen flex flex-col">
       <Header />
-      <div className="page max-w-3xl mx-auto w-full px-4 py-6 pb-28">
+      <div className="doc-action-page-compact page max-w-3xl mx-auto w-full px-4 py-6">
         <div className="mb-4">
           <h1 className="text-2xl font-extrabold">Purchase Order</h1>
           <p className="text-sm text-[var(--text3)]">
@@ -778,7 +778,7 @@ export default function PurchaseOrderFormClient() {
           </div>
         </section>
 
-        <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
+        <div className="doc-action-bar flex flex-wrap gap-2 sticky bottom-4 z-10">
           <Link href="/purchase-orders" className="btn btn-secondary min-w-[80px] text-center">
             Cancel
           </Link>

@@ -12,6 +12,37 @@ export function viewerPhysicalPage(requested: number, documentPages: number): nu
 }
 
 /**
+ * Shown when a deep link asks for a page past the loaded PDF.
+ * Do not clamp that request onto page 1.
+ */
+export function viewerPageOutOfRangeNotice(
+  requested: number | null | undefined,
+  documentPages: number
+): string | null {
+  const page = Math.floor(Number(requested));
+  const total = Math.floor(Number(documentPages));
+  if (!Number.isFinite(page) || page < 1) return null;
+  if (!Number.isFinite(total) || total < 1 || page <= total) return null;
+  return `Page ${page} isn't in this PDF`;
+}
+
+/**
+ * Notice for a deep link. `flaggedOutOfRange` is `_meta.citations[].page_out_of_range`
+ * (marker `oor=1`). That flag shows the notice even before the PDF reports a page count,
+ * and even when the loaded file happens to contain that page number.
+ */
+export function viewerCitedPageNotice(
+  requested: number | null | undefined,
+  documentPages: number,
+  flaggedOutOfRange = false
+): string | null {
+  const page = Math.floor(Number(requested));
+  if (!Number.isFinite(page) || page < 1) return null;
+  if (flaggedOutOfRange) return `Page ${page} isn't in this PDF`;
+  return viewerPageOutOfRangeNotice(page, documentPages);
+}
+
+/**
  * Stable placeholder height for one page, including the row's vertical padding.
  * Scroll-to-page must use this before canvases paint, or a short placeholder
  * lands the viewport on an earlier page after layout grows.
