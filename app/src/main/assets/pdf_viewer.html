@@ -130,7 +130,7 @@
 <body>
 
 <div class="header">
-    <button class="back-btn" onclick="goBack()">← Back</button>
+    <button class="back-btn" id="viewerBackBtn" onclick="goBack()">← Back</button>
     <div class="header-title" id="headerTitle">Service Manual</div>
     <span class="inc-badge" id="incompleteBadge" title="This document is incomplete">Incomplete</span>
 </div>
@@ -147,6 +147,7 @@
     <button class="tool-btn" onclick="findPrev()" title="Previous match">Find ◄</button>
     <button class="tool-btn" onclick="findNext()" title="Next match">Find ►</button>
     <span id="findInfo" style="color:#9CA3AF;font-size:11px;white-space:nowrap;"></span>
+    <button class="tool-btn" id="backToAnswerBtn" onclick="goBack()" style="display:none;">Back to answer</button>
     <button class="tool-btn" id="chaptersBtn" onclick="showChapterSelector()" style="display:none; background:rgba(251,191,36,0.25); border-color:#FBBF24;">📚 Chapters</button>
 </div>
 
@@ -209,6 +210,7 @@
     const storagePath = params.get('storage_path') || '';
     const title = params.get('title') || 'Service Manual';
     const deepLinkPage = parseInt(params.get('page') || params.get('p') || '', 10);
+    const openedFromAssistant = params.get('from') === 'assistant';
 
     let pdfDoc = null;
     let currentPage = 1;
@@ -238,7 +240,16 @@
         if (el) el.style.display = on ? 'inline-block' : 'none';
     }
 
+    function showAssistantReturn() {
+        if (!openedFromAssistant) return;
+        var headerBack = document.getElementById('viewerBackBtn');
+        if (headerBack) headerBack.textContent = 'Back to answer';
+        var tool = document.getElementById('backToAnswerBtn');
+        if (tool) tool.style.display = 'inline-block';
+    }
+
     async function init() {
+        showAssistantReturn();
         const { data: { user } } = await supabaseClient.auth.getUser();
         if (!user) {
             showError('Please log in. Service manuals are for service companies.');
@@ -1161,6 +1172,14 @@
     function findPrev() { runFind(-1); }
 
     async function goBack() {
+        if (openedFromAssistant) {
+            if (window.history.length > 1) {
+                window.history.back();
+                return;
+            }
+            window.location.href = 'ai_assistant.html';
+            return;
+        }
         if (typeof Android !== 'undefined' && Android.goBack) {
             Android.goBack();
         } else {
