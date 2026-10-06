@@ -718,6 +718,10 @@ public class MainActivity extends AppCompatActivity {
         showToast("Could not open link");
     }
 
+    private void showToast(String msg) {
+        runOnUiThread(() -> Toast.makeText(MainActivity.this, msg, Toast.LENGTH_SHORT).show());
+    }
+
     private void openHttpsMapsFallback(String geoUrl) {
         String https = mapsSearchUrlFromGeo(geoUrl);
         if (https == null) {
@@ -1223,6 +1227,11 @@ public class MainActivity extends AppCompatActivity {
             answerSpeaking = false;
             signalAssistantVoice(false);
         }
+    }
+
+    /** Access token for purchase verification. Empty when there is no session. */
+    public String getAccessToken() {
+        return storedAccessToken();
     }
 
     private String storedAccessToken() {
