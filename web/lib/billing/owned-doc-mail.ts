@@ -7,6 +7,10 @@
 import type { CompanyTheme } from '../company-theme.ts';
 import type { OrgMoneyPrefs } from '../money-format.ts';
 import { buildEstimateHtml, buildInvoiceHtml, type DocCompany } from './doc-html.ts';
+import {
+  isEstimateDepositEnabled,
+  printableEstimateDeposit,
+} from './estimate-deposit.ts';
 import { resolveInvoiceCollectable } from './invoice-collectable.ts';
 import { parseJsonField, SERVICE_TYPE_LABELS } from './save-helpers.ts';
 import { buildServiceReportPrintHTML } from '../service-report-print.ts';
@@ -265,6 +269,9 @@ export function buildOwnedEstimateMessage(input: {
     .split('\n')
     .map((line) => line.trim())
     .filter(Boolean);
+  const jobTotal = num(input.row.total ?? data.total);
+  const depositOn = isEstimateDepositEnabled(data);
+  const depositAmount = printableEstimateDeposit(data);
   return buildEstimateHtml({
     company: input.company,
     customer: {
@@ -305,9 +312,10 @@ export function buildOwnedEstimateMessage(input: {
     subtotal: num(data.subtotal),
     taxRate: num(pricing.taxRate),
     tax: num(data.tax),
-    total: num(input.row.total ?? data.total),
-    deposit: num(data.deposit),
-    balanceDue: num(data.balanceDue),
+    total: jobTotal,
+    deposit: depositAmount,
+    depositRequired: depositOn,
+    balanceDue: depositOn ? num(data.balanceDue) : jobTotal,
     validDays: 30,
     actionUrl: input.actionUrl || null,
     theme: input.theme,

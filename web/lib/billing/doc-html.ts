@@ -643,6 +643,11 @@ export type EstimateHtmlInput = {
   tax: number;
   total: number;
   deposit?: number;
+  /**
+   * When false, a stored deposit amount is not printed. Omit to keep the
+   * historical "show a positive deposit" behavior for direct callers.
+   */
+  depositRequired?: boolean;
   balanceDue?: number;
   validDays?: number;
   /** Clinic estimate page (https://repairplanet.net/estimates/{id}). */
@@ -657,7 +662,7 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
   const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
   const services = input.services?.length ? input.services : ['Not specified'];
   const rule = documentRuleColor(input.theme, input.themeScope);
-  const deposit = Number(input.deposit) || 0;
+  const deposit = input.depositRequired === false ? 0 : Number(input.deposit) || 0;
   const balance =
     input.balanceDue != null
       ? Number(input.balanceDue)

@@ -291,17 +291,14 @@ export default function InvoiceFormClient() {
       setCustContact(ed.custContact || '');
       setTax(Number(ed.tax) || 0);
       if (data.total != null) setTotalOverride(Number(data.total));
-      const estDeposit = estimatePartsDeposit({
-        ...ed,
-        deposit_required: ed.deposit_required,
-        deposit: ed.deposit ?? ed.travelDeposit ?? ed.parts_deposit,
-      });
-      // Estimate deposit is due now — not already received.
+      const estDeposit = estimatePartsDeposit(ed, Number(data.total) || Number(ed.total) || undefined);
+      // Estimate deposit is due now — not already received. A stored amount
+      // counts only when the estimate deposit flag is on.
       setDeposit(0);
       setDepositDate('');
       setDepositMethod('');
       setDueNowAmount(estDeposit > 0 ? estDeposit : null);
-      setChargeDepositOnly(true);
+      setChargeDepositOnly(estDeposit > 0);
       setDeferredReleased(false);
 
       let lines: any[] = ed.line_items || ed.part_lines || [];
@@ -1138,7 +1135,7 @@ export default function InvoiceFormClient() {
           </div>
 
           <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Payment split</h3>
-          {(sourceEstimateId || dueNowAmount != null) && (
+          {((dueNowAmount != null && dueNowAmount > 0) || collectable.hasDeferredSplit) && (
             <label className="flex items-start gap-2 text-sm mb-3">
               <input
                 type="checkbox"

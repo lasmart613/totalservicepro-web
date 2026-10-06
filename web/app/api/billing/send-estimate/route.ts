@@ -27,9 +27,10 @@ import {
   senderCompanyFromOrg,
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
+import { rejectedEstimateChangeRefusal } from '@/lib/billing/estimate-display';
 
 const EST_SELECTS = [
-  'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action_token, services, issues, created_at',
+  'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action, customer_action_token, services, issues, created_at',
   'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action_token',
   'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status',
 ];
@@ -94,6 +95,10 @@ export async function POST(req: NextRequest) {
     const est = loaded.row;
     if (!documentOwnedByOrganization(est, callerOrgId)) {
       return respond({ error: 'This estimate belongs to another organization.' }, 403);
+    }
+    const rejected = rejectedEstimateChangeRefusal(est);
+    if (rejected) {
+      return respond({ ok: false, emailSent: false, error: rejected.error }, rejected.status);
     }
 
     let crm: { email: string; source: 'crm_org' | 'crm_contact' | 'form' | 'none' } | null = null;
