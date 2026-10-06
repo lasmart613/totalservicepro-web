@@ -1,14 +1,24 @@
 import assert from 'node:assert/strict';
+import { createHmac } from 'node:crypto';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   CUSTOMER_ACTION_APPROVED,
   CUSTOMER_ACTION_CHANGES,
   CUSTOMER_ACTION_REJECTED,
   buildOrgNotifyEmail,
+  customerActionWrite,
+  decideEstimateActionHttp,
+  estimateActionRedirectLocation,
   generateEstimateActionToken,
   isValidEstimateActionToken,
   mergeCustomerActionIntoEstimateData,
+  signEstimateActionConfirm,
 } from './estimate-action-helpers.ts';
+
+const here = dirname(fileURLToPath(import.meta.url));
 
 test('estimate action tokens are unguessable url-safe secrets', () => {
   const token = generateEstimateActionToken();
@@ -62,4 +72,293 @@ test('shop notify subjects cover approve, reject, and modify', () => {
   });
   assert.match(modify.subject, /Modification requested/);
   assert.match(modify.html, /Please use OEM parts/);
+});
+
+test('GET does not change estimate state, even with a valid confirm nonce', () => {
+  const token = generateEstimateActionToken();
+  const now = 1_700_000_000;
+  const confirm = signEstimateActionConfirm(token, 'approve', 'test-secret', now);
+  const decision = decideEstimateActionHttp({
+    method: 'GET',
+    secret: 'test-secret',
+    nowSec: now,
+    body: { token, confirm, action: 'approve' },
+  });
+  assert.equal(decision.effect, 'none');
+  if (decision.effect !== 'none') return;
+  assert.equal(decision.status, 405);
+
+  const route = readFileSync(join(here, '../../app/api/billing/estimate-action/route.ts'), 'utf8');
+  const getFn = route.slice(route.indexOf('export async function GET'), route.indexOf('export async function POST'));
+  assert.match(getFn, /method: 'GET'/);
+  assert.match(getFn, /Allow: 'POST'/);
+  assert.doesNotMatch(getFn, /applyEstimateCustomerAction|service_estimates/);
+
+  const client = readFileSync(join(here, '../../app/e/[token]/EstimateActionClient.tsx'), 'utf8');
+  assert.doesNotMatch(client, /useEffect|autoPosted/);
+  assert.match(client, /Approve estimate/);
+  assert.match(client, /Reject estimate/);
+  assert.match(client, /confirms\.approve/);
+  assert.match(client, /confirms\.reject/);
+  assert.match(client, /confirms\.modify/);
+  assert.match(client, /status === 409/);
+  assert.doesNotMatch(client, /toLocaleDateString/);
+});
+
+test('POST approve and reject require the confirm form and then record the action', () => {
+  const token = generateEstimateActionToken();
+  const now = 1_700_000_000;
+  const secret = 'test-secret';
+  const confirm = signEstimateActionConfirm(token, 'approve', secret, now);
+  const at = '2026-10-06T00:00:00.000Z';
+
+  const missing = decideEstimateActionHttp({
+    method: 'POST',
+    secret,
+    nowSec: now,
+    body: { token, action: 'approve' },
+  });
+  assert.equal(missing.effect, 'none');
+
+  const approved = decideEstimateActionHttp({
+    method: 'POST',
+    secret,
+    nowSec: now,
+    body: { token, action: 'approve', confirm },
+  });
+  assert.equal(approved.effect, 'mutate');
+  if (approved.effect !== 'mutate') return;
+  const approvedWrite = customerActionWrite({ estimate_data: { customer_action_token: token } }, approved.action, approved.note, at);
+  assert.equal(approvedWrite.already, false);
+  assert.equal(approvedWrite.patch?.customer_action, 'approved');
+
+  const rejectConfirm = signEstimateActionConfirm(token, 'reject', secret, now);
+  const rejected = decideEstimateActionHttp({
+    method: 'POST',
+    secret,
+    nowSec: now,
+    body: { token, action: 'reject', confirm: rejectConfirm, note: 'Too high' },
+  });
+  assert.equal(rejected.effect, 'mutate');
+  if (rejected.effect !== 'mutate') return;
+  const rejectedWrite = customerActionWrite(
+    { estimate_data: { customer_action_token: token } },
+    rejected.action,
+    rejected.note,
+    at
+  );
+  assert.equal(rejectedWrite.patch?.customer_action, 'rejected');
+  assert.equal(rejectedWrite.patch?.customer_action_note, 'Too high');
+
+  const route = readFileSync(join(here, '../../app/api/billing/estimate-action/route.ts'), 'utf8');
+  const postFn = route.slice(route.indexOf('export async function POST'));
+  const gate = postFn.indexOf('decideEstimateActionHttp');
+  const apply = postFn.indexOf('applyEstimateCustomerAction');
+  assert.ok(gate >= 0 && apply > gate);
+  assert.doesNotMatch(postFn, /searchParams\.get/);
+  assert.match(postFn, /result\.already && result\.conflict/);
+  assert.match(postFn, /terminalConflict \? 409 : 200/);
+});
+
+test('a confirm nonce cannot be reused for a different action and does not write', () => {
+  const token = generateEstimateActionToken();
+  const now = 1_700_000_000;
+  const secret = 'test-secret';
+  const pairs = [
+    ['approve', 'reject'],
+    ['reject', 'approve'],
+    ['modify', 'approve'],
+  ] as const;
+
+  for (const [signed, posted] of pairs) {
+    const confirm = signEstimateActionConfirm(token, signed, secret, now);
+    const decision = decideEstimateActionHttp({
+      method: 'POST',
+      secret,
+      nowSec: now,
+      body: { token, action: posted, confirm },
+    });
+    assert.equal(decision.effect, 'none', `${signed} confirm posted as ${posted}`);
+    if (decision.effect !== 'none') continue;
+    assert.equal(decision.status, 400);
+  }
+
+  const legacyExp = now + 60;
+  const legacySig = createHmac('sha256', secret)
+    .update(`estimate-confirm.${token}.${legacyExp}`)
+    .digest('base64url');
+  const legacy = decideEstimateActionHttp({
+    method: 'POST',
+    secret,
+    nowSec: now,
+    body: { token, action: 'approve', confirm: `${legacyExp}.${legacySig}` },
+  });
+  assert.equal(legacy.effect, 'none');
+  if (legacy.effect === 'none') assert.equal(legacy.status, 400);
+});
+
+test('each action nonce succeeds, and approve after modify uses the approve nonce', () => {
+  const token = generateEstimateActionToken();
+  const now = 1_700_000_000;
+  const secret = 'test-secret';
+  const at = '2026-10-06T00:00:00.000Z';
+
+  for (const action of ['approve', 'reject', 'modify'] as const) {
+    const confirm = signEstimateActionConfirm(token, action, secret, now);
+    const decision = decideEstimateActionHttp({
+      method: 'POST',
+      secret,
+      nowSec: now,
+      body: { token, action, confirm },
+    });
+    assert.equal(decision.effect, 'mutate', action);
+  }
+
+  const modifyConfirm = signEstimateActionConfirm(token, 'modify', secret, now);
+  const modifyDecision = decideEstimateActionHttp({
+    method: 'POST',
+    secret,
+    nowSec: now,
+    body: { token, action: 'modify', confirm: modifyConfirm, note: 'Please revise labor' },
+  });
+  assert.equal(modifyDecision.effect, 'mutate');
+  if (modifyDecision.effect !== 'mutate') return;
+  const modified = customerActionWrite(
+    { estimate_data: { customer_action_token: token } },
+    modifyDecision.action,
+    modifyDecision.note,
+    at
+  );
+  assert.equal(modified.action, 'changes_requested');
+
+  const approveConfirm = signEstimateActionConfirm(token, 'approve', secret, now);
+  const approveDecision = decideEstimateActionHttp({
+    method: 'POST',
+    secret,
+    nowSec: now,
+    body: { token, action: 'approve', confirm: approveConfirm },
+  });
+  assert.equal(approveDecision.effect, 'mutate');
+  if (approveDecision.effect !== 'mutate') return;
+  const approved = customerActionWrite(
+    {
+      customer_action: modified.action,
+      customer_action_note: modified.patch?.customer_action_note,
+      estimate_data: modified.patch?.estimate_data,
+    },
+    approveDecision.action,
+    approveDecision.note,
+    '2026-10-06T01:00:00.000Z'
+  );
+  assert.equal(approved.already, false);
+  assert.equal(approved.action, 'approved');
+  assert.equal(approved.patch?.customer_action, 'approved');
+});
+
+test('form POST redirect stays on an allowlisted host and never a deploy permalink', () => {
+  const token = generateEstimateActionToken();
+  const encoded = encodeURIComponent(token);
+  const prod = estimateActionRedirectLocation({
+    token,
+    status: 200,
+    action: 'approved',
+    already: false,
+    forwardedHost: 'repairplanet.net',
+    host: '6ac445998ecfb20008b96b11--totalservicepro.netlify.app',
+  });
+  assert.equal(prod, `https://repairplanet.net/e/${encoded}?done=approved`);
+
+  const preview = estimateActionRedirectLocation({
+    token,
+    status: 200,
+    action: 'approved',
+    forwardedHost: 'deploy-preview-207--totalservicepro.netlify.app',
+  });
+  assert.equal(
+    preview,
+    `https://deploy-preview-207--totalservicepro.netlify.app/e/${encoded}?done=approved`
+  );
+
+  const permalink = estimateActionRedirectLocation({
+    token,
+    status: 200,
+    action: 'approved',
+    forwardedHost: '6ac445998ecfb20008b96b11--totalservicepro.netlify.app',
+    host: '6ac445998ecfb20008b96b11--totalservicepro.netlify.app',
+  });
+  assert.equal(permalink, `/e/${encoded}?done=approved`);
+  assert.doesNotMatch(String(permalink), /netlify|https?:/);
+
+  const local = estimateActionRedirectLocation({
+    token,
+    status: 200,
+    action: 'rejected',
+    host: 'localhost:3456',
+  });
+  assert.equal(local, `http://localhost:3456/e/${encoded}?done=rejected`);
+
+  const replay = estimateActionRedirectLocation({
+    token,
+    status: 200,
+    action: 'approved',
+    already: true,
+    forwardedHost: 'www.repairplanet.net',
+  });
+  assert.equal(replay, `https://www.repairplanet.net/e/${encoded}`);
+
+  const route = readFileSync(join(here, '../../app/api/billing/estimate-action/route.ts'), 'utf8');
+  const finish = route.slice(route.indexOf('function finish'));
+  assert.match(finish, /estimateActionRedirectLocation/);
+  assert.doesNotMatch(finish, /req\.url|DEPLOY_URL|DEPLOY_PRIME_URL|process\.env\.URL|new URL\(/);
+});
+
+test('approve and reject still work after a modification request; approved stays final', () => {
+  const at = '2026-10-06T00:00:00.000Z';
+  const modified = customerActionWrite(
+    { estimate_data: { customer_action_token: 'abcdefghijklmnopqrstuvwxyz' } },
+    CUSTOMER_ACTION_CHANGES,
+    'Please revise labor',
+    at
+  );
+  assert.equal(modified.action, 'changes_requested');
+  assert.equal(modified.patch?.customer_action_note, 'Please revise labor');
+
+  const approved = customerActionWrite(
+    {
+      customer_action: modified.action,
+      customer_action_note: modified.patch?.customer_action_note,
+      estimate_data: modified.patch?.estimate_data,
+    },
+    CUSTOMER_ACTION_APPROVED,
+    null,
+    '2026-10-06T01:00:00.000Z'
+  );
+  assert.equal(approved.already, false);
+  assert.equal(approved.conflict, false);
+  assert.equal(approved.action, 'approved');
+  assert.equal(approved.patch?.customer_action, 'approved');
+  assert.equal(approved.patch?.customer_action_note, 'Please revise labor');
+
+  const rejectedAfterModify = customerActionWrite(
+    {
+      customer_action: 'changes_requested',
+      estimate_data: modified.patch?.estimate_data,
+    },
+    CUSTOMER_ACTION_REJECTED,
+    'No thanks',
+    '2026-10-06T02:00:00.000Z'
+  );
+  assert.equal(rejectedAfterModify.already, false);
+  assert.equal(rejectedAfterModify.patch?.customer_action, 'rejected');
+
+  const terminal = customerActionWrite(
+    { customer_action: 'approved', estimate_data: approved.patch?.estimate_data },
+    CUSTOMER_ACTION_REJECTED,
+    null,
+    '2026-10-06T03:00:00.000Z'
+  );
+  assert.equal(terminal.already, true);
+  assert.equal(terminal.conflict, true);
+  assert.equal(terminal.patch, null);
+  assert.equal(terminal.action, 'approved');
 });
