@@ -6,6 +6,7 @@ import {
   decideClaim,
   inviteMustNotLeaveHome,
 } from '@/lib/org-membership';
+import { authorizeInviteAccept } from '@/lib/tenant-lockdown';
 import {
   deleteMembership,
   listMembershipsForUser,
@@ -135,6 +136,16 @@ export async function POST(req: NextRequest) {
         claimed: false,
         pendingInvite: false,
       });
+    }
+
+    const accept = authorizeInviteAccept({
+      callerEmail: email,
+      inviteEmail: inv.email,
+      inviteOrgId: inv.organization_id,
+      inviteRole: inv.role,
+    });
+    if (!accept.ok) {
+      return NextResponse.json({ ok: false, error: accept.error }, { status: accept.status });
     }
 
     const leaveGuard = inviteMustNotLeaveHome({

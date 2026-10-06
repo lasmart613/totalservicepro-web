@@ -53,7 +53,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
+    if (!hasServiceRole()) {
+      return NextResponse.json(
+        { ok: false, claimed: false, error: 'Server cannot link this clinic profile (missing service role).' },
+        { status: 503 }
+      );
+    }
+
+    const writer = getSupabaseAdmin();
 
     const { data: org } = await writer
       .from('organizations')

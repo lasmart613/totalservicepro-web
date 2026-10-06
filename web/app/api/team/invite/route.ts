@@ -4,6 +4,7 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { ensureTeamMemberProfile, findAuthUserByEmail } from '@/lib/team-profile';
 import { applyInviteToExistingUser } from '@/lib/org-membership-server';
 import { DEFAULT_STAFF_ROLE } from '@/lib/org-membership';
+import { decideMemberRoleChange } from '@/lib/tenant-lockdown';
 import {
   buildTeamInviteHtml,
   buildTeamInviteText,
@@ -106,7 +107,17 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: emailError }, { status: 400 });
     }
 
-    const inviteRole = (body.role || DEFAULT_STAFF_ROLE).toLowerCase();
+    const requestedRole = (body.role || DEFAULT_STAFF_ROLE).toLowerCase();
+    const roleGate = decideMemberRoleChange({
+      callerRole: role,
+      targetRole: requestedRole,
+      sameOrganization: true,
+      allowServiceManager: true,
+    });
+    if (!roleGate.ok) {
+      return NextResponse.json({ error: roleGate.error }, { status: roleGate.status });
+    }
+    const inviteRole = roleGate.role;
     const firstName = (body.firstName || '').trim() || null;
     const lastName = (body.lastName || '').trim() || null;
     const jobTitle = (body.jobTitle || '').trim() || null;

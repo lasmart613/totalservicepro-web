@@ -45,7 +45,6 @@ const FACILITY_TYPES = [
 
 const TEAM_ROLES = ['company_admin', 'service_manager', 'fse', 'dispatcher', 'billing_manager', 'admin'];
 const ADDITIONAL_ROLES = ['fse', 'dispatcher', 'service_manager', 'billing_manager'];
-const ADMIN_ROLES = ['admin', 'company_admin'];
 
 const MODEL_WAVELENGTHS: { [key: string]: string[] } = {
   'candela_vbeam2': ['595'],
@@ -54,45 +53,18 @@ const MODEL_WAVELENGTHS: { [key: string]: string[] } = {
   'default': ['532', '595', '755', '1064', '10600']
 };
 
-/** Only force admin for service-company creators — never overwrite owner/supplier roles. */
-async function ensureServiceCreatorLinked(supabase: any, orgId: any, orgType?: string | null) {
+/** Link a founder to a shop they created. Role is assigned on the server. */
+async function ensureServiceCreatorLinked(supabase: any, orgId: any, _orgType?: string | null) {
   if (!orgId) return;
   try {
+    const { data: sessionData } = await supabase.auth.getSession();
+    const token = sessionData.session?.access_token;
+    if (!token) return;
+    const { postFounderOrganization } = await import('@/lib/org-founder-client');
+    const linked = await postFounderOrganization(token, { organizationId: orgId });
+    if (!linked.ok) console.warn('ensureServiceCreatorLinked', linked.error);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: prof } = await supabase
-      .from('user_profiles')
-      .select('organization_id, role')
-      .eq('id', user.id)
-      .maybeSingle();
-
-    // Never elevate owner / customer / supplier to company_admin
-    if (isOwnerish(prof?.role, orgType) || isSupplier(prof?.role, orgType)) {
-      const needsLink = !prof?.organization_id || prof.organization_id !== orgId;
-      if (needsLink) {
-        await supabase.from('user_profiles').update({ organization_id: orgId }).eq('id', user.id);
-      }
-      await claimPendingInvitations?.(supabase, user.id, user.email || '');
-      return;
-    }
-
-    if (!isServiceCompany(prof?.role, orgType) && orgType && orgType !== 'service_company') {
-      await claimPendingInvitations?.(supabase, user.id, user.email || '');
-      return;
-    }
-
-    const needsLink = !prof?.organization_id || prof.organization_id !== orgId;
-    const needsAdminRole = !prof?.role || !ADMIN_ROLES.includes(prof.role);
-    // Only auto-admin if they already look like service staff without a role
-    if (needsLink || (needsAdminRole && !prof?.role)) {
-      await supabase.from('user_profiles').update({
-        organization_id: orgId,
-        ...(needsAdminRole && !prof?.role ? { role: 'company_admin' } : { organization_id: orgId }),
-      }).eq('id', user.id);
-    } else if (needsLink) {
-      await supabase.from('user_profiles').update({ organization_id: orgId }).eq('id', user.id);
-    }
-    await claimPendingInvitations?.(supabase, user.id, user.email || '');
+    if (user?.email) await claimPendingInvitations?.(supabase, user.id, user.email || '');
   } catch (e) {
     console.warn('ensureServiceCreatorLinked non-fatal:', e);
   }
@@ -113,6 +85,7 @@ function CompanyProfile() {
   const searchParams = useSearchParams();
   const justSetup = searchParams.get('justSetup');
   const [userRole, setUserRole] = useState('');
+  const [selfUserId, setSelfUserId] = useState('');
   const [loadingOrg, setLoadingOrg] = useState(true);
   const [showTeamPrompt, setShowTeamPrompt] = useState(false);
   const [accessDenied, setAccessDenied] = useState(false);
@@ -246,6 +219,7 @@ function CompanyProfile() {
       setLoadingOrg(true);
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) { setLoadingOrg(false); return; }
+      setSelfUserId(user.id);
 
       const { data: prof } = await supabase
         .from('user_profiles')
@@ -380,6 +354,31 @@ function CompanyProfile() {
     } catch {
       /* ignore */
     }
+  }
+
+  async function changeMemberRole(memberId: string, role: string) {
+    const orgId = org?.id;
+    if (!orgId || !memberId) return;
+    const { data: { session } } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) {
+      toast.error('Sign in required.');
+      return;
+    }
+    const { postMemberRole } = await import('@/lib/org-founder-client');
+    const result = await postMemberRole(token, {
+      userId: memberId,
+      organizationId: orgId,
+      role,
+    });
+    if (!result.ok) {
+      toast.error(result.error || 'Could not change that role.');
+      return;
+    }
+    setMembers((prev) =>
+      prev.map((row) => (row.id === memberId ? { ...row, role: result.role || role } : row))
+    );
+    toast.success('Role updated');
   }
 
   async function resendInviteEmail(email: string, role?: string) {
@@ -1089,9 +1088,22 @@ function CompanyProfile() {
                         <div>
                           <div className="font-medium">
                             {[m.first_name, m.last_name].filter(Boolean).join(' ') || '—'}
-                            <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-[var(--surface3)] capitalize">
-                              {roleLabel(m.role)}
-                            </span>
+                            {(isAdmin(userRole) || userRole === 'owner') && m.id && m.id !== selfUserId ? (
+                              <select
+                                className="select text-xs ml-2"
+                                aria-label={`Role for ${m.email || m.first_name || 'member'}`}
+                                value={m.role || 'fse'}
+                                onChange={(e) => changeMemberRole(String(m.id), e.target.value)}
+                              >
+                                {(m.role && !TEAM_ROLES.includes(m.role) ? [m.role, ...TEAM_ROLES] : TEAM_ROLES).map((r) => (
+                                  <option key={r} value={r}>{roleLabel(r)}</option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-[var(--surface3)] capitalize">
+                                {roleLabel(m.role)}
+                              </span>
+                            )}
                           </div>
                           <div className="text-xs text-[var(--text3)]">{m.email || 'no email'}</div>
                           {m.job_title && (
