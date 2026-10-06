@@ -77,6 +77,29 @@ function esc(s: any) {
     .replace(/"/g, '&quot;');
 }
 
+/** Strip explicit bidi marks so an LTR isolate keeps CLDR order (630.00 US$, not a visual $US). */
+const BIDI_CONTROLS = /[\u200e\u200f\u202a-\u202e\u2066-\u2069]/g;
+
+function isolateUserText(value: string): string {
+  return `<bdi dir="auto">${esc(value)}</bdi>`;
+}
+
+function isolateLtr(value: string): string {
+  return `<bdi dir="ltr">${esc(String(value).replace(BIDI_CONTROLS, ''))}</bdi>`;
+}
+
+function partLineHtml(line: string): string {
+  const times = /^(.*?)\s×\s*(\d+(?:\.\d+)?)\s@\s(.+?)\s=\s(.+)$/.exec(line.trim());
+  if (times) {
+    return `${isolateUserText(times[1].trim())} ×${times[2]} @ ${isolateLtr(times[3].trim())} = ${isolateLtr(times[4].trim())}`;
+  }
+  const colon = /^(.*?):\s*(\S.*)$/.exec(line.trim());
+  if (colon && /[0-9$€£]/.test(colon[2])) {
+    return `${isolateUserText(colon[1].trim())}: ${isolateLtr(colon[2].trim())}`;
+  }
+  return isolateUserText(line);
+}
+
 function money(
   n: number | undefined | null,
   prefs?: OrgMoneyPrefs | null,
@@ -675,6 +698,14 @@ export type EstimateHtmlInput = {
   perDiemRate?: number;
   perDiemDays?: number;
   partsLines?: string[];
+  /** Structured parts so the part number, name, and each amount can be isolated separately. */
+  partRows?: {
+    partNumber?: string | null;
+    description?: string | null;
+    qty?: number | null;
+    unitPrice?: number | null;
+    ext?: number | null;
+  }[];
   partsTotal?: number;
   subtotal: number;
   taxRate?: number;
@@ -697,7 +728,8 @@ export type EstimateHtmlInput = {
 };
 
 export function buildEstimateHtml(input: EstimateHtmlInput): string {
-  const money = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
+  const money = (n: number | undefined | null) =>
+    isolateLtr(formatOrgMoney(n, input.moneyPrefs, input.locale));
   const tr = (text: string) => docT(input.locale, text);
   const services = (input.services?.length ? input.services : ['Not specified']).map((item) => tr(item));
   const rule = documentRuleColor(input.theme, input.themeScope);
@@ -750,9 +782,24 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
     cost += `<div style="padding-left:8px;">${tr('Other')}: ${money(input.reimbOther)}</div>`;
   if (input.partsTotal) {
     cost += `<div style="margin-top:6px;">${tr('Parts')}:<br>`;
-    (input.partsLines || []).forEach((ln) => {
-      cost += `<div><bdi dir="auto">${esc(ln)}</bdi></div>`;
-    });
+    const rows = (input.partRows || []).filter(
+      (row) => row.partNumber || row.description || row.unitPrice || row.ext,
+    );
+    if (rows.length) {
+      rows.forEach((row) => {
+        const qty = Number(row.qty) > 0 ? Number(row.qty) : 1;
+        const label = [
+          row.partNumber && String(row.partNumber).trim() ? isolateUserText(String(row.partNumber).trim()) : '',
+          row.description && String(row.description).trim() ? isolateUserText(String(row.description).trim()) : '',
+        ].filter(Boolean);
+        const ext = row.ext != null ? Number(row.ext) : qty * (Number(row.unitPrice) || 0);
+        cost += `<div>${label.join(' ') || isolateUserText('Part')} ×${qty} @ ${money(row.unitPrice)} = ${money(ext)}</div>`;
+      });
+    } else {
+      (input.partsLines || []).forEach((ln) => {
+        cost += `<div>${partLineHtml(ln)}</div>`;
+      });
+    }
     cost += `<strong>${tr('Parts Subtotal')}: ${money(input.partsTotal)}</strong></div>`;
   }
   cost +=

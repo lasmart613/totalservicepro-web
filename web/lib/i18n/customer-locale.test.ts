@@ -90,6 +90,18 @@ test('confirm page translates from the customer locale and keeps confirm fields'
   assert.match(client, /dir=\{meta\.dir\}/);
   assert.match(client, /Approve estimate/);
   assert.match(client, /Reject estimate/);
+  for (const key of [
+    'Use the button on this page. Opening the email link does not approve or reject the estimate.',
+    'This estimate has expired and can no longer be updated online.',
+    'Something went wrong. Please try the button again.',
+    'Something went wrong. Please contact the company.',
+    'Network error. Please try again or call the company.',
+  ]) {
+    assert.match(client, new RegExp(`t\\('${key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}'\\)`));
+    assert.notEqual(appStrings('de')[key], key, key);
+    assert.notEqual(appStrings('ar')[key], key, key);
+    assert.match(appStrings('ar')[key], /[\u0600-\u06FF]/, key);
+  }
   assert.match(client, /confirms\.approve/);
   assert.doesNotMatch(client, /useT\(|useFormatDate\(|useEffect|toLocaleDateString/);
 });
