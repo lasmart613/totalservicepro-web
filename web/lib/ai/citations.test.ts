@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'url';
 import {
   attachProsePages,
+  citationChipLabel,
   citationLabel,
   citationViewerHref,
   citationsForAssistantReply,
@@ -220,7 +221,7 @@ test('meta citations and section extraction', () => {
     16
   );
   assert.equal(fromMeta[0].page, 12);
-  assert.equal(citationLabel(fromMeta[0]), 'Xeo SM, p.12, §3.1');
+  assert.equal(citationLabel(fromMeta[0]), 'Xeo SM, p. 12, §3.1');
   assert.equal(mergeCitations(fromMeta, fromMeta).length, 1);
 
   const linked = citationsForAssistantReply(
@@ -309,7 +310,7 @@ test('out-of-range and cross-manual cites stay on their own row', () => {
   assert.match(html, /href="\/manuals\/view\?id=5[^"]*page=121/);
   assert.match(html, /data-cite-manual="5"/);
   assert.doesNotMatch(html, /From: GentleMAX Pro/);
-  assert.match(html, /GentleMAX Pro Service Manual, p\.12/);
+  assert.match(html, /GentleMAX Pro Service Manual, p\. 12/);
   const oorHtml = formatAssistantHtml('[[cite:id=110&p=88&oor=1&t=GentleMAX+Pro+Service+Manual]]', [
     cites[2],
   ]);
@@ -413,4 +414,59 @@ test('AI assistant and viewer use structured cites, not public PDF URLs', () => 
   assert.match(viewer, /initialPage|viewer-rail/);
   assert.match(rail, /Ask about this manual|byManual|messagesForManual/);
   assert.match(grok, /citations/);
+});
+
+test('citation label spaces the page like the From chip', () => {
+  assert.equal(citationLabel({ manualId: 9, title: 'Rev A', page: 166 }), 'Rev A, p. 166');
+  assert.equal(
+    citationLabel({ manualId: 9, title: 'Rev A', page: 166, section: '4.2' }),
+    'Rev A, p. 166, §4.2'
+  );
+  assert.equal(
+    citationChipLabel({
+      manualId: 5,
+      title: 'Candela GentleMAX PRO PLUS Service Manual',
+      page: 121,
+      crossManual: true,
+    }),
+    'From: Candela GentleMAX PRO PLUS Service Manual, p. 121'
+  );
+  assert.doesNotMatch(citationLabel({ manualId: 9, title: 'Rev A', page: 166 }), /Rev A,p\.|p\.166/);
+});
+
+test('citation list dedupes the same manual page and keeps first-seen order', () => {
+  const rows = [
+    { manualId: 110, title: 'Rev A', page: 166, section: '1.1' },
+    { manualId: 5, title: 'PRO PLUS', page: 121 },
+    { manualId: 110, title: 'Rev A', page: 166, section: '9.9' },
+    { manualId: 110, title: 'Rev A', page: 88 },
+    { manualId: 5, title: 'PRO PLUS', page: 121, section: '2' },
+    { manualId: 110, title: 'Rev A', section: '3.1' },
+    { manualId: 110, title: 'Rev A', section: '4.2' },
+  ];
+  const merged = mergeCitations(rows);
+  assert.deepEqual(
+    merged.map((c) => ({ id: c.manualId, page: c.page, section: c.section })),
+    [
+      { id: 110, page: 166, section: '1.1' },
+      { id: 5, page: 121, section: undefined },
+      { id: 110, page: 88, section: undefined },
+      { id: 110, page: undefined, section: '3.1' },
+      { id: 110, page: undefined, section: '4.2' },
+    ]
+  );
+
+  const html = formatAssistantHtml('', rows);
+  assert.equal((html.match(/class="ai-cite-link"/g) || []).length, 5);
+  assert.equal((html.match(/Rev A, p\. 166/g) || []).length, 1);
+  assert.match(html, /Rev A, p\. 166, §1\.1/);
+  assert.doesNotMatch(html, /§9\.9/);
+  const chipOrder = [...html.matchAll(/>([^<]+)<\/a>/g)].map((match) => match[1]);
+  assert.deepEqual(chipOrder, [
+    'Rev A, p. 166, §1.1',
+    'PRO PLUS, p. 121',
+    'Rev A, p. 88',
+    'Rev A, §3.1',
+    'Rev A, §4.2',
+  ]);
 });

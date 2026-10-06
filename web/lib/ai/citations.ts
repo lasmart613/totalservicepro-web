@@ -155,6 +155,16 @@ export function parseCitationMarkerQuery(raw: string): ManualCitation | null {
   }
 }
 
+/** One list row per manual page. Pageless cites still keep distinct sections. */
+export function citationListKey(
+  manualId: number,
+  page: number | undefined,
+  section: string | undefined
+): string {
+  if (page) return `${manualId}|${page}`;
+  return `${manualId}||${section || ''}`;
+}
+
 export function parseCitationMarkers(content: string): ManualCitation[] {
   const out: ManualCitation[] = [];
   const seen = new Set<string>();
@@ -163,8 +173,16 @@ export function parseCitationMarkers(content: string): ManualCitation[] {
   while ((m = re.exec(String(content || '')))) {
     const cite = parseCitationMarkerQuery(m[1] || '');
     if (!cite) continue;
-    const key = `${cite.manualId}|${cite.page || ''}|${cite.section || ''}`;
-    if (seen.has(key)) continue;
+    const key = citationListKey(cite.manualId, cite.page, cite.section);
+    if (seen.has(key)) {
+      if (cite.pageOutOfRange) {
+        const prev = out.find(
+          (item) => citationListKey(item.manualId, item.page, item.section) === key
+        );
+        if (prev) prev.pageOutOfRange = true;
+      }
+      continue;
+    }
     seen.add(key);
     out.push(cite);
   }
@@ -191,9 +209,9 @@ export function mergeCitations(...lists: Array<ManualCitation[] | undefined | nu
       const title = cleanSection(c.title);
       const pageOutOfRange = c.pageOutOfRange === true;
       const crossManual = c.crossManual === true;
-      const key = `${id}|${page || ''}|${section || ''}`;
+      const key = citationListKey(id, page, section);
       if (seen.has(key)) {
-        const prev = out.find((item) => `${item.manualId}|${item.page || ''}|${item.section || ''}` === key);
+        const prev = out.find((item) => citationListKey(item.manualId, item.page, item.section) === key);
         if (prev) {
           if (pageOutOfRange) prev.pageOutOfRange = true;
           if (crossManual) prev.crossManual = true;
@@ -220,7 +238,7 @@ export function mergeCitations(...lists: Array<ManualCitation[] | undefined | nu
 export function citationLabel(c: ManualCitation): string {
   const title = (c.title || 'Service manual').trim();
   const bits: string[] = [];
-  if (c.page) bits.push(`p.${c.page}`);
+  if (c.page) bits.push(`p. ${c.page}`);
   if (c.section) bits.push(`§${c.section}`);
   return bits.length ? `${title}, ${bits.join(', ')}` : title;
 }

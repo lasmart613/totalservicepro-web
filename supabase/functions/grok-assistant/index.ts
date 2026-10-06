@@ -475,7 +475,7 @@ export function citationsFromParts(
     // Physical page only (stamp / xAI page_number). Never regex a printed "7-8" label out of passage text.
     const page = p.page && p.page > 0 ? p.page : undefined
     const section = p.section || extractSectionRef(p.text)
-    const key = `${page || ''}|${section || ''}|${p.source}`
+    const key = page ? `p:${page}` : `s:${section || ''}|${p.source}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push({
@@ -493,7 +493,7 @@ export function formatCitationLine(citations: ManualCitation[], fallback = ''): 
   if (!citations.length) return fallback ? `\n\n— Source: ${fallback}` : ''
   const labels = [...new Set(citations.map((c) => {
     let s = c.title || 'Selected manual'
-    if (c.page) s += `, p.${c.page}`
+    if (c.page) s += `, p. ${c.page}`
     if (c.section) s += `, §${c.section}`
     return s
   }))]
@@ -512,7 +512,7 @@ export function attachProsePages(citations: ManualCitation[], _text: string): Ma
   const seen = new Set<string>()
   const out: ManualCitation[] = []
   for (const c of citations) {
-    const key = `${c.manualId}|${c.page || ''}|${c.section || ''}`
+    const key = c.page ? `${c.manualId}|${c.page}` : `${c.manualId}||${c.section || ''}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push(c)
@@ -680,10 +680,10 @@ async function withBudget<T>(work: Promise<T>, ms: number, fallback: T): Promise
 }
 
 const LIMITS: Record<string, { text: number; voice: number }> = {
-  free: { text: 5, voice: 1 },
-  premium: { text: 50, voice: 10 },
-  team: { text: 50, voice: 10 },
-  enterprise: { text: 50, voice: 10 },
+  free: { text: 5, voice: 5 },
+  premium: { text: 50, voice: 50 },
+  team: { text: 50, voice: 50 },
+  enterprise: { text: 50, voice: 50 },
 }
 
 const FSE_SYSTEM_PROMPT = `You are Zapp, an AI assistant for Total Service Pro (TSP), helping licensed Laser Service Engineers with laser and aesthetic medical equipment.

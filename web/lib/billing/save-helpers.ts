@@ -270,6 +270,31 @@ export function validUntilLabel(createdAt?: string | null): string {
   return d.toLocaleDateString();
 }
 
+/** Fixed UTC calendar day so server and browser render the same validity line. */
+export function formatUtcCalendarDay(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'UTC',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(d);
+}
+
+export function estimateValidityText(opts: {
+  expired: boolean;
+  validDays: number;
+  validUntil: string | null;
+}): string {
+  const through = formatUtcCalendarDay(opts.validUntil);
+  if (opts.expired) return through ? `Expired on ${through}` : 'Expired';
+  return through
+    ? `Good for ${opts.validDays} days (through ${through})`
+    : `Good for ${opts.validDays} days`;
+}
+
 export type CustomerActionKind = 'approved' | 'rejected' | 'changes_requested';
 export type EstimateEmailAction = 'approve' | 'reject' | 'modify';
 
@@ -367,6 +392,31 @@ export function customerActionConfirmationTitle(
   if (action === 'rejected') return 'Estimate rejected';
   if (action === 'changes_requested') return 'Modification requested';
   return '';
+}
+
+export type EstimateConfirmMode =
+  | { kind: 'final'; action: 'approved' | 'rejected' }
+  | { kind: 'expired' }
+  | { kind: 'choose'; priorModification: boolean }
+  | { kind: 'confirm'; action: EstimateEmailAction; priorModification: boolean };
+
+/**
+ * What the public /e/<token> page may show.
+ * Approved and rejected are final. A modification request is not:
+ * the customer can still approve or reject. Nothing here writes state.
+ */
+export function estimateConfirmMode(opts: {
+  expired?: boolean;
+  customerAction: CustomerActionKind | null | undefined;
+  requested: EstimateEmailAction | null;
+}): EstimateConfirmMode {
+  if (opts.customerAction === 'approved' || opts.customerAction === 'rejected') {
+    return { kind: 'final', action: opts.customerAction };
+  }
+  if (opts.expired) return { kind: 'expired' };
+  const priorModification = opts.customerAction === 'changes_requested';
+  if (!opts.requested) return { kind: 'choose', priorModification };
+  return { kind: 'confirm', action: opts.requested, priorModification };
 }
 
 /** Sent estimates the clinic can still Approve / Reject / Modify. */
