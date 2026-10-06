@@ -12,6 +12,7 @@ import { isPartListing, partsDetailPath } from '@/lib/marketplace/parts';
 import { useGuestSignupRedirect } from '@/lib/use-signed-in';
 import { marketplaceAuthHeaders } from '@/lib/marketplace/client-auth';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
+import { StorageImage } from '@/components/StorageImage';
 
 export default function ListingDetail() {
   const params = useParams();
@@ -143,14 +144,15 @@ export default function ListingDetail() {
           {/* Featured Photo */}
           {mainPhoto && (
             <div className="mb-6">
-              <img src={mainPhoto} alt={listing.title} className="w-full max-h-[400px] object-contain rounded-lg border" />
+              <StorageImage src={mainPhoto} alt={listing.title || ''} className="w-full max-h-[400px] object-contain rounded-lg border" width={960} loading="eager" />
               {images.length > 1 && (
                 <div className="flex gap-2 mt-3 justify-center">
                   {images.map((url: string, idx: number) => (
-                    <img
+                    <StorageImage
                       key={idx}
                       src={url}
                       alt=""
+                      width={160}
                       onClick={() => setSelectedPhoto(idx)}
                       className={`w-16 h-16 object-cover rounded cursor-pointer border ${selectedPhoto === idx ? 'border-[var(--gold)]' : 'border-transparent'}`}
                     />

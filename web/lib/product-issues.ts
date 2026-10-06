@@ -72,6 +72,9 @@ export function shouldSendReporterConfirmation(opts: {
   return normalizeEmail(opts.email) != null;
 }
 
+/** Shown when the report could not be stored or delivered. Do not retry in a loop. */
+export const PRODUCT_ISSUE_LATER_MESSAGE = "Couldn't send, try again later.";
+
 export function productIssuesFromAddress(): string {
   return (
     process.env.NOTIFY_FROM_EMAIL ||

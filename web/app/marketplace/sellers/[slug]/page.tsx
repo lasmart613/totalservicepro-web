@@ -12,6 +12,7 @@ import { formatListingPrice, partsDetailPath } from '@/lib/marketplace/parts';
 import { GUEST_SIGNUP_HREF } from '@/lib/marketplace/guest';
 import { useSignedIn } from '@/lib/use-signed-in';
 import { AddListingToInvoiceButton } from '@/components/marketplace/AddListingToInvoice';
+import { StorageImage } from '@/components/StorageImage';
 
 type Seller = {
   name: string;
@@ -176,7 +177,7 @@ export default function SellerStorefrontPage() {
                 <div key={l.id} className="card p-6 text-left">
                   {img && (
                     <Link href={href}>
-                      <img src={img} alt={l.title || 'Part'} className="w-full h-40 object-cover rounded mb-3" />
+                      <StorageImage src={img} alt={l.title || 'Part'} className="w-full h-40 object-cover rounded mb-3" width={480} />
                     </Link>
                   )}
                   <Link href={href}>
