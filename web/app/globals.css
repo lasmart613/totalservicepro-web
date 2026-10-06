@@ -85,6 +85,47 @@ html.landing-mode main {
   min-width: 0;
 }
 
+/* Sticky header is about 4.5–7rem. Anchors and focused fields should clear it. */
+html {
+  scroll-padding-top: 7.5rem;
+}
+
+#team-section {
+  scroll-margin-top: 7.5rem;
+}
+
+/* Invite form stacks above the sticky header so its fields stay clickable. */
+.team-invite-panel {
+  position: relative;
+  z-index: 60;
+  scroll-margin-top: 7.5rem;
+  border: 1px solid var(--gold-border);
+  background: var(--surface3);
+  border-radius: 12px;
+  padding: 1rem 1rem 0.85rem;
+}
+
+.team-invite-panel :is(input, select, textarea, button, label) {
+  scroll-margin-top: 7.5rem;
+}
+
+/* Mobile doc action bars (fixed or sticky) cover the last inputs at 390px.
+   Padding matches a wrapped button row plus the estimate caption. */
+.doc-action-page {
+  padding-bottom: 16rem;
+}
+.doc-action-page-compact {
+  padding-bottom: 13rem;
+}
+@media (min-width: 640px) {
+  .doc-action-page {
+    padding-bottom: 9rem;
+  }
+  .doc-action-page-compact {
+    padding-bottom: 7.5rem;
+  }
+}
+
 .section {
   background: var(--surface2);
   border: 1px solid var(--border);
@@ -146,6 +187,80 @@ html.landing-mode main {
   margin-top: 0.55rem;
   font-size: 12px;
   line-height: 1.45;
+}
+.ai-cite-panel {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  background: #0d1117;
+  color: #e5e7eb;
+  overflow: hidden;
+}
+.ai-assistant-split {
+  flex: 1 0 32rem;
+  width: auto;
+  min-width: 32rem;
+  max-width: 40rem;
+}
+.ai-chat-thread:focus {
+  outline: 2px solid var(--gold, #fbbf24);
+  outline-offset: 2px;
+}
+.ai-cite-panel.is-docked {
+  flex: 1 1 0%;
+  min-width: 18rem;
+}
+.ai-cite-panel.is-fullscreen {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+}
+.ai-cite-panel:focus {
+  outline: none;
+}
+.ai-cite-panel-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.55rem 0.75rem;
+  background: #1f2937;
+  border-bottom: 1px solid #374151;
+  flex-shrink: 0;
+}
+.ai-cite-panel-back {
+  border: 0;
+  border-radius: 0.5rem;
+  background: var(--gold, #fbbf24);
+  color: #111827;
+  font-size: 0.875rem;
+  font-weight: 800;
+  padding: 0.4rem 0.75rem;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+.ai-cite-panel-back:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.ai-cite-panel-title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  min-width: 0;
+  flex: 1;
+  font-weight: 650;
+  color: var(--gold, #fbbf24);
+}
+.ai-cite-panel-page {
+  color: #9ca3af;
+  font-weight: 600;
+  font-size: 0.8rem;
+  flex-shrink: 0;
+}
+.ai-cite-panel-viewer {
+  flex: 1;
+  min-height: 0;
 }
 .viewer-layout {
   display: grid;
@@ -829,6 +944,77 @@ html.landing-mode main {
 .book:hover {
   transform: translateY(-6px);
   z-index: 3;
+}
+
+/* Language code on a spine. Desktop is a small corner mark that may sit slightly outside. */
+.manual-language-badge {
+  position: absolute;
+  right: -4px;
+  bottom: -4px;
+  z-index: 10;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.25rem;
+  min-height: 1.1rem;
+  padding: 1px 4px;
+  border-radius: 999px;
+  background: #0c4a6e;
+  color: #fff;
+  font-size: 8px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: 0.02em;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
+}
+
+.manual-language-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  border-radius: 999px;
+  background: #0c4a6e;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+  line-height: 1;
+  padding: 2px 8px;
+}
+
+@media (max-width: 767px) {
+  /* Keep the code inside the spine's bottom padding so it cannot cover the title
+     or reach the next book. It is not a control. */
+  .book:has(.manual-language-badge) .book-spine {
+    padding-bottom: 28px;
+  }
+  .book:has(.manual-language-badge) .book-title,
+  .book:has(.manual-language-badge) .book-spine > .relative {
+    max-height: calc(100% - 4px);
+  }
+  .manual-language-badge {
+    right: 2px;
+    bottom: 2px;
+    left: auto;
+    top: auto;
+    z-index: 2;
+    min-width: 0;
+    width: auto;
+    max-width: calc(100% - 4px);
+    height: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    padding: 0 4px;
+    font-size: 11px;
+    line-height: 22px;
+    pointer-events: none;
+  }
+
+  .manual-language-chip {
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: 16px;
+  }
 }
 
 .book-spine {

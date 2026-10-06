@@ -1006,10 +1006,26 @@ function CompanyProfile() {
             <div id="team-section" className="card p-6">
               <h2 className="font-bold mb-4">{t('Team Members & Roles')}</h2>
               <p className="text-xs text-[var(--text3)] mb-3">Add or assign people to roles in this RSP org. Creator/admin changeable but always keep &gt;=1 admin. Use invites for new signups (they sign up first using org tiles or login, then get claimed/assigned here).</p>
-              <div className="mb-4">
-                <h3 className="font-semibold mb-2">{t('Add / Assign Team Member (general roles)')}</h3>
+              <div id="team-invite" className="team-invite-panel mb-4">
+                <h3 className="font-semibold mb-1">{t('Invite a teammate')}</h3>
+                <p className="text-xs text-[var(--text3)] mb-3">
+                  {t('This invite form is separate from Company Details. It does not change the organization email.')}
+                </p>
                 <div className="space-y-2 text-sm">
-                  <input className="input" placeholder={t('Email')} value={newTeam.email} onChange={e => setNewTeam({...newTeam, email: e.target.value})} />
+                  <div>
+                    <label className="label" htmlFor="team-invite-email">{t('Invitee email')}</label>
+                    <input
+                      id="team-invite-email"
+                      name="invitee-email"
+                      className="input"
+                      type="email"
+                      inputMode="email"
+                      autoComplete="off"
+                      spellCheck={false}
+                      value={newTeam.email}
+                      onChange={e => setNewTeam({...newTeam, email: e.target.value})}
+                    />
+                  </div>
                   <input className="input" placeholder={t('Full Name')} value={newTeam.fullName} onChange={e => setNewTeam({...newTeam, fullName: e.target.value})} />
                   <div className="grid grid-cols-2 gap-2">
                     <select className="select" value={newTeam.role} onChange={e => setNewTeam({...newTeam, role: e.target.value})}>

@@ -179,10 +179,10 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
   ];
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col min-w-0 max-w-full">
       <Header />
-      <div className="flex flex-1">
-        <aside className="w-64 bg-[var(--surface)] border-r border-[var(--border)] p-6 hidden lg:block">
+      <div className="flex flex-1 w-full min-w-0">
+        <aside className="w-64 shrink-0 bg-[var(--surface)] border-r border-[var(--border)] p-6 hidden lg:block">
           <div className="mb-8">
             <h2 className="text-2xl font-bold text-[var(--gold)]">{t('Admin Portal')}</h2>
             <p className="text-sm text-[var(--text3)] truncate" title={orgName}>
@@ -229,7 +229,7 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           </nav>
         </aside>
 
-        <main className="flex-1 p-6 lg:p-8">
+        <main className="flex-1 min-w-0 p-6 lg:p-8">
           {/* Mobile admin nav */}
           <div className="lg:hidden flex gap-2 overflow-x-auto mb-4 pb-1">
             {nav.map((item) => (

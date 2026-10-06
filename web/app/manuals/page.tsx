@@ -43,17 +43,18 @@ import {
   filterManualLibrary,
   fetchManualLibraryRows,
   manufacturerShelves,
+  manualLanguageOptionsForView,
   manualLibraryFiltersActive,
   manualCatalogLanguage,
   manualLibrarySearchParams,
   parseManualLibrarySearchParams,
+  manualSearchBodyQuery,
   uniqueManualBrands,
   type ManualLibraryRoom,
 } from '@/lib/manual-library-filter';
 import {
   ALL_MANUAL_LANGUAGES,
   manualLanguageBadge,
-  manualLanguageFilterOptions,
   resolveManualLanguage,
 } from '@/lib/manual-language';
 
@@ -536,7 +537,7 @@ export default function ManualsLibrary() {
   });
 
   useEffect(() => {
-    const q = query.trim();
+    const q = manualSearchBodyQuery(query);
     if (!q) {
       setBodyMatchIds(null);
       setBodySearchReady(true);
@@ -664,9 +665,15 @@ export default function ManualsLibrary() {
     [manuals, library]
   );
   const languageOptions = useMemo(
-    () => manualLanguageFilterOptions(manuals.filter((m) => manualLibraryShelf(m) === library)),
-    [manuals, library]
+    () => manualLanguageOptionsForView(sourceManuals, { room, library }),
+    [sourceManuals, room, library]
   );
+  useEffect(() => {
+    if (loading || !selectedLanguage || selectedLanguage === ALL_MANUAL_LANGUAGES) return;
+    if (languageOptions.some((option) => option.value === selectedLanguage)) return;
+    setSelectedLanguage('');
+    syncFilterUrl({ language: '' });
+  }, [loading, languageOptions, selectedLanguage]);
   const filtersOn = discoveryActive || selectedWavelength !== '';
   const activeRoom =
     room === ALL_MANUAL_ROOMS
@@ -1173,10 +1180,7 @@ export default function ManualsLibrary() {
                           </div>
                         )}
                         {languageBadge && (
-                          <div
-                            className="absolute -bottom-1 -right-1 z-10 rounded-full bg-sky-900 text-white text-[8px] font-extrabold px-1 py-0.5 shadow"
-                            title={languageBadge.label}
-                          >
+                          <div className="manual-language-badge" title={languageBadge.label}>
                             {languageBadge.code}
                           </div>
                         )}

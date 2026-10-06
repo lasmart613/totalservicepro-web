@@ -13,6 +13,10 @@ import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-
 import { getCompanyTheme } from '@/lib/company-theme';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import {
+  finalizeEstimateDelivery,
+  isEstimateMarkedSent,
+} from '@/lib/billing/finalize-estimate';
+import {
   buildOwnedEstimateMessage,
   documentAccountLinks,
   documentCustomerOrgId,
@@ -41,6 +45,8 @@ const EST_SELECTS = [
  * The HTML and recipient come from that estimate. The body cannot supply them.
  * No customer-invite claim token is minted. Approve / reject links use the
  * estimate action token already stored on that estimate.
+ * The existing row is marked pending before mail is sent. A repeat call for an
+ * already pending/sent estimate does not send again and does not insert.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -121,6 +127,21 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (isEstimateMarkedSent(est.status)) {
+      return respond(
+        {
+          ok: true,
+          emailSent: false,
+          alreadySent: true,
+          to: recipient.email,
+          emailSource: recipient.source,
+          estimateId,
+        },
+        200,
+        [recipient.email]
+      );
+    }
+
     const techName = await readTechName(supabase, user.id);
     const company =
       callerOrgId != null
@@ -178,39 +199,51 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const rr = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        'Content-Type': 'application/json',
+    const delivery = await finalizeEstimateDelivery({
+      client: writer,
+      estimateId,
+      row: est,
+      send: async () => {
+        const rr = await fetch('https://api.resend.com/emails', {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${resendKey}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(
+            resendMessage({
+              from,
+              to: recipient.email,
+              subject,
+              html: wrapped,
+              replyTo: company.email,
+            })
+          ),
+        });
+        const result = await rr.json().catch(() => ({}));
+        if (!rr.ok) {
+          console.error('Resend estimate send failed', result);
+          const msg = result?.message || `Email provider error (${rr.status})`;
+          const friendly =
+            /verify a domain|own email address|testing emails|not verified/i.test(msg)
+              ? `${msg} — Verify medicalrepairnetwork.com DNS in Resend before sending to customers.`
+              : msg;
+          return { ok: false, error: friendly };
+        }
+        return { ok: true, id: result?.id || null };
       },
-      body: JSON.stringify(
-        resendMessage({
-          from,
-          to: recipient.email,
-          subject,
-          html: wrapped,
-          replyTo: company.email,
-        })
-      ),
     });
 
-    const result = await rr.json().catch(() => ({}));
-    if (!rr.ok) {
-      console.error('Resend estimate send failed', result);
-      const msg = result?.message || `Email provider error (${rr.status})`;
-      const friendly =
-        /verify a domain|own email address|testing emails|not verified/i.test(msg)
-          ? `${msg} — Verify medicalrepairnetwork.com DNS in Resend before sending to customers.`
-          : msg;
-      return respond({ ok: false, emailSent: false, error: friendly }, 502, [recipient.email]);
+    if (!delivery.ok) {
+      return respond({ ok: false, emailSent: false, error: delivery.error }, 502, [recipient.email]);
     }
 
     return respond(
       {
         ok: true,
-        emailSent: true,
-        id: result?.id || null,
+        emailSent: delivery.emailed,
+        alreadySent: delivery.alreadySent,
+        id: delivery.providerId,
         to: recipient.email,
         emailSource: recipient.source,
         estimateId,

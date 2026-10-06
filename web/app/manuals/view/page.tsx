@@ -21,6 +21,7 @@ function ManualViewInner() {
       initialPage={page}
       initialSection={section}
       initialFind={find}
+      pageOutOfRange={params.get('oor') === '1'}
     />
   );
 }

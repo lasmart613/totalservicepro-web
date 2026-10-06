@@ -14,6 +14,7 @@ export type SendDocResult = {
   paymentUrl?: string | null;
   stripeSkippedReason?: string | null;
   emailSource?: string;
+  alreadySent?: boolean;
 };
 
 export function isValidOnFileEmail(e: string | null | undefined): boolean {
@@ -102,6 +103,7 @@ export async function sendBillingDocEmail(opts: {
       paymentUrl: json.paymentUrl ?? null,
       stripeSkippedReason: json.stripeSkippedReason ?? null,
       emailSource: json.emailSource,
+      alreadySent: !!json.alreadySent,
     };
   } catch (e: any) {
     return {

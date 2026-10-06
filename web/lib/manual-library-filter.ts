@@ -21,8 +21,10 @@ import {
 import { localeFromPathname } from './i18n/locales.ts';
 import {
   ALL_MANUAL_LANGUAGES,
-  manualLanguageLabel,
+  manualLanguageFilterOptions,
+  manualQueryLanguageMatch,
   resolveManualLanguage,
+  type ManualLanguageOption,
 } from './manual-language.ts';
 import { normalizeManualSearchText } from './manual-search-text.ts';
 
@@ -99,7 +101,6 @@ export function manualSearchHaystack(manual: ManualLibraryRow): string {
       meta.label,
       meta.roomLabel,
       wls,
-      resolveManualLanguage(manual) === 'en' ? '' : manualLanguageLabel(resolveManualLanguage(manual)),
     ].join(' ')
   );
 }
@@ -110,8 +111,13 @@ function hayIncludes(hay: string, token: string): boolean {
   return hay.replace(/\s+/g, '').includes(token.replace(/\s+/g, ''));
 }
 
+/** Text left after language names are taken out. Empty means the query is only a language tag. */
+export function manualSearchBodyQuery(query: string): string {
+  return manualQueryLanguageMatch(query).textQuery;
+}
+
 export function manualMatchesQuery(manual: ManualLibraryRow, query: string): boolean {
-  const tokens = manualSearchTokens(query);
+  const tokens = manualSearchTokens(manualSearchBodyQuery(query));
   if (!tokens.length) return true;
   const hay = manualSearchHaystack(manual);
   return tokens.every((t) => hayIncludes(hay, t));
@@ -214,6 +220,34 @@ export function groupManualsByBrand(rows: ManualLibraryRow[]): Record<string, Ma
   return groups;
 }
 
+/**
+ * Languages that actually appear on this room + shelf.
+ * Room "all" keeps every language on the shelf. Counts use the same
+ * effective language as the spine badge, including a trailing bracket's last word.
+ * "All languages" is always present.
+ */
+export function manualLanguageOptionsForView(
+  rows: ManualLibraryRow[],
+  scope: { room?: ManualLibraryRoom | null; library?: ManualLibraryShelf | null } = {}
+): ManualLanguageOption[] {
+  const library: ManualLibraryShelf = scope.library === 'operators' ? 'operators' : 'service';
+  const room = scope.room && scope.room !== ALL_MANUAL_ROOMS ? scope.room : null;
+  const visible = rows.filter((row) => {
+    if (manualLibraryShelf(row) !== library) return false;
+    if (!room) return true;
+    return (
+      inferEquipmentType({
+        equipment_type: row.equipment_type,
+        title: row.title,
+        brand: row.brand,
+        model: row.model,
+        storage_path: row.storage_path,
+      }) === room
+    );
+  });
+  return manualLanguageFilterOptions(visible);
+}
+
 export function manualLibraryFiltersActive(filters: ManualLibraryFilters): boolean {
   const language = String(filters.language || '')
     .trim()
@@ -237,7 +271,9 @@ export function filterManualLibrary(
   bodyMatchIds?: Set<string> | null
 ): ManualLibraryRow[] {
   const query = sanitizeManualSearchQuery(filters.query || '');
-  const tokens = manualSearchTokens(query);
+  const languageQuery = manualQueryLanguageMatch(query);
+  const textQuery = languageQuery.textQuery;
+  const tokens = manualSearchTokens(textQuery);
   const brand = String(filters.brand || '')
     .trim()
     .toLowerCase();
@@ -263,10 +299,12 @@ export function filterManualLibrary(
     if (room && inferred !== room) return false;
     if (brand && String(m.brand || '').trim().toLowerCase() !== brand) return false;
     if (applyLanguage && resolveManualLanguage(m) !== language) return false;
+    if (languageQuery.codes.some((code) => resolveManualLanguage(m) !== code)) return false;
     if (incompleteOnly && !isManualIncomplete(m)) return false;
     if (applyWavelength && !matchesWavelength(m, wavelength)) return false;
+    // A language name is a tag filter. PDF body text that merely contains the word does not count.
     if (!tokens.length) return true;
-    if (manualMatchesQuery(m, query)) return true;
+    if (manualMatchesQuery(m, textQuery)) return true;
     const id = manualRowId(m);
     return !!(id && bodyMatchIds && bodyMatchIds.has(id));
   });

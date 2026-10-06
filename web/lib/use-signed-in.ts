@@ -7,11 +7,15 @@ import { GUEST_SIGNUP_HREF } from '@/lib/marketplace/guest';
 import { getSupabaseClient } from '@/lib/supabase/client';
 
 export function useSignedIn(): { ready: boolean; signedIn: boolean } {
-  const [state, setState] = useState({ ready: false, signedIn: hasBrowserAuthHint() });
+  // SSR and the first client render must agree. Reading localStorage here
+  // made signed-in directory labels ("My Clinics") differ from the server
+  // HTML ("Laser clinics") and threw a hydration mismatch.
+  const [state, setState] = useState({ ready: false, signedIn: false });
 
   useEffect(() => {
     const supabase = getSupabaseClient();
     let alive = true;
+    if (hasBrowserAuthHint()) setState({ ready: false, signedIn: true });
 
     supabase.auth.getUser().then(({ data: { user } }) => {
       if (alive) setState({ ready: true, signedIn: !!user });
