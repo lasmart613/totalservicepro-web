@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import Link from 'next/link';
-import { useParams } from 'next/navigation';
+import { useParams, useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -12,6 +12,7 @@ import {
   PART_CATEGORIES,
   PART_UNITS,
 } from '@/components/AddPartModal';
+import { PART_ARCHIVE_ERROR, VENDOR_REMOVE_ERROR, canArchiveCatalogPart, changedRowCount } from '@/lib/part-catalog-manage';
 
 type PartRow = Record<string, any>;
 type VendorRow = {
@@ -57,6 +58,7 @@ function gallery(part: PartRow): string[] {
 
 export default function PartDetailPage() {
   const params = useParams();
+  const router = useRouter();
   const partId = params.id as string;
   const supabase = getSupabaseClient();
   const brands = useMemo(() => [...listManufacturers(), 'Generic/Other'], []);
@@ -72,6 +74,7 @@ export default function PartDetailPage() {
   const [form, setForm] = useState<PartRow>({});
   const [imageFiles, setImageFiles] = useState<File[]>([]);
   const [previews, setPreviews] = useState<string[]>([]);
+  const [canArchive, setCanArchive] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -88,8 +91,24 @@ export default function PartDetailPage() {
           .eq('part_id', data.id)
           .order('is_preferred', { ascending: false });
         setVendors((vrows || []) as VendorRow[]);
+        const {
+          data: { user },
+        } = await supabase.auth.getUser();
+        const createdBy = data.created_by ? String(data.created_by) : '';
+        const memberFilter = [user?.id, createdBy].filter(Boolean).map((id) => `user_id.eq.${id}`).join(',');
+        const { data: memberships } = memberFilter
+          ? await supabase.from('organization_memberships').select('user_id, organization_id, role').or(memberFilter)
+          : { data: [] };
+        setCanArchive(
+          canArchiveCatalogPart({
+            userId: user?.id,
+            createdBy,
+            memberships: memberships || [],
+          })
+        );
       } else {
         setVendors([]);
+        setCanArchive(false);
       }
     } catch (e: any) {
       console.error('part detail', e);
@@ -114,28 +133,26 @@ export default function PartDetailPage() {
     setForm((prev) => ({ ...prev, [key]: value }));
   }
 
-  async function uploadNewPhotos(userId: string): Promise<string[]> {
-    const urls: string[] = [];
-    const buckets = ['marketplace-images', 'equipment-photos', 'equipment', 'logos'];
-    for (let i = 0; i < imageFiles.length; i++) {
-      const file = imageFiles[i];
-      const ext = (file.name.split('.').pop() || 'jpg').toLowerCase().replace(/[^a-z0-9]/g, '') || 'jpg';
-      const path = `parts/${userId}/${Date.now()}_${i}.${ext}`;
-      for (const bucket of buckets) {
-        const { error } = await supabase.storage.from(bucket).upload(path, file, {
-          upsert: true,
-          contentType: file.type || `image/${ext}`,
-        });
-        if (!error) {
-          const { data } = supabase.storage.from(bucket).getPublicUrl(path);
-          if (data?.publicUrl) {
-            urls.push(data.publicUrl);
-            break;
-          }
-        }
-      }
+  async function uploadNewPhotos(): Promise<string[]> {
+    if (!imageFiles.length) return [];
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    const token = session?.access_token;
+    if (!token) throw new Error('Sign in to add a photo.');
+    const body = new FormData();
+    for (const file of imageFiles) body.append('file', file);
+    const res = await fetch('/api/parts/photos', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+      body,
+    });
+    const json = (await res.json().catch(() => ({}))) as { urls?: string[]; error?: string };
+    if (!res.ok) {
+      console.error('[part-photos]', res.status, json.error || '');
+      throw new Error(json.error || "Couldn't upload this photo.");
     }
-    return urls;
+    return Array.isArray(json.urls) ? json.urls : [];
   }
 
   async function saveEdit() {
@@ -149,7 +166,7 @@ export default function PartDetailPage() {
       const {
         data: { user },
       } = await supabase.auth.getUser();
-      const uploaded = user ? await uploadNewPhotos(user.id) : [];
+      const uploaded = user ? await uploadNewPhotos() : [];
       const existing = gallery(form);
       const images = uploaded.length ? [...uploaded, ...existing] : existing;
       const modelsRaw = Array.isArray(form.compatible_models)
@@ -210,13 +227,31 @@ export default function PartDetailPage() {
 
   async function removeVendor(id: number | string) {
     if (!confirm('Remove this vendor from the part?')) return;
-    const { error } = await supabase.from('part_vendors').delete().eq('id', id);
-    if (error) {
-      toast.error(error.message);
+    const { data, error } = await supabase.from('part_vendors').delete().eq('id', id).select('id');
+    if (error || changedRowCount(data) === 0) {
+      console.error('[part-vendors] delete', error?.message || '0 rows');
+      toast.error(VENDOR_REMOVE_ERROR);
       return;
     }
     setVendors((rows) => rows.filter((v) => String(v.id) !== String(id)));
     toast.success('Vendor removed.');
+  }
+
+  async function archivePart() {
+    if (!part?.id || !canArchive) return;
+    if (!confirm('Archive this part? It leaves the catalog list. Inventory history stays.')) return;
+    const { data, error } = await supabase
+      .from('parts_catalog')
+      .update({ is_active: false, updated_at: new Date().toISOString() })
+      .eq('id', part.id)
+      .select('id');
+    if (error || changedRowCount(data) === 0) {
+      console.error('[parts-catalog] archive', error?.message || '0 rows');
+      toast.error(PART_ARCHIVE_ERROR);
+      return;
+    }
+    toast.success('Part archived.');
+    router.push('/parts');
   }
 
   async function persistStock(inStock: boolean, qty: number) {
@@ -295,6 +330,7 @@ export default function PartDetailPage() {
               ← Parts Catalog
             </Link>
             <h1 className="text-3xl font-extrabold mt-1">{part.name}</h1>
+            {part.is_active === false && <p className="text-sm text-[var(--text3)]">Archived</p>}
             <p className="text-[var(--text3)]">
               {part.part_number}
               {part.brand ? ` • ${part.brand}` : ''}
@@ -308,6 +344,11 @@ export default function PartDetailPage() {
             <button type="button" className="btn btn-secondary" onClick={() => setShowVendors((v) => !v)}>
               {showVendors ? 'Hide vendors' : 'Show vendors'}
             </button>
+            {canArchive && part.is_active !== false && (
+              <button type="button" className="btn btn-secondary" onClick={archivePart}>
+                Archive
+              </button>
+            )}
             {!editing ? (
               <button type="button" className="btn btn-primary" onClick={() => setEditing(true)}>
                 Edit part

@@ -16,7 +16,7 @@ test('parts catalog can add a part with photo, price, and multiple vendors', () 
   assert.match(modal, /\+ Add vendor/);
   assert.match(modal, /from\('parts_catalog'\)/);
   assert.match(modal, /from\('part_vendors'\)/);
-  assert.match(modal, /storage\.from/);
+  assert.match(modal, /\/api\/parts\/photos/);
 });
 
 test('catalog cards open a part detail page that can edit the record', () => {
