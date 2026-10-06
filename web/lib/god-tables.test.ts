@@ -128,6 +128,27 @@ test('organizations cannot forever-flip is_premium without a future premium_unti
   assert.equal(dated.ok, true);
 });
 
+test('god invoice edits drop stripe_session_id and keep the other fields', () => {
+  const invoices = getGodTable('service_invoices')!;
+  const write = sanitizeWritePayload(
+    invoices,
+    {
+      customer_name: 'Luxor',
+      status: 'sent',
+      stripe_session_id: 'cs_test_inflight',
+    },
+    'update'
+  );
+  assert.equal(write.ok, true);
+  if (write.ok) {
+    assert.equal(write.payload.customer_name, 'Luxor');
+    assert.equal(write.payload.status, 'sent');
+    assert.equal('stripe_session_id' in write.payload, false);
+  }
+  const onlySession = sanitizeWritePayload(invoices, { stripe_session_id: 'cs_test_inflight' }, 'update');
+  assert.equal(onlySession.ok, false);
+});
+
 test('user_profiles create requires an Auth user id', () => {
   const missing = sanitizeWritePayload(getGodTable('user_profiles')!, { email: 'x@y.z', role: 'fse' }, 'create');
   assert.equal(missing.ok, false);
