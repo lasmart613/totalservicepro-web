@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -18,6 +18,31 @@ const here = dirname(fileURLToPath(import.meta.url));
 
 function read(rel: string): string {
   return readFileSync(join(here, rel), 'utf8');
+}
+
+function clientRpcCalls(fn: string): string[] {
+  const roots = [
+    join(here, '../app'),
+    join(here, '../components'),
+    join(here, '../lib'),
+    join(here, '../../app/src/main/assets'),
+  ];
+  const hits: string[] = [];
+  const needle = new RegExp(`\\.rpc\\(\\s*['"\`]${fn}['"\`]`);
+  const walk = (dir: string) => {
+    for (const ent of readdirSync(dir, { withFileTypes: true })) {
+      if (ent.name === 'node_modules' || ent.name === '.next') continue;
+      const path = join(dir, ent.name);
+      if (ent.isDirectory()) {
+        walk(path);
+        continue;
+      }
+      if (ent.name.endsWith('.test.ts') || !/\.(ts|tsx|js|mjs|html)$/.test(ent.name)) continue;
+      if (needle.test(readFileSync(path, 'utf8'))) hits.push(path);
+    }
+  };
+  for (const root of roots) walk(root);
+  return hits;
 }
 
 test('round-2 migration covers the review nits and attribution guard', () => {
@@ -50,6 +75,24 @@ test('round-2 migration covers the review nits and attribution guard', () => {
   assert.match(hotfix, /20261006030456/);
   assert.match(hotfix, /hotfix_user_profiles_guard_identity_20261005/);
   assert.match(hotfix, /Filename version 20261006030456/);
+  assert.doesNotMatch(
+    sql,
+    /GRANT EXECUTE ON FUNCTION public\.accept_team_invite\(bigint, bigint\) TO (?!service_role\b)/
+  );
+  assert.match(
+    sql,
+    /REVOKE EXECUTE ON FUNCTION public\.accept_team_invite\(bigint, bigint\) FROM PUBLIC, anon, authenticated/
+  );
+  const revoke = read(
+    '../supabase/migrations/20261006044306_revoke_accept_team_invite_client_20261006_000801.sql'
+  );
+  assert.match(revoke, /Filename version 20261006044306/);
+  assert.match(revoke, /revoke_accept_team_invite_client_20261006_000801/);
+  assert.match(
+    revoke,
+    /REVOKE EXECUTE ON FUNCTION public\.accept_team_invite\(bigint, bigint\) FROM PUBLIC, anon, authenticated;\nGRANT EXECUTE ON FUNCTION public\.accept_team_invite\(bigint, bigint\) TO service_role;/
+  );
+  assert.equal(clientRpcCalls('accept_team_invite').length, 0);
 });
 
 test('part photo quota limits each request, each user, and each org', () => {

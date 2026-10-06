@@ -90,6 +90,11 @@ BEGIN
      OR has_column_privilege('authenticated', 'public.labor_log', 'id', 'UPDATE') THEN
     RAISE EXCEPTION 'FAIL labor_log safe column grant';
   END IF;
+  IF has_function_privilege('anon', 'public.accept_team_invite(bigint, bigint)', 'EXECUTE')
+     OR has_function_privilege('authenticated', 'public.accept_team_invite(bigint, bigint)', 'EXECUTE')
+     OR NOT has_function_privilege('service_role', 'public.accept_team_invite(bigint, bigint)', 'EXECUTE') THEN
+    RAISE EXCEPTION 'FAIL accept_team_invite is executable by a client role';
+  END IF;
   IF has_table_privilege('authenticated', 'public.inventory_transactions', 'UPDATE')
      OR NOT has_column_privilege('authenticated', 'public.inventory_transactions', 'performed_by', 'UPDATE')
      OR has_column_privilege('authenticated', 'public.inventory_transactions', 'id', 'UPDATE') THEN

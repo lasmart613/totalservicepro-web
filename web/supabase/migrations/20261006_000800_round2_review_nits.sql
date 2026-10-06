@@ -1,8 +1,9 @@
 -- Round-2 review nits and #219. Not applied by the app.
 -- Apply after 20261006_000700. Re-running 000400 or 000500 after this file
--- would put the old profile_org_change_allowed signature and the anon
--- product_issue_reports INSERT back. Re-running 000700 after this file
--- would restore the shared-org parts policies.
+-- would put the old profile_org_change_allowed signature, the anon
+-- product_issue_reports INSERT, and client EXECUTE on accept_team_invite back.
+-- Re-running 000700 after this file would restore the shared-org parts policies.
+-- This file does not GRANT accept_team_invite to anon or authenticated.
 --
 -- 1. A customer org already linked to another service org cannot be linked again.
 -- 2. Catalog admin is an admin of the part creator's home org, not any shared org.
@@ -445,5 +446,11 @@ BEGIN
     );
   END LOOP;
 END $$;
+
+-- 20261006044306 revokes client EXECUTE on accept_team_invite. That filename
+-- sorts before 20261006_000400, which grants EXECUTE to authenticated.
+-- Repeat the revoke so a filename-ordered replay does not give it back.
+REVOKE EXECUTE ON FUNCTION public.accept_team_invite(bigint, bigint) FROM PUBLIC, anon, authenticated;
+GRANT EXECUTE ON FUNCTION public.accept_team_invite(bigint, bigint) TO service_role;
 
 NOTIFY pgrst, 'reload schema';
