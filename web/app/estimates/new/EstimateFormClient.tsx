@@ -486,7 +486,9 @@ export default function EstimateFormClient() {
     });
     const json = await res.json().catch(() => ({}));
     if (res.status === 409) return json?.error || REJECTED_ESTIMATE_ERROR;
-    if (!res.ok) return json?.error || `Could not update estimate status (${res.status})`;
+    if (!res.ok) {
+      return t('Could not update estimate status ({status})').replace('{status}', String(res.status));
+    }
     return null;
   }
 
@@ -884,12 +886,14 @@ export default function EstimateFormClient() {
                   })
                 )}`}
               >
-                {estimateStatusLabel(
-                  estimateListBadge({
-                    status,
-                    created_at: createdAt,
-                    customer_action: customerAction,
-                  })
+                {t(
+                  estimateStatusLabel(
+                    estimateListBadge({
+                      status,
+                      created_at: createdAt,
+                      customer_action: customerAction,
+                    })
+                  )
                 )}
               </span>
             </div>

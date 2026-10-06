@@ -279,7 +279,9 @@ export default function InvoiceFormClient() {
     });
     const json = await res.json().catch(() => ({}));
     if (res.status === 409) return json?.error || REJECTED_ESTIMATE_CONVERT_ERROR;
-    if (!res.ok) return json?.error || `Could not convert estimate (${res.status})`;
+    if (!res.ok) {
+      return t('Could not convert estimate ({status})').replace('{status}', String(res.status));
+    }
     return null;
   }
 
@@ -291,12 +293,12 @@ export default function InvoiceFormClient() {
         .eq('id', estimateId)
         .maybeSingle();
       if (error || !data) {
-        toast.error('Could not load estimate for convert');
+        toast.error(t('Could not load estimate for convert'));
         return;
       }
       const refusal = await guardRejectedEstimateConvert(data.id);
       if (refusal || customerActionFromEstimate(data).action === 'rejected') {
-        toast.error(refusal || REJECTED_ESTIMATE_CONVERT_ERROR);
+        toast.error(t(refusal || REJECTED_ESTIMATE_CONVERT_ERROR));
         setSourceEstimateId(null);
         router.replace('/estimates');
         return;
@@ -387,11 +389,13 @@ export default function InvoiceFormClient() {
       setDescription(ed.description || parts.join('\n'));
       toast.message(
         estDeposit > 0
-          ? `Prefilling from estimate — Stripe will charge the $${estDeposit.toFixed(2)} parts/travel deposit only. Remainder stays due on completion.`
-          : 'Prefilling invoice from estimate — review and save.'
+          ? t(
+              'Prefilling from estimate — Stripe will charge the {amount} parts/travel deposit only. Remainder stays due on completion.'
+            ).replace('{amount}', money(estDeposit))
+          : t('Prefilling invoice from estimate — review and save.')
       );
     },
-    [supabase, router]
+    [supabase, router, t, money]
   );
 
   useEffect(() => {
@@ -495,7 +499,7 @@ export default function InvoiceFormClient() {
       if (!existingIdBefore && sourceEstimateId) {
         const refusal = await guardRejectedEstimateConvert(sourceEstimateId);
         if (refusal) {
-          toast.error(refusal);
+          toast.error(t(refusal));
           return null;
         }
       }
@@ -1180,8 +1184,9 @@ export default function InvoiceFormClient() {
                 }}
               />
               <span>
-                Charge parts/travel deposit now. Remainder stays on this invoice as due on completion
-                and is not included in the Stripe pay button until you collect it.
+                {t(
+                  'Charge parts/travel deposit now. Remainder stays on this invoice as due on completion and is not included in the Stripe pay button until you collect it.'
+                )}
               </span>
             </label>
           )}
@@ -1216,13 +1221,17 @@ export default function InvoiceFormClient() {
             </div>
             {collectable.hasDeferredSplit && !collectable.deferredReleased && (
               <p className="text-xs text-[var(--text3)] mt-2">
-                Customer pay link charges the deposit only. The {money(collectable.deferredUnpaid)}{' '}
-                remainder is deferred until you collect it.
+                {t(
+                  'Customer pay link charges the deposit only. The {amount} remainder is deferred until you collect it.'
+                ).replace('{amount}', money(collectable.deferredUnpaid))}
               </p>
             )}
             {collectable.deferredReleased && collectable.remainingOwed > 0 && (
               <p className="text-xs text-[var(--text3)] mt-2">
-                Remaining balance is released — Stripe will charge {money(collectable.stripeAmount)}.
+                {t('Remaining balance is released — Stripe will charge {amount}.').replace(
+                  '{amount}',
+                  money(collectable.stripeAmount)
+                )}
               </p>
             )}
           </div>
@@ -1267,8 +1276,9 @@ export default function InvoiceFormClient() {
             </div>
           </div>
           <p className="text-xs text-[var(--text3)] mt-2">
-            Amount received is cash/check/card already in hand — not the unpaid deposit. Stripe
-            Checkout records this automatically when the customer pays the due-now amount.
+            {t(
+              'Amount received is cash/check/card already in hand — not the unpaid deposit. Stripe Checkout records this automatically when the customer pays the due-now amount.'
+            )}
           </p>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-4">
