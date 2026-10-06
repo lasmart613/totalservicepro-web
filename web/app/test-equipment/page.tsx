@@ -6,6 +6,7 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { saveShopTestEquipment } from '@/lib/test-equipment';
+import { displayModelName } from '@/lib/model-display';
 
 type TeRow = {
   id: string;
@@ -324,7 +325,7 @@ export default function TestEquipmentPage() {
                   <div className="flex justify-between gap-2">
                     <div>
                       <div className="font-bold text-[var(--gold)]">
-                        {[r.make, r.model].filter(Boolean).join(' ') || r.type}
+                        {[r.make, displayModelName(r.model)].filter(Boolean).join(' ') || r.type}
                       </div>
                       <div className="text-xs text-[var(--text3)] mt-1">
                         {r.type}
