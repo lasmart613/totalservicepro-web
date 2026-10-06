@@ -216,7 +216,10 @@ test('server-built estimate and report ignore a stored HTML blob', () => {
   });
   const emailed = ensureEstimateActionCtas(withParts, 'https://repairplanet.net/e/action-token');
   assert.equal((emailed.match(/These links are unique to this estimate\./g) || []).length, 1);
-  assert.match(emailed, /LT-1 Laser tip ×1 @ \$10\.00 = \$10\.00/);
+  assert.match(
+    emailed,
+    /<bdi dir="auto">LT-1<\/bdi> <bdi dir="auto">Laser tip<\/bdi> ×1 @ <bdi dir="ltr">\$10\.00<\/bdi> = <bdi dir="ltr">\$10\.00<\/bdi>/,
+  );
   assert.doesNotMatch(emailed, /Laser tip: 10\.00/);
   assert.match(emailed, /Alexandrite TriVantage/);
   assert.doesNotMatch(emailed, /alex_trivantage/);
@@ -233,7 +236,7 @@ test('server-built estimate and report ignore a stored HTML blob', () => {
     actionUrl: 'https://repairplanet.net/e/action-token',
     moneyPrefs: { currencyCode: 'EUR', numberFormat: 'auto' },
   });
-  assert.match(bare, /Laser tip: €10\.00/);
+  assert.match(bare, /<bdi dir="auto">Laser tip<\/bdi>: <bdi dir="ltr">€10\.00<\/bdi>/);
   assert.doesNotMatch(bare, /: 10\.00/);
 
   const text = buildOwnedEstimatePlainText({
