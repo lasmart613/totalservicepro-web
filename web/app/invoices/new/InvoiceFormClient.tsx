@@ -33,6 +33,7 @@ import {
   resolveInvoiceCollectable,
 } from '@/lib/billing/invoice-collectable';
 import { invoiceDataForSave } from '@/lib/billing/invoice-form-data';
+import { REJECTED_ESTIMATE_CONVERT_ERROR } from '@/lib/billing/estimate-display';
 import { lineItemFromStored } from '@/lib/billing/listing-invoice';
 
 type CustomerOpt = LinkedCustomerOpt;
@@ -263,6 +264,25 @@ export default function InvoiceFormClient() {
     [supabase]
   );
 
+  async function guardRejectedEstimateConvert(id: string | number): Promise<string | null> {
+    const {
+      data: { session },
+    } = await supabase.auth.getSession();
+    if (!session?.access_token) return 'Session expired — sign in again';
+    const res = await fetch('/api/billing/estimate-convert', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${session.access_token}`,
+      },
+      body: JSON.stringify({ estimate_id: id }),
+    });
+    const json = await res.json().catch(() => ({}));
+    if (res.status === 409) return json?.error || REJECTED_ESTIMATE_CONVERT_ERROR;
+    if (!res.ok) return json?.error || `Could not convert estimate (${res.status})`;
+    return null;
+  }
+
   const prefillFromEstimate = useCallback(
     async (estimateId: string) => {
       const { data, error } = await supabase
@@ -274,8 +294,10 @@ export default function InvoiceFormClient() {
         toast.error('Could not load estimate for convert');
         return;
       }
-      if (customerActionFromEstimate(data).action === 'rejected') {
-        toast.error('This estimate was rejected and cannot be converted to an invoice.');
+      const refusal = await guardRejectedEstimateConvert(data.id);
+      if (refusal || customerActionFromEstimate(data).action === 'rejected') {
+        toast.error(refusal || REJECTED_ESTIMATE_CONVERT_ERROR);
+        setSourceEstimateId(null);
         router.replace('/estimates');
         return;
       }
@@ -297,17 +319,14 @@ export default function InvoiceFormClient() {
       setCustContact(ed.custContact || '');
       setTax(Number(ed.tax) || 0);
       if (data.total != null) setTotalOverride(Number(data.total));
-      const estDeposit = estimatePartsDeposit({
-        ...ed,
-        deposit_required: ed.deposit_required,
-        deposit: ed.deposit ?? ed.travelDeposit ?? ed.parts_deposit,
-      });
-      // Estimate deposit is due now — not already received.
+      const estDeposit = estimatePartsDeposit(ed, Number(data.total) || Number(ed.total) || undefined);
+      // Estimate deposit is due now — not already received. A stored amount
+      // counts only when the estimate deposit flag is on.
       setDeposit(0);
       setDepositDate('');
       setDepositMethod('');
       setDueNowAmount(estDeposit > 0 ? estDeposit : null);
-      setChargeDepositOnly(true);
+      setChargeDepositOnly(estDeposit > 0);
       setDeferredReleased(false);
 
       let lines: any[] = ed.line_items || ed.part_lines || [];
@@ -472,6 +491,14 @@ export default function InvoiceFormClient() {
     }
     setSaving(true);
     try {
+      const existingIdBefore = savedIdRef.current;
+      if (!existingIdBefore && sourceEstimateId) {
+        const refusal = await guardRejectedEstimateConvert(sourceEstimateId);
+        if (refusal) {
+          toast.error(refusal);
+          return null;
+        }
+      }
       let invNum = editIdParam ? docNumber : '';
       if (!invNum && userOrgId) {
         invNum = await allocateDocNumber(supabase, {
@@ -1144,7 +1171,7 @@ export default function InvoiceFormClient() {
           </div>
 
           <h3 className="font-bold text-sm mt-5 mb-2 text-[var(--gold)]">Payment split</h3>
-          {(sourceEstimateId || dueNowAmount != null) && (
+          {((dueNowAmount != null && dueNowAmount > 0) || collectable.hasDeferredSplit) && (
             <label className="flex items-start gap-2 text-sm mb-3">
               <input
                 type="checkbox"
