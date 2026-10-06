@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
   completeOnboardingReturn,
+  connectSiteOrigin,
   readConnectState,
   StripeConnectApiError,
 } from '@/lib/billing/stripe-connect-api';
@@ -22,7 +23,7 @@ function resumeRedirect(origin: string, stateToken: string) {
 }
 
 export async function GET(req: NextRequest) {
-  const origin = req.nextUrl.origin.replace(/\/$/, '');
+  const origin = connectSiteOrigin(req);
   const stateToken = req.nextUrl.searchParams.get('state') || '';
   const actor = await connectActorFromRequest(req);
   const state = readConnectState(stateToken);

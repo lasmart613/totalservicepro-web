@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import {
+  connectSiteOrigin,
   readConnectState,
   refreshOnboardingFromState,
   StripeConnectApiError,
@@ -10,7 +11,7 @@ import { authorizeConnectCallback, safeConnectNext } from '@/lib/billing/stripe-
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const origin = req.nextUrl.origin.replace(/\/$/, '');
+  const origin = connectSiteOrigin(req);
   const stateToken = req.nextUrl.searchParams.get('state') || '';
   const actor = await connectActorFromRequest(req);
   const state = readConnectState(stateToken);
@@ -37,7 +38,7 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const origin = req.nextUrl.origin.replace(/\/$/, '');
+  const origin = connectSiteOrigin(req);
   const actor = await connectActorFromRequest(req);
   const body = await req.json().catch(() => ({}));
   const stateToken = typeof body?.state === 'string' ? body.state : '';
