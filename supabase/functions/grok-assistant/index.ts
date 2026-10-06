@@ -4,7 +4,9 @@
  * Single-file raw.githubusercontent.com bootstrap of THIS file must boot even
  * when the isolate still has PR #129 sibling modules. Cite-scope helpers are
  * inlined (do not import ./collection-search.ts). manual-scope / xai-collection /
- * fault-codes stay relative — those files exist on the isolate from PR #129.
+ * fault-codes / citation-scope stay relative — those files ship with this folder.
+ * citation-scope.ts keeps sibling-model citations (Pro vs PRO PLUS) out of the
+ * voice-quota / tts code so that change rebases cleanly.
  *
  * Full folder deploy also works:
  *   supabase functions deploy grok-assistant --project-ref yljztfajyvjzqikxdddf
@@ -31,6 +33,15 @@ import {
 } from './manual-scope.ts'
 import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
 import { extractFaultCodes } from './fault-codes.ts'
+import {
+  attributeCitations,
+  modelSuffixConflict,
+  passageOwnedBySelected,
+  reconcilePhysicalPage,
+  storedPageCount,
+  type CatalogCiteRow,
+  type CitationAttributionScope,
+} from './citation-scope.ts'
 /**
  * INLINED from collection-search.ts for single-file raw-GitHub bootstrap.
  * Do not import ./collection-search.ts: a bootstrap that replaces only
@@ -63,7 +74,18 @@ export type CollectionHit = {
   section?: string
 }
 
-export type Retrieved = { text: string; source: string; page?: number; section?: string }
+export type Retrieved = {
+  text: string
+  source: string
+  page?: number
+  section?: string
+  fileId?: string
+  fileName?: string
+  /** Set on the manual_search_index excerpt for the open manual. */
+  fromSelectedIndex?: boolean
+  /** Full stamped index text. Not sent to the model; used to cap and correct pages. */
+  indexText?: string
+}
 
 /** Heading-style section/chapter from a retrieved passage. */
 export function extractSectionRef(text: string): string | undefined {
@@ -96,10 +118,17 @@ export function extractPageRef(text: string): number | undefined {
 
 function hitPage(row: Record<string, unknown>, text = ''): number | undefined {
   const fields = row.fields && typeof row.fields === 'object' ? (row.fields as Record<string, unknown>) : {}
+  let reported: number | undefined
   for (const v of [row.page_number, row.page, fields.page_number, fields.page]) {
     const n = Number(v)
-    if (Number.isFinite(n) && n > 0 && n < 10000) return Math.floor(n)
+    if (Number.isFinite(n) && n >= 0 && n < 10000) {
+      reported = Math.floor(n)
+      break
+    }
   }
+  // [[pdfpage:N]] wins. xAI page_number is often 0-based or the chunk-start page.
+  const physical = reconcilePhysicalPage({ reported, passage: text })
+  if (physical) return physical
   return extractPageRef(text)
 }
 
@@ -349,8 +378,15 @@ function isWeakToken(token: string): boolean {
   return !t || t.length < 4 || BRAND_TOKENS.has(t) || GENERIC_TOKENS.has(t)
 }
 
-export function docMatchesManual(docName: string, tokens: string[], chapterKeys: string[] = []): boolean {
+export function docMatchesManual(
+  docName: string,
+  tokens: string[],
+  chapterKeys: string[] = [],
+  selectedNames: string[] = []
+): boolean {
   if (!docName) return false
+  // Pro vs PRO PLUS (and ii/2, max vs max pro, …) before chapter-key or token fallback.
+  if (modelSuffixConflict(docName, [...selectedNames, ...tokens].join(' '))) return false
   if (docHasForeignModel(docName, tokens)) return false
   const n = docName.toLowerCase().replace(/[^a-z0-9]+/g, ' ')
   const compact = n.replace(/\s+/g, '')
@@ -392,7 +428,7 @@ export function pickFileIdsForManual(
     if (ids.size) return ids
   }
   for (const [id, name] of entries) {
-    if (docMatchesManual(name, tokens, chapterKeys)) ids.add(id)
+    if (docMatchesManual(name, tokens, chapterKeys, expected)) ids.add(id)
   }
   return ids
 }
@@ -411,21 +447,30 @@ export function filterHitsForManual(
     return { parts: hits.slice(0, 12), filteredOut: 0 }
   }
   const expected = (opts.expectedFilenames || []).filter(Boolean)
+  const selectedBlob = [...opts.tokens, ...expected].join(' ')
   if (opts.fileIds && opts.fileIds.size) {
-    const matched = hits.filter((h) => h.fileId && opts.fileIds!.has(h.fileId))
+    const matched = hits.filter((h) => {
+      if (!h.fileId || !opts.fileIds!.has(h.fileId)) return false
+      if (h.source && modelSuffixConflict(h.source, selectedBlob)) return false
+      return true
+    })
     if (matched.length) {
       return { parts: matched.slice(0, 12), filteredOut: hits.length - matched.length }
     }
   }
   const named = expected.length
-    ? hits.filter((p) => expected.some((e) => namesAlign(e, p.source)))
+    ? hits.filter(
+        (p) =>
+          expected.some((e) => namesAlign(e, p.source)) && !modelSuffixConflict(p.source, selectedBlob)
+      )
     : []
   if (named.length) {
     return { parts: named.slice(0, 12), filteredOut: hits.length - named.length }
   }
   // No filename hit (short CO2RE.pdf vs a longer collection name): model tokens.
   // Foreign-model markers still reject CoolGlide when Xeo is selected.
-  const tokenMatched = hits.filter((p) => docMatchesManual(p.source, opts.tokens, opts.chapterKeys))
+  // Suffix qualifiers (pro vs pro plus) reject sibling models in that fallback.
+  const tokenMatched = hits.filter((p) => docMatchesManual(p.source, opts.tokens, opts.chapterKeys, expected))
   if (tokenMatched.length) {
     return { parts: tokenMatched.slice(0, 12), filteredOut: hits.length - tokenMatched.length }
   }
@@ -441,6 +486,8 @@ export function retrievedFromHits(hits: CollectionHit[], expectedFilenames: stri
     return {
       text: h.text,
       source: loc ? `${name} ${loc}` : name,
+      ...(h.fileId ? { fileId: h.fileId } : {}),
+      ...(h.source ? { fileName: h.source } : {}),
       ...(page ? { page } : {}),
       ...(section ? { section } : {}),
     }
@@ -452,6 +499,12 @@ export type ManualCitation = {
   title?: string
   page?: number
   section?: string
+  /**
+   * True when `page` is past the cited PDF (manuals.page_count, else max [[pdfpage:N]]).
+   * Web viewer: read `_meta.citations[].page_out_of_range` and show
+   * "Page N isn't in this PDF" instead of scrolling. `page` stays 1-based.
+   */
+  page_out_of_range?: true
 }
 
 export function embedCitationMarker(c: ManualCitation): string {
@@ -460,15 +513,24 @@ export function embedCitationMarker(c: ManualCitation): string {
   if (c.page) qs.set('p', String(c.page))
   if (c.section) qs.set('s', String(c.section).slice(0, 80))
   if (c.title) qs.set('t', String(c.title).slice(0, 80))
+  if (c.page_out_of_range) qs.set('oor', '1')
   return `[[cite:${qs.toString()}]]`
 }
 
 export function citationsFromParts(
   parts: Retrieved[],
   manualId: number | null,
-  fallbackTitle: string
+  fallbackTitle: string,
+  scope?: CitationAttributionScope
 ): ManualCitation[] {
   if (manualId == null || manualId < 1) return []
+  if (scope) {
+    const prepared = parts.map((p) => ({
+      ...p,
+      section: p.section || extractSectionRef(p.text),
+    }))
+    return attributeCitations(prepared, manualId, fallbackTitle, scope).slice(0, 8)
+  }
   const out: ManualCitation[] = []
   const seen = new Set<string>()
   for (const p of parts) {
@@ -1600,6 +1662,8 @@ async function searchIndexedManualText(
   return {
     text: excerpt,
     source: `${label || 'Selected manual'} (indexed PDF text)`,
+    fromSelectedIndex: true,
+    indexText: full,
     ...(page ? { page } : {}),
     ...(section ? { section } : {}),
   }
@@ -1703,6 +1767,117 @@ async function selectManualRows(
     return apply(db.from('manuals').select(MANUAL_ROW_COLUMNS))
   }
   return first
+}
+
+const CATALOG_CITE_COLUMNS = 'id,title,brand,model,storage_path'
+
+/** LIKE needle for a collection filename. Punctuation becomes a wildcard so `2410_A_01` still matches. */
+function catalogLikeNeedle(fileName: string): string {
+  const base = storageBasename(fileName).replace(/\.pdf$/i, '')
+  return base
+    .replace(/[%_,.()]/g, '%')
+    .replace(/%+/g, '%')
+    .replace(/^%+|%+$/g, '')
+    .trim()
+    .slice(0, 80)
+}
+
+/**
+ * Read-only catalog match for a passage that is not the open manual.
+ * page_count and xai_file_id are optional columns — a missing column retries without them.
+ * No writes.
+ */
+async function loadSiblingCatalog(
+  db: any,
+  parts: Retrieved[]
+): Promise<{ rows: CatalogCiteRow[]; indexes: Record<number, string> }> {
+  const empty = { rows: [] as CatalogCiteRow[], indexes: {} as Record<number, string> }
+  const needles: string[] = []
+  const fileIds: string[] = []
+  for (const part of parts) {
+    const needle = catalogLikeNeedle(part.fileName || '')
+    if (needle.length >= 8 && !needles.includes(needle)) needles.push(needle)
+    const fileId = String(part.fileId || '').replace(/[^A-Za-z0-9_-]/g, '')
+    if (fileId && !fileIds.includes(fileId)) fileIds.push(fileId)
+  }
+  const nameFilters = needles.slice(0, 4).map((needle) => `storage_path.ilike.%${needle}%`)
+  if (!nameFilters.length && !fileIds.length) return empty
+
+  let rows: CatalogCiteRow[] = []
+  const richFilters = [
+    ...nameFilters,
+    ...fileIds.slice(0, 4).map((id) => `xai_file_id.eq.${id}`),
+  ]
+  const rich = await db
+    .from('manuals')
+    .select(`${CATALOG_CITE_COLUMNS},page_count,xai_file_id`)
+    .or(richFilters.join(','))
+    .limit(20)
+  if (!rich?.error && Array.isArray(rich.data)) {
+    rows = rich.data
+  } else if (nameFilters.length) {
+    const basic = await db.from('manuals').select(CATALOG_CITE_COLUMNS).or(nameFilters.join(',')).limit(20)
+    if (!basic?.error && Array.isArray(basic.data)) rows = basic.data
+  }
+
+  const indexes: Record<number, string> = {}
+  const ids = [...new Set(rows.map((row) => Number(row.id)).filter((id) => id > 0))]
+  if (ids.length) {
+    const idx = await db.from('manual_search_index').select('manual_id,search_text').in('manual_id', ids)
+    if (!idx?.error && Array.isArray(idx.data)) {
+      for (const row of idx.data) {
+        const id = Number(row.manual_id)
+        if (id > 0 && row.search_text) indexes[id] = String(row.search_text)
+      }
+    }
+  }
+  return { rows, indexes }
+}
+
+/** Scope object for citationsFromParts. Failures drop unmatched passages; they never relabel them. */
+async function citationScopeForChat(
+  db: any,
+  opts: {
+    selectedId: number
+    fileIds: Set<string>
+    expectedFilenames: string[]
+    parts: Retrieved[]
+    indexText?: string
+    pageCount?: number
+  }
+): Promise<CitationAttributionScope> {
+  const scope: CitationAttributionScope = {
+    fileIds: opts.fileIds,
+    expectedFilenames: opts.expectedFilenames,
+    indexText: opts.indexText,
+    pageCount: opts.pageCount,
+    catalog: [],
+    indexTextByManualId: {},
+  }
+  try {
+    if (!scope.pageCount) {
+      const q = await db.from('manuals').select('page_count').eq('id', opts.selectedId).maybeSingle()
+      if (!q?.error) scope.pageCount = storedPageCount(q?.data?.page_count)
+    }
+    const foreign = opts.parts.filter(
+      (part) =>
+        !passageOwnedBySelected({
+          fileId: part.fileId,
+          fileName: part.fileName || part.source,
+          fromSelectedIndex: part.fromSelectedIndex,
+          fileIds: opts.fileIds,
+          expectedFilenames: opts.expectedFilenames,
+        })
+    )
+    if (foreign.length) {
+      const loaded = await loadSiblingCatalog(db, foreign)
+      scope.catalog = loaded.rows
+      scope.indexTextByManualId = loaded.indexes
+    }
+  } catch (e) {
+    console.warn('citation scope lookup failed soft', e)
+  }
+  return scope
 }
 
 function formatManualContext(parts: Retrieved[], selectedLabel: string, emptyHint: string): string {
@@ -2026,7 +2201,8 @@ serve(async (req) => {
             }
           }
 
-          const merged = mergeIndexedParts(await indexedP, parts)
+          const indexedHit = await indexedP
+          const merged = mergeIndexedParts(indexedHit, parts)
           parts = merged.parts
           const citeParts = merged.citeParts
 
@@ -2037,7 +2213,15 @@ serve(async (req) => {
             const manCite = srcs.map((c) => c.split('/').filter((p) => p && p !== 'shared').join(' › ')).join('; ')
             const scopedId = asManualId(manualMeta?.id)
             if (scopedId != null) {
-              manualCitations = citationsFromParts(citeParts, scopedId, manualLabel || manCite)
+              const citeScope = await citationScopeForChat(db, {
+                selectedId: scopedId,
+                fileIds: selectedCollectionFileIds,
+                expectedFilenames,
+                parts: citeParts,
+                indexText: indexedHit?.indexText,
+                pageCount: storedPageCount(manualMeta?.page_count),
+              })
+              manualCitations = citationsFromParts(citeParts, scopedId, manualLabel || manCite, citeScope)
               citationLine = formatCitationLine(manualCitations, manCite)
             } else {
               citationLine = `\n\n— Source: ${manCite}`
