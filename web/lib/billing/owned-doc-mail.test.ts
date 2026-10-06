@@ -3,8 +3,10 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { ensureEstimateActionCtas } from './doc-html.ts';
 import {
   buildOwnedEstimateMessage,
+  buildOwnedEstimatePlainText,
   buildOwnedInvoiceMessage,
   buildOwnedReportMessage,
   documentAccountLinks,
@@ -193,6 +195,63 @@ test('server-built estimate and report ignore a stored HTML blob', () => {
   assert.match(estimate, /https:\/\/repairplanet.net\/e\/action-token/);
   assert.doesNotMatch(estimate, /evil\.test|claim=/);
 
+  const withParts = buildOwnedEstimateMessage({
+    row: {
+      customer_name: 'Clinic',
+      estimate_number: 'EST-3',
+      total: 10,
+      estimate_data: {
+        model: 'alex_trivantage',
+        partsText: 'Laser tip: 10.00',
+        part_lines: [{ part_number: 'LT-1', description: 'Laser tip', qty: 1, unit_price: 10, ext: 10 }],
+        partsTotal: 10,
+        subtotal: 10,
+        tax: 0,
+      },
+    },
+    company: { company_name: 'Owned Shop' },
+    theme: null,
+    actionUrl: 'https://repairplanet.net/e/action-token',
+    moneyPrefs: { currencyCode: 'USD', numberFormat: 'auto' },
+  });
+  const emailed = ensureEstimateActionCtas(withParts, 'https://repairplanet.net/e/action-token');
+  assert.equal((emailed.match(/These links are unique to this estimate\./g) || []).length, 1);
+  assert.match(emailed, /LT-1 Laser tip ×1 @ \$10\.00 = \$10\.00/);
+  assert.doesNotMatch(emailed, /Laser tip: 10\.00/);
+  assert.match(emailed, /alex_trivantage/);
+
+  const bare = buildOwnedEstimateMessage({
+    row: {
+      customer_name: 'Clinic',
+      estimate_number: 'EST-3',
+      total: 10,
+      estimate_data: { partsText: 'Laser tip: 10.00', partsTotal: 10, subtotal: 10, tax: 0 },
+    },
+    company: { company_name: 'Owned Shop' },
+    theme: null,
+    actionUrl: 'https://repairplanet.net/e/action-token',
+    moneyPrefs: { currencyCode: 'EUR', numberFormat: 'auto' },
+  });
+  assert.match(bare, /Laser tip: €10\.00/);
+  assert.doesNotMatch(bare, /: 10\.00/);
+
+  const text = buildOwnedEstimatePlainText({
+    row: {
+      customer_name: 'Clinic',
+      estimate_number: 'EST-3',
+      total: 10,
+      estimate_data: { partsText: 'Laser tip: 10.00', subtotal: 10, tax: 0 },
+    },
+    company: { company_name: 'Owned Shop' },
+    theme: null,
+    actionUrl: 'https://repairplanet.net/e/action-token',
+    moneyPrefs: { currencyCode: 'USD', numberFormat: 'auto' },
+  });
+  assert.equal((text.match(/These links are unique to this estimate\./g) || []).length, 1);
+  assert.match(text, /Laser tip: \$10\.00/);
+  assert.match(text, /Approve: /);
+  assert.doesNotMatch(text, /approveReject|ApproveReject|RejectModify/);
+
   const report = buildOwnedReportMessage(
     {
       report_number: 'SR-4',
@@ -246,6 +305,15 @@ test('resend payload uses the document recipient only', () => {
     replyTo: 'shop@owned.test',
   });
   assert.equal(withReply.reply_to, 'shop@owned.test');
+  const withText = resendMessage({
+    from: 'Shop <shop@owned.test>',
+    to: 'clinic@owned.test',
+    subject: 'Estimate',
+    html: '<p>Estimate</p>',
+    text: 'Approve: https://repairplanet.net/e/tok\nReject: https://repairplanet.net/e/tok',
+  });
+  assert.match(String(withText.text), /Approve: /);
+  assert.doesNotMatch(String(withText.text), /ApproveReject/);
 });
 
 test('responses drop every mailbox that is not the owned document recipient', () => {

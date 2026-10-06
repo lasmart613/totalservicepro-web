@@ -69,28 +69,27 @@ function estimateEmailActionHref(actionUrl: string, action: 'approve' | 'reject'
   return `${base}?action=${action}`;
 }
 
+function estimateActionButtonCell(href: string, bg: string, color: string, label: string): string {
+  return (
+    `<td align="center" style="padding:6px 4px;" width="33%">\n` +
+    `<a href="${href}" ` +
+    `style="display:inline-block;background:${bg};color:${color};padding:14px 18px;border-radius:8px;` +
+    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid ${bg};min-width:110px;">` +
+    `${label}</a>\n` +
+    `</td>\n`
+  );
+}
+
 function estimateActionButtonsRow(actionUrl: string): string {
   const approveHref = esc(estimateEmailActionHref(actionUrl, 'approve'));
   const rejectHref = esc(estimateEmailActionHref(actionUrl, 'reject'));
   const modifyHref = esc(estimateEmailActionHref(actionUrl, 'modify'));
   return (
     `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;">` +
-    `<tr>` +
-    `<td align="center" style="padding:6px 4px;" width="33%">` +
-    `<a href="${approveHref}" ` +
-    `style="display:inline-block;background:#15803D;color:#ffffff;padding:14px 18px;border-radius:8px;` +
-    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #15803D;min-width:110px;">` +
-    `Approve</a></td>` +
-    `<td align="center" style="padding:6px 4px;" width="33%">` +
-    `<a href="${rejectHref}" ` +
-    `style="display:inline-block;background:#B91C1C;color:#ffffff;padding:14px 18px;border-radius:8px;` +
-    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #B91C1C;min-width:110px;">` +
-    `Reject</a></td>` +
-    `<td align="center" style="padding:6px 4px;" width="33%">` +
-    `<a href="${modifyHref}" ` +
-    `style="display:inline-block;background:#FBBF24;color:#111827;padding:14px 18px;border-radius:8px;` +
-    `text-decoration:none;font-weight:800;font-size:16px;letter-spacing:0.02em;border:2px solid #FBBF24;min-width:110px;">` +
-    `Modify</a></td>` +
+    `<tr>\n` +
+    estimateActionButtonCell(approveHref, '#15803D', '#ffffff', 'Approve') +
+    estimateActionButtonCell(rejectHref, '#B91C1C', '#ffffff', 'Reject') +
+    estimateActionButtonCell(modifyHref, '#FBBF24', '#111827', 'Modify') +
     `</tr></table>`
   );
 }
@@ -109,21 +108,51 @@ export function buildEstimateActionCtasHtml(actionUrl: string, variant: 'banner'
     `Tap Approve, Reject, or Modify — no login required.` +
     `</td></tr>` +
     `<tr><td style="padding:4px 8px 14px;">${estimateActionButtonsRow(actionUrl)}</td></tr>` +
-    `<tr><td align="center" style="padding:0 12px 14px;font-size:10px;color:#D1D5DB;">` +
-    `These links are unique to this estimate.` +
-    `</td></tr>` +
+    (variant === 'banner'
+      ? `<tr><td align="center" style="padding:0 12px 14px;font-size:10px;color:#D1D5DB;">` +
+        `These links are unique to this estimate.` +
+        `</td></tr>`
+      : '') +
     `</table>`
   );
 }
 
-const ESTIMATE_CTA_TABLE_RE = /<table[^>]*class="tsp-est-cta[^"]*"[^>]*>[\s\S]*?<\/table>/gi;
+/** Remove a CTA table, including the nested button table, so the sentence is not left behind. */
+function stripEstimateActionCtas(html: string): string {
+  const re = /<table\b[^>]*>/gi;
+  let out = '';
+  let cursor = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html))) {
+    if (!/tsp-est-cta/.test(match[0])) continue;
+    const end = endOfTable(html, match.index);
+    if (end < 0) break;
+    out += html.slice(cursor, match.index);
+    cursor = end;
+    re.lastIndex = end;
+  }
+  return out + html.slice(cursor);
+}
+
+function endOfTable(html: string, start: number): number {
+  const re = /<\/?table\b[^>]*>/gi;
+  re.lastIndex = start;
+  let depth = 0;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(html))) {
+    if (/^<\//.test(match[0])) depth -= 1;
+    else depth += 1;
+    if (depth === 0) return re.lastIndex;
+  }
+  return -1;
+}
 
 /** Inject or replace CTAs at the top and bottom so they are hard to miss. */
 export function ensureEstimateActionCtas(html: string, actionUrl: string): string {
   if (!html || !actionUrl) return html;
   const top = buildEstimateActionCtasHtml(actionUrl, 'banner');
   const bottom = buildEstimateActionCtasHtml(actionUrl, 'repeat');
-  let next = html.replace(ESTIMATE_CTA_TABLE_RE, '');
+  let next = stripEstimateActionCtas(html);
   const firstDiv = next.indexOf('<div');
   if (firstDiv >= 0) {
     const close = next.indexOf('>', firstDiv);
@@ -777,6 +806,44 @@ export function buildEstimateHtml(input: EstimateHtmlInput): string {
       input.company.company_name || 'Total Service Pro'
     )}!</div></div></div>`
   );
+}
+
+/** Plain-text part of the estimate email. Links stay on their own lines so words do not run together. */
+export function buildEstimatePlainText(input: EstimateHtmlInput): string {
+  const amount = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
+  const company = input.company.company_name || 'Total Service Pro';
+  const lines: string[] = [
+    company,
+    `Service estimate ${input.estNumber || ''}`.trim(),
+  ];
+  if (input.dateStr) lines.push(input.dateStr);
+  lines.push('', `Customer: ${input.customer.name || 'Customer'}`);
+  if (input.customer.email) lines.push(`Email: ${input.customer.email}`);
+  if (input.services?.length) lines.push('', 'Services:', ...input.services.map((s) => `- ${s}`));
+  if (input.partsLines?.length) {
+    lines.push('', 'Parts:');
+    for (const line of input.partsLines) lines.push(line);
+  }
+  if (input.partsTotal) lines.push(`Parts subtotal: ${amount(input.partsTotal)}`);
+  lines.push(
+    '',
+    `Subtotal: ${amount(input.subtotal)}`,
+    `Tax: ${amount(input.tax)}`,
+    `Grand total: ${amount(input.total)}`
+  );
+  if (input.actionUrl) {
+    lines.push(
+      '',
+      'Respond to this estimate. No login required.',
+      `Approve: ${estimateEmailActionHref(input.actionUrl, 'approve')}`,
+      `Reject: ${estimateEmailActionHref(input.actionUrl, 'reject')}`,
+      `Modify: ${estimateEmailActionHref(input.actionUrl, 'modify')}`,
+      '',
+      'These links are unique to this estimate.'
+    );
+  }
+  lines.push('', `Thank you for choosing ${company}.`);
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /** Open print dialog with full HTML document (app-quality PDF via browser Save as PDF). */

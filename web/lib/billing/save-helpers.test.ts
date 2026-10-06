@@ -4,6 +4,7 @@ import {
   customerActionConfirmationTitle,
   customerActionFromEstimate,
   customerActionLabel,
+  estimateConfirmMode,
   isEstimateAwaitingCustomerAction,
   parseCustomerActionKind,
   parseEstimateEmailAction,
@@ -64,6 +65,41 @@ test('resolveCustomerActionApply is idempotent and treats approve/reject as term
     apply: true,
     conflict: false,
   });
+  assert.deepEqual(resolveCustomerActionApply('changes_requested', 'rejected'), {
+    already: false,
+    apply: true,
+    conflict: false,
+  });
+});
+
+test('confirm page offers approve after a modification and keeps approve or reject final', () => {
+  assert.deepEqual(estimateConfirmMode({ customerAction: null, requested: 'approve' }), {
+    kind: 'confirm',
+    action: 'approve',
+    priorModification: false,
+  });
+  assert.deepEqual(estimateConfirmMode({ customerAction: null, requested: 'reject' }), {
+    kind: 'confirm',
+    action: 'reject',
+    priorModification: false,
+  });
+  assert.deepEqual(
+    estimateConfirmMode({ customerAction: 'changes_requested', requested: 'approve' }),
+    { kind: 'confirm', action: 'approve', priorModification: true }
+  );
+  assert.deepEqual(
+    estimateConfirmMode({ customerAction: 'changes_requested', requested: 'reject' }),
+    { kind: 'confirm', action: 'reject', priorModification: true }
+  );
+  assert.deepEqual(estimateConfirmMode({ customerAction: 'approved', requested: 'approve' }), {
+    kind: 'final',
+    action: 'approved',
+  });
+  assert.deepEqual(estimateConfirmMode({ customerAction: 'rejected', requested: 'reject' }), {
+    kind: 'final',
+    action: 'rejected',
+  });
+  assert.equal(estimateConfirmMode({ customerAction: null, requested: null, expired: true }).kind, 'expired');
 });
 
 test('isEstimateAwaitingCustomerAction is sent + not terminal + not expired', () => {

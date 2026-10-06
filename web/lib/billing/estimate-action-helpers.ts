@@ -2,10 +2,16 @@
  * Pure helpers for tokenized estimate CTAs (safe for node:test — no @/ imports).
  */
 
-import { randomBytes } from 'crypto';
+import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
 import { SITE_ORIGIN } from '../share.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
-import { parseJsonField, type CustomerActionKind } from './save-helpers.ts';
+import {
+  customerActionFromEstimate,
+  parseCustomerActionKind,
+  parseJsonField,
+  resolveCustomerActionApply,
+  type CustomerActionKind,
+} from './save-helpers.ts';
 
 export const CUSTOMER_ACTION_APPROVED = 'approved' as const;
 export const CUSTOMER_ACTION_REJECTED = 'rejected' as const;
@@ -104,4 +110,146 @@ export function buildOrgNotifyEmail(opts: {
     `</div>`;
 
   return { subject, html };
+}
+
+/** Confirm nonce lifetime. Matches the 30-day estimate validity window. */
+export const ESTIMATE_ACTION_CONFIRM_TTL_SEC = 60 * 60 * 24 * 30;
+
+const CONFIRM_PURPOSE = 'estimate-confirm';
+
+export type EstimateActionEstimateRecord = {
+  customer_action?: string | null;
+  customer_action_at?: string | null;
+  customer_action_note?: string | null;
+  customer_action_token?: string | null;
+  estimate_data?: unknown;
+};
+
+export type CustomerActionPatch = {
+  customer_action: CustomerActionKind;
+  customer_action_at: string;
+  customer_action_note: string | null;
+  estimate_data: Record<string, unknown>;
+};
+
+/**
+ * Signed field the confirm form must POST. Bound to the estimate token.
+ * A GET, a query string, or a POST without this field cannot act.
+ */
+export function signEstimateActionConfirm(
+  token: string,
+  secret: string,
+  nowSec = Math.floor(Date.now() / 1000)
+): string {
+  const exp = nowSec + ESTIMATE_ACTION_CONFIRM_TTL_SEC;
+  const payload = `${CONFIRM_PURPOSE}.${String(token || '').trim()}.${exp}`;
+  const sig = createHmac('sha256', secret).update(payload).digest('base64url');
+  return `${exp}.${sig}`;
+}
+
+export function verifyEstimateActionConfirm(
+  token: string,
+  confirm: unknown,
+  secret: string,
+  nowSec = Math.floor(Date.now() / 1000)
+): boolean {
+  const trimmed = String(token || '').trim();
+  if (!secret || !isValidEstimateActionToken(trimmed)) return false;
+  const raw = String(confirm ?? '').trim();
+  const dot = raw.indexOf('.');
+  if (dot < 1) return false;
+  const exp = Number(raw.slice(0, dot));
+  const sig = raw.slice(dot + 1);
+  if (!Number.isFinite(exp) || exp < nowSec || !sig) return false;
+  const payload = `${CONFIRM_PURPOSE}.${trimmed}.${exp}`;
+  const expected = createHmac('sha256', secret).update(payload).digest('base64url');
+  const a = Buffer.from(sig);
+  const b = Buffer.from(expected);
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
+export type EstimateActionHttpDecision =
+  | { effect: 'none'; status: number; error: string }
+  | { effect: 'mutate'; token: string; action: CustomerActionKind; note: string | null };
+
+/**
+ * GET never mutates, even when the body already contains a valid confirm nonce.
+ * POST mutates only with a token, a known action, and a confirm nonce.
+ */
+export function decideEstimateActionHttp(input: {
+  method: string;
+  body?: Record<string, unknown> | null;
+  secret: string;
+  nowSec?: number;
+}): EstimateActionHttpDecision {
+  if (String(input.method || '').toUpperCase() !== 'POST') {
+    return { effect: 'none', status: 405, error: 'Method not allowed' };
+  }
+  const body = input.body && typeof input.body === 'object' ? input.body : {};
+  const token = String(body.token || '').trim();
+  if (!isValidEstimateActionToken(token)) {
+    return { effect: 'none', status: 400, error: 'Invalid link' };
+  }
+  if (!input.secret) {
+    return {
+      effect: 'none',
+      status: 503,
+      error: 'This page is temporarily unavailable. Please contact the company that sent the estimate.',
+    };
+  }
+  if (!verifyEstimateActionConfirm(token, body.confirm, input.secret, input.nowSec)) {
+    return {
+      effect: 'none',
+      status: 400,
+      error: 'Use the button on the estimate page. Opening the link does not approve or reject it.',
+    };
+  }
+  const action = parseCustomerActionKind(body.action);
+  if (!action) return { effect: 'none', status: 400, error: 'Unknown action' };
+  const note = String(body.note || '').trim() || null;
+  return { effect: 'mutate', token, action, note };
+}
+
+/**
+ * Pure customer-action write. Approved and rejected stay final.
+ * changes_requested can still become approved or rejected.
+ * A null patch means the caller must not update the row.
+ */
+export function customerActionWrite(
+  estimate: EstimateActionEstimateRecord,
+  action: CustomerActionKind,
+  note: string | null,
+  at: string
+): {
+  already: boolean;
+  conflict: boolean;
+  action: CustomerActionKind;
+  patch: CustomerActionPatch | null;
+} {
+  const prev = customerActionFromEstimate(estimate);
+  const resolved = resolveCustomerActionApply(prev.action, action);
+  if (!resolved.apply) {
+    return { already: true, conflict: resolved.conflict, action: prev.action || action, patch: null };
+  }
+  const nextNote =
+    action === CUSTOMER_ACTION_APPROVED
+      ? prev.note
+      : (note || '').trim() || prev.note;
+  return {
+    already: false,
+    conflict: false,
+    action,
+    patch: {
+      customer_action: action,
+      customer_action_at: at,
+      customer_action_note: nextNote,
+      estimate_data: mergeCustomerActionIntoEstimateData(estimate.estimate_data, {
+        token: prev.token,
+        action,
+        at,
+        note: nextNote,
+      }),
+    },
+  };
 }

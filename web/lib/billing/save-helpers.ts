@@ -369,6 +369,31 @@ export function customerActionConfirmationTitle(
   return '';
 }
 
+export type EstimateConfirmMode =
+  | { kind: 'final'; action: 'approved' | 'rejected' }
+  | { kind: 'expired' }
+  | { kind: 'choose'; priorModification: boolean }
+  | { kind: 'confirm'; action: EstimateEmailAction; priorModification: boolean };
+
+/**
+ * What the public /e/<token> page may show.
+ * Approved and rejected are final. A modification request is not:
+ * the customer can still approve or reject. Nothing here writes state.
+ */
+export function estimateConfirmMode(opts: {
+  expired?: boolean;
+  customerAction: CustomerActionKind | null | undefined;
+  requested: EstimateEmailAction | null;
+}): EstimateConfirmMode {
+  if (opts.customerAction === 'approved' || opts.customerAction === 'rejected') {
+    return { kind: 'final', action: opts.customerAction };
+  }
+  if (opts.expired) return { kind: 'expired' };
+  const priorModification = opts.customerAction === 'changes_requested';
+  if (!opts.requested) return { kind: 'choose', priorModification };
+  return { kind: 'confirm', action: opts.requested, priorModification };
+}
+
 /** Sent estimates the clinic can still Approve / Reject / Modify. */
 export function isEstimateAwaitingCustomerAction(est: {
   status?: string | null;

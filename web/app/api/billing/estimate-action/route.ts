@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import {
   applyEstimateCustomerAction,
+  decideEstimateActionHttp,
+  estimateActionConfirmSecret,
   findEstimateByActionToken,
   isValidEstimateActionToken,
   notifyShopOfCustomerAction,
@@ -11,80 +13,66 @@ import {
 import {
   customerActionConfirmationTitle,
   isEstimateExpired,
-  parseCustomerActionKind,
+  parseEstimateEmailAction,
 } from '@/lib/billing/save-helpers';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
 
 export const dynamic = 'force-dynamic';
 
-function parseToken(req: NextRequest, body?: any): string {
-  const fromQuery = req.nextUrl.searchParams.get('token') || '';
-  const fromBody = body?.token ? String(body.token) : '';
-  return (fromBody || fromQuery).trim();
-}
-
 /**
- * GET /api/billing/estimate-action?token=
- * Public, no-login estimate summary for the emailed CTA page.
+ * GET /api/billing/estimate-action
+ * Opening a link must not approve, reject, or create a ticket.
+ * The confirm page reads the estimate on the server. This route is POST-only.
  */
-export async function GET(req: NextRequest) {
-  try {
-    const token = parseToken(req);
-    if (!isValidEstimateActionToken(token)) {
-      return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
-    }
-    if (!hasServiceRole()) {
-      return NextResponse.json(
-        { error: 'This page is temporarily unavailable. Please contact the company that sent the estimate.' },
-        { status: 503 }
-      );
-    }
-
-    const admin = getSupabaseAdmin();
-    const est = await findEstimateByActionToken(admin, token);
-    if (!est) {
-      return NextResponse.json({ error: 'Estimate not found' }, { status: 404 });
-    }
-
-    const { companyName } = await resolveOrgNotifyEmails(admin, est);
-    const moneyPrefs = await loadOrgMoneyPrefs(admin, est.organization_id);
-    return NextResponse.json({ estimate: publicEstimatePayload(est, companyName, moneyPrefs) });
-  } catch (e: any) {
-    console.error('estimate-action GET', e);
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
-  }
+export async function GET() {
+  const decision = decideEstimateActionHttp({ method: 'GET', secret: '' });
+  return NextResponse.json(
+    { error: decision.error },
+    { status: decision.status, headers: { Allow: 'POST', 'Cache-Control': 'no-store' } }
+  );
 }
 
 /**
  * POST /api/billing/estimate-action
- * Body: { token, action: 'approve' | 'reject' | 'modify', note? }
- * Token is the credential — no clinic login required.
+ * Body: { token, action: 'approve' | 'reject' | 'modify', note?, confirm }
+ * `confirm` is the nonce rendered on the confirm page. A POST without it does not write.
  */
 export async function POST(req: NextRequest) {
+  const formPost = isConfirmFormPost(req);
   try {
-    const body = await req.json().catch(() => ({}));
-    const token = parseToken(req, body);
-    if (!isValidEstimateActionToken(token)) {
-      return NextResponse.json({ error: 'Invalid link' }, { status: 400 });
+    const body = await readActionBody(req);
+    const decision = decideEstimateActionHttp({
+      method: 'POST',
+      body,
+      secret: estimateActionConfirmSecret(),
+    });
+    if (decision.effect !== 'mutate') {
+      return finish(req, formPost, decision.status, {
+        error: decision.error,
+        token: String(body.token || ''),
+        action: String(body.action || ''),
+        notice: decision.status === 400 ? 'confirm' : 'failed',
+      });
     }
+
     if (!hasServiceRole()) {
-      return NextResponse.json(
-        { error: 'This page is temporarily unavailable. Please contact the company that sent the estimate.' },
-        { status: 503 }
-      );
+      return finish(req, formPost, 503, {
+        error: 'This page is temporarily unavailable. Please contact the company that sent the estimate.',
+        token: decision.token,
+        action: String(body.action || ''),
+        notice: 'failed',
+      });
     }
-
-    const action = parseCustomerActionKind(body.action);
-    if (!action) {
-      return NextResponse.json({ error: 'Unknown action' }, { status: 400 });
-    }
-
-    const note = String(body.note || '').trim() || null;
 
     const admin = getSupabaseAdmin();
-    const est = await findEstimateByActionToken(admin, token);
+    const est = await findEstimateByActionToken(admin, decision.token);
     if (!est) {
-      return NextResponse.json({ error: 'Estimate not found' }, { status: 404 });
+      return finish(req, formPost, 404, {
+        error: 'Estimate not found',
+        token: decision.token,
+        action: String(body.action || ''),
+        notice: 'failed',
+      });
     }
 
     const { companyName } = await resolveOrgNotifyEmails(admin, est);
@@ -92,31 +80,33 @@ export async function POST(req: NextRequest) {
     const payload = publicEstimatePayload(est, companyName, moneyPrefs);
 
     if (payload.expired || isEstimateExpired(est)) {
-      return NextResponse.json(
-        {
-          error: 'This estimate has expired and can no longer be updated online.',
-          estimate: payload,
-          expired: true,
-        },
-        { status: 409 }
-      );
+      return finish(req, formPost, 409, {
+        error: 'This estimate has expired and can no longer be updated online.',
+        estimate: payload,
+        expired: true,
+        token: decision.token,
+        action: String(body.action || ''),
+        notice: 'expired',
+      });
     }
 
-    const result = await applyEstimateCustomerAction(admin, est, action, note);
+    const result = await applyEstimateCustomerAction(admin, est, decision.action, decision.note);
     const applied = result.action;
     const updated = {
       ...payload,
       customerAction: applied,
       customerActionAt: result.already ? payload.customerActionAt : new Date().toISOString(),
       customerActionNote:
-        applied === 'changes_requested' ? note || payload.customerActionNote : payload.customerActionNote,
+        applied === 'approved'
+          ? payload.customerActionNote
+          : decision.note || payload.customerActionNote,
     };
 
     if (!result.already) {
-      await notifyShopOfCustomerAction(admin, est, applied, note);
+      await notifyShopOfCustomerAction(admin, est, applied, decision.note);
     }
 
-    return NextResponse.json({
+    return finish(req, formPost, 200, {
       ok: true,
       already: result.already,
       conflict: result.conflict,
@@ -127,9 +117,68 @@ export async function POST(req: NextRequest) {
         ? { id: result.ticket.id, number: result.ticket.ticket_number }
         : null,
       companyName,
+      token: decision.token,
+      notice: '',
     });
   } catch (e: any) {
     console.error('estimate-action POST', e);
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
+    return finish(req, formPost, 500, { error: e?.message || 'Server error', notice: 'failed' });
   }
+}
+
+function isConfirmFormPost(req: NextRequest): boolean {
+  const contentType = req.headers.get('content-type') || '';
+  return (
+    contentType.includes('application/x-www-form-urlencoded') ||
+    contentType.includes('multipart/form-data')
+  );
+}
+
+async function readActionBody(req: NextRequest): Promise<Record<string, unknown>> {
+  const contentType = req.headers.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    const json = await req.json().catch(() => null);
+    return json && typeof json === 'object' && !Array.isArray(json)
+      ? (json as Record<string, unknown>)
+      : {};
+  }
+  if (isConfirmFormPost(req)) {
+    const form = await req.formData().catch(() => null);
+    if (!form) return {};
+    const out: Record<string, unknown> = {};
+    for (const [key, value] of form.entries()) {
+      if (typeof value === 'string') out[key] = value;
+    }
+    return out;
+  }
+  return {};
+}
+
+function finish(
+  req: NextRequest,
+  formPost: boolean,
+  status: number,
+  body: Record<string, unknown>
+) {
+  const token = String(body.token || '').trim();
+  if (formPost && isValidEstimateActionToken(token)) {
+    const back = new URL(`/e/${encodeURIComponent(token)}`, req.url);
+    const action = parseEstimateEmailAction(body.action);
+    if (status === 200 && body.action) {
+      const done = String(body.action);
+      if (done === 'approved' || done === 'rejected' || done === 'changes_requested') {
+        back.searchParams.set('done', done);
+      }
+    } else if (body.notice) {
+      if (action) back.searchParams.set('action', action);
+      back.searchParams.set('notice', String(body.notice));
+    }
+    return NextResponse.redirect(back, 303);
+  }
+  const json = { ...body };
+  delete json.token;
+  delete json.notice;
+  const headers: Record<string, string> = { 'Cache-Control': 'no-store' };
+  if (status === 405) headers.Allow = 'POST';
+  return NextResponse.json(json, { status, headers });
 }
