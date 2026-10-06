@@ -11,6 +11,7 @@ import { useRouter } from 'next/navigation';
 import { isOwnerish, isSupplier } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { displayModelName } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { applyPendingSignup, ensureOrganizationMembership, resolvePendingSignup } from '@/lib/pending-signup';
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim, shouldSendToMemberOnboarding } from '@/lib/invite-claim';
@@ -1006,7 +1007,7 @@ export default function Onboarding() {
                 >
                   <option value="">{laserMfr ? 'Select model…' : 'Select manufacturer first'}</option>
                   {laserModelsForMfr.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m} value={m}>{displayModelName(m)}</option>
                   ))}
                   <option value={OTHER_MODEL}>Other / not listed…</option>
                 </select>

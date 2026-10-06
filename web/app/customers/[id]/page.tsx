@@ -13,6 +13,7 @@ import {
 } from '@/lib/roles';
 import { ownerOrgTypeLabel } from '@/lib/org-types';
 import { toast } from 'sonner';
+import { displayModelName } from '@/lib/model-display';
 import { CustomerInfoForm } from '@/components/CustomerInfoForm';
 import { CustomerLocationsPanel } from '@/components/CustomerLocationsPanel';
 import {
@@ -859,7 +860,7 @@ export default function CustomerProfilePage() {
                     </div>
                     <div className="flex-1 min-w-0">
                       <div className="font-bold text-sm truncate">
-                        {[eq.manufacturer, eq.model || eq.name].filter(Boolean).join(' ') ||
+                        {[eq.manufacturer, displayModelName(eq.model || eq.name)].filter(Boolean).join(' ') ||
                           'Equipment'}
                       </div>
                       <div className="text-xs text-[var(--text3)] mt-0.5">

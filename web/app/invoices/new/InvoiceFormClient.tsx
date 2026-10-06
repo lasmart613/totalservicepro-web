@@ -24,6 +24,9 @@ import {
   type LineItem,
 } from '@/lib/billing/save-helpers';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
+import { displayModelName } from '@/lib/model-display';
+import { resolveOrgTimeZone } from '@/lib/org-timezone';
+import { canVoidInvoice, isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 import {
@@ -62,6 +65,12 @@ export default function InvoiceFormClient() {
   const [userId, setUserId] = useState<string | null>(null);
   const [docNumber, setDocNumber] = useState('');
   const [status, setStatus] = useState('draft');
+  const [callerRole, setCallerRole] = useState('');
+  const [orgTimeZone, setOrgTimeZone] = useState<string | null>(null);
+  const [voidOpen, setVoidOpen] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
+  const [voiding, setVoiding] = useState(false);
+  const [storedVoidReason, setStoredVoidReason] = useState<string | null>(null);
   const [company, setCompany] = useState<DocCompany>({});
   const [companyTheme, setCompanyTheme] = useState<CompanyTheme | null>(null);
   const [emailing, setEmailing] = useState(false);
@@ -210,6 +219,7 @@ export default function InvoiceFormClient() {
       savedIdRef.current = data.id;
       setSavedId(data.id);
       setStatus(data.status || 'draft');
+      setStoredVoidReason(data.void_reason || parseJsonField(data.invoice_data).void_reason || null);
       setCustomerName(data.customer_name || '');
       setCustSearch(data.customer_name || '');
       setCustomerOrgId(data.customer_organization_id || null);
@@ -384,12 +394,17 @@ export default function InvoiceFormClient() {
         const { data: profile } = await supabase
           .from('user_profiles')
           .select(
-            'organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url, slogan)'
+            'role, organization_id, first_name, last_name, organizations(name, address, city, state, zip, phone, email, website, logo_url, slogan)'
           )
           .eq('id', user.id)
           .maybeSingle();
         const orgId = coerceOrgId(profile?.organization_id);
         setUserOrgId(orgId);
+        setCallerRole(String((profile as { role?: string } | null)?.role || ''));
+        if (orgId) {
+          const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();
+          if (!zoneRow.error && zoneRow.data?.timezone) setOrgTimeZone(String(zoneRow.data.timezone));
+        }
         const org = Array.isArray((profile as any)?.organizations)
           ? (profile as any).organizations[0]
           : (profile as any)?.organizations;
@@ -644,6 +659,11 @@ export default function InvoiceFormClient() {
       themeScope,
       moneyPrefs: prefs,
       locale,
+      timeZone: resolveOrgTimeZone({
+        stored: orgTimeZone,
+        state: company.state,
+        allowBrowser: false,
+      }).timeZone,
     });
   }
 
@@ -797,6 +817,39 @@ export default function InvoiceFormClient() {
     saveInvoice('sent');
   }
 
+  const voided = isVoidInvoiceStatus(status);
+  const voidable =
+    Boolean(savedId) && canVoidInvoice({ status, amount_paid: received, role: callerRole }).ok;
+
+  async function submitVoid() {
+    if (!savedId) return;
+    setVoiding(true);
+    try {
+      const { data: sessionData } = await supabase.auth.getSession();
+      const access = sessionData.session?.access_token;
+      if (!access) throw new Error('Sign in required');
+      const res = await fetch('/api/billing/invoices/void', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${access}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ invoice_id: savedId, reason: voidReason }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.ok) throw new Error(json.error || 'Could not void invoice');
+      setStatus('void');
+      setStoredVoidReason(json.void_reason || voidReason.trim() || null);
+      setVoidOpen(false);
+      setVoidReason('');
+      toast.success('Invoice voided');
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : 'Could not void invoice');
+    } finally {
+      setVoiding(false);
+    }
+  }
+
   if (loading) {
     return (
       <div className="min-h-screen flex flex-col">
@@ -824,7 +877,13 @@ export default function InvoiceFormClient() {
               {docNumber && (
                 <span className="text-[var(--gold)] font-bold">{docNumber}</span>
               )}
-              <span className="inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border border-[var(--border2)] bg-[var(--surface2)]">
+              <span
+                className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-bold border ${
+                  isVoidInvoiceStatus(status)
+                    ? 'bg-rose-900/40 text-rose-200 border-rose-700'
+                    : 'border-[var(--border2)] bg-[var(--surface2)]'
+                }`}
+              >
                 {(status || 'draft').toUpperCase()}
               </span>
               {sourceEstimateId && (
@@ -941,7 +1000,7 @@ export default function InvoiceFormClient() {
                 <option value="">— Select —</option>
                 {models.map((m) => (
                   <option key={m} value={m}>
-                    {m}
+                    {displayModelName(m)}
                   </option>
                 ))}
               </select>
@@ -1271,10 +1330,18 @@ export default function InvoiceFormClient() {
           </div>
         </section>
 
+        {voided && (
+          <div className="card p-4 mb-4 border border-rose-700 bg-rose-950/40">
+            <p className="font-bold">{VOIDED_INVOICE_MESSAGE}</p>
+            {storedVoidReason ? <p className="text-sm text-[var(--text3)] mt-1">{storedVoidReason}</p> : null}
+          </div>
+        )}
+
         <div className="flex flex-wrap gap-2 sticky bottom-4 z-10">
           <Link href="/invoices" className="btn btn-secondary min-w-[80px] text-center">
             Cancel
           </Link>
+          {!voided && (
           <button
             type="button"
             className="btn btn-secondary min-w-[100px]"
@@ -1283,6 +1350,7 @@ export default function InvoiceFormClient() {
           >
             {saving ? 'Saving…' : 'Save Draft'}
           </button>
+          )}
           <button
             type="button"
             className="btn btn-secondary min-w-[120px]"
@@ -1290,6 +1358,8 @@ export default function InvoiceFormClient() {
           >
             Preview / PDF
           </button>
+          {!voided && (
+          <>
           <button
             type="button"
             className="btn btn-primary min-w-[140px]"
@@ -1352,7 +1422,44 @@ export default function InvoiceFormClient() {
           >
             Mark paid
           </button>
+          {voidable && (
+            <button
+              type="button"
+              className="btn btn-secondary min-w-[120px]"
+              disabled={saving || emailing || voiding}
+              onClick={() => setVoidOpen(true)}
+            >
+              Void invoice
+            </button>
+          )}
+          </>
+          )}
         </div>
+        {voidOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4" onClick={() => setVoidOpen(false)}>
+            <div className="card w-full max-w-sm p-5 hover:transform-none" onClick={(e) => e.stopPropagation()}>
+              <h2 className="text-lg font-extrabold mb-1">Void invoice</h2>
+              <p className="text-xs text-[var(--text3)] mb-3">
+                This unpaid invoice will be voided. An open payment link is expired. No charge or refund is made.
+              </p>
+              <label className="text-xs text-[var(--text3)] font-bold">Reason (optional)</label>
+              <textarea
+                className="input mt-1 min-h-[80px]"
+                value={voidReason}
+                maxLength={500}
+                onChange={(e) => setVoidReason(e.target.value)}
+              />
+              <div className="flex gap-2 mt-4 justify-end">
+                <button type="button" className="btn btn-secondary" onClick={() => setVoidOpen(false)}>
+                  Cancel
+                </button>
+                <button type="button" className="btn btn-primary" disabled={voiding} onClick={() => submitVoid()}>
+                  {voiding ? 'Voiding…' : 'Void invoice'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
         <p className="text-[10px] text-[var(--text3)] mt-2">
           Finalize &amp; Email only sets status to <strong>sent</strong> after Resend accepts the
           message. Requires customer email + verified From domain (contact@medicalrepairnetwork.com).

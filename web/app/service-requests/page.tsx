@@ -8,6 +8,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { canBidMarketplace, isOwnerish, isPro, isServiceCompany } from '@/lib/roles';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL, OTHER_LASER } from '@/lib/laser-catalog';
+import { displayModelName } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { ShareButton } from '@/components/ShareButton';
 import { serviceRequestShareText } from '@/lib/share';
@@ -532,7 +533,7 @@ function ServiceRequestsInner() {
                         <select className="input" value={model} onChange={(e) => setModel(e.target.value)} disabled={!mfr}>
                           <option value="">Select model…</option>
                           {modelOptions.map((m) => (
-                            <option key={m} value={m}>{m}</option>
+                            <option key={m} value={m}>{displayModelName(m)}</option>
                           ))}
                           <option value={OTHER_MODEL}>Other / not listed…</option>
                         </select>

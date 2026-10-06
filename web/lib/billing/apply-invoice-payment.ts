@@ -2,6 +2,7 @@
  * Apply a Stripe Checkout payment (or a manual cash/check amount) onto a TSP invoice.
  * Idempotent on stripe session id. Does not invent amounts.
  */
+import { isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from './void-invoice.ts';
 
 export type InvoicePaymentRow = {
   id: string | number;
@@ -91,6 +92,9 @@ export function buildInvoicePaymentPatch(input: {
   sessionId?: string | null;
   now?: Date;
 }): InvoicePaymentPatch {
+  if (isVoidInvoiceStatus(input.invoice.status)) {
+    throw new Error(VOIDED_INVOICE_MESSAGE);
+  }
   const now = input.now || new Date();
   const total = money2(Number(input.invoice.total) || 0);
   const prior = existingPaidAmount(input.invoice);

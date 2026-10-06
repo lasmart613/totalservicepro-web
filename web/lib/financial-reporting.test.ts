@@ -213,7 +213,7 @@ test('figures come from invoice, purchase order, and estimate rows', () => {
 
   const collected = metric('cash_collected', report);
   assert.equal(collected.amount, 500);
-  assert.match(collected.note || '', /no amount_paid/);
+  assert.match(collected.note || '', /no recorded payment/);
 
   const outstanding = metric('outstanding_balance', report);
   assert.equal(outstanding.amount, 1300);
@@ -292,7 +292,7 @@ test('collected cash is unavailable when payment fields were not returned', () =
   assert.equal(metric('po_commitments', report).availability, 'unavailable');
   assert.equal(metric('estimate_pipeline', report).availability, 'unavailable');
   assert.equal(report.aging, null);
-  assert.match(report.agingReason || '', /due_date/);
+  assert.match(report.agingReason || '', /due date/);
 });
 
 test('a failed invoice read does not become a zero total', () => {

@@ -12,6 +12,7 @@ import { publicSiteOrigin, wrapCustomerFacingDocumentEmail } from '@/lib/custome
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 import { getCompanyTheme } from '@/lib/company-theme';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
+import { resolveNumberingTimeZone } from '@/lib/org-timezone';
 import {
   buildOwnedEstimateMessage,
   documentAccountLinks,
@@ -139,12 +140,14 @@ export async function POST(req: NextRequest) {
 
     const subject = ownedDocumentSubject('estimate', est.estimate_number, company.company_name);
     const moneyPrefs = callerOrgId != null ? await loadOrgMoneyPrefs(supabase, callerOrgId) : null;
+    const zone = await resolveNumberingTimeZone(supabase, callerOrgId, { allowBrowser: false });
     let html = buildOwnedEstimateMessage({
       row: est,
       company,
       theme,
       actionUrl: estimateActionUrl(actionToken),
       moneyPrefs,
+      timeZone: zone.timeZone,
     });
     html = ensureEstimateActionCtas(html, estimateActionUrl(actionToken));
     const origin = publicSiteOrigin(req);

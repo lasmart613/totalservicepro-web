@@ -35,7 +35,19 @@ export function FinancialReportingGate() {
         return;
       }
 
-      const res = await fetch(FINANCIAL_REPORTING_API, {
+      let tz = '';
+      try {
+        tz = Intl.DateTimeFormat().resolvedOptions().timeZone || '';
+      } catch {
+        tz = '';
+      }
+      if (tz) {
+        document.cookie = `rp-tz=${encodeURIComponent(tz)}; path=/; max-age=31536000; samesite=lax`;
+      }
+      const reportUrl = tz
+        ? `${FINANCIAL_REPORTING_API}?tz=${encodeURIComponent(tz)}`
+        : FINANCIAL_REPORTING_API;
+      const res = await fetch(reportUrl, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}` },
         cache: 'no-store',

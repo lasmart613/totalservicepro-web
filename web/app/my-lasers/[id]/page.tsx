@@ -7,6 +7,7 @@ import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { toast } from 'sonner';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
+import { displayModelName } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { loadServiceHistoryForLaser } from '@/lib/equipment-ensure';
 import { equipmentPhotoDisplayUrl } from '@/lib/org-scoped-read';
@@ -403,7 +404,7 @@ export default function LaserProfilePage() {
                 <select className="input" value={model} onChange={(e) => setModel(e.target.value)} disabled={!mfr}>
                   <option value="">Select model…</option>
                   {modelOptions.map((m) => (
-                    <option key={m} value={m}>{m}</option>
+                    <option key={m} value={m}>{displayModelName(m)}</option>
                   ))}
                   <option value={OTHER_MODEL}>Other / not listed…</option>
                 </select>

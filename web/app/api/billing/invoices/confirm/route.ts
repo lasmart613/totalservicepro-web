@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { retrieveCheckoutSession, StripeSubscriptionError } from '@/lib/billing/stripe-subscription';
 import { applyInvoiceCheckoutSession } from '@/lib/billing/persist-invoice-payment';
+import { VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
 
 export const dynamic = 'force-dynamic';
 
@@ -36,6 +37,12 @@ async function confirm(sessionId: string) {
       session,
     });
     if (!result.ok) {
+      if (result.reason === 'invoice_void') {
+        return NextResponse.json(
+          { ok: false, voided: true, error: VOIDED_INVOICE_MESSAGE },
+          { status: 409 }
+        );
+      }
       return NextResponse.json({ ok: false, error: result.reason }, { status: 409 });
     }
     return NextResponse.json({ ok: true, ...result.applied });
