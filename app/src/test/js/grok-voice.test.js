@@ -99,6 +99,35 @@ test('open voice command is narrow', () => {
     assert.equal(voice.isOpenCommand('what does fault 322 mean'), false);
 });
 
+test('online voice rewrites only assistant chat and speaks through the native bridge', () => {
+    const online = require('../../main/assets/online-voice.js');
+    assert.equal(online.isAssistantPath('/ai-assistant'), true);
+    assert.equal(online.isAssistantPath('/ai-assistant/'), true);
+    assert.equal(online.isAssistantPath('/manuals'), false);
+    assert.equal(online.isLiveHost('repairplanet.net'), true);
+    const chat = JSON.stringify({ action: 'chat', voiceMode: false, messages: [] });
+    const rewritten = JSON.parse(online.planVoiceChat(true, ASSISTANT, chat));
+    assert.equal(rewritten.voiceMode, true);
+    assert.equal(online.planVoiceChat(false, ASSISTANT, chat), null);
+    assert.equal(online.planVoiceChat(true, ASSISTANT, JSON.stringify({ action: 'usage' })), null);
+    assert.equal(online.planVoiceChat(true, TTS, chat), null);
+    assert.equal(
+        online.assistantReplyText({ choices: [{ message: { content: 'Check the pot.' } }] }),
+        'Check the pot.'
+    );
+
+    const src = fs.readFileSync(path.join(__dirname, '../../main/assets/online-voice.js'), 'utf8');
+    assert.match(src, /Android\.speakAnswer/);
+    assert.match(src, /assistant:voice-state/);
+    assert.match(src, /dataset\.assistantVoice/);
+    assert.match(src, /assistant:open-citation/);
+    assert.match(src, /TSP\.openCitation/);
+    assert.match(src, /interruptSpeech/);
+    assert.doesNotMatch(src, /new CustomEvent\('assistant:citation-open'/);
+    assert.doesNotMatch(src, /Android\.speak\(/);
+    assert.doesNotMatch(src, /pdf_viewer\.html/);
+});
+
 test('bundled assistant speaks through grok-tts and still talks on a 429', () => {
     const html = fs.readFileSync(path.join(__dirname, '../../main/assets/ai_assistant.html'), 'utf8');
     assert.match(html, /grok-voice\.js/);
@@ -125,11 +154,24 @@ test('bundled assistant speaks through grok-tts and still talks on a 429', () =>
         'utf8'
     );
     assert.match(shell, /TextToSpeech/);
+    assert.match(shell, /speakAnswer/);
+    assert.match(shell, /MediaPlayer/);
+    assert.match(shell, /injectOnlineVoice/);
     assert.match(shell, /assistant:citation-open/);
     assert.match(shell, /onCitationObserved/);
     assert.match(shell, /assistant:voice-state/);
     assert.doesNotMatch(shell, /Android\.openCitation/);
     assert.doesNotMatch(shell, /pdf_viewer\.html\?manual_id/);
+    const speech = fs.readFileSync(
+        path.join(__dirname, '../../main/java/com/photometrytools/GrokSpeech.java'),
+        'utf8'
+    );
+    assert.match(speech, /functions\/v1\/grok-tts/);
+    assert.match(speech, /Grok voice limit reached today/);
+    assert.match(speech, /Grok voice unavailable — using device voice/);
+    assert.match(speech, /usage_unavailable/);
+    assert.match(speech, /daily_limit_reached/);
+    assert.match(speech, /rate_limited/);
     const viewer = fs.readFileSync(path.join(__dirname, '../../main/assets/pdf_viewer.html'), 'utf8');
     assert.match(viewer, /Back to answer/);
     assert.match(viewer, /openedFromAssistant/);

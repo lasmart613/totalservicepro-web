@@ -9,6 +9,8 @@ import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.pdf.PdfDocument;
+import android.media.AudioAttributes;
+import android.media.MediaPlayer;
 import android.media.MediaScannerConnection;
 import android.net.ConnectivityManager;
 import android.net.NetworkInfo;
@@ -49,8 +51,13 @@ import androidx.core.content.ContextCompat;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
+import java.io.InputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Locale;
@@ -116,9 +123,14 @@ public class MainActivity extends AppCompatActivity {
     private TextToSpeech textToSpeech;
     private SpeechRecognizer speechRecognizer;
     private boolean ttsReady = false;
-    private String activeUtteranceId = null;
-    private boolean ttsCancelled = false;
+    private volatile boolean ttsCancelled = false;
+    private volatile String activeUtteranceId = null;
     private int ttsEpoch = 0;
+    private MediaPlayer grokPlayer;
+    private File grokAudioFile;
+    private volatile int speechGeneration = 0;
+    private volatile boolean answerSpeaking = false;
+    private String onlineVoiceScript;
     private int listenGen = 0;
     private boolean voiceCancelRequested = false;
     private boolean pendingVoiceStart = false;
@@ -350,21 +362,48 @@ public class MainActivity extends AppCompatActivity {
             }
         }
 
-        /** Device TextToSpeech fallback when grok-tts is off or unreachable. */
+        /**
+         * Device TextToSpeech only. The offline assistant calls this after
+         * grok-tts already failed. Do not call grok-tts again from here.
+         */
         @JavascriptInterface
         public void speak(String text) {
             runOnUiThread(() -> speakWithDeviceTts(text));
         }
 
+        /**
+         * Online assistant path. Plays grok-tts (or device TTS when that
+         * engine is selected) and signals assistant:voice-state around the
+         * whole playback, including a device fallback.
+         */
+        @JavascriptInterface
+        public void speakAnswer(String text, String voiceId, String engine, String accessToken) {
+            runOnUiThread(() -> startGrokAnswer(text, voiceId, engine, accessToken));
+        }
+
+        /**
+         * Stop current audio without reporting speaking false. The online page
+         * uses this when a new voice question starts so auto-open keeps waiting.
+         */
+        @JavascriptInterface
+        public void interruptSpeech() {
+            runOnUiThread(() -> {
+                speechGeneration++;
+                stopGrokPlayer();
+                stopDeviceTts(false);
+                answerSpeaking = false;
+            });
+        }
+
         @JavascriptInterface
         public void stopSpeaking() {
-            runOnUiThread(() -> stopDeviceTts());
+            runOnUiThread(() -> stopAnswer(true));
         }
 
         @JavascriptInterface
         public void startVoiceRecognition() {
             runOnUiThread(() -> {
-                stopDeviceTts();
+                stopAnswer(true);
                 if (ContextCompat.checkSelfPermission(MainActivity.this, Manifest.permission.RECORD_AUDIO)
                         != PackageManager.PERMISSION_GRANTED) {
                     pendingVoiceStart = true;
@@ -551,6 +590,7 @@ public class MainActivity extends AppCompatActivity {
                 updateBottomNavVisibilityAndSelection(url);
                 injectStoredSession(view);
                 injectCitationOpenBridge(view);
+                injectOnlineVoice(view, url);
             }
 
             @Override
@@ -932,6 +972,7 @@ public class MainActivity extends AppCompatActivity {
                     public void onDone(String utteranceId) {
                         if (ttsCancelled) return;
                         if (utteranceId != null && utteranceId.equals(activeUtteranceId)) {
+                            answerSpeaking = false;
                             signalAssistantVoice(false);
                             notifyVoiceJs("if(window.onDeviceTtsDone)window.onDeviceTtsDone();");
                         }
@@ -941,6 +982,7 @@ public class MainActivity extends AppCompatActivity {
                     public void onError(String utteranceId) {
                         if (ttsCancelled) return;
                         if (utteranceId != null && utteranceId.equals(activeUtteranceId)) {
+                            answerSpeaking = false;
                             signalAssistantVoice(false);
                             notifyDeviceTtsError(utteranceId);
                         }
@@ -950,6 +992,7 @@ public class MainActivity extends AppCompatActivity {
                     public void onError(String utteranceId, int errorCode) {
                         if (ttsCancelled) return;
                         if (utteranceId != null && utteranceId.equals(activeUtteranceId)) {
+                            answerSpeaking = false;
                             signalAssistantVoice(false);
                             notifyDeviceTtsError(utteranceId);
                         }
@@ -967,23 +1010,265 @@ public class MainActivity extends AppCompatActivity {
 
     /** Device reader used when Grok speech is turned off or the grok-tts call fails. */
     private void speakWithDeviceTts(String text) {
+        stopGrokPlayer();
         if (text == null || text.trim().isEmpty() || !ttsReady || textToSpeech == null) {
+            answerSpeaking = false;
+            signalAssistantVoice(false);
             notifyVoiceJs("if(window.onDeviceTtsError)window.onDeviceTtsError();");
             return;
         }
+        try { textToSpeech.stop(); } catch (Exception ignored) {}
         ttsCancelled = false;
+        answerSpeaking = true;
         String id = "tts-" + (++ttsEpoch);
         activeUtteranceId = id;
         signalAssistantVoice(true);
         textToSpeech.speak(text, TextToSpeech.QUEUE_FLUSH, null, id);
     }
 
-    private void stopDeviceTts() {
+    /**
+     * Online /ai-assistant playback. Speaking stays true across a failed
+     * grok-tts call into device TTS, and goes false when that playback ends,
+     * fails, or is barged in.
+     */
+    private void startGrokAnswer(String text, String voiceId, String engine, String accessToken) {
+        speechGeneration++;
+        final int gen = speechGeneration;
+        stopGrokPlayer();
+        stopDeviceTts(false);
+        final String spoken = GrokSpeech.clipSpeechText(text, GrokSpeech.MAX_CHARS);
+        if (spoken.isEmpty()) {
+            answerSpeaking = false;
+            signalAssistantVoice(false);
+            return;
+        }
+        answerSpeaking = true;
+        signalAssistantVoice(true);
+        if (GrokSpeech.isDeviceEngine(engine)) {
+            speakWithDeviceTts(spoken);
+            return;
+        }
+        final String token = (accessToken == null || accessToken.trim().isEmpty())
+                ? storedAccessToken()
+                : accessToken.trim();
+        new Thread(() -> requestGrokTts(spoken, voiceId, token, gen, false), "grok-tts").start();
+    }
+
+    private void requestGrokTts(String text, String voiceId, String token, int gen, boolean retried) {
+        if (gen != speechGeneration) return;
+        if (token == null || token.isEmpty()) {
+            runOnUiThread(() -> fallbackToDevice(text, gen, false));
+            return;
+        }
+        HttpURLConnection conn = null;
+        try {
+            org.json.JSONObject payload = new org.json.JSONObject();
+            payload.put("text", text);
+            payload.put("voice_id", GrokSpeech.normalizeVoiceId(voiceId));
+            payload.put("language", "en");
+            byte[] json = payload.toString().getBytes(StandardCharsets.UTF_8);
+            conn = (HttpURLConnection) new URL(GrokSpeech.TTS_URL).openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(60000);
+            conn.setRequestMethod("POST");
+            conn.setDoOutput(true);
+            conn.setRequestProperty("Authorization", "Bearer " + token);
+            conn.setRequestProperty("Content-Type", "application/json; charset=utf-8");
+            conn.setRequestProperty("Accept", "audio/mpeg, application/json");
+            try (java.io.OutputStream out = conn.getOutputStream()) {
+                out.write(json);
+            }
+            int status = conn.getResponseCode();
+            String contentType = conn.getContentType();
+            InputStream stream = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+            byte[] body = readLimited(stream, 8 * 1024 * 1024);
+            if (gen != speechGeneration) return;
+            String kind = GrokSpeech.classify(status, contentType, body);
+            Log.i(TAG, "grok-tts status=" + status + " kind=" + kind);
+            if ("audio".equals(kind)) {
+                runOnUiThread(() -> playGrokAudio(body, text, gen));
+                return;
+            }
+            if ("too_long".equals(kind) && !retried) {
+                int max = GrokSpeech.maxCharacters(body);
+                int limit = max > 0 ? Math.min(max, Math.max(1, text.length() - 1)) : Math.max(1, text.length() - 1);
+                String shorter = GrokSpeech.clipSpeechText(text, limit);
+                if (!shorter.isEmpty() && shorter.length() < text.length()) {
+                    runOnUiThread(() -> {
+                        if (gen == speechGeneration) {
+                            Toast.makeText(MainActivity.this, GrokSpeech.SHORTENED_NOTICE, Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                    requestGrokTts(shorter, voiceId, token, gen, true);
+                    return;
+                }
+            }
+            final boolean limit = "limited".equals(kind);
+            runOnUiThread(() -> fallbackToDevice(text, gen, limit));
+        } catch (Exception e) {
+            Log.w(TAG, "grok-tts request failed", e);
+            if (gen == speechGeneration) runOnUiThread(() -> fallbackToDevice(text, gen, false));
+        } finally {
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private void fallbackToDevice(String text, int gen, boolean limit) {
+        if (gen != speechGeneration) return;
+        Toast.makeText(
+                MainActivity.this,
+                limit ? GrokSpeech.LIMIT_NOTICE : GrokSpeech.FALLBACK_NOTICE,
+                Toast.LENGTH_LONG
+        ).show();
+        speakWithDeviceTts(text);
+    }
+
+    private void playGrokAudio(byte[] audio, String fallbackText, int gen) {
+        if (gen != speechGeneration) return;
+        File file = new File(getCacheDir(), "grok-tts-" + gen + ".mp3");
+        try {
+            try (FileOutputStream fos = new FileOutputStream(file)) {
+                fos.write(audio);
+            }
+            grokAudioFile = file;
+            MediaPlayer mp = new MediaPlayer();
+            grokPlayer = mp;
+            mp.setAudioAttributes(new AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                    .build());
+            mp.setDataSource(file.getAbsolutePath());
+            mp.setOnPreparedListener(player -> {
+                if (gen != speechGeneration || grokPlayer != player) {
+                    releasePlayer(player, file);
+                    return;
+                }
+                player.start();
+            });
+            mp.setOnCompletionListener(player -> finishGrokPlayback(player, file, gen));
+            mp.setOnErrorListener((player, what, extra) -> {
+                releasePlayer(player, file);
+                if (gen == speechGeneration) fallbackToDevice(fallbackText, gen, false);
+                return true;
+            });
+            mp.prepareAsync();
+        } catch (Exception e) {
+            Log.w(TAG, "grok-tts playback failed", e);
+            if (file.exists()) file.delete();
+            fallbackToDevice(fallbackText, gen, false);
+        }
+    }
+
+    private void finishGrokPlayback(MediaPlayer player, File file, int gen) {
+        releasePlayer(player, file);
+        if (gen != speechGeneration) return;
+        answerSpeaking = false;
+        signalAssistantVoice(false);
+    }
+
+    private void releasePlayer(MediaPlayer player, File file) {
+        try {
+            player.setOnCompletionListener(null);
+            player.setOnErrorListener(null);
+            player.release();
+        } catch (Exception ignored) {}
+        if (grokPlayer == player) grokPlayer = null;
+        if (file != null && file.exists()) file.delete();
+        if (grokAudioFile == file) grokAudioFile = null;
+    }
+
+    private void stopGrokPlayer() {
+        MediaPlayer player = grokPlayer;
+        File file = grokAudioFile;
+        grokPlayer = null;
+        grokAudioFile = null;
+        if (player != null) {
+            try {
+                player.setOnCompletionListener(null);
+                player.setOnErrorListener(null);
+                player.release();
+            } catch (Exception ignored) {}
+        }
+        if (file != null && file.exists()) file.delete();
+    }
+
+    /**
+     * User barge-in. Always reports speaking false so a hold that the page
+     * set before native playback started is released too.
+     */
+    private void stopAnswer(boolean signalIdle) {
+        speechGeneration++;
+        stopGrokPlayer();
+        stopDeviceTts(false);
+        answerSpeaking = false;
+        if (signalIdle) signalAssistantVoice(false);
+    }
+
+    private void stopDeviceTts(boolean signalIdle) {
         ttsCancelled = true;
         activeUtteranceId = null;
-        signalAssistantVoice(false);
         if (textToSpeech != null) {
             try { textToSpeech.stop(); } catch (Exception ignored) {}
+        }
+        if (signalIdle) {
+            answerSpeaking = false;
+            signalAssistantVoice(false);
+        }
+    }
+
+    private String storedAccessToken() {
+        if (storedSession == null || storedSession.isEmpty()) return "";
+        try {
+            org.json.JSONObject root = new org.json.JSONObject(storedSession);
+            org.json.JSONObject sess = root.has("currentSession")
+                    ? root.getJSONObject("currentSession")
+                    : root;
+            return sess.optString("access_token", "");
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private static byte[] readLimited(InputStream in, int max) throws java.io.IOException {
+        if (in == null) return new byte[0];
+        ByteArrayOutputStream out = new ByteArrayOutputStream();
+        byte[] buf = new byte[8192];
+        int total = 0;
+        int n;
+        while ((n = in.read(buf)) >= 0) {
+            total += n;
+            if (total > max) throw new java.io.IOException("grok-tts body too large");
+            out.write(buf, 0, n);
+        }
+        return out.toByteArray();
+    }
+
+    /**
+     * Live /ai-assistant has no voice loop. Inject the page hook that calls
+     * speakAnswer. Bundled ai_assistant.html already speaks on its own.
+     */
+    private void injectOnlineVoice(WebView view, String url) {
+        if (view == null || url == null) return;
+        if (!url.startsWith(PRODUCTION_ORIGIN) && !url.startsWith("https://www.repairplanet.net")) return;
+        if (onlineVoiceScript == null) {
+            String grok = assetText("grok-voice.js");
+            String online = assetText("online-voice.js");
+            if (grok.isEmpty() || online.isEmpty()) return;
+            onlineVoiceScript = grok + "\n" + online;
+        }
+        view.evaluateJavascript(onlineVoiceScript, null);
+    }
+
+    private String assetText(String name) {
+        try (InputStream in = getAssets().open(name);
+             ByteArrayOutputStream out = new ByteArrayOutputStream()) {
+            byte[] buf = new byte[4096];
+            int n;
+            while ((n = in.read(buf)) >= 0) out.write(buf, 0, n);
+            return out.toString(StandardCharsets.UTF_8.name());
+        } catch (Exception e) {
+            Log.w(TAG, "asset " + name, e);
+            return "";
         }
     }
 
@@ -1155,7 +1440,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onDestroy() {
-        stopDeviceTts();
+        stopAnswer(false);
         if (speechRecognizer != null) {
             try { speechRecognizer.destroy(); } catch (Exception ignored) {}
             speechRecognizer = null;
