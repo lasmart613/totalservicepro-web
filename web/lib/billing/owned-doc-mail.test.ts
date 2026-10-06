@@ -3,8 +3,10 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { translateApp } from '../i18n/translate-app.ts';
 import { ensureEstimateActionCtas } from './doc-html.ts';
 import {
+  buildOwnedEstimateEmailText,
   buildOwnedEstimateMessage,
   buildOwnedEstimatePlainText,
   buildOwnedInvoiceMessage,
@@ -289,6 +291,67 @@ test('server-built estimate and report ignore a stored HTML blob', () => {
   );
   assert.match(report, /SR-4/);
   assert.doesNotMatch(report, /PWNED|attacker body/);
+});
+
+test('Arabic and German estimate plain text drops leftover English labels', () => {
+  const english = [
+    'Diagnostic / Troubleshooting',
+    'Create a free account',
+    'Sign in',
+    'Customer:',
+    'Parts:',
+    'Part ×',
+    'Services:',
+    'Diagnostic Fee:',
+    'Subtotal:',
+    'Grand total:',
+    'Not specified',
+  ];
+  for (const locale of ['ar', 'de'] as const) {
+    const text = buildOwnedEstimateEmailText({
+      row: {
+        customer_name: 'Clinic',
+        estimate_number: 'EST-3',
+        total: 100,
+        services: ['Diagnostic'],
+        created_at: '2026-10-01T12:00:00.000Z',
+        estimate_data: {
+          laborHours: 1,
+          labor: 40,
+          pricing: { laborRate: 40, diagFee: 50 },
+          subtotal: 100,
+          tax: 0,
+          part_lines: [
+            { part_number: 'LT-1', description: 'Laser tip', qty: 1, unit_price: 10, ext: 10 },
+            { qty: 1, unit_price: 5, ext: 5 },
+          ],
+          partsTotal: 15,
+        },
+      },
+      company: { company_name: 'Owned Shop' },
+      theme: null,
+      actionUrl: 'https://repairplanet.net/e/action-token',
+      moneyPrefs: { currencyCode: 'USD', numberFormat: 'auto' },
+      locale,
+      signupUrl: 'https://repairplanet.net/signup/owner',
+      loginUrl: 'https://repairplanet.net/login',
+    });
+    for (const phrase of english) {
+      assert.equal(text.includes(phrase), false, `${locale} still has ${phrase}\n${text}`);
+    }
+    for (const key of [
+      'Diagnostic / Troubleshooting',
+      'Create a free account',
+      'Sign in',
+      'Customer',
+      'Parts',
+      'Part',
+    ] as const) {
+      const translated = translateApp(locale, key);
+      assert.notEqual(translated, key, key);
+      assert.equal(text.includes(translated), true, `${locale} missing ${key} → ${translated}\n${text}`);
+    }
+  }
 });
 
 test('document subjects use the owning shop name', () => {

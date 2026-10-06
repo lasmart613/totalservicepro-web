@@ -1887,6 +1887,16 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'Diária: {days} dia(s) a {rate}/dia = {amount}',
     'بدل يومي: {days} يوم × {rate}/يوم = {amount}',
   ),
+  'Part': row(
+    'قطعه',
+    'Pieza',
+    'Pièce',
+    'חלק',
+    'Ricambio',
+    'Teil',
+    'Peça',
+    'قطعة',
+  ),
   'Parts Subtotal': row(
     'جمع قطعات',
     'Subtotal de piezas',
