@@ -230,3 +230,24 @@ test('product-issues API emails the team inbox and one reporter confirmation', (
   assert.match(control, /PRODUCT_ISSUE_LATER_MESSAGE/);
   assert.match(control, /console\.error\('\[product-issues\] send failed'/);
 });
+
+test('product issue SELECT is the reporter only; God lists use the service role', () => {
+  const sql = readFileSync(
+    join(here, '../supabase/migrations/20261006_000200_product_issue_reports.sql'),
+    'utf8'
+  );
+  assert.match(sql, /DROP POLICY IF EXISTS product_issue_reports_select_own_or_admin/);
+  assert.match(sql, /DROP POLICY IF EXISTS product_issue_reports_select_own/);
+  assert.match(
+    sql,
+    /CREATE POLICY product_issue_reports_select_own[\s\S]*FOR SELECT[\s\S]*TO authenticated[\s\S]*USING \(reporter_user_id = auth\.uid\(\)\);/
+  );
+  assert.doesNotMatch(sql, /user_profiles/);
+  assert.doesNotMatch(sql, /company_admin/);
+  const list = readFileSync(join(here, '../app/api/god/tables/[table]/route.ts'), 'utf8');
+  const detail = readFileSync(join(here, '../app/api/god/tables/[table]/[id]/route.ts'), 'utf8');
+  assert.match(list, /requireGodCaller/);
+  assert.match(detail, /requireGodCaller/);
+  assert.match(list, /listGodRows\(getSupabaseAdmin\(\)/);
+  assert.match(detail, /getGodRow\(getSupabaseAdmin\(\)/);
+});

@@ -43,22 +43,16 @@ CREATE POLICY product_issue_reports_insert_anon
   TO anon
   WITH CHECK (reporter_user_id IS NULL);
 
--- Reporter reads their own rows. Admins follow web/lib/roles.ts isAdmin
--- (admin ≡ company_admin on user_profiles.role). God reads use the service role.
+-- A signed-in reporter reads only their own rows.
+-- Platform admins read every row through the service role
+-- (God table APIs behind requireGodCaller).
 DROP POLICY IF EXISTS product_issue_reports_select_own_or_admin ON public.product_issue_reports;
-CREATE POLICY product_issue_reports_select_own_or_admin
+DROP POLICY IF EXISTS product_issue_reports_select_own ON public.product_issue_reports;
+CREATE POLICY product_issue_reports_select_own
   ON public.product_issue_reports
   FOR SELECT
   TO authenticated
-  USING (
-    reporter_user_id = auth.uid()
-    OR EXISTS (
-      SELECT 1
-      FROM public.user_profiles p
-      WHERE p.id = auth.uid()
-        AND lower(coalesce(p.role, '')) IN ('admin', 'company_admin')
-    )
-  );
+  USING (reporter_user_id = auth.uid());
 
 GRANT SELECT, INSERT ON TABLE public.product_issue_reports TO authenticated;
 GRANT INSERT ON TABLE public.product_issue_reports TO anon;
