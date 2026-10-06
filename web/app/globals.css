@@ -831,7 +831,7 @@ html.landing-mode main {
   z-index: 3;
 }
 
-/* Language code on a spine. Desktop stays a small corner mark. Mobile is a 44px tap target. */
+/* Language code on a spine. Desktop is a small corner mark that may sit slightly outside. */
 .manual-language-badge {
   position: absolute;
   right: -4px;
@@ -868,13 +868,31 @@ html.landing-mode main {
 }
 
 @media (max-width: 767px) {
+  /* Keep the code inside the spine's bottom padding so it cannot cover the title
+     or reach the next book. It is not a control. */
+  .book:has(.manual-language-badge) .book-spine {
+    padding-bottom: 28px;
+  }
+  .book:has(.manual-language-badge) .book-title,
+  .book:has(.manual-language-badge) .book-spine > .relative {
+    max-height: calc(100% - 4px);
+  }
   .manual-language-badge {
-    right: -10px;
-    bottom: -8px;
-    min-width: 44px;
-    min-height: 44px;
-    padding: 0 8px;
-    font-size: 14px;
+    right: 2px;
+    bottom: 2px;
+    left: auto;
+    top: auto;
+    z-index: 2;
+    min-width: 0;
+    width: auto;
+    max-width: calc(100% - 4px);
+    height: 22px;
+    min-height: 22px;
+    max-height: 22px;
+    padding: 0 4px;
+    font-size: 11px;
+    line-height: 22px;
+    pointer-events: none;
   }
 
   .manual-language-chip {

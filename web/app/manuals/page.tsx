@@ -43,6 +43,7 @@ import {
   filterManualLibrary,
   fetchManualLibraryRows,
   manufacturerShelves,
+  manualLanguageOptionsForView,
   manualLibraryFiltersActive,
   manualLibrarySearchParams,
   parseManualLibrarySearchParams,
@@ -53,7 +54,6 @@ import {
 import {
   ALL_MANUAL_LANGUAGES,
   manualLanguageBadge,
-  manualLanguageFilterOptions,
   resolveManualLanguage,
 } from '@/lib/manual-language';
 
@@ -663,8 +663,8 @@ export default function ManualsLibrary() {
     [manuals, library]
   );
   const languageOptions = useMemo(
-    () => manualLanguageFilterOptions(manuals.filter((m) => manualLibraryShelf(m) === library)),
-    [manuals, library]
+    () => manualLanguageOptionsForView(sourceManuals, { room, library }),
+    [sourceManuals, room, library]
   );
   useEffect(() => {
     if (loading || !selectedLanguage || selectedLanguage === ALL_MANUAL_LANGUAGES) return;

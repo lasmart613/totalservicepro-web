@@ -20,8 +20,10 @@ import {
 } from './equipment-types.ts';
 import {
   ALL_MANUAL_LANGUAGES,
+  manualLanguageFilterOptions,
   manualQueryLanguageMatch,
   resolveManualLanguage,
+  type ManualLanguageOption,
 } from './manual-language.ts';
 import { normalizeManualSearchText } from './manual-search-text.ts';
 
@@ -215,6 +217,34 @@ export function groupManualsByBrand(rows: ManualLibraryRow[]): Record<string, Ma
   const groups: Record<string, ManualLibraryRow[]> = {};
   for (const shelf of manufacturerShelves(rows)) groups[shelf.brand] = shelf.manuals;
   return groups;
+}
+
+/**
+ * Languages that actually appear on this room + shelf.
+ * Room "all" keeps every language on the shelf. Counts use the same
+ * effective language as the spine badge, including a trailing bracket's last word.
+ * "All languages" is always present.
+ */
+export function manualLanguageOptionsForView(
+  rows: ManualLibraryRow[],
+  scope: { room?: ManualLibraryRoom | null; library?: ManualLibraryShelf | null } = {}
+): ManualLanguageOption[] {
+  const library: ManualLibraryShelf = scope.library === 'operators' ? 'operators' : 'service';
+  const room = scope.room && scope.room !== ALL_MANUAL_ROOMS ? scope.room : null;
+  const visible = rows.filter((row) => {
+    if (manualLibraryShelf(row) !== library) return false;
+    if (!room) return true;
+    return (
+      inferEquipmentType({
+        equipment_type: row.equipment_type,
+        title: row.title,
+        brand: row.brand,
+        model: row.model,
+        storage_path: row.storage_path,
+      }) === room
+    );
+  });
+  return manualLanguageFilterOptions(visible);
 }
 
 export function manualLibraryFiltersActive(filters: ManualLibraryFilters): boolean {
