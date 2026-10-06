@@ -88,13 +88,25 @@ type SignedUrlsResult = {
   error: { message?: string } | null;
 };
 
+/**
+ * Matches @supabase/storage-js createSignedUrl(s). Return values are read as
+ * { data, error }; the SDK's discriminated union is not assigned here.
+ */
 type BucketSigner = {
-  createSignedUrl: (path: string, expiresIn: number, options?: { transform?: { width: number; resize?: 'cover' | 'contain' } }) => Promise<SignedUrlResult>;
+  createSignedUrl: (
+    path: string,
+    expiresIn: number,
+    options?: {
+      download?: string | boolean;
+      transform?: { width?: number; height?: number; resize?: 'cover' | 'contain' | 'fill'; quality?: number };
+      cacheNonce?: string;
+    }
+  ) => Promise<SignedUrlResult | { data: { signedUrl: string } | null; error: { message: string } | null }>;
   createSignedUrls?: (
     paths: string[],
     expiresIn: number,
-    options?: { transform?: { width: number; resize?: 'cover' | 'contain' } }
-  ) => Promise<SignedUrlsResult>;
+    options?: { download?: string | boolean; cacheNonce?: string }
+  ) => Promise<SignedUrlsResult | { data: Array<{ path: string | null; signedUrl: string | null; error: string | null }> | null; error: { message: string } | null }>;
 };
 
 type SignedStorage = {
