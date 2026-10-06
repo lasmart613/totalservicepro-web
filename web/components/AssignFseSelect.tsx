@@ -1,5 +1,6 @@
 'use client';
 
+import { useSiteLocale } from '@/lib/fa/locale';
 import { roleLabel } from '@/lib/labels';
 import type { TicketAssignee } from '@/lib/ticket-assignees';
 
@@ -18,6 +19,7 @@ export function AssignFseSelect({
   selfName?: string;
   className?: string;
 }) {
+  const locale = useSiteLocale();
   return (
     <select
       className={className}
@@ -35,7 +37,7 @@ export function AssignFseSelect({
         .filter((a) => a.id !== userId)
         .map((a) => (
           <option key={a.id} value={a.id}>
-            {a.name} · {roleLabel(a.role)}
+            {a.name} · {roleLabel(a.role, locale)}
           </option>
         ))}
     </select>

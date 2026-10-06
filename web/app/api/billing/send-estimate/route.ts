@@ -5,9 +5,10 @@ import { ensureEstimateActionCtas } from '@/lib/billing/doc-html';
 import {
   generateEstimateActionToken,
   persistEstimateActionToken,
+  persistEstimateDocumentLocale,
   readExistingActionToken,
 } from '@/lib/billing/estimate-action';
-import { estimateActionUrl, estimateCustomerPath } from '@/lib/share';
+import { estimateActionUrl, estimateCustomerPath, stampLangOnEstimateLinks } from '@/lib/share';
 import { publicSiteOrigin, wrapCustomerFacingDocumentEmail } from '@/lib/customer-invite';
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 import { getCompanyTheme } from '@/lib/company-theme';
@@ -168,7 +169,7 @@ export async function POST(req: NextRequest) {
     const subject = ownedDocumentSubject('estimate', est.estimate_number, company.company_name, request.locale);
     const moneyPrefs = callerOrgId != null ? await loadOrgMoneyPrefs(supabase, callerOrgId) : null;
     const zone = await resolveNumberingTimeZone(supabase, callerOrgId, { allowBrowser: false });
-    const actionUrl = estimateActionUrl(actionToken);
+    const actionUrl = estimateActionUrl(actionToken, { lang: request.locale });
     const mailInput = {
       row: est,
       company,
@@ -185,21 +186,27 @@ export async function POST(req: NextRequest) {
     );
     const origin = publicSiteOrigin(req);
     const { signupUrl, loginUrl } = documentAccountLinks(origin, estimateCustomerPath(estimateId));
-    const text = [
-      buildOwnedEstimatePlainText(mailInput),
-      '',
-      `Create a free account: ${signupUrl}`,
-      `Sign in: ${loginUrl}`,
-    ].join('\n');
-    const wrapped = wrapCustomerFacingDocumentEmail({
-      subject,
-      documentHtml: html,
-      signupUrl,
-      loginUrl,
-      companyName: String(est.customer_name || '').trim(),
-      theme,
-      locale: request.locale,
-    });
+    const text = stampLangOnEstimateLinks(
+      [
+        buildOwnedEstimatePlainText(mailInput),
+        '',
+        `Create a free account: ${signupUrl}`,
+        `Sign in: ${loginUrl}`,
+      ].join('\n'),
+      request.locale
+    );
+    const mailedHtml = stampLangOnEstimateLinks(
+      wrapCustomerFacingDocumentEmail({
+        subject,
+        documentHtml: html,
+        signupUrl,
+        loginUrl,
+        companyName: String(est.customer_name || '').trim(),
+        theme,
+        locale: request.locale,
+      }),
+      request.locale
+    );
 
     const resendKey = process.env.RESEND_API_KEY;
     const from =
@@ -235,7 +242,7 @@ export async function POST(req: NextRequest) {
               from,
               to: recipient.email,
               subject,
-              html: wrapped,
+              html: mailedHtml,
               text,
               replyTo: company.email,
             })
@@ -257,6 +264,14 @@ export async function POST(req: NextRequest) {
 
     if (!delivery.ok) {
       return respond({ ok: false, emailSent: false, error: delivery.error }, 502, [recipient.email]);
+    }
+
+    if (delivery.emailed) {
+      try {
+        await persistEstimateDocumentLocale(writer, estimateId, request.locale);
+      } catch (e) {
+        console.warn('could not stamp estimate document locale', e);
+      }
     }
 
     return respond(

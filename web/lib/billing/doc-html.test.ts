@@ -24,6 +24,19 @@ test('estimate email CTAs are Approve / Reject / Modify on tokenized links', () 
   assert.match(html, /\?action=modify/);
   assert.doesNotMatch(html, /Sign in with your clinic account/);
   assert.doesNotMatch(html, /Request Changes/);
+  const localized = `${TOKEN_URL}?lang=ar`;
+  const arHtml = buildEstimateActionCtasHtml(localized, 'banner', 'ar');
+  assert.match(arHtml, /action=approve&amp;lang=ar/);
+  assert.match(arHtml, /action=reject&amp;lang=ar/);
+  assert.match(arHtml, /action=modify&amp;lang=ar/);
+  const plain = buildEstimatePlainText({
+    company: { company_name: 'QA' },
+    customer: { name: 'Clinic' },
+    estNumber: 'E-1',
+    actionUrl: localized,
+    locale: 'ar',
+  } as any);
+  assert.match(plain, /action=approve&lang=ar/);
 });
 
 test('ensureEstimateActionCtas puts three CTAs at the top and bottom', () => {

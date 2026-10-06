@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { Calendar as CalendarIcon, ChevronLeft, ChevronRight, Plus } from 'lucide-react';
 import { canSeeAllShopTickets, isAdmin, isFieldEngineer, isPro } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
-import { useT } from '@/lib/fa/locale';
+import { useSiteLocale, useT } from '@/lib/fa/locale';
 import { generateDocNumber } from '@/lib/billing/doc-numbers';
 import { orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
 import { ticketDateYmd, toLocalYmd } from '@/lib/tickets';
@@ -136,6 +136,7 @@ const EMPTY_FORM = (presetDate?: string): TicketForm => ({
 
 export default function ServiceSchedule() {
   const t = useT();
+  const locale = useSiteLocale();
   const { format, locale } = useFormatDate();
   const [view, setView] = useState<'month' | 'week' | 'day' | 'agenda'>('month');
   // Keep full date so Day view and month→day click land on the correct day
@@ -840,7 +841,7 @@ export default function ServiceSchedule() {
               {datedThisMonth} dated this month
               {' · '}
               {unscheduledCalls.length} unscheduled
-              {userRole ? ` · ${t(roleLabel(userRole))}` : ''}
+              {userRole ? ` · ${roleLabel(userRole, locale)}` : ''}
               {fseOnlyView ? ' · your assignments only' : ' · full shop'}
               {!canCreate && userId ? ' · read-only' : ''}
             </span>

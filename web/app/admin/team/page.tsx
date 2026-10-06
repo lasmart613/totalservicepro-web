@@ -1,6 +1,6 @@
 'use client';
 import { useFormatDate } from '@/lib/use-format-date';
-import { useT } from '@/lib/fa/locale';
+import { useSiteLocale, useT } from '@/lib/fa/locale';
 
 import React, { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
@@ -23,6 +23,7 @@ const ROLES = [
 
 export default function TeamManagement() {
   const t = useT();
+  const locale = useSiteLocale();
   const { format } = useFormatDate();
   const [teamMembers, setTeamMembers] = useState<any[]>([]);
   const [pendingInvites, setPendingInvites] = useState<any[]>([]);
@@ -340,7 +341,7 @@ export default function TeamManagement() {
             >
               {ROLES.map((role) => (
                 <option key={role} value={role}>
-                  {roleLabel(role)}
+                  {roleLabel(role, locale)}
                 </option>
               ))}
             </select>
@@ -412,7 +413,7 @@ export default function TeamManagement() {
                       {[inv.first_name, inv.last_name].filter(Boolean).join(' ') || '—'}
                     </td>
                     <td className="py-3 px-4 text-sm">{inv.email}</td>
-                    <td className="py-3 px-4 capitalize text-sm">{inv.role || 'fse'}</td>
+                    <td className="py-3 px-4 text-sm">{roleLabel(inv.role || 'fse', locale)}</td>
                     <td className="py-3 px-4 text-sm text-[var(--text3)]">
                       {inv.created_at ? format(inv.created_at) : '—'}
                     </td>
@@ -468,7 +469,7 @@ export default function TeamManagement() {
                     <td className="py-3 px-4 text-sm">{member.email}</td>
                     <td className="py-3 px-4">
                       <span className="px-2 py-1 text-xs rounded-full bg-[var(--surface3)]">
-                        {roleLabel(member.role)}
+                        {roleLabel(member.role, locale)}
                       </span>
                     </td>
                     <td className="py-3 px-4 text-sm text-[var(--text3)]">

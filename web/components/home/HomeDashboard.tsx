@@ -27,11 +27,12 @@ import {
 } from '@/lib/tickets';
 import { isEstimateAwaitingCustomerAction } from '@/lib/billing/save-helpers';
 import { TicketAddressLink } from '@/components/AddressLink';
-import { useT } from '@/lib/fa/locale';
+import { useSiteLocale, useT } from '@/lib/fa/locale';
 import { DEFAULT_ORG_TIMEZONE, isoDateInTimeZone, resolveNumberingTimeZone } from '@/lib/org-timezone';
 
 export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
   const t = useT();
+  const locale = useSiteLocale();
   const router = useRouter();
   const [user, setUser] = useState<any>(null);
   const [profile, setProfile] = useState<any>(null);
@@ -495,7 +496,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
               {t('Welcome back,')} {greetName}!
             </h1>
             <p className="text-[var(--text3)]">
-              {t('Role:')} {t(roleLabel(role))}
+              {t('Role:')} {roleLabel(role, locale)}
               {displayOrgType ? <span> · {t('Org:')} {t(orgTypeLabel(displayOrgType))}</span> : null}
             </p>
           </div>

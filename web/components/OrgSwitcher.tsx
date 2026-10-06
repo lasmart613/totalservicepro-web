@@ -4,7 +4,7 @@ import React, { useEffect, useState } from 'react';
 import { Building2, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import { roleLabel } from '@/lib/labels';
-import { useT } from '@/lib/fa/locale';
+import { useSiteLocale, useT } from '@/lib/fa/locale';
 import {
   acceptTeamInvite,
   fetchMemberships,
@@ -22,6 +22,7 @@ export function OrgSwitcher({
   variant?: 'chip' | 'menu';
 }) {
   const t = useT();
+  const locale = useSiteLocale();
   const [memberships, setMemberships] = useState<OrgMembership[]>([]);
   const [pending, setPending] = useState<PendingOrgInvite[]>([]);
   const [open, setOpen] = useState(false);
@@ -69,7 +70,7 @@ export function OrgSwitcher({
       toast.success(
         leave
           ? `Joined ${invite.name} and left the previous shop. Your login is unchanged.`
-          : `Added ${invite.name} as ${roleLabel(invite.role)}. Home shop unchanged.`
+          : `Added ${invite.name} as ${roleLabel(invite.role, locale)}. Home shop unchanged.`
       );
       window.location.reload();
     } catch (e: any) {
@@ -99,7 +100,7 @@ export function OrgSwitcher({
             >
               <div className="font-semibold truncate">{m.name}</div>
               <div className="text-[11px] text-[var(--text3)]">
-                {t(roleLabel(m.role))}
+                {roleLabel(m.role, locale)}
                 {m.isHome ? ` · ${t('Home shop')}` : ''}
                 {m.isActive ? ` · ${t('Active')}` : ''}
               </div>
@@ -112,7 +113,7 @@ export function OrgSwitcher({
                 <div key={inv.id} className="rounded border border-[var(--border)] p-2">
                   <div className="font-semibold">{inv.name}</div>
                   <div className="text-[11px] text-[var(--text3)] mb-2">
-                    {t(roleLabel(inv.role))}
+                    {roleLabel(inv.role, locale)}
                   </div>
                   <div className="flex flex-wrap gap-1.5">
                     <button
@@ -169,6 +170,7 @@ export function OrgSwitcher({
 
 export function MembershipsSettings() {
   const t = useT();
+  const locale = useSiteLocale();
   const [memberships, setMemberships] = useState<OrgMembership[]>([]);
   const [pending, setPending] = useState<PendingOrgInvite[]>([]);
   const [busy, setBusy] = useState(false);
@@ -231,7 +233,7 @@ export function MembershipsSettings() {
             <div>
               <div className="font-medium">{m.name}</div>
               <div className="text-[11px] text-[var(--text3)]">
-                {t(roleLabel(m.role))}
+                {roleLabel(m.role, locale)}
                 {m.isHome ? ` · ${t('Home shop')}` : ''}
                 {m.isActive ? ` · ${t('Active')}` : ''}
               </div>
@@ -270,7 +272,7 @@ export function MembershipsSettings() {
           {pending.map((inv) => (
             <div key={inv.id} className="rounded border border-[var(--gold)] px-3 py-2">
               <div className="font-medium">{inv.name}</div>
-              <div className="text-[11px] text-[var(--text3)] mb-2">{t(roleLabel(inv.role))}</div>
+              <div className="text-[11px] text-[var(--text3)] mb-2">{roleLabel(inv.role, locale)}</div>
               <button
                 type="button"
                 className="btn btn-primary text-[11px] px-2 py-1"

@@ -28,3 +28,29 @@ export function storedOrgLanguage(estimateData: unknown): string | null {
   }
   return null;
 }
+
+const SITE_LANGS = new Set(['en', 'de', 'es', 'fr', 'it', 'pt', 'ar', 'he', 'fa']);
+
+/** A site language id safe to put on a customer link. Unknown tags are dropped. English is kept. */
+export function customerLinkLang(raw: unknown): string | null {
+  if (typeof raw !== 'string') return null;
+  const text = raw.trim().toLowerCase().replace(/_/g, '-');
+  if (!text) return null;
+  if (text === 'en' || text.startsWith('en-')) return 'en';
+  if (text === 'pt' || text === 'pt-br') return 'pt';
+  const id = text.split('-')[0];
+  return SITE_LANGS.has(id) ? id : null;
+}
+
+/**
+ * Language stamped on the estimate when it was sent.
+ * The column wins. Older rows fall through to a language saved on estimate_data.
+ */
+export function estimateDocumentLocale(row: {
+  document_locale?: unknown;
+  estimate_data?: unknown;
+} | null | undefined): string | null {
+  const column = typeof row?.document_locale === 'string' ? row.document_locale.trim() : '';
+  if (column) return column;
+  return storedOrgLanguage(row?.estimate_data);
+}

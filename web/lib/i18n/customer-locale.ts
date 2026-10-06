@@ -7,7 +7,7 @@
 import type { PublicLocale } from './locales.ts';
 import { resolvePublicLocale } from './translate-app.ts';
 
-export { storedOrgLanguage } from './stored-org-language.ts';
+export { estimateDocumentLocale, storedOrgLanguage } from './stored-org-language.ts';
 
 /** A known site language, including explicit English. Unknown tags are skipped. */
 export function explicitPublicLocale(raw: string | null | undefined): PublicLocale | null {

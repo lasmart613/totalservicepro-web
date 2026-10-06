@@ -7,6 +7,7 @@ import { appStrings, APP_STRING_KEYS } from './app-copy.ts';
 import { FA_COPY } from '../fa/copy.ts';
 import { formatLocaleDate } from './format-date.ts';
 import { PUBLIC_LOCALES, type PublicLocale } from './locales.ts';
+import { roleLabel } from '../labels.ts';
 import { applyDocumentLocale, documentLocaleMeta, parseSiteLanguage } from './preference.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -244,6 +245,14 @@ test('QA leftover labels exist in German and Arabic', () => {
     'View profile →',
     'No parts suppliers found',
     'Choose a parts supplier ({count} shown)…',
+    'marked accepted',
+    'waiting',
+    'Edit',
+    'Customer view',
+    'Staff',
+    'Company Admin',
+    'Administrator',
+    'Dispatcher',
   ];
   for (const key of keys) {
     assert.ok(APP_STRING_KEYS.includes(key), key);
@@ -263,6 +272,19 @@ test('QA leftover labels exist in German and Arabic', () => {
   }
   assert.equal(appStrings('de').Travel, 'Anreise');
   assert.match(appStrings('ar').Travel, /[\u0600-\u06FF]/);
+  assert.equal(roleLabel('company_admin'), 'Company Admin');
+  assert.equal(roleLabel('admin', 'en'), 'Administrator');
+  assert.equal(roleLabel('company_admin', 'de'), appStrings('de')['Company Admin']);
+  assert.equal(roleLabel('staff', 'ar'), appStrings('ar').Staff);
+  assert.notEqual(roleLabel('dispatcher', 'de'), 'Dispatcher');
+  assert.match(read('app/company/page.tsx'), /t\('marked accepted'\)/);
+  assert.match(read('app/company/page.tsx'), /t\('waiting'\)/);
+  assert.match(read('app/estimates/page.tsx'), /t\('Edit'\)/);
+  assert.match(read('app/estimates/page.tsx'), /t\('Customer view'\)/);
+  assert.match(read('app/invoices/new/InvoiceFormClient.tsx'), /t\('Mark paid'\)/);
+  assert.match(read('app/admin/team/page.tsx'), /roleLabel\(member\.role, locale\)/);
+  assert.match(read('app/api/billing/send-estimate/route.ts'), /persistEstimateDocumentLocale/);
+  assert.match(read('app/api/billing/send-estimate/route.ts'), /lang: request\.locale/);
 });
 
 test('every t() literal exists in the signed-in or public dictionary', () => {

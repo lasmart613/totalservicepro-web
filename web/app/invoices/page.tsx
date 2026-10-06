@@ -479,7 +479,7 @@ export default function InvoicesListPage() {
                           )
                         }
                       >
-                        Mark paid
+                        {t('Mark paid')}
                       </button>
                       {(() => {
                         const split = resolveInvoiceCollectable({

@@ -20,6 +20,7 @@ import { localeToBcp47, translateApp, translateAppFill, withDocDirection } from 
 import { displayModelName, displayModelText } from '../model-display.ts';
 import { DEFAULT_ORG_TIMEZONE, formatDateInTimeZone } from '../org-timezone.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
+import { estimateEmailActionUrl } from '../share.ts';
 
 function docT(locale: string | null | undefined, text: string): string {
   return translateApp(locale, text);
@@ -85,10 +86,7 @@ function money(
 }
 
 function estimateEmailActionHref(actionUrl: string, action: 'approve' | 'reject' | 'modify'): string {
-  const raw = String(actionUrl || '').trim();
-  if (!raw) return '';
-  const base = raw.split('#')[0].split('?')[0];
-  return `${base}?action=${action}`;
+  return estimateEmailActionUrl(actionUrl, action);
 }
 
 function estimateActionButtonCell(href: string, bg: string, color: string, label: string): string {

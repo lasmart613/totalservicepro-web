@@ -1,5 +1,5 @@
 'use client';
-import { useT } from '@/lib/fa/locale';
+import { useSiteLocale, useT } from '@/lib/fa/locale';
 
 import React, { useCallback, useEffect, useState } from 'react';
 import Link from 'next/link';
@@ -32,6 +32,7 @@ export function TestEquipmentRoster(props: {
 }) {
   const supabase = getSupabaseClient();
   const t = useT();
+  const locale = useSiteLocale();
   const [rows, setRows] = useState<TestEquipmentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [note, setNote] = useState<string | null>(null);
@@ -198,7 +199,7 @@ export function TestEquipmentRoster(props: {
               {assignOptions.map((m) => (
                 <option key={m.id} value={m.id}>
                   {m.name}
-                  {m.role ? ` · ${roleLabel(m.role)}` : ''}
+                  {m.role ? ` · ${roleLabel(m.role, locale)}` : ''}
                 </option>
               ))}
             </select>
@@ -267,7 +268,7 @@ export function TestEquipmentRoster(props: {
                         {assignOptions.map((m) => (
                           <option key={m.id} value={m.id}>
                             {m.name}
-                            {m.role ? ` · ${roleLabel(m.role)}` : ''}
+                            {m.role ? ` · ${roleLabel(m.role, locale)}` : ''}
                           </option>
                         ))}
                       </select>

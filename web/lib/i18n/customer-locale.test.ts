@@ -7,6 +7,7 @@ import { appStrings } from './app-copy.ts';
 import {
   explicitPublicLocale,
   localeFromAcceptLanguage,
+  estimateDocumentLocale,
   resolveCustomerPageLocale,
   storedOrgLanguage,
 } from './customer-locale.ts';
@@ -54,6 +55,28 @@ test('stored org language is read from the estimate payload only', () => {
   assert.equal(storedOrgLanguage('{"site_language":"fa"}'), 'fa');
 });
 
+test('document_locale wins, then estimate_data, then nothing', () => {
+  assert.equal(
+    estimateDocumentLocale({ document_locale: ' ar ', estimate_data: { siteLanguage: 'de' } }),
+    'ar',
+  );
+  assert.equal(
+    estimateDocumentLocale({ document_locale: 'en', estimate_data: { siteLanguage: 'de' } }),
+    'en',
+  );
+  assert.equal(estimateDocumentLocale({ document_locale: '  ', estimate_data: { locale: 'de' } }), 'de');
+  assert.equal(estimateDocumentLocale({ estimate_data: { manufacturer: 'Lumenis' } }), null);
+  assert.equal(estimateDocumentLocale(null), null);
+  assert.equal(
+    resolveCustomerPageLocale({ orgLanguage: 'ar', queryLang: null, acceptLanguage: 'en-US' }),
+    'ar',
+  );
+  assert.equal(
+    resolveCustomerPageLocale({ orgLanguage: null, queryLang: null, acceptLanguage: 'en-US' }),
+    'en',
+  );
+});
+
 test('confirm page translates from the customer locale and keeps confirm fields', () => {
   const page = readFileSync(join(here, '../../app/e/[token]/page.tsx'), 'utf8');
   const client = readFileSync(join(here, '../../app/e/[token]/EstimateActionClient.tsx'), 'utf8');
@@ -62,7 +85,7 @@ test('confirm page translates from the customer locale and keeps confirm fields'
   assert.match(page, /accept-language/);
   assert.match(page, /query\.lang/);
   assert.match(page, /orgLanguage/);
-  assert.match(loader, /storedOrgLanguage/);
+  assert.match(loader, /estimateDocumentLocale/);
   assert.doesNotMatch(loader, /signEstimateActionConfirm\([^)]*locale/);
   assert.match(client, /dir=\{meta\.dir\}/);
   assert.match(client, /Approve estimate/);

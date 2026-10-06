@@ -14,7 +14,7 @@ import {
   canAccessCompanyProfile,
 } from '@/lib/roles';
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
-import { useT } from '@/lib/fa/locale';
+import { useSiteLocale, useT } from '@/lib/fa/locale';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
 import { displayModelName } from '@/lib/model-display';
 import {
@@ -103,6 +103,7 @@ async function ensureServiceCreatorLinked(supabase: any, orgId: any, orgType?: s
 
 function CompanyProfile() {
   const t = useT();
+  const locale = useSiteLocale();
   const { format } = useFormatDate();
   const [org, setOrg] = useState<any>({});
   const [members, setMembers] = useState<any[]>([]);
@@ -1057,7 +1058,7 @@ function CompanyProfile() {
                   <input className="input" placeholder={t('Full Name')} value={newTeam.fullName} onChange={e => setNewTeam({...newTeam, fullName: e.target.value})} />
                   <div className="grid grid-cols-2 gap-2">
                     <select className="select" value={newTeam.role} onChange={e => setNewTeam({...newTeam, role: e.target.value})}>
-                      {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                      {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r, locale)}</option>)}
                     </select>
                     <input className="input" placeholder={t('Job Title override')} value={newTeam.title} onChange={e => setNewTeam({...newTeam, title: e.target.value})} />
                   </div>
@@ -1065,7 +1066,7 @@ function CompanyProfile() {
                     <div className="text-[10px] mb-1">{t('Additional Roles (for multi-role members)')}</div>
                     <div className="flex flex-wrap gap-1 mb-1">
                       {ADDITIONAL_ROLES.map(ar => (
-                        <button key={ar} type="button" onClick={() => toggleNewTeamAddl(ar)} className={`text-[10px] px-1.5 py-px border rounded ${newTeam.additional.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{roleLabel(ar)}</button>
+                        <button key={ar} type="button" onClick={() => toggleNewTeamAddl(ar)} className={`text-[10px] px-1.5 py-px border rounded ${newTeam.additional.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{roleLabel(ar, locale)}</button>
                       ))}
                     </div>
                   </div>
@@ -1107,8 +1108,8 @@ function CompanyProfile() {
                         <div>
                           <div className="font-medium">
                             {[m.first_name, m.last_name].filter(Boolean).join(' ') || '—'}
-                            <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-[var(--surface3)] capitalize">
-                              {roleLabel(m.role)}
+                            <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-[var(--surface3)]">
+                              {roleLabel(m.role, locale)}
                             </span>
                           </div>
                           <div className="text-xs text-[var(--text3)]">{m.email || 'no email'}</div>
@@ -1148,12 +1149,12 @@ function CompanyProfile() {
                       >
                         <div>
                           <div className="font-medium">{inv.email}</div>
-                          <div className="text-xs text-[var(--text3)] capitalize">
-                            {roleLabel(inv.role || 'fse')}
+                          <div className="text-xs text-[var(--text3)]">
+                            {roleLabel(inv.role || 'fse', locale)}
                             {inv.created_at
                               ? ` · ${t('invited')} ${format(inv.created_at)}`
                               : ''}
-                            {inv.accepted ? ' · marked accepted' : ' · waiting'}
+                            {inv.accepted ? ` · ${t('marked accepted')}` : ` · ${t('waiting')}`}
                           </div>
                         </div>
                         <button

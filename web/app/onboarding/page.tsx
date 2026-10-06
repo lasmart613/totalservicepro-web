@@ -1,5 +1,5 @@
 'use client';
-import { useT } from '@/lib/fa/locale';
+import { useSiteLocale, useT } from '@/lib/fa/locale';
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { Header } from '@/components/Header';
@@ -58,6 +58,7 @@ const ADMIN_ROLES = ['company_admin', 'admin'];
 
 export default function Onboarding() {
   const t = useT();
+  const locale = useSiteLocale();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const [step, setStep] = useState(1);
@@ -382,18 +383,18 @@ export default function Onboarding() {
     return (
       <div className="space-y-2 mb-4 text-sm">
         {teamMembers.map((m, idx) => {
-          const rolesText = [m.role, ...m.additionalRoles].filter(Boolean).map(roleLabel).join(' + ');
+          const rolesText = [m.role, ...m.additionalRoles].filter(Boolean).map((role) => roleLabel(role, locale)).join(' + ');
           return (
             <div key={m.id} className="p-3 border border-[var(--border)] rounded bg-[var(--surface3)]">
               <strong>{m.firstName} {m.lastName}</strong> {m.email && '• ' + m.email}<br/>
               <span className="text-[var(--text3)]">Roles: {rolesText}</span>
               <div className="mt-1 flex gap-2 flex-wrap items-center">
                 <select value={m.role} onChange={e => changeMemberRole(idx, e.target.value)} className="input !py-0.5 !text-xs">
-                  {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                  {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r, locale)}</option>)}
                 </select>
                 {ADDITIONAL_ROLES.map(ar => (
                   <button key={ar} type="button" onClick={() => toggleMemberAdditional(idx, ar)}
-                    className={`text-[10px] px-1.5 py-px border rounded ${m.additionalRoles.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{roleLabel(ar)}</button>
+                    className={`text-[10px] px-1.5 py-px border rounded ${m.additionalRoles.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{roleLabel(ar, locale)}</button>
                 ))}
                 {m.isCreator ? (
                   <span className="text-[10px] text-[var(--gold)]">{t('(creator - must keep >=1 admin)')}</span>
@@ -953,7 +954,7 @@ export default function Onboarding() {
                   <input className="input" placeholder={t('First Name')} value={teamFirst} onChange={e=>setTeamFirst(e.target.value)} />
                   <input className="input" placeholder={t('Last Name')} value={teamLast} onChange={e=>setTeamLast(e.target.value)} />
                   <select className="select" value={teamRole} onChange={e=>setTeamRole(e.target.value)}>
-                    {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                    {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r, locale)}</option>)}
                   </select>
                 </div>
                 <div className="mt-2">
@@ -961,7 +962,7 @@ export default function Onboarding() {
                   <div className="flex flex-wrap gap-1">
                     {ADDITIONAL_ROLES.map(ar => (
                       <button key={ar} type="button" onClick={() => toggleTeamAdditional(ar)}
-                        className={`text-[10px] px-2 py-0.5 border rounded ${teamAdditional.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{roleLabel(ar)}</button>
+                        className={`text-[10px] px-2 py-0.5 border rounded ${teamAdditional.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{roleLabel(ar, locale)}</button>
                     ))}
                   </div>
                 </div>

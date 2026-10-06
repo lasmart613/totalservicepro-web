@@ -573,14 +573,14 @@ function ShopEstimatesList() {
                         className="btn btn-secondary text-xs px-3 py-1.5"
                         style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
                       >
-                        Edit
+                        {t('Edit')}
                       </Link>
                       <Link
                         href={`/estimates/${est.id}`}
                         className="btn btn-secondary text-xs px-3 py-1.5"
                         style={{ display: 'inline-block', margin: '0 8px 8px 0' }}
                       >
-                        Customer view
+                        {t('Customer view')}
                       </Link>
                       {canConvert && (
                         <Link
