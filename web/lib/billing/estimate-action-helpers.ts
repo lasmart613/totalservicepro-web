@@ -3,6 +3,7 @@
  */
 
 import { createHmac, randomBytes, timingSafeEqual } from 'crypto';
+import { PUBLIC_LOCALES } from '../i18n/locales.ts';
 import { publicSiteOrigin } from '../site-origin.ts';
 import { formatOrgMoney, type OrgMoneyPrefs } from '../money-format.ts';
 import {
@@ -27,10 +28,13 @@ export type EstimateCustomerAction = {
 };
 
 const TOKEN_RE = /^[A-Za-z0-9_-]{20,128}$/;
-const REDIRECT_LANGS = new Set(['en', 'fa', 'es', 'fr', 'he', 'it', 'de', 'pt', 'ar']);
+const REDIRECT_LANGS = new Set<string>(PUBLIC_LOCALES.map((item) => item.id));
 
-/** Keep a known page language on the no-JS confirm redirect. Unknown tags are dropped. */
-function redirectLang(raw: unknown): string | null {
+/**
+ * Keep a known public locale on the no-JS confirm redirect.
+ * Unknown tags are dropped so a posted lang cannot inject text into the URL.
+ */
+export function estimateActionRedirectLang(raw: unknown): string | null {
   const text = String(raw ?? '')
     .trim()
     .toLowerCase()
@@ -287,7 +291,7 @@ export function estimateActionFormRedirectPath(input: {
     if (emailAction) params.set('action', emailAction);
     params.set('notice', String(input.notice));
   }
-  const lang = redirectLang(input.lang);
+  const lang = estimateActionRedirectLang(input.lang);
   if (lang) params.set('lang', lang);
   const path = `/e/${encodeURIComponent(token)}`;
   const query = params.toString();

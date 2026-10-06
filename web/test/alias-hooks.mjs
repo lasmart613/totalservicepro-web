@@ -18,6 +18,10 @@ function resolveAlias(specifier) {
 }
 
 export async function resolve(specifier, context, nextResolve) {
+  // Node's ESM loader does not resolve the extensionless CJS entry `next/server`.
+  if (specifier === 'next/server') {
+    return nextResolve(pathToFileURL(join(webRoot, 'node_modules/next/server.js')).href, context);
+  }
   if (!isBuiltin(specifier)) {
     const file = resolveAlias(specifier);
     if (file) return nextResolve(pathToFileURL(file).href, context);

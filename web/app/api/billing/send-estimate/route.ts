@@ -20,7 +20,7 @@ import {
 } from '@/lib/billing/finalize-estimate';
 import {
   buildOwnedEstimateMessage,
-  buildOwnedEstimatePlainText,
+  buildOwnedEstimateEmailText,
   documentAccountLinks,
   documentCustomerOrgId,
   documentOwnedByOrganization,
@@ -187,12 +187,11 @@ export async function POST(req: NextRequest) {
     const origin = publicSiteOrigin(req);
     const { signupUrl, loginUrl } = documentAccountLinks(origin, estimateCustomerPath(estimateId));
     const text = stampLangOnEstimateLinks(
-      [
-        buildOwnedEstimatePlainText(mailInput),
-        '',
-        `Create a free account: ${signupUrl}`,
-        `Sign in: ${loginUrl}`,
-      ].join('\n'),
+      buildOwnedEstimateEmailText({
+        ...mailInput,
+        signupUrl,
+        loginUrl,
+      }),
       request.locale
     );
     const mailedHtml = stampLangOnEstimateLinks(
