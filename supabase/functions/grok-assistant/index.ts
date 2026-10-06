@@ -475,7 +475,7 @@ export function citationsFromParts(
     // Physical page only (stamp / xAI page_number). Never regex a printed "7-8" label out of passage text.
     const page = p.page && p.page > 0 ? p.page : undefined
     const section = p.section || extractSectionRef(p.text)
-    const key = `${page || ''}|${section || ''}|${p.source}`
+    const key = page ? `p:${page}` : `s:${section || ''}|${p.source}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push({
@@ -493,7 +493,7 @@ export function formatCitationLine(citations: ManualCitation[], fallback = ''): 
   if (!citations.length) return fallback ? `\n\n— Source: ${fallback}` : ''
   const labels = [...new Set(citations.map((c) => {
     let s = c.title || 'Selected manual'
-    if (c.page) s += `, p.${c.page}`
+    if (c.page) s += `, p. ${c.page}`
     if (c.section) s += `, §${c.section}`
     return s
   }))]
@@ -512,7 +512,7 @@ export function attachProsePages(citations: ManualCitation[], _text: string): Ma
   const seen = new Set<string>()
   const out: ManualCitation[] = []
   for (const c of citations) {
-    const key = `${c.manualId}|${c.page || ''}|${c.section || ''}`
+    const key = c.page ? `${c.manualId}|${c.page}` : `${c.manualId}||${c.section || ''}`
     if (seen.has(key)) continue
     seen.add(key)
     out.push(c)

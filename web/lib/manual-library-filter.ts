@@ -14,9 +14,11 @@ import {
 } from './manual-catalog.ts';
 import {
   DEFAULT_EQUIPMENT_TYPE,
+  EQUIPMENT_TYPES,
   equipmentTypeMeta,
   inferEquipmentType,
   type EquipmentType,
+  type EquipmentTypeMeta,
 } from './equipment-types.ts';
 import {
   ALL_MANUAL_LANGUAGES,
@@ -245,6 +247,50 @@ export function manualLanguageOptionsForView(
     );
   });
   return manualLanguageFilterOptions(visible);
+}
+
+/**
+ * Rooms that have at least one manual on this shelf under the current
+ * discovery filters (search, make, language, incomplete, PDF body hits).
+ * Order follows EQUIPMENT_TYPES. Rooms with no manuals are omitted.
+ */
+export function manualRoomsForView(
+  rows: ManualLibraryRow[],
+  scope: {
+    library?: ManualLibraryShelf | null;
+    query?: string;
+    brand?: string;
+    language?: string;
+    incompleteOnly?: boolean;
+  } = {},
+  bodyMatchIds?: Set<string> | null
+): EquipmentTypeMeta[] {
+  const library: ManualLibraryShelf = scope.library === 'operators' ? 'operators' : 'service';
+  const visible = filterManualLibrary(
+    rows,
+    {
+      query: scope.query,
+      brand: scope.brand,
+      language: scope.language,
+      incompleteOnly: scope.incompleteOnly,
+      room: ALL_MANUAL_ROOMS,
+      library,
+    },
+    bodyMatchIds
+  );
+  const present = new Set<EquipmentType>();
+  for (const row of visible) {
+    present.add(
+      inferEquipmentType({
+        equipment_type: row.equipment_type,
+        title: row.title,
+        brand: row.brand,
+        model: row.model,
+        storage_path: row.storage_path,
+      })
+    );
+  }
+  return EQUIPMENT_TYPES.filter((meta) => present.has(meta.value));
 }
 
 export function manualLibraryFiltersActive(filters: ManualLibraryFilters): boolean {
