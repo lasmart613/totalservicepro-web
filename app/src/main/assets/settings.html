@@ -490,12 +490,13 @@
     <div class="setting-row" id="zappVoiceRow">
         <div class="setting-info">
             <div class="setting-label">Voice</div>
-            <div class="setting-sub" id="zappVoiceSub">Default is Sage. Grok voices: Eve, Ara, Rex, Sal, Leo, Sage.</div>
+            <div class="setting-sub" id="zappVoiceSub">Default is Eve. Grok voices: Eve, Ara, Rex, Sal, Leo.</div>
         </div>
         <select class="setting-select" id="zappVoice" style="width:180px;flex-shrink:0;" onchange="saveSettings()">
-            <option value="sage">Sage — warm &amp; clear</option>
-            <option value="rex">Rex — confident</option>
-            <option value="sal">Sal — versatile</option>
+            <option value="eve">Eve — energetic &amp; upbeat</option>
+            <option value="ara">Ara — warm &amp; friendly</option>
+            <option value="rex">Rex — confident &amp; clear</option>
+            <option value="sal">Sal — smooth &amp; balanced</option>
             <option value="leo">Leo — authoritative</option>
         </select>
     </div>
@@ -719,8 +720,8 @@
         notifSound:     false,
         notifDot:       true,
         zappPersona:    true,
-        zappVoiceGender:'male',
-        zappVoice:      'sage',
+        zappVoiceGender:'female',
+        zappVoice:      'eve',
         zappVoiceEngine:'grok',
         autoOpenCitedManual: true,
     };
@@ -736,6 +737,9 @@
         if (saved) {
             try { settings = { ...DEFAULTS, ...JSON.parse(saved) }; }
             catch(e) { settings = { ...DEFAULTS }; }
+        }
+        if (window.TSPGrokVoice && TSPGrokVoice.migrateStoredVoice(settings)) {
+            try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings)); } catch (e) {}
         }
 
         applySettings();
@@ -807,9 +811,9 @@
             else if (directOpen === 'true') settings.autoOpenCitedManual = true;
         } catch (e) {}
         document.getElementById('autoOpenCitedManual').checked = settings.autoOpenCitedManual !== false;
-        document.getElementById('zappVoiceGender').value   = settings.zappVoiceGender || 'male';
-        document.getElementById('zappVoice').value         = settings.zappVoice || 'sage';
-        updateZappVoiceOptions(settings.zappVoiceGender || 'male', false);
+        document.getElementById('zappVoiceGender').value   = settings.zappVoiceGender || 'female';
+        document.getElementById('zappVoice').value         = settings.zappVoice || 'eve';
+        updateZappVoiceOptions(settings.zappVoiceGender || 'female', false);
         refreshGrokVoicePicker();
 
         // Native-backed settings
@@ -946,14 +950,13 @@
         }
         const fallback = {
             male: [
-                { id: 'sage', label: 'Sage — warm & clear' },
-                { id: 'rex',  label: 'Rex — confident' },
-                { id: 'sal',  label: 'Sal — versatile' },
+                { id: 'rex',  label: 'Rex — confident & clear' },
+                { id: 'sal',  label: 'Sal — smooth & balanced' },
                 { id: 'leo',  label: 'Leo — authoritative' },
             ],
             female: [
-                { id: 'eve',  label: 'Eve — expressive' },
-                { id: 'ara',  label: 'Ara — warm & conversational' },
+                { id: 'eve',  label: 'Eve — energetic & upbeat' },
+                { id: 'ara',  label: 'Ara — warm & friendly' },
             ]
         };
         return fallback[gender] || fallback.male;
@@ -1003,8 +1006,8 @@
         }
         if (sub) {
             sub.textContent = gender === 'female'
-                ? 'Eve or Ara. Grok voice default is Sage.'
-                : 'Sage (default), Rex, Sal, or Leo.';
+                ? 'Eve (default) or Ara.'
+                : 'Rex, Sal, or Leo.';
         }
         saveSettings();
     }

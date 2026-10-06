@@ -7,24 +7,23 @@
  * POST { text, voice_id, language } → audio/mpeg
  * GET  → { voices: [{ voice_id, name, ... }] }
  *
- * Prod grok-assistant TTS allowlist (unknown ids fall back to sage):
- * eve, ara, rex, sal, leo, sage. Default voice_id is sage.
+ * Voices xAI accepts for TTS (docs.x.ai text-to-speech). Default is eve.
+ * eve, ara, rex, sal, leo. xAI rejects sage, so a saved sage id reads as eve.
  */
 (function (root) {
-    var ALLOWED_VOICE_IDS = ['eve', 'ara', 'rex', 'sal', 'leo', 'sage'];
-    /** Picker order. Sage is the prod grok-assistant default, so it leads the list. */
-    var DISPLAY_ORDER = ['sage', 'rex', 'sal', 'leo', 'eve', 'ara'];
-    var DEFAULT_VOICE_ID = 'sage';
+    var ALLOWED_VOICE_IDS = ['eve', 'ara', 'rex', 'sal', 'leo'];
+    /** Picker order. Eve is the xAI default, so it leads the list. */
+    var DISPLAY_ORDER = ['eve', 'ara', 'rex', 'sal', 'leo'];
+    var DEFAULT_VOICE_ID = 'eve';
     var MAX_TTS_CHARS = 4000;
     var FEMALE_IDS = { eve: true, ara: true };
 
     var BUILTIN_LABELS = {
-        sage: 'Sage — warm & clear',
-        rex: 'Rex — confident',
-        sal: 'Sal — versatile',
-        leo: 'Leo — authoritative',
-        eve: 'Eve — expressive',
-        ara: 'Ara — warm & conversational'
+        eve: 'Eve — energetic & upbeat',
+        ara: 'Ara — warm & friendly',
+        rex: 'Rex — confident & clear',
+        sal: 'Sal — smooth & balanced',
+        leo: 'Leo — authoritative'
     };
 
     function genderFor(id) {
@@ -58,8 +57,34 @@
     }
 
     function normalizeVoiceId(id) {
-        var v = String(id || '').trim();
+        var v = String(id || '').trim().toLowerCase();
+        if (v === 'sage') return DEFAULT_VOICE_ID;
         return ALLOWED_VOICE_IDS.indexOf(v) >= 0 ? v : DEFAULT_VOICE_ID;
+    }
+
+    /**
+     * Read path for tsp_settings. A saved sage voice becomes eve, and the
+     * gender follows eve so the picker does not snap to a different voice.
+     * Returns true when the object changed.
+     */
+    function migrateStoredVoice(settings) {
+        if (!settings || typeof settings !== 'object') return false;
+        var raw = String(settings.zappVoice == null ? '' : settings.zappVoice).trim().toLowerCase();
+        var next = normalizeVoiceId(settings.zappVoice);
+        var changed = settings.zappVoice !== next;
+        settings.zappVoice = next;
+        if (raw === 'sage' && settings.zappVoiceGender !== 'female') {
+            settings.zappVoiceGender = 'female';
+            changed = true;
+        }
+        return changed;
+    }
+
+    /** POST body. omitVoice leaves voice_id off so grok-tts uses its default. */
+    function ttsRequestBody(text, voiceId, omitVoice) {
+        var body = { text: String(text || ''), language: 'en' };
+        if (!omitVoice) body.voice_id = normalizeVoiceId(voiceId);
+        return body;
     }
 
     function voiceIdFromItem(item) {
@@ -69,9 +94,10 @@
     }
 
     /**
-     * Settings picker is the prod allowlist (sage first).
-     * GET /grok-tts may refresh a label, but voices outside the allowlist are
-     * dropped and a partial list does not hide Sage or the other five.
+     * Settings picker is the xAI allowlist (eve first).
+     * GET /grok-tts may refresh a label, but voices outside the allowlist
+     * (including a retired sage) are dropped and a partial list does not
+     * hide Eve or the other four.
      */
     function parseVoiceList(payload) {
         var raw = [];
@@ -163,6 +189,12 @@
         return status === 503 && code === 'usage_unavailable';
     }
 
+    /** grok-tts rejected the voice. Retry once with voice_id omitted. */
+    function isInvalidVoiceId(status, body) {
+        var code = body && (body.error || body.code);
+        return status === 400 && code === 'invalid_voice_id';
+    }
+
     function asPositivePage(value) {
         var n = Number(String(value == null ? '' : value).trim());
         if (!isFinite(n) || n < 1 || n > 9999) return undefined;
@@ -250,6 +282,8 @@
         ttsUrlFromAssistant: ttsUrlFromAssistant,
         ttsUrlFromProject: ttsUrlFromProject,
         normalizeVoiceId: normalizeVoiceId,
+        migrateStoredVoice: migrateStoredVoice,
+        ttsRequestBody: ttsRequestBody,
         parseVoiceList: parseVoiceList,
         voicesForGender: voicesForGender,
         prepareSpeechText: prepareSpeechText,
@@ -257,6 +291,7 @@
         isTextTooLong: isTextTooLong,
         isGrokVoiceLimit: isGrokVoiceLimit,
         isUsageUnavailable: isUsageUnavailable,
+        isInvalidVoiceId: isInvalidVoiceId,
         normalizeCitationTarget: normalizeCitationTarget,
         topCitation: topCitation,
         isOpenCommand: isOpenCommand

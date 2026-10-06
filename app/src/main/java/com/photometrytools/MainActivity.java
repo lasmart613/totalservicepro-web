@@ -1051,10 +1051,15 @@ public class MainActivity extends AppCompatActivity {
         final String token = (accessToken == null || accessToken.trim().isEmpty())
                 ? storedAccessToken()
                 : accessToken.trim();
-        new Thread(() -> requestGrokTts(spoken, voiceId, token, gen, false), "grok-tts").start();
+        new Thread(() -> requestGrokTts(spoken, voiceId, token, gen, false, false), "grok-tts").start();
     }
 
-    private void requestGrokTts(String text, String voiceId, String token, int gen, boolean retried) {
+    /**
+     * shortened: already retried a text_too_long response once.
+     * omitVoice: already retried a 400 invalid_voice_id once, with voice_id left off
+     * so grok-tts applies its own default.
+     */
+    private void requestGrokTts(String text, String voiceId, String token, int gen, boolean shortened, boolean omitVoice) {
         if (gen != speechGeneration) return;
         if (token == null || token.isEmpty()) {
             runOnUiThread(() -> fallbackToDevice(text, gen, false));
@@ -1064,7 +1069,7 @@ public class MainActivity extends AppCompatActivity {
         try {
             org.json.JSONObject payload = new org.json.JSONObject();
             payload.put("text", text);
-            payload.put("voice_id", GrokSpeech.normalizeVoiceId(voiceId));
+            if (!omitVoice) payload.put("voice_id", GrokSpeech.normalizeVoiceId(voiceId));
             payload.put("language", "en");
             byte[] json = payload.toString().getBytes(StandardCharsets.UTF_8);
             conn = (HttpURLConnection) new URL(GrokSpeech.TTS_URL).openConnection();
@@ -1089,7 +1094,11 @@ public class MainActivity extends AppCompatActivity {
                 runOnUiThread(() -> playGrokAudio(body, text, gen));
                 return;
             }
-            if ("too_long".equals(kind) && !retried) {
+            if ("invalid_voice".equals(kind) && !omitVoice) {
+                requestGrokTts(text, voiceId, token, gen, shortened, true);
+                return;
+            }
+            if ("too_long".equals(kind) && !shortened) {
                 int max = GrokSpeech.maxCharacters(body);
                 int limit = max > 0 ? Math.min(max, Math.max(1, text.length() - 1)) : Math.max(1, text.length() - 1);
                 String shorter = GrokSpeech.clipSpeechText(text, limit);
@@ -1099,7 +1108,7 @@ public class MainActivity extends AppCompatActivity {
                             Toast.makeText(MainActivity.this, GrokSpeech.SHORTENED_NOTICE, Toast.LENGTH_SHORT).show();
                         }
                     });
-                    requestGrokTts(shorter, voiceId, token, gen, true);
+                    requestGrokTts(shorter, voiceId, token, gen, true, omitVoice);
                     return;
                 }
             }

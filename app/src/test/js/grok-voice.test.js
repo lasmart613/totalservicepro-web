@@ -15,28 +15,58 @@ test('tts URL is derived from the grok-assistant URL', () => {
     );
 });
 
-test('default voice is sage and unknown ids fall back to sage', () => {
-    assert.equal(voice.DEFAULT_VOICE_ID, 'sage');
-    assert.equal(voice.normalizeVoiceId(undefined), 'sage');
-    assert.equal(voice.normalizeVoiceId(''), 'sage');
+test('default voice is eve and a saved sage id reads as eve', () => {
+    assert.equal(voice.DEFAULT_VOICE_ID, 'eve');
+    assert.equal(voice.normalizeVoiceId(undefined), 'eve');
+    assert.equal(voice.normalizeVoiceId(''), 'eve');
     assert.equal(voice.normalizeVoiceId('eve'), 'eve');
-    assert.equal(voice.normalizeVoiceId('nova'), 'sage');
-    assert.deepEqual(voice.ALLOWED_VOICE_IDS, ['eve', 'ara', 'rex', 'sal', 'leo', 'sage']);
+    assert.equal(voice.normalizeVoiceId('EVE'), 'eve');
+    assert.equal(voice.normalizeVoiceId('sage'), 'eve');
+    assert.equal(voice.normalizeVoiceId('Sage'), 'eve');
+    assert.equal(voice.normalizeVoiceId('nova'), 'eve');
+    assert.deepEqual(voice.ALLOWED_VOICE_IDS, ['eve', 'ara', 'rex', 'sal', 'leo']);
+    assert.equal(voice.ALLOWED_VOICE_IDS.includes('sage'), false);
+    const stored = { zappVoice: 'sage', zappVoiceGender: 'male', theme: 'dark' };
+    assert.equal(voice.migrateStoredVoice(stored), true);
+    assert.equal(stored.zappVoice, 'eve');
+    assert.equal(stored.zappVoiceGender, 'female');
+    assert.equal(stored.theme, 'dark');
+    const kept = { zappVoice: 'rex', zappVoiceGender: 'male' };
+    assert.equal(voice.migrateStoredVoice(kept), false);
+    assert.equal(kept.zappVoice, 'rex');
+    assert.equal(kept.zappVoiceGender, 'male');
 });
 
-test('voice list keeps only the allowlist and still offers every prod voice', () => {
+test('voice list keeps only xAI voices and drops sage', () => {
     const parsed = voice.parseVoiceList({
         voices: [
             { voice_id: 'nova', name: 'Nova' },
-            { voice_id: 'eve', name: 'Eve' },
+            { voice_id: 'eve', name: 'Energetic' },
             { voice_id: 'sage', name: 'Warm narrator' }
         ]
     });
-    assert.deepEqual(parsed.map((v) => v.id), ['sage', 'rex', 'sal', 'leo', 'eve', 'ara']);
-    assert.equal(parsed.find((v) => v.id === 'sage').label, 'Sage — Warm narrator');
+    assert.deepEqual(parsed.map((v) => v.id), ['eve', 'ara', 'rex', 'sal', 'leo']);
+    assert.equal(parsed.find((v) => v.id === 'eve').label, 'Eve — Energetic');
+    assert.equal(parsed.some((v) => v.id === 'sage'), false);
     assert.equal(parsed.some((v) => v.id === 'nova'), false);
     const male = voice.voicesForGender(parsed, 'male').map((v) => v.id);
-    assert.deepEqual(male, ['sage', 'rex', 'sal', 'leo']);
+    assert.deepEqual(male, ['rex', 'sal', 'leo']);
+    const female = voice.voicesForGender(parsed, 'female').map((v) => v.id);
+    assert.deepEqual(female, ['eve', 'ara']);
+});
+
+test('invalid_voice_id retries once with voice_id omitted', () => {
+    assert.equal(voice.isInvalidVoiceId(400, { error: 'invalid_voice_id' }), true);
+    assert.equal(voice.isInvalidVoiceId(400, { error: 'text_too_long' }), false);
+    assert.equal(voice.isInvalidVoiceId(400, { error: 'TTS error' }), false);
+    assert.equal(voice.isInvalidVoiceId(502, { error: 'invalid_voice_id' }), false);
+    const sent = voice.ttsRequestBody('Check the pot.', 'sage', false);
+    assert.equal(sent.voice_id, 'eve');
+    assert.equal(sent.language, 'en');
+    const omitted = voice.ttsRequestBody('Check the pot.', 'rex', true);
+    assert.equal(Object.prototype.hasOwnProperty.call(omitted, 'voice_id'), false);
+    assert.equal(omitted.text, 'Check the pot.');
+    assert.equal(omitted.language, 'en');
 });
 
 test('speech text strips citations and stays within 4000 characters', () => {
@@ -165,6 +195,10 @@ test('bundled assistant speaks through grok-tts and still talks on a 429', () =>
     assert.match(html, /assistant:citation-open/);
     assert.match(html, /isGrokVoiceLimit/);
     assert.match(html, /isUsageUnavailable/);
+    assert.match(html, /isInvalidVoiceId/);
+    assert.match(html, /ttsRequestBody/);
+    assert.match(html, /playGrokTts\(spoken, token, voiceId, gen, retried, true\)/);
+    assert.doesNotMatch(html, /['"]sage['"]/);
     assert.match(html, /speakWithDevice\(spoken, gen\)/);
     assert.match(html, /Grok voice unavailable — using device voice/);
     assert.match(html, /assistant:voice-state/);
@@ -200,6 +234,13 @@ test('bundled assistant speaks through grok-tts and still talks on a 429', () =>
     assert.match(speech, /usage_unavailable/);
     assert.match(speech, /daily_limit_reached/);
     assert.match(speech, /rate_limited/);
+    assert.match(speech, /invalid_voice_id/);
+    assert.match(speech, /return "eve"/);
+    assert.match(speech, /return "invalid_voice"/);
+    assert.doesNotMatch(speech, /["']sage["']/);
+    assert.match(shell, /omitVoice/);
+    assert.match(shell, /"invalid_voice"\.equals\(kind\) && !omitVoice/);
+    assert.match(shell, /if \(!omitVoice\) payload\.put\("voice_id", GrokSpeech\.normalizeVoiceId\(voiceId\)\)/);
     const viewer = fs.readFileSync(path.join(__dirname, '../../main/assets/pdf_viewer.html'), 'utf8');
     assert.match(viewer, /Back to answer/);
     assert.match(viewer, /openedFromAssistant/);
@@ -210,4 +251,10 @@ test('bundled assistant speaks through grok-tts and still talks on a 429', () =>
     assert.match(settings, /Device voice/);
     assert.match(settings, /autoOpenCitedManual/);
     assert.match(settings, /grok-tts/);
+    assert.match(settings, /zappVoice:\s*'eve'/);
+    assert.match(settings, /migrateStoredVoice/);
+    assert.doesNotMatch(settings, /["']sage["']/i);
+    const onlineSrc = fs.readFileSync(path.join(__dirname, '../../main/assets/online-voice.js'), 'utf8');
+    assert.match(onlineSrc, /migrateStoredVoice/);
+    assert.doesNotMatch(onlineSrc, /["']sage["']/i);
 });

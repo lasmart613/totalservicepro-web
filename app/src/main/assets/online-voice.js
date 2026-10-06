@@ -106,14 +106,17 @@
 
     function readPrefs() {
         var engine = 'grok';
-        var voice = 'sage';
+        var voice = 'eve';
         try {
             var raw = localStorage.getItem('tsp_settings');
             var s = raw ? JSON.parse(raw) : {};
             if (s.zappVoiceEngine === 'device') engine = 'device';
+            if (window.TSPGrokVoice && TSPGrokVoice.migrateStoredVoice(s)) {
+                localStorage.setItem('tsp_settings', JSON.stringify(s));
+            }
             voice = window.TSPGrokVoice
                 ? TSPGrokVoice.normalizeVoiceId(s.zappVoice)
-                : (s.zappVoice || 'sage');
+                : (s.zappVoice || 'eve');
         } catch (e) {}
         return { engine: engine, voice: voice };
     }
@@ -123,7 +126,7 @@
             var raw = localStorage.getItem('tsp_settings');
             var s = raw ? JSON.parse(raw) : {};
             s.zappVoiceEngine = engine === 'device' ? 'device' : 'grok';
-            s.zappVoice = window.TSPGrokVoice ? TSPGrokVoice.normalizeVoiceId(voice) : (voice || 'sage');
+            s.zappVoice = window.TSPGrokVoice ? TSPGrokVoice.normalizeVoiceId(voice) : (voice || 'eve');
             localStorage.setItem('tsp_settings', JSON.stringify(s));
         } catch (e) {}
     }
@@ -267,7 +270,7 @@
         if (!sel) return;
         var voices = (list && list.length)
             ? list
-            : (window.TSPGrokVoice ? TSPGrokVoice.allowlistVoices() : [{ id: 'sage', label: 'Sage' }]);
+            : (window.TSPGrokVoice ? TSPGrokVoice.allowlistVoices() : [{ id: 'eve', label: 'Eve' }]);
         var current = readPrefs().voice;
         sel.innerHTML = '';
         voices.forEach(function (v) {

@@ -428,11 +428,14 @@
 
     function getAIPrefs() {
         const voiceApi = window.TSPGrokVoice;
-        const fallbackVoice = voiceApi ? voiceApi.DEFAULT_VOICE_ID : 'sage';
+        const fallbackVoice = voiceApi ? voiceApi.DEFAULT_VOICE_ID : 'eve';
         try {
             const raw = localStorage.getItem('tsp_settings');
             if (raw) {
                 const s = JSON.parse(raw);
+                if (voiceApi && voiceApi.migrateStoredVoice(s)) {
+                    try { localStorage.setItem('tsp_settings', JSON.stringify(s)); } catch (e2) {}
+                }
                 return {
                     zappPersona:    s.zappPersona !== false,
                     zappVoice:      voiceApi ? voiceApi.normalizeVoiceId(s.zappVoice) : (s.zappVoice || fallbackVoice),
@@ -626,7 +629,7 @@
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
                         <div>
                             <div style="font-size:13px;font-weight:700;color:#c4b5fd;">Voice</div>
-                            <div style="font-size:11px;color:#4b4b6b;margin-top:2px;">Sage, Rex, Sal, Leo, Eve, Ara</div>
+                            <div style="font-size:11px;color:#4b4b6b;margin-top:2px;">Eve, Ara, Rex, Sal, Leo</div>
                         </div>
                         <select id="vVoice" onchange="saveVoiceSettings()"
                             style="background:#1a1a2e;border:1px solid #2d2d4e;border-radius:8px;color:#c4b5fd;font-size:12px;padding:6px 10px;outline:none;min-width:150px;">
@@ -1054,14 +1057,13 @@
 
     const VOICE_OPTIONS = {
         male:   [
-            { id: 'sage', label: 'Sage — warm & clear' },
-            { id: 'rex',  label: 'Rex — confident' },
-            { id: 'sal',  label: 'Sal — versatile' },
+            { id: 'rex',  label: 'Rex — confident & clear' },
+            { id: 'sal',  label: 'Sal — smooth & balanced' },
             { id: 'leo',  label: 'Leo — authoritative' },
         ],
         female: [
-            { id: 'eve',  label: 'Eve — expressive' },
-            { id: 'ara',  label: 'Ara — warm & conversational' },
+            { id: 'eve',  label: 'Eve — energetic & upbeat' },
+            { id: 'ara',  label: 'Ara — warm & friendly' },
         ]
     };
 
@@ -1105,7 +1107,7 @@
         sel.innerHTML = voices.map(v => `<option value="${v.id}">${v.label}</option>`).join('');
         const wanted = window.TSPGrokVoice ? TSPGrokVoice.normalizeVoiceId(selectedId) : selectedId;
         const match = voices.find(v => v.id === wanted);
-        sel.value = match ? wanted : (voices[0] ? voices[0].id : 'sage');
+        sel.value = match ? wanted : (voices[0] ? voices[0].id : 'eve');
     }
 
     async function refreshGrokVoices() {
@@ -1132,14 +1134,14 @@
     function onVoiceGenderChange() {
         const gender = document.getElementById('vVoiceGender')?.value || 'male';
         const voices = voiceChoices(gender);
-        populateVoiceDropdown(gender, voices[0] ? voices[0].id : 'sage');
+        populateVoiceDropdown(gender, voices[0] ? voices[0].id : 'eve');
         saveVoiceSettings();
     }
 
     function saveVoiceSettings() {
         try {
             const persona = document.getElementById('vZappPersona')?.checked ?? true;
-            const voiceRaw = document.getElementById('vVoice')?.value || 'sage';
+            const voiceRaw = document.getElementById('vVoice')?.value || 'eve';
             const voice = window.TSPGrokVoice ? TSPGrokVoice.normalizeVoiceId(voiceRaw) : voiceRaw;
             const raw = localStorage.getItem('tsp_settings');
             const s = raw ? JSON.parse(raw) : {};
@@ -1469,12 +1471,18 @@
     /**
      * POST grok-tts. Returns 'played', 'limited' (device TTS + limit notice), or 'failed'.
      * HTTP 400 and 413 text_too_long shorten the text and retry once.
+     * HTTP 400 invalid_voice_id retries once with voice_id omitted.
      * HTTP 503 usage_unavailable is 'failed': device TTS, same as other non-audio errors.
      */
-    async function playGrokTts(text, token, voiceId, gen, retried) {
+    async function playGrokTts(text, token, voiceId, gen, retried, omitVoice) {
         if (gen !== speechGen) return 'failed';
         const voiceApi = window.TSPGrokVoice;
         const spoken = voiceApi ? voiceApi.clipSpeechText(text, voiceApi.MAX_TTS_CHARS) : text;
+        const body = voiceApi
+            ? voiceApi.ttsRequestBody(spoken, voiceId, !!omitVoice)
+            : (omitVoice
+                ? { text: spoken, language: 'en' }
+                : { text: spoken, voice_id: voiceId || 'eve', language: 'en' });
         let resp;
         try {
             resp = await fetch(GROK_TTS_URL, {
@@ -1483,11 +1491,7 @@
                     'Content-Type': 'application/json',
                     'Authorization': 'Bearer ' + token
                 },
-                body: JSON.stringify({
-                    text: spoken,
-                    voice_id: voiceApi ? voiceApi.normalizeVoiceId(voiceId) : (voiceId || 'sage'),
-                    language: 'en'
-                })
+                body: JSON.stringify(body)
             });
         } catch (e) {
             return 'failed';
@@ -1504,6 +1508,9 @@
         if (voiceApi && voiceApi.isGrokVoiceLimit(resp.status, errBody)) {
             return 'limited';
         }
+        if (voiceApi && voiceApi.isInvalidVoiceId(resp.status, errBody) && !omitVoice) {
+            return playGrokTts(spoken, token, voiceId, gen, retried, true);
+        }
         if (voiceApi && voiceApi.isUsageUnavailable(resp.status, errBody)) {
             return 'failed';
         }
@@ -1512,7 +1519,7 @@
             const shorter = voiceApi.clipSpeechText(spoken, Math.min(max, spoken.length - 1));
             if (shorter && shorter.length < spoken.length) {
                 showToast('Shortened the answer for Grok voice');
-                return playGrokTts(shorter, token, voiceId, gen, true);
+                return playGrokTts(shorter, token, voiceId, gen, true, !!omitVoice);
             }
         }
         return 'failed';

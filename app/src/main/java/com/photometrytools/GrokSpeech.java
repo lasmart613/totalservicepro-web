@@ -12,16 +12,18 @@ final class GrokSpeech {
     static final String SHORTENED_NOTICE = "Shortened the answer for Grok voice";
     static final int MAX_CHARS = 4000;
 
-    private static final String[] ALLOWED = {"eve", "ara", "rex", "sal", "leo", "sage"};
+    /** xAI TTS voices. Eve is the documented default. */
+    private static final String[] ALLOWED = {"eve", "ara", "rex", "sal", "leo"};
 
     private GrokSpeech() {}
 
+    /** Unknown and retired voice ids read as eve. */
     static String normalizeVoiceId(String id) {
-        String v = id == null ? "" : id.trim();
+        String v = id == null ? "" : id.trim().toLowerCase(java.util.Locale.US);
         for (String allowed : ALLOWED) {
             if (allowed.equals(v)) return v;
         }
-        return "sage";
+        return "eve";
     }
 
     static boolean isDeviceEngine(String engine) {
@@ -42,7 +44,8 @@ final class GrokSpeech {
     /**
      * audio: play the body.
      * limited: 429 daily_limit_reached or rate_limited (the limit notice).
-     * too_long: 400/413 text_too_long, retry once.
+     * too_long: 400/413 text_too_long, retry once shorter.
+     * invalid_voice: 400 invalid_voice_id, retry once with voice_id omitted.
      * failed: everything else, including 503 usage_unavailable and upstream_rate_limited.
      */
     static String classify(int status, String contentType, byte[] body) {
@@ -52,6 +55,7 @@ final class GrokSpeech {
         if (status == 429 && ("daily_limit_reached".equals(code) || "rate_limited".equals(code))) {
             return "limited";
         }
+        if (status == 400 && "invalid_voice_id".equals(code)) return "invalid_voice";
         if ((status == 400 || status == 413) && "text_too_long".equals(code)) return "too_long";
         if (status == 413 && code.isEmpty()) return "too_long";
         return "failed";
