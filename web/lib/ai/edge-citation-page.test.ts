@@ -233,3 +233,33 @@ test('edge citation label spaces the page and drops a repeated manual page', asy
   );
   assert.equal(cites[0].section, '1.1');
 });
+
+test('GentleMAX fluence search uses the PDF page of the settings table, not the next chapter', async () => {
+  const edge = await loadEdge();
+  const pages: string[] = [];
+  for (let n = 1; n <= 100; n++) {
+    let text = 'GentleMAX PRO PLUS service manual header.';
+    if (n === 49) text += ' 9 System Settings by Wavelength. System settings vary. Minimum Fluence (J/cm2) Maximum Fluence (J/cm2).';
+    if (n === 53) text += ' The actual values vary depending on the fluence setting and laser head efficiency.';
+    if (n === 86) text += ' See also • Chapter 16, DHP Laser Rail Alignment. • Chapter 18, Calibration.';
+    if (n === 87) {
+      text += ' 18 Calibration (Cal) Port Verification Procedure. Record fluence. Follow the steps.';
+    }
+    pages.push(`[[pdfpage:${n}]] ${text}`);
+  }
+  const query = edge.buildSearchQuery(
+    'What is the maximum fluence setting for the GentleMAX Pro Plus?',
+    'Candela GentleMAX PRO PLUS',
+    []
+  );
+  const indexed = await edge.searchIndexedManualText(
+    fakeDb(pages.join('\f')),
+    5,
+    query,
+    'Candela GentleMAX PRO PLUS'
+  );
+  assert.ok(indexed, 'indexed hit');
+  assert.equal(indexed!.page, 49);
+  assert.notEqual(indexed!.section, 'Ch.16');
+  assert.doesNotMatch(indexed!.section || '', /16/);
+});

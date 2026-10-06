@@ -35,6 +35,7 @@ import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collectio
 import { extractFaultCodes } from './fault-codes.ts'
 import {
   attributeCitations,
+  effectivePageCount,
   modelSuffixConflict,
   passageOwnedBySelected,
   reconcilePhysicalPage,
@@ -1400,7 +1401,9 @@ function termAt(hay: string, term: string, from: number): number {
     const before = at > 0 ? hay.charAt(at - 1) : ''
     const after = hay.charAt(at + term.length)
     const edge = (ch: string) => ch === '' || !/[\p{L}\p{N}+]/u.test(ch)
-    if (edge(before) && edge(after)) return at
+    // "setting" also matches "settings" on the fluence table page.
+    const plural = term.length >= 4 && !term.endsWith('s') && after === 's' && edge(hay.charAt(at + term.length + 1))
+    if (edge(before) && (edge(after) || plural)) return at
     i = at + 1
   }
   return -1
@@ -1528,10 +1531,51 @@ function errorCodeBoost(
   return { score, at }
 }
 
+/** Drop running-header words that are printed on most pages. */
+function rareExcerptTerms(terms: string[], df: Map<string, number>, pageCount: number): string[] {
+  const rare = terms.filter((term) => {
+    const n = df.get(term) || 0
+    return !(pageCount > 1 && n > pageCount * 0.25)
+  })
+  return rare.length ? rare : terms
+}
+
+/**
+ * Consecutive rare terms a few characters apart ("Maximum Fluence").
+ * One hit is enough: it marks the spec table, not a later procedure that
+ * only mentions one of the words.
+ */
+function rarePhraseHit(
+  terms: string[],
+  positions: Map<string, number[]>,
+  df: Map<string, number>,
+  pageCount: number,
+  start: number,
+  end: number
+): { bonus: number; at: number } {
+  const rare = rareExcerptTerms(terms, df, pageCount)
+  const gap = 24
+  for (let i = 0; i < rare.length - 1; i++) {
+    const left = hitsOnSpan(positions.get(rare[i]) || [], start, end)
+    const right = hitsOnSpan(positions.get(rare[i + 1]) || [], start, end)
+    for (const ha of left) {
+      const limit = ha + rare[i].length + gap
+      for (const hb of right) {
+        if (hb < ha + rare[i].length) continue
+        if (hb > limit) break
+        return { bonus: 18, at: ha }
+      }
+    }
+  }
+  return { bonus: 0, at: -1 }
+}
+
 /**
  * Anchor where the specific query terms cluster.
  * Error codes (#43, a bare 43 beside CW Laser, error 43) and multi-word phrases
  * outrank a brand word. Terms are weighted by how many pages they appear on.
+ * A running header is not a phrase. An adjacent rare pair ("Maximum Fluence")
+ * outranks a later page that only shares one of those words.
  * Equal scores prefer the later hit so a contents line loses to the procedure.
  * Returns -1 when nothing in the query is present.
  */
@@ -1576,12 +1620,15 @@ function excerptAnchor(raw: string, query: string): number {
       }
     }
     if (score <= 0) continue
-    const chain = orderedTermChain(terms, positions, span.start, span.end)
+    const chain = orderedTermChain(rareExcerptTerms(terms, df, spans.length), positions, span.start, span.end)
     if (chain.len >= 3) score += chain.len * 8
     if (chain.len >= 5) score += 24
+    const phrase = rarePhraseHit(terms, positions, df, spans.length, span.start, span.end)
+    score += phrase.bonus
     const code = errorCodeBoost(hay, terms, positions, span.start, span.end)
     score += code.score
     let at = chain.len >= 3 && chain.at >= 0 ? chain.at : rareAt
+    if (phrase.at >= 0) at = phrase.at
     if (code.score >= 36 && code.at >= 0) at = code.at
     const head = hay.slice(span.start, Math.min(span.end, span.start + 48))
     const stamped = /\[\[pdfpage:\d{1,4}\]\]/.exec(head)
@@ -1617,6 +1664,27 @@ function indexedExcerptPage(raw: string, query: string): number | undefined {
   const feeds = before.match(/\f/g)
   if (feeds && feeds.length) return Math.min(9999, feeds.length + 1)
   return undefined
+}
+
+/**
+ * Chapter or section on the stamped page that owns the anchor.
+ * A see-also line that names two chapters ("Chapter 16 … Chapter 18") is not
+ * the heading of this page.
+ */
+function sectionOnCitedPage(raw: string, at: number): string | undefined {
+  const text = String(raw || '')
+  if (at < 0) return undefined
+  const start = text.lastIndexOf('\f', Math.max(0, at - 1))
+  const end = text.indexOf('\f', at)
+  const page = text.slice(start < 0 ? 0 : start + 1, end < 0 ? text.length : end)
+  const kept = page
+    .split(/(?<=\.)\s+/)
+    .filter((sentence) => {
+      const hits = sentence.match(/\b(?:chapters?|ch\.?)\s*\d+/gi) || []
+      return hits.length < 2
+    })
+    .join(' ')
+  return extractSectionRef(kept)
 }
 
 function indexedExcerptSection(raw: string, query: string): string | undefined {
@@ -1658,7 +1726,7 @@ async function searchIndexedManualText(
   const excerpt = excerptIndexedManualText(full, query)
   if (!excerpt || excerpt.length < 40) return null
   const page = indexedExcerptPage(full, query)
-  const section = indexedExcerptSection(full, query) || extractSectionRef(excerpt)
+  const section = sectionOnCitedPage(full, excerptAnchor(full, query)) || indexedExcerptSection(full, query)
   return {
     text: excerpt,
     source: `${label || 'Selected manual'} (indexed PDF text)`,
@@ -2064,6 +2132,7 @@ serve(async (req) => {
       let contextBlock = ''
       let citationLine = ''
       let manualCitations: ManualCitation[] = []
+      let selectedPageCount: number | undefined
       let hasFaultDBHit = false
       let hasManualPassages = false
       let collectionNameById: Record<string, string> = {}
@@ -2202,6 +2271,10 @@ serve(async (req) => {
           }
 
           const indexedHit = await indexedP
+          if (!selectedPageCount) {
+            const counted = effectivePageCount(storedPageCount(manualMeta?.page_count), indexedHit?.indexText)
+            if (counted) selectedPageCount = counted
+          }
           const merged = mergeIndexedParts(indexedHit, parts)
           parts = merged.parts
           const citeParts = merged.citeParts
@@ -2319,6 +2392,7 @@ serve(async (req) => {
         attachedPdfs: attachedNames,
         matchTokens,
         citations: manualCitations,
+        ...(selectedPageCount ? { pageCount: selectedPageCount } : {}),
       })
       if (wantPdfs) {
         const collectionFiles = pickCollectionAttachments(
@@ -2393,6 +2467,10 @@ serve(async (req) => {
             )
             const attachStats: PdfAttachStat[] = []
             for (const ch of picks) attachStats.push(await statManualPdf(db, ch.storage_path))
+            if (!selectedPageCount) {
+              const counted = attachStats.find((stat) => stat.pages && stat.pages >= 1)?.pages
+              if (counted) selectedPageCount = counted
+            }
             if (picks.length && !wholePdfAttachAllowed(attachStats)) {
               skippedLargePdf = true
               console.warn('skip whole-pdf attach', manualMeta?.id, attachStats)

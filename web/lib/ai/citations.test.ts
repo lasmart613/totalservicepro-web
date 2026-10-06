@@ -28,7 +28,7 @@ test('citation viewer href stays on the auth-gated in-app route', () => {
     citationViewerHref({ manualId: 105, title: 'Xeo Service Manual Rev B', page: 42 }),
     '/manuals/view?id=105&title=Xeo+Service+Manual+Rev+B&page=42'
   );
-  assert.equal(citationViewerHref({ manualId: 16 }), '/manuals/view?id=16&page=1');
+  assert.equal(citationViewerHref({ manualId: 16 }), '/manuals/view?id=16');
   assert.equal(
     citationViewerHref({ manualId: 105, section: '4.2' }),
     '/manuals/view?id=105&section=4.2'
@@ -115,7 +115,7 @@ test('document-only citation still opens that manual', () => {
     { manualId: 105, title: 'Xeo Service Manual Rev B' },
   ]);
   assert.match(html, /href="\/manuals\/view\?id=105/);
-  assert.match(html, /page=1/);
+  assert.doesNotMatch(html, /[?&]page=/);
 });
 
 test('index-excerpt cite chips keep (p. N) instead of opening page 1', () => {
@@ -150,10 +150,8 @@ test('cite URL includes page= when marker has p= and omits it only when unknown'
   assert.doesNotMatch(noPage, /[?&]p=/);
   const parsed = parseCitationMarkers(noPage)[0];
   assert.equal(parsed.page, undefined);
-  assert.equal(
-    citationViewerHref(parsed),
-    '/manuals/view?id=105&title=Cutera+Xeo+System&page=1'
-  );
+  assert.equal(citationViewerHref(parsed), '/manuals/view?id=105&title=Cutera+Xeo+System');
+  assert.doesNotMatch(citationViewerHref(parsed), /[?&]page=/);
 });
 
 test('prose page mentions never become page= unless a physical stamp matches', () => {
@@ -332,9 +330,11 @@ test('out-of-range and cross-manual cites stay on their own row', () => {
   const oorHtml = formatAssistantHtml('[[cite:id=110&p=88&oor=1&t=GentleMAX+Pro+Service+Manual]]', [
     cites[2],
   ]);
-  assert.match(oorHtml, /page=88/);
-  assert.match(oorHtml, /oor=1/);
+  assert.match(oorHtml, /not in this copy/);
   assert.match(oorHtml, /data-cite-oor="1"/);
+  assert.doesNotMatch(oorHtml, /data-cite-page=/);
+  assert.doesNotMatch(oorHtml, /[?&]page=88/);
+  assert.doesNotMatch(oorHtml, /[?&]oor=/);
   assert.equal(oorHtml.match(/id=5/g), null);
 });
 
@@ -450,6 +450,8 @@ test('citation label spaces the page like the From chip', () => {
     'From: Candela GentleMAX PRO PLUS Service Manual, p. 121'
   );
   assert.doesNotMatch(citationLabel({ manualId: 9, title: 'Rev A', page: 166 }), /Rev A,p\.|p\.166/);
+  const panel = readFileSync(join(here, '../../components/AssistantCitedManual.tsx'), 'utf8');
+  assert.match(panel, /p\. \{page\}/);
 });
 
 test('citation list dedupes the same manual page and keeps first-seen order', () => {
@@ -487,4 +489,66 @@ test('citation list dedupes the same manual page and keeps first-seen order', ()
     'Rev A, §3.1',
     'Rev A, §4.2',
   ]);
+});
+
+test('Rev A, p. 166 is one link and a bare Source line is not repeated', () => {
+  const html = formatAssistantHtml(
+    ['Check the harness.', 'Source: Rev A', '— Source: Rev A, p. 166', '[[cite:id=9&p=166&t=Rev+A]]'].join('\n'),
+    [{ manualId: 9, title: 'Rev A', page: 166 }]
+  );
+  assert.equal((html.match(/Source:/g) || []).length, 1);
+  assert.match(html, /<a class="ai-cite-link"[^>]*>Rev A, p\. 166<\/a>/);
+  assert.doesNotMatch(html, />Rev A,<\/a>/);
+  assert.match(html, /href="\/manuals\/view\?id=9[^"]*page=166/);
+});
+
+test('manual with no indexed page does not fabricate a p.1 anchor', () => {
+  const html = formatAssistantHtml(
+    [
+      'zum Reinigen der Fenster finden sich auf Seite 126 und Seite 133.',
+      '',
+      '— Source: Candela GentleMAX Pro Service Manual, p. 1',
+      '[[cite:id=110&t=Candela+GentleMAX+Pro+Service+Manual]]',
+    ].join('\n'),
+    [{ manualId: 110, title: 'Candela GentleMAX Pro Service Manual', pdfPageCount: 15 }]
+  );
+  assert.match(html, /href="\/manuals\/view\?id=110/);
+  assert.doesNotMatch(html, /[?&]page=/);
+  assert.doesNotMatch(html, /p\. 1(?!\d)/);
+  assert.match(html, /ai-cite-oor/);
+  assert.match(html, /p\. 126, p\. 133 not in this copy/);
+  const fromMeta = citationsForAssistantReply(
+    {
+      manualId: 110,
+      manualLabel: 'Candela GentleMAX Pro Service Manual',
+      pageCount: 15,
+      citations: [{ manualId: 110, title: 'Candela GentleMAX Pro Service Manual' }],
+    },
+    110,
+    'Siehe Seite 126 und Seite 133.'
+  );
+  assert.equal(fromMeta[0].page, undefined);
+  assert.equal(fromMeta[0].pdfPageCount, 15);
+  assert.equal(fromMeta[0].pageOutOfRange, undefined);
+});
+
+test('a page past the served PDF is not a deep link', () => {
+  const cites = citationsForAssistantReply(
+    {
+      manualId: 110,
+      pageCount: 15,
+      citations: [{ manualId: 110, title: 'GentleMAX Pro Service Manual', page: 126 }],
+    },
+    110,
+    'Inspect the optics on page 126.'
+  );
+  assert.equal(cites[0].page, 126);
+  assert.equal(cites[0].pageOutOfRange, true);
+  assert.equal(cites[0].pdfPageCount, 15);
+  assert.equal(citationViewerHref(cites[0]), '/manuals/view?id=110&title=GentleMAX+Pro+Service+Manual');
+  assert.match(citationLabel(cites[0]), /p\. 126 not in this copy/);
+  const html = formatAssistantHtml('Inspect the optics on page 126.\n[[cite:id=110&p=126&t=GentleMAX+Pro+Service+Manual]]', cites);
+  assert.doesNotMatch(html, /[?&]page=126/);
+  assert.match(html, /not in this copy/);
+  assert.doesNotMatch(html, /data-cite-page=/);
 });
