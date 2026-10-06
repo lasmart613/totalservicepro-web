@@ -1,6 +1,11 @@
 /**
- * Turn a Stripe-paid organization back to Free when its subscription ends
- * or a renewal invoice fails.
+ * Turn a Stripe-paid organization back to Free when the subscription is
+ * actually over. The first failed renewal stays on Premium so Stripe can retry.
+ *
+ * Downgrade only on customer.subscription.deleted, and on
+ * customer.subscription.updated when the retrieved status is canceled,
+ * unpaid, or incomplete_expired. past_due does not change the plan.
+ * invoice.payment_failed is logged and returns 200 with no plan write.
  *
  * Complimentary and manual Premium are not Stripe subscriptions and are
  * never written here:
@@ -17,9 +22,9 @@
  *
  * A second active or trialing subscription on the same Stripe customer blocks
  * the downgrade. That check uses subscriptions.list, not webhook delivery order.
- * invoice.payment_failed excludes the subscription on that invoice, because
- * Stripe often leaves it active while the renewal is failing.
  */
+
+const SUBSCRIPTION_DOWNGRADE_STATUSES = new Set(['canceled', 'unpaid', 'incomplete_expired']);
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { isComplimentaryGrant } from '../complimentary-premium.ts';
@@ -195,26 +200,19 @@ function downgradeBody(result: {
   };
 }
 
-export async function applyStripePremiumDowngrade(input: {
+async function lookupStripeOrganization(input: {
   writer: SupabaseClient;
   subscription: StripeSubscriptionLike & StripeObject;
-  listLiveSubscriptions: (customerId: string) => Promise<StripeSubscriptionLike[]>;
   retrieveCustomer?: (customerId: string) => Promise<StripeObject | null>;
-  /**
-   * invoice.payment_failed sets this to the invoice's subscription id.
-   * That subscription may still be active while the renewal fails, so it
-   * must not count as "another" live subscription.
-   */
-  excludeSubscriptionId?: string | null;
-}): Promise<{ downgraded: boolean; organizationId?: string | null; reason?: string }> {
+}): Promise<{ organizationId: string | null; subscriptionId: string | null; customerId: string | null; reason?: string }> {
   const subscription = input.subscription;
   const meta = subscription.metadata || {};
   if (meta.kind && meta.kind !== UPGRADE_KIND) {
-    return { downgraded: false, reason: 'wrong_kind' };
+    return { organizationId: null, subscriptionId: null, customerId: null, reason: 'wrong_kind' };
   }
 
   const customerId = customerIdOf(subscription.customer);
-  if (!customerId) return { downgraded: false, reason: 'missing_customer' };
+  if (!customerId) return { organizationId: null, subscriptionId: null, customerId: null, reason: 'missing_customer' };
 
   let metadataOrg = metadataOrgId(meta);
   if (!metadataOrg && input.retrieveCustomer) {
@@ -231,7 +229,33 @@ export async function applyStripePremiumDowngrade(input: {
     typeof subscription.id === 'string' && subscription.id.startsWith('sub_') ? subscription.id : null;
   const stored = await findStoredStripeLink(input.writer, customerId, subscriptionId);
   const organizationId = linkedOrganizationId(metadataOrg, stored);
-  if (!organizationId) return { downgraded: false, reason: 'no_stripe_link' };
+  if (!organizationId) {
+    return { organizationId: null, subscriptionId, customerId, reason: 'no_stripe_link' };
+  }
+  return { organizationId, subscriptionId, customerId };
+}
+
+function attemptCountFromInvoice(invoice: Record<string, unknown> | null): number | null {
+  const raw = invoice?.attempt_count;
+  return typeof raw === 'number' && Number.isFinite(raw) ? raw : null;
+}
+
+export async function applyStripePremiumDowngrade(input: {
+  writer: SupabaseClient;
+  subscription: StripeSubscriptionLike & StripeObject;
+  listLiveSubscriptions: (customerId: string) => Promise<StripeSubscriptionLike[]>;
+  retrieveCustomer?: (customerId: string) => Promise<StripeObject | null>;
+}): Promise<{ downgraded: boolean; organizationId?: string | null; reason?: string }> {
+  const subscription = input.subscription;
+  const linked = await lookupStripeOrganization({
+    writer: input.writer,
+    subscription,
+    retrieveCustomer: input.retrieveCustomer,
+  });
+  if (!linked.organizationId || !linked.customerId) {
+    return { downgraded: false, reason: linked.reason || 'no_stripe_link' };
+  }
+  const organizationId = linked.organizationId;
 
   const org = await loadOrgPlanRow(input.writer, organizationId);
   if (!org) return { downgraded: false, reason: 'missing_org' };
@@ -239,28 +263,24 @@ export async function applyStripePremiumDowngrade(input: {
     return { downgraded: false, organizationId, reason: 'complimentary' };
   }
 
-  const live = await input.listLiveSubscriptions(customerId);
-  if (liveSubscriptionRemains(live, input.excludeSubscriptionId)) {
+  const live = await input.listLiveSubscriptions(linked.customerId);
+  if (liveSubscriptionRemains(live)) {
     return { downgraded: false, organizationId, reason: 'live_subscription_remains' };
   }
 
   await writeOrgColumns(input.writer, organizationId, orgFreePlanFields());
 
-  if (subscriptionId) {
+  if (linked.subscriptionId) {
     const stripeStatus = String(subscription.status || '').toLowerCase();
-    const ledgerStatus =
-      input.excludeSubscriptionId && subscriptionGrantsPremium(stripeStatus)
-        ? 'past_due'
-        : stripeStatus || 'canceled';
     try {
       await input.writer
         .from('subscriptions')
         .update({
-          status: ledgerStatus,
+          status: stripeStatus || 'canceled',
           tier: 'free',
           updated_at: new Date().toISOString(),
         })
-        .eq('stripe_subscription_id', subscriptionId)
+        .eq('stripe_subscription_id', linked.subscriptionId)
         .select('id')
         .maybeSingle();
     } catch (err) {
@@ -271,10 +291,22 @@ export async function applyStripePremiumDowngrade(input: {
   return { downgraded: true, organizationId };
 }
 
+function subscriptionStatusEndsPremium(status: unknown): boolean {
+  return SUBSCRIPTION_DOWNGRADE_STATUSES.has(String(status || '').trim().toLowerCase());
+}
+
+function keptPremium(status: string): BillingEventResult {
+  return {
+    httpStatus: 200,
+    body: { ok: true, handled: true, downgraded: false, status },
+  };
+}
+
 /**
  * customer.subscription.created/updated/deleted and invoice.payment_failed.
- * Active and trialing still upgrade. Anything else, and a failed renewal
- * invoice, downgrade unless another live subscription remains.
+ * Active and trialing still upgrade. Deleted, and updated to canceled,
+ * unpaid, or incomplete_expired, downgrade unless another live subscription
+ * remains. past_due and a failed invoice do not change the plan.
  */
 export async function applyBillingSubscriptionEvent(input: {
   writer: SupabaseClient;
@@ -286,20 +318,44 @@ export async function applyBillingSubscriptionEvent(input: {
   if (isInvoicePaymentFailed(input.event.type)) {
     const invoice = stripeWebhookObject(input.event);
     const subId = subscriptionIdFromInvoice(invoice);
-    if (!subId) return { httpStatus: 200, body: { ok: true, ignored: 'not_subscription_invoice' } };
-    const subscription = await input.retrieveSubscription(subId);
-    if (!customerIdOf(subscription.customer) && invoice) {
-      const fromInvoice = customerIdOf(invoice.customer);
-      if (fromInvoice) subscription.customer = fromInvoice;
+    const attemptCount = attemptCountFromInvoice(invoice);
+    let organizationId: string | null = null;
+    let subscriptionId: string | null = subId;
+    if (subId) {
+      try {
+        const subscription = await input.retrieveSubscription(subId);
+        if (!customerIdOf(subscription.customer) && invoice) {
+          const fromInvoice = customerIdOf(invoice.customer);
+          if (fromInvoice) subscription.customer = fromInvoice;
+        }
+        const linked = await lookupStripeOrganization({
+          writer: input.writer,
+          subscription,
+          retrieveCustomer: input.retrieveCustomer,
+        });
+        organizationId = linked.organizationId;
+        subscriptionId = linked.subscriptionId || subId;
+      } catch (err) {
+        console.warn('[billing] invoice.payment_failed lookup skipped', err);
+      }
     }
-    const result = await applyStripePremiumDowngrade({
-      writer: input.writer,
-      subscription,
-      listLiveSubscriptions: input.listLiveSubscriptions,
-      retrieveCustomer: input.retrieveCustomer,
-      excludeSubscriptionId: subId,
+    console.info('[billing] invoice.payment_failed', {
+      organizationId,
+      subscriptionId,
+      attemptCount,
     });
-    return downgradeBody(result);
+    return {
+      httpStatus: 200,
+      body: {
+        ok: true,
+        handled: true,
+        logged: true,
+        downgraded: false,
+        organizationId,
+        subscriptionId,
+        attemptCount,
+      },
+    };
   }
 
   if (!isSubscriptionLifecycle(input.event.type) && !isSubscriptionDeleted(input.event.type)) {
@@ -311,7 +367,8 @@ export async function applyBillingSubscriptionEvent(input: {
   if (!subId) return { httpStatus: 200, body: { ok: true, ignored: 'missing_subscription_id' } };
   const subscription = await input.retrieveSubscription(subId);
 
-  if (subscriptionGrantsPremium(typeof subscription.status === 'string' ? subscription.status : null)) {
+  const status = typeof subscription.status === 'string' ? subscription.status : '';
+  if (subscriptionGrantsPremium(status)) {
     const result = await applyPaidSubscriptionRecord({
       writer: input.writer,
       subscription,
@@ -327,6 +384,11 @@ export async function applyBillingSubscriptionEvent(input: {
       },
     };
   }
+
+  const deleted = isSubscriptionDeleted(input.event.type);
+  const ended =
+    input.event.type === 'customer.subscription.updated' && subscriptionStatusEndsPremium(status);
+  if (!deleted && !ended) return keptPremium(status || 'unknown');
 
   const result = await applyStripePremiumDowngrade({
     writer: input.writer,

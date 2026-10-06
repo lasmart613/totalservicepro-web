@@ -27,7 +27,9 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Stripe → org upgrade when success_url is missed, and back to Free when
- * the subscription ends or a renewal invoice fails.
+ * the subscription is deleted or updated to canceled, unpaid, or
+ * incomplete_expired. past_due stays Premium. invoice.payment_failed is
+ * logged and does not change the plan.
  * Verifies the webhook signature. Idempotent. Never creates a user or org.
  *
  * Stripe Dashboard endpoint events:

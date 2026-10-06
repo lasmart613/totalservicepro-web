@@ -235,8 +235,8 @@ test('subscription.deleted downgrades a Stripe-linked org to Free', async () => 
   assert.equal(state.orgs[0].subscription_tier, 'free');
 });
 
-test('updated to past_due, unpaid, or canceled downgrades', async () => {
-  for (const status of ['past_due', 'unpaid', 'canceled']) {
+test('updated to canceled, unpaid, or incomplete_expired downgrades', async () => {
+  for (const status of ['canceled', 'unpaid', 'incomplete_expired']) {
     const state = billingState({
       premiumUntil: status === 'canceled' ? '2027-06-01T00:00:00.000Z' : null,
     });
@@ -251,32 +251,75 @@ test('updated to past_due, unpaid, or canceled downgrades', async () => {
   }
 });
 
-test('invoice.payment_failed downgrades even when that subscription is still listed active', async () => {
+test('updated to past_due does not downgrade', async () => {
   const state = billingState();
-  const { result, listCalls } = await runEvent(
-    state,
-    'invoice.payment_failed',
-    'active',
-    [{ id: 'sub_paid', status: 'active' }],
-    {
-      object: {
-        id: 'in_failed',
-        customer: 'cus_paid',
-        subscription: 'sub_paid',
-      },
-    }
-  );
-  assert.equal(result.body.downgraded, true);
-  assert.equal(result.body.plan, 'free');
-  assert.deepEqual(listCalls, ['cus_paid']);
-  assertFree(state.orgs[0], state.orgWrites.at(-1));
-  assert.equal(state.subs[0].status, 'past_due');
+  const { result, listCalls } = await runEvent(state, 'customer.subscription.updated', 'past_due', []);
+  assert.equal(result.httpStatus, 200);
+  assert.equal(result.body.handled, true);
+  assert.equal(result.body.downgraded, false);
+  assert.equal(result.body.ignored, undefined);
+  assert.deepEqual(listCalls, []);
+  assert.equal(state.orgs[0].is_premium, true);
+  assert.equal(state.orgs[0].plan, 'premium');
+  assert.equal(state.orgs[0].subscription_tier, 'premium');
+  assert.equal(state.orgWrites.length, 0);
+  assert.equal(state.subs[0].status, 'active');
+  assert.equal(state.subs[0].tier, 'premium');
+});
+
+test('invoice.payment_failed logs and does not downgrade', async () => {
+  const state = billingState();
+  const logs: unknown[][] = [];
+  const original = console.info;
+  console.info = (...args: unknown[]) => {
+    logs.push(args);
+  };
+  try {
+    const { result, listCalls } = await runEvent(
+      state,
+      'invoice.payment_failed',
+      'active',
+      [{ id: 'sub_paid', status: 'active' }],
+      {
+        object: {
+          id: 'in_failed',
+          customer: 'cus_paid',
+          subscription: 'sub_paid',
+          attempt_count: 2,
+        },
+      }
+    );
+    assert.equal(result.httpStatus, 200);
+    assert.equal(result.body.handled, true);
+    assert.equal(result.body.logged, true);
+    assert.equal(result.body.downgraded, false);
+    assert.equal(result.body.ignored, undefined);
+    assert.equal(result.body.organizationId, '42');
+    assert.equal(result.body.subscriptionId, 'sub_paid');
+    assert.equal(result.body.attemptCount, 2);
+    assert.deepEqual(listCalls, []);
+    assert.equal(state.orgs[0].is_premium, true);
+    assert.equal(state.orgs[0].plan, 'premium');
+    assert.equal(state.orgs[0].subscription_tier, 'premium');
+    assert.equal(state.orgWrites.length, 0);
+    assert.equal(state.subs[0].status, 'active');
+    assert.equal(state.subs[0].tier, 'premium');
+    const entry = logs.find((args) => args[0] === '[billing] invoice.payment_failed');
+    assert.ok(entry);
+    assert.deepEqual(entry?.[1], {
+      organizationId: '42',
+      subscriptionId: 'sub_paid',
+      attemptCount: 2,
+    });
+  } finally {
+    console.info = original;
+  }
 });
 
 test('a second live subscription prevents the downgrade', async () => {
   const state = billingState();
-  const { result } = await runEvent(state, 'customer.subscription.updated', 'past_due', [
-    { id: 'sub_paid', status: 'past_due' },
+  const { result } = await runEvent(state, 'customer.subscription.updated', 'canceled', [
+    { id: 'sub_paid', status: 'canceled' },
     { id: 'sub_team', status: 'trialing' },
   ]);
   assert.equal(result.body.downgraded, undefined);
@@ -323,13 +366,13 @@ test('a complimentary org is not downgraded by an unrelated event', async () => 
   const namesCompOrg = await applyBillingSubscriptionEvent({
     writer: writerFor(state) as never,
     event: {
-      type: 'invoice.payment_failed',
-      data: { object: { id: 'in_other', customer: 'cus_other', subscription: 'sub_other' } },
+      type: 'customer.subscription.updated',
+      data: { object: { id: 'sub_other', status: 'canceled' } },
     },
     retrieveSubscription: async () =>
       ({
         id: 'sub_other',
-        status: 'past_due',
+        status: 'canceled',
         customer: 'cus_other',
         metadata: { kind: 'org_plan', organization_id: '7', plan: 'premium', sku: 'premium_monthly' },
       }) as never,
