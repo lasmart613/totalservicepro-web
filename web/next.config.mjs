@@ -4,11 +4,21 @@ import { fileURLToPath } from "url";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
+function netlifySiteOrigin() {
+  const ctx = String(process.env.CONTEXT || process.env.NETLIFY_CONTEXT || '').toLowerCase();
+  const preview = ctx === 'deploy-preview' || ctx === 'branch-deploy';
+  const raw = preview
+    ? process.env.DEPLOY_PRIME_URL
+    : process.env.NEXT_PUBLIC_SITE_URL || process.env.URL;
+  return String(raw || '').trim().replace(/\/$/, '');
+}
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   env: {
     NEXT_PUBLIC_APP_VERSION: process.env.NEXT_PUBLIC_APP_VERSION || '0.4.0-beta',
     NEXT_PUBLIC_GIT_SHA: process.env.COMMIT_REF || process.env.NEXT_PUBLIC_GIT_SHA || '',
+    NEXT_PUBLIC_SITE_ORIGIN: netlifySiteOrigin(),
   },
   typescript: {
     ignoreBuildErrors: true,

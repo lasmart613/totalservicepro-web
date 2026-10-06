@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { signupAssignsTenant } from '@/lib/tenant-lockdown';
+import { publicSiteOrigin } from '@/lib/site-origin';
 
 /**
  * POST /api/auth/signup
@@ -51,7 +52,9 @@ export async function POST(req: NextRequest) {
       password,
       options: {
         data: { first_name: firstName, last_name: lastName },
-        emailRedirectTo: emailRedirectTo || undefined,
+        emailRedirectTo:
+          emailRedirectTo ||
+          `${publicSiteOrigin(req)}/auth/callback?next=${encodeURIComponent('/onboarding')}`,
       },
     });
     if (error) {

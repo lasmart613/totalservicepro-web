@@ -14,6 +14,7 @@ import {
   teamInviteRoleLabel,
   teamInviteSubject,
 } from '@/lib/team-invite';
+import { publicSiteOrigin } from '@/lib/site-origin';
 
 const ADMIN_ROLES = new Set([
   'admin',
@@ -31,15 +32,6 @@ type InviteBody = {
   /** UI Resend — same send path as a fresh invite. */
   resend?: boolean;
 };
-
-function siteUrl(req: NextRequest): string {
-  const env = process.env.NEXT_PUBLIC_SITE_URL || process.env.URL || process.env.DEPLOY_PRIME_URL;
-  if (env) return env.replace(/\/$/, '');
-  const host = req.headers.get('x-forwarded-host') || req.headers.get('host');
-  const proto = req.headers.get('x-forwarded-proto') || 'https';
-  if (host) return `${proto}://${host}`;
-  return 'https://repairplanet.net';
-}
 
 function isRateLimitError(msg: string): boolean {
   return /rate.?limit|too many|429|email.*limit/i.test(msg || '');
@@ -122,7 +114,7 @@ export async function POST(req: NextRequest) {
     const lastName = (body.lastName || '').trim() || null;
     const jobTitle = (body.jobTitle || '').trim() || null;
     const orgId = profile.organization_id;
-    const base = siteUrl(req);
+    const base = publicSiteOrigin(req);
     const redirectTo = `${base}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`;
     const roleLabel = teamInviteRoleLabel(inviteRole);
 

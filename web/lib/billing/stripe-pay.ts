@@ -11,6 +11,7 @@
  */
 
 import { classifyCheckoutExpire } from './void-invoice.ts';
+import { publicSiteOrigin } from '../site-origin.ts';
 
 export const STRIPE_SECRET_ENV_NAMES = ['STRIPE_SECRET_KEY', 'STRIPE_SECRET'] as const;
 
@@ -96,7 +97,7 @@ export function stripeSecretProblem(): string | null {
 }
 
 export function stripeSiteOrigin(): string {
-  return (readEnv('NEXT_PUBLIC_SITE_URL') || 'https://repairplanet.net').replace(/\/$/, '');
+  return publicSiteOrigin();
 }
 
 export type InvoicePayLinkInput = {
