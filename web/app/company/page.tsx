@@ -1,4 +1,5 @@
 'use client';
+import { useFormatDate } from '@/lib/use-format-date';
 
 import React, { useEffect, useState, useRef, Suspense } from 'react';
 import { Header } from '@/components/Header';
@@ -14,7 +15,7 @@ import {
 } from '@/lib/roles';
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { invitationIsOpen } from '@/lib/org-membership';
-import { useT } from '@/lib/fa/locale';
+import { useSiteLocale, useT } from '@/lib/fa/locale';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
 import { displayModelName } from '@/lib/model-display';
 import {
@@ -75,6 +76,8 @@ async function ensureServiceCreatorLinked(supabase: any, orgId: any, _orgType?: 
 
 function CompanyProfile() {
   const t = useT();
+  const locale = useSiteLocale();
+  const { format } = useFormatDate();
   const [org, setOrg] = useState<any>({});
   const [members, setMembers] = useState<any[]>([]);
   const [pendingInvites, setPendingInvites] = useState<any[]>([]);
@@ -365,7 +368,7 @@ function CompanyProfile() {
     const { data: { session } } = await supabase.auth.getSession();
     const token = session?.access_token;
     if (!token) {
-      toast.error('Sign in required.');
+      toast.error(t('Sign in required.'));
       return;
     }
     const { postMemberRole } = await import('@/lib/org-founder-client');
@@ -375,13 +378,13 @@ function CompanyProfile() {
       role,
     });
     if (!result.ok) {
-      toast.error(result.error || 'Could not change that role.');
+      toast.error(result.error || t('Could not change that role.'));
       return;
     }
     setMembers((prev) =>
       prev.map((row) => (row.id === memberId ? { ...row, role: result.role || role } : row))
     );
-    toast.success('Role updated');
+    toast.success(t('Role updated'));
   }
 
   async function resendInviteEmail(email: string, role?: string) {
@@ -579,10 +582,10 @@ function CompanyProfile() {
 
   async function addTeamMember() {
     if (!newTeam.email || !newTeam.fullName) {
-      setAddMessage('Email and full name required.');
+      setAddMessage(t('Email and full name required.'));
       return;
     }
-    setAddMessage('Sending invite…');
+    setAddMessage(t('Sending invite…'));
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (!session?.access_token || !org?.id) throw new Error('No org / not signed in');
@@ -762,13 +765,11 @@ function CompanyProfile() {
   const profileTitle = ownerMode
     ? ownerProfileLabel(org?.type, org?.facility_type)
     : supplierMode
-      ? 'Supplier Profile'
-      : 'Company Management';
+      ? t('Supplier Profile') : t('Company Management');
   const detailsTitle = ownerMode
     ? ownerDetailsLabel(org?.type, org?.facility_type)
     : supplierMode
-      ? 'Supplier Details'
-      : 'Company Details';
+      ? t('Supplier Details') : t('Company Details');
 
   if (accessDenied) {
     return (
@@ -790,8 +791,7 @@ function CompanyProfile() {
         {justSetup && (
           <div className="mb-4 p-4 rounded bg-green-900/20 border border-green-600 text-sm">
             {ownerMode
-              ? 'This is your clinic profile. Edit anything your service company prefilled, add a logo, extra contacts, and lasers. Changes save on this facility only.'
-              : 'Onboarding complete! Your details, team (if added), and logo have been saved. Review or update company info below anytime. Use Settings for personal phone/job/role.'}
+              ? t('This is your clinic profile. Edit anything your service company prefilled, add a logo, extra contacts, and lasers. Changes save on this facility only.') : t('Onboarding complete! Your details, team (if added), and logo have been saved. Review or update company info below anytime. Use Settings for personal phone/job/role.')}
           </div>
         )}
         <div className="flex items-center justify-between gap-4 flex-wrap">
@@ -821,26 +821,26 @@ function CompanyProfile() {
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="label">City</label>
+                  <label className="label">{t('City')}</label>
                   <input className="input" value={org.city || ''} onChange={e => setOrg({ ...org, city: e.target.value })} />
                 </div>
                 <div>
-                  <label className="label">State</label>
+                  <label className="label">{t('State')}</label>
                   <input className="input" value={org.state || ''} onChange={e => setOrg({ ...org, state: e.target.value })} />
                 </div>
               </div>
               <div>
-                <label className="label">ZIP</label>
+                <label className="label">{t('ZIP')}</label>
                 <input className="input" value={org.zip || ''} onChange={e => setOrg({ ...org, zip: e.target.value })} />
               </div>
               <div>
-                <label className="label">Timezone</label>
+                <label className="label">{t('Timezone')}</label>
                 <select
                   className="select"
                   value={org.timezone || ''}
                   onChange={(e) => setOrg({ ...org, timezone: e.target.value || null })}
                 >
-                  <option value="">Use address state</option>
+                  <option value="">{t('Use address state')}</option>
                   {org.timezone && !ORG_TIME_ZONE_CHOICES.includes(org.timezone as (typeof ORG_TIME_ZONE_CHOICES)[number]) ? (
                     <option value={org.timezone}>{org.timezone}</option>
                   ) : null}
@@ -851,15 +851,15 @@ function CompanyProfile() {
                   ))}
                 </select>
                 <p className="text-xs text-[var(--text3)] mt-1">
-                  Document numbers, email dates, and financial report dates use this timezone.
+                  {t('Document numbers, email dates, and financial report dates use this timezone.')}
                 </p>
               </div>
               <div>
-                <label className="label">Phone</label>
+                <label className="label">{t('Phone')}</label>
                 <input className="input" value={org.phone || ''} onChange={e => setOrg({ ...org, phone: e.target.value })} />
               </div>
               <div>
-                <label className="label" htmlFor="company-details-email">Email</label>
+                <label className="label" htmlFor="company-details-email">{t('Email')}</label>
                 <input
                   id="company-details-email"
                   className="input"
@@ -869,49 +869,48 @@ function CompanyProfile() {
                 />
               </div>
               <div>
-                <label className="label">Website</label>
+                <label className="label">{t('Website')}</label>
                 <input className="input" value={org.website || ''} onChange={e => setOrg({ ...org, website: e.target.value })} />
               </div>
               <div>
-                <label className="label">Primary contact</label>
+                <label className="label">{t('Primary contact')}</label>
                 <input
                   className="input"
                   value={org.contact_name || ''}
                   onChange={e => setOrg({ ...org, contact_name: e.target.value })}
-                  placeholder="Name at the front desk / clinic"
+                  placeholder={t('Name at the front desk / clinic')}
                 />
               </div>
               {ownerMode && (
                 <div>
-                  <label className="label">Facility type</label>
+                  <label className="label">{t('Facility type')}</label>
                   <select
                     className="select"
                     value={org.facility_type || ''}
                     onChange={e => setOrg({ ...org, facility_type: e.target.value })}
                   >
-                    <option value="">Select…</option>
-                    {FACILITY_TYPES.map((t) => (
-                      <option key={t} value={t}>{t}</option>
+                    <option value="">{t('Select…')}</option>
+                    {FACILITY_TYPES.map((kind) => (
+                      <option key={kind} value={kind}>{t(kind)}</option>
                     ))}
                   </select>
                 </div>
               )}
               <div>
-                <label className="label">Notes{ownerMode ? ' / hours' : ''}</label>
+                <label className="label">{ownerMode ? t('Notes / hours') : t('Notes')}</label>
                 <textarea
                   className="input min-h-[80px]"
                   value={org.notes || ''}
                   onChange={e => setOrg({ ...org, notes: e.target.value })}
                   placeholder={
                     ownerMode
-                      ? 'Hours, access notes, parking, preferences…'
-                      : 'Internal notes'
+                      ? t('Hours, access notes, parking, preferences…') : t('Internal notes')
                   }
                 />
               </div>
               {!ownerMode && (
               <div>
-                <label className="label">Brands serviced</label>
+                <label className="label">{t('Brands serviced')}</label>
                 <div className="flex flex-wrap gap-1.5 mt-1">
                   {listManufacturers().map((b) => {
                     const selected = Array.isArray(org.supported_brands) && org.supported_brands.includes(b);
@@ -946,14 +945,10 @@ function CompanyProfile() {
                   checked={!!org.list_in_directory}
                   onChange={(e) => setOrg({ ...org, list_in_directory: e.target.checked })}
                 />
-                <span className="text-sm font-semibold leading-snug">
-                  List my organization in the Total Service Pro directory for free
-                  <span className="block text-[11px] font-normal text-[var(--text3)] mt-0.5">
-                    Appears in the{' '}
-                    <a href="/directory" className="text-[var(--gold)] hover:underline">
-                      TSP Directory
-                    </a>{' '}
-                    so others can find you. Change anytime. Free for all org types.
+                <span className="text-sm font-semibold leading-snug">{t('List my organization in the Total Service Pro directory for free')}                  <span className="block text-[11px] font-normal text-[var(--text3)] mt-0.5">
+                    {t('Appears in the')}{' '}
+                    <a href="/directory" className="text-[var(--gold)] hover:underline">{t('TSP Directory')}</a>{' '}
+                    {t('so others can find you. Change anytime. Free for all org types.')}
                   </span>
                 </span>
               </label>
@@ -961,21 +956,21 @@ function CompanyProfile() {
 
             {/* Logo Upload */}
             <div>
-              <label className="label">Company Logo</label>
-              {org.logo_url && <img src={org.logo_url} alt="Company logo" className="mb-3 max-h-24 rounded border" />}
+              <label className="label">{t('Company Logo')}</label>
+              {org.logo_url && <img src={org.logo_url} alt={t('Company logo')} className="mb-3 max-h-24 rounded border" />}
               <input type="file" ref={fileInputRef} onChange={handleLogoSelect} accept={LOGO_ACCEPT} className="block w-full text-sm" disabled={uploadingLogo || removingLogo} />
               <button type="button" onClick={() => fileInputRef.current?.click()} disabled={uploadingLogo || removingLogo} className="btn btn-secondary mt-2 text-sm">
-                {uploadingLogo ? 'Uploading...' : org.logo_url ? 'Replace logo' : 'Choose & Upload Logo'}
+                {uploadingLogo ? t('Uploading...') : org.logo_url ? t('Replace logo') : t('Choose & Upload Logo')}
               </button>
-              <p className="text-xs text-[var(--text3)] mt-2">PNG, JPG, WebP, or SVG. Max 2 MB.</p>
+              <p className="text-xs text-[var(--text3)] mt-2">{t('PNG, JPG, WebP, or SVG. Max 2 MB.')}</p>
             </div>
 
             <div className="md:col-span-2">
               <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-                <h3 className="font-semibold">Branding</h3>
+                <h3 className="font-semibold">{t('Branding')}</h3>
                 {org.logo_url ? (
                   <button type="button" onClick={removeLogo} disabled={uploadingLogo || removingLogo} className="btn btn-secondary text-sm">
-                    {removingLogo ? 'Removing...' : 'Remove logo'}
+                    {removingLogo ? t('Removing...') : t('Remove logo')}
                   </button>
                 ) : null}
               </div>
@@ -1008,25 +1003,23 @@ function CompanyProfile() {
 
           {supplierMode && (
             <div className="mt-6 p-4 rounded-xl border border-[var(--border)] bg-[var(--surface3)]">
-              <h3 className="font-semibold mb-1">Marketplace storefront</h3>
+              <h3 className="font-semibold mb-1">{t('Marketplace storefront')}</h3>
               <p className="text-sm text-[var(--text3)] mb-3">
-                Premium and Team parts sellers can optionally publish a public shop page and upload inventory as CSV
-                or Excel.
+                {t('Premium and Team parts sellers can optionally publish a public shop page and upload inventory as CSV or Excel.')}
               </p>
-              <a href="/marketplace/storefront" className="btn btn-secondary text-sm">
-                Seller storefront settings
-              </a>
+              <a href="/marketplace/storefront" className="btn btn-secondary text-sm">{t('Seller storefront settings')}</a>
             </div>
           )}
 
           <button onClick={saveOrg} disabled={saving} className="btn btn-primary mt-6 w-full md:w-auto">
             {saving
-              ? 'Saving...'
+              ? t('Saving...')
               : ownerMode
-                ? `Save ${ownerDetailsLabel(org?.type, org?.facility_type)}`
+                ? (ownerDetailsLabel(org?.type, org?.facility_type) === 'Facility Details'
+                    ? t('Save Facility Details')
+                    : t('Save Company Details'))
                 : supplierMode
-                  ? 'Save Supplier Details'
-                  : 'Save Company Details'}
+                  ? t('Save Supplier Details') : t('Save Company Details')}
           </button>
         </div>
 
@@ -1035,14 +1028,14 @@ function CompanyProfile() {
           <>
             {showTeamPrompt && (
               <div className="card p-6 bg-[var(--gold-glow)]/10 border border-[var(--gold)]">
-                <h3 className="font-bold text-lg mb-2">Great! Company details saved.</h3>
-                <p className="text-sm mb-4">Next step: Build your team below.</p>
-                <a href="#team-section" className="btn btn-primary">Go to Team Setup →</a>
+                <h3 className="font-bold text-lg mb-2">{t('Great! Company details saved.')}</h3>
+                <p className="text-sm mb-4">{t('Next step: Build your team below.')}</p>
+                <a href="#team-section" className="btn btn-primary">{t('Go to Team Setup →')}</a>
               </div>
             )}
 
             <div id="team-section" className="card p-6">
-              <h2 className="font-bold mb-4">Team Members &amp; Roles</h2>
+              <h2 className="font-bold mb-4">{t('Team Members & Roles')}</h2>
               <p className="text-xs text-[var(--text3)] mb-3">Add or assign people to roles in this RSP org. Creator/admin changeable but always keep &gt;=1 admin. Use invites for new signups (they sign up first using org tiles or login, then get claimed/assigned here).</p>
               <div id="team-invite" className="team-invite-panel mb-4">
                 <h3 className="font-semibold mb-1">{t('Invite a teammate')}</h3>
@@ -1064,55 +1057,53 @@ function CompanyProfile() {
                       onChange={e => setNewTeam({...newTeam, email: e.target.value})}
                     />
                   </div>
-                  <input className="input" placeholder="Full Name" value={newTeam.fullName} onChange={e => setNewTeam({...newTeam, fullName: e.target.value})} />
+                  <input className="input" placeholder={t('Full Name')} value={newTeam.fullName} onChange={e => setNewTeam({...newTeam, fullName: e.target.value})} />
                   <div className="grid grid-cols-2 gap-2">
                     <select className="select" value={newTeam.role} onChange={e => setNewTeam({...newTeam, role: e.target.value})}>
-                      {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r)}</option>)}
+                      {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r, locale)}</option>)}
                     </select>
-                    <input className="input" placeholder="Job Title override" value={newTeam.title} onChange={e => setNewTeam({...newTeam, title: e.target.value})} />
+                    <input className="input" placeholder={t('Job Title override')} value={newTeam.title} onChange={e => setNewTeam({...newTeam, title: e.target.value})} />
                   </div>
                   <div>
-                    <div className="text-[10px] mb-1">Additional Roles (for multi-role members)</div>
+                    <div className="text-[10px] mb-1">{t('Additional Roles (for multi-role members)')}</div>
                     <div className="flex flex-wrap gap-1 mb-1">
                       {ADDITIONAL_ROLES.map(ar => (
-                        <button key={ar} type="button" onClick={() => toggleNewTeamAddl(ar)} className={`text-[10px] px-1.5 py-px border rounded ${newTeam.additional.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{roleLabel(ar)}</button>
+                        <button key={ar} type="button" onClick={() => toggleNewTeamAddl(ar)} className={`text-[10px] px-1.5 py-px border rounded ${newTeam.additional.includes(ar) ? 'bg-[var(--gold)] text-black' : ''}`}>{roleLabel(ar, locale)}</button>
                       ))}
                     </div>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <input className="input" placeholder="Contact Phone" value={newTeam.contact} onChange={e => setNewTeam({...newTeam, contact: e.target.value})} />
+                    <input className="input" placeholder={t('Contact Phone')} value={newTeam.contact} onChange={e => setNewTeam({...newTeam, contact: e.target.value})} />
                     <select className="select" value={newTeam.timeZone} onChange={e => setNewTeam({...newTeam, timeZone: e.target.value})}>
                       {TIME_ZONES.map(tz => <option key={tz} value={tz}>{tz}</option>)}
                     </select>
                   </div>
                   <div className="grid grid-cols-2 gap-2">
-                    <input className="input" placeholder="Years Exp" value={newTeam.yearsExp} onChange={e => setNewTeam({...newTeam, yearsExp: e.target.value})} />
-                    <input className="input" placeholder="Territories / Competencies" value={newTeam.competencies || newTeam.territories} onChange={e => setNewTeam({...newTeam, competencies: e.target.value})} />
+                    <input className="input" placeholder={t('Years Exp')} value={newTeam.yearsExp} onChange={e => setNewTeam({...newTeam, yearsExp: e.target.value})} />
+                    <input className="input" placeholder={t('Territories / Competencies')} value={newTeam.competencies || newTeam.territories} onChange={e => setNewTeam({...newTeam, competencies: e.target.value})} />
                   </div>
-                  <button onClick={addTeamMember} className="btn btn-primary text-sm w-full">Add / Link by Email (or create invite)</button>
+                  <button onClick={addTeamMember} className="btn btn-primary text-sm w-full">{t('Add / Link by Email (or create invite)')}</button>
                   {addMessage && <div className="text-xs text-[var(--text3)]">{addMessage}</div>}
-                  <div className="text-[10px] text-[var(--text3)]">Existing account? Assigned immediately. New? Invitation record created (they sign up using 3 org tiles or login, then claim on signin).</div>
+                  <div className="text-[10px] text-[var(--text3)]">{t('Existing account? Assigned immediately. New? Invitation record created (they sign up using 3 org tiles or login, then claim on signin).')}</div>
                 </div>
               </div>
 
               <div className="mb-6">
                 <div className="flex items-center justify-between mb-2 gap-2">
-                  <h3 className="font-semibold">Current Team</h3>
+                  <h3 className="font-semibold">{t('Current Team')}</h3>
                   <button
                     type="button"
                     className="btn btn-secondary text-xs"
                     onClick={async () => {
-                      setAddMessage('Syncing team…');
+                      setAddMessage(t('Syncing team…'));
                       await loadTeamMembers(org.id);
                       setAddMessage('');
-                      toast.success('Team list refreshed');
+                      toast.success(t('Team list refreshed'));
                     }}
-                  >
-                    Refresh / sync invites
-                  </button>
+                  >{t('Refresh / sync invites')}</button>
                 </div>
-                <p className="text-xs text-[var(--text3)] mb-2">{members.length} member(s)</p>
-                {members.length === 0 ? <p className="text-xs text-[var(--text3)]">No team members yet.</p> : (
+                <p className="text-xs text-[var(--text3)] mb-2">{t('{count} member(s)').replace('{count}', String(members.length))}</p>
+                {members.length === 0 ? <p className="text-xs text-[var(--text3)]">{t('No team members yet.')}</p> : (
                   <ul className="text-sm">
                     {members.map((m: any, i: number) => (
                       <li key={m.id || i} className="py-2 border-b border-[var(--border)] last:border-0 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -1122,17 +1113,17 @@ function CompanyProfile() {
                             {(isAdmin(userRole) || userRole === 'owner') && m.id && m.id !== selfUserId ? (
                               <select
                                 className="select text-xs ml-2"
-                                aria-label={`Role for ${m.email || m.first_name || 'member'}`}
+                                aria-label={t('Role for {name}').replace('{name}', m.email || m.first_name || t('Member'))}
                                 value={m.role || 'fse'}
                                 onChange={(e) => changeMemberRole(String(m.id), e.target.value)}
                               >
                                 {(m.role && !TEAM_ROLES.includes(m.role) ? [m.role, ...TEAM_ROLES] : TEAM_ROLES).map((r) => (
-                                  <option key={r} value={r}>{roleLabel(r)}</option>
+                                  <option key={r} value={r}>{roleLabel(r, locale)}</option>
                                 ))}
                               </select>
                             ) : (
-                              <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-[var(--surface3)] capitalize">
-                                {roleLabel(m.role)}
+                              <span className="ml-2 text-xs px-1.5 py-0.5 rounded bg-[var(--surface3)]">
+                                {roleLabel(m.role, locale)}
                               </span>
                             )}
                           </div>
@@ -1141,7 +1132,7 @@ function CompanyProfile() {
                             <div className="text-xs text-[var(--text3)]">{m.job_title}</div>
                           )}
                           {m.onboarding_completed !== true && (
-                            <div className="text-[10px] text-[var(--text3)]">Setup not finished</div>
+                            <div className="text-[10px] text-[var(--text3)]">{t('Setup not finished')}</div>
                           )}
                         </div>
                         {m.onboarding_completed !== true && m.email ? (
@@ -1149,9 +1140,7 @@ function CompanyProfile() {
                             type="button"
                             className="btn btn-secondary text-xs self-start"
                             onClick={() => resendInviteEmail(m.email, m.role)}
-                          >
-                            Resend invite email
-                          </button>
+                          >{t('Resend invite email')}</button>
                         ) : null}
                       </li>
                     ))}
@@ -1161,13 +1150,11 @@ function CompanyProfile() {
 
               <div className="mb-6">
                 <h3 className="font-semibold mb-2">
-                  Pending invites ({pendingInvites.length})
+                  {t('Pending invites')} ({pendingInvites.length})
                 </h3>
-                <p className="text-[10px] text-[var(--text3)] mb-2">
-                  Open invites only. After someone joins they appear on Current Team, not here.
-                </p>
+                <p className="text-[10px] text-[var(--text3)] mb-2">{t('Open invites only. After someone joins they appear on Current Team, not here.')}</p>
                 {pendingInvites.length === 0 ? (
-                  <p className="text-xs text-[var(--text3)]">No pending invites.</p>
+                  <p className="text-xs text-[var(--text3)]">{t('No pending invites.')}</p>
                 ) : (
                   <ul className="text-sm">
                     {pendingInvites.map((inv: any) => (
@@ -1177,21 +1164,19 @@ function CompanyProfile() {
                       >
                         <div>
                           <div className="font-medium">{inv.email}</div>
-                          <div className="text-xs text-[var(--text3)] capitalize">
-                            {roleLabel(inv.role || 'fse')}
+                          <div className="text-xs text-[var(--text3)]">
+                            {roleLabel(inv.role || 'fse', locale)}
                             {inv.created_at
-                              ? ` · invited ${new Date(inv.created_at).toLocaleDateString()}`
+                              ? ` · ${t('invited')} ${format(inv.created_at)}`
                               : ''}
-                            {inv.accepted ? ' · marked accepted' : invitationIsOpen(inv) ? ' · waiting' : ' · expired'}
+                            {inv.accepted ? ` · ${t('marked accepted')}` : invitationIsOpen(inv) ? ` · ${t('waiting')}` : ` · ${t('expired')}`}
                           </div>
                         </div>
                         <button
                           type="button"
                           className="btn btn-secondary text-xs self-start"
                           onClick={() => resendInviteEmail(inv.email, inv.role)}
-                        >
-                          Resend / copy link
-                        </button>
+                        >{t('Resend / copy link')}</button>
                       </li>
                     ))}
                   </ul>
@@ -1200,9 +1185,9 @@ function CompanyProfile() {
 
               {inviteHistory.length > 0 && (
                 <div>
-                  <h3 className="font-semibold mb-2">Invite history</h3>
+                  <h3 className="font-semibold mb-2">{t('Invite history')}</h3>
                   <p className="text-[10px] text-[var(--text3)] mb-2">
-                    All invite records for your organization (including completed).
+                    {t('All invite records for your organization (including completed).')}
                   </p>
                   <ul className="text-xs text-[var(--text2)] max-h-48 overflow-y-auto">
                     {inviteHistory.map((inv: any) => {
@@ -1218,15 +1203,15 @@ function CompanyProfile() {
                           <span className="truncate">{inv.email}</span>
                           <span className="shrink-0 text-[var(--text3)]">
                             {onTeam
-                              ? 'on team'
+                              ? t('on team')
                               : inv.accepted
-                                ? 'accepted'
+                                ? t('accepted')
                                 : invitationIsOpen(inv)
-                                  ? 'pending'
-                                  : 'expired'}
+                                  ? t('pending')
+                                  : t('expired')}
                             {' · '}
                             {inv.created_at
-                              ? new Date(inv.created_at).toLocaleDateString()
+                              ? format(inv.created_at)
                               : '—'}
                           </span>
                         </li>
@@ -1238,11 +1223,11 @@ function CompanyProfile() {
             </div>
 
             <p className="text-sm text-[var(--text3)]">
-              Add and manage customers from the{' '}
-              <a href="/customers" className="text-[var(--gold)] hover:underline">
-                Customer Directory
-              </a>
-              .
+              <span dir="auto">
+                {t('Add and manage customers from the {page}.').split('{page}')[0]}
+                <a href="/customers" className="text-[var(--gold)] hover:underline">{t('Customer Directory')}</a>
+                {t('Add and manage customers from the {page}.').split('{page}')[1]}
+              </span>
             </p>
           </>
         )}
@@ -1251,7 +1236,7 @@ function CompanyProfile() {
           <div className="card p-6 space-y-4">
             <div className="flex items-start justify-between gap-3 flex-wrap">
               <div>
-                <h2 className="font-bold">Contacts</h2>
+                <h2 className="font-bold">{t('Contacts')}</h2>
                 <p className="text-xs text-[var(--text3)] mt-1">
                   Add people at this facility. Extra contacts are in addition to the primary contact above.
                 </p>
@@ -1261,7 +1246,7 @@ function CompanyProfile() {
               </a>
             </div>
             {contacts.length === 0 ? (
-              <p className="text-sm text-[var(--text3)]">No extra contacts yet.</p>
+              <p className="text-sm text-[var(--text3)]">{t('No extra contacts yet.')}</p>
             ) : (
               <ul className="text-sm divide-y divide-[var(--border)]">
                 {contacts.map((c: any) => (
@@ -1280,32 +1265,32 @@ function CompanyProfile() {
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               <input
                 className="input"
-                placeholder="First name *"
+                placeholder={t('First name *')}
                 value={newContact.first_name}
                 onChange={(e) => setNewContact({ ...newContact, first_name: e.target.value })}
               />
               <input
                 className="input"
-                placeholder="Last name"
+                placeholder={t('Last name')}
                 value={newContact.last_name}
                 onChange={(e) => setNewContact({ ...newContact, last_name: e.target.value })}
               />
               <input
                 className="input"
-                placeholder="Title"
+                placeholder={t('Title')}
                 value={newContact.title}
                 onChange={(e) => setNewContact({ ...newContact, title: e.target.value })}
               />
               <input
                 className="input"
-                placeholder="Phone"
+                placeholder={t('Phone')}
                 value={newContact.phone}
                 onChange={(e) => setNewContact({ ...newContact, phone: e.target.value })}
               />
               <input
                 className="input sm:col-span-2"
                 type="email"
-                placeholder="Email"
+                placeholder={t('Email')}
                 value={newContact.email}
                 onChange={(e) => setNewContact({ ...newContact, email: e.target.value })}
               />
@@ -1316,7 +1301,7 @@ function CompanyProfile() {
               disabled={savingContact}
               onClick={addFacilityContact}
             >
-              {savingContact ? 'Adding…' : 'Add contact'}
+              {savingContact ? t('Adding…') : t('Add contact')}
             </button>
           </div>
         )}

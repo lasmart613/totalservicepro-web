@@ -45,6 +45,7 @@ import {
   manualLanguageOptionsForView,
   manualRoomsForView,
   manualLibraryFiltersActive,
+  manualCatalogLanguage,
   manualLibrarySearchParams,
   parseManualLibrarySearchParams,
   manualSearchBodyQuery,
@@ -99,7 +100,8 @@ export default function ManualsLibrary() {
     else if (parsed.room) setRoom(equipmentTypeOrDefault(parsed.room));
     if (parsed.query) setQuery(parsed.query);
     if (parsed.brand) setSelectedBrand(parsed.brand);
-    if (parsed.language) setSelectedLanguage(parsed.language);
+    const catalogLanguage = manualCatalogLanguage(window.location.pathname, window.location.search);
+    if (catalogLanguage) setSelectedLanguage(catalogLanguage);
     if (parsed.incompleteOnly) setIncompleteOnly(true);
     loadData();
   }, []);
@@ -880,7 +882,7 @@ export default function ManualsLibrary() {
             autoComplete="off"
           />
           <label className="label" htmlFor="manuals-make">
-            Manufacturer
+            {t('Manufacturer')}
           </label>
           <select
             id="manuals-make"
@@ -892,7 +894,7 @@ export default function ManualsLibrary() {
               syncFilterUrl({ brand: next });
             }}
           >
-            <option value="">All manufacturers</option>
+            <option value="">{t('All manufacturers')}</option>
             {makeOptions.map((brand) => (
               <option key={brand} value={brand}>
                 {brand}
@@ -900,7 +902,7 @@ export default function ManualsLibrary() {
             ))}
           </select>
           <label className="label" htmlFor="manuals-language">
-            Language
+            {t('Language')}
           </label>
           <select
             id="manuals-language"
@@ -914,7 +916,7 @@ export default function ManualsLibrary() {
           >
             {languageOptions.map((option) => (
               <option key={option.value} value={option.value}>
-                {option.label}
+                {t(option.label)}
               </option>
             ))}
           </select>
@@ -954,24 +956,24 @@ export default function ManualsLibrary() {
                 </span>
               </span>
             </button>
-            {shelfRooms.map((t) => {
-              const selected = room === t.value;
-              const count = roomCounts[t.value];
+            {shelfRooms.map((shelf) => {
+              const selected = room === shelf.value;
+              const count = roomCounts[shelf.value];
               return (
                 <button
-                  key={t.value}
+                  key={shelf.value}
                   type="button"
                   role="tab"
                   aria-selected={selected}
-                  onClick={() => selectRoom(t.value)}
+                  onClick={() => selectRoom(shelf.value)}
                   className={`manual-room ${selected ? 'is-selected' : ''}`}
-                  title={t.blurb}
+                  title={shelf.blurb}
                 >
                   <span className="manual-room-icon" aria-hidden>
-                    {t.icon}
+                    {shelf.icon}
                   </span>
                   <span className="manual-room-copy">
-                    <span className="manual-room-label">{t.label}</span>
+                    <span className="manual-room-label">{shelf.label}</span>
                     <span className="manual-room-meta">
                       {loading ? '…' : `${count} ${count === 1 ? 'manual' : 'manuals'}`}
                     </span>

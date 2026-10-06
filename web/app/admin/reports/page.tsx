@@ -1,10 +1,12 @@
 'use client';
+import { useT } from '@/lib/fa/locale';
 
 import React, { useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { isClosedTicketStatus, isCompleteReport, isOpenReport } from '@/lib/tickets';
 
 export default function AdminReports() {
+  const t = useT();
   const [stats, setStats] = useState({
     totalTeam: 0,
     totalCustomers: 0,
@@ -75,46 +77,44 @@ export default function AdminReports() {
   }, []);
 
   if (loading) {
-    return <div className="p-8">Loading reports...</div>;
+    return <div className="p-8">{t('Loading reports...')}</div>;
   }
 
   return (
     <div>
-      <h1 className="text-3xl font-extrabold mb-8">Reports & Analytics</h1>
+      <h1 className="text-3xl font-extrabold mb-8">{t('Reports & Analytics')}</h1>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
         <div className="card p-6">
-          <div className="text-sm text-[var(--text3)]">Total Team Members</div>
+          <div className="text-sm text-[var(--text3)]">{t('Total Team Members')}</div>
           <div className="text-4xl font-extrabold mt-2">{stats.totalTeam}</div>
         </div>
 
         <div className="card p-6">
-          <div className="text-sm text-[var(--text3)]">Total Customers</div>
+          <div className="text-sm text-[var(--text3)]">{t('Total Customers')}</div>
           <div className="text-4xl font-extrabold mt-2">{stats.totalCustomers}</div>
-          <div className="text-xs text-[var(--text3)] mt-1">Linked to your organization</div>
+          <div className="text-xs text-[var(--text3)] mt-1">{t('Linked to your organization')}</div>
         </div>
 
         <div className="card p-6">
-          <div className="text-sm text-[var(--text3)]">Open Tickets</div>
+          <div className="text-sm text-[var(--text3)]">{t('Open Tickets')}</div>
           <div className="text-4xl font-extrabold mt-2 text-[var(--gold)]">{stats.openTickets}</div>
         </div>
 
         <div className="card p-6">
-          <div className="text-sm text-[var(--text3)]">Open / Draft Reports</div>
+          <div className="text-sm text-[var(--text3)]">{t('Open / Draft Reports')}</div>
           <div className="text-4xl font-extrabold mt-2 text-[var(--gold)]">{stats.openReports}</div>
         </div>
 
         <div className="card p-6">
-          <div className="text-sm text-[var(--text3)]">Completed Reports</div>
+          <div className="text-sm text-[var(--text3)]">{t('Completed Reports')}</div>
           <div className="text-4xl font-extrabold mt-2 text-green-400">{stats.completedReports}</div>
         </div>
       </div>
 
       <div className="mt-10 card p-6">
-        <h3 className="font-bold mb-4">Coming Soon</h3>
-        <p className="text-[var(--text3)]">
-          More detailed analytics, revenue reports, FSE performance tracking, and export options will be added here.
-        </p>
+        <h3 className="font-bold mb-4">{t('Coming Soon')}</h3>
+        <p className="text-[var(--text3)]">{t('More detailed analytics, revenue reports, FSE performance tracking, and export options will be added here.')}</p>
       </div>
     </div>
   );

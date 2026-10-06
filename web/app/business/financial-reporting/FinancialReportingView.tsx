@@ -47,7 +47,7 @@ function KpiTile({ kpi, money }: { kpi: MoneyKpi; money: (amount: number) => str
           {kpi.compareAmount != null ? ` · ${money(kpi.compareAmount)}` : ''}
         </div>
       )}
-      <p className="text-xs text-[var(--text3)] mt-auto">{unavailable ? kpi.reason : kpi.note}</p>
+      <p className="text-xs text-[var(--text3)] mt-auto">{unavailable ? t(kpi.reason || '') : t(kpi.note || '')}</p>
     </article>
   );
 }
@@ -145,8 +145,8 @@ function DetailedSections({
                   {metric.count} {metric.count === 1 ? t('row') : t('rows')}
                 </div>
               )}
-              <p className="text-xs text-[var(--text3)] mt-auto">{unavailable ? metric.reason : metric.note || metric.source}</p>
-              {!unavailable && metric.note && <p className="text-[11px] text-[var(--text3)]">Source: {metric.source}</p>}
+              <p className="text-xs text-[var(--text3)] mt-auto">{unavailable ? t(metric.reason || '') : t(metric.note || metric.source || '')}</p>
+              {!unavailable && metric.note && <p className="text-[11px] text-[var(--text3)]">{t('Source')}: {metric.source}</p>}
             </article>
           );
         })}
@@ -192,7 +192,7 @@ function DetailedSections({
                       )}
                     </td>
                     <td className="px-3 py-2">{row.customer}</td>
-                    <td className="px-3 py-2">{statusLabel(row.status)}</td>
+                    <td className="px-3 py-2">{t(statusLabel(row.status))}</td>
                     <td className="px-3 py-2">{row.invoiceDate || '—'}</td>
                     <td className="px-3 py-2">{row.dueDate || '—'}</td>
                     <td className="px-3 py-2 text-end" dir="ltr">
@@ -233,7 +233,7 @@ function DetailedSections({
                   <tr key={`${row.id}-${row.reason}-${index}`} className="border-t border-[var(--border)]">
                     <td className="px-3 py-2">{row.number || row.id || '—'}</td>
                     <td className="px-3 py-2">{row.customer}</td>
-                    <td className="px-3 py-2">{statusLabel(row.status)}</td>
+                    <td className="px-3 py-2">{t(statusLabel(row.status))}</td>
                     <td className="px-3 py-2">{row.reason}</td>
                   </tr>
                 ))}

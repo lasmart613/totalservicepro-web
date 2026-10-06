@@ -100,7 +100,7 @@ export default function UsedSystemsMarketplace() {
                 <div key={l.id} className="card p-6">
                   {featured && (
                     <Link href={href}>
-                      <StorageImage src={featured} alt="Featured" className="w-full h-32 object-cover rounded mb-3 cursor-pointer" width={480} />
+                      <StorageImage src={featured} alt={t('Featured')} className="w-full h-32 object-cover rounded mb-3 cursor-pointer" width={480} />
                     </Link>
                   )}
                   <Link href={href}>
@@ -108,7 +108,7 @@ export default function UsedSystemsMarketplace() {
                   </Link>
                   <p className="text-sm text-[var(--text3)] mb-1">{l.description}</p>
                   <p className="text-sm text-[var(--text3)] mb-2 fa-ltr">{t('S/N:')} {l.serial_number || l.part_number || t('N/A')}</p>
-                  <p className="text-sm mb-1">{l.manufacturer} {displayModelName(l.model)} • {l.condition} {l.year_manufactured ? '• ' + l.year_manufactured : ''}</p>
+                  <p className="text-sm mb-1">{l.manufacturer} {displayModelName(l.model)} • {l.condition ? t(l.condition) : ''} {l.year_manufactured ? '• ' + l.year_manufactured : ''}</p>
                   <GuestAwarePrice signedIn={signedIn} priceLabel={formatListingPrice(l)} className="font-semibold text-[var(--gold)] mb-2" />
                   {signedIn ? (
                   <button 
@@ -147,7 +147,7 @@ export default function UsedSystemsMarketplace() {
                       />
                       <div className="flex gap-2">
                         <button onClick={submitBid} className="btn btn-primary flex-1 text-sm">Submit Offer</button>
-                        <button onClick={() => setBiddingOn(null)} className="btn btn-secondary flex-1 text-sm">Cancel</button>
+                        <button onClick={() => setBiddingOn(null)} className="btn btn-secondary flex-1 text-sm">{t('Cancel')}</button>
                       </div>
                     </div>
                   )}

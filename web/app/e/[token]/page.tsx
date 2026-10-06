@@ -1,8 +1,9 @@
-import React from 'react';
 import type { Metadata } from 'next';
-import EstimateActionClient from './EstimateActionClient';
+import { headers } from 'next/headers';
+import EstimateActionClient, { EstimateLinkFallback } from './EstimateActionClient';
 import { loadPublicEstimateForToken } from '@/lib/billing/estimate-action';
 import { parseCustomerActionKind, parseEstimateEmailAction } from '@/lib/billing/save-helpers';
+import { resolveCustomerPageLocale } from '@/lib/i18n/customer-locale';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,7 @@ export default async function EstimateActionPage({
   searchParams,
 }: {
   params: Promise<{ token: string }>;
-  searchParams?: Promise<{ action?: string; changes?: string; done?: string; notice?: string }>;
+  searchParams?: Promise<{ action?: string; changes?: string; done?: string; notice?: string; lang?: string }>;
 }) {
   const raw = await params;
   const query = searchParams ? await searchParams : {};
@@ -32,6 +33,7 @@ export default async function EstimateActionPage({
   const requested = requestedFromQuery(query);
   const justCompleted = parseCustomerActionKind(query.done);
   const notice = String(query.notice || '');
+  const acceptLanguage = (await headers()).get('accept-language');
 
   let loaded: Awaited<ReturnType<typeof loadPublicEstimateForToken>>;
   try {
@@ -44,16 +46,14 @@ export default async function EstimateActionPage({
     };
   }
 
+  const locale = resolveCustomerPageLocale({
+    orgLanguage: loaded.ok ? loaded.orgLanguage : null,
+    queryLang: query.lang,
+    acceptLanguage,
+  });
+
   if (!loaded.ok) {
-    return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center p-6 text-center">
-        <div className="text-[var(--gold)] font-extrabold tracking-wide text-sm uppercase">RepairPlanet</div>
-        <h1 className="text-xl font-extrabold mb-2 mt-3">
-          {loaded.message.includes('temporarily unavailable') ? 'Temporarily unavailable' : 'Link not valid'}
-        </h1>
-        <p className="text-sm text-[var(--text2)] max-w-md">{loaded.message}</p>
-      </div>
-    );
+    return <EstimateLinkFallback message={loaded.message} locale={locale} />;
   }
 
   return (
@@ -64,6 +64,7 @@ export default async function EstimateActionPage({
       requested={requested}
       justCompleted={justCompleted}
       notice={notice}
+      locale={locale}
     />
   );
 }

@@ -18,13 +18,21 @@ const FN_DIR = join(here, '../../../supabase/functions/grok-assistant');
 const CO2RE_SHA256 = '74db371f64e5a29cbe73b45737ce87211580393b850876e371b29d0f83d262c6';
 const CO2RE_BYTES = 7_728_071;
 
-type Cite = { manualId: number; title?: string; page?: number; section?: string };
-type Part = { text: string; source: string; page?: number; section?: string };
+type Cite = { manualId: number; title?: string; page?: number; section?: string; pageOutOfRange?: boolean };
+type Part = {
+  text: string;
+  source: string;
+  page?: number;
+  section?: string;
+  fileId?: string;
+  fileName?: string;
+  fromSelectedIndex?: boolean;
+};
 type Edge = {
   buildSearchQuery: (q: string, label: string, codes: string[]) => string;
   searchIndexedManualText: (db: unknown, id: number, q: string, label: string) => Promise<Part | null>;
   mergeIndexedParts: (indexed: Part | null, parts: Part[]) => { parts: Part[]; citeParts: Part[] };
-  citationsFromParts: (parts: Part[], id: number, title: string) => Cite[];
+  citationsFromParts: (parts: Part[], id: number, title: string, scope?: unknown) => Cite[];
   attachProsePages: (cites: Cite[], text: string) => Cite[];
   formatCitationLine: (cites: Cite[], fallback?: string) => string;
 };
@@ -33,7 +41,7 @@ let edgePromise: Promise<Edge> | null = null;
 function loadEdge(): Promise<Edge> {
   if (edgePromise) return edgePromise;
   const dir = mkdtempSync(join(tmpdir(), 'grok-edge-'));
-  for (const f of ['manual-scope.ts', 'xai-collection.ts', 'fault-codes.ts']) {
+  for (const f of ['manual-scope.ts', 'xai-collection.ts', 'fault-codes.ts', 'citation-scope.ts']) {
     copyFileSync(join(FN_DIR, f), join(dir, f));
   }
   let src = readFileSync(join(FN_DIR, 'index.ts'), 'utf8');
@@ -143,6 +151,65 @@ test('real CO2RE extract: error 43 cites physical page 150, never printed 7', as
   const text = await extractPdfSearchText(bytes);
   assert.equal((text.match(/\[\[pdfpage:\d+\]\]/g) || []).length, 161);
   await assertPhysical150(await loadEdge(), text);
+});
+
+test('edge cites a PRO PLUS passage as manual 5, not the open Pro manual', async () => {
+  const edge = await loadEdge();
+  const pages: string[] = [];
+  for (let n = 1; n <= 178; n++) {
+    let body = `GentleMAX PRO PLUS service body ${n}`;
+    if (n === 121) body = 'ALEX circuit calibration set TX% 85% before simmer. Calibration Successful.';
+    pages.push(`[[pdfpage:${n}]] ${body}`);
+  }
+  const cites = edge.citationsFromParts(
+    [
+      {
+        text: 'ALEX circuit calibration set TX% 85% before simmer. Calibration Successful.',
+        source: 'GentleMAX PRO PLUS Service Manual 8501-00-2410_A_01.pdf',
+        fileId: 'file_pro_plus',
+        fileName: 'GentleMAX PRO PLUS Service Manual 8501-00-2410_A_01.pdf',
+        page: 120,
+      },
+      {
+        text: 'Model GentleMAX PRO P/N 8501-00-9035 Rev 01 front matter for this service manual.',
+        source: 'GentleMAX Pro Service Manual.pdf p.12',
+        fileId: 'file_pro',
+        fileName: 'GentleMAX Pro Service Manual.pdf',
+        page: 12,
+      },
+    ],
+    110,
+    'Candela GentleMAX Pro Service Manual',
+    {
+      fileIds: new Set(['file_pro']),
+      expectedFilenames: ['GentleMAX Pro Service Manual.pdf'],
+      pageCount: 15,
+      catalog: [
+        {
+          id: 5,
+          title: 'GentleMAX PRO PLUS Service Manual',
+          brand: 'Candela',
+          storage_path: 'shared/candela/GentleMAX PRO PLUS Service Manual 8501-00-2410_A_01.pdf',
+          xai_file_id: 'file_pro_plus',
+          page_count: 178,
+        },
+      ],
+      indexTextByManualId: { 5: pages.join('\f') },
+    }
+  );
+  const plus = cites.find((c) => c.manualId === 5);
+  assert.ok(plus, JSON.stringify(cites));
+  assert.equal(plus!.page, 121);
+  assert.match(plus!.title || '', /GentleMAX PRO PLUS Service Manual/);
+  assert.equal(plus!.pageOutOfRange, undefined);
+  const pro = cites.find((c) => c.manualId === 110);
+  assert.ok(pro, JSON.stringify(cites));
+  assert.equal(pro!.page, 12);
+  assert.equal(pro!.pageOutOfRange, undefined);
+  assert.equal(
+    cites.some((c) => c.manualId === 110 && c.page === 120),
+    false
+  );
 });
 
 test('edge citation label spaces the page and drops a repeated manual page', async () => {

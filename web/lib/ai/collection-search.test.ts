@@ -275,6 +275,11 @@ test('index.ts inlines the same cite-scope helpers as collection-search.ts', () 
   assert.match(fn, /export function extractPageRef/);
   assert.match(lib, /export function extractPageRef/);
   assert.match(fn, /attachProsePages/);
+  assert.match(fn, /reconcilePhysicalPage/);
+  assert.match(lib, /reconcilePhysicalPage/);
+  assert.match(fn, /modelSuffixConflict/);
+  assert.match(lib, /modelSuffixConflict/);
+  assert.match(fn, /from '\.\/citation-scope\.ts'/);
 });
 
 test('name filters stay few and compact-deduped so chat does not issue N serial GETs', () => {

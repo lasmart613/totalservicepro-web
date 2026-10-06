@@ -1,6 +1,9 @@
 /** User-facing labels — never show raw snake_case in the UI. */
 
-export function roleLabel(role?: string | null): string {
+import { translateApp } from './i18n/translate-app.ts';
+
+/** English label for a stored role code. Option values and saved fields stay this code. */
+export function roleLabelEnglish(role?: string | null): string {
   const r = String(role || '').toLowerCase().trim();
   const map: Record<string, string> = {
     company_admin: 'Company Admin',
@@ -17,10 +20,21 @@ export function roleLabel(role?: string | null): string {
     customer: 'Owner',
     parts_supplier: 'Parts Supplier',
     supplier: 'Parts Supplier',
+    staff: 'Staff',
   };
   if (map[r]) return map[r];
   if (!r) return 'Member';
   return r.replace(/_/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+/**
+ * Role name for display. Omit locale (or pass English) to keep the English label.
+ * Stored role codes are unchanged.
+ */
+export function roleLabel(role?: string | null, locale?: string | null): string {
+  const english = roleLabelEnglish(role);
+  if (!locale) return english;
+  return translateApp(locale, english);
 }
 
 export function orgTypeLabel(type?: string | null): string {
