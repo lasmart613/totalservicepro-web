@@ -15,6 +15,7 @@ import { getCompanyTheme, type CompanyTheme } from '@/lib/company-theme';
 import { sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import {
   coerceOrgId,
+  customerActionFromEstimate,
   emptyLineItem,
   isValidOrgId,
   lineItemsSubtotal,
@@ -273,6 +274,11 @@ export default function InvoiceFormClient() {
         toast.error('Could not load estimate for convert');
         return;
       }
+      if (customerActionFromEstimate(data).action === 'rejected') {
+        toast.error('This estimate was rejected and cannot be converted to an invoice.');
+        router.replace('/estimates');
+        return;
+      }
       setSourceEstimateId(data.id);
       setCustomerName(data.customer_name || '');
       setCustSearch(data.customer_name || '');
@@ -366,7 +372,7 @@ export default function InvoiceFormClient() {
           : 'Prefilling invoice from estimate — review and save.'
       );
     },
-    [supabase]
+    [supabase, router]
   );
 
   useEffect(() => {
