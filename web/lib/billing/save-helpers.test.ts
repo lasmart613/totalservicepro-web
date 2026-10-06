@@ -4,6 +4,8 @@ import {
   customerActionConfirmationTitle,
   customerActionFromEstimate,
   customerActionLabel,
+  estimateConfirmMode,
+  estimateValidityText,
   isEstimateAwaitingCustomerAction,
   parseCustomerActionKind,
   parseEstimateEmailAction,
@@ -64,6 +66,41 @@ test('resolveCustomerActionApply is idempotent and treats approve/reject as term
     apply: true,
     conflict: false,
   });
+  assert.deepEqual(resolveCustomerActionApply('changes_requested', 'rejected'), {
+    already: false,
+    apply: true,
+    conflict: false,
+  });
+});
+
+test('confirm page offers approve after a modification and keeps approve or reject final', () => {
+  assert.deepEqual(estimateConfirmMode({ customerAction: null, requested: 'approve' }), {
+    kind: 'confirm',
+    action: 'approve',
+    priorModification: false,
+  });
+  assert.deepEqual(estimateConfirmMode({ customerAction: null, requested: 'reject' }), {
+    kind: 'confirm',
+    action: 'reject',
+    priorModification: false,
+  });
+  assert.deepEqual(
+    estimateConfirmMode({ customerAction: 'changes_requested', requested: 'approve' }),
+    { kind: 'confirm', action: 'approve', priorModification: true }
+  );
+  assert.deepEqual(
+    estimateConfirmMode({ customerAction: 'changes_requested', requested: 'reject' }),
+    { kind: 'confirm', action: 'reject', priorModification: true }
+  );
+  assert.deepEqual(estimateConfirmMode({ customerAction: 'approved', requested: 'approve' }), {
+    kind: 'final',
+    action: 'approved',
+  });
+  assert.deepEqual(estimateConfirmMode({ customerAction: 'rejected', requested: 'reject' }), {
+    kind: 'final',
+    action: 'rejected',
+  });
+  assert.equal(estimateConfirmMode({ customerAction: null, requested: null, expired: true }).kind, 'expired');
 });
 
 test('isEstimateAwaitingCustomerAction is sent + not terminal + not expired', () => {
@@ -82,4 +119,17 @@ test('isEstimateAwaitingCustomerAction is sent + not terminal + not expired', ()
   );
   assert.equal(isEstimateAwaitingCustomerAction({ status: 'draft', created_at: fresh }), false);
   assert.equal(isEstimateAwaitingCustomerAction({ status: 'invoiced', created_at: fresh }), false);
+});
+
+test('estimate validity text is a stable UTC string', () => {
+  const text = estimateValidityText({
+    expired: false,
+    validDays: 30,
+    validUntil: '2026-11-04T00:00:00.000Z',
+  });
+  assert.equal(text, 'Good for 30 days (through Nov 4, 2026)');
+  assert.equal(
+    estimateValidityText({ expired: true, validDays: 30, validUntil: '2026-11-04T00:00:00.000Z' }),
+    'Expired on Nov 4, 2026'
+  );
 });

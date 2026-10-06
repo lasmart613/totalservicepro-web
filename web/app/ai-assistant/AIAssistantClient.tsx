@@ -73,7 +73,7 @@ function answerTimestamp(): number {
 function defaultUsage(): AiUsage {
   return {
     text: { used: 0, limit: 5 },
-    voice: { used: 0, limit: 1 },
+    voice: { used: 0, limit: 5 },
     tier: 'free',
   };
 }
