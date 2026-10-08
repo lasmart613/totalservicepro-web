@@ -9,7 +9,7 @@ import {
 } from '@/lib/customer-invite';
 import { parseMailLocale } from '@/lib/i18n/translate-app';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
-import { takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
+import { releaseDocumentSendSlot, takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
 import {
   buildOwnedPurchaseOrderEmailText,
   buildOwnedPurchaseOrderMessage,
@@ -52,6 +52,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseOrderDeps = {}) {
+  let heldSlot: { organizationId: string | number | null; documentId: string | number; stamp: number } | null =
+    null;
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
@@ -184,10 +186,12 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
     const sendLimit = takeDocumentSendSlot({
       organizationId: callerOrgId,
       documentId: poId,
+      documentType: 'purchase_order',
     });
     if (!sendLimit.ok) {
       return respond({ error: sendLimit.message, rateLimited: true }, 429);
     }
+    heldSlot = { organizationId: callerOrgId, documentId: poId, stamp: sendLimit.stamp };
 
     const message = resendMessage({
       from,
@@ -208,9 +212,15 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
     const result = await rr.json().catch(() => ({}));
     if (!rr.ok) {
       console.error('Resend purchase order send failed', result);
+      if (heldSlot) {
+        releaseDocumentSendSlot({ ...heldSlot, documentType: 'purchase_order' });
+        heldSlot = null;
+      }
       const msg = result?.message || `Email provider error (${rr.status})`;
       return respond({ ok: false, emailSent: false, error: msg }, 502, [recipient]);
     }
+
+    heldSlot = null;
 
     try {
       const writer = admin ?? supabase;
@@ -240,6 +250,7 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
       [recipient]
     );
   } catch (e: any) {
+    if (heldSlot) releaseDocumentSendSlot({ ...heldSlot, documentType: 'purchase_order' });
     console.error('send-purchase-order', e);
     return respond({ error: e?.message || 'Send failed' }, 500);
   }

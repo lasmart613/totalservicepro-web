@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { appStrings } from './app-copy.ts';
+import { formatOrgMoney } from '../money-format.ts';
 import {
   explicitPublicLocale,
   localeFromAcceptLanguage,
@@ -11,6 +12,7 @@ import {
   resolveCustomerPageLocale,
   storedOrgLanguage,
 } from './customer-locale.ts';
+import { estimateDocumentLocaleScript } from './preference.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -104,6 +106,23 @@ test('confirm page translates from the customer locale and keeps confirm fields'
   }
   assert.match(client, /confirms\.approve/);
   assert.doesNotMatch(client, /useT\(|useFormatDate\(|useEffect|toLocaleDateString/);
+  assert.match(client, /formatOrgMoney\(n, \{ currencyCode, numberFormat \}, locale\)/);
+  assert.match(page, /estimateDocumentLocaleScript/);
+  assert.match(page, /LocaleHtml/);
+  const layout = readFileSync(join(here, '../../app/layout.tsx'), 'utf8');
+  assert.match(layout, /if\(p==="\/e"\|\|p\.indexOf\("\/e\/"\)===0\)return/);
+  const provider = readFileSync(join(here, '../fa/locale.tsx'), 'utf8');
+  assert.match(provider, /path === '\/e' \|\| path\.startsWith\('\/e\/'\)/);
+  const arabic = formatOrgMoney(685.13, { currencyCode: 'USD', numberFormat: 'auto' }, 'ar');
+  assert.equal(arabic, '\u200f685.13\u00a0US$');
+  assert.match(arabic, /685\.13/);
+  assert.match(arabic, /US\$/);
+  const script = estimateDocumentLocaleScript('ar');
+  assert.match(script, /d\.lang="ar"/);
+  assert.match(script, /d\.dir="rtl"/);
+  assert.match(script, /ar-preview/);
+  assert.match(estimateDocumentLocaleScript('de'), /d\.lang="de"/);
+  assert.match(estimateDocumentLocaleScript('de'), /d\.dir="ltr"/);
 });
 
 test('rtl confirm sentences keep a period after a Latin name or number', () => {

@@ -104,7 +104,9 @@ export function SiteLocaleProvider({ children }: { children: React.ReactNode }) 
   const locale: PublicLocale = pathLocale !== 'en' ? pathLocale : stored;
 
   useLayoutEffect(() => {
-    const fromPath = localeFromPathname(window.location.pathname);
+    const path = window.location.pathname || '';
+    if (path === '/e' || path.startsWith('/e/')) return;
+    const fromPath = localeFromPathname(path);
     if (fromPath !== 'en') {
       writeSiteLanguage(fromPath);
       setStored(fromPath);

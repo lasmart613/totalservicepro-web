@@ -32,8 +32,13 @@ type PublicEstimate = {
   numberFormat?: string | null;
 };
 
-function money(n: number, currencyCode?: string | null, numberFormat?: string | null) {
-  return formatOrgMoney(n, { currencyCode, numberFormat });
+function money(
+  n: number,
+  currencyCode: string | null | undefined,
+  numberFormat: string | null | undefined,
+  locale: string,
+) {
+  return formatOrgMoney(n, { currencyCode, numberFormat }, locale);
 }
 
 function noticeMessage(notice: string, t: (text: string) => string) {
@@ -233,7 +238,7 @@ export default function EstimateActionClient({
               </p>
               {est.estimateNumber && (
                 <p className="text-sm text-[var(--text3)] mt-4">
-                  {est.estimateNumber} · {money(est.total, est.currencyCode, est.numberFormat)}
+                  {est.estimateNumber} · {money(est.total, est.currencyCode, est.numberFormat, locale)}
                 </p>
               )}
               {(done === 'changes_requested' || done === 'rejected') && (est.customerActionNote || note || rejectNote) && (
@@ -274,7 +279,7 @@ export default function EstimateActionClient({
                 <div>
                   <div className="text-[10px] uppercase tracking-wide text-[var(--text3)]">{t('Total')}</div>
                   <div className="font-extrabold text-[var(--gold)] text-lg">
-                    {money(est.total, est.currencyCode, est.numberFormat)}
+                    {money(est.total, est.currencyCode, est.numberFormat, locale)}
                   </div>
                 </div>
                 <div className="col-span-2">
