@@ -164,6 +164,15 @@ async function withResend<T>(run: (sent: Record<string, unknown>[]) => Promise<T
   }
 }
 
+function assertNoMailbox(body: unknown) {
+  const packed = JSON.stringify(body);
+  assert.equal(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i.test(packed), false, packed);
+  assert.equal(packed.includes(VENDOR_EMAIL), false);
+  assert.equal(packed.includes(STORED_EMAIL), false);
+  assert.equal(packed.includes(FORGED_TO), false);
+  assert.equal(packed.includes(SHOP_EMAIL), false);
+}
+
 function assertServerMail(message: Record<string, unknown>, recipient: string) {
   const html = String(message.html || '');
   const text = String(message.text || '');
@@ -199,8 +208,11 @@ describe('send purchase order', { concurrency: false }, () => {
       });
       const json = await res.json();
       assert.equal(res.status, 200);
+      assert.equal(json.ok, true);
       assert.equal(json.emailSent, true);
-      assert.equal(json.to, VENDOR_EMAIL);
+      assert.equal(json.supplierName, 'Acme Optics');
+      assert.equal(typeof json.sent_at, 'string');
+      assertNoMailbox(json);
       assert.equal(sent.length, 1);
       assertServerMail(sent[0], VENDOR_EMAIL);
       assert.equal(db.updates[0]?.patch.supplier_email, VENDOR_EMAIL);
@@ -230,22 +242,28 @@ describe('send purchase order', { concurrency: false }, () => {
         userClient: linked as never,
         adminClient: null,
       });
+      const linkedJson = await linkedRes.json();
       assert.equal(linkedRes.status, 200);
-      assert.equal((await linkedRes.json()).to, VENDOR_EMAIL);
+      assert.equal(linkedJson.supplierName, 'Acme Optics');
+      assertNoMailbox(linkedJson);
 
       const storedRes = await runSendPurchaseOrder(request(forgedBody), {
         userClient: storedOnly as never,
         adminClient: null,
       });
+      const storedJson = await storedRes.json();
       assert.equal(storedRes.status, 200);
-      assert.equal((await storedRes.json()).to, STORED_EMAIL);
+      assertNoMailbox(storedJson);
 
       const clinicRes = await runSendPurchaseOrder(request(forgedBody), {
         userClient: clinicOrg as never,
         adminClient: null,
       });
+      const clinicJson = await clinicRes.json();
       assert.equal(clinicRes.status, 200);
-      assert.equal((await clinicRes.json()).to, STORED_EMAIL);
+      assert.equal(clinicJson.supplierName, 'Acme Optics');
+      assertNoMailbox(clinicJson);
+      assert.equal(JSON.stringify(clinicJson).includes('clinic@victim.test'), false);
 
       assert.deepEqual(
         sent.map((message) => message.to),
@@ -349,10 +367,14 @@ describe('send purchase order', { concurrency: false }, () => {
         userClient: missingEmail as never,
         adminClient: null,
       });
+      const invalidJson = await invalidRes.json();
+      const missingJson = await missingRes.json();
       assert.equal(invalidRes.status, 400);
       assert.equal(missingRes.status, 400);
-      assert.match((await invalidRes.json()).error, /No valid supplier email/);
-      assert.match((await missingRes.json()).error, /No valid supplier email/);
+      assert.match(invalidJson.error, /No valid supplier email/);
+      assert.match(missingJson.error, /No valid supplier email/);
+      assertNoMailbox(invalidJson);
+      assertNoMailbox(missingJson);
       assert.equal(sent.length, 0);
       assert.equal(invalid.updates.length, 0);
       assert.equal(missingEmail.updates.length, 0);
@@ -375,14 +397,114 @@ describe('send purchase order', { concurrency: false }, () => {
       assert.equal(res.status, 200);
       assert.equal(json.ok, true);
       assert.equal(json.emailSent, true);
-      assert.equal(json.to, VENDOR_EMAIL);
-      assert.equal(json.purchaseOrderId, 42);
+      assert.equal(json.supplierName, 'Acme Optics');
+      assert.equal(typeof json.sent_at, 'string');
+      assert.equal(json.to, undefined);
+      assert.equal(json.purchaseOrderId, undefined);
+      assertNoMailbox(json);
       assert.equal(sent.length, 1);
       assertServerMail(sent[0], VENDOR_EMAIL);
       assert.equal(db.updates.length, 1);
       assert.equal(db.updates[0].table, 'purchase_orders');
       assert.equal(db.updates[0].patch.status, 'sent');
       assert.equal(db.updates[0].patch.supplier_email, VENDOR_EMAIL);
+      assert.equal(db.updates[0].patch.sent_at, json.sent_at);
+    });
+  });
+
+  test('a non-supplier organization falls back to supplier_email, or 400 when that address is missing', async () => {
+    resetDocumentSendRateLimit();
+    const clinicEmail = 'clinic@victim.test';
+    const fallback = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg, { ...vendorOrg, type: 'customer', email: clinicEmail, name: 'Clinic Victim' }],
+      purchase_orders: [poRow({ supplier_email: STORED_EMAIL, supplier_name: 'Acme Optics' })],
+    });
+    const noFallback = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg, { ...vendorOrg, type: 'laser_clinic', email: clinicEmail, name: 'Clinic Victim' }],
+      purchase_orders: [poRow({ supplier_email: 'not-an-email', supplier_name: 'Acme Optics' })],
+    });
+    const emptyType = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg, { ...vendorOrg, type: '', email: clinicEmail, name: 'Untitled Org' }],
+      purchase_orders: [poRow({ supplier_email: null, supplier_name: 'Acme Optics' })],
+    });
+    await withResend(async (sent) => {
+      const fallbackRes = await runSendPurchaseOrder(request({ purchase_order_id: 42, recipient: FORGED_TO }), {
+        userClient: fallback as never,
+        adminClient: null,
+      });
+      const fallbackJson = await fallbackRes.json();
+      assert.equal(fallbackRes.status, 200);
+      assert.equal(fallbackJson.ok, true);
+      assert.equal(fallbackJson.supplierName, 'Acme Optics');
+      assertNoMailbox(fallbackJson);
+      assert.equal(sent.length, 1);
+      assert.deepEqual(sent[0].to, [STORED_EMAIL]);
+      assert.equal(JSON.stringify(sent[0]).includes(clinicEmail), false);
+
+      const denied = await runSendPurchaseOrder(request({ purchase_order_id: 42, to: FORGED_TO }), {
+        userClient: noFallback as never,
+        adminClient: null,
+      });
+      const deniedJson = await denied.json();
+      assert.equal(denied.status, 400);
+      assert.match(deniedJson.error, /No valid supplier email/);
+      assertNoMailbox(deniedJson);
+      assert.equal(JSON.stringify(deniedJson).includes(clinicEmail), false);
+      assert.equal(noFallback.updates.length, 0);
+
+      const blankType = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
+        userClient: emptyType as never,
+        adminClient: null,
+      });
+      const blankJson = await blankType.json();
+      assert.equal(blankType.status, 400);
+      assertNoMailbox(blankJson);
+      assert.equal(JSON.stringify(blankJson).includes(clinicEmail), false);
+      assert.equal(sent.length, 1);
+      assert.equal(emptyType.updates.length, 0);
+    });
+  });
+
+  test('vendor and supplier organization types send, and the response has no recipient address', async () => {
+    resetDocumentSendRateLimit();
+    const vendorTyped = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg, { ...vendorOrg, type: 'vendor', name: 'Vendor Desk' }],
+      purchase_orders: [poRow({ supplier_name: 'Stored label' })],
+    });
+    const supplierTyped = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg, { ...vendorOrg, type: 'supplier', name: 'Supplier Desk', email: 'desk@supplier.test' }],
+      purchase_orders: [poRow({ supplier_email: null, supplier_name: 'Stored label' })],
+    });
+    await withResend(async (sent) => {
+      const vendorRes = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
+        userClient: vendorTyped as never,
+        adminClient: null,
+      });
+      const vendorJson = await vendorRes.json();
+      assert.equal(vendorRes.status, 200);
+      assert.equal(vendorJson.supplierName, 'Vendor Desk');
+      assert.equal(typeof vendorJson.sent_at, 'string');
+      assertNoMailbox(vendorJson);
+
+      const supplierRes = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
+        userClient: supplierTyped as never,
+        adminClient: null,
+      });
+      const supplierJson = await supplierRes.json();
+      assert.equal(supplierRes.status, 200);
+      assert.equal(supplierJson.supplierName, 'Supplier Desk');
+      assertNoMailbox(supplierJson);
+      assert.equal(JSON.stringify(supplierJson).includes('desk@supplier.test'), false);
+
+      assert.deepEqual(
+        sent.map((message) => message.to),
+        [[VENDOR_EMAIL], ['desk@supplier.test']]
+      );
     });
   });
 });

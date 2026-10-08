@@ -9,6 +9,7 @@ import {
 } from '@/lib/customer-invite';
 import { parseMailLocale } from '@/lib/i18n/translate-app';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
+import { isSupplierOrgType } from '@/lib/org-types';
 import { takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
 import {
   buildOwnedPurchaseOrderEmailText,
@@ -117,9 +118,9 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
 
     const readers: QueryClient[] = admin ? [supabase, admin] : [supabase];
     const supplierOrg = await storedSupplierContact(readers, po.supplier_organization_id);
-    const orgEmail = supplierOrg?.email || '';
     const storedEmail = String(po.supplier_email || '').trim();
-    const recipient = isMailbox(orgEmail) ? orgEmail : isMailbox(storedEmail) ? storedEmail : '';
+    const storedName = String(po.supplier_name || '').trim();
+    const recipient = supplierRecipient(supplierOrg, storedEmail);
     if (!recipient) {
       return respond(
         {
@@ -129,6 +130,8 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
         400
       );
     }
+    const supplierName =
+      (supplierOrg?.supplier ? supplierOrg.name : '') || storedName || null;
 
     const techName = await readTechName(supabase, user.id);
     const company = await loadSenderCompany(supabase, callerOrgId, techName);
@@ -176,8 +179,7 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
             'Email delivery is not configured (RESEND_API_KEY). Save the PO and set up Resend to send mail.',
           needsConfig: true,
         },
-        503,
-        [recipient]
+        503
       );
     }
 
@@ -209,21 +211,25 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
     if (!rr.ok) {
       console.error('Resend purchase order send failed', result);
       const msg = result?.message || `Email provider error (${rr.status})`;
-      return respond({ ok: false, emailSent: false, error: msg }, 502, [recipient]);
+      return respond({ ok: false, emailSent: false, error: msg }, 502);
     }
 
+    let sentAt: string | null = null;
     try {
       const writer = admin ?? supabase;
-      await writer
+      const stamped = new Date().toISOString();
+      const { error: markError } = await writer
         .from('purchase_orders')
         .update({
           status: 'sent',
           supplier_email: recipient,
-          sent_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
+          sent_at: stamped,
+          updated_at: stamped,
         })
         .eq('id', poId)
         .eq('organization_id', callerOrgId);
+      if (!markError) sentAt = stamped;
+      else console.warn('could not mark purchase order sent', markError);
     } catch (e) {
       console.warn('could not mark purchase order sent', e);
     }
@@ -232,12 +238,10 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
       {
         ok: true,
         emailSent: true,
-        id: result?.id || null,
-        to: recipient,
-        purchaseOrderId: poId,
+        sent_at: sentAt,
+        supplierName,
       },
-      200,
-      [recipient]
+      200
     );
   } catch (e: any) {
     console.error('send-purchase-order', e);
@@ -245,36 +249,64 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
   }
 }
 
-function respond(body: Record<string, unknown>, status = 200, allowedEmails: string[] = []) {
-  return NextResponse.json(sanitizeMailResponse(body, allowedEmails), { status });
+function respond(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(sanitizeMailResponse(body, []), { status });
 }
 
 /**
- * Email on the supplier organization stored on the PO.
- * A non-supplier type does not contribute an address. A missing row is skipped
- * so the PO's own supplier_email can still be used.
+ * parts_supplier and vendor are the purchase-order supplier types.
+ * supplier is the extra alias the parts vendor picker and founder membership
+ * SQL treat as a parts supplier. An empty type is not a supplier.
+ */
+function isPurchaseOrderSupplierType(type: unknown): boolean {
+  const value = String(type || '').toLowerCase().trim();
+  return isSupplierOrgType(value) || value === 'supplier';
+}
+
+type SupplierOrgContact = {
+  email: string;
+  name: string;
+  supplier: boolean;
+};
+
+/**
+ * Organization stored on the PO. A non-supplier type does not contribute an
+ * address; the caller falls back to supplier_email. A missing row is skipped
+ * for the same reason.
  */
 async function storedSupplierContact(
   clients: QueryClient[],
   supplierOrgId: unknown
-): Promise<{ email: string } | null> {
+): Promise<SupplierOrgContact | null> {
   if (supplierOrgId == null || String(supplierOrgId).trim() === '') return null;
   for (const client of clients) {
     try {
       const { data, error } = await client
         .from('organizations')
-        .select('email, type')
+        .select('email, type, name')
         .eq('id', supplierOrgId)
         .maybeSingle();
       if (error || !data) continue;
-      const type = String(data.type || '').toLowerCase();
-      if (type && type !== 'parts_supplier' && type !== 'vendor') return { email: '' };
-      return { email: String(data.email || '').trim() };
+      const supplier = isPurchaseOrderSupplierType(data.type);
+      return {
+        email: supplier ? String(data.email || '').trim() : '',
+        name: String(data.name || '').trim(),
+        supplier,
+      };
     } catch {
       continue;
     }
   }
   return null;
+}
+
+/**
+ * A linked supplier org must be a supplier type before its address is used.
+ * Anything else falls back to the purchase order's own supplier_email.
+ */
+function supplierRecipient(supplierOrg: SupplierOrgContact | null, storedEmail: string): string {
+  if (supplierOrg?.supplier && isMailbox(supplierOrg.email)) return supplierOrg.email;
+  return isMailbox(storedEmail) ? storedEmail : '';
 }
 
 async function readTechName(supabase: SupabaseClient, userId: string): Promise<string> {

@@ -465,8 +465,13 @@ export default function PurchaseOrderFormClient() {
         toast.error(result.error || 'Email was not sent. PO remains a draft.');
         return;
       }
-      await savePo('sent', { quiet: true });
-      toast.success(`Purchase order emailed to ${result.to}`);
+      if (!result.sentAt) {
+        await savePo('sent', { quiet: true });
+      } else {
+        setStatus('sent');
+      }
+      const mailedName = supplierName.trim();
+      toast.success(mailedName ? `Purchase order emailed to ${mailedName}` : 'Purchase order emailed');
     } finally {
       setEmailing(false);
     }
