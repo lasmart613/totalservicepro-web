@@ -15,7 +15,7 @@ import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import { resolveNumberingTimeZone } from '@/lib/org-timezone';
 import { readEstimateDocumentLocale } from '@/lib/billing/estimate-action';
 import { isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
-import { takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
+import { releaseDocumentSendSlot, takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
 import { stampLangOnEstimateLinks } from '@/lib/share';
 import { loadInvoiceRow, mergePaymentFieldsIntoInvoiceData } from '@/lib/billing/invoice-row-load';
 import {
@@ -42,6 +42,8 @@ import {
  * No customer-invite claim token is minted.
  */
 export async function POST(req: NextRequest) {
+  let heldSlot: { organizationId: string | number | null; documentId: string | number; stamp: number } | null =
+    null;
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
@@ -137,6 +139,19 @@ export async function POST(req: NextRequest) {
     });
     const payAmount = collectable.stripeAmount;
     const includePay = request.includePaymentLink;
+
+    const resendKey = process.env.RESEND_API_KEY;
+    if (resendKey) {
+      const sendLimit = takeDocumentSendSlot({
+        organizationId: callerOrgId,
+        documentId: invoiceId,
+        documentType: 'invoice',
+      });
+      if (!sendLimit.ok) {
+        return respond({ error: sendLimit.message, rateLimited: true }, 429);
+      }
+      heldSlot = { organizationId: callerOrgId, documentId: invoiceId, stamp: sendLimit.stamp };
+    }
 
     let paymentUrl: string | null = null;
     let stripeSessionId: string | null = null;
@@ -272,7 +287,6 @@ export async function POST(req: NextRequest) {
     });
     const mailedHtml = stampLangOnEstimateLinks(wrapped, mailLocale);
 
-    const resendKey = process.env.RESEND_API_KEY;
     const from =
       process.env.NOTIFY_FROM_EMAIL ||
       process.env.RESEND_FROM ||
@@ -292,14 +306,6 @@ export async function POST(req: NextRequest) {
         503,
         [recipient.email]
       );
-    }
-
-    const sendLimit = takeDocumentSendSlot({
-      organizationId: callerOrgId,
-      documentId: invoiceId,
-    });
-    if (!sendLimit.ok) {
-      return respond({ error: sendLimit.message, rateLimited: true }, 429);
     }
 
     const rr = await fetch('https://api.resend.com/emails', {
@@ -322,6 +328,10 @@ export async function POST(req: NextRequest) {
     const result = await rr.json().catch(() => ({}));
     if (!rr.ok) {
       console.error('Resend invoice send failed', result);
+      if (heldSlot) {
+        releaseDocumentSendSlot({ ...heldSlot, documentType: 'invoice' });
+        heldSlot = null;
+      }
       const msg = result?.message || `Email provider error (${rr.status})`;
       const friendly =
         /verify a domain|own email address|testing emails|not verified/i.test(msg)
@@ -334,6 +344,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    heldSlot = null;
     return respond(
       {
         ok: true,
@@ -353,6 +364,7 @@ export async function POST(req: NextRequest) {
       [recipient.email]
     );
   } catch (e: any) {
+    if (heldSlot) releaseDocumentSendSlot({ ...heldSlot, documentType: 'invoice' });
     console.error('send-invoice', e);
     return respond({ error: e?.message || 'Server error' }, 500);
   }

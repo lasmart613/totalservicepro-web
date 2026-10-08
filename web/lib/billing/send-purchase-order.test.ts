@@ -346,6 +346,63 @@ describe('send purchase order', { concurrency: false }, () => {
     });
   });
 
+  test('an email provider failure releases the document send slot', async () => {
+    resetDocumentSendRateLimit();
+    const db = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg, vendorOrg],
+      purchase_orders: [poRow()],
+    });
+    const previous = process.env.RESEND_API_KEY;
+    process.env.RESEND_API_KEY = 'resend-test';
+    let calls = 0;
+    const original = globalThis.fetch;
+    globalThis.fetch = (async (url: unknown) => {
+      if (!String(url).includes('api.resend.com')) throw new Error(`unexpected fetch ${String(url)}`);
+      calls += 1;
+      if (calls === 1) {
+        return new Response(JSON.stringify({ message: 'provider down' }), {
+          status: 502,
+          headers: { 'content-type': 'application/json' },
+        });
+      }
+      return new Response(JSON.stringify({ id: 'msg-1' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      const failed = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
+        userClient: db as never,
+        adminClient: null,
+      });
+      const failedJson = await failed.json();
+      assert.equal(failed.status, 502);
+      assert.equal(failedJson.emailSent, false);
+      assert.equal(db.updates.length, 0);
+
+      for (let n = 0; n < DOCUMENT_SENDS_PER_DOCUMENT_PER_HOUR; n++) {
+        const res = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
+          userClient: db as never,
+          adminClient: null,
+        });
+        assert.equal(res.status, 200, `send ${n + 1}`);
+      }
+      const blocked = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
+        userClient: db as never,
+        adminClient: null,
+      });
+      const blockedJson = await blocked.json();
+      assert.equal(blocked.status, 429);
+      assert.equal(blockedJson.rateLimited, true);
+      assert.equal(db.updates.length, DOCUMENT_SENDS_PER_DOCUMENT_PER_HOUR);
+    } finally {
+      globalThis.fetch = original;
+      if (previous == null) delete process.env.RESEND_API_KEY;
+      else process.env.RESEND_API_KEY = previous;
+    }
+  });
+
   test('an invalid or missing supplier email returns 400', async () => {
     resetDocumentSendRateLimit();
     const invalid = memoryClient({

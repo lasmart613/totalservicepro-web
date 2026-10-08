@@ -67,3 +67,15 @@ export function applyDocumentLocale(locale: PublicLocale, root?: LocaleRoot): vo
   for (const token of SCRIPT_CLASSES) el.classList.remove(token);
   if (meta.htmlClass) el.classList.add(meta.htmlClass);
 }
+
+/**
+ * First-paint script for /e/ pages. The root layout boot script returns early
+ * on those paths so a saved site language cannot replace the estimate locale.
+ */
+export function estimateDocumentLocaleScript(locale: PublicLocale): string {
+  const meta = documentLocaleMeta(locale);
+  const lang = JSON.stringify(meta.lang);
+  const dir = JSON.stringify(meta.dir);
+  const addClass = meta.htmlClass ? `d.classList.add(${JSON.stringify(meta.htmlClass)});` : '';
+  return `(function(){try{var d=document.documentElement;d.lang=${lang};d.dir=${dir};["fa-preview","he-preview","ar-preview"].forEach(function(k){d.classList.remove(k);});${addClass}}catch(e){}})();`;
+}

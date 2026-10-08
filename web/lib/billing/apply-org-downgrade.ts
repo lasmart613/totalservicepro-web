@@ -16,12 +16,20 @@
  *   (and any manual grant stored the same way).
  * - any other non-empty premium_grant is treated as a manual grant.
  * Paid Stripe clears premium_until and premium_grant (orgUpgradeFields) and
- * stores stripe_customers.stripe_customer_id plus subscriptions.stripe_subscription_id.
+ * stores stripe_customers.stripe_customer_id plus subscriptions.stripe_subscription_id
+ * and subscriptions.organization_id.
  * Downgrade writes is_premium/plan/subscription_tier directly. It does not
  * set or trust premium_until.
  *
- * A second active or trialing subscription on the same Stripe customer blocks
- * the downgrade. That check uses subscriptions.list, not webhook delivery order.
+ * The paid org is the subscriptions.organization_id stored for this Stripe
+ * subscription. Metadata organization_id is used only when that column is
+ * empty and the customer user is or was a member of that org. The payer's
+ * current profile org is never the fallback. A stored org and metadata org
+ * that disagree, or no anchor at all, changes nothing.
+ *
+ * Any active or trialing Stripe subscription still anchored to that org
+ * blocks the downgrade. The check lists every anchored customer, not only
+ * the customer on the event.
  */
 
 const SUBSCRIPTION_DOWNGRADE_STATUSES = new Set(['canceled', 'unpaid', 'incomplete_expired']);
@@ -31,7 +39,7 @@ import { isComplimentaryGrant } from '../complimentary-premium.ts';
 import type { OrgPlanFields } from '../org-plan.ts';
 import { loadOrgPlanRow } from '../org-plan-load.ts';
 import { applyPaidSubscriptionRecord } from './apply-org-upgrade.ts';
-import { writeOrgColumns } from './persist-org-upgrade.ts';
+import { ledgerStatusForStripe, writeOrgColumns } from './persist-org-upgrade.ts';
 import {
   isInvoicePaymentFailed,
   isSubscriptionDeleted,
@@ -55,9 +63,41 @@ export type BillingEventResult = {
 
 export type StoredStripeLink = {
   subscriptionOrgId: string | null;
-  customerOrgId: string | null;
-  organizationIds: Set<string>;
+  userId: string | null;
 };
+
+export type AnchoredOrganization = {
+  organizationId: string | null;
+  reason: 'stored_subscription' | 'metadata_membership' | 'anchor_mismatch' | 'not_a_member' | 'no_stripe_link';
+};
+
+/**
+ * Paid org for a downgrade. Profile organization_id is not an input.
+ * Stored subscriptions.organization_id wins. Metadata is accepted only when
+ * there is no stored org and the user is (or was) a member of that org.
+ * Disagreement, or nothing that resolves, refuses the plan change.
+ */
+export function resolveAnchoredOrganization(input: {
+  storedOrganizationId: string | null;
+  metadataOrganizationId: string | null;
+  memberOrganizationIds: ReadonlySet<string>;
+  userId: string | null;
+}): AnchoredOrganization {
+  const stored = input.storedOrganizationId;
+  const metadata = input.metadataOrganizationId;
+  if (stored && metadata && stored !== metadata) {
+    return { organizationId: null, reason: 'anchor_mismatch' };
+  }
+  if (stored) return { organizationId: stored, reason: 'stored_subscription' };
+  if (metadata) {
+    if (input.userId && input.memberOrganizationIds.has(metadata)) {
+      return { organizationId: metadata, reason: 'metadata_membership' };
+    }
+    if (input.userId) return { organizationId: null, reason: 'not_a_member' };
+    return { organizationId: null, reason: 'no_stripe_link' };
+  }
+  return { organizationId: null, reason: 'no_stripe_link' };
+}
 
 export function liveSubscriptionRemains(
   subscriptions: StripeSubscriptionLike[] | null | undefined,
@@ -120,24 +160,13 @@ function metadataOrgId(meta: Record<string, string | undefined> | null | undefin
   return normalizeOrgId(meta?.organization_id);
 }
 
-/** Prefer the subscription row we stored at checkout, then a metadata org that matches a stored link. */
-export function linkedOrganizationId(
-  metadataOrg: string | null,
-  stored: StoredStripeLink
-): string | null {
-  if (stored.subscriptionOrgId) return stored.subscriptionOrgId;
-  if (metadataOrg && stored.organizationIds.has(metadataOrg)) return metadataOrg;
-  return stored.customerOrgId;
-}
-
 async function findStoredStripeLink(
   writer: SupabaseClient,
   customerId: string | null,
   subscriptionId: string | null
 ): Promise<StoredStripeLink> {
-  const organizationIds = new Set<string>();
   let subscriptionOrgId: string | null = null;
-  let customerOrgId: string | null = null;
+  let userId: string | null = null;
 
   if (subscriptionId) {
     const { data, error } = await writer
@@ -148,8 +177,8 @@ async function findStoredStripeLink(
     if (error) throw new Error(error.message || 'subscription lookup failed');
     if (data?.organization_id != null && String(data.organization_id).trim() !== '') {
       subscriptionOrgId = String(data.organization_id);
-      organizationIds.add(subscriptionOrgId);
     }
+    if (data?.user_id) userId = String(data.user_id);
   }
 
   if (customerId) {
@@ -159,22 +188,107 @@ async function findStoredStripeLink(
       .eq('stripe_customer_id', customerId)
       .maybeSingle();
     if (cusErr) throw new Error(cusErr.message || 'stripe customer lookup failed');
-    const userId = cus?.user_id ? String(cus.user_id) : '';
-    if (userId) {
-      const { data: profile, error: profileErr } = await writer
-        .from('user_profiles')
-        .select('id, organization_id')
-        .eq('id', userId)
-        .maybeSingle();
-      if (profileErr) throw new Error(profileErr.message || 'profile lookup failed');
-      if (profile?.organization_id != null && String(profile.organization_id).trim() !== '') {
-        customerOrgId = String(profile.organization_id);
-        organizationIds.add(customerOrgId);
-      }
-    }
+    if (!userId && cus?.user_id) userId = String(cus.user_id);
   }
 
-  return { subscriptionOrgId, customerOrgId, organizationIds };
+  return { subscriptionOrgId, userId };
+}
+
+async function memberOrganizationIds(writer: SupabaseClient, userId: string | null): Promise<Set<string>> {
+  const ids = new Set<string>();
+  if (!userId) return ids;
+  const { data, error } = await writer
+    .from('organization_memberships')
+    .select('organization_id, user_id')
+    .eq('user_id', userId);
+  if (error) throw new Error(error.message || 'membership lookup failed');
+  const rows = Array.isArray(data) ? data : [];
+  for (const row of rows) {
+    if (row?.organization_id != null && String(row.organization_id).trim() !== '') {
+      ids.add(String(row.organization_id));
+    }
+  }
+  return ids;
+}
+
+type OrgStripeAnchors = {
+  customerIds: string[];
+  subscriptionIds: string[];
+};
+
+/** Stripe customers and subscription ids tied to this org, including member payers. */
+async function orgStripeAnchors(
+  writer: SupabaseClient,
+  organizationId: string,
+  eventCustomerId: string | null
+): Promise<OrgStripeAnchors> {
+  const customerIds = new Set<string>();
+  const subscriptionIds = new Set<string>();
+  const userIds = new Set<string>();
+  if (eventCustomerId) customerIds.add(eventCustomerId);
+
+  const { data: subs, error: subErr } = await writer
+    .from('subscriptions')
+    .select('user_id, stripe_subscription_id, organization_id, platform')
+    .eq('organization_id', organizationId);
+  if (subErr) throw new Error(subErr.message || 'subscription anchor lookup failed');
+  for (const row of Array.isArray(subs) ? subs : []) {
+    if (row?.user_id) userIds.add(String(row.user_id));
+    const subId = row?.stripe_subscription_id != null ? String(row.stripe_subscription_id).trim() : '';
+    if (subId.startsWith('sub_')) subscriptionIds.add(subId);
+  }
+
+  const { data: members, error: memErr } = await writer
+    .from('organization_memberships')
+    .select('user_id, organization_id')
+    .eq('organization_id', organizationId);
+  if (memErr) throw new Error(memErr.message || 'membership anchor lookup failed');
+  for (const row of Array.isArray(members) ? members : []) {
+    if (row?.user_id) userIds.add(String(row.user_id));
+  }
+
+  for (const userId of userIds) {
+    const { data: cus, error } = await writer
+      .from('stripe_customers')
+      .select('stripe_customer_id, user_id')
+      .eq('user_id', userId)
+      .maybeSingle();
+    if (error) throw new Error(error.message || 'stripe customer lookup failed');
+    const customerId = cus?.stripe_customer_id != null ? String(cus.stripe_customer_id).trim() : '';
+    if (customerId.startsWith('cus_')) customerIds.add(customerId);
+  }
+
+  return { customerIds: [...customerIds], subscriptionIds: [...subscriptionIds] };
+}
+
+async function writeSubscriptionLedgerStatus(
+  writer: SupabaseClient,
+  subscriptionId: string,
+  stripeStatus: string,
+  opts?: { clearTier?: boolean }
+): Promise<void> {
+  const status = ledgerStatusForStripe(stripeStatus);
+  if (!status) {
+    console.error('[billing] subscription ledger status not written; Stripe status is not mapped', {
+      subscriptionId,
+      stripeStatus,
+    });
+    return;
+  }
+  const patch: Record<string, unknown> = {
+    status,
+    updated_at: new Date().toISOString(),
+  };
+  if (opts?.clearTier) patch.tier = 'free';
+  const { error } = await writer.from('subscriptions').update(patch).eq('stripe_subscription_id', subscriptionId);
+  if (error) {
+    console.error('[billing] subscription ledger status update failed', {
+      message: error.message,
+      subscriptionId,
+      status,
+    });
+    throw new Error(error.message || 'subscription ledger status update failed');
+  }
 }
 
 function downgradeBody(result: {
@@ -228,11 +342,17 @@ async function lookupStripeOrganization(input: {
   const subscriptionId =
     typeof subscription.id === 'string' && subscription.id.startsWith('sub_') ? subscription.id : null;
   const stored = await findStoredStripeLink(input.writer, customerId, subscriptionId);
-  const organizationId = linkedOrganizationId(metadataOrg, stored);
-  if (!organizationId) {
-    return { organizationId: null, subscriptionId, customerId, reason: 'no_stripe_link' };
+  const members = await memberOrganizationIds(input.writer, stored.userId);
+  const anchored = resolveAnchoredOrganization({
+    storedOrganizationId: stored.subscriptionOrgId,
+    metadataOrganizationId: metadataOrg,
+    memberOrganizationIds: members,
+    userId: stored.userId,
+  });
+  if (!anchored.organizationId) {
+    return { organizationId: null, subscriptionId, customerId, reason: anchored.reason };
   }
-  return { organizationId, subscriptionId, customerId };
+  return { organizationId: anchored.organizationId, subscriptionId, customerId };
 }
 
 function attemptCountFromInvoice(invoice: Record<string, unknown> | null): number | null {
@@ -244,6 +364,7 @@ export async function applyStripePremiumDowngrade(input: {
   writer: SupabaseClient;
   subscription: StripeSubscriptionLike & StripeObject;
   listLiveSubscriptions: (customerId: string) => Promise<StripeSubscriptionLike[]>;
+  retrieveSubscription?: (subscriptionId: string) => Promise<StripeObject>;
   retrieveCustomer?: (customerId: string) => Promise<StripeObject | null>;
 }): Promise<{ downgraded: boolean; organizationId?: string | null; reason?: string }> {
   const subscription = input.subscription;
@@ -253,6 +374,11 @@ export async function applyStripePremiumDowngrade(input: {
     retrieveCustomer: input.retrieveCustomer,
   });
   if (!linked.organizationId || !linked.customerId) {
+    console.error('[billing] refusing org plan change; subscription is not anchored', {
+      reason: linked.reason || 'no_stripe_link',
+      subscriptionId: linked.subscriptionId,
+      customerId: linked.customerId,
+    });
     return { downgraded: false, reason: linked.reason || 'no_stripe_link' };
   }
   const organizationId = linked.organizationId;
@@ -263,32 +389,54 @@ export async function applyStripePremiumDowngrade(input: {
     return { downgraded: false, organizationId, reason: 'complimentary' };
   }
 
-  const live = await input.listLiveSubscriptions(linked.customerId);
-  if (liveSubscriptionRemains(live)) {
+  if (await orgStillHasLiveStripeSubscription({
+    writer: input.writer,
+    organizationId,
+    eventCustomerId: linked.customerId,
+    eventSubscriptionId: linked.subscriptionId,
+    listLiveSubscriptions: input.listLiveSubscriptions,
+    retrieveSubscription: input.retrieveSubscription,
+  })) {
     return { downgraded: false, organizationId, reason: 'live_subscription_remains' };
   }
 
   await writeOrgColumns(input.writer, organizationId, orgFreePlanFields());
 
   if (linked.subscriptionId) {
-    const stripeStatus = String(subscription.status || '').toLowerCase();
-    try {
-      await input.writer
-        .from('subscriptions')
-        .update({
-          status: stripeStatus || 'canceled',
-          tier: 'free',
-          updated_at: new Date().toISOString(),
-        })
-        .eq('stripe_subscription_id', linked.subscriptionId)
-        .select('id')
-        .maybeSingle();
-    } catch (err) {
-      console.warn('[billing] subscription ledger downgrade skipped', err);
-    }
+    const stripeStatus = String(subscription.status || '').toLowerCase() || 'canceled';
+    await writeSubscriptionLedgerStatus(input.writer, linked.subscriptionId, stripeStatus, { clearTier: true });
   }
 
   return { downgraded: true, organizationId };
+}
+
+async function orgStillHasLiveStripeSubscription(input: {
+  writer: SupabaseClient;
+  organizationId: string;
+  eventCustomerId: string;
+  eventSubscriptionId: string | null;
+  listLiveSubscriptions: (customerId: string) => Promise<StripeSubscriptionLike[]>;
+  retrieveSubscription?: (subscriptionId: string) => Promise<StripeObject>;
+}): Promise<boolean> {
+  const anchors = await orgStripeAnchors(input.writer, input.organizationId, input.eventCustomerId);
+  const seenLive = new Set<string>();
+  for (const customerId of anchors.customerIds) {
+    const live = await input.listLiveSubscriptions(customerId);
+    for (const sub of live || []) {
+      if (!subscriptionGrantsPremium(sub?.status)) continue;
+      const id = String(sub?.id || '').trim();
+      if (id) seenLive.add(id);
+    }
+    if (liveSubscriptionRemains(live)) return true;
+  }
+
+  if (!input.retrieveSubscription) return false;
+  for (const subscriptionId of anchors.subscriptionIds) {
+    if (!subscriptionId || subscriptionId === input.eventSubscriptionId || seenLive.has(subscriptionId)) continue;
+    const other = await input.retrieveSubscription(subscriptionId);
+    if (subscriptionGrantsPremium(typeof other?.status === 'string' ? other.status : null)) return true;
+  }
+  return false;
 }
 
 function subscriptionStatusEndsPremium(status: unknown): boolean {
@@ -388,12 +536,18 @@ export async function applyBillingSubscriptionEvent(input: {
   const deleted = isSubscriptionDeleted(input.event.type);
   const ended =
     input.event.type === 'customer.subscription.updated' && subscriptionStatusEndsPremium(status);
-  if (!deleted && !ended) return keptPremium(status || 'unknown');
+  if (!deleted && !ended) {
+    if (ledgerStatusForStripe(status) === 'grace_period' && subId) {
+      await writeSubscriptionLedgerStatus(input.writer, subId, status);
+    }
+    return keptPremium(status || 'unknown');
+  }
 
   const result = await applyStripePremiumDowngrade({
     writer: input.writer,
     subscription,
     listLiveSubscriptions: input.listLiveSubscriptions,
+    retrieveSubscription: input.retrieveSubscription,
     retrieveCustomer: input.retrieveCustomer,
   });
   return downgradeBody(result);
