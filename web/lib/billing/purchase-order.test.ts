@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
@@ -85,13 +85,18 @@ test('send-purchase-order renders from the stored PO and ignores body mail field
   assert.doesNotMatch(src, /record\.supplier_organization_id|record\.recipient|record\.supplier_email/);
 });
 
-test('PO email form sends only the purchase order id', () => {
+test('PO email form sends only the purchase order id and does not toast the recipient address', () => {
   const form = readFileSync(join(here, '../../app/purchase-orders/new/PurchaseOrderFormClient.tsx'), 'utf8');
   const sendAt = form.indexOf('async function finalizeAndEmail');
   const sendFn = form.slice(sendAt, form.indexOf('if (loading)', sendAt));
   assert.match(sendFn, /purchase_order_id: id/);
   assert.doesNotMatch(sendFn, /html:|company_name:|reply_to:|replyTo:|supplier_organization_id|supplier_name|po_number/);
   assert.doesNotMatch(sendFn, /buildPurchaseOrderHtml|buildPoEmailHtml/);
+  assert.doesNotMatch(sendFn, /result\.to\b/);
+  assert.match(sendFn, /result\.sentAt/);
+  assert.match(sendFn, /supplierName\.trim\(\)/);
+  assert.match(sendFn, /savePo\('draft'/);
+  assert.match(sendFn, /if \(!result\.sentAt\)/);
 });
 
 test('purchase order list is scoped to caller organization_id', () => {
@@ -107,4 +112,79 @@ test('PO RLS uses the active shop only, not every membership', () => {
   );
   assert.match(live, /organization_id = public\.get_my_org_id\(\)/);
   assert.doesNotMatch(live, /my_membership_org_ids/);
+});
+
+test('purchase order supplier guard locks the supplier and tenant columns', () => {
+  const migrationsDir = join(here, '../../supabase/migrations');
+  const names = readdirSync(migrationsDir).filter((name) => name.endsWith('.sql'));
+  assert.equal(names.includes('20261006_000900_purchase_order_supplier_guard.sql'), false);
+  assert.equal(names.filter((name) => name.startsWith('20261008_000901_')).length, 1);
+  const sql = readFileSync(join(migrationsDir, '20261008_000901_purchase_order_supplier_guard.sql'), 'utf8');
+
+  const firstSql = sql
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n')
+    .trim()
+    .split(';')[0]
+    .trim();
+  assert.equal(firstSql, "SET LOCAL lock_timeout = '5s'");
+  assert.doesNotMatch(sql, /\bCONCURRENTLY\b/i);
+  assert.doesNotMatch(sql, /\bCOMMIT\b/i);
+  assert.doesNotMatch(sql, /CREATE TRIGGER guard_tenant_owner_cols/);
+  assert.doesNotMatch(sql, /EXECUTE FUNCTION public\.guard_tenant_owner_cols/);
+  assert.match(sql, /does not fit this table/);
+  assert.match(sql, /does not revoke anon SELECT/);
+
+  assert.match(sql, /CREATE OR REPLACE FUNCTION public\.purchase_orders_guard_supplier\(\)/);
+  assert.match(sql, /SECURITY DEFINER/);
+  assert.match(sql, /SET search_path = public, pg_temp/);
+  assert.match(sql, /IF auth\.uid\(\) IS NULL THEN\s+RETURN NEW;/);
+  assert.match(sql, /IF TG_OP = 'INSERT' THEN/);
+  assert.match(sql, /NEW\.created_by IS DISTINCT FROM auth\.uid\(\)/);
+  assert.match(sql, /created_by must be the signed-in user/);
+  assert.match(sql, /NEW\.organization_id IS DISTINCT FROM OLD\.organization_id/);
+  assert.match(sql, /organization_id cannot be changed/);
+  assert.match(sql, /NEW\.created_by IS DISTINCT FROM OLD\.created_by/);
+  assert.match(sql, /created_by cannot be changed/);
+  assert.match(sql, /OLD\.status = 'sent' OR OLD\.sent_at IS NOT NULL/);
+  assert.match(
+    sql,
+    /NEW\.supplier_email IS DISTINCT FROM OLD\.supplier_email\s+OR NEW\.supplier_organization_id IS DISTINCT FROM OLD\.supplier_organization_id/
+  );
+  assert.match(sql, /supplier cannot be changed after the purchase order is sent/);
+  assert.match(sql, /RETURN NEW;/);
+  assert.match(sql, /parts_supplier', 'vendor', 'supplier'/);
+  assert.match(sql, /supplier_organization_id must reference a parts supplier/);
+  assert.match(sql, /TG_OP = 'INSERT'\s+OR NEW\.supplier_organization_id IS DISTINCT FROM OLD\.supplier_organization_id/);
+
+  assert.match(
+    sql,
+    /REVOKE EXECUTE ON FUNCTION public\.purchase_orders_guard_supplier\(\) FROM PUBLIC, anon, authenticated/
+  );
+  assert.match(sql, /DROP TRIGGER IF EXISTS purchase_orders_guard_supplier ON public\.purchase_orders/);
+  assert.match(
+    sql,
+    /CREATE TRIGGER purchase_orders_guard_supplier\s+BEFORE INSERT OR UPDATE ON public\.purchase_orders\s+FOR EACH ROW\s+EXECUTE FUNCTION public\.purchase_orders_guard_supplier\(\)/
+  );
+
+  const create = readFileSync(join(migrationsDir, '20260825_000001_purchase_orders.sql'), 'utf8');
+  const policy = readFileSync(join(migrationsDir, '20260825_000004_po_active_org_rls.sql'), 'utf8');
+  assert.match(create, /ENABLE ROW LEVEL SECURITY/);
+  assert.match(create, /GRANT SELECT, INSERT, UPDATE, DELETE ON public\.purchase_orders TO authenticated/);
+  assert.doesNotMatch(create, /GRANT SELECT[^;]*purchase_orders TO anon/);
+  assert.match(policy, /FOR ALL TO authenticated/);
+  assert.match(policy, /organization_id = public\.get_my_org_id\(\)/);
+  assert.doesNotMatch(`${create}\n${policy}`, /TO anon|TO public|USING \(true\)/);
+  assert.equal((create.match(/CREATE POLICY/g) || []).length, 1);
+  assert.equal((policy.match(/CREATE POLICY/g) || []).length, 1);
+
+  const route = readFileSync(join(here, '../../app/api/billing/send-purchase-order/route.ts'), 'utf8');
+  assert.match(route, /isPurchaseOrderSupplierType/);
+  assert.match(route, /isSupplierOrgType/);
+  assert.match(route, /sent_at: sentAt/);
+  assert.match(route, /supplierName/);
+  assert.doesNotMatch(route, /to: recipient,\s*purchaseOrderId/);
+  assert.match(route, /sanitizeMailResponse\(body, \[\]\)/);
 });

@@ -23,6 +23,8 @@ export type SendDocResult = {
   } | null;
   emailSource?: string;
   alreadySent?: boolean;
+  sentAt?: string | null;
+  supplierName?: string | null;
 };
 
 export function isValidOnFileEmail(e: string | null | undefined): boolean {
@@ -117,6 +119,8 @@ export async function sendBillingDocEmail(opts: {
       stripeConnect: json.stripeConnect ?? null,
       emailSource: json.emailSource,
       alreadySent: !!json.alreadySent,
+      sentAt: json.sent_at ?? null,
+      supplierName: json.supplierName ?? null,
     };
   } catch (e: any) {
     return {
