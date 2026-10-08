@@ -10,7 +10,6 @@ import { useOrgMoney } from '@/lib/use-org-money';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { orgTodayIso } from '@/lib/org-timezone';
-import { buildPurchaseOrderHtml, type DocCompany } from '@/lib/billing/doc-html';
 import { isValidOnFileEmail, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import { chunkIds, fetchAllPages } from '@/lib/supabase/paginate';
 import {
@@ -59,7 +58,7 @@ export function PurchaseOrderPageFallback() {
 
 export default function PurchaseOrderFormClient() {
   const t = useT();
-  const { money, prefs, locale } = useOrgMoney();
+  const { money } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -73,7 +72,6 @@ export default function PurchaseOrderFormClient() {
   const [userId, setUserId] = useState<string | null>(null);
   const [docNumber, setDocNumber] = useState('');
   const [status, setStatus] = useState('draft');
-  const [company, setCompany] = useState<DocCompany>({});
 
   const [suppliers, setSuppliers] = useState<SupplierOpt[]>([]);
   const [supSearch, setSupSearch] = useState('');
@@ -303,12 +301,11 @@ export default function PurchaseOrderFormClient() {
         setUserId(user.id);
         const { data: profile } = await supabase
           .from('user_profiles')
-          .select('organization_id, first_name, last_name')
+          .select('organization_id')
           .eq('id', user.id)
           .maybeSingle();
         const orgId = coerceOrgId(profile?.organization_id);
         setUserOrgId(orgId);
-        const techName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ');
         if (orgId) {
           let storedZone: string | null = null;
           const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();
@@ -316,24 +313,11 @@ export default function PurchaseOrderFormClient() {
           else if (zoneRow.data?.timezone) storedZone = String(zoneRow.data.timezone);
           const { data: org } = await supabase
             .from('organizations')
-            .select('name, address, city, state, zip, phone, email, website, logo_url, slogan')
+            .select('name, address, city, state, zip')
             .eq('id', orgId)
             .maybeSingle();
           orgTodayRef.current = orgTodayIso({ stored: storedZone, state: org?.state });
           if (!editIdParam && !poDateTouched.current) setPoDate(orgTodayRef.current);
-          setCompany({
-            company_name: org?.name || '',
-            address: org?.address || '',
-            city: org?.city || '',
-            state: org?.state || '',
-            zip: org?.zip || '',
-            phone: org?.phone || '',
-            email: org?.email || '',
-            website: org?.website || '',
-            logo_url: org?.logo_url || '',
-            slogan: org?.slogan || '',
-            tech_name: techName,
-          });
           const ship = [org?.name, org?.address, org?.city, org?.state, org?.zip]
             .filter(Boolean)
             .join(', ');
@@ -450,33 +434,6 @@ export default function PurchaseOrderFormClient() {
     }
   }
 
-  function buildPoEmailHtml() {
-    return buildPurchaseOrderHtml({
-      company,
-      supplier: {
-        name: supplierName.trim() || supSearch.trim(),
-        address: supAddress,
-        city: supCity,
-        state: supState,
-        zip: supZip,
-        phone: supPhone,
-        email: supEmail,
-      },
-      poNumber: docNumber || 'Draft',
-      poDate: poDate || orgTodayRef.current,
-      neededBy: neededBy || undefined,
-      shipTo: shipTo || undefined,
-      description: description || undefined,
-      preparedBy: company.tech_name,
-      lines: lineItems,
-      subtotal,
-      tax: Number(tax) || 0,
-      total,
-      moneyPrefs: prefs,
-      locale,
-    });
-  }
-
   async function finalizeAndEmail() {
     if (!supplierOrgId) {
       toast.error('Pick a parts supplier from the list so we can use their profile email.');
@@ -502,12 +459,6 @@ export default function PurchaseOrderFormClient() {
         accessToken: session.access_token,
         payload: {
           purchase_order_id: id,
-          po_number: docNumber,
-          supplier_organization_id: supplierOrgId,
-          supplier_name: supplierName,
-          company_name: company.company_name,
-          reply_to: company.email || undefined,
-          html: buildPoEmailHtml(),
         },
       });
       if (!result.emailSent) {
