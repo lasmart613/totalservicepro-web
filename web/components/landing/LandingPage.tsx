@@ -9,7 +9,7 @@ import { FindRepControl } from './FindRepControl';
 import { FindRepForm } from './FindRepForm';
 import { plansHrefForAudience, type PlanAudience } from '@/lib/billing/plan-tiles';
 import { shouldAutoOpenFindRep } from '@/lib/clinic-service-lead';
-import { LANDING_SHOT_SIZE, landingSizes, landingSrcSet } from '@/lib/landing-images';
+import { LANDING_SHOT_SIZE, landingSizes, landingSrcSet, localizedLandingSrc } from '@/lib/landing-images';
 import './landing.css';
 
 const LANDING_PLAN_ROLE: Record<'shop' | 'clinic' | 'parts', PlanAudience> = {
@@ -50,14 +50,16 @@ function Shot({
   sizesKind?: 'hero' | 'gallery' | 'role' | 'phone';
   mount?: boolean;
 }) {
+  const locale = usePublicLocale();
+  const shown = localizedLandingSrc(src, locale);
   const phone = frame === 'phone';
   const dim = LANDING_SHOT_SIZE[src] || { width: phone ? 390 : 1400, height: phone ? 844 : 900 };
-  const srcSet = landingSrcSet(src);
+  const srcSet = landingSrcSet(shown);
   return (
     <figure className={`lp-shot${phone ? ' is-phone' : ''}`}>
       {mount ? (
         <img
-          src={src}
+          src={shown}
           srcSet={srcSet}
           sizes={srcSet ? landingSizes(phone ? 'phone' : sizesKind) : undefined}
           alt={alt}
@@ -477,6 +479,7 @@ function HeroCarousel() {
 
 export function LandingPage() {
   const t = useT();
+  const shotLocale = usePublicLocale();
   return (
     <LandingShell>
       <HeroCarousel />
@@ -613,7 +616,7 @@ export function LandingPage() {
         <div className="lp-phone-wrap">
           <div className="lp-phone">
             <img
-              src="/landing/app-hub.webp"
+              src={localizedLandingSrc('/landing/app-hub.webp', shotLocale)}
               alt={t('Android Service Hub')}
               width={390}
               height={844}
@@ -623,7 +626,7 @@ export function LandingPage() {
           </div>
           <div className="lp-phone">
             <img
-              src="/landing/app-calcs.webp"
+              src={localizedLandingSrc('/landing/app-calcs.webp', shotLocale)}
               alt={t('Photometry tools on Android')}
               width={390}
               height={844}

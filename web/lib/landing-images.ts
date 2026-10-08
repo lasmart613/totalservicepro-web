@@ -13,12 +13,41 @@ export const LANDING_SHOT_SIZE: Record<string, { width: number; height: number }
   '/landing/app-reports.webp': { width: 390, height: 844 },
 };
 
-const PHONE_PREFIX = '/landing/app-';
+const PHONE_FILE = /^app-.*\.webp$/;
+
+/** Product stills that have a Farsi, Spanish, and French version. Photos and store badges stay shared. */
+const LOCALIZED_LANDING_SHOTS = new Set([
+  '/landing/dashboard.webp',
+  '/landing/directory.webp',
+  '/landing/marketplace.webp',
+  '/landing/parts.webp',
+  '/landing/reports.webp',
+  '/landing/schedule.webp',
+  '/landing/team-equipment.webp',
+  '/landing/ticket-assign.webp',
+  '/landing/app-calcs.webp',
+  '/landing/app-hub.webp',
+]);
+
+export type LandingShotLocale = 'en' | 'fa' | 'es' | 'fr';
+
+/** Locales that have a still beside the English file. Others stay on the English path. */
+const LOCALIZED_SHOT_LOCALES = new Set<string>(['fa', 'es', 'fr']);
+
+/**
+ * English path, or the same file under /landing/fa|es|fr when that language is open.
+ * Locales and stills without a localized file stay on the English path.
+ */
+export function localizedLandingSrc(src: string, locale: string): string {
+  if (!LOCALIZED_SHOT_LOCALES.has(locale) || !LOCALIZED_LANDING_SHOTS.has(src)) return src;
+  return `/landing/${locale}/${src.slice('/landing/'.length)}`;
+}
 
 /** Half-width still for srcset (desktop screenshots only). */
 export function landingHalfSrc(src: string): string | null {
   if (!src.endsWith('.webp')) return null;
-  if (src.startsWith(PHONE_PREFIX)) return null;
+  const file = src.slice(src.lastIndexOf('/') + 1);
+  if (PHONE_FILE.test(file)) return null;
   if (src.includes('hero-bg-')) return null;
   return src.replace(/\.webp$/, '-700.webp');
 }
