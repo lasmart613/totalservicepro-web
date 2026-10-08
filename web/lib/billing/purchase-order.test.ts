@@ -69,11 +69,29 @@ test('PO HTML is vendor-labeled and has no customer free-account footer', () => 
   assert.doesNotMatch(html, /Create a free account/);
 });
 
-test('send-purchase-order requires sending-org ownership', () => {
+test('send-purchase-order renders from the stored PO and ignores body mail fields', () => {
   const src = readFileSync(join(here, '../../app/api/billing/send-purchase-order/route.ts'), 'utf8');
-  assert.match(src, /This purchase order belongs to another organization/);
-  assert.match(src, /email on their organization profile/);
+  assert.match(src, /documentOwnedByOrganization/);
+  assert.match(src, /Purchase order not found/);
+  assert.match(src, /No valid supplier email/);
   assert.match(src, /wrapSupplierFacingDocumentEmail/);
+  assert.match(src, /buildOwnedPurchaseOrderMessage/);
+  assert.match(src, /buildOwnedPurchaseOrderEmailText/);
+  assert.match(src, /takeDocumentSendSlot/);
+  assert.match(src, /ownedDocumentSubject\('purchase_order'/);
+  assert.match(src, /replyTo: shop\.email/);
+  assert.doesNotMatch(src, /body\.html|body\.company_name|body\.reply_to|body\.replyTo|body\.subject/);
+  assert.doesNotMatch(src, /record\.html|record\.company_name|record\.reply_to|record\.replyTo|record\.subject/);
+  assert.doesNotMatch(src, /record\.supplier_organization_id|record\.recipient|record\.supplier_email/);
+});
+
+test('PO email form sends only the purchase order id', () => {
+  const form = readFileSync(join(here, '../../app/purchase-orders/new/PurchaseOrderFormClient.tsx'), 'utf8');
+  const sendAt = form.indexOf('async function finalizeAndEmail');
+  const sendFn = form.slice(sendAt, form.indexOf('if (loading)', sendAt));
+  assert.match(sendFn, /purchase_order_id: id/);
+  assert.doesNotMatch(sendFn, /html:|company_name:|reply_to:|replyTo:|supplier_organization_id|supplier_name|po_number/);
+  assert.doesNotMatch(sendFn, /buildPurchaseOrderHtml|buildPoEmailHtml/);
 });
 
 test('purchase order list is scoped to caller organization_id', () => {

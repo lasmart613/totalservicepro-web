@@ -362,6 +362,12 @@ test('document subjects use the owning shop name', () => {
   assert.equal(ownedDocumentSubject('estimate', '', shop), 'Service estimate from Cedar Laser Service');
   assert.equal(ownedDocumentSubject('report', 'SR-4', shop), 'Service Report SR-4 from Cedar Laser Service');
   assert.equal(ownedDocumentSubject('report', '', shop), 'Service report from Cedar Laser Service');
+  assert.equal(
+    ownedDocumentSubject('purchase_order', 'PO-100', shop),
+    'Purchase Order PO-100 from Cedar Laser Service'
+  );
+  assert.equal(ownedDocumentSubject('purchase_order', '', shop), 'Purchase Order from Cedar Laser Service');
+  assert.equal(ownedDocumentSubject('purchase_order', 'PO-100', '  '), 'Purchase Order PO-100');
   for (const kind of ['invoice', 'estimate', 'report'] as const) {
     const subject = ownedDocumentSubject(kind, '100', shop);
     assert.match(subject, /Cedar Laser Service/);

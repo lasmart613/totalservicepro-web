@@ -1,5 +1,5 @@
 /**
- * Caps invoice, estimate, and service-report email sends.
+ * Caps invoice, estimate, purchase-order, and service-report email sends.
  *
  * Photo and upload caps in the marketplace are plan slot limits, not request
  * rates, and nothing else stores a per-org send counter. This uses the same

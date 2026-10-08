@@ -72,10 +72,11 @@ test('send slots expire after an hour', () => {
   assert.equal(later.ok, true);
 });
 
-test('invoice, estimate, and report sends use the limiter and answer 429', () => {
+test('invoice, estimate, purchase order, and report sends use the limiter and answer 429', () => {
   for (const rel of [
     '../../app/api/billing/send-invoice/route.ts',
     '../../app/api/billing/send-estimate/route.ts',
+    '../../app/api/billing/send-purchase-order/route.ts',
     '../../app/api/billing/send-report/route.ts',
   ]) {
     const src = readFileSync(join(here, rel), 'utf8');
