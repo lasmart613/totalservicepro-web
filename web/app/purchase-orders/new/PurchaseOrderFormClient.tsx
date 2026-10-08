@@ -22,6 +22,7 @@ import {
   writeWithColumnRetry,
   type LineItem,
 } from '@/lib/billing/save-helpers';
+import { isSentPurchaseOrder, purchaseOrderSavePayload } from '@/lib/billing/purchase-order-save';
 import { isPartListing } from '@/lib/marketplace/parts';
 import {
   exactPartSuggest,
@@ -72,6 +73,8 @@ export default function PurchaseOrderFormClient() {
   const [userId, setUserId] = useState<string | null>(null);
   const [docNumber, setDocNumber] = useState('');
   const [status, setStatus] = useState('draft');
+  const [sentAt, setSentAt] = useState<string | null>(null);
+  const supplierLocked = isSentPurchaseOrder(status, sentAt);
 
   const [suppliers, setSuppliers] = useState<SupplierOpt[]>([]);
   const [supSearch, setSupSearch] = useState('');
@@ -250,6 +253,7 @@ export default function PurchaseOrderFormClient() {
       }
       setSavedId(data.id);
       setStatus(data.status || 'draft');
+      setSentAt(data.sent_at ? String(data.sent_at) : null);
       setSupplierName(data.supplier_name || '');
       setSupSearch(data.supplier_name || '');
       setSupplierOrgId(data.supplier_organization_id || null);
@@ -408,12 +412,17 @@ export default function PurchaseOrderFormClient() {
         payload.created_by = userId;
         payload.created_at = new Date().toISOString();
       }
+      const alreadySent = supplierLocked;
+      const writing = purchaseOrderSavePayload(payload, {
+        alreadySent,
+        nextStatus,
+      });
 
-      const result = await writeWithColumnRetry(supabase, 'purchase_orders', payload, savedId);
+      const result = await writeWithColumnRetry(supabase, 'purchase_orders', writing, savedId);
       if (result.error) throw result.error;
       if (result.id) {
         setSavedId(result.id);
-        setStatus(nextStatus);
+        if (!alreadySent || nextStatus === 'sent') setStatus(nextStatus);
         try {
           const url = new URL(window.location.href);
           url.searchParams.set('id', String(result.id));
@@ -423,7 +432,7 @@ export default function PurchaseOrderFormClient() {
         }
       }
       if (!opts?.quiet) {
-        toast.success(nextStatus === 'draft' ? 'PO draft saved' : 'Purchase order saved');
+        toast.success(!alreadySent && nextStatus === 'draft' ? 'PO draft saved' : 'Purchase order saved');
       }
       return result.id || savedId;
     } catch (err: any) {
@@ -469,6 +478,7 @@ export default function PurchaseOrderFormClient() {
         await savePo('sent', { quiet: true });
       } else {
         setStatus('sent');
+        setSentAt(String(result.sentAt));
       }
       const mailedName = supplierName.trim();
       toast.success(mailedName ? `Purchase order emailed to ${mailedName}` : 'Purchase order emailed');
@@ -506,8 +516,12 @@ export default function PurchaseOrderFormClient() {
             <label className="text-xs text-[var(--text3)]">{t('Choose a parts supplier')}</label>
             <select
               className="input select mt-1"
+              data-field="supplier_organization_id"
               value={supplierOrgId != null ? String(supplierOrgId) : ''}
+              disabled={supplierLocked}
+              aria-readonly={supplierLocked}
               onChange={(e) => {
+                if (supplierLocked) return;
                 const id = e.target.value;
                 if (!id) {
                   clearSupplier();
@@ -533,8 +547,11 @@ export default function PurchaseOrderFormClient() {
             <label className="text-xs text-[var(--text3)] mt-3 block">{t('Type to filter the list')}</label>
             <input
               className="input mt-1"
+              data-field="supplier_name"
               value={supSearch}
+              readOnly={supplierLocked}
               onChange={(e) => {
+                if (supplierLocked) return;
                 const v = e.target.value;
                 setSupSearch(v);
                 const exact = suppliers.find(
@@ -558,13 +575,21 @@ export default function PurchaseOrderFormClient() {
               ))}
             </datalist>
             <p className="text-[11px] text-[var(--text3)] mt-1">
-              {t('Pick from the dropdown or type a name — email fills from their profile.')}
+              {supplierLocked
+                ? t('Sent purchase orders keep their supplier. Save draft updates the other fields.')
+                : t('Pick from the dropdown or type a name — email fills from their profile.')}
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Email on supplier profile')}</label>
-              <input className="input mt-1 opacity-90" readOnly value={supEmail || '—'} />
+              <input
+                className="input mt-1 opacity-90"
+                data-field="supplier_email"
+                readOnly
+                aria-readonly="true"
+                value={supEmail || '—'}
+              />
             </div>
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Phone')}</label>
