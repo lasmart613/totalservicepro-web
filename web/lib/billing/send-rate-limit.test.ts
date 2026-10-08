@@ -149,9 +149,15 @@ test('a 429 invoice send returns before Stripe checkout or an invoice write', ()
   const limitedAt = src.indexOf('rateLimited: true');
   const stripeAt = src.indexOf('createInvoiceCheckoutSession(');
   const writeAt = src.indexOf("from('service_invoices')");
+  const missingKeyAt = src.indexOf('needsConfig: true');
   assert.ok(limitedAt > 0);
+  assert.ok(missingKeyAt > 0 && missingKeyAt < stripeAt && missingKeyAt < writeAt);
   assert.ok(stripeAt > limitedAt);
   assert.ok(writeAt > limitedAt);
+  const providerFail = src.slice(src.indexOf('if (!rr.ok)'));
+  assert.match(providerFail, /heldSlot && !checkoutSessionCreated/);
+  const thrown = src.slice(src.indexOf('} catch (e: any)'));
+  assert.match(thrown, /heldSlot && !checkoutSessionCreated/);
   assert.match(src, /documentType: 'invoice'/);
   const estimate = readFileSync(join(here, '../../app/api/billing/send-estimate/route.ts'), 'utf8');
   const report = readFileSync(join(here, '../../app/api/billing/send-report/route.ts'), 'utf8');

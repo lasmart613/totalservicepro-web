@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { createInvoiceCheckoutSession, stripeSecretProblem } from '@/lib/billing/stripe-pay';
+import {
+  createInvoiceCheckoutSession as defaultCreateInvoiceCheckoutSession,
+  stripeSecretProblem,
+  type InvoiceCheckoutOutcome,
+  type InvoicePayLinkInput,
+} from '@/lib/billing/stripe-pay';
 import { decideSellerChargeRoute, CONNECT_REQUIRED_CODE } from '@/lib/billing/stripe-connect';
 import { loadSellerPayoutAccount } from '@/lib/billing/stripe-connect-api';
 import {
@@ -41,22 +46,41 @@ import {
  * The HTML and recipient come from that invoice. The body cannot supply them.
  * No customer-invite claim token is minted.
  */
+type SendInvoiceDeps = {
+  userClient?: SupabaseClient;
+  adminClient?: SupabaseClient | null;
+  createCheckout?: (input: InvoicePayLinkInput) => Promise<InvoiceCheckoutOutcome>;
+};
+
 export async function POST(req: NextRequest) {
+  return runSendInvoice(req);
+}
+
+export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {}) {
   let heldSlot: { organizationId: string | number | null; documentId: string | number; stamp: number } | null =
     null;
+  let checkoutSessionCreated = false;
+  const createInvoiceCheckoutSession = deps.createCheckout ?? defaultCreateInvoiceCheckoutSession;
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
     if (!token) return respond({ error: 'Sign in required' }, 401);
 
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    if (!url || !anon) return respond({ error: 'Server misconfigured' }, 500);
+    let supabase: SupabaseClient;
+    if (deps.userClient) {
+      supabase = deps.userClient;
+    } else {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+      const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+      if (!url || !anon) return respond({ error: 'Server misconfigured' }, 500);
+      supabase = createClient(url, anon, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    }
 
-    const supabase = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const admin: SupabaseClient | null =
+      deps.adminClient !== undefined ? deps.adminClient : hasServiceRole() ? getSupabaseAdmin() : null;
 
     const {
       data: { user },
@@ -83,7 +107,7 @@ export async function POST(req: NextRequest) {
 
     const loaded = await loadOwnedDocument({
       userClient: supabase,
-      adminClient: hasServiceRole() ? getSupabaseAdmin() : null,
+      adminClient: admin,
       table: 'service_invoices',
       id: invoiceId,
       callerOrgId,
@@ -141,17 +165,29 @@ export async function POST(req: NextRequest) {
     const includePay = request.includePaymentLink;
 
     const resendKey = process.env.RESEND_API_KEY;
-    if (resendKey) {
-      const sendLimit = takeDocumentSendSlot({
-        organizationId: callerOrgId,
-        documentId: invoiceId,
-        documentType: 'invoice',
-      });
-      if (!sendLimit.ok) {
-        return respond({ error: sendLimit.message, rateLimited: true }, 429);
-      }
-      heldSlot = { organizationId: callerOrgId, documentId: invoiceId, stamp: sendLimit.stamp };
+    if (!resendKey) {
+      return respond(
+        {
+          ok: false,
+          emailSent: false,
+          error:
+            'Email delivery is not configured (RESEND_API_KEY). Invoice was finalized; export PDF or set up Resend to send mail.',
+          needsConfig: true,
+        },
+        503,
+        [recipient.email]
+      );
     }
+
+    const sendLimit = takeDocumentSendSlot({
+      organizationId: callerOrgId,
+      documentId: invoiceId,
+      documentType: 'invoice',
+    });
+    if (!sendLimit.ok) {
+      return respond({ error: sendLimit.message, rateLimited: true }, 429);
+    }
+    heldSlot = { organizationId: callerOrgId, documentId: invoiceId, stamp: sendLimit.stamp };
 
     let paymentUrl: string | null = null;
     let stripeSessionId: string | null = null;
@@ -213,6 +249,7 @@ export async function POST(req: NextRequest) {
         } else if (pay && !pay.ok) {
           stripeSkippedReason = pay.message;
         } else if (pay?.ok) {
+          checkoutSessionCreated = true;
           paymentUrl = pay.url;
           stripeSessionId = pay.sessionId;
           if (invoiceId && inv) {
@@ -224,7 +261,7 @@ export async function POST(req: NextRequest) {
                 payment_kind: collectable.paymentKind,
               });
               if (merged) {
-                const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
+                const writer = admin ?? supabase;
                 const { error: upErr } = await writer
                   .from('service_invoices')
                   .update({ invoice_data: merged, updated_at: new Date().toISOString() })
@@ -251,7 +288,7 @@ export async function POST(req: NextRequest) {
     const sourceEstimateId = inv.estimate_id;
     if (sourceEstimateId != null && String(sourceEstimateId).trim() !== '') {
       try {
-        const reader = hasServiceRole() ? getSupabaseAdmin() : supabase;
+        const reader = admin ?? supabase;
         const stored = await readEstimateDocumentLocale(reader, sourceEstimateId);
         if (stored) mailLocale = stored;
       } catch (e) {
@@ -291,22 +328,6 @@ export async function POST(req: NextRequest) {
       process.env.NOTIFY_FROM_EMAIL ||
       process.env.RESEND_FROM ||
       'Total Service Pro <contact@medicalrepairnetwork.com>';
-    if (!resendKey) {
-      return respond(
-        {
-          ok: false,
-          emailSent: false,
-          error:
-            'Email delivery is not configured (RESEND_API_KEY). Invoice was finalized; export PDF or set up Resend to send mail.',
-          needsConfig: true,
-          paymentUrl,
-          connectRequired,
-          stripeConnect,
-        },
-        503,
-        [recipient.email]
-      );
-    }
 
     const rr = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -328,7 +349,7 @@ export async function POST(req: NextRequest) {
     const result = await rr.json().catch(() => ({}));
     if (!rr.ok) {
       console.error('Resend invoice send failed', result);
-      if (heldSlot) {
+      if (heldSlot && !checkoutSessionCreated) {
         releaseDocumentSendSlot({ ...heldSlot, documentType: 'invoice' });
         heldSlot = null;
       }
@@ -364,7 +385,9 @@ export async function POST(req: NextRequest) {
       [recipient.email]
     );
   } catch (e: any) {
-    if (heldSlot) releaseDocumentSendSlot({ ...heldSlot, documentType: 'invoice' });
+    if (heldSlot && !checkoutSessionCreated) {
+      releaseDocumentSendSlot({ ...heldSlot, documentType: 'invoice' });
+    }
     console.error('send-invoice', e);
     return respond({ error: e?.message || 'Server error' }, 500);
   }
