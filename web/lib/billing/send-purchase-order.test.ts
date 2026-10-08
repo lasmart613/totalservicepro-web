@@ -204,7 +204,7 @@ describe('send purchase order', { concurrency: false }, () => {
     await withResend(async (sent) => {
       const res = await runSendPurchaseOrder(request(forgedBody), {
         userClient: db as never,
-        adminClient: null,
+        adminClient: db as never,
       });
       const json = await res.json();
       assert.equal(res.status, 200);
@@ -374,7 +374,7 @@ describe('send purchase order', { concurrency: false }, () => {
     try {
       const failed = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
         userClient: db as never,
-        adminClient: null,
+        adminClient: db as never,
       });
       const failedJson = await failed.json();
       assert.equal(failed.status, 502);
@@ -384,13 +384,13 @@ describe('send purchase order', { concurrency: false }, () => {
       for (let n = 0; n < DOCUMENT_SENDS_PER_DOCUMENT_PER_HOUR; n++) {
         const res = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
           userClient: db as never,
-          adminClient: null,
+          adminClient: db as never,
         });
         assert.equal(res.status, 200, `send ${n + 1}`);
       }
       const blocked = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
         userClient: db as never,
-        adminClient: null,
+        adminClient: db as never,
       });
       const blockedJson = await blocked.json();
       assert.equal(blocked.status, 429);
@@ -448,7 +448,7 @@ describe('send purchase order', { concurrency: false }, () => {
     await withResend(async (sent) => {
       const res = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
         userClient: db as never,
-        adminClient: null,
+        adminClient: db as never,
       });
       const json = await res.json();
       assert.equal(res.status, 200);
@@ -540,7 +540,7 @@ describe('send purchase order', { concurrency: false }, () => {
     await withResend(async (sent) => {
       const vendorRes = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
         userClient: vendorTyped as never,
-        adminClient: null,
+        adminClient: vendorTyped as never,
       });
       const vendorJson = await vendorRes.json();
       assert.equal(vendorRes.status, 200);
@@ -550,7 +550,7 @@ describe('send purchase order', { concurrency: false }, () => {
 
       const supplierRes = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
         userClient: supplierTyped as never,
-        adminClient: null,
+        adminClient: supplierTyped as never,
       });
       const supplierJson = await supplierRes.json();
       assert.equal(supplierRes.status, 200);
@@ -562,6 +562,84 @@ describe('send purchase order', { concurrency: false }, () => {
         sent.map((message) => message.to),
         [[VENDOR_EMAIL], ['desk@supplier.test']]
       );
+    });
+  });
+
+  test('the first send and a re-send stamp status and sent_at with the service role client', async () => {
+    resetDocumentSendRateLimit();
+    const firstUser = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg, vendorOrg],
+      purchase_orders: [poRow()],
+    });
+    const firstAdmin = memoryClient({});
+    const originalSentAt = '2026-08-01T00:00:00.000Z';
+    const againUser = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg, vendorOrg],
+      purchase_orders: [poRow({ status: 'sent', sent_at: originalSentAt })],
+    });
+    const againAdmin = memoryClient({});
+    await withResend(async (sent) => {
+      const first = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
+        userClient: firstUser as never,
+        adminClient: firstAdmin as never,
+      });
+      const firstJson = await first.json();
+      assert.equal(first.status, 200);
+      assert.equal(firstJson.ok, true);
+      assert.equal(firstJson.emailSent, true);
+      assert.equal(typeof firstJson.sent_at, 'string');
+      assert.equal(firstUser.updates.length, 0);
+      assert.equal(firstAdmin.updates.length, 1);
+      assert.equal(firstAdmin.updates[0].table, 'purchase_orders');
+      assert.equal(firstAdmin.updates[0].patch.status, 'sent');
+      assert.equal(firstAdmin.updates[0].patch.sent_at, firstJson.sent_at);
+      assert.equal(firstAdmin.updates[0].patch.supplier_email, VENDOR_EMAIL);
+
+      const again = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
+        userClient: againUser as never,
+        adminClient: againAdmin as never,
+      });
+      const againJson = await again.json();
+      assert.equal(again.status, 200);
+      assert.equal(againJson.ok, true);
+      assert.equal(againJson.emailSent, true);
+      assert.equal(typeof againJson.sent_at, 'string');
+      assert.notEqual(againJson.sent_at, originalSentAt);
+      assert.equal(againUser.updates.length, 0);
+      assert.equal(againAdmin.updates.length, 1);
+      assert.equal(againAdmin.updates[0].patch.status, 'sent');
+      assert.equal(againAdmin.updates[0].patch.sent_at, againJson.sent_at);
+      assert.equal(sent.length, 2);
+    });
+  });
+
+  test('a re-send without the service role client does not change sent_at', async () => {
+    resetDocumentSendRateLimit();
+    const originalSentAt = '2026-08-01T00:00:00.000Z';
+    const user = memoryClient({
+      user_profiles: [profile],
+      organizations: [shopOrg, vendorOrg],
+      purchase_orders: [poRow({ status: 'sent', sent_at: originalSentAt, supplier_email: VENDOR_EMAIL })],
+    });
+    await withResend(async (sent) => {
+      const res = await runSendPurchaseOrder(request({ purchase_order_id: 42 }), {
+        userClient: user as never,
+        adminClient: null,
+      });
+      const json = await res.json();
+      assert.equal(res.status, 200);
+      assert.equal(json.ok, true);
+      assert.equal(json.emailSent, true);
+      assert.equal(json.sent_at, null);
+      assert.equal(user.updates.length, 0);
+      assert.equal(
+        user.updates.some((update) => Object.prototype.hasOwnProperty.call(update.patch, 'sent_at')),
+        false
+      );
+      assert.equal(sent.length, 1);
+      assertNoMailbox(json);
     });
   });
 });

@@ -27,7 +27,7 @@ import {
 } from '@/lib/billing/owned-doc-mail';
 
 const PO_SELECTS = [
-  'id, organization_id, supplier_organization_id, supplier_name, supplier_email, po_number, po_date, needed_by, description, subtotal, tax, total, status, po_data, created_by',
+  'id, organization_id, supplier_organization_id, supplier_name, supplier_email, po_number, po_date, needed_by, description, subtotal, tax, total, status, sent_at, po_data, created_by',
   'id, organization_id, supplier_organization_id, supplier_name, supplier_email, po_number, status, po_data',
   'id, organization_id, supplier_email, po_number',
 ];
@@ -226,20 +226,29 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
 
     let sentAt: string | null = null;
     try {
-      const writer = admin ?? supabase;
-      const stamped = new Date().toISOString();
-      const { error: markError } = await writer
-        .from('purchase_orders')
-        .update({
-          status: 'sent',
-          supplier_email: recipient,
-          sent_at: stamped,
-          updated_at: stamped,
-        })
-        .eq('id', poId)
-        .eq('organization_id', callerOrgId);
-      if (!markError) sentAt = stamped;
-      else console.warn('could not mark purchase order sent', markError);
+      // Ownership was already checked above. Stamp with the service-role
+      // client: a signed-in JWT cannot move status off 'sent' or change
+      // sent_at once it is set. Service role (no JWT user) bypasses that
+      // guard, so the first send and a re-send can both write sent_at here.
+      // Without the admin client, leave the row alone rather than writing
+      // sent_at with the caller's JWT.
+      if (admin) {
+        const stamped = new Date().toISOString();
+        const { error: markError } = await admin
+          .from('purchase_orders')
+          .update({
+            status: 'sent',
+            supplier_email: recipient,
+            sent_at: stamped,
+            updated_at: stamped,
+          })
+          .eq('id', poId)
+          .eq('organization_id', callerOrgId);
+        if (!markError) sentAt = stamped;
+        else console.warn('could not mark purchase order sent', markError);
+      } else {
+        console.warn('could not mark purchase order sent: service role client is required');
+      }
     } catch (e) {
       console.warn('could not mark purchase order sent', e);
     }

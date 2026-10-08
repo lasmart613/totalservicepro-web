@@ -9810,4 +9810,14 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'Use o botão na página do orçamento. Abrir o link não aprova nem recusa.',
     'استخدم الزر في صفحة عرض السعر. فتح الرابط لا يعتمده ولا يرفضه.\u200f',
   ),
+  'Sent purchase orders keep their supplier. Save draft updates the other fields.': row(
+    'سفارش خرید ارسال‌شده تأمین‌کننده را نگه می‌دارد. ذخیره پیش‌نویس بقیه فیلدها را به‌روز می‌کند.',
+    'Las órdenes de compra enviadas conservan su proveedor. Guardar borrador actualiza los demás campos.',
+    'Les bons de commande envoyés gardent leur fournisseur. Enregistrer le brouillon met à jour les autres champs.',
+    'הזמנות רכש שנשלחו שומרות על הספק. שמירת טיוטה מעדכנת את שאר השדות.',
+    'Gli ordini di acquisto inviati tengono il fornitore. Salva bozza aggiorna gli altri campi.',
+    'Gesendete Bestellungen behalten ihren Lieferanten. Entwurf speichern aktualisiert die übrigen Felder.',
+    'Pedidos de compra enviados mantêm o fornecedor. Salvar rascunho atualiza os outros campos.',
+    'أوامر الشراء المرسلة تُبقي المورّد. حفظ المسودة يحدّث الحقول الأخرى.',
+  ),
 };
