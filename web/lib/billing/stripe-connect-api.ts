@@ -6,11 +6,8 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import {
-  getStripeSecret,
-  stripeSecretProblem,
-  stripeSiteOrigin,
-} from '@/lib/billing/stripe-pay';
+import { getStripeSecret, stripeSecretProblem } from '@/lib/billing/stripe-pay';
+import { publicSiteOrigin } from '@/lib/site-origin';
 import {
   canStartStripeConnect,
   emptyPayoutAccount,
@@ -219,8 +216,13 @@ export async function ensureExpressAccount(input: {
   return created;
 }
 
+/** Same origin checkout uses. Production is repairplanet.net; previews keep DEPLOY_PRIME_URL. */
+export function connectSiteOrigin(req?: Parameters<typeof publicSiteOrigin>[0]): string {
+  return publicSiteOrigin(req);
+}
+
 export function connectLinkUrls(origin: string, state: string): { refresh: string; returnTo: string } {
-  const base = origin.replace(/\/$/, '');
+  const base = (origin || connectSiteOrigin()).replace(/\/$/, '');
   return {
     refresh: `${base}/api/billing/stripe/connect/refresh?state=${encodeURIComponent(state)}`,
     returnTo: `${base}/api/billing/stripe/connect/return?state=${encodeURIComponent(state)}`,
@@ -245,7 +247,7 @@ export async function createOnboardingLink(input: {
     },
     secret
   );
-  const urls = connectLinkUrls(input.origin || stripeSiteOrigin(), state);
+  const urls = connectLinkUrls(input.origin || connectSiteOrigin(), state);
   const link = await stripeForm('account_links', {
     account: input.accountId,
     refresh_url: urls.refresh,

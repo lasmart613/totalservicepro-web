@@ -35,6 +35,7 @@ import {
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
 import { rejectedEstimateChangeRefusal } from '@/lib/billing/estimate-display';
+import { takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
 
 const EST_SELECTS = [
   'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action, customer_action_token, services, issues, created_at',
@@ -223,6 +224,14 @@ export async function POST(req: NextRequest) {
         },
         503
       );
+    }
+
+    const sendLimit = takeDocumentSendSlot({
+      organizationId: callerOrgId,
+      documentId: estimateId,
+    });
+    if (!sendLimit.ok) {
+      return respond({ error: sendLimit.message, rateLimited: true }, 429);
     }
 
     const delivery = await finalizeEstimateDelivery({

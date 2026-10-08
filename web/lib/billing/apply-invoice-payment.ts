@@ -64,6 +64,22 @@ export function existingPaidAmount(inv: InvoicePaymentRow): number {
   return 0;
 }
 
+/** Checkout session ids are cs_ + letters, digits, and underscores. */
+const STRIPE_SESSION_ID_SAFE = /^[A-Za-z0-9_]+$/;
+
+export const INVOICE_STRIPE_SESSION_COLUMN = 'stripe_session_id';
+
+/**
+ * PostgREST filter for an atomic claim:
+ * UPDATE ... WHERE stripe_session_id IS NULL OR stripe_session_id <> $session
+ * Returns null when the id cannot be placed safely in the filter string.
+ */
+export function invoiceSessionClaimFilter(sessionId: string): string | null {
+  const id = String(sessionId || '').trim();
+  if (!STRIPE_SESSION_ID_SAFE.test(id)) return null;
+  return `${INVOICE_STRIPE_SESSION_COLUMN}.is.null,${INVOICE_STRIPE_SESSION_COLUMN}.neq.${id}`;
+}
+
 export function alreadyAppliedSession(inv: InvoicePaymentRow, sessionId: string): boolean {
   const id = String(sessionId || '').trim();
   if (!id) return false;

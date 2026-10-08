@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { loadBillingCaller } from '@/lib/billing/billing-caller';
 import {
+  connectSiteOrigin,
   connectStatusPayload,
   createOnboardingLink,
   ensureExpressAccount,
@@ -11,10 +12,6 @@ import {
 import { canStartStripeConnect, safeConnectNext } from '@/lib/billing/stripe-connect';
 
 export const dynamic = 'force-dynamic';
-
-function originOf(req: NextRequest): string {
-  return req.nextUrl.origin.replace(/\/$/, '');
-}
 
 async function callerFrom(req: NextRequest) {
   const loaded = await loadBillingCaller(req);
@@ -100,7 +97,7 @@ export async function POST(req: NextRequest) {
       orgId: caller.orgId,
       userId: caller.userId,
       next,
-      origin: originOf(req),
+      origin: connectSiteOrigin(req),
     });
     return NextResponse.json({
       url,

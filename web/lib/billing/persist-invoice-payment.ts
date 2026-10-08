@@ -7,7 +7,9 @@ import {
   alreadyAppliedSession,
   buildInvoicePaymentPatch,
   checkoutLooksLikeInvoicePay,
+  invoiceSessionClaimFilter,
   money2,
+  type InvoicePaymentPatch,
   type InvoicePaymentRow,
 } from './apply-invoice-payment.ts';
 import type { StripeObject } from './stripe-subscription.ts';
@@ -88,23 +90,19 @@ export async function applyInvoiceCheckoutSession(input: {
   });
   Object.assign(patch.invoice_data, invoicePayoutRecord(m));
 
-  let payload: Record<string, unknown> = { ...patch };
-  let lastErr: { message?: string } | null = null;
-  for (let i = 0; i < 8; i++) {
-    const { error: upErr } = await input.writer.from('service_invoices').update(payload).eq('id', invoiceId);
-    if (!upErr) {
-      lastErr = null;
-      break;
-    }
-    lastErr = upErr;
-    const col = upErr.message?.match(/Could not find the '([^']+)' column/i)?.[1];
-    if (col && col in payload) {
-      delete payload[col];
-      continue;
-    }
-    break;
+  const claim = await claimInvoicePayment(input.writer, invoiceId, patch, sessionId);
+  if (!claim.ok) return { ok: false, reason: claim.reason };
+  if (!claim.claimed) {
+    return {
+      ok: true,
+      applied: {
+        invoiceId,
+        status: String(row.status || 'paid'),
+        amountPaid: money2(Number(row.amount_paid) || 0),
+        alreadyApplied: true,
+      },
+    };
   }
-  if (lastErr) return { ok: false, reason: lastErr.message || 'update_failed' };
 
   await notifyShopOfPayment(input.writer, row, patch.status, patch.amount_paid);
 
@@ -117,6 +115,50 @@ export async function applyInvoiceCheckoutSession(input: {
       alreadyApplied: false,
     },
   };
+}
+
+/**
+ * One session credits once. The conditional update returns a row only for the
+ * delivery that claimed stripe_session_id. Overlapping deliveries get no row
+ * and must not notify or add the amount again.
+ * If the column is not migrated yet, fall back to a plain update.
+ */
+async function claimInvoicePayment(
+  writer: SupabaseClient,
+  invoiceId: string,
+  patch: InvoicePaymentPatch,
+  sessionId: string
+): Promise<{ ok: true; claimed: boolean } | { ok: false; reason: string }> {
+  const filter = sessionId ? invoiceSessionClaimFilter(sessionId) : null;
+  const payload: Record<string, unknown> = {
+    ...patch,
+    ...(sessionId && filter ? { stripe_session_id: sessionId } : {}),
+  };
+  let useFilter = Boolean(filter);
+  let lastErr: { message?: string } | null = null;
+
+  for (let i = 0; i < 8; i++) {
+    let query = writer.from('service_invoices').update(payload).eq('id', invoiceId);
+    if (useFilter && filter) query = query.or(filter);
+    const { data, error } = await query.select('id').maybeSingle();
+    if (!error) {
+      if (useFilter && !data) return { ok: true, claimed: false };
+      return { ok: true, claimed: true };
+    }
+    lastErr = error;
+    const col = error.message?.match(/Could not find the '([^']+)' column/i)?.[1];
+    if (col === 'stripe_session_id') {
+      delete payload.stripe_session_id;
+      useFilter = false;
+      continue;
+    }
+    if (col && col in payload) {
+      delete payload[col];
+      continue;
+    }
+    break;
+  }
+  return { ok: false, reason: lastErr?.message || 'update_failed' };
 }
 
 export async function notifyShopOfPayment(

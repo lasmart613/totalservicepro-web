@@ -27,6 +27,8 @@ import {
 } from './stripe-connect.ts';
 import {
   completeOnboardingReturn,
+  connectLinkUrls,
+  connectSiteOrigin,
   connectStatusPayload,
   isMissingStripeColumn,
   loadSellerPayoutAccount,
@@ -760,5 +762,88 @@ test('Connect return and refresh require the admin who started onboarding', asyn
     else process.env.STRIPE_SECRET_KEY = previousSecret;
     if (previousContext == null) delete process.env.CONTEXT;
     else process.env.CONTEXT = previousContext;
+  }
+});
+
+const SITE_ORIGIN_ENV = [
+  'CONTEXT',
+  'NETLIFY_CONTEXT',
+  'URL',
+  'DEPLOY_PRIME_URL',
+  'NEXT_PUBLIC_SITE_URL',
+  'NEXT_PUBLIC_SITE_ORIGIN',
+] as const;
+
+function withSiteOriginEnv(env: Partial<Record<(typeof SITE_ORIGIN_ENV)[number], string>>, run: () => void) {
+  const previous = new Map<string, string | undefined>();
+  for (const key of SITE_ORIGIN_ENV) previous.set(key, process.env[key]);
+  for (const key of SITE_ORIGIN_ENV) {
+    const value = env[key];
+    if (value == null) delete process.env[key];
+    else process.env[key] = value;
+  }
+  try {
+    run();
+  } finally {
+    for (const key of SITE_ORIGIN_ENV) {
+      const value = previous.get(key);
+      if (value == null) delete process.env[key];
+      else process.env[key] = value;
+    }
+  }
+}
+
+test('a Netlify deploy-hash host still yields repairplanet.net for Connect return_url and refresh_url', () => {
+  const deployHash = '6ac4896698c4fd0008d83d92--totalservicepro.netlify.app';
+  const req = {
+    headers: {
+      get(name: string) {
+        if (name === 'x-forwarded-host' || name === 'host') return deployHash;
+        if (name === 'x-forwarded-proto') return 'https';
+        return null;
+      },
+    },
+  };
+
+  withSiteOriginEnv(
+    {
+      CONTEXT: 'production',
+      NEXT_PUBLIC_SITE_URL: 'https://repairplanet.net',
+    },
+    () => {
+      const urls = connectLinkUrls(connectSiteOrigin(req), 'state_tok');
+      assert.equal(urls.returnTo, 'https://repairplanet.net/api/billing/stripe/connect/return?state=state_tok');
+      assert.equal(urls.refresh, 'https://repairplanet.net/api/billing/stripe/connect/refresh?state=state_tok');
+      assert.doesNotMatch(`${urls.returnTo} ${urls.refresh}`, /6ac4896698c4fd0008d83d92/);
+    }
+  );
+
+  withSiteOriginEnv(
+    {
+      CONTEXT: 'deploy-preview',
+      NEXT_PUBLIC_SITE_URL: 'https://repairplanet.net',
+      DEPLOY_PRIME_URL: 'https://deploy-preview-224--totalservicepro.netlify.app',
+    },
+    () => {
+      const urls = connectLinkUrls(connectSiteOrigin(req), 'state_tok');
+      assert.equal(
+        urls.returnTo,
+        'https://deploy-preview-224--totalservicepro.netlify.app/api/billing/stripe/connect/return?state=state_tok'
+      );
+      assert.equal(
+        urls.refresh,
+        'https://deploy-preview-224--totalservicepro.netlify.app/api/billing/stripe/connect/refresh?state=state_tok'
+      );
+    }
+  );
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const onboarding = readFileSync(join(here, '../../app/api/billing/stripe/connect/route.ts'), 'utf8');
+  const returned = readFileSync(join(here, '../../app/api/billing/stripe/connect/return/route.ts'), 'utf8');
+  const refresh = readFileSync(join(here, '../../app/api/billing/stripe/connect/refresh/route.ts'), 'utf8');
+  for (const src of [onboarding, returned, refresh]) {
+    assert.match(src, /connectSiteOrigin\(req\)/);
+    assert.doesNotMatch(src, /nextUrl\.origin/);
+    assert.doesNotMatch(src, /x-forwarded-host/);
   }
 });
