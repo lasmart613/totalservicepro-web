@@ -671,6 +671,42 @@ export function buildPurchaseOrderHtml(input: PurchaseOrderHtmlInput): string {
   , input.locale);
 }
 
+/** Plain-text part of a purchase-order email. The HTML builder is the source of the same fields. */
+export function buildPurchaseOrderPlainText(input: PurchaseOrderHtmlInput): string {
+  const tr = (text: string) => docT(input.locale, text);
+  const amount = (n: number | undefined | null) => formatOrgMoney(n, input.moneyPrefs, input.locale);
+  const shop = String(input.company.company_name || '').trim();
+  const lines: string[] = [];
+  if (shop) lines.push(shop);
+  lines.push(`${tr('Purchase Order')} ${input.poNumber || ''}`.trim());
+  if (input.poDate) lines.push(input.poDate);
+  lines.push('', `${tr('Vendor / Parts Supplier')}: ${input.supplier.name || tr('Parts supplier')}`.trim());
+  if (input.supplier.email) lines.push(`${tr('Email')}: ${input.supplier.email}`);
+  if (input.neededBy) lines.push(`${tr('Needed by')}: ${input.neededBy}`);
+  if (input.shipTo) lines.push(`${tr('Ship to')}: ${input.shipTo}`);
+  const items = (input.lines || []).filter((it) => it.description || it.part_number || it.unit_price);
+  if (items.length) {
+    lines.push('', tr('Line Items'));
+    for (const it of items) {
+      const qty = Number(it.qty) || 0;
+      const ext = it.ext ?? qty * (Number(it.unit_price) || 0);
+      const label = [it.part_number, it.description].filter(Boolean).join(' ').trim() || tr('Part');
+      lines.push(`${label} x${qty} @ ${amount(it.unit_price)} = ${amount(ext)}`);
+    }
+  }
+  if (input.description) lines.push('', `${tr('Notes')}: ${input.description}`);
+  lines.push(
+    '',
+    `${tr('Subtotal')}: ${amount(input.subtotal)}`,
+    `${tr('Tax')}: ${amount(input.tax)}`,
+    `${tr('PO Total')}: ${amount(input.total)}`
+  );
+  if (shop) {
+    lines.push('', docFill(input.locale, 'Please confirm this purchase order with {shop}.', { shop }));
+  }
+  return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim();
+}
+
 export type EstimateHtmlInput = {
   company: DocCompany;
   customer: DocCustomer;

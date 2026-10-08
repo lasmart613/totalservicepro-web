@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import {
   publicSiteOrigin,
@@ -7,157 +7,168 @@ import {
   supplierSignupUrl,
   wrapSupplierFacingDocumentEmail,
 } from '@/lib/customer-invite';
-import { parseMailLocale, translateAppFill } from '@/lib/i18n/translate-app';
+import { parseMailLocale } from '@/lib/i18n/translate-app';
+import { loadOrgMoneyPrefs } from '@/lib/org-money';
+import { takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
+import {
+  buildOwnedPurchaseOrderEmailText,
+  buildOwnedPurchaseOrderMessage,
+  documentOwnedByOrganization,
+  isMailbox,
+  loadOwnedDocument,
+  loadSenderCompany,
+  ownedDocumentSubject,
+  parseDocumentId,
+  resendMessage,
+  sanitizeMailResponse,
+  senderCompanyFromOrg,
+  type QueryClient,
+} from '@/lib/billing/owned-doc-mail';
 
-const isValidEmail = (e: string) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(e);
+const PO_SELECTS = [
+  'id, organization_id, supplier_organization_id, supplier_name, supplier_email, po_number, po_date, needed_by, description, subtotal, tax, total, status, po_data, created_by',
+  'id, organization_id, supplier_organization_id, supplier_name, supplier_email, po_number, status, po_data',
+  'id, organization_id, supplier_email, po_number',
+];
 
-function sameOrg(a: unknown, b: unknown): boolean {
-  return a != null && b != null && String(a) === String(b);
-}
+/** Same wording for a missing row and a row owned by another shop. */
+const PO_NOT_FOUND = 'Purchase order not found.';
+
+type SendPurchaseOrderDeps = {
+  userClient?: SupabaseClient;
+  adminClient?: SupabaseClient | null;
+};
 
 /**
  * POST /api/billing/send-purchase-order
- * Emails a PO to the parts supplier's organization profile email.
- * Caller must belong to the sending organization.
+ * Body: { purchase_order_id, locale? }
+ * Mail is sent only for a purchase order the caller's organization owns.
+ * HTML, text, subject, shop name, reply-to, and recipient come from that PO
+ * and the owning organization. html, subject, company_name, reply_to, replyTo,
+ * supplier_organization_id, and any recipient in the body are ignored.
  */
 export async function POST(req: NextRequest) {
+  return runSendPurchaseOrder(req);
+}
+
+export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseOrderDeps = {}) {
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
-    if (!token) {
-      return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
-    }
+    if (!token) return respond({ error: 'Sign in required' }, 401);
 
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    if (!url || !anon) {
-      return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
+    let supabase: SupabaseClient;
+    if (deps.userClient) {
+      supabase = deps.userClient;
+    } else {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+      const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+      if (!url || !anon) return respond({ error: 'Server misconfigured' }, 500);
+      supabase = createClient(url, anon, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
     }
-
-    const supabase = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
 
     const {
       data: { user },
       error: userErr,
     } = await supabase.auth.getUser(token);
-    if (userErr || !user) {
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
-    }
+    if (userErr || !user) return respond({ error: 'Invalid session' }, 401);
 
-    const { data: profile } = await supabase
-      .from('user_profiles')
-      .select('organization_id, role')
-      .eq('id', user.id)
-      .maybeSingle();
-    const callerOrgId = profile?.organization_id ?? null;
-    if (callerOrgId == null) {
-      return NextResponse.json({ error: 'No organization on your profile' }, { status: 403 });
-    }
-
-    const body = await req.json().catch(() => ({}));
-    const html = String(body.html || '').trim();
-    const poNumber = body.po_number ? String(body.po_number) : '';
-    const rawId = body.purchase_order_id ?? body.po_id ?? null;
-    const poId =
-      rawId == null || rawId === '' || rawId === 'new'
-        ? null
-        : /^\d+$/.test(String(rawId))
-          ? Number(rawId)
-          : rawId;
-
-    if (!html) {
-      return NextResponse.json({ error: 'Purchase order HTML is required' }, { status: 400 });
-    }
-
-    const reader = hasServiceRole() ? getSupabaseAdmin() : supabase;
-    let po: any = null;
-    if (poId != null) {
-      const { data, error } = await reader
-        .from('purchase_orders')
-        .select(
-          'id, organization_id, supplier_organization_id, supplier_name, supplier_email, po_number, status, created_by'
-        )
-        .eq('id', poId)
+    let callerOrgId: string | number | null = null;
+    try {
+      const { data: prof } = await supabase
+        .from('user_profiles')
+        .select('organization_id')
+        .eq('id', user.id)
         .maybeSingle();
-      if (error) {
-        return NextResponse.json({ error: error.message }, { status: 400 });
-      }
-      po = data;
-      if (!po) {
-        return NextResponse.json({ error: 'Purchase order not found' }, { status: 404 });
-      }
-      if (!sameOrg(po.organization_id, callerOrgId)) {
-        return NextResponse.json(
-          { error: 'This purchase order belongs to another organization' },
-          { status: 403 }
-        );
-      }
+      callerOrgId = prof?.organization_id ?? null;
+    } catch {
+      callerOrgId = null;
+    }
+    if (callerOrgId == null || String(callerOrgId).trim() === '') {
+      return respond({ error: 'No organization on your profile' }, 403);
     }
 
-    let supplierOrgId =
-      body.supplier_organization_id ?? po?.supplier_organization_id ?? null;
-    let supplierEmail = '';
-    let supplierName = String(body.supplier_name || po?.supplier_name || '').trim();
+    const raw = await req.json().catch(() => ({}));
+    const record = raw && typeof raw === 'object' ? (raw as Record<string, unknown>) : {};
+    const poId = parseDocumentId(record.purchase_order_id ?? record.po_id);
+    const locale = parseMailLocale(record.locale);
+    if (poId == null) return respond({ error: 'Purchase order id is required.' }, 400);
 
-    if (supplierOrgId != null) {
-      const { data: supplier } = await reader
-        .from('organizations')
-        .select('id, name, email, type')
-        .eq('id', supplierOrgId)
-        .maybeSingle();
-      if (!supplier) {
-        return NextResponse.json({ error: 'Parts supplier not found' }, { status: 404 });
-      }
-      const t = String(supplier.type || '').toLowerCase();
-      if (t && t !== 'parts_supplier' && t !== 'vendor') {
-        return NextResponse.json(
-          { error: 'Selected organization is not a parts supplier' },
-          { status: 400 }
-        );
-      }
-      supplierName = supplier.name || supplierName;
-      if (isValidEmail(String(supplier.email || '').trim())) {
-        supplierEmail = String(supplier.email).trim();
-      }
+    const admin: SupabaseClient | null =
+      deps.adminClient !== undefined ? deps.adminClient : hasServiceRole() ? getSupabaseAdmin() : null;
+
+    const loaded = await loadOwnedDocument({
+      userClient: supabase,
+      adminClient: admin,
+      table: 'purchase_orders',
+      id: poId,
+      callerOrgId,
+      narrowSelects: PO_SELECTS,
+      notFoundError: PO_NOT_FOUND,
+      forbiddenError: PO_NOT_FOUND,
+    });
+    if (!loaded.ok || !documentOwnedByOrganization(loaded.row, callerOrgId)) {
+      return respond({ error: PO_NOT_FOUND }, 403);
     }
+    const po = loaded.row;
 
-    if (!supplierEmail && po?.supplier_email && isValidEmail(String(po.supplier_email).trim())) {
-      supplierEmail = String(po.supplier_email).trim();
-    }
-
-    if (!isValidEmail(supplierEmail)) {
-      return NextResponse.json(
+    const readers: QueryClient[] = admin ? [supabase, admin] : [supabase];
+    const supplierOrg = await storedSupplierContact(readers, po.supplier_organization_id);
+    const orgEmail = supplierOrg?.email || '';
+    const storedEmail = String(po.supplier_email || '').trim();
+    const recipient = isMailbox(orgEmail) ? orgEmail : isMailbox(storedEmail) ? storedEmail : '';
+    if (!recipient) {
+      return respond(
         {
           error:
-            'This parts supplier has no email on their organization profile. Add one there, then send again.',
+            'No valid supplier email. Add an email on the parts supplier profile or on this purchase order.',
         },
-        { status: 400 }
+        400
       );
     }
 
-    const mailLocale = parseMailLocale(body.locale);
-    const shopName = String(body.company_name || 'Total Service Pro');
-    const localizedSubject = poNumber
-      ? translateAppFill(mailLocale, 'Purchase Order {num} from {shop}', {
-          num: poNumber,
-          shop: shopName,
-        })
-      : translateAppFill(mailLocale, 'Purchase Order from {shop}', { shop: shopName });
-    const subject = mailLocale
-      ? localizedSubject
-      : String(body.subject || '').trim() || localizedSubject;
+    const techName = await readTechName(supabase, user.id);
+    const company = await loadSenderCompany(supabase, callerOrgId, techName);
+    const shop = company.company_name ? company : senderCompanyFromOrg(null, techName);
+    const moneyPrefs = await loadOrgMoneyPrefs(supabase, callerOrgId);
+    const subject = ownedDocumentSubject('purchase_order', po.po_number, shop.company_name, locale);
+    const origin = publicSiteOrigin(req);
+    const signupUrl = supplierSignupUrl(origin, recipient);
+    const loginUrl = supplierLoginUrl(origin);
+    const documentHtml = buildOwnedPurchaseOrderMessage({
+      row: po,
+      company: shop,
+      supplierEmail: recipient,
+      moneyPrefs,
+      locale,
+    });
+    const text = buildOwnedPurchaseOrderEmailText({
+      row: po,
+      company: shop,
+      supplierEmail: recipient,
+      moneyPrefs,
+      locale,
+      signupUrl,
+      loginUrl,
+    });
+    const html = wrapSupplierFacingDocumentEmail({
+      subject,
+      documentHtml,
+      signupUrl,
+      loginUrl,
+      locale,
+    });
 
     const resendKey = process.env.RESEND_API_KEY;
     const from =
       process.env.NOTIFY_FROM_EMAIL ||
       process.env.RESEND_FROM ||
       'Total Service Pro <contact@medicalrepairnetwork.com>';
-
     if (!resendKey) {
-      return NextResponse.json(
+      return respond(
         {
           ok: false,
           emailSent: false,
@@ -165,68 +176,116 @@ export async function POST(req: NextRequest) {
             'Email delivery is not configured (RESEND_API_KEY). Save the PO and set up Resend to send mail.',
           needsConfig: true,
         },
-        { status: 503 }
+        503,
+        [recipient]
       );
     }
 
-    const origin = publicSiteOrigin(req);
-    const wrapped = wrapSupplierFacingDocumentEmail({
-      subject,
-      documentHtml: html,
-      signupUrl: supplierSignupUrl(origin, supplierEmail),
-      loginUrl: supplierLoginUrl(origin),
-      locale: mailLocale,
+    const sendLimit = takeDocumentSendSlot({
+      organizationId: callerOrgId,
+      documentId: poId,
     });
+    if (!sendLimit.ok) {
+      return respond({ error: sendLimit.message, rateLimited: true }, 429);
+    }
 
+    const message = resendMessage({
+      from,
+      to: recipient,
+      subject,
+      html,
+      text,
+      replyTo: shop.email,
+    });
     const rr = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: {
         Authorization: `Bearer ${resendKey}`,
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({
-        from,
-        to: [supplierEmail],
-        subject,
-        html: wrapped,
-        reply_to: body.reply_to || undefined,
-      }),
+      body: JSON.stringify(message),
     });
-
     const result = await rr.json().catch(() => ({}));
     if (!rr.ok) {
+      console.error('Resend purchase order send failed', result);
       const msg = result?.message || `Email provider error (${rr.status})`;
-      return NextResponse.json(
-        { ok: false, emailSent: false, error: msg, attemptedTo: supplierEmail },
-        { status: 502 }
-      );
+      return respond({ ok: false, emailSent: false, error: msg }, 502, [recipient]);
     }
 
-    if (poId != null) {
-      const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
+    try {
+      const writer = admin ?? supabase;
       await writer
         .from('purchase_orders')
         .update({
           status: 'sent',
-          supplier_email: supplierEmail,
+          supplier_email: recipient,
           sent_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         })
         .eq('id', poId)
         .eq('organization_id', callerOrgId);
+    } catch (e) {
+      console.warn('could not mark purchase order sent', e);
     }
 
-    return NextResponse.json({
-      ok: true,
-      emailSent: true,
-      id: result?.id || null,
-      to: supplierEmail,
-      purchaseOrderId: poId,
-      supplierOrganizationId: supplierOrgId,
-      supplierName,
-    });
+    return respond(
+      {
+        ok: true,
+        emailSent: true,
+        id: result?.id || null,
+        to: recipient,
+        purchaseOrderId: poId,
+      },
+      200,
+      [recipient]
+    );
   } catch (e: any) {
     console.error('send-purchase-order', e);
-    return NextResponse.json({ error: e?.message || 'Send failed' }, { status: 500 });
+    return respond({ error: e?.message || 'Send failed' }, 500);
+  }
+}
+
+function respond(body: Record<string, unknown>, status = 200, allowedEmails: string[] = []) {
+  return NextResponse.json(sanitizeMailResponse(body, allowedEmails), { status });
+}
+
+/**
+ * Email on the supplier organization stored on the PO.
+ * A non-supplier type does not contribute an address. A missing row is skipped
+ * so the PO's own supplier_email can still be used.
+ */
+async function storedSupplierContact(
+  clients: QueryClient[],
+  supplierOrgId: unknown
+): Promise<{ email: string } | null> {
+  if (supplierOrgId == null || String(supplierOrgId).trim() === '') return null;
+  for (const client of clients) {
+    try {
+      const { data, error } = await client
+        .from('organizations')
+        .select('email, type')
+        .eq('id', supplierOrgId)
+        .maybeSingle();
+      if (error || !data) continue;
+      const type = String(data.type || '').toLowerCase();
+      if (type && type !== 'parts_supplier' && type !== 'vendor') return { email: '' };
+      return { email: String(data.email || '').trim() };
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
+async function readTechName(supabase: SupabaseClient, userId: string): Promise<string> {
+  try {
+    const { data } = await supabase
+      .from('user_profiles')
+      .select('first_name, last_name')
+      .eq('id', userId)
+      .maybeSingle();
+    return [data?.first_name, data?.last_name].filter(Boolean).join(' ');
+  } catch {
+    return '';
   }
 }
