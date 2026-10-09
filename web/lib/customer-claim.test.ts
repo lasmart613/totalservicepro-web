@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NextRequest } from 'next/server';
 import { CLINIC_OWNER_SLOT_ROLES, runCustomerClaim } from '../app/api/customers/claim/route.ts';
+import { runCustomerInvite } from '../app/api/customers/invite/route.ts';
 import { signCustomerInvite } from './customer-invite.ts';
 
 type Profile = {
@@ -168,6 +169,9 @@ function fakeWriter(
           return Promise.resolve({ error: null });
         },
         then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+          if (table === 'contacts') {
+            return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
+          }
           state.lookups.push({ table, inRole: inRole ? [...inRole] : null, limit: limitN });
           if (state.ownerLookupError && table === 'user_profiles' && filters.id == null) {
             return Promise.resolve({ data: null, error: state.ownerLookupError }).then(onFulfilled, onRejected);
@@ -198,6 +202,7 @@ async function postClaim(opts: {
   userId: string;
   email: string;
   inviteEmail?: string;
+  clinicEmail?: string;
   profiles: Profile[];
   ownerLookupError?: DbError | null;
   updateError?: DbError | null;
@@ -229,7 +234,12 @@ async function postClaim(opts: {
       hasServiceRole: () => true,
       getWriter: () =>
         fakeWriter(
-          { id: CLINIC_ID, name: 'North Clinic', email: 'front@clinic.test', type: 'customer' },
+          {
+            id: CLINIC_ID,
+            name: 'North Clinic',
+            email: opts.clinicEmail ?? opts.inviteEmail ?? opts.email,
+            type: 'customer',
+          },
           state
         ) as never,
       createUserClient: () => ({
@@ -500,6 +510,142 @@ test('a unique owner conflict during claim is 409 and does not succeed', async (
     result.writes.some((write) => write.role === 'owner'),
     false
   );
+});
+
+test('a token issued for the old clinic email is refused after the email changes', async () => {
+  const result = await postClaim({
+    userId: 'new-user',
+    email: 'old@clinic.test',
+    inviteEmail: 'old@clinic.test',
+    clinicEmail: 'new@clinic.test',
+    profiles: [{ id: 'new-user', organization_id: null, role: null, email: 'old@clinic.test' }],
+  });
+  assert.equal(result.status, 403);
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.claimed, false);
+  assert.match(result.body.error || '', /no longer on this clinic/i);
+  assert.equal(result.writes.length, 0);
+  assert.equal(result.profiles.find((profile) => profile.id === 'new-user')?.role, null);
+});
+
+test('a token for the clinic current email still claims', async () => {
+  const result = await postClaim({
+    userId: 'new-user',
+    email: 'new@clinic.test',
+    inviteEmail: 'new@clinic.test',
+    clinicEmail: 'new@clinic.test',
+    profiles: [{ id: 'new-user', organization_id: null, role: null, email: 'new@clinic.test' }],
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal(result.body.claimed, true);
+  assert.equal(result.profiles.find((profile) => profile.id === 'new-user')?.role, 'owner');
+});
+
+test('the customer invite response has no signup url or token', async () => {
+  const previous = {
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    anon: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+    secret: process.env.CUSTOMER_INVITE_SECRET,
+  };
+  process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://127.0.0.1:54321';
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon-test-value';
+  process.env.CUSTOMER_INVITE_SECRET = 'invite-test-secret';
+  const sent: Array<{ to: string[]; html: string; text: string }> = [];
+  try {
+    const response = await runCustomerInvite(
+      new NextRequest('http://127.0.0.1/api/customers/invite', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer session-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ customer_organization_id: 42 }),
+      }),
+      {
+        resendKey: 'resend-test',
+        sendEmail: async (message) => {
+          sent.push({ to: message.to, html: message.html, text: message.text });
+          return { ok: true, status: 200, id: 'mail-1' };
+        },
+        createUserClient: () => ({
+          auth: {
+            getUser: async () => ({
+              data: { user: { id: 'staff-1', email: 'staff@shop.test' } },
+              error: null,
+            }),
+          },
+          from(table: string) {
+            const filters: Record<string, unknown> = {};
+            const api = {
+              select() {
+                return api;
+              },
+              eq(column: string, value: unknown) {
+                filters[column] = value;
+                return api;
+              },
+              limit() {
+                return api;
+              },
+              maybeSingle: async () => {
+                if (table === 'user_profiles') {
+                  return { data: { organization_id: 7, role: 'company_admin' }, error: null };
+                }
+                if (table === 'organization_customers') {
+                  return { data: { customer_organization_id: 42 }, error: null };
+                }
+                if (table === 'organizations') {
+                  if (String(filters.id) === '7') {
+                    return { data: { id: 7, name: 'North Shop', type: 'service_company' }, error: null };
+                  }
+                  return {
+                    data: {
+                      id: 42,
+                      name: 'North Clinic',
+                      email: 'ada@clinic.test',
+                      contact_name: 'Ada',
+                      type: 'customer',
+                    },
+                    error: null,
+                  };
+                }
+                return { data: null, error: null };
+              },
+              then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+                return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
+              },
+            };
+            return api;
+          },
+        }),
+      }
+    );
+    const body = (await response.json()) as Record<string, unknown>;
+    const packed = JSON.stringify(body);
+    assert.equal(response.status, 200);
+    assert.equal(body.ok, true);
+    assert.equal(body.emailed, true);
+    assert.equal(body.to, 'ada@clinic.test');
+    assert.equal('signupUrl' in body, false);
+    assert.equal('token' in body, false);
+    assert.doesNotMatch(packed, /signupUrl|claim=|token/i);
+    assert.equal(sent.length, 1);
+    assert.deepEqual(sent[0].to, ['ada@clinic.test']);
+    assert.match(`${sent[0].html}\n${sent[0].text}`, /claim=/);
+    assert.equal(packed.includes('claim='), false);
+    const client = readFileSync(join(dirname(fileURLToPath(import.meta.url)), './customer-invite-client.ts'), 'utf8');
+    const modal = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../components/AddCustomerModal.tsx'), 'utf8');
+    assert.doesNotMatch(client, /signupUrl/);
+    assert.doesNotMatch(modal, /signupUrl|clipboard|writeText/);
+  } finally {
+    if (previous.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = previous.url;
+    if (previous.anon === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = previous.anon;
+    if (previous.secret === undefined) delete process.env.CUSTOMER_INVITE_SECRET;
+    else process.env.CUSTOMER_INVITE_SECRET = previous.secret;
+  }
 });
 
 test('one-owner migration is unapplied SQL with a matching rollback', () => {

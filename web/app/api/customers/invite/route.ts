@@ -11,6 +11,7 @@ import {
   customerInviteSubject,
   isValidCustomerEmail,
   publicSiteOrigin,
+  publicCustomerInviteBody,
   signCustomerInvite,
   verifyCustomerInvite,
 } from '@/lib/customer-invite';
@@ -42,30 +43,63 @@ export async function GET(req: NextRequest) {
  * Never uses a caller-supplied destination address. Never BCCs anyone.
  */
 export async function POST(req: NextRequest) {
+  return runCustomerInvite(req);
+}
+
+export async function runCustomerInvite(
+  req: NextRequest,
+  deps: {
+    createUserClient?: (
+      url: string,
+      anonKey: string,
+      accessToken: string
+    ) => {
+      auth: {
+        getUser: (token: string) => Promise<{
+          data: { user: { id: string; email?: string | null } | null };
+          error: { message?: string } | null;
+        }>;
+      };
+      from: (table: string) => unknown;
+    };
+    sendEmail?: (message: {
+      to: string[];
+      subject: string;
+      html: string;
+      text: string;
+    }) => Promise<{ ok: boolean; status?: number; id?: string | null; message?: string }>;
+    resendKey?: string | null;
+  } = {}
+) {
+  const respond = (body: Record<string, unknown>, status = 200) =>
+    NextResponse.json(publicCustomerInviteBody(body), { status });
+
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
     if (!token) {
-      return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
+      return respond({ error: 'Sign in required' }, 401);
     }
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
     const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
     if (!url || !anon) {
-      return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
+      return respond({ error: 'Server misconfigured' }, 500);
     }
 
-    const supabase = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = deps.createUserClient
+      ? deps.createUserClient(url, anon, token)
+      : createClient(url, anon, {
+          global: { headers: { Authorization: `Bearer ${token}` } },
+          auth: { persistSession: false, autoRefreshToken: false },
+        });
 
     const {
       data: { user },
       error: userErr,
     } = await supabase.auth.getUser(token);
     if (userErr || !user) {
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+      return respond({ error: 'Invalid session' }, 401);
     }
 
     const { data: prof } = await supabase
@@ -75,7 +109,7 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (!prof?.organization_id) {
-      return NextResponse.json({ error: 'You are not linked to an organization' }, { status: 403 });
+      return respond({ error: 'You are not linked to an organization' }, 403);
     }
 
     const { data: callerOrg } = await supabase
@@ -85,13 +119,13 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (!canAddCustomers(prof.role, callerOrg?.type)) {
-      return NextResponse.json({ error: 'Only service company staff can send customer invites' }, { status: 403 });
+      return respond({ error: 'Only service company staff can send customer invites' }, 403);
     }
 
     const body = await req.json().catch(() => ({}));
     const customerId = body.customer_organization_id ?? body.customerId ?? null;
     if (customerId == null || customerId === '') {
-      return NextResponse.json({ error: 'customer_organization_id is required' }, { status: 400 });
+      return respond({ error: 'customer_organization_id is required' }, 400);
     }
 
     const { data: link } = await supabase
@@ -102,7 +136,7 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (!link) {
-      return NextResponse.json({ error: 'Customer is not in your directory' }, { status: 403 });
+      return respond({ error: 'Customer is not in your directory' }, 403);
     }
 
     let { data: customer, error: customerErr } = await supabase
@@ -119,11 +153,11 @@ export async function POST(req: NextRequest) {
     }
 
     if (!customer) {
-      return NextResponse.json({ error: 'Customer not found' }, { status: 404 });
+      return respond({ error: 'Customer not found' }, 404);
     }
 
     if (customer.type && !isOwnerOrgType(customer.type) && customer.type !== 'customer') {
-      return NextResponse.json({ error: 'Not a customer organization' }, { status: 400 });
+      return respond({ error: 'Not a customer organization' }, 400);
     }
 
     const sources = await fetchDirectoryContactSources(supabase, customer.id);
@@ -140,7 +174,7 @@ export async function POST(req: NextRequest) {
     });
     const toEmail = reach.email;
     if (!toEmail) {
-      return NextResponse.json({
+      return respond({
         ok: true,
         emailed: false,
         skipped: 'no_email',
@@ -149,7 +183,7 @@ export async function POST(req: NextRequest) {
       });
     }
     if (!isValidCustomerEmail(toEmail)) {
-      return NextResponse.json({
+      return respond({
         ok: true,
         emailed: false,
         skipped: 'invalid_email',
@@ -193,62 +227,71 @@ export async function POST(req: NextRequest) {
       loginUrl,
     });
 
-    const resendKey = process.env.RESEND_API_KEY;
+    const resendKey = deps.resendKey === undefined ? process.env.RESEND_API_KEY : deps.resendKey || '';
     const from =
       process.env.NOTIFY_FROM_EMAIL ||
       process.env.RESEND_FROM ||
       'Total Service Pro <contact@medicalrepairnetwork.com>';
 
     if (!resendKey) {
-      return NextResponse.json({
+      return respond({
         ok: true,
         emailed: false,
         skipped: 'not_configured',
         to: toEmail,
-        signupUrl,
         error:
           'Email delivery is not configured (RESEND_API_KEY). Customer was saved; invite was not sent.',
       });
     }
 
-    const rr = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${resendKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        from,
-        to: [toEmail],
-        subject,
-        html,
-        text,
-      }),
-    });
+    const sent = deps.sendEmail
+      ? await deps.sendEmail({ to: [toEmail], subject, html, text })
+      : await (async () => {
+          const rr = await fetch('https://api.resend.com/emails', {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${resendKey}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              from,
+              to: [toEmail],
+              subject,
+              html,
+              text,
+            }),
+          });
+          const result = await rr.json().catch(() => ({}));
+          return {
+            ok: rr.ok,
+            status: rr.status,
+            id: result?.id || null,
+            message: result?.message || (rr.ok ? '' : `Email provider error (${rr.status})`),
+          };
+        })();
 
-    const result = await rr.json().catch(() => ({}));
-    if (!rr.ok) {
-      console.error('Resend customer invite failed', result);
-      const msg = result?.message || `Email provider error (${rr.status})`;
-      return NextResponse.json({
+    if (!sent.ok) {
+      const msg = sent.message || `Email provider error (${sent.status ?? 'unknown'})`;
+      const logged = /claim=|\/signup\/owner/i.test(msg) ? 'provider error' : msg;
+      console.error('Resend customer invite failed', logged);
+      return respond({
         ok: true,
         emailed: false,
         skipped: 'send_failed',
         to: toEmail,
-        signupUrl,
         error: msg,
       });
     }
 
-    return NextResponse.json({
+    return respond({
       ok: true,
       emailed: true,
       to: toEmail,
-      id: result?.id || null,
-      signupUrl,
+      id: sent.id || null,
     });
   } catch (e: any) {
-    console.error('customer invite', e);
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
+    const message = e?.message || 'Server error';
+    console.error('customer invite', /claim=|\/signup\/owner/i.test(String(message)) ? 'server error' : message);
+    return respond({ error: /claim=|\/signup\/owner/i.test(String(message)) ? 'Server error' : message }, 500);
   }
 }

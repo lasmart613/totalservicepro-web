@@ -12,6 +12,7 @@ import {
   type AuthUserRow,
 } from './team-profile.ts';
 import { teamInviteSentMessage } from './team-invite.ts';
+import { isPendingTeamInvite } from './org-membership.ts';
 import { NextRequest } from 'next/server';
 import { runTeamInvite } from '../app/api/team/invite/route.ts';
 import {
@@ -776,6 +777,41 @@ test('a lookup or proof failure does not mint a setup link', async () => {
   assert.match(proof.sent[0].html, /Sign in/);
   assert.doesNotMatch(proof.sent[0].html, /\/auth\/v1\/verify/);
   assertNoLink(proof, SETUP_LINK);
+});
+
+test('resend on an accepted invite leaves it accepted and sends a sign-in email', async () => {
+  const acceptedAt = '2026-10-01T12:00:00.000Z';
+  const expiresAt = '2026-10-08T12:00:00.000Z';
+  const invite = {
+    ...pendingCreated,
+    accepted: true,
+    accepted_at: acceptedAt,
+    expires_at: expiresAt,
+  };
+  const result = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: null },
+    invite,
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal(result.body.emailed, true);
+  assert.equal(result.linkCalls.length, 0);
+  assert.equal(result.sent.length, 1);
+  assert.deepEqual(result.sent[0].to, [INVITEE]);
+  assert.match(result.sent[0].html, /Sign in/);
+  assert.doesNotMatch(`${result.sent[0].html}\n${result.sent[0].text}`, /\/auth\/v1\/verify/);
+  assert.equal(invite.accepted, true);
+  assert.equal(invite.accepted_at, acceptedAt);
+  assert.equal(invite.expires_at, expiresAt);
+  assert.equal(
+    result.updates.some(
+      (patch) => 'accepted' in patch || 'accepted_at' in patch || 'status' in patch || 'expires_at' in patch
+    ),
+    false
+  );
+  assert.equal(isPendingTeamInvite(invite), false);
+  assertNoLink(result, SETUP_LINK);
 });
 
 test('an existing user with email not configured gets 503 and no link', async () => {

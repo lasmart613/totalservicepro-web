@@ -3,9 +3,9 @@
 import React, { Suspense, useEffect, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
-import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
+import { applyPendingSignup, clearPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup } from '@/lib/auth-session';
-import { claimCustomerInvite, previewCustomerInvite } from '@/lib/customer-invite-client';
+import { claimCustomerInvite, ownerSignupAfterClaim, previewCustomerInvite } from '@/lib/customer-invite-client';
 import { MODELS } from '@/lib/models';
 import {
   OWNER_ORG_TYPE_SIGNUP_OPTIONS,
@@ -193,13 +193,20 @@ function OwnerSignupInner() {
     if (claimToken) {
       const { data: sessionData } = await supabase.auth.getSession();
       const access = sessionData.session?.access_token;
-      if (access) {
-        const claimed = await claimCustomerInvite(access, claimToken);
-        if (claimed.claimed) {
-          router.push('/company?justSetup=1');
-          return;
-        }
+      const claimed = access
+        ? await claimCustomerInvite(access, claimToken)
+        : { claimed: false, error: 'Sign in required to claim this clinic profile.' };
+      const next = ownerSignupAfterClaim({
+        fromClaimLink: true,
+        claimed: !!claimed.claimed,
+        error: claimed.error,
+      });
+      if (next.action === 'claimed') {
+        router.push('/company?justSetup=1');
+        return;
       }
+      clearPendingSignup();
+      throw new Error(next.action === 'show-error' ? next.message : 'This clinic invite could not be claimed. A new organization was not created.');
     }
 
     const applied = await applyPendingSignup(supabase, userId, pending);

@@ -49,6 +49,26 @@ export function signCustomerInvite(payload: Omit<CustomerInvitePayload, 'exp'>, 
   return `${encoded}.${sig}`;
 }
 
+const CUSTOMER_INVITE_RESPONSE_KEYS = new Set([
+  'signupUrl',
+  'loginUrl',
+  'token',
+  'claim',
+  'claimToken',
+  'action_link',
+]);
+
+/** Staff response for a clinic invite. The claim link stays in the email only. */
+export function publicCustomerInviteBody(body: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(body)) {
+    if (CUSTOMER_INVITE_RESPONSE_KEYS.has(key)) continue;
+    if (typeof value === 'string' && /claim=|signupUrl|\/signup\/owner\?/i.test(value)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
 export function verifyCustomerInvite(token: string): CustomerInvitePayload | null {
   const secret = inviteSecret();
   if (!secret) return null;

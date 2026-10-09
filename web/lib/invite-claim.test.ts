@@ -9,6 +9,7 @@ import {
   routeAfterTeamClaim,
   shouldSendToMemberOnboarding,
 } from './invite-claim.ts';
+import { ownerSignupAfterClaim } from './customer-invite-client.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -138,6 +139,38 @@ test('founder onboarding claims on load and on finish; does not skip claim after
   );
   const claimCalls = onboarding.match(/await postTeamClaim/g) || [];
   assert.equal(claimCalls.length, 3);
+});
+
+test('a failed clinic claim does not create a new organization', () => {
+  assert.deepEqual(ownerSignupAfterClaim({ fromClaimLink: false, claimed: false, error: 'nope' }), {
+    action: 'create-org',
+  });
+  assert.deepEqual(ownerSignupAfterClaim({ fromClaimLink: true, claimed: true, error: 'ignored' }), {
+    action: 'claimed',
+  });
+  const failed = ownerSignupAfterClaim({
+    fromClaimLink: true,
+    claimed: false,
+    error: 'This company profile already has an owner account.',
+  });
+  assert.equal(failed.action, 'show-error');
+  if (failed.action === 'show-error') assert.match(failed.message, /already has an owner/);
+  const blank = ownerSignupAfterClaim({ fromClaimLink: true, claimed: false, error: '   ' });
+  assert.equal(blank.action, 'show-error');
+  if (blank.action === 'show-error') assert.match(blank.message, /was not created/);
+
+  const owner = readFileSync(join(here, '../app/signup/owner/page.tsx'), 'utf8');
+  const claimBranch = owner.slice(owner.indexOf('if (claimToken)'), owner.indexOf('const applied = await applyPendingSignup'));
+  assert.match(claimBranch, /ownerSignupAfterClaim/);
+  assert.match(claimBranch, /clearPendingSignup/);
+  assert.doesNotMatch(claimBranch, /applyPendingSignup/);
+  assert.match(owner, /applyPendingSignup\(supabase, userId, pending\)/);
+
+  const callback = readFileSync(join(here, '../app/auth/callback/page.tsx'), 'utf8');
+  const callbackClaim = callback.slice(callback.indexOf('if (claimToken)'), callback.indexOf('const pending = inviteInPlay'));
+  assert.match(callbackClaim, /ownerSignupAfterClaim/);
+  assert.match(callbackClaim, /clearPendingSignup/);
+  assert.doesNotMatch(callbackClaim, /applyPendingSignup/);
 });
 
 test('applyPendingSignup claims a team invite by email instead of creating a new shop', () => {
