@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { clientAuthOrigin } from '@/lib/site-origin';
+import { loginMagicLinkRedirect } from '@/lib/auth-link-route';
 
 type Props = {
   email: string;
@@ -36,6 +37,7 @@ export default function AuthOtpBox({
   function redirectUrl() {
     if (emailRedirectTo) return emailRedirectTo;
     const origin = clientAuthOrigin();
+    if (mode === 'magic') return loginMagicLinkRedirect(origin, '/hub');
     return `${origin}/auth/callback?next=/onboarding`;
   }
 

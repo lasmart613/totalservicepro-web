@@ -11,6 +11,7 @@ import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session'
 import { postTeamClaim, routeAfterTeamClaim } from '@/lib/invite-claim';
 import { publicAuthMessage } from '@/lib/auth-errors';
 import { clientAuthOrigin } from '@/lib/site-origin';
+import { loginMagicLinkRedirect, recoveryRedirect } from '@/lib/auth-link-route';
 
 function LoginInner() {
   const [email, setEmail] = useState('');
@@ -216,9 +217,7 @@ function LoginInner() {
         email: cleanEmail,
         options: {
           shouldCreateUser: false,
-          emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(nextPath || '/hub')}${
-            claimToken ? `&claim=${encodeURIComponent(claimToken)}` : ''
-          }`,
+          emailRedirectTo: loginMagicLinkRedirect(origin, nextPath || '/hub', claimToken),
         },
       });
       if (error) throw error;
@@ -319,7 +318,7 @@ function LoginInner() {
     if (!isValidEmail(cleanEmail)) return setMsg('Enter a valid email address first.');
     const origin = clientAuthOrigin();
     const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-      redirectTo: `${origin}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`,
+      redirectTo: recoveryRedirect(origin),
     });
     setMsg(
       error

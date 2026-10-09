@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
 import { destAfterInviteClaim, inviteInPlay } from '@/lib/invite-claim';
+import { resolveSetPasswordFlow, setPasswordSubtitle } from '@/lib/auth-link-route';
 
 /**
  * Invited / recovery users land here after the email link establishes a session.
@@ -17,28 +18,47 @@ function SetPasswordInner() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
-  const [message, setMessage] = useState('Checking your invite…');
+  const [flow, setFlow] = useState<'invite' | 'reset'>(() =>
+    resolveSetPasswordFlow({
+      flow: searchParams.get('flow'),
+      type: searchParams.get('type'),
+    })
+  );
+  const [message, setMessage] = useState(
+    flow === 'invite' ? 'Checking your invite…' : 'Checking your link…'
+  );
   const [error, setError] = useState('');
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
   const [noSession, setNoSession] = useState(false);
+  const subtitle = setPasswordSubtitle(flow);
 
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
       try {
-        // Prefer code exchange if present (PKCE invite / recovery)
         const url = new URL(window.location.href);
+        const hash = window.location.hash.replace(/^#/, '');
+        const hashParams = hash ? new URLSearchParams(hash) : null;
+        const linkFlow = resolveSetPasswordFlow({
+          flow: url.searchParams.get('flow') || hashParams?.get('flow'),
+          type: url.searchParams.get('type') || hashParams?.get('type'),
+        });
+        if (!cancelled) {
+          setFlow(linkFlow);
+          setMessage(linkFlow === 'invite' ? 'Checking your invite…' : 'Checking your link…');
+        }
+
+        // Prefer code exchange if present (PKCE invite / recovery)
         const code = url.searchParams.get('code');
         if (code) {
           const { error: exErr } = await supabase.auth.exchangeCodeForSession(code);
           if (exErr) console.warn('set-password code exchange:', exErr.message);
         } else {
           // Hash tokens from older email templates
-          const hash = window.location.hash.replace(/^#/, '');
           if (hash) {
-            const params = new URLSearchParams(hash);
+            const params = hashParams || new URLSearchParams(hash);
             const access_token = params.get('access_token');
             const refresh_token = params.get('refresh_token') || '';
             if (access_token) {
@@ -56,9 +76,12 @@ function SetPasswordInner() {
             setNoSession(true);
             setMessage('');
             setError(
-              'This invite link is missing a session (expired, already used, or redirected incorrectly). ' +
-                'Use “Forgot password” on the login page with your invite email to set a password, ' +
-                'or ask your admin to resend the invite.'
+              linkFlow === 'invite'
+                ? 'This invite link is missing a session (expired, already used, or redirected incorrectly). ' +
+                    'Use “Forgot password” on the login page with your invite email to set a password, ' +
+                    'or ask your admin to resend the invite.'
+                : 'This reset link is missing a session (expired or already used). ' +
+                    'Use “Forgot password” on the login page to send a new one.'
             );
           }
           return;
@@ -171,7 +194,7 @@ function SetPasswordInner() {
               Total Service Pro
             </span>
           </Link>
-          <p className="text-[var(--text3)] mt-1 text-sm">Team invite — set your password</p>
+          <p className="text-[var(--text3)] mt-1 text-sm">{subtitle}</p>
         </div>
 
         <div className="card p-8">

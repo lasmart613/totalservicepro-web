@@ -9,15 +9,12 @@ import { claimCustomerInvite, clearStaleClaimToken, ownerSignupAfterClaim } from
 import { destAfterInviteClaim, inviteInPlay, type InviteClaimResult } from '@/lib/invite-claim';
 import { isTspAndroidWebView } from '@/lib/android-session';
 import { publicAuthMessage } from '@/lib/auth-errors';
+import { decideAuthCallback, setPasswordHref } from '@/lib/auth-link-route';
 
 function safeNextPath(raw: string | null): string {
   if (!raw) return '';
   if (!raw.startsWith('/') || raw.startsWith('//')) return '';
   return raw;
-}
-
-function isInviteAuthType(authType: string): boolean {
-  return authType === 'invite' || authType === 'recovery' || authType === 'magiclink';
 }
 
 /**
@@ -50,22 +47,16 @@ function AuthCallbackInner() {
           hashParams?.get('type') ||
           ''
         ).toLowerCase();
+        const flowParam = url.searchParams.get('flow') || hashParams?.get('flow') || '';
 
-        // Confirm-signup emails set type=signup. That is NOT an invite, even if
-        // a stale next=/auth/set-password is present.
+        // type=signup already chose a password. type=magiclink and type=email
+        // are sign-in. Only type=invite and type=recovery set a password.
         const isSignupConfirm = authType === 'signup';
-        const isPasswordResetDest =
-          next === '/auth/set-password' ||
-          next.startsWith('/auth/set-password') ||
-          next === '/reset-password' ||
-          next.startsWith('/reset-password');
-
-        const isInviteOrRecovery =
-          !isSignupConfirm &&
-          (isInviteAuthType(authType) || isPasswordResetDest);
-
-        if (isSignupConfirm && isPasswordResetDest) {
-          next = '/onboarding';
+        const decision = decideAuthCallback({ type: authType, next, flow: flowParam });
+        const isInviteOrRecovery = decision.kind === 'set-password';
+        const setupFlow = decision.kind === 'set-password' ? decision.flow : 'reset';
+        if (decision.kind === 'continue') {
+          next = decision.next;
         }
 
         if (err) {
@@ -98,7 +89,9 @@ function AuthCallbackInner() {
         if (!user) {
           setMessage(
             isInviteOrRecovery
-              ? 'Invite link did not establish a session. Try Resend invite, or use Forgot password on the login page.'
+              ? setupFlow === 'invite'
+                ? 'Invite link did not establish a session. Try Resend invite, or use Forgot password on the login page.'
+                : 'Reset link did not establish a session. Use Forgot password on the login page to send a new one.'
               : 'Signed in, but no user session found. Try again.'
           );
           return;
@@ -114,14 +107,17 @@ function AuthCallbackInner() {
           claimResult = await claimPendingInvitations(supabase, user.id, user.email);
         }
 
-        // Invited / password-recovery users must set a password.
-        // type=signup never belongs here — they already chose a password at signup.
-        if (isInviteOrRecovery || (invitedMember && !isSignupConfirm && !meta.role?.includes('admin') && meta.role !== 'owner' && meta.role !== 'parts_supplier')) {
-          if (isInviteOrRecovery || invitedMember) {
-            setMessage('Almost done — set your password…');
-            router.replace('/auth/set-password');
-            return;
-          }
+        // Brand-new invite links and password recovery set a password.
+        // Magic links, email OTP, and invited_member metadata do not — those
+        // users already have a password and continue to claim or home.
+        if (decision.kind === 'set-password') {
+          setMessage(
+            setupFlow === 'invite'
+              ? 'Almost done — set your password…'
+              : 'Almost done — choose a new password…'
+          );
+          router.replace(setPasswordHref(setupFlow));
+          return;
         }
 
         const full = (meta.full_name || meta.name || '') as string;

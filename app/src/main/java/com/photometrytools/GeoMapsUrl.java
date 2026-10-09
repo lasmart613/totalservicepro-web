@@ -39,6 +39,10 @@ public final class GeoMapsUrl {
         if (decoded == null || decoded.trim().isEmpty()) return null;
         String encoded = encode.apply(decoded);
         if (encoded == null || encoded.isEmpty()) return null;
+        // URLEncoder and URLSearchParams write spaces as '+'. Android Uri.encode
+        // and encodeURIComponent write '%20'. A raw '+' here is always a space
+        // from a form encoder (a real plus is already '%2B'), so normalize it.
+        encoded = encoded.replace("+", "%20");
         return "https://www.google.com/maps/search/?api=1&query=" + encoded;
     }
 }

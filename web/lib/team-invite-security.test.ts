@@ -720,6 +720,11 @@ test('resend to a pending invite-created user emails a set-password link and hid
   assert.equal(result.body.emailed, true);
   assert.equal(result.linkCalls.length, 1);
   assert.equal(result.linkCalls[0].type, 'invite');
+  const inviteRedirect = (result.linkCalls[0] as { options?: { redirectTo?: string } }).options?.redirectTo || '';
+  assert.match(inviteRedirect, /\/auth\/callback\?/);
+  assert.match(inviteRedirect, /set-password/);
+  assert.match(inviteRedirect, /flow=invite/);
+  assert.doesNotMatch(inviteRedirect, /flow=reset/);
   assert.equal(result.sent.length, 1);
   assert.deepEqual(result.sent[0].to, [INVITEE]);
   assert.match(result.sent[0].html, /set password/i);
@@ -747,6 +752,13 @@ test('resend falls forward when invite cannot be reissued, still without returni
     result.linkCalls.map((call) => call.type),
     ['invite', 'recovery']
   );
+  const followupRedirects = result.linkCalls.map(
+    (call) => (call as { options?: { redirectTo?: string } }).options?.redirectTo || ''
+  );
+  assert.match(followupRedirects[0], /flow=invite/);
+  assert.match(followupRedirects[1], /flow=reset/);
+  assert.match(followupRedirects[1], /set-password/);
+  assert.doesNotMatch(followupRedirects[1], /flow=invite/);
   assert.equal(result.sent.length, 1);
   assert.deepEqual(result.sent[0].to, [INVITEE]);
   assert.ok(result.sent[0].html.includes(FOLLOWUP_LINK) || result.sent[0].text.includes(FOLLOWUP_LINK));
