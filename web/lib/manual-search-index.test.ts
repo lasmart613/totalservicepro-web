@@ -21,6 +21,7 @@ import {
 import { MANUAL_SEARCH_PDF_MAX_BYTES } from './manual-pdf-text.ts';
 import { buildTextPdf } from './manual-pdf-fixtures.ts';
 import { MANUAL_FIXTURE_PATH } from './manuals.ts';
+import { containsTextImatch } from './email-match.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -43,6 +44,22 @@ test('pdf paths prefer chapter_metadata, then a single PDF, then a folder prefix
   assert.equal(folderPrefixForManual({ storage_path: 'shared/x.pdf' }), null);
   assert.deepEqual(chapterPathsFromMetadata(null), []);
   assert.equal(escapeIlike('50%_off'), '50\\%\\_off');
+});
+
+test('manual body fallback matches star, percent, and underscore as literals', () => {
+  const src = readFileSync(join(here, './manual-search-index.ts'), 'utf8');
+  assert.match(src, /containsTextImatch\(/);
+  assert.doesNotMatch(src, /\.ilike\(/);
+  const star = containsTextImatch('a*b');
+  assert.equal(new RegExp(star, 'i').test('a*b'), true);
+  assert.equal(new RegExp(star, 'i').test('A*B'), true);
+  assert.equal(new RegExp(star, 'i').test('axxb'), false);
+  const percent = containsTextImatch('a%b');
+  assert.equal(new RegExp(percent, 'i').test('a%b'), true);
+  assert.equal(new RegExp(percent, 'i').test('axxb'), false);
+  const underscore = containsTextImatch('a_b');
+  assert.equal(new RegExp(underscore, 'i').test('a_b'), true);
+  assert.equal(new RegExp(underscore, 'i').test('axb'), false);
 });
 
 test('God Index preserves mixed-case PDF paths for Storage download (Xeo 105)', () => {

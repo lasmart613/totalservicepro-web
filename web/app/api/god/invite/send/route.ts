@@ -10,7 +10,9 @@ import {
 } from '@/lib/shop-invite-email';
 import {
   newUnsubscribeToken,
+  recipientUnsubscribed,
   shopInviteResendHeaders,
+  UNSUBSCRIBE_LOOKUP_ERROR,
 } from '@/lib/shop-invite-unsubscribe';
 import { fetchAllPages } from '@/lib/supabase/paginate';
 
@@ -51,21 +53,6 @@ async function loadGodOrgs(): Promise<ReturnType<typeof assembleGodOrgs>> {
   }));
 
   return assembleGodOrgs({ orgs: orgs || [], members });
-}
-
-async function recipientUnsubscribed(email: string): Promise<boolean> {
-  try {
-    const { data, error } = await getSupabaseAdmin()
-      .from('god_email_sends')
-      .select('id')
-      .ilike('recipient_email', email)
-      .not('unsubscribed_at', 'is', null)
-      .limit(1);
-    if (error) return false;
-    return Boolean(data?.length);
-  } catch {
-    return false;
-  }
 }
 
 async function sendResend(
@@ -193,7 +180,18 @@ export async function POST(req: NextRequest) {
       });
       continue;
     }
-    if (await recipientUnsubscribed(recipient)) {
+    const unsubscribed = await recipientUnsubscribed(recipient);
+    if (unsubscribed === null) {
+      results.push({
+        organizationId: org.id,
+        organizationName: org.name,
+        recipient,
+        ok: false,
+        error: UNSUBSCRIBE_LOOKUP_ERROR,
+      });
+      continue;
+    }
+    if (unsubscribed) {
       results.push({
         organizationId: org.id,
         organizationName: org.name,

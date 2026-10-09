@@ -24,26 +24,16 @@ import {
   type BlastTemplate,
   type BlastTemplateKey,
 } from '@/lib/god-email-blast';
-import { newUnsubscribeToken, shopInviteResendHeaders } from '@/lib/shop-invite-unsubscribe';
+import {
+  newUnsubscribeToken,
+  recipientUnsubscribed,
+  shopInviteResendHeaders,
+  UNSUBSCRIBE_LOOKUP_ERROR,
+} from '@/lib/shop-invite-unsubscribe';
 
 export const dynamic = 'force-dynamic';
 /** Must be a numeric literal for the Next/OpenNext plugin. Keep in sync with BLAST_SEND_MAX_DURATION_SECONDS. */
 export const maxDuration = 60;
-
-async function recipientUnsubscribed(email: string): Promise<boolean> {
-  try {
-    const { data, error } = await getSupabaseAdmin()
-      .from('god_email_sends')
-      .select('id')
-      .ilike('recipient_email', email)
-      .not('unsubscribed_at', 'is', null)
-      .limit(1);
-    if (error) return false;
-    return Boolean(data?.length);
-  } catch {
-    return false;
-  }
-}
 
 async function sendResend(opts: {
   to: string;
@@ -213,7 +203,19 @@ export async function POST(req: NextRequest) {
         });
         continue;
       }
-      if (await recipientUnsubscribed(recipient)) {
+      const unsubscribed = await recipientUnsubscribed(recipient);
+      if (unsubscribed === null) {
+        results.push({
+          organizationId: org.id,
+          organizationName: org.name,
+          recipient,
+          ok: false,
+          error: UNSUBSCRIBE_LOOKUP_ERROR,
+          skip_reason: 'provider_error',
+        });
+        continue;
+      }
+      if (unsubscribed) {
         results.push({
           organizationId: org.id,
           organizationName: org.name,

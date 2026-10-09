@@ -3,7 +3,16 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { emailsMatch, exactEmailIlike, exactEmailImatch, ilikeExact, normalizeLookupEmail } from './email-match.ts';
+import {
+  containsTextImatch,
+  emailsMatch,
+  exactEmailIlike,
+  exactEmailImatch,
+  exactTextImatch,
+  ilikeExact,
+  normalizeLookupEmail,
+  textsMatchCaseInsensitive,
+} from './email-match.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -39,6 +48,57 @@ test('a star in an email is not a wildcard', () => {
   assert.equal(pattern.test('a%b@x.com'), false);
   assert.equal(emailsMatch('a*b@x.com', 'aXXb@x.com'), false);
   assert.equal(emailsMatch('A*B@x.com', 'a*b@x.com'), true);
+});
+
+test('exact text match treats star, percent, and underscore as literals', () => {
+  assert.equal(exactTextImatch('  Acme*Laser  '), '^acme\\*laser$');
+  assert.equal(exactTextImatch('A%B_C'), '^a%b_c$');
+  assert.equal(exactEmailImatch('A*B@x.com'), exactTextImatch('A*B@x.com'));
+  for (const sample of ['Acme*Laser', 'a%b', 'a_b']) {
+    const pattern = new RegExp(exactTextImatch(sample), 'i');
+    assert.equal(pattern.test(sample), true, sample);
+    assert.equal(pattern.test(sample.toUpperCase()), true, sample);
+    assert.equal(pattern.test(sample.replace(/[*_%]/, 'XX')), false, sample);
+    assert.equal(textsMatchCaseInsensitive(sample, `  ${sample.toUpperCase()}  `), true, sample);
+    assert.equal(textsMatchCaseInsensitive(sample, sample.replace(/[*_%]/, 'XX')), false, sample);
+  }
+  assert.equal(textsMatchCaseInsensitive('', 'acme'), false);
+  assert.equal(textsMatchCaseInsensitive('  ', 'acme'), false);
+  const contains = containsTextImatch('A*B%C_D');
+  assert.equal(contains, 'A\\*B%C_D');
+  assert.equal(new RegExp(contains, 'i').test('xxa*b%c_dyy'), true);
+  assert.equal(new RegExp(contains, 'i').test('xxaxxb%c_dyy'), false);
+  assert.equal(new RegExp(contains, 'i').test('xxa*bXc_dyy'), false);
+  assert.equal(new RegExp(contains, 'i').test('xxa*b%cXdyy'), false);
+});
+
+test('exact text callers re-check and do not use unescaped ilike', () => {
+  const named = [
+    ['../app/api/god/blast/send/route.ts', /recipientUnsubscribed\(/],
+    ['../app/api/god/invite/send/route.ts', /recipientUnsubscribed\(/],
+    ['./pending-signup.ts', /exactTextImatch\(/],
+    ['./equipment-ensure.ts', /exactTextImatch\(/],
+    ['../app/customers/[id]/page.tsx', /exactTextImatch\(/],
+    ['../app/my-lasers/[id]/page.tsx', /loadServiceRequestsForLaser\(/],
+  ] as const;
+  for (const [rel, marker] of named) {
+    const source = readFileSync(join(here, rel), 'utf8');
+    assert.match(source, marker, rel);
+    assert.doesNotMatch(source, /\.ilike\(/, rel);
+  }
+  const pending = readFileSync(join(here, './pending-signup.ts'), 'utf8');
+  assert.match(pending, /textsMatchCaseInsensitive\(/);
+  assert.doesNotMatch(pending, /exactEmailImatch\(/);
+  const customer = readFileSync(join(here, '../app/customers/[id]/page.tsx'), 'utf8');
+  assert.match(customer, /textsMatchCaseInsensitive\(/);
+  const equipment = readFileSync(join(here, './equipment-ensure.ts'), 'utf8');
+  assert.match(equipment, /textsMatchCaseInsensitive\(/);
+  const lasers = readFileSync(join(here, '../app/my-lasers/[id]/page.tsx'), 'utf8');
+  assert.doesNotMatch(lasers, /\.or\(/);
+  const unsub = readFileSync(join(here, './shop-invite-unsubscribe.ts'), 'utf8');
+  assert.match(unsub, /exactEmailImatch\(/);
+  assert.match(unsub, /emailsMatch\(/);
+  assert.doesNotMatch(unsub, /\.ilike\(/);
 });
 
 test('exact email callers re-check with emailsMatch and do not use ilike or or()', () => {

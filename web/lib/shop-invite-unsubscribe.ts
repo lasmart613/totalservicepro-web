@@ -4,6 +4,8 @@
  */
 
 import { randomBytes } from 'node:crypto';
+import { emailsMatch, exactEmailImatch } from '@/lib/email-match';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
 
 export const UNSUBSCRIBE_MAILTO = 'mailto:contact@medicalrepairnetwork.com?subject=unsubscribe';
 export const UNSUBSCRIBE_ORIGIN = 'https://repairplanet.net';
@@ -25,6 +27,38 @@ export function unsubscribeHttpsUrl(token: string): string {
 
 export function listUnsubscribeHeader(token: string): string {
   return `<${UNSUBSCRIBE_MAILTO}>, <${unsubscribeHttpsUrl(token)}>`;
+}
+
+/** Shown when the unsubscribe lookup itself fails. Does not contain "unsubscribed", so blast retry still treats it as a provider error. */
+export const UNSUBSCRIBE_LOOKUP_ERROR = 'Could not check the mailing preference';
+
+/**
+ * Whether this address has a God send row with unsubscribed_at set.
+ * Exact match: `*` `%` and `_` are not wildcards.
+ * `true` means unsubscribed, `false` means clear to send.
+ * `null` means the lookup failed. Callers skip that recipient and keep going.
+ */
+export async function recipientUnsubscribed(
+  email: string,
+  admin?: { from: (table: string) => any }
+): Promise<boolean | null> {
+  const needle = String(email ?? '').trim();
+  if (!needle) return false;
+  try {
+    const db = admin ?? getSupabaseAdmin();
+    const { data, error } = await db
+      .from('god_email_sends')
+      .select('id, recipient_email')
+      .filter('recipient_email', 'imatch', exactEmailImatch(needle))
+      .not('unsubscribed_at', 'is', null)
+      .limit(20);
+    if (error) return null;
+    return (data || []).some((row: { recipient_email?: unknown }) =>
+      emailsMatch(row?.recipient_email, needle)
+    );
+  } catch {
+    return null;
+  }
 }
 
 export function shopInviteResendHeaders(token: string): Record<string, string> {

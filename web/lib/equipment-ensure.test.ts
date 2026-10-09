@@ -3,7 +3,12 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { ensureEquipment } from './equipment-ensure.ts';
+import { exactTextImatch } from './email-match.ts';
+import {
+  ensureEquipment,
+  loadServiceHistoryForLaser,
+  loadServiceRequestsForLaser,
+} from './equipment-ensure.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -25,6 +30,9 @@ function equipmentClient(opts?: {
         return b;
       },
       ilike() {
+        return b;
+      },
+      filter() {
         return b;
       },
       eq() {
@@ -505,4 +513,250 @@ test('loose model comparison does not treat a plus model as the base model', asy
   });
   assert.equal(matched, 9);
   assert.equal(plusWord.updates.length, 0);
+});
+
+function serialLookupClient(rows: any[]) {
+  const filters: Array<{ column: string; operator: string; value: unknown }> = [];
+  const inserts: any[] = [];
+  function builder(kind: 'query' | 'write') {
+    const b: any = {
+      select() {
+        return b;
+      },
+      filter(column: string, operator: string, value: unknown) {
+        filters.push({ column, operator, value });
+        return b;
+      },
+      eq() {
+        return b;
+      },
+      limit(n: number) {
+        if (kind === 'query' && n === 5) return Promise.resolve({ data: rows, error: null });
+        return b;
+      },
+      maybeSingle() {
+        return Promise.resolve({ data: { id: 42 }, error: null });
+      },
+      insert(body: any) {
+        inserts.push(body);
+        return builder('write');
+      },
+      update() {
+        return b;
+      },
+      then(resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) {
+        return Promise.resolve({ data: null, error: null }).then(resolve, reject);
+      },
+    };
+    return b;
+  }
+  return {
+    filters,
+    inserts,
+    client: {
+      from() {
+        return builder('query');
+      },
+    },
+  };
+}
+
+test('equipment serial lookup does not treat star, percent, or underscore as wildcards', async () => {
+  const cases = [
+    ['SN*100', 'SNXX100'],
+    ['SN%100', 'SNXX100'],
+    ['SN_100', 'SNX100'],
+  ];
+  for (const [serial, decoy] of cases) {
+    const miss = serialLookupClient([
+      {
+        id: 8,
+        customer_organization_id: 9,
+        manufacturer: 'Candela',
+        model: 'GentleMax',
+        serial_number: decoy,
+      },
+    ]);
+    const missed = await ensureEquipment({
+      client: miss.client,
+      customerOrgId: 9,
+      manufacturer: 'Candela',
+      model: 'GentleMax',
+      serial,
+    });
+    assert.equal(missed, 42, serial);
+    assert.equal(miss.inserts.length, 1, serial);
+    assert.equal(miss.inserts[0][0].serial_number, serial);
+    assert.equal(miss.filters[0]?.operator, 'imatch', serial);
+    assert.equal(miss.filters[0]?.value, exactTextImatch(serial), serial);
+
+    const hit = serialLookupClient([
+      {
+        id: 8,
+        customer_organization_id: 9,
+        manufacturer: 'Candela',
+        model: 'GentleMax',
+        serial_number: decoy,
+      },
+      {
+        id: 3,
+        customer_organization_id: 4,
+        manufacturer: 'Candela',
+        model: 'GentleMax',
+        serial_number: serial.toLowerCase(),
+      },
+    ]);
+    const found = await ensureEquipment({
+      client: hit.client,
+      customerOrgId: 9,
+      manufacturer: 'Candela',
+      model: 'GentleMax',
+      serial,
+    });
+    assert.equal(found, 3, serial);
+    assert.equal(hit.inserts.length, 0, serial);
+    assert.equal(hit.filters[0]?.value, exactTextImatch(serial), serial);
+  }
+});
+
+test('duplicate serial race does not adopt a wildcard neighbor', async () => {
+  const filters: Array<{ column: string; operator: string; value: unknown }> = [];
+  let inserts = 0;
+  const client = {
+    from() {
+      let filtered = false;
+      const b: any = {
+        select() {
+          return b;
+        },
+        filter(column: string, operator: string, value: unknown) {
+          filters.push({ column, operator, value });
+          filtered = true;
+          return b;
+        },
+        eq() {
+          return b;
+        },
+        limit(n: number) {
+          if (n === 5) return Promise.resolve({ data: [], error: null });
+          return b;
+        },
+        insert() {
+          inserts += 1;
+          return b;
+        },
+        update() {
+          return b;
+        },
+        maybeSingle() {
+          if (inserts === 1 && !filtered) {
+            return Promise.resolve({
+              data: null,
+              error: { message: 'duplicate key value violates unique constraint' },
+            });
+          }
+          if (filtered && inserts === 1) {
+            return Promise.resolve({ data: { id: 99, serial_number: 'SNXX100' }, error: null });
+          }
+          return Promise.resolve({ data: { id: 42 }, error: null });
+        },
+      };
+      return b;
+    },
+  };
+  const id = await ensureEquipment({
+    client,
+    customerOrgId: 9,
+    manufacturer: 'Candela',
+    model: 'GentleMax',
+    serial: 'SN*100',
+  });
+  assert.equal(id, 42);
+  assert.equal(inserts, 2);
+  assert.ok(filters.every((row) => row.value === exactTextImatch('SN*100')));
+});
+
+function splitLookupClient(idRows: any[], serialRows: any[]) {
+  const filters: Array<{ column: string; operator: string; value: unknown }> = [];
+  return {
+    filters,
+    client: {
+      from() {
+        let filtered = false;
+        const b: any = {
+          select() {
+            return b;
+          },
+          eq() {
+            return b;
+          },
+          filter(column: string, operator: string, value: unknown) {
+            filters.push({ column, operator, value });
+            filtered = true;
+            return b;
+          },
+          order() {
+            return b;
+          },
+          limit() {
+            return b;
+          },
+          then(resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) {
+            return Promise.resolve({ data: filtered ? serialRows : idRows, error: null }).then(
+              resolve,
+              reject
+            );
+          },
+        };
+        return b;
+      },
+    },
+  };
+}
+
+test('service history and requests keep an exact serial and drop wildcard neighbors', async () => {
+  const cases = [
+    ['SN*100', 'SNXX100'],
+    ['SN%100', 'SNXX100'],
+    ['SN_100', 'SNX100'],
+  ];
+  for (const [serial, decoy] of cases) {
+    const history = splitLookupClient(
+      [{ id: 'by-id', serial_number: 'OTHER', created_at: '2024-01-01' }],
+      [
+        { id: 'wild', serial_number: decoy, created_at: '2024-02-01' },
+        { id: 'exact', serial_number: serial.toLowerCase(), created_at: '2024-03-01' },
+      ]
+    );
+    const reports = await loadServiceHistoryForLaser({
+      client: history.client,
+      equipmentId: 9,
+      serial,
+    });
+    assert.deepEqual(
+      reports.map((row) => row.id).sort(),
+      ['by-id', 'exact'],
+      serial
+    );
+    assert.equal(history.filters[0]?.value, exactTextImatch(serial), serial);
+
+    const requests = splitLookupClient(
+      [{ id: 'by-id', serial_number: 'OTHER', created_at: '2024-01-01' }],
+      [
+        { id: 'wild', serial_number: decoy, created_at: '2024-02-01' },
+        { id: 'exact', serial_number: serial.toLowerCase(), created_at: '2024-03-01' },
+      ]
+    );
+    const reqs = await loadServiceRequestsForLaser({
+      client: requests.client,
+      equipmentId: 9,
+      serial,
+    });
+    assert.deepEqual(
+      reqs.map((row) => row.id).sort(),
+      ['by-id', 'exact'],
+      serial
+    );
+    assert.equal(requests.filters[0]?.value, exactTextImatch(serial), serial);
+  }
 });

@@ -32,7 +32,7 @@ import {
   type PdfAttachStat,
 } from './manual-scope.ts'
 import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
-import { extractFaultCodes } from './fault-codes.ts'
+import { extractFaultCodes, literalSubstringPattern, stripIlikeReserved } from './fault-codes.ts'
 import {
   attributeCitations,
   effectivePageCount,
@@ -1107,13 +1107,14 @@ async function lookupFaultCode(
   brand: string | null
 ): Promise<{ rows: any[]; source: string } | null> {
   if (model) {
-    const r1 = await db.from('fault_codes').select('*').eq('fault_code', faultCode).ilike('model', `%${model}%`)
+    const modelNeedle = literalSubstringPattern(model)
+    const r1 = await db.from('fault_codes').select('*').eq('fault_code', faultCode).filter('model', 'imatch', modelNeedle)
     if (r1.data?.length > 0) return { rows: r1.data, source: 'exact' }
-    const r2 = await db.from('fault_codes').select('*').eq('fault_code', faultCode).ilike('model_group', `%${model}%`)
+    const r2 = await db.from('fault_codes').select('*').eq('fault_code', faultCode).filter('model_group', 'imatch', modelNeedle)
     if (r2.data?.length > 0) return { rows: r2.data, source: 'group' }
   }
   if (brand) {
-    const r3 = await db.from('fault_codes').select('*').eq('fault_code', faultCode).ilike('brand', `%${brand}%`)
+    const r3 = await db.from('fault_codes').select('*').eq('fault_code', faultCode).filter('brand', 'imatch', literalSubstringPattern(brand))
     if (r3.data?.length > 0) return { rows: r3.data, source: 'brand' }
   }
   const r4 = await db.from('fault_codes').select('*').eq('fault_code', faultCode)
@@ -1913,7 +1914,7 @@ const CATALOG_CITE_COLUMNS = 'id,title,brand,model,storage_path'
 
 /** LIKE needle for a collection filename. Punctuation becomes a wildcard so `2410_A_01` still matches. */
 function catalogLikeNeedle(fileName: string): string {
-  const base = storageBasename(fileName).replace(/\.pdf$/i, '')
+  const base = stripIlikeReserved(storageBasename(fileName).replace(/\.pdf$/i, ''))
   return base
     .replace(/[%_,.()]/g, '%')
     .replace(/%+/g, '%')

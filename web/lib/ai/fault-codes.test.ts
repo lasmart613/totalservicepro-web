@@ -6,7 +6,9 @@ import { fileURLToPath } from 'url';
 import {
   extractFaultCode,
   extractFaultCodes,
+  literalSubstringPattern,
   MAX_FAULT_CODES,
+  stripIlikeReserved,
 } from '../../../supabase/functions/grok-assistant/fault-codes.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -52,7 +54,22 @@ test('grok-assistant searches the selected service manual before fault_codes', (
   const lookupCall = chat.indexOf('await applyFaultLookup()');
   assert.ok(searchCall >= 0 && lookupCall > searchCall, 'manual search must run before fault DB lookup');
   assert.match(fn, /await lookupFaultCode/);
+  assert.match(fn, /literalSubstringPattern\(model\)/);
+  assert.match(fn, /literalSubstringPattern\(brand\)/);
+  assert.match(fn, /stripIlikeReserved\(/);
+  assert.doesNotMatch(fn, /ilike\('model'|ilike\('model_group'|ilike\('brand'/);
   assert.match(fn, /!hasManualPassages && !hasCollectionPdfs && faultCodes\.length/);
   assert.match(fn, /collectionHitsFromResponse/);
   assert.match(fn, /file_id: s\.fileId/);
+});
+
+test('fault and catalog needles do not let star, percent, or underscore act as wildcards', () => {
+  const pattern = new RegExp(literalSubstringPattern('A*B%C_D'), 'i');
+  assert.equal(pattern.test('xxA*B%C_Dyy'), true);
+  assert.equal(pattern.test('xxa*b%c_dyy'), true);
+  assert.equal(pattern.test('xxAxxB%C_Dyy'), false);
+  assert.equal(pattern.test('xxA*BXC_Dyy'), false);
+  assert.equal(pattern.test('xxA*B%CXDyy'), false);
+  assert.equal(stripIlikeReserved('a*b%c_d:\\"'), 'ab%c_d');
+  assert.equal(stripIlikeReserved('2410_A_01'), '2410_A_01');
 });

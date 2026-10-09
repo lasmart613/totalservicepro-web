@@ -3,7 +3,8 @@ import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { emailsMatch } from '@/lib/email-match';
 import { isOwnerOrgType } from '@/lib/org-types';
-import { verifyCustomerInvite } from '@/lib/customer-invite';
+import { openCustomerInvite } from '@/lib/customer-invite';
+import { type ClaimErrorCode } from '@/lib/claim-error';
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 import { asClaimSignupMeta, claimSignupMetadataClearPatch } from '@/lib/claim-signup-metadata';
 
@@ -47,7 +48,12 @@ async function setClinicHome(
   const organizationId = Number(orgId);
   if (!Number.isFinite(organizationId)) {
     return NextResponse.json(
-      { ok: false, claimed: false, error: 'Could not set this clinic as your home organization.' },
+      {
+        ok: false,
+        claimed: false,
+        error: 'Could not set this clinic as your home organization.',
+        code: 'server_error' satisfies ClaimErrorCode,
+      },
       { status: 500 }
     );
   }
@@ -59,7 +65,12 @@ async function setClinicHome(
   });
   if (error) {
     return NextResponse.json(
-      { ok: false, claimed: false, error: 'Could not set this clinic as your home organization.' },
+      {
+        ok: false,
+        claimed: false,
+        error: 'Could not set this clinic as your home organization.',
+        code: 'server_error' satisfies ClaimErrorCode,
+      },
       { status: 503 }
     );
   }
@@ -115,13 +126,13 @@ export async function runCustomerClaim(
     const auth = req.headers.get('authorization') || '';
     const accessToken = auth.replace(/^Bearer\s+/i, '').trim();
     if (!accessToken) {
-      return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
+      return NextResponse.json({ error: 'Sign in required', code: 'claim_refused' }, { status: 401 });
     }
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
     const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
     if (!url || !anon) {
-      return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
+      return NextResponse.json({ error: 'Server misconfigured', code: 'server_error' }, { status: 500 });
     }
 
     const supabase = createUserClient(url, anon, accessToken);
@@ -131,7 +142,7 @@ export async function runCustomerClaim(
       error: userErr,
     } = await supabase.auth.getUser(accessToken);
     if (userErr || !user) {
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+      return NextResponse.json({ error: 'Invalid session', code: 'claim_refused' }, { status: 401 });
     }
 
     const claimMeta = asClaimSignupMeta(user.user_metadata);
@@ -163,22 +174,44 @@ export async function runCustomerClaim(
     };
 
     const body = await req.json().catch(() => ({}));
-    const payload = verifyCustomerInvite(String(body.token || ''));
-    if (!payload) {
-      return reply({ ok: false, claimed: false, error: 'Invite is invalid or expired.' }, 400);
+    const opened = openCustomerInvite(String(body.token || ''));
+    if (!opened.ok) {
+      return reply(
+        {
+          ok: false,
+          claimed: false,
+          error:
+            opened.reason === 'token_expired'
+              ? 'This clinic invite has expired. Ask the shop that invited you to send a new one.'
+              : 'Invite is invalid or expired.',
+          code: opened.reason,
+        },
+        400
+      );
     }
+    const payload = opened.payload;
 
     const userEmail = String(user.email || '').trim().toLowerCase();
     if (!emailsMatch(user.email, payload.email)) {
       return reply(
-        { ok: false, claimed: false, error: 'Sign in with the email this invite was sent to.' },
+        {
+          ok: false,
+          claimed: false,
+          error: 'Sign in with the email this invite was sent to.',
+          code: 'email_mismatch',
+        },
         403
       );
     }
 
     if (!serviceRoleReady()) {
       return NextResponse.json(
-        { ok: false, claimed: false, error: 'Server cannot link this clinic profile (missing service role).' },
+        {
+          ok: false,
+          claimed: false,
+          error: 'Server cannot link this clinic profile (missing service role).',
+          code: 'server_error',
+        },
         { status: 503 }
       );
     }
@@ -192,12 +225,18 @@ export async function runCustomerClaim(
       .maybeSingle();
 
     if (!org) {
-      return reply({ ok: false, claimed: false, error: 'Company profile was not found.' }, 404);
+      return reply(
+        { ok: false, claimed: false, error: 'Company profile was not found.', code: 'claim_refused' },
+        404
+      );
     }
 
     const orgType = String(org.type || '').toLowerCase();
     if (orgType && !isOwnerOrgType(orgType) && orgType !== 'customer') {
-      return reply({ ok: false, claimed: false, error: 'This invite is not for a clinic profile.' }, 400);
+      return reply(
+        { ok: false, claimed: false, error: 'This invite is not for a clinic profile.', code: 'claim_refused' },
+        400
+      );
     }
 
     const sources = await fetchDirectoryContactSources(writer, org.id);
@@ -212,6 +251,7 @@ export async function runCustomerClaim(
           ok: false,
           claimed: false,
           error: 'This invite was issued for an email that is no longer on this clinic.',
+          code: 'email_mismatch',
         },
         403
       );
@@ -230,20 +270,21 @@ export async function runCustomerClaim(
             ok: false,
             claimed: false,
             error: 'This company profile already has an owner account.',
+            code: 'owner_exists',
           },
           { status: 409 }
         );
       }
       if (updated.error) {
         return NextResponse.json(
-          { ok: false, claimed: false, error: 'Could not update the clinic owner role.' },
+          { ok: false, claimed: false, error: 'Could not update the clinic owner role.', code: 'server_error' },
           { status: 503 }
         );
       }
       const row = updated.data as { role?: string | null; organization_id?: string | number | null } | null;
       if (!row || !isOwnerRole(row.role) || String(row.organization_id) !== String(org.id)) {
         return NextResponse.json(
-          { ok: false, claimed: false, error: 'Clinic owner role was not saved.' },
+          { ok: false, claimed: false, error: 'Clinic owner role was not saved.', code: 'server_error' },
           { status: 500 }
         );
       }
@@ -276,6 +317,7 @@ export async function runCustomerClaim(
           ok: false,
           claimed: false,
           error: 'This account is already linked to another organization.',
+          code: 'claim_refused',
         },
         409
       );
@@ -293,6 +335,7 @@ export async function runCustomerClaim(
           ok: false,
           claimed: false,
           error: 'Could not check who owns this clinic. Nothing was changed.',
+          code: 'server_error',
         },
         { status: 503 }
       );
@@ -311,6 +354,7 @@ export async function runCustomerClaim(
           ok: false,
           claimed: false,
           error: 'This company profile already has an owner account.',
+          code: 'owner_exists',
         },
         409
       );
@@ -346,6 +390,7 @@ export async function runCustomerClaim(
           ok: false,
           claimed: false,
           error: 'This company profile already has an owner account.',
+          code: 'owner_exists',
         },
         409
       );
@@ -365,13 +410,17 @@ export async function runCustomerClaim(
             ok: false,
             claimed: false,
             error: 'This company profile already has an owner account.',
+            code: 'owner_exists',
           },
           409
         );
       }
     }
     if (upErr) {
-      return NextResponse.json({ ok: false, claimed: false, error: upErr.message || 'Could not link profile.' }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, claimed: false, error: upErr.message || 'Could not link profile.', code: 'server_error' },
+        { status: 500 }
+      );
     }
 
     const { data: check } = await writer
@@ -381,7 +430,10 @@ export async function runCustomerClaim(
       .maybeSingle();
 
     if (!check?.organization_id || String(check.organization_id) !== String(org.id)) {
-      return NextResponse.json({ ok: false, claimed: false, error: 'Profile did not link to the company.' }, { status: 500 });
+      return NextResponse.json(
+        { ok: false, claimed: false, error: 'Profile did not link to the company.', code: 'server_error' },
+        { status: 500 }
+      );
     }
 
     const homeError = await setClinicHome(writer, user.id, org.id);
@@ -390,6 +442,6 @@ export async function runCustomerClaim(
     return NextResponse.json({ ok: true, claimed: true, organizationId: org.id });
   } catch (e: any) {
     console.error('customer claim', e);
-    return NextResponse.json({ error: e?.message || 'Server error' }, { status: 500 });
+    return NextResponse.json({ error: e?.message || 'Server error', code: 'server_error' }, { status: 500 });
   }
 }

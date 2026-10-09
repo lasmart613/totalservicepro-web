@@ -12,11 +12,15 @@ import {
   listUnsubscribeHeader,
   newUnsubscribeToken,
   parseUnsubscribePostBody,
+  recipientUnsubscribed,
+  UNSUBSCRIBE_LOOKUP_ERROR,
   shopInviteResendHeaders,
   shopInviteUnsubscribePageHtml,
   unsubscribeHttpsUrl,
   unsubscribePageHeaders,
 } from './shop-invite-unsubscribe.ts';
+import { exactEmailImatch } from './email-match.ts';
+import { classifyBlastSkip, isRetryableBlastError } from './god-email-blast.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -85,4 +89,110 @@ test('send path attaches List-Unsubscribe and does not blast', () => {
   assert.match(send, /confirm !== true/);
   assert.match(send, /selectedOrgIds/);
   assert.doesNotMatch(send, /auto-blast|send to every org/i);
+});
+
+function unsubAdmin(rows: Array<{ recipient_email?: string }>) {
+  const filters: Array<{ column: string; operator: string; value: unknown }> = [];
+  const admin = {
+    from() {
+      const api: any = {
+        select() {
+          return api;
+        },
+        filter(column: string, operator: string, value: unknown) {
+          filters.push({ column, operator, value });
+          return api;
+        },
+        not() {
+          return api;
+        },
+        limit() {
+          return api;
+        },
+        then(resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) {
+          return Promise.resolve({ data: rows, error: null }).then(resolve, reject);
+        },
+      };
+      return api;
+    },
+  };
+  return { admin, filters };
+}
+
+test('blast and shop-invite unsubscribe lookup is an exact email match', async () => {
+  const blast = readFileSync(join(here, '../app/api/god/blast/send/route.ts'), 'utf8');
+  const invite = readFileSync(join(here, '../app/api/god/invite/send/route.ts'), 'utf8');
+  for (const source of [blast, invite]) {
+    assert.match(source, /recipientUnsubscribed\(/);
+    assert.doesNotMatch(source, /\.ilike\(\s*['"]recipient_email['"]/);
+  }
+
+  const cases = [
+    ['a*b@x.com', 'axxb@x.com'],
+    ['a%b@x.com', 'axxb@x.com'],
+    ['a_b@x.com', 'axb@x.com'],
+  ];
+  for (const [email, decoy] of cases) {
+    const onlyDecoy = unsubAdmin([{ recipient_email: decoy }]);
+    assert.equal(await recipientUnsubscribed(email, onlyDecoy.admin), false, email);
+    assert.equal(onlyDecoy.filters[0]?.operator, 'imatch', email);
+    assert.equal(onlyDecoy.filters[0]?.column, 'recipient_email', email);
+    assert.equal(onlyDecoy.filters[0]?.value, exactEmailImatch(email), email);
+
+    const exact = unsubAdmin([
+      { recipient_email: decoy },
+      { recipient_email: email.toUpperCase() },
+    ]);
+    assert.equal(await recipientUnsubscribed(email, exact.admin), true, email);
+    assert.equal(exact.filters[0]?.value, exactEmailImatch(email), email);
+  }
+
+  let called = false;
+  assert.equal(
+    await recipientUnsubscribed('   ', {
+      from() {
+        called = true;
+        return {};
+      },
+    }),
+    false
+  );
+  assert.equal(called, false);
+
+  const broken = {
+    from() {
+      const api: any = {
+        select() {
+          return api;
+        },
+        filter() {
+          return api;
+        },
+        not() {
+          return api;
+        },
+        limit() {
+          return api;
+        },
+        then(resolve: (v: unknown) => unknown, reject: (e: unknown) => unknown) {
+          return Promise.resolve({ data: null, error: { message: 'down' } }).then(resolve, reject);
+        },
+      };
+      return api;
+    },
+  };
+  assert.equal(await recipientUnsubscribed('pat@example.com', broken), null);
+
+  assert.equal(classifyBlastSkip(UNSUBSCRIBE_LOOKUP_ERROR), 'provider_error');
+  assert.equal(isRetryableBlastError(UNSUBSCRIBE_LOOKUP_ERROR), true);
+  assert.doesNotMatch(UNSUBSCRIBE_LOOKUP_ERROR, /unsubscribed/i);
+
+  for (const source of [blast, invite]) {
+    assert.match(source, /unsubscribed === null/);
+    assert.match(source, /UNSUBSCRIBE_LOOKUP_ERROR/);
+    const failed = source.slice(source.indexOf('unsubscribed === null'), source.indexOf('if (unsubscribed)'));
+    assert.match(failed, /continue;/);
+    assert.doesNotMatch(failed, /sendResend/);
+  }
+  assert.match(blast, /skip_reason: 'provider_error'/);
 });

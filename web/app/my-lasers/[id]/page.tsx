@@ -9,7 +9,7 @@ import { toast } from 'sonner';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { displayModelName, displayModelText } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
-import { loadServiceHistoryForLaser } from '@/lib/equipment-ensure';
+import { loadServiceHistoryForLaser, loadServiceRequestsForLaser } from '@/lib/equipment-ensure';
 import { StorageImage } from '@/components/StorageImage';
 
 type Laser = {
@@ -113,17 +113,12 @@ export default function LaserProfilePage() {
             .join(' · '),
         });
       });
-      let reqQ = supabase
-        .from('service_requests')
-        .select('id, title, status, urgency, created_at, service_type, equipment_id, serial_number')
-        .order('created_at', { ascending: false })
-        .limit(20);
-      if (L.serial_number) {
-        reqQ = reqQ.or(`equipment_id.eq.${L.id},serial_number.ilike.${L.serial_number}`);
-      } else {
-        reqQ = reqQ.eq('equipment_id', L.id);
-      }
-      const { data: reqs } = await reqQ;
+      const reqs = await loadServiceRequestsForLaser({
+        client: supabase,
+        equipmentId: L.id,
+        serial: L.serial_number,
+        limit: 20,
+      });
       (reqs || []).forEach((r: any) => {
         items.push({
           kind: 'request',

@@ -37,6 +37,7 @@ import {
   roleKeyFromTitle,
 } from '@/lib/customer-contacts';
 import { filledSocialLinks, socialFieldsFromOrg } from '@/lib/social-links';
+import { exactTextImatch, textsMatchCaseInsensitive } from '@/lib/email-match';
 
 type TabKey = 'overview' | 'equipment' | 'history' | 'contacts';
 
@@ -413,10 +414,14 @@ export default function CustomerProfilePage() {
             const rSn = await supabase
               .from('service_reports')
               .select(selectCols)
-              .ilike('serial_number', eq.serial_number)
+              .filter('serial_number', 'imatch', exactTextImatch(eq.serial_number))
               .order('created_at', { ascending: false })
               .limit(20);
-            push(rSn.data);
+            push(
+              (rSn.data || []).filter((row) =>
+                textsMatchCaseInsensitive(row?.serial_number, eq.serial_number)
+              )
+            );
           }
         }
       } catch {
@@ -429,10 +434,14 @@ export default function CustomerProfilePage() {
           .from('service_reports')
           .select(selectCols)
           .eq('organization_id', serviceOrgIdVal)
-          .ilike('customer_name', customerName)
+          .filter('customer_name', 'imatch', exactTextImatch(customerName))
           .order('created_at', { ascending: false })
           .limit(50);
-        push(r2.data);
+        push(
+          (r2.data || []).filter((row) =>
+            textsMatchCaseInsensitive(row?.customer_name, customerName)
+          )
+        );
       }
 
       merged.sort(

@@ -1,4 +1,7 @@
+import { claimErrorCode, CLAIM_REFUSED_MESSAGE, type ClaimErrorCode } from '@/lib/claim-error';
 import { clearPendingSignup } from '@/lib/pending-signup';
+
+export { refusedClaimLoginHref } from '@/lib/claim-error';
 
 /**
  * Browser helpers for clinic invite / claim. Talks to /api/customers/*.
@@ -12,8 +15,7 @@ export type CustomerInviteSendResult = {
   error?: string;
 };
 
-export const CLAIM_SIGNUP_ORG_BLOCKED =
-  'This clinic invite could not be claimed. A new organization was not created.';
+export const CLAIM_SIGNUP_ORG_BLOCKED = CLAIM_REFUSED_MESSAGE;
 
 export const CLAIM_INVITE_UNUSED =
   "This invite couldn't be used. Ask the shop that invited you to send a new invite, or sign in with the email the invite was sent to.";
@@ -70,28 +72,15 @@ export const COMPANY_JUST_SETUP_PATH = '/company?justSetup=1';
 /**
  * Login and the auth callback after a clinic claim attempt.
  * Success opens the company profile. A refusal stays off /company?justSetup=1
- * and keeps the server error so the login page can show it.
+ * and returns a fixed error code. The login URL never carries the API sentence.
  */
 export function clinicClaimSignInRoute(input: {
   claimed: boolean;
   error?: string | null;
-}): { kind: 'company'; dest: string } | { kind: 'stay'; message: string } {
-  const decision = ownerSignupAfterClaim({
-    fromClaimLink: true,
-    claimed: input.claimed,
-    error: input.error,
-  });
-  if (decision.action === 'claimed') {
-    return { kind: 'company', dest: COMPANY_JUST_SETUP_PATH };
-  }
-  const message = decision.action === 'show-error' ? decision.message : CLAIM_SIGNUP_ORG_BLOCKED;
-  return { kind: 'stay', message };
-}
-
-/** Login URL that shows a refused clinic claim. No claim token and no company next. */
-export function refusedClaimLoginHref(message: string): string {
-  const text = String(message || '').trim() || CLAIM_SIGNUP_ORG_BLOCKED;
-  return `/login?claimError=${encodeURIComponent(text)}`;
+  code?: string | null;
+}): { kind: 'company'; dest: string } | { kind: 'stay'; code: ClaimErrorCode } {
+  if (input.claimed) return { kind: 'company', dest: COMPANY_JUST_SETUP_PATH };
+  return { kind: 'stay', code: claimErrorCode({ code: input.code, error: input.error }) };
 }
 
 /**
@@ -121,6 +110,7 @@ export type CustomerClaimResult = {
   claimed?: boolean;
   organizationId?: string | number | null;
   error?: string;
+  code?: string;
 };
 
 export async function sendCustomerInviteEmail(
@@ -175,5 +165,6 @@ export async function claimCustomerInvite(
     claimed: !!json.claimed,
     organizationId: json.organizationId ?? null,
     error: json.error,
+    code: typeof json.code === 'string' ? json.code : undefined,
   };
 }

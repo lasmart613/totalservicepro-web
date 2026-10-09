@@ -155,10 +155,11 @@ function AuthCallbackInner() {
           const { data: sessionData } = await supabase.auth.getSession();
           const claimed = sessionData.session?.access_token
             ? await claimCustomerInvite(sessionData.session.access_token, claimToken)
-            : { claimed: false, error: 'Sign in required to claim this clinic profile.' };
+            : { claimed: false, code: 'claim_refused' };
           const route = clinicClaimSignInRoute({
             claimed: !!claimed.claimed,
             error: claimed.error,
+            code: claimed.code,
           });
           if (route.kind === 'company') {
             if (cancelled) return;
@@ -168,8 +169,7 @@ function AuthCallbackInner() {
           }
           await clearStaleClaimToken(supabase);
           if (cancelled) return;
-          setMessage(route.message);
-          router.replace(refusedClaimLoginHref(route.message));
+          router.replace(refusedClaimLoginHref(route.code));
           return;
         }
 
