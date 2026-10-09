@@ -3,6 +3,9 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NextRequest } from 'next/server';
+import { runOrgMemberships } from '../app/api/org/memberships/route.ts';
+import { exactEmailImatch } from './email-match.ts';
 import {
   DEFAULT_STAFF_ROLE,
   decideClaim,
@@ -318,4 +321,113 @@ test('invite acceptance and membership inserts follow the Auth login, not profil
   assert.match(sql, /COALESCE\(p_is_home, false\) = false/);
   assert.match(sql, /membership_insert_allowed\(user_id, organization_id, role, is_home\)/);
   assert.match(sql, /home := false/);
+});
+
+test('memberships drops stored invites that do not exactly match the login email', async () => {
+  const previous = {
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    anon: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  };
+  process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://127.0.0.1:54321';
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon-test-value';
+  const seen: string[] = [];
+  const invites = [
+    {
+      id: 1,
+      email: 'a*b@x.com',
+      organization_id: 9,
+      role: 'fse',
+      created_at: '2026-10-01T00:00:00.000Z',
+      expires_at: '2099-01-01T00:00:00.000Z',
+      accepted: false,
+    },
+    {
+      id: 2,
+      email: 'axxb@x.com',
+      organization_id: 4,
+      role: 'fse',
+      created_at: '2026-10-02T00:00:00.000Z',
+      expires_at: '2099-01-01T00:00:00.000Z',
+      accepted: false,
+    },
+  ];
+  try {
+    const response = await runOrgMemberships(
+      new NextRequest('http://127.0.0.1/api/org/memberships', {
+        headers: { authorization: 'Bearer session-token' },
+      }),
+      {
+        hasServiceRole: () => true,
+        listMemberships: async () => [],
+        createUserClient: () => ({
+          auth: {
+            getUser: async () => ({ data: { user: { id: 'user-1', email: 'A*B@x.com' } } }),
+          },
+          from: () => ({
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({ data: null, error: null }),
+              }),
+            }),
+          }),
+        }),
+        getAdmin: () => ({
+          from(table: string) {
+            const api = {
+              select() {
+                return api;
+              },
+              filter(column: string, operator: string, value: string) {
+                assert.equal(column, 'email');
+                assert.equal(operator, 'imatch');
+                seen.push(value);
+                return api;
+              },
+              eq() {
+                return api;
+              },
+              in() {
+                return api;
+              },
+              order() {
+                return api;
+              },
+              limit() {
+                return api;
+              },
+              then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+                const data =
+                  table === 'engineer_invitations'
+                    ? invites
+                    : table === 'organizations'
+                      ? [
+                          { id: 9, name: 'Star Shop' },
+                          { id: 4, name: 'Decoy Shop' },
+                        ]
+                      : [];
+                return Promise.resolve({ data, error: null }).then(onFulfilled, onRejected);
+              },
+            };
+            return api;
+          },
+        }),
+      }
+    );
+    const body = (await response.json()) as {
+      pendingInvites?: Array<{ id?: number; organizationId?: number; name?: string }>;
+    };
+    assert.equal(response.status, 200);
+    assert.deepEqual(seen, [exactEmailImatch('A*B@x.com')]);
+    assert.equal(body.pendingInvites?.length, 1);
+    assert.equal(body.pendingInvites?.[0]?.id, 1);
+    assert.equal(body.pendingInvites?.[0]?.organizationId, 9);
+    assert.equal(body.pendingInvites?.[0]?.name, 'Star Shop');
+    assert.equal(JSON.stringify(body).includes('axxb@x.com'), false);
+    assert.equal(JSON.stringify(body).includes('Decoy Shop'), false);
+  } finally {
+    if (previous.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = previous.url;
+    if (previous.anon === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = previous.anon;
+  }
 });
