@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
-import { normalizeLookupEmail } from '@/lib/email-match';
+import { emailsMatch, normalizeLookupEmail } from '@/lib/email-match';
+import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { canAddCustomers } from '@/lib/roles';
 import { isOwnerOrgType } from '@/lib/org-types';
 import {
@@ -22,13 +23,59 @@ import { getCompanyTheme } from '@/lib/company-theme';
 /**
  * GET /api/customers/invite?token=
  * Public preview for the owner signup form (company name + email only).
+ * The token email must still be the clinic's current reach email
+ * (same emailsMatch rule as POST /api/customers/claim). A mismatch is
+ * invalid and does not include the clinic's current address.
  */
 export async function GET(req: NextRequest) {
+  return runCustomerInvitePreview(req);
+}
+
+export async function runCustomerInvitePreview(
+  req: NextRequest,
+  deps: {
+    hasServiceRole?: () => boolean;
+    getReader?: () => { from: (table: string) => any };
+  } = {}
+) {
   const token = req.nextUrl.searchParams.get('token') || '';
   const payload = verifyCustomerInvite(token);
   if (!payload) {
     return NextResponse.json({ valid: false, error: 'Invite link is invalid or expired.' }, { status: 200 });
   }
+
+  const ready = deps.hasServiceRole ?? hasServiceRole;
+  if (!ready()) {
+    return NextResponse.json({ valid: false, error: 'Invite could not be checked.' }, { status: 200 });
+  }
+
+  const reader = (deps.getReader ?? getSupabaseAdmin)();
+  const { data: org, error: orgErr } = await reader
+    .from('organizations')
+    .select('id, email')
+    .eq('id', payload.orgId)
+    .maybeSingle();
+  if (orgErr || !org) {
+    return NextResponse.json({ valid: false, error: 'Invite link is invalid or expired.' }, { status: 200 });
+  }
+
+  const sources = await fetchDirectoryContactSources(reader, org.id);
+  const currentEmail = pickCrmReachEmail({
+    directoryContacts: sources.directoryContacts,
+    contactRows: sources.contactRows,
+    officeEmail: sources.officeEmail ?? (org as { email?: string | null }).email,
+  }).email;
+  if (!emailsMatch(currentEmail, payload.email)) {
+    return NextResponse.json(
+      {
+        valid: false,
+        reason: 'email_mismatch',
+        error: 'This invite was issued for an email that is no longer on this clinic.',
+      },
+      { status: 200 }
+    );
+  }
+
   return NextResponse.json({
     valid: true,
     companyName: payload.name,

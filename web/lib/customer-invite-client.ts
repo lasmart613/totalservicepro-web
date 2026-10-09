@@ -64,6 +64,50 @@ export function ownerSignupAfterClaim(input: {
   return { action: 'show-error', message };
 }
 
+/** Successful clinic claim. The green company banner is only for this landing. */
+export const COMPANY_JUST_SETUP_PATH = '/company?justSetup=1';
+
+/**
+ * Login and the auth callback after a clinic claim attempt.
+ * Success opens the company profile. A refusal stays off /company?justSetup=1
+ * and keeps the server error so the login page can show it.
+ */
+export function clinicClaimSignInRoute(input: {
+  claimed: boolean;
+  error?: string | null;
+}): { kind: 'company'; dest: string } | { kind: 'stay'; message: string } {
+  const decision = ownerSignupAfterClaim({
+    fromClaimLink: true,
+    claimed: input.claimed,
+    error: input.error,
+  });
+  if (decision.action === 'claimed') {
+    return { kind: 'company', dest: COMPANY_JUST_SETUP_PATH };
+  }
+  const message = decision.action === 'show-error' ? decision.message : CLAIM_SIGNUP_ORG_BLOCKED;
+  return { kind: 'stay', message };
+}
+
+/** Login URL that shows a refused clinic claim. No claim token and no company next. */
+export function refusedClaimLoginHref(message: string): string {
+  const text = String(message || '').trim() || CLAIM_SIGNUP_ORG_BLOCKED;
+  return `/login?claimError=${encodeURIComponent(text)}`;
+}
+
+/**
+ * Green /company banner ("Onboarding complete" or the clinic profile note).
+ * Requires a linked organization. A refused claim has no org, so the banner stays off.
+ */
+export function showCompanyJustSetupBanner(
+  justSetup: string | null | undefined,
+  organizationId: unknown
+): boolean {
+  const flag = String(justSetup ?? '').trim().toLowerCase();
+  if (flag !== '1' && flag !== 'true') return false;
+  if (organizationId == null) return false;
+  return String(organizationId).trim().length > 0;
+}
+
 export type CustomerInvitePreview = {
   valid: boolean;
   companyName?: string;

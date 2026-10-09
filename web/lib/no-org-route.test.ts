@@ -207,3 +207,62 @@ test('claim runs once per sign-in even when several callers mount', async () => 
     clearTeamClaimDedupe();
   }
 });
+
+test('a 503 team claim is not cached; the next call retries and an ok result is reused', async () => {
+  installSessionStorage();
+  clearTeamClaimDedupe();
+  const token = tokenFor('user-retry');
+  const storageKey = 'tsp-team-claim:user-retry:auto';
+  let fetchCount = 0;
+  let mode: 'fail' | 'ok' = 'fail';
+  let release: () => void = () => {};
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const previous = globalThis.fetch;
+  globalThis.fetch = (async () => {
+    fetchCount += 1;
+    if (mode === 'fail') {
+      await gate;
+      return {
+        ok: false,
+        status: 503,
+        json: async () => ({ ok: false, error: 'unavailable' }),
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({ ok: true, claimed: false, pendingInvite: false }),
+    };
+  }) as typeof fetch;
+
+  try {
+    const pending = Promise.all([
+      postTeamClaim(token, undefined, { userId: 'user-retry' }),
+      postTeamClaim(token, undefined, { userId: 'user-retry' }),
+    ]);
+    assert.equal(fetchCount, 1);
+    release();
+    const failed = await pending;
+    assert.equal(failed.length, 2);
+    assert.equal(failed.every((row) => row.ok === false && row.status === 503), true);
+    assert.equal(sessionStorage.getItem(storageKey), null);
+
+    mode = 'ok';
+    const retried = await postTeamClaim(token, undefined, { userId: 'user-retry' });
+    assert.equal(retried.ok, true);
+    assert.equal(retried.claimed, false);
+    assert.equal(fetchCount, 2);
+    const stored = JSON.parse(sessionStorage.getItem(storageKey) || 'null') as { ok?: boolean };
+    assert.equal(stored.ok, true);
+
+    const cached = await postTeamClaim(token, undefined, { userId: 'user-retry' });
+    assert.equal(cached.ok, true);
+    assert.equal(cached.claimed, false);
+    assert.equal(fetchCount, 2);
+  } finally {
+    globalThis.fetch = previous;
+    clearTeamClaimDedupe();
+  }
+});

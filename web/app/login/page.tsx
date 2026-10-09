@@ -1,12 +1,16 @@
 'use client';
 
-import React, { useState, Suspense } from 'react';
+import React, { useEffect, useState, Suspense } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { PublicLink, usePublicHref, useT } from '@/lib/fa/locale';
 import { nextPathFromSearchParams } from '@/lib/login-next';
 import { safeRedirectPath } from '@/lib/safe-redirect';
-import { claimCustomerInvite, clearStaleClaimToken } from '@/lib/customer-invite-client';
+import {
+  claimCustomerInvite,
+  clearStaleClaimToken,
+  clinicClaimSignInRoute,
+} from '@/lib/customer-invite-client';
 import { clearPendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session';
 import { postTeamClaim, resetTeamClaimDedupeForSignIn } from '@/lib/invite-claim';
@@ -36,20 +40,31 @@ function LoginInner() {
   const claimToken = (searchParams.get('claim') || '').trim();
   const supabase = getSupabaseClient();
 
+  useEffect(() => {
+    const refused = (searchParams.get('claimError') || '').trim();
+    if (!refused) return;
+    setMessage(refused);
+    setMessageOk(false);
+  }, [searchParams]);
+
   async function finishLogin(dest: string) {
     dest = safeRedirectPath(dest, clientAuthOrigin(), '/');
     if (claimToken) {
       const { data: sessionData } = await supabase.auth.getSession();
-      let claimedOk = false;
-      if (sessionData.session?.access_token) {
-        const claimed = await claimCustomerInvite(sessionData.session.access_token, claimToken);
-        claimedOk = !!claimed.claimed;
-      }
-      if (claimedOk) {
-        router.push('/company?justSetup=1');
+      const claimed = sessionData.session?.access_token
+        ? await claimCustomerInvite(sessionData.session.access_token, claimToken)
+        : { claimed: false, error: 'Sign in required to claim this clinic profile.' };
+      const route = clinicClaimSignInRoute({
+        claimed: !!claimed.claimed,
+        error: claimed.error,
+      });
+      if (route.kind === 'company') {
+        router.push(route.dest);
         return;
       }
       await clearStaleClaimToken(supabase);
+      setMsg(route.message, false);
+      return;
     }
     const { data: sessionData } = await supabase.auth.getSession();
     if (sessionData.session?.access_token) {

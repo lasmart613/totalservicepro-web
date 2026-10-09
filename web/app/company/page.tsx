@@ -5,7 +5,7 @@ import React, { useEffect, useState, useRef, Suspense } from 'react';
 import { Header } from '@/components/Header';
 import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
 import { toast } from 'sonner';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import {
   isAdmin,
   isOwnerish,
@@ -36,6 +36,8 @@ import { canEditOrgCurrency } from '@/lib/org-money';
 import { StripeConnectCard } from '@/components/StripeConnectCard';
 import { ORG_TIME_ZONE_CHOICES } from '@/lib/org-timezone';
 import { RemoveTeamMemberButton } from '@/components/RemoveTeamMemberButton';
+import { showCompanyJustSetupBanner } from '@/lib/customer-invite-client';
+import { shouldPostFounderOrganization } from '@/lib/org-founder-client';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -90,6 +92,7 @@ function CompanyProfile() {
   const [addMessage, setAddMessage] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
   const supabase = getSupabaseClient();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const justSetup = searchParams.get('justSetup');
   const [userRole, setUserRole] = useState('');
@@ -255,7 +258,16 @@ function CompanyProfile() {
           .single();
         if (orgData) {
           setOrg(orgData);
-          await ensureServiceCreatorLinked(supabase, prof.organization_id, orgData.type);
+          // Claimed clinics are owned by this user but created by the shop.
+          // POST /api/org/founder 403s unless created_by is the caller.
+          if (
+            shouldPostFounderOrganization({
+              callerId: user.id,
+              createdBy: orgData.created_by,
+            })
+          ) {
+            await ensureServiceCreatorLinked(supabase, prof.organization_id, orgData.type);
+          }
           // Team + CRM only for service company admins
           if (isServiceCompany(prof.role, orgData.type) && (isAdmin(prof.role) || prof.role === 'service_manager')) {
             await loadTeamMembers(prof.organization_id);
@@ -269,6 +281,12 @@ function CompanyProfile() {
       setLoadingOrg(false);
     })();
   }, []);
+
+  useEffect(() => {
+    if (loadingOrg || !justSetup) return;
+    if (showCompanyJustSetupBanner(justSetup, linkedOrgId)) return;
+    router.replace('/onboarding');
+  }, [loadingOrg, justSetup, linkedOrgId, router]);
 
   async function loadTeamMembers(orgId: any) {
     if (!orgId) return;
@@ -767,7 +785,7 @@ function CompanyProfile() {
       <Header />
       <div className="max-w-7xl mx-auto w-full p-6 space-y-8">
         {loadingOrg && <div className="mb-4 text-center text-xs py-1.5 rounded bg-[var(--surface)] border border-[var(--border)] text-[var(--text3)]">{t('Loading company profile…')}</div>}
-        {justSetup && (
+        {showCompanyJustSetupBanner(justSetup, linkedOrgId) && (
           <div className="mb-4 p-4 rounded bg-green-900/20 border border-green-600 text-sm">
             {ownerMode
               ? t('This is your clinic profile. Edit anything your service company prefilled, add a logo, extra contacts, and lasers. Changes save on this facility only.') : t('Onboarding complete! Your details, team (if added), and logo have been saved. Review or update company info below anytime. Use Settings for personal phone/job/role.')}
