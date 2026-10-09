@@ -768,7 +768,7 @@ export default function ManualsLibrary() {
    */
   const getSpineTitle = (fullTitle: string | null | undefined, brand?: string | null) => {
     if (!fullTitle) return 'Manual';
-    let t = String(fullTitle)
+    let spine = String(fullTitle)
       .replace(/\bService\s+Manuals?\b/gi, ' ')
       .replace(/\bOperator'?s?\s+Manuals?\b/gi, ' ')
       .replace(/\bUser\s+Manuals?\b/gi, ' ')
@@ -778,7 +778,7 @@ export default function ManualsLibrary() {
       .replace(/\bParts\s*(?:and|&)\s*Service\b/gi, ' ')
       .replace(/\s{2,}/g, ' ')
       .trim();
-    t = t.replace(/\b(Service|Manuals?|Instructions?)\b$/gi, '').trim();
+    spine = spine.replace(/\b(Service|Manuals?|Instructions?)\b$/gi, '').trim();
 
     const brandRes: RegExp[] = [
       ...(brand
@@ -793,26 +793,26 @@ export default function ManualsLibrary() {
       /\bsciton\b[\s\-/:]*|\bfotona\b[\s\-/:]*|\bellex\b[\s\-/:]*|\blightmed\b[\s\-/:]*/gi,
       /\brohrer(?:\s*aesthetics)?\b[\s\-/:]*/gi,
     ];
-    for (const re of brandRes) t = t.replace(re, ' ');
-    t = t.replace(/\s{2,}/g, ' ').replace(/^[\s\-–—:/|]+|[\s\-–—:/|]+$/g, '').trim();
-    if (!t) t = String(fullTitle).replace(/\bService\s+Manuals?\b/gi, '').trim() || 'Manual';
+    for (const re of brandRes) spine = spine.replace(re, ' ');
+    spine = spine.replace(/\s{2,}/g, ' ').replace(/^[\s\-–—:/|]+|[\s\-–—:/|]+$/g, '').trim();
+    if (!spine) spine = String(fullTitle).replace(/\bService\s+Manuals?\b/gi, '').trim() || 'Manual';
 
     // Model shortcuts (no brand)
-    if (/fels[-\s]?25a|intelliguide/i.test(t) || /fels[-\s]?25a|intelliguide/i.test(fullTitle)) return 'FELS-25A';
-    if (/v-?beam.*perfecta/i.test(t)) return 'VBEAM PF';
-    if (/gentlemax\s*pro/i.test(t)) return 'GENTLEMAX PRO';
-    if (/excel\s*hr/i.test(t)) return 'EXCEL HR';
-    if (/litho\s*evo/i.test(t)) return 'LITHO EVO';
-    if (/litho\s*100|cyber\s*ho\s*100/i.test(t)) return 'LITHO 100';
-    if (/litho\s*60|cyber\s*ho\s*60/i.test(t)) return 'LITHO 60';
-    if (/\blitho\b/i.test(t) && !/litho\s*(60|100|evo)/i.test(t)) return 'LITHO';
-    if (/\b9900\b/i.test(t) || /oec\s*9900/i.test(t)) return 'OEC 9900';
-    if (/\bh[- ]?20\b/i.test(t) && /\bh[- ]?30\b/i.test(t)) return 'H20/H30';
-    if (/\bh[- ]?20\b/i.test(t)) return 'H20';
-    if (/\bh[- ]?30\b/i.test(t)) return 'H30';
+    if (/fels[-\s]?25a|intelliguide/i.test(spine) || /fels[-\s]?25a|intelliguide/i.test(fullTitle)) return 'FELS-25A';
+    if (/v-?beam.*perfecta/i.test(spine)) return 'VBEAM PF';
+    if (/gentlemax\s*pro/i.test(spine)) return 'GENTLEMAX PRO';
+    if (/excel\s*hr/i.test(spine)) return 'EXCEL HR';
+    if (/litho\s*evo/i.test(spine)) return 'LITHO EVO';
+    if (/litho\s*100|cyber\s*ho\s*100/i.test(spine)) return 'LITHO 100';
+    if (/litho\s*60|cyber\s*ho\s*60/i.test(spine)) return 'LITHO 60';
+    if (/\blitho\b/i.test(spine) && !/litho\s*(60|100|evo)/i.test(spine)) return 'LITHO';
+    if (/\b9900\b/i.test(spine) || /oec\s*9900/i.test(spine)) return 'OEC 9900';
+    if (/\bh[- ]?20\b/i.test(spine) && /\bh[- ]?30\b/i.test(spine)) return 'H20/H30';
+    if (/\bh[- ]?20\b/i.test(spine)) return 'H20';
+    if (/\bh[- ]?30\b/i.test(spine)) return 'H30';
 
-    if (t.length > 32) t = t.slice(0, 30).trimEnd() + '…';
-    return t;
+    if (spine.length > 32) spine = spine.slice(0, 30).trimEnd() + '…';
+    return spine;
   };
 
   return (

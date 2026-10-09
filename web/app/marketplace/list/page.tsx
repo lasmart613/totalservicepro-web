@@ -101,11 +101,11 @@ function MarketplaceListContent() {
     setForm((prev) => ({ ...prev, [field]: value }));
 
   useEffect(() => {
-    const t = (searchParams.get('type') || '').toLowerCase();
-    if (t === 'part' || t === 'parts') setListingType('part');
-    else if (t === 'consumable' || t === 'consumables') setListingType('consumable');
-    else if (t === 'used' || t === 'equipment') setListingType('used');
-    else if (t === 'request' || t === 'service') setListingType('request');
+    const requested = (searchParams.get('type') || '').toLowerCase();
+    if (requested === 'part' || requested === 'parts') setListingType('part');
+    else if (requested === 'consumable' || requested === 'consumables') setListingType('consumable');
+    else if (requested === 'used' || requested === 'equipment') setListingType('used');
+    else if (requested === 'request' || requested === 'service') setListingType('request');
   }, [searchParams]);
 
   useEffect(() => {
