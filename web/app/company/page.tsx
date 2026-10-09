@@ -14,7 +14,7 @@ import {
   canAccessCompanyProfile,
 } from '@/lib/roles';
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
-import { invitationIsOpen, isPendingTeamInvite } from '@/lib/org-membership';
+import { invitationIsOpen, INVITABLE_TEAM_ROLES, isPendingTeamInvite } from '@/lib/org-membership';
 import { teamInviteSentMessage } from '@/lib/team-invite';
 import { useSiteLocale, useT } from '@/lib/fa/locale';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
@@ -49,7 +49,6 @@ const FACILITY_TYPES = [
   'Other',
 ];
 
-const TEAM_ROLES = ['company_admin', 'service_manager', 'fse', 'dispatcher', 'billing_manager', 'admin'];
 const ADDITIONAL_ROLES = ['fse', 'dispatcher', 'service_manager', 'billing_manager'];
 
 const MODEL_WAVELENGTHS: { [key: string]: string[] } = {
@@ -1044,7 +1043,7 @@ function CompanyProfile() {
                   <input className="input" placeholder={t('Full Name')} value={newTeam.fullName} onChange={e => setNewTeam({...newTeam, fullName: e.target.value})} />
                   <div className="grid grid-cols-2 gap-2">
                     <select className="select" value={newTeam.role} onChange={e => setNewTeam({...newTeam, role: e.target.value})}>
-                      {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r, locale)}</option>)}
+                      {INVITABLE_TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r, locale)}</option>)}
                     </select>
                     <input className="input" placeholder={t('Job Title override')} value={newTeam.title} onChange={e => setNewTeam({...newTeam, title: e.target.value})} />
                   </div>
@@ -1093,14 +1092,14 @@ function CompanyProfile() {
                         <div>
                           <div className="font-medium">
                             {[m.first_name, m.last_name].filter(Boolean).join(' ') || '—'}
-                            {(isAdmin(userRole) || userRole === 'owner') && m.id && m.id !== selfUserId ? (
+                            {(isAdmin(userRole) || userRole === 'owner') && m.id && m.id !== selfUserId && m.role !== 'owner' ? (
                               <select
                                 className="select text-xs ml-2"
                                 aria-label={t('Role for {name}').replace('{name}', m.email || m.first_name || t('Member'))}
                                 value={m.role || 'fse'}
                                 onChange={(e) => changeMemberRole(String(m.id), e.target.value)}
                               >
-                                {(m.role && !TEAM_ROLES.includes(m.role) ? [m.role, ...TEAM_ROLES] : TEAM_ROLES).map((r) => (
+                                {(m.role && !(INVITABLE_TEAM_ROLES as readonly string[]).includes(m.role) ? [m.role, ...INVITABLE_TEAM_ROLES] : INVITABLE_TEAM_ROLES).map((r) => (
                                   <option key={r} value={r}>{roleLabel(r, locale)}</option>
                                 ))}
                               </select>

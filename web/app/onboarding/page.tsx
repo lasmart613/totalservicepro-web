@@ -11,6 +11,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { useRouter } from 'next/navigation';
 import { isOwnerish, isSupplier } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
+import { INVITABLE_TEAM_ROLES } from '@/lib/org-membership';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
 import { displayModelName } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
@@ -53,7 +54,6 @@ const SUPPLIER_CATEGORIES = [
   'Full Systems / Refurbs',
   'Other / Specialty Parts',
 ];
-const TEAM_ROLES = ['company_admin', 'service_manager', 'fse', 'dispatcher', 'billing_manager', 'admin'];
 const ADDITIONAL_ROLES = ['fse', 'dispatcher', 'service_manager', 'billing_manager'];
 const ADMIN_ROLES = ['company_admin', 'admin'];
 
@@ -391,7 +391,7 @@ export default function Onboarding() {
               <span className="text-[var(--text3)]">Roles: {rolesText}</span>
               <div className="mt-1 flex gap-2 flex-wrap items-center">
                 <select value={m.role} onChange={e => changeMemberRole(idx, e.target.value)} className="input !py-0.5 !text-xs">
-                  {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r, locale)}</option>)}
+                  {INVITABLE_TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r, locale)}</option>)}
                 </select>
                 {ADDITIONAL_ROLES.map(ar => (
                   <button key={ar} type="button" onClick={() => toggleMemberAdditional(idx, ar)}
@@ -957,7 +957,7 @@ export default function Onboarding() {
                   <input className="input" placeholder={t('First Name')} value={teamFirst} onChange={e=>setTeamFirst(e.target.value)} />
                   <input className="input" placeholder={t('Last Name')} value={teamLast} onChange={e=>setTeamLast(e.target.value)} />
                   <select className="select" value={teamRole} onChange={e=>setTeamRole(e.target.value)}>
-                    {TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r, locale)}</option>)}
+                    {INVITABLE_TEAM_ROLES.map(r => <option key={r} value={r}>{roleLabel(r, locale)}</option>)}
                   </select>
                 </div>
                 <div className="mt-2">

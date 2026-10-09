@@ -5,6 +5,7 @@ import { ensureTeamMemberProfile } from '@/lib/team-profile';
 import {
   decideClaim,
   inviteMustNotLeaveHome,
+  normalizeRole,
 } from '@/lib/org-membership';
 import { teamInviteJoinGate } from '@/lib/team-invite-guard';
 import { authorizeInviteAccept } from '@/lib/tenant-lockdown';
@@ -155,6 +156,17 @@ export async function runTeamClaim(
         });
         if (historical.ok) inv = anyInv;
       }
+    }
+
+    if (normalizeRole(inv?.role) === 'owner') {
+      return NextResponse.json(
+        {
+          ok: false,
+          claimed: false,
+          error: 'An owner role cannot be accepted from a team invite.',
+        },
+        { status: 403 }
+      );
     }
 
     if (inv?.organization_id) {

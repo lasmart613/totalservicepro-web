@@ -11,6 +11,27 @@
 
 export const DEFAULT_STAFF_ROLE = 'fse';
 
+/**
+ * Roles a team invite may assign. Union of the Admin → Team and Company
+ * invite pickers, without owner. Platform admin stays in the list because
+ * the forms still show it; decideMemberRoleChange refuses that target.
+ */
+export const INVITABLE_TEAM_ROLES = [
+  'company_admin',
+  'service_manager',
+  'fse',
+  'dispatcher',
+  'billing_manager',
+  'scheduler',
+  'technician',
+  'viewer',
+  'admin',
+] as const;
+
+export function isInvitableTeamRole(role?: string | null): boolean {
+  return (INVITABLE_TEAM_ROLES as readonly string[]).includes(normalizeRole(role));
+}
+
 export const FOUNDER_LOCKED_ROLES = new Set([
   'company_admin',
   'admin',

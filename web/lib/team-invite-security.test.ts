@@ -12,7 +12,7 @@ import {
   type AuthUserRow,
 } from './team-profile.ts';
 import { teamInviteSentMessage } from './team-invite.ts';
-import { isPendingTeamInvite } from './org-membership.ts';
+import { INVITABLE_TEAM_ROLES, isInvitableTeamRole, isPendingTeamInvite } from './org-membership.ts';
 import { TEAM_INVITE_TTL_MS } from './team-invite-guard.ts';
 import { NextRequest } from 'next/server';
 import { runTeamInvite } from '../app/api/team/invite/route.ts';
@@ -508,6 +508,7 @@ function inviteAdmin(state: {
 }) {
   const linkCalls: Array<{ type?: string }> = [];
   const updates: Array<Record<string, unknown>> = [];
+  const inserts: Array<Record<string, unknown>> = [];
   const admin = {
     from(table: string) {
       let selected = '';
@@ -534,7 +535,8 @@ function inviteAdmin(state: {
           }
           return { data: null, error: null };
         },
-        insert() {
+        insert(row: Record<string, unknown>) {
+          inserts.push(row);
           return {
             select() {
               return {
@@ -568,7 +570,7 @@ function inviteAdmin(state: {
       },
     },
   };
-  return { admin, linkCalls, updates };
+  return { admin, linkCalls, updates, inserts };
 }
 
 async function postExistingInvite(opts: {
@@ -579,6 +581,7 @@ async function postExistingInvite(opts: {
     | { status: 'not_found' };
   invite: Record<string, unknown> | null;
   profile?: Record<string, unknown> | null;
+  role?: string;
   linkHandler?: (args: { type?: string }) => {
     data?: { user?: { id?: string }; properties?: { action_link?: string } } | null;
     error?: { message?: string } | null;
@@ -619,7 +622,7 @@ async function postExistingInvite(opts: {
           authorization: 'Bearer session-token',
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ email: INVITEE, role: 'fse', resend: true }),
+        body: JSON.stringify({ email: INVITEE, role: opts.role || 'fse', resend: true }),
       }),
       {
         hasServiceRole: () => true,
@@ -659,7 +662,15 @@ async function postExistingInvite(opts: {
       }
     );
     const body = (await response.json()) as Record<string, unknown>;
-    return { status: response.status, body, sent, logs, linkCalls: harness.linkCalls, updates: harness.updates };
+    return {
+      status: response.status,
+      body,
+      sent,
+      logs,
+      linkCalls: harness.linkCalls,
+      updates: harness.updates,
+      inserts: harness.inserts,
+    };
   } finally {
     console.log = originals.log;
     console.info = originals.info;
@@ -1255,4 +1266,153 @@ test('reopened-invite repair SQL is a one-off, not a migration', () => {
   assert.match(rollback, /accepted_at = NULL/);
   assert.match(rollback, /2026-10-16 15:57:26\.206\+00/);
   assert.equal(TEAM_INVITE_TTL_MS, 7 * 24 * 60 * 60 * 1000);
+});
+
+test('an owner team invite is rejected and writes no row', async () => {
+  assert.equal(isInvitableTeamRole('owner'), false);
+  assert.equal(isInvitableTeamRole('Owner'), false);
+  assert.deepEqual(
+    [...INVITABLE_TEAM_ROLES],
+    [
+      'company_admin',
+      'service_manager',
+      'fse',
+      'dispatcher',
+      'billing_manager',
+      'scheduler',
+      'technician',
+      'viewer',
+      'admin',
+    ]
+  );
+  const result = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: null },
+    invite: null,
+    role: 'owner',
+  });
+  assert.equal(result.status, 400);
+  assert.match(String(result.body.error), /owner/i);
+  assert.equal(result.inserts.length, 0);
+  assert.equal(result.updates.length, 0);
+  assert.equal(result.sent.length, 0);
+  assert.equal(result.linkCalls.length, 0);
+  assertNoLink(result, SETUP_LINK);
+
+  for (const rel of ['../app/admin/team/page.tsx', '../app/company/page.tsx', '../app/onboarding/page.tsx']) {
+    const page = readFileSync(join(here, rel), 'utf8');
+    assert.match(page, /INVITABLE_TEAM_ROLES/);
+    assert.doesNotMatch(page, /value=["']owner["']/);
+  }
+});
+
+test('resend of an owner-role invite is rejected', async () => {
+  const invite = {
+    ...pendingCreated,
+    role: 'owner',
+    accepted: false,
+    accepted_at: null,
+  };
+  const explicit = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: '2026-10-02T00:00:00.000Z' },
+    invite,
+    role: 'owner',
+  });
+  assert.equal(explicit.status, 400);
+  assert.equal(explicit.updates.length, 0);
+  assert.equal(explicit.inserts.length, 0);
+  assert.equal(explicit.sent.length, 0);
+  assert.equal(invite.role, 'owner');
+  assert.equal(invite.accepted, false);
+
+  const stored = {
+    ...pendingCreated,
+    role: 'owner',
+    accepted: false,
+    accepted_at: null,
+  };
+  const rewritten = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: '2026-10-02T00:00:00.000Z' },
+    invite: stored,
+    role: 'fse',
+  });
+  assert.equal(rewritten.status, 400);
+  assert.equal(rewritten.updates.length, 0);
+  assert.equal(rewritten.sent.length, 0);
+  assert.equal(stored.role, 'owner');
+  assert.equal(stored.accepted, false);
+});
+
+test('a staff role can still be invited', async () => {
+  for (const role of ['fse', 'dispatcher', 'service_manager', 'billing_manager'] as const) {
+    const result = await postExistingInvite({
+      resendKey: 'resend-test',
+      auth: { status: 'not_found' },
+      invite: null,
+      profile: null,
+      role,
+    });
+    assert.equal(result.status, 200, role);
+    assert.equal(result.body.emailed, true);
+    assert.equal(result.inserts.length, 1);
+    assert.equal(result.inserts[0].role, role);
+    assert.equal(result.linkCalls.length, 1);
+    assert.equal(result.linkCalls[0].type, 'invite');
+    assertNoLink(result, SETUP_LINK);
+  }
+});
+
+test('a legacy owner-role invite cannot be claimed and writes nothing', async () => {
+  const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const blocked = await postRejoinClaim({
+    profileOrg: null,
+    memberships: [],
+    invite: {
+      id: 7,
+      email: INVITEE,
+      organization_id: 9,
+      role: 'owner',
+      accepted: false,
+      accepted_at: null,
+      expires_at: future,
+      created_at: '2026-10-08T00:00:00.000Z',
+      first_name: 'New',
+      last_name: 'Person',
+    },
+  });
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.body.claimed, false);
+  assert.match(String(blocked.body.error), /owner/i);
+  assert.equal(blocked.state.invite.accepted, false);
+  assert.equal(blocked.state.invite.role, 'owner');
+  assert.equal(blocked.state.memberships.length, 0);
+  assert.equal(blocked.state.profiles[0].organization_id, null);
+  assert.equal(blocked.state.profiles[0].role, 'fse');
+
+  const staff = await postRejoinClaim({
+    profileOrg: null,
+    memberships: [],
+    invite: {
+      id: 8,
+      email: INVITEE,
+      organization_id: 9,
+      role: 'dispatcher',
+      accepted: false,
+      accepted_at: null,
+      expires_at: future,
+      created_at: '2026-10-08T00:00:00.000Z',
+      first_name: 'New',
+      last_name: 'Person',
+    },
+  });
+  assert.equal(staff.status, 200, JSON.stringify(staff.body));
+  assert.equal(staff.body.claimed, true);
+  assert.equal(String(staff.state.profiles[0].organization_id), '9');
+  assert.equal(staff.state.profiles[0].role, 'dispatcher');
+  assert.equal(
+    staff.state.memberships.some((row) => row.organization_id === 9 && row.role === 'dispatcher'),
+    true
+  );
 });
