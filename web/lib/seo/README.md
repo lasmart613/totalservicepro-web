@@ -31,4 +31,4 @@ From `web/`:
 npm test
 ```
 
-`lib/seo/publicContent.test.ts` checks titles, descriptions, slugs, word counts, and that entries do not contain storage paths or PDF URLs.
+`npm test` discovers `*.test.ts` and `*.test.mjs` via `scripts/run-tests.mjs`. Do not add the new file to `package.json`. `lib/seo/publicContent.test.ts` checks titles, descriptions, slugs, word counts, and that entries do not contain storage paths or PDF URLs.
