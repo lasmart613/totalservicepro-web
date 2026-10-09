@@ -9,7 +9,8 @@ import { safeRedirectPath } from '@/lib/safe-redirect';
 import { claimCustomerInvite, clearStaleClaimToken } from '@/lib/customer-invite-client';
 import { clearPendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session';
-import { postTeamClaim, routeAfterTeamClaim } from '@/lib/invite-claim';
+import { postTeamClaim, resetTeamClaimDedupeForSignIn } from '@/lib/invite-claim';
+import { loginDest } from '@/lib/no-org-route';
 import { publicAuthMessage } from '@/lib/auth-errors';
 import { clientAuthOrigin } from '@/lib/site-origin';
 import { loginMagicLinkRedirect, recoveryRedirect } from '@/lib/auth-link-route';
@@ -52,8 +53,9 @@ function LoginInner() {
     }
     const { data: sessionData } = await supabase.auth.getSession();
     if (sessionData.session?.access_token) {
+      resetTeamClaimDedupeForSignIn(sessionData.session.access_token);
       const claim = await postTeamClaim(sessionData.session.access_token);
-      router.push(routeAfterTeamClaim(claim, dest));
+      router.push(loginDest(claim, dest, clientAuthOrigin()));
       return;
     }
     router.push(dest);

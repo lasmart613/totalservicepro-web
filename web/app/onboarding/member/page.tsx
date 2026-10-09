@@ -3,7 +3,8 @@
 import React, { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
-import { getSupabaseClient, claimPendingInvitations } from '@/lib/supabase/client';
+import { getSupabaseClient } from '@/lib/supabase/client';
+import { postTeamClaim } from '@/lib/invite-claim';
 import { toast } from 'sonner';
 import { useSiteLocale } from '@/lib/fa/locale';
 import { roleLabel } from '@/lib/labels';
@@ -39,19 +40,10 @@ export default function MemberOnboardingPage() {
         return;
       }
 
-      // Ensure invite is claimed (creates profile + org link)
+      // Read the sign-in claim when login or the callback already ran it.
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) {
-        await fetch('/api/team/claim', {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${session.access_token}`,
-            'Content-Type': 'application/json',
-          },
-        }).catch(() => {});
-      }
-      if (user.email) {
-        await claimPendingInvitations(supabase, user.id, user.email);
+        await postTeamClaim(session.access_token, undefined, { userId: user.id }).catch(() => {});
       }
 
       const { data: profile } = await supabase

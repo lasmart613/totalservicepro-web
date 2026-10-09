@@ -10,6 +10,7 @@ import { canAccessFinancialReporting } from '@/lib/financial-reporting-access';
 import { canAccessJobCosting } from '@/lib/job-costing-access';
 import { fetchGodMe } from '@/lib/god-client';
 import { ownerLabelKind } from '@/lib/labels';
+import { hubDest } from '@/lib/no-org-route';
 import { useT } from '@/lib/fa/locale';
 
 type HubCard = { href: string; icon: string; label: string; desc: string };
@@ -31,11 +32,24 @@ export default function TechHub() {
           router.replace('/login?next=/hub');
           return;
         }
-        const { data: prof } = await supabase
+        let { data: prof, error: profErr } = await supabase
           .from('user_profiles')
-          .select('role, organization_id, organizations(type, facility_type)')
+          .select('role, organization_id, active_organization_id, organizations(type, facility_type)')
           .eq('id', user.id)
           .maybeSingle();
+        if (profErr && /active_organization_id|column/i.test(profErr.message || '')) {
+          const retry = await supabase
+            .from('user_profiles')
+            .select('role, organization_id, organizations(type, facility_type)')
+            .eq('id', user.id)
+            .maybeSingle();
+          prof = retry.data;
+          profErr = retry.error;
+        }
+        if (!profErr && hubDest(prof)) {
+          router.replace('/onboarding');
+          return;
+        }
         const meta = user.user_metadata || {};
         setRole(prof?.role || meta.role || '');
         const ot =

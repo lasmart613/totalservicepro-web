@@ -4,7 +4,8 @@ import React, { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
-import { destAfterInviteClaim, inviteInPlay } from '@/lib/invite-claim';
+import { destAfterInviteClaim, inviteInPlay, resetTeamClaimDedupeForSignIn } from '@/lib/invite-claim';
+import { profileOrgId } from '@/lib/no-org-route';
 import { resolveSetPasswordFlow, setPasswordSubtitle } from '@/lib/auth-link-route';
 import { safeRedirectPath } from '@/lib/safe-redirect';
 
@@ -138,29 +139,35 @@ function SetPasswordInner() {
         { onConflict: 'id' }
       );
 
+      const { data: claimSession } = await supabase.auth.getSession();
+      if (claimSession.session?.access_token) {
+        resetTeamClaimDedupeForSignIn(claimSession.session.access_token, user.id);
+      }
       let claim = user.email
         ? await claimPendingInvitations(supabase, user.id, user.email)
         : { ok: false };
 
       const { data: prof } = await supabase
         .from('user_profiles')
-        .select('organization_id, onboarding_completed')
+        .select('organization_id, active_organization_id, onboarding_completed')
         .eq('id', user.id)
         .maybeSingle();
 
       // Invite in play → member onboarding (never founder wizard / new company).
+      // No organization_id and no active org stays on founder onboarding, not /.
       let dest = '/hub';
-      if (inviteInPlay(claim) || claim.organization_id || (prof?.organization_id && !prof.onboarding_completed)) {
+      const orgId = profileOrgId(prof);
+      if (inviteInPlay(claim) || claim.organization_id || (orgId && !prof?.onboarding_completed)) {
         dest = destAfterInviteClaim(
           {
             ...claim,
-            organization_id: claim.organization_id ?? prof?.organization_id,
+            organization_id: claim.organization_id ?? orgId,
             needsMemberOnboarding:
               claim.needsMemberOnboarding ?? prof?.onboarding_completed !== true,
           },
           '/onboarding/member'
         );
-      } else if (!prof?.organization_id) {
+      } else if (!orgId) {
         dest = '/onboarding';
       }
 

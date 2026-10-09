@@ -129,8 +129,10 @@ test('password reset / invite callback claims before founder onboarding', () => 
 
 test('founder onboarding claims on load and on finish; does not skip claim after save', () => {
   const onboarding = readFileSync(join(here, '../app/onboarding/page.tsx'), 'utf8');
+  const routing = readFileSync(join(here, './no-org-route.ts'), 'utf8');
   assert.match(onboarding, /postTeamClaim/);
-  assert.match(onboarding, /shouldSendToMemberOnboarding/);
+  assert.match(onboarding, /onboardingLeaveTarget/);
+  assert.match(routing, /shouldSendToMemberOnboarding/);
   assert.match(onboarding, /inviteInPlay/);
   assert.match(onboarding, /saveOnboarding/);
   assert.match(onboarding, /destAfterInviteClaim/);
@@ -228,7 +230,8 @@ test('applyPendingSignup claims a team invite by email instead of creating a new
 test('invitee who signs up at /login with no token is still claimed onto member onboarding', () => {
   const login = readFileSync(join(here, '../app/login/page.tsx'), 'utf8');
   assert.match(login, /postTeamClaim\(sessionData\.session\.access_token\)/);
-  assert.match(login, /routeAfterTeamClaim\(claim, dest\)/);
+  assert.match(login, /loginDest\(claim, dest/);
+  assert.match(readFileSync(join(here, './no-org-route.ts'), 'utf8'), /routeAfterTeamClaim\(claim, requested\)/);
   assert.doesNotMatch(login, /hasInviteToken|requireInviteToken/);
   assert.match(login, /await finishLogin\(nextPath && nextPath !== '\/' \? nextPath : '\/onboarding'\)/);
   const claimed = {
@@ -266,6 +269,6 @@ test('home and login claim a pending invite before sending someone to founder on
 
   const login = readFileSync(join(here, '../app/login/page.tsx'), 'utf8');
   assert.match(login, /postTeamClaim/);
-  assert.match(login, /routeAfterTeamClaim/);
+  assert.match(login, /loginDest/);
   assert.doesNotMatch(login, /hasInviteToken|requireInviteToken/);
 });

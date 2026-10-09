@@ -16,7 +16,8 @@ import { canAccessJobCosting } from '@/lib/job-costing-access';
 import { fetchGodMe } from '@/lib/god-client';
 import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
-import { destAfterInviteClaim, inviteInPlay } from '@/lib/invite-claim';
+import { inviteInPlay } from '@/lib/invite-claim';
+import { homeDest, profileOrgId } from '@/lib/no-org-route';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import {
@@ -84,6 +85,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
   }, [user]);
 
   useEffect(() => {
+    let cancelled = false;
     const loadData = async () => {
       // localStorage session is enough to keep the dashboard up. getUser()
       // talks to Auth over the network and can sit on a slow link for seconds.
@@ -102,9 +104,18 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
 
       let { data: prof, error: profErr } = await supabase
         .from('user_profiles')
-        .select('first_name, role, organization_id, onboarding_completed')
+        .select('first_name, role, organization_id, active_organization_id, onboarding_completed')
         .eq('id', u.id)
         .maybeSingle();
+      if (profErr && /active_organization_id|column/i.test(profErr.message || '')) {
+        const retry = await supabase
+          .from('user_profiles')
+          .select('first_name, role, organization_id, onboarding_completed')
+          .eq('id', u.id)
+          .maybeSingle();
+        prof = retry.data;
+        profErr = retry.error;
+      }
 
       if (profErr) {
         console.warn('profile load', profErr);
@@ -115,10 +126,10 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
       const claim = u.email
         ? await claimPendingInvitations(supabase, u.id, u.email)
         : { ok: false };
-      if (inviteInPlay(claim) && !prof?.organization_id && claim.organization_id) {
+      if (inviteInPlay(claim) && !profileOrgId(prof) && claim.organization_id) {
         const { data: again } = await supabase
           .from('user_profiles')
-          .select('first_name, role, organization_id, onboarding_completed')
+          .select('first_name, role, organization_id, active_organization_id, onboarding_completed')
           .eq('id', u.id)
           .maybeSingle();
         if (again) {
@@ -127,55 +138,41 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
         }
       }
 
-      if (!prof?.organization_id) {
-        if (inviteInPlay(claim)) {
-          router.replace(destAfterInviteClaim(claim, '/onboarding/member'));
-          return;
-        }
+      if (!profileOrgId(prof)) {
         const pending = resolvePendingSignup(u);
         if (pending?.kind === 'owner') {
           try {
             const applied = await applyPendingSignup(supabase, u.id, pending);
             if (applied.orgId && !applied.blockedClaim) {
-              router.replace('/my-lasers?justSetup=1');
+              if (!cancelled) router.replace('/my-lasers?justSetup=1');
               return;
             }
           } catch (e) {
             console.warn('owner first-run apply', e);
           }
         }
-        router.replace('/onboarding');
-        return;
-      }
-      if (prof.onboarding_completed === false) {
-        const r = String(prof.role || '').toLowerCase();
-        const invited = ['fse', 'engineer', 'dispatcher', 'scheduler', 'technician'].includes(r);
-        const metaRole = String((u.user_metadata as any)?.role || '').toLowerCase();
-        const ownerOrSupplier =
-          r === 'owner' ||
-          r === 'customer' ||
-          r === 'parts_supplier' ||
-          r === 'supplier' ||
-          metaRole === 'owner' ||
-          metaRole === 'parts_supplier';
-        if (invited && !ownerOrSupplier) {
-          router.replace('/onboarding/member');
-          return;
-        }
-        // Owners/suppliers already have an org — do not send them through RSP onboarding.
-        if (!ownerOrSupplier) {
-          router.replace('/onboarding');
-          return;
-        }
       }
 
-      if (!prof?.organization_id) {
+      const dest = homeDest({
+        profile: prof,
+        claim,
+        metaRole: (u.user_metadata as { role?: string } | null)?.role || null,
+      });
+      if (!prof?.organization_id && dest === '/onboarding') {
+        if (!cancelled) router.replace('/onboarding');
+        return;
+      }
+      if (dest) {
+        if (!cancelled) router.replace(dest);
+        return;
+      }
+
+      const orgId = profileOrgId(prof);
+      if (!orgId) {
         setPersona(getDashboardPersona(prof?.role));
         setLoading(false);
         return;
       }
-
-      const orgId = prof.organization_id;
 
       let oType: string | null = null;
       try {
@@ -317,7 +314,10 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
     };
 
     loadData();
-  }, [supabase]);
+    return () => {
+      cancelled = true;
+    };
+  }, [supabase, router]);
 
   async function loadOwnerStats(orgId: any, _userId: string) {
     let lasers = 0;

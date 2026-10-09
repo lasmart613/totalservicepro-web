@@ -6,7 +6,8 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { claimCustomerInvite, clearStaleClaimToken, ownerSignupAfterClaim } from '@/lib/customer-invite-client';
-import { destAfterInviteClaim, inviteInPlay, type InviteClaimResult } from '@/lib/invite-claim';
+import { inviteInPlay, resetTeamClaimDedupeForSignIn, type InviteClaimResult } from '@/lib/invite-claim';
+import { callbackDest, profileOrgId } from '@/lib/no-org-route';
 import { isTspAndroidWebView } from '@/lib/android-session';
 import { publicAuthMessage } from '@/lib/auth-errors';
 import { decideAuthCallback, setPasswordHref } from '@/lib/auth-link-route';
@@ -101,8 +102,13 @@ function AuthCallbackInner() {
 
         // Claim before routing. Invite + Forgot password used to skip this and
         // send people through founder onboarding with the invite still pending.
+        // Reset so this sign-in claims once; later pages read the stored result.
         let claimResult: InviteClaimResult | null = null;
         if (user.email && !isSignupConfirm) {
+          const { data: claimSession } = await supabase.auth.getSession();
+          if (claimSession.session?.access_token) {
+            resetTeamClaimDedupeForSignIn(claimSession.session.access_token, user.id);
+          }
           claimResult = await claimPendingInvitations(supabase, user.id, user.email);
         }
 
@@ -194,11 +200,19 @@ function AuthCallbackInner() {
           claimResult = await claimPendingInvitations(supabase, user.id, user.email);
         }
 
-        let { data: prof } = await supabase
+        let { data: prof, error: profErr } = await supabase
           .from('user_profiles')
-          .select('onboarding_completed, organization_id, role, first_name, last_name')
+          .select('onboarding_completed, organization_id, active_organization_id, role, first_name, last_name')
           .eq('id', user.id)
           .maybeSingle();
+        if (profErr && /active_organization_id|column/i.test(profErr.message || '')) {
+          const retry = await supabase
+            .from('user_profiles')
+            .select('onboarding_completed, organization_id, role, first_name, last_name')
+            .eq('id', user.id)
+            .maybeSingle();
+          prof = retry.data;
+        }
 
         if (cancelled) return;
 
@@ -220,14 +234,16 @@ function AuthCallbackInner() {
           prof = { ...prof, onboarding_completed: true };
         }
 
-        let dest = '/';
-        if (inviteInPlay(claimResult)) {
-          dest = destAfterInviteClaim(claimResult, '/onboarding/member');
-        } else if (!prof?.organization_id || (isFounder && !prof?.onboarding_completed)) {
+        let dest = callbackDest({
+          profile: prof,
+          claim: claimResult,
+          next,
+          isFounder,
+        });
+        if (!prof?.organization_id && !profileOrgId(prof) && !claimResult?.organization_id && !inviteInPlay(claimResult)) {
           dest = '/onboarding';
-        } else if (next && next !== '/auth/set-password') {
-          dest = next;
         }
+        dest = safeRedirectPath(dest, url.origin, '/onboarding');
 
         if (wantApp) {
           await maybeHandoffToAndroid(supabase, dest, setAppHandoff, setMessage);
