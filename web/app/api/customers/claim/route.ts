@@ -11,7 +11,8 @@ import { verifyCustomerInvite } from '@/lib/customer-invite';
  * Links the signed-in user to the invited customer org (owner role).
  * Does not create a second organization. Refuses if another owner already
  * claims the org, or if this user already belongs to a different org.
- * A member who is already in the clinic is not promoted to owner.
+ * A member already in this clinic becomes owner only when the owner slot is
+ * empty and their signed-in email matches the invite. An existing owner blocks that.
  */
 const CLINIC_OWNER_SLOT_ROLES = new Set(['owner', 'customer', 'admin', 'company_admin']);
 
@@ -167,9 +168,13 @@ export async function runCustomerClaim(
       );
     }
 
-    // Already on this clinic, but not its owner. Do not promote, even when the
-    // owner slot is empty — claim is how an unlinked user becomes the first owner.
+    // Already linked, and nobody else holds the owner slot. Email was matched
+    // above, same as a first claim. Promote this member; do not skip the check.
     if (alreadyInThisOrg) {
+      await writer
+        .from('user_profiles')
+        .update({ role: 'owner', onboarding_completed: true })
+        .eq('id', user.id);
       return NextResponse.json({ ok: true, claimed: true, organizationId: org.id, alreadyLinked: true });
     }
 

@@ -111,6 +111,7 @@ function fakeWriter(
 async function postClaim(opts: {
   userId: string;
   email: string;
+  inviteEmail?: string;
   profiles: Profile[];
 }) {
   const previous = {
@@ -128,7 +129,7 @@ async function postClaim(opts: {
   try {
     const token = signCustomerInvite({
       orgId: String(CLINIC_ID),
-      email: opts.email,
+      email: opts.inviteEmail ?? opts.email,
       name: 'North Clinic',
     });
     const response = await runCustomerClaim(claimRequest(token), {
@@ -213,7 +214,7 @@ test('the first claim of an unowned clinic makes the claimer owner', async () =>
   assert.equal(result.profiles.filter((profile) => profile.role === 'owner').length, 1);
 });
 
-test('an existing member is not promoted when the clinic has no owner yet', async () => {
+test('an existing member of an ownerless clinic with a matching email becomes owner', async () => {
   const result = await postClaim({
     userId: 'member-user',
     email: 'member@clinic.test',
@@ -226,6 +227,27 @@ test('an existing member is not promoted when the clinic has no owner yet', asyn
   assert.equal(result.body.ok, true);
   assert.equal(result.body.claimed, true);
   assert.equal(result.body.alreadyLinked, true);
+  assert.equal(String(result.body.organizationId), String(CLINIC_ID));
+  const member = result.profiles.find((profile) => profile.id === 'member-user');
+  assert.equal(member?.role, 'owner');
+  assert.equal(String(member?.organization_id), String(CLINIC_ID));
+  assert.equal(result.profiles.filter((profile) => profile.role === 'owner').length, 1);
+});
+
+test('a member whose email does not match the invite is not promoted', async () => {
+  const result = await postClaim({
+    userId: 'member-user',
+    email: 'member@clinic.test',
+    inviteEmail: 'other@clinic.test',
+    profiles: [
+      { id: 'member-user', organization_id: CLINIC_ID, role: 'fse', email: 'member@clinic.test' },
+    ],
+  });
+
+  assert.equal(result.status, 403);
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.claimed, false);
+  assert.match(result.body.error || '', /email this invite was sent to/i);
   const member = result.profiles.find((profile) => profile.id === 'member-user');
   assert.equal(member?.role, 'fse');
   assert.equal(
