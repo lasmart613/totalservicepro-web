@@ -233,6 +233,58 @@ test('single-file manuals attach the storage_path PDF; folders use chapters or a
   }
 });
 
+/** Synthetic GentleMAX leaves: footer "Page 83", threshold on 88–89, weak TX on 95. */
+function gentleMaxTransmissionIndex(): string {
+  const pages: string[] = [];
+  for (let n = 1; n <= 100; n++) {
+    let text = `GentleMAX PRO PLUS Service Manual Candela Corporation Page ${n} of 178.`;
+    if (n === 49) {
+      text += ' 9 System Settings by Wavelength. System settings vary. Minimum Fluence (J/cm2) Maximum Fluence (J/cm2).';
+    }
+    if (n === 53) text += ' The actual values vary depending on the fluence setting and laser head efficiency.';
+    if (n === 86) text += ' See also • Chapter 16, DHP Laser Rail Alignment. • Chapter 18, Calibration.';
+    if (n === 87) text += ' 18 Calibration (Cal) Port Verification Procedure. Record fluence. Follow the steps.';
+    if (n === 88) {
+      text +=
+        ' Pulse into the cal port and record the average of the three transmissions. If TX% = <83%, clean the window and repeat until transmission is >83%.';
+    }
+    if (n === 89) {
+      text +=
+        ' Record the average of the three transmissions. If TX = <83%, clean or replace the fiber and repeat until transmission is >83%. Perform the steps in the Troubleshooting Guide (Chapter 17).';
+    }
+    if (n === 92) {
+      text +=
+        ' 19.1 Alex Performance Test Tables. Average Transmission (C) = (A / B) x 100 = %. Cal port Transmission (D) = %.';
+    }
+    if (n === 95) {
+      text +=
+        ' 19.2 Nd:YAG Performance Test Tables. Average Transmission (C) = (A / B) x 100 = %. Cal port Transmission. See also • Chapter 16, DHP Laser Rail Alignment. • Chapter 18, Calibration. TX 83 at the cal port.';
+    }
+    pages.push(`[[pdfpage:${n}]] ${text}`);
+  }
+  return pages.join('\f');
+}
+
+test('transmission below 83% anchors the threshold pages, not the footer or the cal-port table', () => {
+  const indexed = gentleMaxTransmissionIndex();
+  const label = 'Candela GentleMAX PRO PLUS';
+  for (const question of [
+    'TX not >83%',
+    'transmission below 83%',
+    'transmission under 83%',
+    'transmission less than 83%',
+    'transmission threshold',
+  ]) {
+    const page = indexedExcerptPage(indexed, `${label} ${question}`);
+    assert.ok(page === 88 || page === 89, `${question} -> ${page}`);
+  }
+  const fluence = indexedExcerptPage(
+    indexed,
+    `${label} What is the maximum fluence setting for the GentleMAX Pro Plus? procedure specification steps`
+  );
+  assert.equal(fluence, 49);
+});
+
 test('maximum fluence anchors the settings page, not the following calibration chapter', () => {
   const pages: string[] = [];
   for (let n = 1; n <= 100; n++) {
