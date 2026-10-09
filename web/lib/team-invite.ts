@@ -3,8 +3,8 @@
  * Email helpers (`isValidTeamInviteEmail`, `teamInviteEmailError`) are safe on the client.
  * HTML/text builders are for the server invite route.
  *
- * New users: CTA is a real generateLink action_link (set-password).
- * Already-registered users: CTA is Sign in (loginUrl). Never a placeholder token.
+ * New users: the set-password link is emailed to that address and is not returned
+ * to the inviter. Already-registered users: CTA is Sign in (loginUrl).
  */
 
 export const DEFAULT_TEAM_ROLE = 'fse';
@@ -55,17 +55,22 @@ export function teamInviteEmailError(value: unknown): string | null {
 }
 
 /**
- * Prefer a set-password / recovery action link when they never finished
- * setup or never signed in. Otherwise the branded email uses Sign in.
+ * Retired. Unfinished onboarding or a missing sign-in used to tell the
+ * inviter to mint a password-setup link. That link is an account takeover
+ * when the address already belongs to someone. Always false.
  */
-export function teamInviteNeedsPasswordSetup(input: {
+export function teamInviteNeedsPasswordSetup(_input?: {
   onboardingCompleted?: boolean | null;
   lastSignInAt?: string | null;
 }): boolean {
-  if (input.onboardingCompleted === true && input.lastSignInAt) return false;
-  if (input.onboardingCompleted === false) return true;
-  if (!input.lastSignInAt) return true;
-  return input.onboardingCompleted !== true;
+  return false;
+}
+
+/** Toast and API copy. No URL — the invite itself goes to the invitee's mailbox. */
+export function teamInviteSentMessage(email: string, extra?: string): string {
+  const base = `Invite sent to ${String(email || '').trim()}.`;
+  const more = String(extra || '').trim();
+  return more ? `${base} ${more}` : base;
 }
 
 const ROLE_LABELS: Record<string, string> = {
@@ -128,7 +133,7 @@ export type TeamInviteCopy = {
   organizationName: string;
   firstName?: string | null;
   roleLabel?: string | null;
-  /** Required for new users (generateLink action_link). Unused when alreadyRegistered. */
+  /** Set-password URL emailed only to a new user. Unused when alreadyRegistered. */
   acceptUrl?: string;
   loginUrl: string;
   /** Existing RepairPlanet account — Sign in CTA instead of set-password. */

@@ -8,7 +8,7 @@ import { toast } from 'sonner';
 import { TestEquipmentRoster } from '@/components/TestEquipmentRoster';
 import { canAssignShopTestEquipment, isAdmin } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
-import { teamInviteEmailError } from '@/lib/team-invite';
+import { teamInviteEmailError, teamInviteSentMessage } from '@/lib/team-invite';
 import { invitationIsOpen } from '@/lib/org-membership';
 
 function inviteListStatus(
@@ -59,8 +59,6 @@ export default function TeamManagement() {
     jobTitle: '',
   });
   const [adding, setAdding] = useState(false);
-  const [lastInviteUrl, setLastInviteUrl] = useState<string | null>(null);
-  const [lastInviteEmail, setLastInviteEmail] = useState<string | null>(null);
   const [inviteStatusById, setInviteStatusById] = useState<Record<string, string>>({});
   const supabase = getSupabaseClient();
 
@@ -207,41 +205,14 @@ export default function TeamManagement() {
       }
 
       const inviteEmail = newMember.email;
-      if (json.inviteUrl) {
-        setLastInviteUrl(json.inviteUrl);
-        setLastInviteEmail(inviteEmail);
-      } else {
-        setLastInviteUrl(null);
-        setLastInviteEmail(null);
-      }
-
       if (json.emailed) {
-        toast.success(json.message || `Invite email sent to ${inviteEmail}`, {
-          description: json.inviteUrl
-            ? 'Also copy the invite link below if email is delayed/spam-filtered.'
-            : undefined,
-          duration: 15000,
-        });
-      } else if (json.rateLimited) {
+        toast.success(json.message || teamInviteSentMessage(inviteEmail), { duration: 15000 });
+      } else {
         toast.error(
           json.message ||
-            'Invite email could not be sent right now. Copy the invite link and send it yourself.',
+            `Invitation saved for ${inviteEmail}, but the email could not be sent. No link was issued. Try again.`,
           { duration: 15000 }
         );
-      } else {
-        toast.message(json.message || 'Invitation saved (email may not have been sent)', {
-          description: json.warning || json.inviteUrl || undefined,
-          duration: 15000,
-        });
-      }
-
-      if (json.inviteUrl && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        try {
-          await navigator.clipboard.writeText(json.inviteUrl);
-          toast.message('Invite link copied to clipboard', { duration: 5000 });
-        } catch {
-          /* ignore */
-        }
       }
 
       setNewMember({
@@ -302,26 +273,14 @@ export default function TeamManagement() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Resend failed');
-      if (json.inviteUrl) {
-        setLastInviteUrl(json.inviteUrl);
-        setLastInviteEmail(email);
-        try {
-          await navigator.clipboard.writeText(json.inviteUrl);
-          toast.message('Invite link copied to clipboard', { duration: 10000 });
-        } catch {
-          /* ignore */
-        }
-      }
       if (json.emailed) {
-        toast.success(json.message || `Invite re-sent to ${email}`, { duration: 15000 });
-      } else if (json.rateLimited) {
+        toast.success(json.message || teamInviteSentMessage(email), { duration: 15000 });
+      } else {
         toast.error(
           json.message ||
-            'Invite email could not be sent. Use the copied invite link instead.',
+            `Invitation saved for ${email}, but the email could not be sent. No link was issued. Try again.`,
           { duration: 15000 }
         );
-      } else {
-        toast.message(json.message || 'Could not send email', { duration: 15000 });
       }
       await fetchTeam();
     } catch (e: any) {
@@ -341,31 +300,8 @@ export default function TeamManagement() {
       <div className="card p-6 mb-10">
         <h2 className="font-bold text-xl mb-4">{t('Invite Team Member')}</h2>
         <p className="text-xs text-[var(--text3)] mb-4">
-          {t("If the invite email is delayed or doesn't arrive, copy the invite link and send it to them directly.")}
+          {t('The invite is emailed to them. They sign in with that address to join.')}
         </p>
-
-        {lastInviteUrl && (
-          <div className="mb-4 p-3 rounded border border-[var(--gold)] bg-[var(--gold)]/10 text-sm">
-            <div className="font-semibold mb-1">
-              Invite link for {lastInviteEmail || 'team member'}
-            </div>
-            <div className="text-xs break-all text-[var(--text2)] mb-2">{lastInviteUrl}</div>
-            <button
-              type="button"
-              className="btn btn-primary text-xs"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(lastInviteUrl);
-                  toast.success('Invite link copied');
-                } catch {
-                  toast.message('Copy failed — select the link manually');
-                }
-              }}
-            >
-              Copy invite link
-            </button>
-          </div>
-        )}
 
         <form
           onSubmit={handleAddMember}

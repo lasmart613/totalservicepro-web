@@ -223,7 +223,9 @@ test('already-on-team still takes the branded email path (no silent emailed:fals
   const here = dirname(fileURLToPath(import.meta.url));
   const source = readFileSync(join(here, '../app/api/team/invite/route.ts'), 'utf8');
   assert.match(source, /deliverForExistingAccount/);
-  assert.match(source, /teamInviteNeedsPasswordSetup/);
+  assert.doesNotMatch(source, /teamInviteNeedsPasswordSetup/);
+  assert.doesNotMatch(source, /inviteUrl/);
+  assert.doesNotMatch(source, /recovery/);
   assert.match(source, /deliverBrandedInvite/);
   assert.match(source, /RESEND_API_KEY/);
   assert.doesNotMatch(source, /\/already\/i\.test/);
@@ -255,10 +257,21 @@ test('resend preserves the invite or member role instead of hardcoding fse', () 
   assert.match(company, /duration:\s*15000/);
 });
 
-test('teamInviteNeedsPasswordSetup prefers set-password until they finish setup', () => {
+test('teamInviteNeedsPasswordSetup never asks the inviter to mint a password link', () => {
   assert.equal(
     teamInviteNeedsPasswordSetup({ onboardingCompleted: false, lastSignInAt: null }),
-    true
+    false
+  );
+  assert.equal(
+    teamInviteNeedsPasswordSetup({
+      onboardingCompleted: false,
+      lastSignInAt: '2026-09-01T00:00:00.000Z',
+    }),
+    false
+  );
+  assert.equal(
+    teamInviteNeedsPasswordSetup({ onboardingCompleted: true, lastSignInAt: null }),
+    false
   );
   assert.equal(
     teamInviteNeedsPasswordSetup({
@@ -266,10 +279,6 @@ test('teamInviteNeedsPasswordSetup prefers set-password until they finish setup'
       lastSignInAt: '2026-09-01T00:00:00.000Z',
     }),
     false
-  );
-  assert.equal(
-    teamInviteNeedsPasswordSetup({ onboardingCompleted: true, lastSignInAt: null }),
-    true
   );
 });
 
