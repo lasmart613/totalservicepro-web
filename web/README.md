@@ -8,6 +8,23 @@ The site is deployed to Netlify project "totalservicepro" (linked, logged in as 
 
 Indexable pages (`/service-manuals`, `/blog`, `/troubleshooting`) are typed data in `lib/seo/publicContent.ts`, not rows from the private manuals table. To add a page, append one object to `SERVICE_MANUALS`, `BLOG_POSTS`, or `TROUBLESHOOTING_GUIDES`. Do not put public URLs under `/manuals` — robots `Disallow: /manuals` blocks that tree, and the in-app library stays auth-gated. Details: [lib/seo/README.md](lib/seo/README.md).
 
+## Tests
+
+From `web/`:
+
+```bash
+npm test
+npm test -- lib/theme.test.ts
+```
+
+`npm test` runs `scripts/run-tests.mjs`. That script finds `*.test.ts` and `*.test.mjs` (it skips `node_modules`, `.next`, `out`, `build`, and `dist`), sorts them, and runs:
+
+```bash
+node --experimental-strip-types --experimental-transform-types --import ./test/alias-loader.mjs --test
+```
+
+A new test file is picked up on its own. Do not add it to `package.json`. To keep a matching file out of the run, add its path and a reason to `tests.exclude`. Extra arguments are forwarded, so `npm test -- --test-name-pattern theme lib/theme.test.ts` still works. The runner needs Node 22 (the same flags as before). `npm run build` does not run tests.
+
 ## Getting Started
 
 First, run the development server:

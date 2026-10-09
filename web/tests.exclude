@@ -1,0 +1,10 @@
+# Test files that match *.test.ts or *.test.mjs but must not run.
+# One web/-relative path per line. Put the reason after #.
+#
+# Example:
+# lib/example.test.ts  # hangs under node --test; see issue 123
+#
+# When scripts/run-tests.mjs replaced the package.json file list, every
+# *.test.ts and *.test.mjs file on disk was already in that list.
+# Nothing was skipped on purpose, so this list starts empty. Add a line here
+# instead of dropping a file from package.json.
