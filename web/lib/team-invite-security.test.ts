@@ -1114,6 +1114,39 @@ function claimAdmin(state: {
       };
       return api;
     },
+    async rpc(fn: string, args: Record<string, unknown>) {
+      if (fn !== 'set_home_membership') {
+        return { data: null, error: { message: `unknown rpc ${fn}` } };
+      }
+      const userId = String(args.p_user_id);
+      const orgId = Number(args.p_organization_id);
+      const role = String(args.p_role || 'fse');
+      for (const row of state.memberships) {
+        if (row.user_id === userId && row.organization_id !== orgId) row.is_home = false;
+      }
+      const existing = state.memberships.find(
+        (item) => item.user_id === userId && item.organization_id === orgId
+      );
+      if (existing) {
+        existing.is_home = true;
+        existing.role = role;
+      } else {
+        state.memberships.push({
+          user_id: userId,
+          organization_id: orgId,
+          role,
+          is_home: true,
+        });
+      }
+      if (args.p_sync_profile) {
+        const profile = state.profiles.find((item) => item.id === userId);
+        if (profile) {
+          profile.organization_id = orgId;
+          profile.role = role;
+        }
+      }
+      return { data: null, error: null };
+    },
   };
 }
 

@@ -159,10 +159,10 @@ export async function POST(req: NextRequest) {
     }
 
     const profile = body.profile || {};
+    // Org pointer and home membership are one transaction in set_home_membership.
+    // Writing organization_id here would let the profile trigger mark a second home
+    // before that call, and a failed call could not undo it.
     const profileUpdate: Record<string, unknown> = {
-      organization_id: orgId,
-      active_organization_id: orgId,
-      role: decision.role,
       updated_at: new Date().toISOString(),
     };
     if (profile.firstName) profileUpdate.first_name = profile.firstName;
@@ -180,21 +180,26 @@ export async function POST(req: NextRequest) {
     if (extraRoles) profileUpdate.additional_roles = extraRoles;
     if (user.email) profileUpdate.email = user.email.toLowerCase();
 
-    let { error: profileError } = await admin
+    let { data: profileRows, error: profileError } = await admin
       .from('user_profiles')
       .update(profileUpdate)
-      .eq('id', user.id);
+      .eq('id', user.id)
+      .select('id');
     if (profileError && /additional_roles|onboarding_completed_at|column/i.test(profileError.message || '')) {
       delete profileUpdate.additional_roles;
       delete profileUpdate.onboarding_completed_at;
-      ({ error: profileError } = await admin
+      ({ data: profileRows, error: profileError } = await admin
         .from('user_profiles')
         .update(profileUpdate)
-        .eq('id', user.id));
+        .eq('id', user.id)
+        .select('id'));
     }
-    if (profileError) {
+    if (profileError || !profileRows?.length) {
       const insertRow = { id: user.id, ...profileUpdate };
-      const inserted = await admin.from('user_profiles').upsert(insertRow, { onConflict: 'id' });
+      const inserted = await admin
+        .from('user_profiles')
+        .upsert(insertRow, { onConflict: 'id' })
+        .select('id');
       profileError = inserted.error;
     }
     if (profileError) {
@@ -204,11 +209,17 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (orgId == null || orgId === '') {
+      return NextResponse.json({ error: 'Organization not found.' }, { status: 500 });
+    }
+    const organizationId = orgId;
+
     const membership = await upsertMembership(admin, {
       userId: user.id,
-      organizationId: orgId,
+      organizationId,
       role: decision.role,
       isHome: true,
+      syncProfile: true,
     });
     if (!membership.ok) {
       return NextResponse.json(
@@ -219,7 +230,7 @@ export async function POST(req: NextRequest) {
 
     const active = await setActiveOrganization(admin, {
       userId: user.id,
-      organizationId: orgId,
+      organizationId,
       role: decision.role,
     });
     if (!active.ok) {
@@ -231,7 +242,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       ok: true,
-      organizationId: orgId,
+      organizationId,
       role: decision.role,
     });
   } catch (e: unknown) {

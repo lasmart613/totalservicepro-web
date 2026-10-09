@@ -6,6 +6,7 @@ import {
   decideClaim,
   inviteMustNotLeaveHome,
   isInvitableTeamRole,
+  teamClaimMovesHome,
   teamRoleForInvite,
 } from '@/lib/org-membership';
 import { teamInviteJoinGate } from '@/lib/team-invite-guard';
@@ -25,8 +26,11 @@ type ClaimBody = {
 /**
  * Invited user claims their engineer_invitations row (service role).
  * Founders with a home shop are not skipped: a pending invite to another
- * company becomes a second membership (moonlight). Optional leaveOrganizationId
- * is a move (staff leave A after joining B). Auth user is never deleted.
+ * company becomes a second membership and keeps that home (moonlight).
+ * The inviting company becomes the only home when this is the first membership,
+ * or when the active org is a company this user created after the invite.
+ * Optional leaveOrganizationId is a move (staff leave A after joining B).
+ * Auth user is never deleted.
  */
 export async function POST(req: NextRequest) {
   return runTeamClaim(req);
@@ -259,13 +263,44 @@ export async function runTeamClaim(
       });
     }
 
+    let activeOrgCreatedByCaller = false;
+    let activeOrgCreatedAt: string | null = null;
+    if (decision.keepHome && existingProf?.organization_id) {
+      const { data: curOrg } = await admin
+        .from('organizations')
+        .select('id, created_at, created_by')
+        .eq('id', existingProf.organization_id)
+        .maybeSingle();
+      if (curOrg && String(curOrg.created_by) === user.id) {
+        activeOrgCreatedByCaller = true;
+        activeOrgCreatedAt = curOrg.created_at ?? null;
+      }
+    }
+
+    // First membership becomes home. A company this user created after the
+    // invite (founder onboarding by mistake) also loses home to the inviting
+    // company. Any other second org stays moonlight and does not move home.
+    const moveHome = teamClaimMovesHome({
+      hasMembership: memberships.length > 0,
+      activeOrgCreatedByCaller,
+      activeOrgCreatedAt,
+      inviteCreatedAt: inv.created_at ?? null,
+    });
+
     const added = await upsertMembership(admin, {
       userId: user.id,
       organizationId: decision.add.organizationId,
       role: decision.add.role,
-      isHome: false,
+      isHome: moveHome,
+      syncProfile: moveHome,
     });
     if (!added.ok) {
+      if (moveHome) {
+        return NextResponse.json(
+          { ok: false, error: added.error || 'Could not move your home organization.' },
+          { status: 503 }
+        );
+      }
       console.warn('claim membership upsert failed, attaching profile anyway', added.error);
     }
 
@@ -277,21 +312,7 @@ export async function runTeamClaim(
     }
 
     let activateId = decision.activateOrganizationId;
-    // Forgot-password invitees often complete founder onboarding by mistake and
-    // create a new company. If that org was created after this invite, join the
-    // inviting company as the active org instead of moonlight-only.
-    if (!activateId && inv.organization_id && existingProf?.organization_id) {
-      const { data: curOrg } = await admin
-        .from('organizations')
-        .select('id, created_at, created_by')
-        .eq('id', existingProf.organization_id)
-        .maybeSingle();
-      const inviteAt = inv.created_at ? new Date(inv.created_at).getTime() : 0;
-      const orgAt = curOrg?.created_at ? new Date(curOrg.created_at).getTime() : 0;
-      if (curOrg && String(curOrg.created_by) === user.id && orgAt >= inviteAt) {
-        activateId = inv.organization_id;
-      }
-    }
+    if (moveHome && !activateId) activateId = decision.add.organizationId;
 
     if (activateId) {
       const alreadyDone = existingProf?.onboarding_completed === true;
@@ -336,7 +357,7 @@ export async function runTeamClaim(
       claimed: true,
       pendingInvite: hadPending,
       inviteAccepted: true,
-      moonlight: decision.keepHome,
+      moonlight: decision.keepHome && !moveHome,
       leftOrganizationId: decision.leaveOrganizationId,
       needsMemberOnboarding: after?.onboarding_completed !== true,
     });

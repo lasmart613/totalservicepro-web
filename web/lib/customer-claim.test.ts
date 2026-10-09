@@ -28,6 +28,8 @@ type Lookup = {
   limit: number | null;
 };
 
+type HomeCall = { fn: string; args: Record<string, unknown> };
+
 type DbError = { message: string; code?: string };
 
 const CLINIC_ID = 42;
@@ -49,6 +51,8 @@ function fakeWriter(
     profiles: Profile[];
     writes: Write[];
     lookups: Lookup[];
+    homeCalls: HomeCall[];
+    homeError?: DbError | null;
     ownerLookupError?: DbError | null;
     updateError?: DbError | null;
     uniqueViolation?: boolean;
@@ -195,6 +199,11 @@ function fakeWriter(
       };
       return api;
     },
+    async rpc(fn: string, args: Record<string, unknown>) {
+      state.homeCalls.push({ fn, args });
+      if (state.homeError) return { data: null, error: state.homeError };
+      return { data: null, error: null };
+    },
   };
 }
 
@@ -207,6 +216,7 @@ async function postClaim(opts: {
   ownerLookupError?: DbError | null;
   updateError?: DbError | null;
   uniqueViolation?: boolean;
+  homeError?: DbError | null;
 }) {
   const previous = {
     url: process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -220,6 +230,8 @@ async function postClaim(opts: {
     profiles: opts.profiles.map((profile) => ({ ...profile })),
     writes: [] as Write[],
     lookups: [] as Lookup[],
+    homeCalls: [] as HomeCall[],
+    homeError: opts.homeError,
     ownerLookupError: opts.ownerLookupError,
     updateError: opts.updateError,
     uniqueViolation: opts.uniqueViolation,
@@ -270,6 +282,7 @@ async function postClaim(opts: {
       profiles: state.profiles,
       writes: state.writes,
       lookups: state.lookups,
+      homeCalls: state.homeCalls,
     };
   } finally {
     if (previous.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -321,6 +334,12 @@ test('the first claim of an unowned clinic makes the claimer owner', async () =>
   assert.equal(claimer?.role, 'owner');
   assert.equal(String(claimer?.organization_id), String(CLINIC_ID));
   assert.equal(result.profiles.filter((profile) => profile.role === 'owner').length, 1);
+  assert.equal(result.homeCalls.length, 1);
+  assert.equal(result.homeCalls[0].fn, 'set_home_membership');
+  assert.equal(result.homeCalls[0].args.p_user_id, 'new-user');
+  assert.equal(result.homeCalls[0].args.p_organization_id, CLINIC_ID);
+  assert.equal(result.homeCalls[0].args.p_role, 'owner');
+  assert.equal(result.homeCalls[0].args.p_sync_profile, true);
 });
 
 test('an existing member of an ownerless clinic with a matching email becomes owner', async () => {

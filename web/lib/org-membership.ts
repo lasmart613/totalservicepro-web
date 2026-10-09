@@ -294,6 +294,27 @@ export function decideClaim(input: {
   };
 }
 
+/**
+ * Whether accepting a team invite should make that org the only home.
+ * A first membership becomes home. An existing home stays (moonlight), except
+ * when the active org is a company this user created at or after the invite
+ * — that shop was founder onboarding by mistake, and the inviting company
+ * becomes home. Joining a second org does not move home otherwise.
+ */
+export function teamClaimMovesHome(input: {
+  hasMembership: boolean;
+  activeOrgCreatedByCaller: boolean;
+  activeOrgCreatedAt?: string | null;
+  inviteCreatedAt?: string | null;
+}): boolean {
+  if (!input.hasMembership) return true;
+  if (!input.activeOrgCreatedByCaller) return false;
+  const inviteAt = input.inviteCreatedAt ? new Date(input.inviteCreatedAt).getTime() : 0;
+  const orgAt = input.activeOrgCreatedAt ? new Date(input.activeOrgCreatedAt).getTime() : 0;
+  if (!Number.isFinite(inviteAt) || !Number.isFinite(orgAt)) return false;
+  return orgAt >= inviteAt;
+}
+
 export function canLeaveMembership(input: {
   leaving: MembershipSnapshot;
   remainingAfterLeave: MembershipSnapshot[];
