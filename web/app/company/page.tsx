@@ -15,6 +15,7 @@ import {
 } from '@/lib/roles';
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { invitationIsOpen } from '@/lib/org-membership';
+import { teamInviteSentMessage } from '@/lib/team-invite';
 import { useSiteLocale, useT } from '@/lib/fa/locale';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
 import { displayModelName } from '@/lib/model-display';
@@ -402,20 +403,14 @@ function CompanyProfile() {
       });
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Resend failed');
-      if (json.inviteUrl && navigator.clipboard?.writeText) {
-        try {
-          await navigator.clipboard.writeText(json.inviteUrl);
-          toast.message('Invite link copied to clipboard', { duration: 10000 });
-        } catch {
-          /* ignore */
-        }
-      }
       if (json.emailed) {
-        toast.success(json.message || `Invite email sent to ${email}`, { duration: 15000 });
-      } else if (json.rateLimited) {
-        toast.error(json.message || 'Invite email could not be sent. Use the copied link.', { duration: 15000 });
+        toast.success(json.message || teamInviteSentMessage(email), { duration: 15000 });
       } else {
-        toast.message(json.message || 'Invite processed — email may not have been sent', { duration: 15000 });
+        toast.error(
+          json.message ||
+            `Invitation saved for ${email}, but the email could not be sent. No link was issued. Try again.`,
+          { duration: 15000 }
+        );
       }
       await loadTeamMembers(org.id);
     } catch (e: any) {
@@ -614,27 +609,14 @@ function CompanyProfile() {
       const json = await res.json().catch(() => ({}));
       if (!res.ok) throw new Error(json.error || 'Invite failed');
 
-      if (json.inviteUrl && typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-        try {
-          await navigator.clipboard.writeText(json.inviteUrl);
-        } catch {
-          /* ignore */
-        }
-      }
-
       if (json.emailed) {
-        toast.success(json.message || `Invite email sent to ${em}`, { duration: 15000 });
-      } else if (json.rateLimited) {
+        toast.success(json.message || teamInviteSentMessage(em), { duration: 15000 });
+      } else {
         toast.error(
           json.message ||
-            'Invite email could not be sent. Copy the invite link and send it yourself.',
+            `Invitation saved for ${em}, but the email could not be sent. No link was issued. Try again.`,
           { duration: 15000 }
         );
-      } else {
-        toast.message(json.message || 'Invitation saved (email may not have been sent)', {
-          description: json.inviteUrl || json.signupUrl || undefined,
-          duration: 15000,
-        });
       }
       await loadTeamMembers(org.id);
     } catch (e: any) {

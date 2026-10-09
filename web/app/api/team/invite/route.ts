@@ -1,16 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { findAuthUserByEmail } from '@/lib/team-profile';
+import { findAuthUserByEmail, type AuthEmailLookup } from '@/lib/team-profile';
 import { DEFAULT_STAFF_ROLE } from '@/lib/org-membership';
 import { freshTeamInviteFields } from '@/lib/team-invite-guard';
 import { decideMemberRoleChange } from '@/lib/tenant-lockdown';
+import {
+  decideTeamInviteAudience,
+  newUserLinkFailureMode,
+  sealInviteResponse,
+  teamInviteClosedBody,
+  teamInviteMayMintActionLink,
+  teamInvitePublicBody,
+} from '@/lib/team-invite-flow';
 import {
   buildTeamInviteHtml,
   buildTeamInviteText,
   teamInviteEmailError,
   teamInviteLoginUrl,
-  teamInviteNeedsPasswordSetup,
   teamInviteRoleLabel,
   teamInviteSubject,
 } from '@/lib/team-invite';
@@ -33,8 +40,19 @@ type InviteBody = {
   resend?: boolean;
 };
 
+type InviteProfileLookup = {
+  status: 'found' | 'not_found' | 'error';
+  moonlight: boolean;
+  firstName: string | null;
+  onboardingCompleted: boolean | null;
+};
+
 function isRateLimitError(msg: string): boolean {
   return /rate.?limit|too many|429|email.*limit/i.test(msg || '');
+}
+
+function respond(body: Record<string, unknown>, status = 200) {
+  return NextResponse.json(sealInviteResponse(body), { status });
 }
 
 /**
@@ -44,11 +62,11 @@ function isRateLimitError(msg: string): boolean {
  *    An existing profile does not get a membership here — they join via
  *    POST /api/team/claim after the invite is open and their email is confirmed.
  *    Never reject just because they already have another company (moonlight).
- *    Always send branded email. Prefer set-password when they never signed in
- *    or onboarding is incomplete; otherwise Sign in.
- * 3) New user → generateLink (no Supabase Auth mail) + branded set-password email
- * 4) If Resend is not configured or send fails, still return a copyable link
- * 5) Do not mark the invite accepted until they claim it
+ * 3) Existing auth user → branded sign-in email to that mailbox. No password
+ *    link is minted, and nothing that signs in as them is returned.
+ * 4) Confirmed new user → generateLink type invite, emailed to them via Resend.
+ *    The action link is not included in this response.
+ * 5) If the email lookup errors or is ambiguous, fail closed: no link.
  *
  * Does not send the generic Auth invite mail (avoids double send with Resend).
  */
@@ -57,13 +75,13 @@ export async function POST(req: NextRequest) {
     const authHeader = req.headers.get('authorization') || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
     if (!token) {
-      return NextResponse.json({ error: 'Not signed in' }, { status: 401 });
+      return respond({ error: 'Not signed in' }, 401);
     }
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
     if (!url || !anon) {
-      return NextResponse.json({ error: 'Server misconfigured (Supabase env)' }, { status: 500 });
+      return respond({ error: 'Server misconfigured (Supabase env)' }, 500);
     }
 
     const userClient = createClient(url, anon, {
@@ -76,7 +94,7 @@ export async function POST(req: NextRequest) {
       error: userErr,
     } = await userClient.auth.getUser();
     if (userErr || !user) {
-      return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
+      return respond({ error: 'Invalid session' }, 401);
     }
 
     const { data: profile } = await userClient
@@ -86,19 +104,19 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
 
     if (!profile?.organization_id) {
-      return NextResponse.json({ error: 'You are not linked to an organization' }, { status: 403 });
+      return respond({ error: 'You are not linked to an organization' }, 403);
     }
 
     const role = (profile.role || '').toLowerCase();
     if (!ADMIN_ROLES.has(role)) {
-      return NextResponse.json({ error: 'Only admins can invite team members' }, { status: 403 });
+      return respond({ error: 'Only admins can invite team members' }, 403);
     }
 
     const body = (await req.json()) as InviteBody;
     const email = (body.email || '').toLowerCase().trim();
     const emailError = teamInviteEmailError(email);
     if (emailError) {
-      return NextResponse.json({ error: emailError }, { status: 400 });
+      return respond({ error: emailError }, 400);
     }
 
     const requestedRole = (body.role || DEFAULT_STAFF_ROLE).toLowerCase();
@@ -109,7 +127,7 @@ export async function POST(req: NextRequest) {
       allowServiceManager: true,
     });
     if (!roleGate.ok) {
-      return NextResponse.json({ error: roleGate.error }, { status: roleGate.status });
+      return respond({ error: roleGate.error }, roleGate.status);
     }
     const inviteRole = roleGate.role;
     const firstName = (body.firstName || '').trim() || null;
@@ -121,9 +139,9 @@ export async function POST(req: NextRequest) {
     const roleLabel = teamInviteRoleLabel(inviteRole);
 
     if (!hasServiceRole()) {
-      return NextResponse.json(
+      return respond(
         { error: 'Server cannot create team invites (missing service role).' },
-        { status: 503 }
+        503
       );
     }
 
@@ -136,7 +154,7 @@ export async function POST(req: NextRequest) {
       .maybeSingle();
     const organizationName = (orgRow?.name || 'your service organization').trim();
     const orgType = orgRow?.type || 'service_company';
-    const servicesOffered = (orgRow as any)?.services_offered || null;
+    const servicesOffered = (orgRow as { services_offered?: unknown } | null)?.services_offered || null;
 
     const inviteMeta = {
       first_name: firstName,
@@ -162,13 +180,15 @@ export async function POST(req: NextRequest) {
       acceptUrl?: string | null;
       greetName?: string | null;
       moonlight?: boolean;
-      needsSetup?: boolean;
     }) => {
+      // Existing accounts get the sign-in email only. A setup URL is never
+      // attached to their message or to this response.
+      const setupUrl = opts.alreadyRegistered ? undefined : opts.acceptUrl || undefined;
       const html = buildTeamInviteHtml({
         organizationName,
         firstName: opts.greetName ?? firstName,
         roleLabel,
-        acceptUrl: opts.acceptUrl || undefined,
+        acceptUrl: setupUrl,
         loginUrl,
         alreadyRegistered: opts.alreadyRegistered,
       });
@@ -176,7 +196,7 @@ export async function POST(req: NextRequest) {
         organizationName,
         firstName: opts.greetName ?? firstName,
         roleLabel,
-        acceptUrl: opts.acceptUrl || undefined,
+        acceptUrl: setupUrl,
         loginUrl,
         alreadyRegistered: opts.alreadyRegistered,
       });
@@ -185,18 +205,19 @@ export async function POST(req: NextRequest) {
         process.env.NOTIFY_FROM_EMAIL ||
         process.env.RESEND_FROM ||
         'Total Service Pro <contact@medicalrepairnetwork.com>';
-      const copyUrl = opts.alreadyRegistered ? loginUrl : opts.acceptUrl || loginUrl;
+
+      const payload = (emailed: boolean, extra?: { rateLimited?: boolean; warning?: string }) =>
+        teamInvitePublicBody({
+          email,
+          emailed,
+          alreadyRegistered: opts.alreadyRegistered,
+          moonlight: opts.moonlight,
+          rateLimited: extra?.rateLimited,
+          warning: extra?.warning,
+        });
 
       if (!resendKey) {
-        return NextResponse.json({
-          ok: true,
-          emailed: false,
-          linked: false,
-          alreadyRegistered: opts.alreadyRegistered,
-          moonlight: !!opts.moonlight,
-          inviteUrl: copyUrl,
-          message: `Invitation saved for ${email}. Email delivery is not configured (RESEND_API_KEY) — copy the ${opts.alreadyRegistered ? 'sign-in' : 'invite'} link and send it yourself.`,
-        });
+        return respond(payload(false));
       }
 
       try {
@@ -216,58 +237,18 @@ export async function POST(req: NextRequest) {
         });
         const result = await rr.json().catch(() => ({}));
         if (rr.ok) {
-          return NextResponse.json({
-            ok: true,
-            emailed: true,
-            linked: false,
-            alreadyRegistered: opts.alreadyRegistered,
-            moonlight: !!opts.moonlight,
-            inviteUrl: copyUrl,
-            message: opts.needsSetup
-              ? `Invite email sent to ${email}. They have not finished setup — ask them to set a password from the email. If they don't see it, check spam or copy the link.`
-              : opts.moonlight
-                ? `Invite email sent to ${email}. They already have a company — they join this shop when they sign in and accept (moonlight). Their home shop is not changed.`
-                : opts.alreadyRegistered
-                  ? `Invite email sent to ${email}. They already have a RepairPlanet account — ask them to sign in with this email.`
-                  : `Invite email sent to ${email}. If they don't see it within a few minutes, check spam — or copy the invite link from the toast / pending list.`,
-          });
+          return respond(payload(true));
         }
         const sendMsg = result?.message || `Email provider error (${rr.status})`;
         console.error('Resend team invite failed', rr.status, sendMsg);
         if (isRateLimitError(sendMsg)) {
-          return NextResponse.json({
-            ok: true,
-            emailed: false,
-            rateLimited: true,
-            linked: false,
-            alreadyRegistered: opts.alreadyRegistered,
-            moonlight: !!opts.moonlight,
-            inviteUrl: copyUrl,
-            message: 'Email rate limit hit. Copy the link below and send it yourself.',
-          });
+          return respond(payload(false, { rateLimited: true }));
         }
-        return NextResponse.json({
-          ok: true,
-          emailed: false,
-          warning: sendMsg,
-          linked: false,
-          alreadyRegistered: opts.alreadyRegistered,
-          moonlight: !!opts.moonlight,
-          inviteUrl: copyUrl,
-          message: `Could not send email: ${sendMsg}. Copy the link and send it yourself.`,
-        });
-      } catch (sendErr: any) {
-        console.error('Resend team invite exception', sendErr);
-        return NextResponse.json({
-          ok: true,
-          emailed: false,
-          warning: sendErr?.message || 'send failed',
-          linked: false,
-          alreadyRegistered: opts.alreadyRegistered,
-          moonlight: !!opts.moonlight,
-          inviteUrl: copyUrl,
-          message: 'Could not send email. Copy the link and send it yourself.',
-        });
+        return respond(payload(false, { warning: sendMsg }));
+      } catch (sendErr: unknown) {
+        const sendMessage = sendErr instanceof Error ? sendErr.message : 'send failed';
+        console.error('Resend team invite exception', sendMessage);
+        return respond(payload(false, { warning: sendMessage }));
       }
     };
 
@@ -310,126 +291,130 @@ export async function POST(req: NextRequest) {
         .eq('id', existingInv.id);
     };
 
-    /** Build a copyable invite/recovery link without sending Supabase mail. */
-    const buildActionLink = async (preferInvite: boolean): Promise<{
-      url: string | null;
-      userId: string | null;
-    }> => {
+    /**
+     * Invite link for an address we have positively confirmed is not an
+     * auth user yet. Emailed to that address. Never returned to the caller.
+     * No second type is tried if this fails.
+     */
+    const createNewUserInviteLink = async (): Promise<{ url: string | null; error: string | null }> => {
       try {
-        const type = preferInvite ? 'invite' : 'recovery';
         const { data, error } = await admin.auth.admin.generateLink({
-          type,
+          type: 'invite',
           email,
           options: {
             redirectTo,
             data: inviteMeta,
           },
-        } as any);
-        if (error) {
-          const alt = preferInvite ? 'recovery' : 'invite';
-          const { data: d2, error: e2 } = await admin.auth.admin.generateLink({
-            type: alt,
-            email,
-            options: { redirectTo, data: inviteMeta },
-          } as any);
-          if (e2) {
-            console.warn('generateLink failed', error.message, e2.message);
-            return { url: null, userId: null };
-          }
-          return {
-            url: d2?.properties?.action_link || null,
-            userId: d2?.user?.id || null,
-          };
+        });
+        const actionLink = data?.properties?.action_link || null;
+        if (error || !actionLink) {
+          return { url: null, error: error?.message || 'invite link was not created' };
         }
-        return {
-          url: data?.properties?.action_link || null,
-          userId: data?.user?.id || null,
-        };
-      } catch (e) {
-        console.warn('generateLink exception', e);
-        return { url: null, userId: null };
+        return { url: actionLink, error: null };
+      } catch (e: unknown) {
+        const message = e instanceof Error ? e.message : 'invite link was not created';
+        console.warn('generateLink invite failed');
+        return { url: null, error: message };
       }
     };
 
     const deliverForExistingAccount = async (opts: {
       greetName?: string | null;
       moonlight?: boolean;
-      onboardingCompleted?: boolean | null;
-      lastSignInAt?: string | null;
     }) => {
-      const needsSetup = teamInviteNeedsPasswordSetup({
-        onboardingCompleted: opts.onboardingCompleted,
-        lastSignInAt: opts.lastSignInAt,
-      });
-      let acceptUrl: string | null = null;
-      if (needsSetup) {
-        const generated = await buildActionLink(false);
-        acceptUrl = generated.url;
-      }
       return deliverBrandedInvite({
-        alreadyRegistered: !needsSetup || !acceptUrl,
-        acceptUrl,
+        alreadyRegistered: true,
         greetName: opts.greetName,
         moonlight: !!opts.moonlight,
-        needsSetup,
       });
     };
 
-    // Existing profile: invite row only. Membership is created later by /api/team/claim.
-    // Always send branded email when the caller is inviting — including already_on_team.
-    const { data: existingProfile } = await admin
-      .from('user_profiles')
-      .select('id, email, organization_id, role, first_name, last_name, onboarding_completed')
-      .ilike('email', email)
-      .maybeSingle();
+    const lookupProfile = async (): Promise<InviteProfileLookup> => {
+      try {
+        const { data, error } = await admin
+          .from('user_profiles')
+          .select('id, email, organization_id, role, first_name, last_name, onboarding_completed')
+          .eq('email', email)
+          .maybeSingle();
+        if (error) return { status: 'error', moonlight: false, firstName: null, onboardingCompleted: null };
+        if (!data?.id) {
+          return { status: 'not_found', moonlight: false, firstName: null, onboardingCompleted: null };
+        }
+        const otherOrg =
+          data.organization_id != null && String(data.organization_id) !== String(orgId);
+        return {
+          status: 'found',
+          moonlight: otherOrg,
+          firstName: (data as { first_name?: string | null }).first_name || null,
+          onboardingCompleted: (data as { onboarding_completed?: boolean | null }).onboarding_completed ?? null,
+        };
+      } catch {
+        return { status: 'error', moonlight: false, firstName: null, onboardingCompleted: null };
+      }
+    };
 
-    if (existingProfile?.id) {
-      await recordInvitation();
+    let authLookup: AuthEmailLookup;
+    try {
+      authLookup = await findAuthUserByEmail(admin, email);
+    } catch {
+      authLookup = { status: 'error' };
+    }
+    const profileLookup = await lookupProfile();
+    const audience = decideTeamInviteAudience({
+      auth: authLookup,
+      profile: profileLookup.status,
+      onboardingCompleted: profileLookup.onboardingCompleted,
+      lastSignInAt: authLookup.status === 'found' ? authLookup.user.last_sign_in_at : null,
+    });
 
-      const existingAuth = await findAuthUserByEmail(admin, email);
-      const greetName = firstName || (existingProfile as { first_name?: string | null }).first_name || null;
-      const otherOrg =
-        existingProfile.organization_id != null &&
-        String(existingProfile.organization_id) !== String(orgId);
-      return deliverForExistingAccount({
-        greetName,
-        moonlight: otherOrg,
-        onboardingCompleted: (existingProfile as { onboarding_completed?: boolean | null }).onboarding_completed,
-        lastSignInAt: existingAuth?.last_sign_in_at || null,
-      });
+    if (audience === 'closed') {
+      const closed = teamInviteClosedBody();
+      return respond(closed.body, closed.status);
     }
 
-    // Pending invitation row for a new email. No membership until they claim.
+    if (audience === 'new' && !process.env.RESEND_API_KEY) {
+      return respond(
+        {
+          ok: false,
+          error: `Email delivery is not configured, so no invite link was created for ${email}.`,
+        },
+        503
+      );
+    }
+
+    const greetName = firstName || profileLookup.firstName;
+    const moonlight = profileLookup.moonlight;
+
+    // Existing profile: invite row only. Membership is created later by /api/team/claim.
     await recordInvitation();
 
-    // Auth exists but no profile yet — still email; prefer set-password if they never signed in.
-    const existingAuth = await findAuthUserByEmail(admin, email);
-    if (existingAuth?.id) {
-      return deliverForExistingAccount({
-        onboardingCompleted: false,
-        lastSignInAt: existingAuth.last_sign_in_at || null,
-      });
+    if (audience === 'existing' || !teamInviteMayMintActionLink(audience)) {
+      return deliverForExistingAccount({ greetName, moonlight });
     }
 
-    const generated = await buildActionLink(true);
-    const inviteUrl = generated.url;
-
-    if (!inviteUrl) {
-      return NextResponse.json({
-        ok: true,
-        emailed: false,
-        message:
-          'Invitation saved, but an invite link could not be created. Ask them to use Login → Forgot password with this email.',
-        signupUrl: loginUrl,
-      });
+    const created = await createNewUserInviteLink();
+    if (!created.url) {
+      if (newUserLinkFailureMode(created.error) === 'existing') {
+        return deliverForExistingAccount({ greetName, moonlight });
+      }
+      return respond(
+        {
+          ok: false,
+          error: `Could not email an invite to ${email}. No link was created. Try again.`,
+        },
+        502
+      );
     }
 
     return deliverBrandedInvite({
       alreadyRegistered: false,
-      acceptUrl: inviteUrl,
+      acceptUrl: created.url,
+      greetName,
+      moonlight,
     });
-  } catch (e: any) {
-    console.error('team invite error', e);
-    return NextResponse.json({ error: e?.message || 'Invite failed' }, { status: 500 });
+  } catch (e: unknown) {
+    const message = e instanceof Error ? e.message : 'Invite failed';
+    console.error('team invite error', message);
+    return respond({ error: message || 'Invite failed' }, 500);
   }
 }
