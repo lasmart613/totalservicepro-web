@@ -118,6 +118,9 @@ function fakeSupabase(user: { id: string; email: string; user_metadata: Record<s
     ilike() {
       return api;
     },
+    filter() {
+      return api;
+    },
     order() {
       return api;
     },

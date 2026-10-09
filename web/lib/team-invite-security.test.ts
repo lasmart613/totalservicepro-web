@@ -3,7 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { exactEmailIlike } from './email-match.ts';
+import { exactEmailImatch } from './email-match.ts';
 import {
   AUTH_EMAIL_LOOKUP_MAX_PAGES,
   AUTH_EMAIL_LOOKUP_PAGE_SIZE,
@@ -205,9 +205,10 @@ test('a user past the first 2000 auth rows is found by exact email', async () =>
           return {
             select() {
               return {
-                ilike(column: string, value: string) {
+                filter(column: string, operator: string, value: string) {
                   assert.equal(column, 'email');
-                  assert.equal(value, target.email);
+                  assert.equal(operator, 'imatch');
+                  assert.equal(value, exactEmailImatch(target.email));
                   return Promise.resolve({ data: [target], error: null });
                 },
               };
@@ -283,7 +284,7 @@ test('an unfinished or failed email lookup is an error, not a new user', async (
           return {
             select() {
               return {
-                ilike: () => Promise.resolve({ data: [], error: null }),
+                filter: () => Promise.resolve({ data: [], error: null }),
               };
             },
           };
@@ -327,7 +328,7 @@ test('an unfinished or failed email lookup is an error, not a new user', async (
             return {
               select() {
                 return {
-                  ilike: () =>
+                  filter: () =>
                     Promise.resolve({
                       data: [
                         { id: 'a', email: 'person@example.com' },
@@ -390,6 +391,8 @@ test('auth email lookup matches case and does not treat percent or underscore as
     { id: 'decoy-percent', email: 'axxb@example.com' },
     { id: 'exact-underscore', email: 'A_B@example.com' },
     { id: 'exact-percent', email: 'A%B@example.com' },
+    { id: 'decoy-star', email: 'aXXb@x.com' },
+    { id: 'exact-star', email: 'A*B@x.com' },
   ];
   const admin: AuthEmailLookupClient = {
     auth: listUsersBomb(),
@@ -399,8 +402,9 @@ test('auth email lookup matches case and does not treat percent or underscore as
           return {
             select() {
               return {
-                ilike(_column: string, value: string) {
-                  const hits = rows.filter((row) => likeMatches(row.email, value));
+                filter(_column: string, operator: string, value: string) {
+                  assert.equal(operator, 'imatch');
+                  const hits = rows.filter((row) => new RegExp(value, 'i').test(row.email.trim()));
                   return Promise.resolve({ data: hits, error: null });
                 },
               };
@@ -419,6 +423,10 @@ test('auth email lookup matches case and does not treat percent or underscore as
   assert.equal(percent.status, 'found');
   if (percent.status === 'found') assert.equal(percent.user.id, 'exact-percent');
 
+  const star = await findAuthUserByEmail(admin, 'a*b@x.com', { fetchAdminUsers: null });
+  assert.equal(star.status, 'found');
+  if (star.status === 'found') assert.equal(star.user.id, 'exact-star');
+
   const onlyDecoy: AuthEmailLookupClient = {
     auth: listUsersBomb(),
     schema() {
@@ -427,10 +435,11 @@ test('auth email lookup matches case and does not treat percent or underscore as
           return {
             select() {
               return {
-                ilike(_column: string, value: string) {
+                filter(_column: string, operator: string, value: string) {
+                  assert.equal(operator, 'imatch');
                   const hits = rows
                     .filter((row) => row.id.startsWith('decoy'))
-                    .filter((row) => likeMatches(row.email, value));
+                    .filter((row) => new RegExp(value, 'i').test(row.email.trim()));
                   return Promise.resolve({ data: hits, error: null });
                 },
               };
@@ -611,12 +620,13 @@ function inviteAdmin(state: {
   const admin = {
     from(table: string) {
       let selected = '';
-      const filters: Array<{ op: 'eq' | 'ilike'; column: string; value: unknown }> = [];
+      const filters: Array<{ op: 'eq' | 'ilike' | 'imatch'; column: string; value: unknown }> = [];
       const matchesEmail = (row: { email?: unknown } | null) => {
         const emailFilter = filters.find((filter) => filter.column === 'email');
         if (!emailFilter) return true;
         if (!row) return false;
         const stored = String(row.email ?? '');
+        if (emailFilter.op === 'imatch') return new RegExp(String(emailFilter.value ?? ''), 'i').test(stored.trim());
         if (emailFilter.op === 'ilike') return likeMatches(stored, String(emailFilter.value ?? ''));
         return stored.trim().toLowerCase() === String(emailFilter.value ?? '').trim().toLowerCase();
       };
@@ -638,6 +648,11 @@ function inviteAdmin(state: {
         ilike(column: string, value: unknown) {
           if (column === 'email') emailLooks.push(String(value));
           filters.push({ op: 'ilike', column, value });
+          return api;
+        },
+        filter(column: string, operator: string, value: unknown) {
+          if (column === 'email' && operator === 'imatch') emailLooks.push(String(value));
+          filters.push({ op: operator === 'imatch' ? 'imatch' : 'eq', column, value });
           return api;
         },
         limit() {
@@ -1013,7 +1028,7 @@ test('a mixed-case profile email is an existing member: moonlight, and resend ke
   assert.equal(moonlight.body.alreadyRegistered, true);
   assert.equal(moonlight.linkCalls.length, 0);
   assert.equal(moonlight.inserts[0]?.email, 'person@example.com');
-  assert.ok(moonlight.emailLooks.includes(exactEmailIlike('Person@Example.com')));
+  assert.ok(moonlight.emailLooks.includes(exactEmailImatch('Person@Example.com')));
   assertNoLink(moonlight, SETUP_LINK);
 
   const acceptedAt = '2026-10-01T12:00:00.000Z';
@@ -1100,8 +1115,8 @@ test('percent and underscore in an invite email are not wildcards', async () => 
   assert.equal(decoy.status, 200, JSON.stringify(decoy.body));
   assert.equal(decoy.body.moonlight, false);
   assert.ok(decoy.emailLooks.length > 0);
-  assert.ok(decoy.emailLooks.every((pattern) => pattern === exactEmailIlike('a_b@example.com')));
-  assert.match(exactEmailIlike('a_b@example.com'), /\\_/);
+  assert.ok(decoy.emailLooks.every((pattern) => pattern === exactEmailImatch('a_b@example.com')));
+  assert.equal(exactEmailImatch('a_b@example.com'), '^a_b@example\\.com$');
 
   const percent = await postExistingInvite({
     resendKey: 'resend-test',
@@ -1115,9 +1130,32 @@ test('percent and underscore in an invite email are not wildcards', async () => 
   });
   assert.equal(percent.status, 200, JSON.stringify(percent.body));
   assert.equal(percent.body.moonlight, true);
-  assert.ok(percent.emailLooks.every((pattern) => pattern === exactEmailIlike('a%b@example.com')));
-  assert.match(exactEmailIlike('a%b@example.com'), /\\%/);
+  assert.ok(percent.emailLooks.every((pattern) => pattern === exactEmailImatch('a%b@example.com')));
+  assert.equal(exactEmailImatch('a%b@example.com'), '^a%b@example\\.com$');
   assert.equal(percent.linkCalls.length, 0);
+});
+
+test('a star is not a valid team-invite address and is not sent as an ilike wildcard', async () => {
+  const result = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-star', lastSignInAt: '2026-10-02T00:00:00.000Z' },
+    email: 'a*b@x.com',
+    invite: null,
+    profile: {
+      id: 'decoy',
+      email: 'aXXb@x.com',
+      organization_id: 4,
+      role: 'fse',
+      onboarding_completed: true,
+    },
+  });
+  assert.equal(result.status, 400, JSON.stringify(result.body));
+  assert.equal(result.sent.length, 0);
+  assert.equal(result.linkCalls.length, 0);
+  assert.equal(result.emailLooks.length, 0);
+  assert.equal(result.updates.length, 0);
+  assert.equal(result.inserts.length, 0);
+  assert.equal(new RegExp(exactEmailImatch('a*b@x.com'), 'i').test('aXXb@x.com'), false);
 });
 
 test('resend to an existing member whose invite is not accepted marks it accepted and sends the sign-in email only', async () => {
@@ -1364,6 +1402,9 @@ function claimAdmin(state: {
         },
         ilike(column: string, value: unknown) {
           filters[column] = value;
+          return api;
+        },
+        filter() {
           return api;
         },
         order() {

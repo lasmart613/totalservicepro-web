@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { emailsMatch, exactEmailIlike, normalizeLookupEmail } from '@/lib/email-match';
+import { emailsMatch, exactEmailImatch, normalizeLookupEmail } from '@/lib/email-match';
 import { findAuthUserByEmail, type AuthEmailLookup } from '@/lib/team-profile';
 import { DEFAULT_STAFF_ROLE, isInvitableTeamRole, normalizeRole, teamRoleForInvite } from '@/lib/org-membership';
 import { freshTeamInviteFields } from '@/lib/team-invite-guard';
@@ -343,12 +343,18 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
 
     const recordInvitation = async (): Promise<string | number | null> => {
       const fresh = freshTeamInviteFields();
-      const { data: existingInv } = await admin
+      const { data: existingRow } = await admin
         .from('engineer_invitations')
-        .select('id, first_name, last_name, accepted, accepted_at')
-        .ilike('email', exactEmailIlike(email))
+        .select('id, email, first_name, last_name, accepted, accepted_at')
+        .filter('email', 'imatch', exactEmailImatch(email))
         .eq('organization_id', orgId)
         .maybeSingle();
+      const existingInv = emailsMatch(
+        (existingRow as { email?: string | null } | null)?.email,
+        email
+      )
+        ? existingRow
+        : null;
       const names = {
         first_name: firstName || (existingInv as { first_name?: string | null } | null)?.first_name || null,
         last_name: lastName || (existingInv as { last_name?: string | null } | null)?.last_name || null,
@@ -497,7 +503,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
         const { data, error } = await admin
           .from('user_profiles')
           .select('id, email, organization_id, role, first_name, last_name, onboarding_completed')
-          .ilike('email', exactEmailIlike(email))
+          .filter('email', 'imatch', exactEmailImatch(email))
           .limit(2);
         if (error || !Array.isArray(data)) return profileClosed();
         const rows = data.filter(
@@ -561,15 +567,17 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
 
     const priorInvite = await (async () => {
       const columns =
-        'id, role, first_name, last_name, accepted, expires_at, created_at, created_auth_user_id';
+        'id, email, role, first_name, last_name, accepted, expires_at, created_at, created_auth_user_id';
+      const acceptRow = (row: { email?: string | null } | null) =>
+        row && emailsMatch(row.email, email) ? row : null;
       const first = await admin
         .from('engineer_invitations')
         .select(columns)
-        .ilike('email', exactEmailIlike(email))
+        .filter('email', 'imatch', exactEmailImatch(email))
         .eq('organization_id', orgId)
         .maybeSingle();
       if (!first.error) {
-        return first.data as {
+        return acceptRow(first.data as { email?: string | null } | null) as {
           role?: string | null;
           accepted?: boolean | null;
           expires_at?: string | null;
@@ -580,17 +588,17 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       if (/created_auth_user_id|column/i.test(String(first.error.message || ''))) {
         const fallback = await admin
           .from('engineer_invitations')
-          .select('id, role, first_name, last_name, accepted, expires_at, created_at')
-          .ilike('email', exactEmailIlike(email))
+          .select('id, email, role, first_name, last_name, accepted, expires_at, created_at')
+          .filter('email', 'imatch', exactEmailImatch(email))
           .eq('organization_id', orgId)
           .maybeSingle();
-        return (fallback.data as {
+        return acceptRow(fallback.data as { email?: string | null } | null) as {
           role?: string | null;
           accepted?: boolean | null;
           expires_at?: string | null;
           created_at?: string | null;
           created_auth_user_id?: string | null;
-        } | null) ?? null;
+        } | null;
       }
       return null;
     })();

@@ -236,9 +236,14 @@ function claimAdmin(state: {
             Object.assign(state.invite, payload);
             return { data: null, error: null };
           }
-          const email = String(state.invite.email || '').toLowerCase();
-          const wanted = filters.email != null ? String(filters.email).toLowerCase() : null;
-          if (wanted && wanted !== email) return { data: null, error: null };
+          const email = String(state.invite.email || '').trim();
+          const wanted = filters.email != null ? String(filters.email) : null;
+          if (wanted) {
+            const exact = wanted.startsWith('^')
+              ? new RegExp(wanted, 'i').test(email)
+              : wanted.toLowerCase() === email.toLowerCase();
+            if (!exact) return { data: null, error: null };
+          }
           if (filters.accepted === false && state.invite.accepted !== false) {
             return { data: null, error: null };
           }
@@ -305,6 +310,10 @@ function claimAdmin(state: {
           return api;
         },
         ilike(column: string, value: unknown) {
+          filters[column] = value;
+          return api;
+        },
+        filter(column: string, _operator: string, value: unknown) {
           filters[column] = value;
           return api;
         },
