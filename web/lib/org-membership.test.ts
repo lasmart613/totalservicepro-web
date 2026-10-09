@@ -291,7 +291,7 @@ test('creating your own shop after an FSE invite still adds a home membership', 
   assert.doesNotMatch(pending, /organization_memberships'\)\.upsert/);
 
   const membershipsRoute = readFileSync(join(here, '../app/api/org/memberships/route.ts'), 'utf8');
-  assert.match(membershipsRoute, /const email = \(user\.email \|\| ''\)/);
+  assert.match(membershipsRoute, /normalizeLookupEmail\(user\.email\)/);
   assert.doesNotMatch(membershipsRoute, /profile\?\.email/);
   assert.doesNotMatch(membershipsRoute, /upsertMembership/);
   assert.doesNotMatch(membershipsRoute, /\.insert\(|\.update\(|\.upsert\(/);
