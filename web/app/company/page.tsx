@@ -35,6 +35,7 @@ import { applyBrandColorPair, normalizeHex } from '@/lib/company-theme';
 import { canEditOrgCurrency } from '@/lib/org-money';
 import { StripeConnectCard } from '@/components/StripeConnectCard';
 import { ORG_TIME_ZONE_CHOICES } from '@/lib/org-timezone';
+import { RemoveTeamMemberButton } from '@/components/RemoveTeamMemberButton';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -1117,13 +1118,29 @@ function CompanyProfile() {
                             <div className="text-[10px] text-[var(--text3)]">{t('Setup not finished')}</div>
                           )}
                         </div>
-                        {m.onboarding_completed !== true && m.email ? (
-                          <button
-                            type="button"
-                            className="btn btn-secondary text-xs self-start"
-                            onClick={() => resendInviteEmail(m.email, m.role)}
-                          >{t('Resend invite email')}</button>
-                        ) : null}
+                        <div className="flex flex-col items-start gap-1">
+                          {m.onboarding_completed !== true && m.email ? (
+                            <button
+                              type="button"
+                              className="btn btn-secondary text-xs self-start"
+                              onClick={() => resendInviteEmail(m.email, m.role)}
+                            >{t('Resend invite email')}</button>
+                          ) : null}
+                          {m.id ? (
+                            <RemoveTeamMemberButton
+                              memberId={String(m.id)}
+                              name={[m.first_name, m.last_name].filter(Boolean).join(' ') || m.email || ''}
+                              role={m.role}
+                              isHome={m.is_home === true}
+                              isFounder={m.is_founder === true || m.founder === true}
+                              callerId={selfUserId}
+                              callerRole={userRole}
+                              organizationId={org?.id}
+                              orgCreatedBy={org?.created_by ? String(org.created_by) : null}
+                              onRemoved={() => loadTeamMembers(org.id)}
+                            />
+                          ) : null}
+                        </div>
                       </li>
                     ))}
                   </ul>
