@@ -832,6 +832,14 @@ test('a removed member can be re-invited and the rejoin claim adds the membershi
                 eq() {
                   return api;
                 },
+                ilike() {
+                  return api;
+                },
+                limit() {
+                  if (table !== 'user_profiles') return Promise.resolve({ data: [], error: null });
+                  const row = state.profiles.find((item) => item.id === MEMBER) || null;
+                  return Promise.resolve({ data: row ? [row] : [], error: null });
+                },
                 maybeSingle: async () => {
                   if (table === 'organizations') {
                     return { data: { id: ORG, name: 'North Shop', type: 'service_company', services_offered: null }, error: null };
@@ -976,6 +984,13 @@ async function reopenAccepted(invite: Invite, profile: Profile) {
               },
               eq() {
                 return api;
+              },
+              ilike() {
+                return api;
+              },
+              limit() {
+                if (table !== 'user_profiles') return Promise.resolve({ data: [], error: null });
+                return Promise.resolve({ data: profile ? [profile] : [], error: null });
               },
               maybeSingle: async () => {
                 if (table === 'organizations') {
