@@ -29,6 +29,11 @@ export function isPasswordSetupPath(path: string | null | undefined): boolean {
   );
 }
 
+/**
+ * The only local gate for next/redirect paths added here.
+ * Replace this body with safeRedirectPath from web/lib/safe-redirect.ts
+ * once that helper is on main. Do not add a second checker.
+ */
 function safeInternal(raw: string | null | undefined): string {
   if (!raw) return '';
   const value = raw.trim();

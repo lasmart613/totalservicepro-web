@@ -12,6 +12,16 @@ const repo = join(here, '../..');
 const mainSrc = join(repo, 'app/src/main/java/com/photometrytools/GeoMapsUrl.java');
 const testSrc = join(repo, 'app/src/test/java/com/photometrytools/GeoMapsUrlTest.java');
 
+/** spawnSync status is null when the binary is missing (ENOENT). */
+function javacAvailable() {
+  const probe = spawnSync('javac', ['-version'], { encoding: 'utf8' });
+  return probe.status === 0;
+}
+
+const skipJava = javacAvailable()
+  ? false
+  : 'javac is not installed (no JDK on PATH); skipping the GeoMapsUrl.java check';
+
 const TEMPE = 'https://www.google.com/maps/search/?api=1&query=Tempe%2C%20AZ';
 const MAIN_ST =
   'https://www.google.com/maps/search/?api=1&query=100%20Main%20St%2C%20Evanston%2C%20IL%2060201';
@@ -47,7 +57,9 @@ test('mapsSearchUrlFromGeo reads ?q= on opaque geo URIs and builds the https Map
     mapsSearchUrlFromGeo('geo:0,0?q=Tempe%2C%20AZ', undefined, formEncode),
     TEMPE
   );
+});
 
+test('GeoMapsUrl.java matches the JS twin', { skip: skipJava }, () => {
   const out = mkdtempSync(join(tmpdir(), 'geomaps-'));
   const compiled = spawnSync('javac', ['-d', out, mainSrc, testSrc], { encoding: 'utf8' });
   assert.equal(compiled.status, 0, compiled.stderr || compiled.stdout || 'javac failed');
