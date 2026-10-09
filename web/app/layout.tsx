@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, DM_Sans } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import "./fa/fa-preview.css";
 import "./he/he-preview.css";
@@ -12,27 +12,41 @@ import { ThemeScript } from "@/components/ThemeScript";
 import { ThemeSync } from "@/components/ThemeSync";
 import { rootMetadata } from "@/lib/seo";
 
-const geistSans = Geist({
+// Latin unicode-range from the Google Fonts CSS these files were taken from.
+const latinUnicodeRange =
+  "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD";
+
+// Geist sans, latin variable (wght 100–900, includes 400/500/600/700/800).
+const geistSans = localFont({
+  src: "./fonts/geist/Geist-latin.woff2",
   variable: "--font-geist-sans",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  weight: "100 900",
+  style: "normal",
   display: "swap",
   preload: false,
+  declarations: [{ prop: "unicode-range", value: latinUnicodeRange }],
 });
 
-const geistMono = Geist_Mono({
+// Geist Mono, latin variable (wght 100–900).
+const geistMono = localFont({
+  src: "./fonts/geist-mono/GeistMono-latin.woff2",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
+  weight: "100 900",
+  style: "normal",
   display: "swap",
   preload: false,
+  declarations: [{ prop: "unicode-range", value: latinUnicodeRange }],
 });
 
-const dmSans = DM_Sans({
+// DM Sans, latin variable (wght 100–1000, includes 400/500/600/700/800).
+const dmSans = localFont({
+  src: "./fonts/dm-sans/DMSans-latin.woff2",
   variable: "--font-dm-sans",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
+  weight: "100 1000",
+  style: "normal",
   display: "swap",
   preload: true,
+  declarations: [{ prop: "unicode-range", value: latinUnicodeRange }],
 });
 
 export const metadata: Metadata = rootMetadata;

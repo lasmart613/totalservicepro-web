@@ -6,7 +6,10 @@
   publish = ".next"
 
 [build.environment]
-  NODE_VERSION = "20"
+  # Site UI Node is 20.20.2. This sets the build command (`next build`) only.
+  # @netlify/plugin-nextjs still runs on Netlify's system Node (22) when the
+  # build Node is below 22.12 — NODE_VERSION does not move that plugin step.
+  NODE_VERSION = "20.20.2"
   SECRETS_SCAN_OMIT_PATHS = "lib/supabase/client.ts,web/lib/supabase/client.ts"
 
 [[plugins]]
