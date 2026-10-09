@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { emailsMatch, exactEmailIlike, normalizeLookupEmail } from '@/lib/email-match';
 import { findAuthUserByEmail, type AuthEmailLookup } from '@/lib/team-profile';
 import { DEFAULT_STAFF_ROLE, isInvitableTeamRole, normalizeRole, teamRoleForInvite } from '@/lib/org-membership';
 import { freshTeamInviteFields } from '@/lib/team-invite-guard';
@@ -175,7 +176,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
     }
 
     const body = (await req.json()) as InviteBody;
-    const email = (body.email || '').toLowerCase().trim();
+    const email = normalizeLookupEmail(body.email);
     const emailError = teamInviteEmailError(email);
     if (emailError) {
       return respond({ error: emailError }, 400);
@@ -345,7 +346,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       const { data: existingInv } = await admin
         .from('engineer_invitations')
         .select('id, first_name, last_name, accepted, accepted_at')
-        .eq('email', email)
+        .ilike('email', exactEmailIlike(email))
         .eq('organization_id', orgId)
         .maybeSingle();
       const names = {
@@ -476,31 +477,52 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       });
     };
 
+    const profileMiss = (): InviteProfileLookup => ({
+      status: 'not_found',
+      moonlight: false,
+      memberHere: false,
+      firstName: null,
+      onboardingCompleted: null,
+    });
+    const profileClosed = (): InviteProfileLookup => ({
+      status: 'error',
+      moonlight: false,
+      memberHere: false,
+      firstName: null,
+      onboardingCompleted: null,
+    });
+
     const lookupProfile = async (): Promise<InviteProfileLookup> => {
       try {
         const { data, error } = await admin
           .from('user_profiles')
           .select('id, email, organization_id, role, first_name, last_name, onboarding_completed')
-          .eq('email', email)
-          .maybeSingle();
-        if (error) {
-          return { status: 'error', moonlight: false, memberHere: false, firstName: null, onboardingCompleted: null };
-        }
-        if (!data?.id) {
-          return { status: 'not_found', moonlight: false, memberHere: false, firstName: null, onboardingCompleted: null };
-        }
+          .ilike('email', exactEmailIlike(email))
+          .limit(2);
+        if (error || !Array.isArray(data)) return profileClosed();
+        const rows = data.filter(
+          (row: { id?: string | null; email?: string | null }) => row?.id && emailsMatch(row.email, email)
+        );
+        if (rows.length > 1) return profileClosed();
+        if (rows.length !== 1) return profileMiss();
+        const found = rows[0] as {
+          id?: string | null;
+          organization_id?: unknown;
+          first_name?: string | null;
+          onboarding_completed?: boolean | null;
+        };
         const otherOrg =
-          data.organization_id != null && String(data.organization_id) !== String(orgId);
-        const memberHere = data.organization_id != null && String(data.organization_id) === String(orgId);
+          found.organization_id != null && String(found.organization_id) !== String(orgId);
+        const memberHere = found.organization_id != null && String(found.organization_id) === String(orgId);
         return {
           status: 'found',
           moonlight: otherOrg,
           memberHere,
-          firstName: (data as { first_name?: string | null }).first_name || null,
-          onboardingCompleted: (data as { onboarding_completed?: boolean | null }).onboarding_completed ?? null,
+          firstName: found.first_name || null,
+          onboardingCompleted: found.onboarding_completed ?? null,
         };
       } catch {
-        return { status: 'error', moonlight: false, memberHere: false, firstName: null, onboardingCompleted: null };
+        return profileClosed();
       }
     };
 
@@ -511,6 +533,10 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       authLookup = { status: 'error' };
     }
     const profileLookup = await lookupProfile();
+    if (profileLookup.status === 'error') {
+      const closed = teamInviteClosedBody();
+      return respond(closed.body, closed.status);
+    }
     const audience = decideTeamInviteAudience({
       auth: authLookup,
       profile: profileLookup.status,
@@ -539,7 +565,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       const first = await admin
         .from('engineer_invitations')
         .select(columns)
-        .eq('email', email)
+        .ilike('email', exactEmailIlike(email))
         .eq('organization_id', orgId)
         .maybeSingle();
       if (!first.error) {
@@ -555,7 +581,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
         const fallback = await admin
           .from('engineer_invitations')
           .select('id, role, first_name, last_name, accepted, expires_at, created_at')
-          .eq('email', email)
+          .ilike('email', exactEmailIlike(email))
           .eq('organization_id', orgId)
           .maybeSingle();
         return (fallback.data as {

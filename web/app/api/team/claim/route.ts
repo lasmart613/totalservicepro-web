@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { exactEmailIlike, normalizeLookupEmail } from '@/lib/email-match';
 import { ensureTeamMemberProfile } from '@/lib/team-profile';
 import {
   decideClaim,
@@ -124,7 +125,7 @@ export async function runTeamClaim(
       return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
     }
 
-    const email = user.email.toLowerCase().trim();
+    const email = normalizeLookupEmail(user.email);
     const meta = user.user_metadata || {};
     let body: ClaimBody = {};
     try {
@@ -166,7 +167,7 @@ export async function runTeamClaim(
       const { data: openInv, error: openError } = await admin
         .from('engineer_invitations')
         .select('*')
-        .ilike('email', email)
+        .ilike('email', exactEmailIlike(email))
         .eq('accepted', false)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -180,7 +181,7 @@ export async function runTeamClaim(
       const { data: anyInv, error: anyError } = await admin
         .from('engineer_invitations')
         .select('*')
-        .ilike('email', email)
+        .ilike('email', exactEmailIlike(email))
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();

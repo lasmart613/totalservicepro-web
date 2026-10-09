@@ -3,6 +3,7 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { exactEmailIlike } from './email-match.ts';
 import {
   AUTH_EMAIL_LOOKUP_MAX_PAGES,
   AUTH_EMAIL_LOOKUP_PAGE_SIZE,
@@ -204,7 +205,7 @@ test('a user past the first 2000 auth rows is found by exact email', async () =>
           return {
             select() {
               return {
-                eq(column: string, value: string) {
+                ilike(column: string, value: string) {
                   assert.equal(column, 'email');
                   assert.equal(value, target.email);
                   return Promise.resolve({ data: [target], error: null });
@@ -282,7 +283,7 @@ test('an unfinished or failed email lookup is an error, not a new user', async (
           return {
             select() {
               return {
-                eq: () => Promise.resolve({ data: [], error: null }),
+                ilike: () => Promise.resolve({ data: [], error: null }),
               };
             },
           };
@@ -326,7 +327,7 @@ test('an unfinished or failed email lookup is an error, not a new user', async (
             return {
               select() {
                 return {
-                  eq: () =>
+                  ilike: () =>
                     Promise.resolve({
                       data: [
                         { id: 'a', email: 'person@example.com' },
@@ -381,6 +382,66 @@ test('getUserByEmail finds the account without paging listUsers', async () => {
   assert.equal(listed, 0);
   assert.equal(result.status, 'found');
   if (result.status === 'found') assert.equal(result.user.id, 'user-2001');
+});
+
+test('auth email lookup matches case and does not treat percent or underscore as wildcards', async () => {
+  const rows = [
+    { id: 'decoy-underscore', email: 'aXb@example.com' },
+    { id: 'decoy-percent', email: 'axxb@example.com' },
+    { id: 'exact-underscore', email: 'A_B@example.com' },
+    { id: 'exact-percent', email: 'A%B@example.com' },
+  ];
+  const admin: AuthEmailLookupClient = {
+    auth: listUsersBomb(),
+    schema() {
+      return {
+        from() {
+          return {
+            select() {
+              return {
+                ilike(_column: string, value: string) {
+                  const hits = rows.filter((row) => likeMatches(row.email, value));
+                  return Promise.resolve({ data: hits, error: null });
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+
+  const underscore = await findAuthUserByEmail(admin, 'a_b@example.com', { fetchAdminUsers: null });
+  assert.equal(underscore.status, 'found');
+  if (underscore.status === 'found') assert.equal(underscore.user.id, 'exact-underscore');
+
+  const percent = await findAuthUserByEmail(admin, 'a%b@example.com', { fetchAdminUsers: null });
+  assert.equal(percent.status, 'found');
+  if (percent.status === 'found') assert.equal(percent.user.id, 'exact-percent');
+
+  const onlyDecoy: AuthEmailLookupClient = {
+    auth: listUsersBomb(),
+    schema() {
+      return {
+        from() {
+          return {
+            select() {
+              return {
+                ilike(_column: string, value: string) {
+                  const hits = rows
+                    .filter((row) => row.id.startsWith('decoy'))
+                    .filter((row) => likeMatches(row.email, value));
+                  return Promise.resolve({ data: hits, error: null });
+                },
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+  const missed = await findAuthUserByEmail(onlyDecoy, 'a_b@example.com', { fetchAdminUsers: null });
+  assert.equal(missed.status, 'not_found');
 });
 
 test('invite responses and the team UI never hand the inviter a recovery link', () => {
@@ -506,9 +567,35 @@ test('a pending invite-created account gets a setup link only when it has never 
 
 type SentMail = { to: string[]; html: string; text: string; subject: string };
 
+/** PostgreSQL ILIKE with backslash escapes. Unescaped % and _ are wildcards. */
+function likeMatches(stored: string, pattern: string): boolean {
+  let re = '';
+  const src = String(pattern || '').toLowerCase();
+  const value = String(stored || '').trim().toLowerCase();
+  for (let i = 0; i < src.length; i += 1) {
+    const ch = src[i];
+    if (ch === '\\' && i + 1 < src.length) {
+      re += src[i + 1].replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      i += 1;
+      continue;
+    }
+    if (ch === '%') {
+      re += '[\\s\\S]*';
+      continue;
+    }
+    if (ch === '_') {
+      re += '[\\s\\S]';
+      continue;
+    }
+    re += ch.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp(`^${re}$`).test(value);
+}
+
 function inviteAdmin(state: {
   invite: Record<string, unknown> | null;
   profile?: Record<string, unknown> | null;
+  profiles?: Array<Record<string, unknown> | null>;
   linkHandler?: (args: { type?: string }) => {
     data?: { user?: { id?: string }; properties?: { action_link?: string } } | null;
     error?: { message?: string } | null;
@@ -517,15 +604,46 @@ function inviteAdmin(state: {
   const linkCalls: Array<{ type?: string }> = [];
   const updates: Array<Record<string, unknown>> = [];
   const inserts: Array<Record<string, unknown>> = [];
+  const emailLooks: string[] = [];
+  const profileRows = (state.profiles ?? (state.profile ? [state.profile] : [])).filter(
+    (row): row is Record<string, unknown> => !!row
+  );
   const admin = {
     from(table: string) {
       let selected = '';
+      const filters: Array<{ op: 'eq' | 'ilike'; column: string; value: unknown }> = [];
+      const matchesEmail = (row: { email?: unknown } | null) => {
+        const emailFilter = filters.find((filter) => filter.column === 'email');
+        if (!emailFilter) return true;
+        if (!row) return false;
+        const stored = String(row.email ?? '');
+        if (emailFilter.op === 'ilike') return likeMatches(stored, String(emailFilter.value ?? ''));
+        return stored.trim().toLowerCase() === String(emailFilter.value ?? '').trim().toLowerCase();
+      };
+      const orgOk = (row: { organization_id?: unknown } | null) => {
+        const orgFilter = filters.find((filter) => filter.column === 'organization_id');
+        if (!orgFilter) return true;
+        if (!row) return false;
+        return String(row.organization_id) === String(orgFilter.value);
+      };
       const api = {
         select(columns: string) {
           selected = columns;
           return api;
         },
-        eq() {
+        eq(column: string, value: unknown) {
+          filters.push({ op: 'eq', column, value });
+          return api;
+        },
+        ilike(column: string, value: unknown) {
+          if (column === 'email') emailLooks.push(String(value));
+          filters.push({ op: 'ilike', column, value });
+          return api;
+        },
+        limit() {
+          if (table === 'user_profiles') {
+            return Promise.resolve({ data: profileRows.filter((row) => matchesEmail(row)), error: null });
+          }
           return api;
         },
         maybeSingle: async () => {
@@ -533,11 +651,16 @@ function inviteAdmin(state: {
             return { data: { id: 9, name: 'North Shop', type: 'service_company', services_offered: null }, error: null };
           }
           if (table === 'user_profiles') {
-            return { data: state.profile ?? null, error: null };
+            const rows = profileRows.filter((row) => matchesEmail(row));
+            if (rows.length > 1) return { data: null, error: { code: 'PGRST116', message: 'multiple rows' } };
+            return { data: rows[0] ?? null, error: null };
           }
           if (table === 'engineer_invitations') {
             if (state.invite && selected.includes('created_auth_user_id') && state.invite.readError) {
               return { data: null, error: { message: String(state.invite.readError) } };
+            }
+            if (!state.invite || !matchesEmail(state.invite) || !orgOk(state.invite)) {
+              return { data: null, error: null };
             }
             return { data: state.invite, error: null };
           }
@@ -578,7 +701,7 @@ function inviteAdmin(state: {
       },
     },
   };
-  return { admin, linkCalls, updates, inserts };
+  return { admin, linkCalls, updates, inserts, emailLooks };
 }
 
 async function postExistingInvite(opts: {
@@ -589,6 +712,8 @@ async function postExistingInvite(opts: {
     | { status: 'not_found' };
   invite: Record<string, unknown> | null;
   profile?: Record<string, unknown> | null;
+  profiles?: Array<Record<string, unknown> | null>;
+  email?: string;
   role?: string;
   linkHandler?: (args: { type?: string }) => {
     data?: { user?: { id?: string }; properties?: { action_link?: string } } | null;
@@ -620,8 +745,10 @@ async function postExistingInvite(opts: {
   const harness = inviteAdmin({
     invite: opts.invite,
     profile: opts.profile,
+    profiles: opts.profiles,
     linkHandler: opts.linkHandler,
   });
+  const requestEmail = opts.email || INVITEE;
   try {
     const response = await runTeamInvite(
       new NextRequest('http://127.0.0.1/api/team/invite', {
@@ -630,7 +757,7 @@ async function postExistingInvite(opts: {
           authorization: 'Bearer session-token',
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ email: INVITEE, role: opts.role || 'fse', resend: true }),
+        body: JSON.stringify({ email: requestEmail, role: opts.role || 'fse', resend: true }),
       }),
       {
         hasServiceRole: () => true,
@@ -641,7 +768,7 @@ async function postExistingInvite(opts: {
           if (opts.auth.status === 'not_found') return { status: 'not_found' as const };
           return {
             status: 'found' as const,
-            user: { id: opts.auth.id, email: INVITEE, last_sign_in_at: opts.auth.lastSignInAt },
+            user: { id: opts.auth.id, email: requestEmail.trim().toLowerCase(), last_sign_in_at: opts.auth.lastSignInAt },
           };
         },
         createUserClient: () => ({
@@ -678,6 +805,7 @@ async function postExistingInvite(opts: {
       linkCalls: harness.linkCalls,
       updates: harness.updates,
       inserts: harness.inserts,
+      emailLooks: harness.emailLooks,
     };
   } finally {
     console.log = originals.log;
@@ -865,6 +993,133 @@ test('resend to an existing member whose invite is accepted keeps accepted_at an
   assertNoLink(result, SETUP_LINK);
 });
 
+test('a mixed-case profile email is an existing member: moonlight, and resend keeps accepted', async () => {
+  const moonlight = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: '2026-10-02T00:00:00.000Z' },
+    email: 'Person@Example.com',
+    invite: null,
+    profile: {
+      id: 'auth-1',
+      email: 'Person@Example.com',
+      organization_id: 4,
+      role: 'fse',
+      onboarding_completed: true,
+      first_name: 'Pat',
+    },
+  });
+  assert.equal(moonlight.status, 200, JSON.stringify(moonlight.body));
+  assert.equal(moonlight.body.moonlight, true);
+  assert.equal(moonlight.body.alreadyRegistered, true);
+  assert.equal(moonlight.linkCalls.length, 0);
+  assert.equal(moonlight.inserts[0]?.email, 'person@example.com');
+  assert.ok(moonlight.emailLooks.includes(exactEmailIlike('Person@Example.com')));
+  assertNoLink(moonlight, SETUP_LINK);
+
+  const acceptedAt = '2026-10-01T12:00:00.000Z';
+  const expiresAt = '2026-10-08T12:00:00.000Z';
+  const invite = {
+    ...pendingCreated,
+    email: 'Person@Example.com',
+    accepted: true,
+    accepted_at: acceptedAt,
+    expires_at: expiresAt,
+  };
+  const resend = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: '2026-10-02T00:00:00.000Z' },
+    email: 'person@example.com',
+    invite,
+    profile: {
+      id: 'auth-1',
+      email: 'Person@Example.com',
+      organization_id: 9,
+      role: 'fse',
+      onboarding_completed: true,
+      first_name: 'Pat',
+    },
+  });
+  assert.equal(resend.status, 200, JSON.stringify(resend.body));
+  assert.equal(resend.body.emailed, true);
+  assert.equal(resend.body.moonlight, false);
+  assert.equal(resend.linkCalls.length, 0);
+  assert.equal(invite.accepted, true);
+  assert.equal(invite.accepted_at, acceptedAt);
+  assert.equal(invite.expires_at, expiresAt);
+  assert.equal(isPendingTeamInvite(invite), false);
+  assertNoLink(resend, SETUP_LINK);
+});
+
+test('a case-insensitive duplicate profile fails closed', async () => {
+  const result = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: '2026-10-02T00:00:00.000Z' },
+    email: 'person@example.com',
+    invite: { ...pendingCreated, accepted: true, accepted_at: '2026-10-01T12:00:00.000Z' },
+    profiles: [
+      {
+        id: 'auth-1',
+        email: 'Person@Example.com',
+        organization_id: 9,
+        role: 'fse',
+        onboarding_completed: true,
+      },
+      {
+        id: 'auth-2',
+        email: 'person@example.com',
+        organization_id: 4,
+        role: 'fse',
+        onboarding_completed: true,
+      },
+    ],
+  });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.ok, false);
+  assert.match(String(result.body.error), /No invite link was created/);
+  assert.equal(result.sent.length, 0);
+  assert.equal(result.linkCalls.length, 0);
+  assert.equal(result.updates.length, 0);
+  assert.equal(result.inserts.length, 0);
+  assertNoLink(result, SETUP_LINK);
+});
+
+test('percent and underscore in an invite email are not wildcards', async () => {
+  const decoy = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: '2026-10-02T00:00:00.000Z' },
+    email: 'a_b@example.com',
+    invite: null,
+    profile: {
+      id: 'other',
+      email: 'aXb@example.com',
+      organization_id: 4,
+      role: 'fse',
+      onboarding_completed: true,
+    },
+  });
+  assert.equal(decoy.status, 200, JSON.stringify(decoy.body));
+  assert.equal(decoy.body.moonlight, false);
+  assert.ok(decoy.emailLooks.length > 0);
+  assert.ok(decoy.emailLooks.every((pattern) => pattern === exactEmailIlike('a_b@example.com')));
+  assert.match(exactEmailIlike('a_b@example.com'), /\\_/);
+
+  const percent = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-9', lastSignInAt: '2026-10-02T00:00:00.000Z' },
+    email: 'a%b@example.com',
+    invite: null,
+    profiles: [
+      { id: 'decoy', email: 'axxb@example.com', organization_id: 4, role: 'fse', onboarding_completed: true },
+      { id: 'exact', email: 'A%B@example.com', organization_id: 4, role: 'owner', onboarding_completed: true },
+    ],
+  });
+  assert.equal(percent.status, 200, JSON.stringify(percent.body));
+  assert.equal(percent.body.moonlight, true);
+  assert.ok(percent.emailLooks.every((pattern) => pattern === exactEmailIlike('a%b@example.com')));
+  assert.match(exactEmailIlike('a%b@example.com'), /\\%/);
+  assert.equal(percent.linkCalls.length, 0);
+});
+
 test('resend to an existing member whose invite is not accepted marks it accepted and sends the sign-in email only', async () => {
   const expiresAt = '2026-10-16T00:00:00.000Z';
   const invite = {
@@ -1049,9 +1304,12 @@ function claimAdmin(state: {
             Object.assign(state.invite, payload);
             return { data: null, error: null };
           }
-          const email = String(state.invite.email || '').toLowerCase();
-          const wanted = filters.email != null ? String(filters.email).toLowerCase() : null;
-          if (wanted && wanted !== email) return { data: null, error: null };
+          if (
+            filters.email != null &&
+            !likeMatches(String(state.invite.email || ''), String(filters.email))
+          ) {
+            return { data: null, error: null };
+          }
           if (filters.accepted === false && state.invite.accepted !== false) {
             return { data: null, error: null };
           }

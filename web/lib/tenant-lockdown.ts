@@ -6,6 +6,8 @@
  * and mirror public.user_profiles_sync_membership.
  */
 
+import { normalizeLookupEmail } from '@/lib/email-match';
+
 export const PLATFORM_ADMIN_ROLE = 'admin';
 
 /** Roles a signed-in user must never grant themselves. */
@@ -122,8 +124,8 @@ export function authorizeInviteAccept(input: {
   inviteOrgId?: number | string | null;
   inviteRole?: string | null;
 }): { ok: true; organizationId: number | string; role: string } | AuthzFailure {
-  const caller = String(input.callerEmail || '').toLowerCase().trim();
-  const invite = String(input.inviteEmail || '').toLowerCase().trim();
+  const caller = normalizeLookupEmail(input.callerEmail);
+  const invite = normalizeLookupEmail(input.inviteEmail);
   if (!caller) {
     return { ok: false, status: 401, error: 'Not signed in' };
   }

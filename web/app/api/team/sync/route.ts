@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { normalizeLookupEmail } from '@/lib/email-match';
 import { listMemberUserIdsForOrg } from '@/lib/org-membership-server';
 import { teamSyncInviteStatus } from '@/lib/team-invite-guard';
 
@@ -106,12 +107,12 @@ export async function POST(req: NextRequest) {
 
     const onTeamEmails = new Set(
       (members || [])
-        .map((m: { email?: string | null }) => String(m.email || '').toLowerCase().trim())
+        .map((m: { email?: string | null }) => normalizeLookupEmail(m.email))
         .filter(Boolean)
     );
 
     const report = (invites || []).map((inv) => {
-      const email = String(inv.email || '').toLowerCase().trim();
+      const email = normalizeLookupEmail(inv.email);
       const status = teamSyncInviteStatus({
         accepted: inv.accepted,
         expires_at: inv.expires_at,
