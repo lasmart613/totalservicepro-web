@@ -13,6 +13,8 @@
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import { isOwnerOrgType } from '../org-types.ts';
+import { PRODUCTION_SITE_ORIGIN } from '../site-origin.ts';
+import { safeRedirectPath } from '../safe-redirect.ts';
 import { checkoutLooksLikeInvoicePay } from './apply-invoice-payment.ts';
 
 export const STRIPE_PARTNER_REFERRAL_ENV = 'STRIPE_PARTNER_REFERRAL_URL';
@@ -428,11 +430,9 @@ const CONNECT_NEXT_EXACT = new Set([
 ]);
 
 export function safeConnectNext(next: string | null | undefined): string {
-  const raw = String(next || '').trim() || '/company';
-  if (!raw.startsWith('/') || raw.startsWith('//') || raw.includes('\\') || raw.includes('://')) {
-    return '/company';
-  }
-  const path = raw.split('?')[0].split('#')[0];
+  const safe = safeRedirectPath(next, PRODUCTION_SITE_ORIGIN, '');
+  if (!safe) return '/company';
+  const path = safe.split('?')[0].split('#')[0];
   if (CONNECT_NEXT_EXACT.has(path) || path.startsWith('/marketplace/parts/')) return path;
   return '/company';
 }

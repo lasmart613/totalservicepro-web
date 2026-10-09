@@ -10,12 +10,7 @@ import { destAfterInviteClaim, inviteInPlay, type InviteClaimResult } from '@/li
 import { isTspAndroidWebView } from '@/lib/android-session';
 import { publicAuthMessage } from '@/lib/auth-errors';
 import { decideAuthCallback, setPasswordHref } from '@/lib/auth-link-route';
-
-function safeNextPath(raw: string | null): string {
-  if (!raw) return '';
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '';
-  return raw;
-}
+import { safeRedirectPath } from '@/lib/safe-redirect';
 
 /**
  * OAuth / magic-link / email-confirm return URL.
@@ -36,7 +31,11 @@ function AuthCallbackInner() {
         const url = new URL(window.location.href);
         const code = url.searchParams.get('code');
         const err = url.searchParams.get('error_description') || url.searchParams.get('error');
-        let next = safeNextPath(searchParams.get('next') || url.searchParams.get('next'));
+        let next = safeRedirectPath(
+          searchParams.get('next') || url.searchParams.get('next'),
+          url.origin,
+          ''
+        );
         const wantApp =
           url.searchParams.get('app') === '1' || searchParams.get('app') === '1';
 

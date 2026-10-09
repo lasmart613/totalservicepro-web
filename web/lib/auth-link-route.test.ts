@@ -9,6 +9,7 @@ import {
   CUSTOMER_CLAIM_DEST,
   RESET_PASSWORD_HEADING,
   TEAM_INVITE_PASSWORD_HEADING,
+  decideAuthCallback,
   destinationAfterAuthLink,
   loginMagicLinkRedirect,
   recoveryRedirect,
@@ -129,6 +130,48 @@ test('PKCE links with no type follow flow and next, not the word magiclink', () 
   assert.equal(destinationAfterAuthLink({ type: '', next: '/hub' }), '/hub');
 });
 
+test('open-redirect next values fall back so onboarding can win', () => {
+  const rejected = [
+    '/\\evil.example',
+    '%2F%5Cevil.example',
+    '/\t/evil.example',
+    '/\n/evil.example',
+    '/%09/evil.example',
+    '/%0a/evil.example',
+  ];
+  for (const raw of rejected) {
+    assert.deepEqual(
+      decideAuthCallback({ type: 'magiclink', next: raw }),
+      { kind: 'continue', next: '' },
+      raw
+    );
+    assert.deepEqual(
+      decideAuthCallback({ type: 'signup', next: raw }),
+      { kind: 'continue', next: '' },
+      raw
+    );
+    assert.equal(destinationAfterAuthLink({ type: 'magiclink', next: raw }), '/hub', raw);
+    assert.equal(
+      destinationAfterAuthLink({ type: 'magiclink', next: raw, homeDest: raw }),
+      '/hub',
+      raw
+    );
+    assert.equal(
+      destinationAfterAuthLink({
+        type: 'email',
+        next: raw,
+        pendingTeamInvite: true,
+        teamClaimDest: raw,
+      }),
+      '/onboarding/member',
+      raw
+    );
+    const magic = new URL(loginMagicLinkRedirect(ORIGIN, raw));
+    assert.equal(magic.searchParams.get('next'), '/hub', raw);
+    assert.equal(magic.hostname, 'repairplanet.net', raw);
+  }
+});
+
 test('emailed sign-in CTAs are login or claim pages, not set-password', () => {
   assert.equal(teamInviteLoginUrl(ORIGIN), `${ORIGIN}/login`);
   assert.doesNotMatch(teamInviteLoginUrl(ORIGIN), /set-password/);
@@ -148,6 +191,7 @@ test('emailed sign-in CTAs are login or claim pages, not set-password', () => {
 test('callback, set-password, and email callers use the link-type router', () => {
   const callback = readFileSync(join(here, '../app/auth/callback/page.tsx'), 'utf8');
   const setPassword = readFileSync(join(here, '../app/auth/set-password/page.tsx'), 'utf8');
+  const route = readFileSync(join(here, 'auth-link-route.ts'), 'utf8');
   const login = readFileSync(join(here, '../app/login/page.tsx'), 'utf8');
   const forgot = readFileSync(join(here, '../app/forgot-password/page.tsx'), 'utf8');
   const invite = readFileSync(join(here, '../app/api/team/invite/route.ts'), 'utf8');
@@ -155,12 +199,18 @@ test('callback, set-password, and email callers use the link-type router', () =>
 
   assert.match(callback, /decideAuthCallback/);
   assert.match(callback, /setPasswordHref/);
+  assert.match(callback, /safeRedirectPath\([\s\S]{0,240}url\.origin,\s*''/);
+  assert.doesNotMatch(callback, /function safeNextPath/);
   assert.doesNotMatch(callback, /authType === 'magiclink'/);
   assert.doesNotMatch(callback, /isInviteAuthType/);
   assert.doesNotMatch(callback, /router\.replace\('\/auth\/set-password'\)/);
 
   assert.match(setPassword, /setPasswordSubtitle/);
   assert.match(setPassword, /resolveSetPasswordFlow/);
+  assert.match(setPassword, /safeRedirectPath\(searchParams\.get\('next'\), window\.location\.origin, ''\)/);
+  assert.match(route, /safeRedirectPath/);
+  assert.doesNotMatch(route, /function safeInternal/);
+  assert.doesNotMatch(route, /startsWith\('\/\/'\)/);
   assert.doesNotMatch(setPassword, />Team invite — set your password</);
 
   assert.match(login, /loginMagicLinkRedirect/);

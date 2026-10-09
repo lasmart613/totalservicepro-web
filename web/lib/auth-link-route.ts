@@ -4,7 +4,13 @@
  * /auth/set-password is only for brand-new invite links (type=invite) and
  * password recovery (type=recovery). Magic links and email OTP sign existing
  * users in: pending team invite or clinic claim token, otherwise home.
+ *
+ * Every next or redirect path goes through safeRedirectPath. An empty result
+ * lets onboarding win, matching the callback and set-password pages.
  */
+
+import { safeRedirectPath } from './safe-redirect.ts';
+import { PRODUCTION_SITE_ORIGIN } from './site-origin.ts';
 
 const SET_PASSWORD = '/auth/set-password';
 const RESET_PASSWORD = '/reset-password';
@@ -30,18 +36,6 @@ export function isPasswordSetupPath(path: string | null | undefined): boolean {
 }
 
 /**
- * The only local gate for next/redirect paths added here.
- * Replace this body with safeRedirectPath from web/lib/safe-redirect.ts
- * once that helper is on main. Do not add a second checker.
- */
-function safeInternal(raw: string | null | undefined): string {
-  if (!raw) return '';
-  const value = raw.trim();
-  if (!value.startsWith('/') || value.startsWith('//')) return '';
-  return value;
-}
-
-/**
  * type=magiclink and type=email (OTP for an existing user) are sign-in.
  * A stale next=/auth/set-password does not turn them into password setup.
  * PKCE drops type; invite and recovery redirects still carry next and flow.
@@ -53,7 +47,7 @@ export function decideAuthCallback(input: {
 }): AuthLinkDecision {
   const type = String(input.type || '').trim().toLowerCase();
   const flow = String(input.flow || '').trim().toLowerCase();
-  const next = safeInternal(input.next);
+  const next = safeRedirectPath(input.next, PRODUCTION_SITE_ORIGIN, '');
 
   if (type === 'signup') {
     return { kind: 'continue', next: isPasswordSetupPath(next) ? '/onboarding' : next };
@@ -112,11 +106,11 @@ export function destinationAfterAuthLink(input: {
   if (decision.kind === 'set-password') return setPasswordHref(decision.flow);
   if (String(input.claimToken || '').trim()) return CUSTOMER_CLAIM_DEST;
   if (input.pendingTeamInvite) {
-    const dest = safeInternal(input.teamClaimDest || '');
+    const dest = safeRedirectPath(input.teamClaimDest, PRODUCTION_SITE_ORIGIN, '');
     return dest || '/onboarding/member';
   }
   if (decision.next) return decision.next;
-  return safeInternal(input.homeDest || '') || DEFAULT_SIGN_IN_HOME;
+  return safeRedirectPath(input.homeDest, PRODUCTION_SITE_ORIGIN, '') || DEFAULT_SIGN_IN_HOME;
 }
 
 function originOf(origin: string): string {
@@ -136,7 +130,7 @@ function callbackUrl(origin: string, pairs: Array<[string, string]>): string {
 export function setupLinkRedirect(origin: string, linkType: string): string {
   const invite = String(linkType || '').trim().toLowerCase() === 'invite';
   return callbackUrl(origin, [
-    ['next', SET_PASSWORD],
+    ['next', safeRedirectPath(SET_PASSWORD, origin, '')],
     ['flow', invite ? 'invite' : 'reset'],
   ]);
 }
@@ -151,7 +145,7 @@ export function loginMagicLinkRedirect(
   nextPath?: string | null,
   claimToken?: string | null
 ): string {
-  let next = safeInternal(nextPath || '');
+  let next = safeRedirectPath(nextPath, origin, '');
   if (!next || isPasswordSetupPath(next)) next = DEFAULT_SIGN_IN_HOME;
   const pairs: Array<[string, string]> = [['next', next]];
   const claim = String(claimToken || '').trim();

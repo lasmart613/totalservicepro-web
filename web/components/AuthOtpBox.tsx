@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { safeAuthEmailRedirect, safeRedirectPath } from '@/lib/safe-redirect';
 import { clientAuthOrigin } from '@/lib/site-origin';
 import { loginMagicLinkRedirect } from '@/lib/auth-link-route';
 
@@ -35,10 +36,13 @@ export default function AuthOtpBox({
   const cleanEmail = (email || '').trim().toLowerCase();
 
   function redirectUrl() {
-    if (emailRedirectTo) return emailRedirectTo;
     const origin = clientAuthOrigin();
-    if (mode === 'magic') return loginMagicLinkRedirect(origin, '/hub');
-    return `${origin}/auth/callback?next=/onboarding`;
+    const fallback =
+      mode === 'magic'
+        ? loginMagicLinkRedirect(origin, '/hub')
+        : `${origin}/auth/callback?next=${encodeURIComponent(safeRedirectPath('/onboarding', origin))}`;
+    if (emailRedirectTo) return safeAuthEmailRedirect(emailRedirectTo, origin, fallback);
+    return fallback;
   }
 
   async function resend() {

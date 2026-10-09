@@ -9,6 +9,7 @@ import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
 import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup } from '@/lib/auth-session';
 import { useRedirectSignedInOrgToPlans } from '@/lib/use-redirect-signed-in-org';
+import { safeRedirectPath } from '@/lib/safe-redirect';
 import { clientAuthOrigin } from '@/lib/site-origin';
 
 const SERVICES_OFFERED = [
@@ -113,7 +114,9 @@ export default function CompanySignup() {
             website: website || '',
             services_offered: selectedServices.length ? selectedServices.join(' | ') : '',
           },
-          emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
+          emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
+            safeRedirectPath('/onboarding', origin)
+          )}`,
         },
       });
       if (authError) throw authError;
