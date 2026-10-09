@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { signupAssignsTenant } from '@/lib/tenant-lockdown';
+import { safeAuthEmailRedirect } from '@/lib/safe-redirect';
 import { publicSiteOrigin } from '@/lib/site-origin';
 
 /**
@@ -25,7 +26,13 @@ export async function POST(req: NextRequest) {
     const password = String(body.password || '');
     const firstName = String(body.firstName || body.first_name || '').trim();
     const lastName = String(body.lastName || body.last_name || '').trim();
-    const emailRedirectTo = String(body.emailRedirectTo || '').trim();
+    const origin = publicSiteOrigin(req);
+    const fallbackRedirect = `${origin}/auth/callback?next=${encodeURIComponent('/onboarding')}`;
+    const emailRedirectTo = safeAuthEmailRedirect(
+      String(body.emailRedirectTo || '').trim(),
+      origin,
+      fallbackRedirect
+    );
 
     if (!email || !email.includes('@')) {
       return NextResponse.json({ error: 'Enter a valid email address.' }, { status: 400 });
@@ -52,9 +59,7 @@ export async function POST(req: NextRequest) {
       password,
       options: {
         data: { first_name: firstName, last_name: lastName },
-        emailRedirectTo:
-          emailRedirectTo ||
-          `${publicSiteOrigin(req)}/auth/callback?next=${encodeURIComponent('/onboarding')}`,
+        emailRedirectTo,
       },
     });
     if (error) {

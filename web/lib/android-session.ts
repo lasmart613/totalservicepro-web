@@ -4,6 +4,9 @@
  * window.Android.saveSession / getStoredSession / clearSession.
  */
 
+import { PRODUCTION_SITE_ORIGIN } from './site-origin.ts';
+import { safeRedirectPath } from './safe-redirect.ts';
+
 export const TSP_ANDROID_UA_RE = /TSPAndroid\//i;
 export const ANDROID_AUTH_SCHEME = 'totalservicepro';
 export const ANDROID_AUTH_HOST = 'auth-callback';
@@ -59,7 +62,5 @@ export function persistableAndroidSession(session: AndroidSessionTokens): string
 }
 
 export function safeAndroidNextPath(raw: string | null | undefined): string {
-  const next = String(raw || '').trim();
-  if (!next.startsWith('/') || next.startsWith('//')) return '/';
-  return next;
+  return safeRedirectPath(raw, PRODUCTION_SITE_ORIGIN, '/');
 }

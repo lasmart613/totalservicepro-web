@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { safeAuthEmailRedirect, safeRedirectPath } from '@/lib/safe-redirect';
 import { clientAuthOrigin } from '@/lib/site-origin';
 
 type Props = {
@@ -34,9 +35,12 @@ export default function AuthOtpBox({
   const cleanEmail = (email || '').trim().toLowerCase();
 
   function redirectUrl() {
-    if (emailRedirectTo) return emailRedirectTo;
     const origin = clientAuthOrigin();
-    return `${origin}/auth/callback?next=/onboarding`;
+    const fallback = `${origin}/auth/callback?next=${encodeURIComponent(
+      safeRedirectPath('/onboarding', origin)
+    )}`;
+    if (emailRedirectTo) return safeAuthEmailRedirect(emailRedirectTo, origin, fallback);
+    return fallback;
   }
 
   async function resend() {

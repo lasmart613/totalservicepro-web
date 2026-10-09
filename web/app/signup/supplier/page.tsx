@@ -6,6 +6,7 @@ import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
 import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup } from '@/lib/auth-session';
 import { useRedirectSignedInOrgToPlans } from '@/lib/use-redirect-signed-in-org';
+import { safeRedirectPath } from '@/lib/safe-redirect';
 import { clientAuthOrigin } from '@/lib/site-origin';
 import AuthOtpBox from '@/components/AuthOtpBox';
 import { PublicLink, useT } from '@/lib/fa/locale';
@@ -132,7 +133,9 @@ export default function SupplierSignup() {
             phone: phone || '',
             website: website || '',
           },
-          emailRedirectTo: `${origin}/auth/callback?next=/`,
+          emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
+            safeRedirectPath('/', origin)
+          )}`,
         },
       });
       if (authError) throw authError;

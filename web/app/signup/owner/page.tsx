@@ -19,6 +19,7 @@ import {
   type OwnerOrgType,
 } from '@/lib/org-types';
 import AuthOtpBox from '@/components/AuthOtpBox';
+import { safeRedirectPath } from '@/lib/safe-redirect';
 import { clientAuthOrigin } from '@/lib/site-origin';
 import { PublicLink, useT } from '@/lib/fa/locale';
 import { useRouter, useSearchParams } from 'next/navigation';
@@ -273,7 +274,7 @@ function OwnerSignupInner() {
             claim_token: claimToken || '',
           },
           emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
-            claimToken ? '/company?justSetup=1' : '/my-lasers'
+            safeRedirectPath(claimToken ? '/company?justSetup=1' : '/my-lasers', origin)
           )}`,
         },
       });
