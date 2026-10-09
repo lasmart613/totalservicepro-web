@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { exactEmailIlike, normalizeLookupEmail } from '@/lib/email-match';
 import { invitationIsOpen } from '@/lib/org-membership';
 import { listMembershipsWithOrgs } from '@/lib/org-membership-server';
 
@@ -45,7 +46,7 @@ export async function GET(req: NextRequest) {
 
     if (hasServiceRole()) {
       const admin = getSupabaseAdmin();
-      const email = (user.email || '').toLowerCase().trim();
+      const email = normalizeLookupEmail(user.email);
 
       // Read existing memberships only. Accepted invites and shops this login
       // created must not be turned back into memberships here — leaving stays gone.
@@ -63,7 +64,7 @@ export async function GET(req: NextRequest) {
         const { data: invites } = await admin
           .from('engineer_invitations')
           .select('id, organization_id, role, first_name, last_name, created_at, expires_at, accepted')
-          .ilike('email', email)
+          .ilike('email', exactEmailIlike(email))
           .eq('accepted', false)
           .order('created_at', { ascending: false })
           .limit(20);

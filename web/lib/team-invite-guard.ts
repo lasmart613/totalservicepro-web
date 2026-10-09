@@ -1,3 +1,4 @@
+import { normalizeLookupEmail } from '@/lib/email-match';
 import { invitationIsOpen } from '@/lib/org-membership';
 
 /** Fresh invite and resend both last 7 days. */
@@ -101,8 +102,8 @@ export function teamInviteJoinGate(input: {
     };
   }
 
-  const caller = String(input.callerEmail || '').toLowerCase().trim();
-  const invite = String(input.inviteEmail || '').toLowerCase().trim();
+  const caller = normalizeLookupEmail(input.callerEmail);
+  const invite = normalizeLookupEmail(input.inviteEmail);
   if (!caller || !invite || caller !== invite) {
     return {
       ok: false,

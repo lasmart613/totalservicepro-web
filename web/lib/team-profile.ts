@@ -1,4 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { exactEmailIlike, normalizeLookupEmail } from '@/lib/email-match';
 import { isFounderLockedRole } from '@/lib/org-membership';
 import { upsertMembership } from '@/lib/org-membership-server';
 
@@ -33,7 +34,7 @@ export type AuthEmailLookupClient = {
   schema?: (schema: string) => {
     from: (table: string) => {
       select: (columns: string) => {
-        eq: (column: string, value: string) => PromiseLike<AuthTableResult>;
+        ilike: (column: string, value: string) => PromiseLike<AuthTableResult>;
       };
     };
   };
@@ -59,7 +60,7 @@ export type FindAuthUserDeps = {
 };
 
 function normalizeAuthEmail(email: string): string {
-  return String(email || '').toLowerCase().trim();
+  return normalizeLookupEmail(email);
 }
 
 function toHit(row: AuthUserRow): AuthEmailHit | null {
@@ -130,7 +131,7 @@ async function lookupAuthTable(
       .schema('auth')
       .from('users')
       .select('id, email, last_sign_in_at')
-      .eq('email', email);
+      .ilike('email', exactEmailIlike(email));
     if (!result || result.error || !Array.isArray(result.data)) return 'unavailable';
     return classifyExact(result.data, email);
   } catch {
@@ -196,7 +197,7 @@ async function lookupAdminFilter(
 /**
  * Find an auth user by exact email.
  * Uses an admin get-by-email method when the client has one, an exact
- * `auth.users` equality query, and GoTrue's admin users filter. A paging
+ * case-insensitive `auth.users` match, and GoTrue's admin users filter. A paging
  * scan of the first 2,000 users is not a lookup. Errors and unfinished
  * scans fail closed (`status: 'error'`), and more than one exact row is
  * `ambiguous`.
@@ -272,7 +273,7 @@ export async function ensureTeamMemberProfile(
 
   const row: Record<string, unknown> = {
     id: input.userId,
-    email: input.email.toLowerCase().trim(),
+    email: normalizeLookupEmail(input.email),
     organization_id: input.organizationId,
     active_organization_id: input.organizationId,
     role: inviteRole,

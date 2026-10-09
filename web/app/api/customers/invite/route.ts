@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { normalizeLookupEmail } from '@/lib/email-match';
 import { canAddCustomers } from '@/lib/roles';
 import { isOwnerOrgType } from '@/lib/org-types';
 import {
@@ -172,7 +173,7 @@ export async function runCustomerInvite(
       legacyContactName: sources.legacyContactName ?? (customer as { contact_name?: string | null }).contact_name,
       officeEmail: sources.officeEmail ?? customer.email,
     });
-    const toEmail = reach.email;
+    const toEmail = normalizeLookupEmail(reach.email);
     if (!toEmail) {
       return respond({
         ok: true,

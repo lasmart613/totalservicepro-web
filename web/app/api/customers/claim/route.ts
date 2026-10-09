@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { emailsMatch } from '@/lib/email-match';
 import { isOwnerOrgType } from '@/lib/org-types';
 import { verifyCustomerInvite } from '@/lib/customer-invite';
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
@@ -168,7 +169,7 @@ export async function runCustomerClaim(
     }
 
     const userEmail = String(user.email || '').trim().toLowerCase();
-    if (!userEmail || userEmail !== payload.email) {
+    if (!emailsMatch(user.email, payload.email)) {
       return reply(
         { ok: false, claimed: false, error: 'Sign in with the email this invite was sent to.' },
         403
@@ -205,7 +206,7 @@ export async function runCustomerClaim(
       contactRows: sources.contactRows,
       officeEmail: sources.officeEmail ?? (org as { email?: string | null }).email,
     }).email.trim().toLowerCase();
-    if (!currentEmail || currentEmail !== payload.email) {
+    if (!emailsMatch(currentEmail, payload.email)) {
       return reply(
         {
           ok: false,
