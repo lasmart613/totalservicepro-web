@@ -5,7 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NextRequest } from 'next/server';
 import { teamClaimMovesHome } from './org-membership.ts';
-import { upsertMembership } from './org-membership-server.ts';
+import { switchUserOrganization, upsertMembership } from './org-membership-server.ts';
 import { runTeamClaim } from '../app/api/team/claim/route.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -93,8 +93,28 @@ test('a first membership becomes home; moonlight does not; a post-invite company
       activeOrgCreatedByCaller: true,
       activeOrgCreatedAt: '2026-08-25T04:24:00.000Z',
       inviteCreatedAt: '2026-08-25T00:36:00.000Z',
+      activeOrgIsEmpty: true,
     }),
     true
+  );
+  assert.equal(
+    teamClaimMovesHome({
+      hasMembership: true,
+      activeOrgCreatedByCaller: true,
+      activeOrgCreatedAt: '2026-08-25T04:24:00.000Z',
+      inviteCreatedAt: '2026-08-25T00:36:00.000Z',
+      activeOrgIsEmpty: false,
+    }),
+    false
+  );
+  assert.equal(
+    teamClaimMovesHome({
+      hasMembership: true,
+      activeOrgCreatedByCaller: true,
+      activeOrgCreatedAt: '2026-08-25T04:24:00.000Z',
+      inviteCreatedAt: '2026-08-25T00:36:00.000Z',
+    }),
+    false
   );
 });
 
@@ -168,11 +188,14 @@ function claimAdmin(state: {
   memberships: Mem[];
   profiles: Prof[];
   org: { id: number; created_at: string; created_by: string };
+  customers: { service_organization_id: number }[];
+  tickets: { organization_id: number }[];
   failHome?: 'set' | null;
 }) {
   return {
     from(table: string) {
       const filters: Record<string, unknown> = {};
+      const notEqual: Record<string, unknown> = {};
       let op: 'select' | 'insert' | 'update' | 'upsert' = 'select';
       let payload: Record<string, unknown> = {};
       const finish = (single: boolean) => {
@@ -197,6 +220,7 @@ function claimAdmin(state: {
           }
           const rows = state.memberships.filter((item) => {
             if (filters.user_id != null && item.user_id !== filters.user_id) return false;
+            if (notEqual.user_id != null && item.user_id === notEqual.user_id) return false;
             if (
               filters.organization_id != null &&
               String(item.organization_id) !== String(filters.organization_id)
@@ -235,6 +259,22 @@ function claimAdmin(state: {
           const found = String(filters.id) === String(state.org.id) ? state.org : null;
           return { data: found, error: null };
         }
+        if (table === 'organization_customers') {
+          const rows = state.customers.filter(
+            (row) =>
+              filters.service_organization_id == null ||
+              String(row.service_organization_id) === String(filters.service_organization_id)
+          );
+          return { data: rows, error: null };
+        }
+        if (table === 'service_tickets') {
+          const rows = state.tickets.filter(
+            (row) =>
+              filters.organization_id == null ||
+              String(row.organization_id) === String(filters.organization_id)
+          );
+          return { data: rows, error: null };
+        }
         return { data: null, error: null };
       };
       const api = {
@@ -258,6 +298,10 @@ function claimAdmin(state: {
         },
         eq(column: string, value: unknown) {
           filters[column] = value;
+          return api;
+        },
+        neq(column: string, value: unknown) {
+          notEqual[column] = value;
           return api;
         },
         ilike(column: string, value: unknown) {
@@ -333,6 +377,9 @@ async function postClaim(opts: {
   org: { id: number; created_at: string; created_by: string };
   inviteCreatedAt: string;
   failHome?: 'set' | null;
+  otherMembers?: Mem[];
+  customers?: { service_organization_id: number }[];
+  tickets?: { organization_id: number }[];
 }) {
   const previous = {
     url: process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -354,7 +401,7 @@ async function postClaim(opts: {
       first_name: 'Ada',
       last_name: 'Founder',
     } as Record<string, unknown>,
-    memberships: opts.memberships.map((row) => ({ ...row })),
+    memberships: [...opts.memberships, ...(opts.otherMembers || [])].map((row) => ({ ...row })),
     profiles: [
       {
         id: 'auth-1',
@@ -365,6 +412,8 @@ async function postClaim(opts: {
       },
     ] as Prof[],
     org: opts.org,
+    customers: opts.customers || [],
+    tickets: opts.tickets || [],
     failHome: opts.failHome ?? null,
   };
   try {
@@ -421,7 +470,7 @@ async function postClaim(opts: {
   }
 }
 
-test('claim switches home when the active org was created after the invite', async () => {
+test('claim switches home when the active org is an empty shop created after the invite', async () => {
   const result = await postClaim({
     profileOrg: 4,
     memberships: [{ user_id: 'auth-1', organization_id: 4, role: 'company_admin', is_home: true }],
@@ -454,6 +503,63 @@ test('moonlight claim keeps the existing home', async () => {
   assert.equal(result.state.memberships.find((row) => row.organization_id === 9)?.is_home, false);
 });
 
+async function claimOccupiedShop(extra: {
+  otherMembers?: Mem[];
+  customers?: { service_organization_id: number }[];
+  tickets?: { organization_id: number }[];
+}) {
+  return postClaim({
+    profileOrg: 4,
+    profileRole: 'owner',
+    memberships: [{ user_id: 'auth-1', organization_id: 4, role: 'owner', is_home: true }],
+    org: { id: 4, created_at: '2026-08-25T04:24:00.000Z', created_by: 'auth-1' },
+    inviteCreatedAt: '2026-08-25T00:36:00.000Z',
+    ...extra,
+  });
+}
+
+function assertFounderKeptHome(result: Awaited<ReturnType<typeof postClaim>>) {
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.moonlight, true);
+  assert.equal(String(result.state.profiles[0].organization_id), '4');
+  assert.equal(result.state.profiles[0].role, 'owner');
+  const home = result.state.memberships.find((row) => row.organization_id === 4 && row.user_id === 'auth-1');
+  const joined = result.state.memberships.find((row) => row.organization_id === 9);
+  assert.equal(home?.is_home, true);
+  assert.equal(home?.role, 'owner');
+  assert.equal(joined?.is_home, false);
+}
+
+test('an empty shop created after the invite moves home', async () => {
+  const result = await claimOccupiedShop({});
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.moonlight, false);
+  assert.equal(String(result.state.profiles[0].organization_id), '9');
+  assert.equal(result.state.memberships.find((row) => row.organization_id === 4)?.is_home, false);
+  assert.equal(result.state.memberships.find((row) => row.organization_id === 9)?.is_home, true);
+});
+
+test('a shop with another member does not move home or the founder role', async () => {
+  const result = await claimOccupiedShop({
+    otherMembers: [{ user_id: 'staff-2', organization_id: 4, role: 'fse', is_home: false }],
+  });
+  assertFounderKeptHome(result);
+});
+
+test('a shop with a customer does not move home or the founder role', async () => {
+  const result = await claimOccupiedShop({
+    customers: [{ service_organization_id: 4 }],
+  });
+  assertFounderKeptHome(result);
+});
+
+test('a shop with a service ticket does not move home or the founder role', async () => {
+  const result = await claimOccupiedShop({
+    tickets: [{ organization_id: 4 }],
+  });
+  assertFounderKeptHome(result);
+});
+
 test('a failed home switch on claim leaves the old home and does not accept the invite', async () => {
   const result = await postClaim({
     profileOrg: 4,
@@ -470,6 +576,128 @@ test('a failed home switch on claim leaves the old home and does not accept the 
   assert.equal(result.state.memberships[0].is_home, true);
   assert.equal(result.state.memberships[0].role, 'company_admin');
   assert.equal(String(result.state.profiles[0].organization_id), '4');
+});
+
+type SwitchState = {
+  memberships: Mem[];
+  profile: Prof;
+};
+
+/** Service-role profile sync from 000904, plus the single-home trigger. */
+function applyServiceRoleProfileSync(state: SwitchState, userId: string, organizationId: number, role: string) {
+  const hasHome = state.memberships.some((row) => row.user_id === userId && row.is_home);
+  const markHome = !hasHome;
+  let row = state.memberships.find(
+    (item) => item.user_id === userId && item.organization_id === organizationId
+  );
+  if (!row) {
+    row = { user_id: userId, organization_id: organizationId, role, is_home: markHome };
+    state.memberships.push(row);
+  } else {
+    const wasHome = row.is_home;
+    row.is_home = wasHome || markHome;
+    if (!wasHome) row.role = role;
+  }
+  if (row.is_home) {
+    for (const other of state.memberships) {
+      if (other.user_id === userId && other.organization_id !== organizationId && other.is_home) {
+        other.is_home = false;
+      }
+    }
+  }
+  state.profile.organization_id = organizationId;
+  state.profile.role = role;
+}
+
+function switchAdmin(state: SwitchState) {
+  return {
+    from(table: string) {
+      const filters: Record<string, unknown> = {};
+      let payload: Record<string, unknown> = {};
+      const api = {
+        select() {
+          return api;
+        },
+        update(row: Record<string, unknown>) {
+          payload = row;
+          return api;
+        },
+        eq(column: string, value: unknown) {
+          filters[column] = value;
+          return api;
+        },
+        maybeSingle() {
+          return Promise.resolve({ data: null, error: null });
+        },
+        then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+          if (table === 'organization_memberships') {
+            const rows = state.memberships.filter((item) => filters.user_id == null || item.user_id === filters.user_id);
+            return Promise.resolve({ data: rows, error: null }).then(onFulfilled, onRejected);
+          }
+          if (table === 'user_profiles') {
+            applyServiceRoleProfileSync(
+              state,
+              String(filters.id),
+              Number(payload.organization_id),
+              String(payload.role || state.profile.role || 'fse')
+            );
+            return Promise.resolve({ data: null, error: null }).then(onFulfilled, onRejected);
+          }
+          return Promise.resolve({ data: null, error: { message: `unexpected ${table}` } }).then(onFulfilled, onRejected);
+        },
+      };
+      return api;
+    },
+  };
+}
+
+test('switching to an org you created keeps the existing home', async () => {
+  const state: SwitchState = {
+    memberships: [
+      { user_id: 'auth-1', organization_id: 4, role: 'company_admin', is_home: true },
+      { user_id: 'auth-1', organization_id: 2528, role: 'company_admin', is_home: false },
+    ],
+    profile: {
+      id: 'auth-1',
+      email: 'founder@example.com',
+      organization_id: 4,
+      role: 'company_admin',
+      onboarding_completed: true,
+    },
+  };
+  const result = await switchUserOrganization(switchAdmin(state) as never, {
+    userId: 'auth-1',
+    targetOrgId: 2528,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(state.profile.organization_id, 2528);
+  assert.equal(state.memberships.find((row) => row.organization_id === 4)?.is_home, true);
+  assert.equal(state.memberships.find((row) => row.organization_id === 2528)?.is_home, false);
+  assert.equal(state.memberships.find((row) => row.organization_id === 4)?.role, 'company_admin');
+});
+
+test('switching when the user has no home makes it home', async () => {
+  const state: SwitchState = {
+    memberships: [
+      { user_id: 'auth-1', organization_id: 4, role: 'fse', is_home: false },
+      { user_id: 'auth-1', organization_id: 2528, role: 'company_admin', is_home: false },
+    ],
+    profile: {
+      id: 'auth-1',
+      email: 'founder@example.com',
+      organization_id: 4,
+      role: 'fse',
+      onboarding_completed: true,
+    },
+  };
+  const result = await switchUserOrganization(switchAdmin(state) as never, {
+    userId: 'auth-1',
+    targetOrgId: 2528,
+  });
+  assert.equal(result.ok, true);
+  assert.equal(state.profile.organization_id, 2528);
+  assert.equal(state.memberships.find((row) => row.organization_id === 4)?.is_home, false);
+  assert.equal(state.memberships.find((row) => row.organization_id === 2528)?.is_home, true);
 });
 
 test('one home migration, rollback, and Tony oneoff stay data-safe', () => {
@@ -515,6 +743,9 @@ test('one home migration, rollback, and Tony oneoff stay data-safe', () => {
   assert.doesNotMatch(migration, /GRANT EXECUTE ON FUNCTION public\.set_home_membership\(uuid, bigint, text, boolean\) TO authenticated/);
   assert.doesNotMatch(migration, /\bCONCURRENTLY\b/i);
   assert.doesNotMatch(migration, /\bCOMMIT\b/i);
+  assert.doesNotMatch(migration, /home := own_created/);
+  assert.match(migration, /SELECT NOT EXISTS \([\s\S]*?m\.is_home IS TRUE[\s\S]*?\) INTO home/);
+  assert.match(migration, /user_profiles_sync_membership/);
   const fn = migration.slice(
     migration.indexOf('CREATE OR REPLACE FUNCTION public.set_home_membership'),
     migration.indexOf('COMMENT ON FUNCTION public.set_home_membership')
@@ -529,7 +760,12 @@ test('one home migration, rollback, and Tony oneoff stay data-safe', () => {
   assert.match(rollback, /DROP INDEX IF EXISTS public\.organization_memberships_one_home_per_user/);
   assert.match(rollback, /DROP FUNCTION IF EXISTS public\.set_home_membership\(uuid, bigint, text, boolean\)/);
   assert.doesNotMatch(rollback, /\bCOMMIT\b/i);
-  assert.doesNotMatch(rollback, /\bUPDATE\b/i);
+  assert.doesNotMatch(rollback, /UPDATE public\.organization_memberships/);
+  assert.match(rollback, /home := own_created/);
+  assert.ok(
+    rollback.indexOf('DROP TRIGGER IF EXISTS organization_memberships_enforce_single_home') <
+      rollback.indexOf('home := own_created')
+  );
 
   assert.doesNotMatch(find, /\b(UPDATE|INSERT|DELETE|ALTER|DROP)\b/i);
   assert.match(find, /WHERE is_home/);
@@ -552,6 +788,9 @@ test('one home migration, rollback, and Tony oneoff stay data-safe', () => {
   assert.match(oneoffRollback, /IF n <> 1 THEN/);
   assert.doesNotMatch(oneoffRollback, /user_profiles/);
   assert.doesNotMatch(oneoffRollback, /SET role/);
+  assert.match(oneoffRollback, /20261009_000904_one_home_membership_rollback\.sql/);
+  assert.match(oneoffRollback, /FIRST/);
+  assert.match(oneoffRollback, /clears membership 13/);
 
   assert.match(founder, /isHome:\s*true/);
   assert.match(founder, /syncProfile:\s*true/);

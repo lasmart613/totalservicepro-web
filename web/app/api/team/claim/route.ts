@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { ensureTeamMemberProfile } from '@/lib/team-profile';
 import {
@@ -24,11 +24,49 @@ type ClaimBody = {
 };
 
 /**
+ * A mistaken founder shop can be replaced only while it is empty.
+ * Other members live in organization_memberships. Customers live in
+ * organization_customers (service_organization_id). Tickets and jobs are
+ * service_tickets; there is no separate jobs table.
+ * A lookup error fails closed and keeps the current home.
+ */
+async function createdShopIsEmpty(
+  admin: SupabaseClient,
+  orgId: number | string,
+  userId: string
+): Promise<boolean> {
+  const { data: members, error: memberError } = await admin
+    .from('organization_memberships')
+    .select('user_id')
+    .eq('organization_id', orgId)
+    .neq('user_id', userId)
+    .limit(1);
+  if (memberError || (members && members.length > 0)) return false;
+
+  const { data: customers, error: customerError } = await admin
+    .from('organization_customers')
+    .select('id')
+    .eq('service_organization_id', orgId)
+    .limit(1);
+  if (customerError || (customers && customers.length > 0)) return false;
+
+  const { data: tickets, error: ticketError } = await admin
+    .from('service_tickets')
+    .select('id')
+    .eq('organization_id', orgId)
+    .limit(1);
+  if (ticketError || (tickets && tickets.length > 0)) return false;
+
+  return true;
+}
+
+/**
  * Invited user claims their engineer_invitations row (service role).
  * Founders with a home shop are not skipped: a pending invite to another
  * company becomes a second membership and keeps that home (moonlight).
  * The inviting company becomes the only home when this is the first membership,
- * or when the active org is a company this user created after the invite.
+ * or when the active org is an empty company this user created after the invite.
+ * Empty means no other members, no organization_customers, and no service_tickets.
  * Optional leaveOrganizationId is a move (staff leave A after joining B).
  * Auth user is never deleted.
  */
@@ -277,14 +315,27 @@ export async function runTeamClaim(
       }
     }
 
-    // First membership becomes home. A company this user created after the
-    // invite (founder onboarding by mistake) also loses home to the inviting
-    // company. Any other second org stays moonlight and does not move home.
+    // First membership becomes home. An empty company this user created at or
+    // after the invite (founder onboarding by mistake) also loses home to the
+    // inviting company. A shop with another member, a customer, or a ticket
+    // stays moonlight: home, profile org, and profile role do not change.
+    const timingMovesHome = teamClaimMovesHome({
+      hasMembership: memberships.length > 0,
+      activeOrgCreatedByCaller,
+      activeOrgCreatedAt,
+      inviteCreatedAt: inv.created_at ?? null,
+      activeOrgIsEmpty: true,
+    });
+    let activeOrgIsEmpty = false;
+    if (timingMovesHome && memberships.length > 0 && existingProf?.organization_id) {
+      activeOrgIsEmpty = await createdShopIsEmpty(admin, existingProf.organization_id, user.id);
+    }
     const moveHome = teamClaimMovesHome({
       hasMembership: memberships.length > 0,
       activeOrgCreatedByCaller,
       activeOrgCreatedAt,
       inviteCreatedAt: inv.created_at ?? null,
+      activeOrgIsEmpty,
     });
 
     const added = await upsertMembership(admin, {

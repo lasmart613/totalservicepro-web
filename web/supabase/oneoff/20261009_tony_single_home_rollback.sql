@@ -1,8 +1,12 @@
 -- Puts membership 17 back to is_home true. Same id / user / org guards.
 -- Does not change roles, profiles, or org 2528.
--- Run this only while the one-home unique index is absent. With that index
--- in place and membership 13 still home, this update fails and changes nothing.
--- Drop the index (20261009_000904 rollback) before restoring the second home.
+--
+-- Run web/supabase/migrations/20261009_000904_one_home_membership_rollback.sql
+-- FIRST, then this file. With the 000904 trigger and partial unique index
+-- still installed, this update does not fail and does not leave two homes.
+-- The BEFORE trigger sees is_home = true, clears membership 13 (org 4), and
+-- membership 17 becomes the only home. Drop the trigger and the index before
+-- restoring the second home.
 
 SET LOCAL lock_timeout = '5s';
 
