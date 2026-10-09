@@ -1,3 +1,4 @@
+import { invitationIsOpen } from '@/lib/org-membership';
 import type { AuthEmailLookup } from '@/lib/team-profile';
 import { teamInviteSentMessage } from '@/lib/team-invite';
 
@@ -110,4 +111,71 @@ export function teamInviteClosedBody(): { status: number; body: Record<string, u
         'Could not verify whether this email already has an account. No invite link was created. Try again.',
     }),
   };
+}
+
+const SETUP_LINK_TYPES = ['invite', 'recovery'] as const;
+export type SetupLinkType = (typeof SETUP_LINK_TYPES)[number];
+
+/**
+ * Password-setup link types, in the order to try them.
+ * Invite first. The next type is only used when invite cannot be issued.
+ */
+export function nextSetupLinkType(failed: string | null | undefined): SetupLinkType | null {
+  if (!failed) return SETUP_LINK_TYPES[0];
+  const idx = SETUP_LINK_TYPES.indexOf(failed as SetupLinkType);
+  if (idx < 0) return null;
+  return SETUP_LINK_TYPES[idx + 1] ?? null;
+}
+
+export type SetupResendDecision = 'setup' | 'sign-in' | 'closed';
+
+/**
+ * A resend may email a set-password link only when the invite is still
+ * pending, the stored auth user id proves this invite created the account,
+ * and that account has never signed in. Anything we cannot prove stays on
+ * the sign-in email. A failed auth lookup fails closed.
+ */
+export function decideInviteSetupResend(input: {
+  authStatus: AuthEmailLookup['status'];
+  lastSignInAt?: string | null;
+  authUserId?: string | null;
+  invite?: {
+    accepted?: boolean | null;
+    expires_at?: string | null;
+    created_at?: string | null;
+    revoked?: boolean | null;
+    status?: string | null;
+    createdAuthUserId?: string | null;
+  } | null;
+  now?: number;
+}): SetupResendDecision {
+  if (input.authStatus === 'error' || input.authStatus === 'ambiguous') return 'closed';
+  if (input.authStatus !== 'found') return 'sign-in';
+
+  const invite = input.invite;
+  if (!invite) return 'sign-in';
+  if (invite.revoked === true) return 'sign-in';
+  const status = String(invite.status || '').trim().toLowerCase();
+  if (status === 'accepted' || status === 'expired' || status === 'revoked') return 'sign-in';
+  if (!invitationIsOpen(invite, input.now ?? Date.now())) return 'sign-in';
+
+  const proof = String(invite.createdAuthUserId || '').trim();
+  const authId = String(input.authUserId || '').trim();
+  if (!proof || !authId || proof !== authId) return 'sign-in';
+  // undefined means the lookup did not say. null or blank means never signed in.
+  if (input.lastSignInAt === undefined) return 'sign-in';
+  if (input.lastSignInAt == null || !String(input.lastSignInAt).trim()) return 'setup';
+  return 'sign-in';
+}
+
+/** Existing-user delivery failed. No link. */
+export function existingUserInviteDeliveryError(
+  email: string,
+  reason: 'unconfigured' | 'failed'
+): Record<string, unknown> {
+  const error =
+    reason === 'unconfigured'
+      ? `Email delivery is not configured, so no invite was emailed to ${email}. No link was created.`
+      : `Could not email the invite to ${email}. No link was created. Try again.`;
+  return sealInviteResponse({ ok: false, error });
 }

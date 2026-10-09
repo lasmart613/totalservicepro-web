@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
+import { isPendingTeamInvite } from '@/lib/org-membership';
 import { listMemberUserIdsForOrg } from '@/lib/org-membership-server';
 
 /**
@@ -127,17 +128,10 @@ export async function GET(req: NextRequest) {
 
     const invites = allInvites || [];
 
-    // Pending = unanswered, or on the roster but they never finished setup.
-    // Do not hide a row just because a profile/membership exists.
-    const pendingInvites = invites.filter((inv: any) => {
-      const em = (inv.email || '').toLowerCase().trim();
-      const member = (members || []).find(
-        (m: any) => (m.email || '').toLowerCase().trim() === em
-      );
-      if (member?.onboarding_completed === true) return false;
-      if (inv.accepted !== true) return true;
-      return !!(member && member.onboarding_completed !== true);
-    });
+    // Pending is only an open, unaccepted invite. Accepted, expired, and
+    // revoked rows stay on invite history. Someone already on the roster
+    // with setup unfinished is a team member, not a pending invite.
+    const pendingInvites = invites.filter((inv) => isPendingTeamInvite(inv));
 
     return NextResponse.json({
       ok: true,

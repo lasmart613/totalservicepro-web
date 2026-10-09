@@ -12,9 +12,14 @@ import {
   type AuthUserRow,
 } from './team-profile.ts';
 import { teamInviteSentMessage } from './team-invite.ts';
+import { NextRequest } from 'next/server';
+import { runTeamInvite } from '../app/api/team/invite/route.ts';
 import {
+  decideInviteSetupResend,
   decideTeamInviteAudience,
+  existingUserInviteDeliveryError,
   newUserLinkFailureMode,
+  nextSetupLinkType,
   sealInviteResponse,
   teamInviteClosedBody,
   teamInviteMayMintActionLink,
@@ -392,4 +397,414 @@ test('invite responses and the team UI never hand the inviter a recovery link', 
     assert.match(page, /teamInviteSentMessage/);
   }
   assert.equal(teamInviteSentMessage('person@example.com'), 'Invite sent to person@example.com.');
+});
+
+const SETUP_LINK = 'https://example.test/auth/v1/verify?token=example&type=invite';
+const FOLLOWUP_LINK = 'https://example.test/auth/v1/verify?token=example&type=recovery';
+const INVITEE = 'new.person@example.com';
+
+test('setup link types try invite, then the fallback type', () => {
+  assert.equal(nextSetupLinkType(null), 'invite');
+  assert.equal(nextSetupLinkType('invite'), 'recovery');
+  assert.equal(nextSetupLinkType('recovery'), null);
+  const blocked = existingUserInviteDeliveryError(INVITEE, 'unconfigured');
+  assert.equal(blocked.ok, false);
+  assert.match(String(blocked.error), /No link was created/);
+  assertNoCredential(blocked);
+});
+
+test('a pending invite-created account gets a setup link only when it has never signed in', () => {
+  const pending = {
+    accepted: false,
+    expires_at: '2026-10-16T00:00:00.000Z',
+    created_at: '2026-10-08T00:00:00.000Z',
+    createdAuthUserId: 'auth-1',
+  };
+  const now = Date.parse('2026-10-09T12:00:00.000Z');
+  assert.equal(
+    decideInviteSetupResend({
+      authStatus: 'found',
+      authUserId: 'auth-1',
+      lastSignInAt: null,
+      invite: pending,
+      now,
+    }),
+    'setup'
+  );
+  assert.equal(
+    decideInviteSetupResend({
+      authStatus: 'found',
+      authUserId: 'auth-1',
+      lastSignInAt: '2026-10-09T00:00:00.000Z',
+      invite: pending,
+      now,
+    }),
+    'sign-in'
+  );
+  assert.equal(
+    decideInviteSetupResend({
+      authStatus: 'found',
+      authUserId: 'someone-else',
+      lastSignInAt: null,
+      invite: pending,
+      now,
+    }),
+    'sign-in'
+  );
+  assert.equal(
+    decideInviteSetupResend({
+      authStatus: 'found',
+      authUserId: 'auth-1',
+      lastSignInAt: null,
+      invite: { ...pending, createdAuthUserId: null },
+      now,
+    }),
+    'sign-in'
+  );
+  assert.equal(
+    decideInviteSetupResend({
+      authStatus: 'found',
+      authUserId: 'auth-1',
+      lastSignInAt: null,
+      invite: { ...pending, accepted: true },
+      now,
+    }),
+    'sign-in'
+  );
+  assert.equal(
+    decideInviteSetupResend({
+      authStatus: 'error',
+      authUserId: 'auth-1',
+      lastSignInAt: null,
+      invite: pending,
+      now,
+    }),
+    'closed'
+  );
+  assert.equal(
+    decideInviteSetupResend({
+      authStatus: 'found',
+      authUserId: 'auth-1',
+      lastSignInAt: undefined,
+      invite: pending,
+      now,
+    }),
+    'sign-in'
+  );
+});
+
+type SentMail = { to: string[]; html: string; text: string; subject: string };
+
+function inviteAdmin(state: {
+  invite: Record<string, unknown> | null;
+  linkHandler?: (args: { type?: string }) => {
+    data?: { user?: { id?: string }; properties?: { action_link?: string } } | null;
+    error?: { message?: string } | null;
+  };
+}) {
+  const linkCalls: Array<{ type?: string }> = [];
+  const updates: Array<Record<string, unknown>> = [];
+  const admin = {
+    from(table: string) {
+      let selected = '';
+      const api = {
+        select(columns: string) {
+          selected = columns;
+          return api;
+        },
+        eq() {
+          return api;
+        },
+        maybeSingle: async () => {
+          if (table === 'organizations') {
+            return { data: { id: 9, name: 'North Shop', type: 'service_company', services_offered: null }, error: null };
+          }
+          if (table === 'user_profiles') {
+            return { data: null, error: null };
+          }
+          if (table === 'engineer_invitations') {
+            if (state.invite && selected.includes('created_auth_user_id') && state.invite.readError) {
+              return { data: null, error: { message: String(state.invite.readError) } };
+            }
+            return { data: state.invite, error: null };
+          }
+          return { data: null, error: null };
+        },
+        insert() {
+          return {
+            select() {
+              return {
+                maybeSingle: async () => ({ data: { id: 7 }, error: null }),
+              };
+            },
+          };
+        },
+        update(patch: Record<string, unknown>) {
+          return {
+            eq() {
+              updates.push(patch);
+              if (state.invite) Object.assign(state.invite, patch);
+              return Promise.resolve({ error: null });
+            },
+          };
+        },
+      };
+      return api;
+    },
+    auth: {
+      admin: {
+        generateLink: async (args: { type?: string }) => {
+          linkCalls.push(args);
+          if (state.linkHandler) return state.linkHandler(args);
+          return {
+            data: { user: { id: 'auth-1' }, properties: { action_link: SETUP_LINK } },
+            error: null,
+          };
+        },
+      },
+    },
+  };
+  return { admin, linkCalls, updates };
+}
+
+async function postExistingInvite(opts: {
+  resendKey: string | null;
+  auth: { status: 'found'; id: string; lastSignInAt: string | null } | { status: 'error' };
+  invite: Record<string, unknown> | null;
+  linkHandler?: (args: { type?: string }) => {
+    data?: { user?: { id?: string }; properties?: { action_link?: string } } | null;
+    error?: { message?: string } | null;
+  };
+  sendOk?: boolean;
+}) {
+  const previous = {
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    anon: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  };
+  process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://127.0.0.1:54321';
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon-test-value';
+  const sent: SentMail[] = [];
+  const logs: string[] = [];
+  const originals = {
+    log: console.log,
+    info: console.info,
+    warn: console.warn,
+    error: console.error,
+  };
+  const capture = (...args: unknown[]) => {
+    logs.push(args.map((part) => String(part)).join(' '));
+  };
+  console.log = capture;
+  console.info = capture;
+  console.warn = capture;
+  console.error = capture;
+  const harness = inviteAdmin({ invite: opts.invite, linkHandler: opts.linkHandler });
+  try {
+    const response = await runTeamInvite(
+      new NextRequest('http://127.0.0.1/api/team/invite', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer session-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ email: INVITEE, role: 'fse', resend: true }),
+      }),
+      {
+        hasServiceRole: () => true,
+        resendKey: opts.resendKey,
+        getAdmin: () => harness.admin as never,
+        findAuthUser: async () =>
+          opts.auth.status === 'error'
+            ? { status: 'error' }
+            : {
+                status: 'found',
+                user: { id: opts.auth.id, email: INVITEE, last_sign_in_at: opts.auth.lastSignInAt },
+              },
+        createUserClient: () => ({
+          auth: {
+            getUser: async () => ({
+              data: { user: { id: 'admin-user', email: 'admin@shop.test' } },
+              error: null,
+            }),
+          },
+          from: () => ({
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: { organization_id: 9, role: 'company_admin' },
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }),
+        sendEmail: async (input) => {
+          sent.push({ to: input.to, html: input.html, text: input.text, subject: input.subject });
+          if (opts.sendOk === false) return { ok: false, status: 500, message: 'provider down' };
+          return { ok: true, status: 200 };
+        },
+      }
+    );
+    const body = (await response.json()) as Record<string, unknown>;
+    return { status: response.status, body, sent, logs, linkCalls: harness.linkCalls, updates: harness.updates };
+  } finally {
+    console.log = originals.log;
+    console.info = originals.info;
+    console.warn = originals.warn;
+    console.error = originals.error;
+    if (previous.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = previous.url;
+    if (previous.anon === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = previous.anon;
+  }
+}
+
+const pendingCreated = {
+  id: 7,
+  email: INVITEE,
+  organization_id: 9,
+  accepted: false,
+  expires_at: '2026-10-16T00:00:00.000Z',
+  created_at: '2026-10-08T00:00:00.000Z',
+  created_auth_user_id: 'auth-1',
+  first_name: 'New',
+  last_name: 'Person',
+};
+
+function assertNoLink(result: { body: Record<string, unknown>; logs: string[] }, link: string) {
+  assertNoCredential(result.body);
+  assert.equal(JSON.stringify(result.body).includes(link), false);
+  assert.equal(result.logs.some((line) => line.includes(link) || line.includes('/auth/v1/verify')), false);
+}
+
+test('resend to a pending invite-created user emails a set-password link and hides it', async () => {
+  const result = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: null },
+    invite: { ...pendingCreated },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal(result.body.emailed, true);
+  assert.equal(result.linkCalls.length, 1);
+  assert.equal(result.linkCalls[0].type, 'invite');
+  assert.equal(result.sent.length, 1);
+  assert.deepEqual(result.sent[0].to, [INVITEE]);
+  assert.match(result.sent[0].html, /set password/i);
+  assert.ok(result.sent[0].html.includes(SETUP_LINK) || result.sent[0].text.includes(SETUP_LINK));
+  assertNoLink(result, SETUP_LINK);
+  assert.equal(
+    result.updates.some((patch) => patch.created_auth_user_id && patch.created_auth_user_id !== 'auth-1'),
+    false
+  );
+});
+
+test('resend falls forward when invite cannot be reissued, still without returning the link', async () => {
+  const result = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: null },
+    invite: { ...pendingCreated },
+    linkHandler: (args) => {
+      if (args.type === 'invite') return { data: null, error: { message: 'already been registered' } };
+      return { data: { user: { id: 'auth-1' }, properties: { action_link: FOLLOWUP_LINK } }, error: null };
+    },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.emailed, true);
+  assert.deepEqual(
+    result.linkCalls.map((call) => call.type),
+    ['invite', 'recovery']
+  );
+  assert.equal(result.sent.length, 1);
+  assert.deepEqual(result.sent[0].to, [INVITEE]);
+  assert.ok(result.sent[0].html.includes(FOLLOWUP_LINK) || result.sent[0].text.includes(FOLLOWUP_LINK));
+  assertNoLink(result, FOLLOWUP_LINK);
+  assertNoLink(result, SETUP_LINK);
+});
+
+test('a pending invite-created user who has signed in gets the sign-in email only', async () => {
+  const result = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: '2026-10-09T00:00:00.000Z' },
+    invite: { ...pendingCreated },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal(result.body.emailed, true);
+  assert.equal(result.linkCalls.length, 0);
+  assert.equal(result.sent.length, 1);
+  assert.match(result.sent[0].html, /Sign in/);
+  assert.doesNotMatch(result.sent[0].html, /\/auth\/v1\/verify/);
+  assert.doesNotMatch(result.sent[0].text, /\/auth\/v1\/verify/);
+  assertNoLink(result, SETUP_LINK);
+});
+
+test('an account not created by the invite gets the sign-in email only', async () => {
+  const result = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: null },
+    invite: { ...pendingCreated, created_auth_user_id: null },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.emailed, true);
+  assert.equal(result.linkCalls.length, 0);
+  assert.match(result.sent[0].html, /Sign in/);
+  assert.doesNotMatch(`${result.sent[0].html}\n${result.sent[0].text}`, /\/auth\/v1\/verify/);
+  assertNoLink(result, SETUP_LINK);
+});
+
+test('a lookup or proof failure does not mint a setup link', async () => {
+  const lookup = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'error' },
+    invite: { ...pendingCreated },
+  });
+  assert.equal(lookup.status, 503);
+  assert.equal(lookup.body.ok, false);
+  assert.equal(lookup.linkCalls.length, 0);
+  assert.equal(lookup.sent.length, 0);
+  assertNoLink(lookup, SETUP_LINK);
+
+  const proof = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: null },
+    invite: { ...pendingCreated, readError: 'connection reset' },
+  });
+  assert.equal(proof.status, 200);
+  assert.equal(proof.body.emailed, true);
+  assert.equal(proof.linkCalls.length, 0);
+  assert.match(proof.sent[0].html, /Sign in/);
+  assert.doesNotMatch(proof.sent[0].html, /\/auth\/v1\/verify/);
+  assertNoLink(proof, SETUP_LINK);
+});
+
+test('an existing user with email not configured gets 503 and no link', async () => {
+  const result = await postExistingInvite({
+    resendKey: null,
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: '2026-10-09T00:00:00.000Z' },
+    invite: { ...pendingCreated },
+  });
+  assert.equal(result.status, 503);
+  assert.equal(result.body.ok, false);
+  assert.match(String(result.body.error), /not configured/i);
+  assert.match(String(result.body.error), /No link was created/);
+  assert.equal(result.sent.length, 0);
+  assert.equal(result.linkCalls.length, 0);
+  assertNoLink(result, SETUP_LINK);
+  assert.equal(JSON.stringify(result.body).includes('Invite sent'), false);
+});
+
+test('an existing user with email configured still gets 200', async () => {
+  const result = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-9', lastSignInAt: '2026-09-01T00:00:00.000Z' },
+    invite: { ...pendingCreated, created_auth_user_id: 'auth-9' },
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.ok, true);
+  assert.equal(result.body.emailed, true);
+  assert.match(String(result.body.message), /^Invite sent to new\.person@example\.com\./);
+  assert.equal(result.sent.length, 1);
+  assert.deepEqual(result.sent[0].to, [INVITEE]);
+  assertNoLink(result, SETUP_LINK);
 });
