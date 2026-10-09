@@ -187,7 +187,23 @@ test('merged job costing and financial reporting stay in the signed-in chrome', 
 
 test('English fonts stay Geist, Geist Mono, and DM Sans', () => {
   const layout = read('app/layout.tsx');
-  assert.match(layout, /Geist, Geist_Mono, DM_Sans/);
+  assert.match(layout, /from "next\/font\/local"/);
+  assert.doesNotMatch(layout, /next\/font\/google/);
+  assert.match(layout, /Geist sans/);
+  assert.match(layout, /Geist Mono/);
+  assert.match(layout, /DM Sans/);
+  assert.match(layout, /--font-geist-sans/);
+  assert.match(layout, /--font-geist-mono/);
+  assert.match(layout, /--font-dm-sans/);
+  assert.match(layout, /Geist-latin\.woff2/);
+  assert.match(layout, /GeistMono-latin\.woff2/);
+  assert.match(layout, /DMSans-latin\.woff2/);
+  assert.match(read('app/fonts/geist/Geist-latin.woff2'), /^wOF2/);
+  assert.match(read('app/fonts/geist-mono/GeistMono-latin.woff2'), /^wOF2/);
+  assert.match(read('app/fonts/dm-sans/DMSans-latin.woff2'), /^wOF2/);
+  assert.match(read('app/fonts/geist/OFL.txt'), /SIL Open Font License/);
+  assert.match(read('app/fonts/geist-mono/OFL.txt'), /SIL Open Font License/);
+  assert.match(read('app/fonts/dm-sans/OFL.txt'), /SIL Open Font License/);
   assert.match(layout, /d\.lang="es";d\.dir="ltr"/);
   assert.match(layout, /d\.lang="fr";d\.dir="ltr"/);
   assert.match(layout, /d\.lang="fa";d\.dir="rtl"/);
