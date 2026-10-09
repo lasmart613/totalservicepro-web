@@ -8,8 +8,25 @@ export type CustomerInviteSendResult = {
   skipped?: 'no_email' | 'invalid_email' | 'not_configured' | string;
   to?: string | null;
   error?: string;
-  signupUrl?: string | null;
 };
+
+export const CLAIM_SIGNUP_ORG_BLOCKED =
+  'This clinic invite could not be claimed. A new organization was not created.';
+
+/**
+ * Claim-link signup either finishes the claim or shows the claim error.
+ * A normal signup, with no claim link, still creates the organization.
+ */
+export function ownerSignupAfterClaim(input: {
+  fromClaimLink: boolean;
+  claimed: boolean;
+  error?: string | null;
+}): { action: 'create-org' } | { action: 'claimed' } | { action: 'show-error'; message: string } {
+  if (!input.fromClaimLink) return { action: 'create-org' };
+  if (input.claimed) return { action: 'claimed' };
+  const message = String(input.error || '').trim() || CLAIM_SIGNUP_ORG_BLOCKED;
+  return { action: 'show-error', message };
+}
 
 export type CustomerInvitePreview = {
   valid: boolean;
@@ -45,7 +62,6 @@ export async function sendCustomerInviteEmail(
     skipped: json.skipped,
     to: json.to ?? null,
     error: json.error,
-    signupUrl: json.signupUrl ?? null,
   };
 }
 

@@ -46,6 +46,7 @@ type InviteBody = {
 type InviteProfileLookup = {
   status: 'found' | 'not_found' | 'error';
   moonlight: boolean;
+  memberHere: boolean;
   firstName: string | null;
   onboardingCompleted: boolean | null;
 };
@@ -332,11 +333,15 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       }
     };
 
+    // Set before recordInvitation() runs. An accepted invite or someone already
+    // in this org keeps the row (accepted, accepted_at, status, expires_at).
+    let preserveInviteRow = false;
+
     const recordInvitation = async (): Promise<string | number | null> => {
       const fresh = freshTeamInviteFields();
       const { data: existingInv } = await admin
         .from('engineer_invitations')
-        .select('id, first_name, last_name')
+        .select('id, first_name, last_name, accepted, accepted_at')
         .eq('email', email)
         .eq('organization_id', orgId)
         .maybeSingle();
@@ -345,6 +350,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
         last_name: lastName || (existingInv as { last_name?: string | null } | null)?.last_name || null,
       };
       if (!existingInv) {
+        if (preserveInviteRow) return null;
         const inserted = await admin
           .from('engineer_invitations')
           .insert({
@@ -362,7 +368,11 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
           .maybeSingle();
         return (inserted.data as { id?: string | number } | null)?.id ?? null;
       }
-      // Resend / re-invite: clear accepted state and extend expires_at so the new link can be claimed.
+      const alreadyAccepted = (existingInv as { accepted?: boolean | null }).accepted === true;
+      if (preserveInviteRow || alreadyAccepted) {
+        return (existingInv as { id: string | number }).id;
+      }
+      // Pending resend only. Extend expiry so the open invite can still be claimed.
       await admin
         .from('engineer_invitations')
         .update({
@@ -462,20 +472,24 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
           .select('id, email, organization_id, role, first_name, last_name, onboarding_completed')
           .eq('email', email)
           .maybeSingle();
-        if (error) return { status: 'error', moonlight: false, firstName: null, onboardingCompleted: null };
+        if (error) {
+          return { status: 'error', moonlight: false, memberHere: false, firstName: null, onboardingCompleted: null };
+        }
         if (!data?.id) {
-          return { status: 'not_found', moonlight: false, firstName: null, onboardingCompleted: null };
+          return { status: 'not_found', moonlight: false, memberHere: false, firstName: null, onboardingCompleted: null };
         }
         const otherOrg =
           data.organization_id != null && String(data.organization_id) !== String(orgId);
+        const memberHere = data.organization_id != null && String(data.organization_id) === String(orgId);
         return {
           status: 'found',
           moonlight: otherOrg,
+          memberHere,
           firstName: (data as { first_name?: string | null }).first_name || null,
           onboardingCompleted: (data as { onboarding_completed?: boolean | null }).onboarding_completed ?? null,
         };
       } catch {
-        return { status: 'error', moonlight: false, firstName: null, onboardingCompleted: null };
+        return { status: 'error', moonlight: false, memberHere: false, firstName: null, onboardingCompleted: null };
       }
     };
 
@@ -542,8 +556,13 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       return null;
     })();
 
-    const setupDecision =
-      audience === 'existing'
+    const existingMember = profileLookup.memberHere;
+    const acceptedInvite = priorInvite?.accepted === true;
+    preserveInviteRow = existingMember || acceptedInvite;
+
+    const setupDecision = preserveInviteRow
+      ? 'sign-in'
+      : audience === 'existing'
         ? decideInviteSetupResend({
             authStatus: authLookup.status,
             lastSignInAt: authLookup.status === 'found' ? authLookup.user.last_sign_in_at : undefined,
@@ -569,6 +588,10 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
 
     // Existing profile: invite row only. Membership is created later by /api/team/claim.
     const inviteId = await recordInvitation();
+
+    if (preserveInviteRow) {
+      return deliverForExistingAccount({ greetName, moonlight });
+    }
 
     if (setupDecision === 'setup') {
       if (!resendKey) {

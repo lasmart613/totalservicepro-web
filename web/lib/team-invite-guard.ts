@@ -21,8 +21,8 @@ type InviteRow = {
 };
 
 /**
- * Fields written on a new invite and on resend.
- * Clears accepted state so a previously used or expired row can be claimed again.
+ * Fields for a new invite, and for resending one that is not already accepted.
+ * An accepted invite is left alone so a resend cannot put it back on the pending list.
  */
 export function freshTeamInviteFields(now = Date.now()): {
   accepted: false;

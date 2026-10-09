@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { isOwnerOrgType } from '@/lib/org-types';
 import { verifyCustomerInvite } from '@/lib/customer-invite';
+import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
 
 /**
  * POST /api/customers/claim
@@ -125,6 +126,23 @@ export async function runCustomerClaim(
     const orgType = String(org.type || '').toLowerCase();
     if (orgType && !isOwnerOrgType(orgType) && orgType !== 'customer') {
       return NextResponse.json({ ok: false, claimed: false, error: 'This invite is not for a clinic profile.' }, { status: 400 });
+    }
+
+    const sources = await fetchDirectoryContactSources(writer, org.id);
+    const currentEmail = pickCrmReachEmail({
+      directoryContacts: sources.directoryContacts,
+      contactRows: sources.contactRows,
+      officeEmail: sources.officeEmail ?? (org as { email?: string | null }).email,
+    }).email.trim().toLowerCase();
+    if (!currentEmail || currentEmail !== payload.email) {
+      return NextResponse.json(
+        {
+          ok: false,
+          claimed: false,
+          error: 'This invite was issued for an email that is no longer on this clinic.',
+        },
+        { status: 403 }
+      );
     }
 
     const saveOwnerRole = async (userId: string) => {

@@ -4,8 +4,8 @@ import React, { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
-import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
-import { claimCustomerInvite } from '@/lib/customer-invite-client';
+import { applyPendingSignup, clearPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
+import { claimCustomerInvite, ownerSignupAfterClaim } from '@/lib/customer-invite-client';
 import { destAfterInviteClaim, inviteInPlay, type InviteClaimResult } from '@/lib/invite-claim';
 import { isTspAndroidWebView } from '@/lib/android-session';
 import { publicAuthMessage } from '@/lib/auth-errors';
@@ -147,15 +147,24 @@ function AuthCallbackInner() {
           String((meta as { claim_token?: string }).claim_token || '');
         if (claimToken) {
           const { data: sessionData } = await supabase.auth.getSession();
-          if (sessionData.session?.access_token) {
-            const claimed = await claimCustomerInvite(sessionData.session.access_token, claimToken);
-            if (claimed.claimed) {
-              if (cancelled) return;
-              setMessage('Clinic profile claimed. Continuing…');
-              router.replace('/company?justSetup=1');
-              return;
-            }
+          const claimed = sessionData.session?.access_token
+            ? await claimCustomerInvite(sessionData.session.access_token, claimToken)
+            : { claimed: false, error: 'Sign in required to claim this clinic profile.' };
+          const next = ownerSignupAfterClaim({
+            fromClaimLink: true,
+            claimed: !!claimed.claimed,
+            error: claimed.error,
+          });
+          if (next.action === 'claimed') {
+            if (cancelled) return;
+            setMessage('Clinic profile claimed. Continuing…');
+            router.replace('/company?justSetup=1');
+            return;
           }
+          clearPendingSignup();
+          if (cancelled) return;
+          setMessage(next.action === 'show-error' ? next.message : 'This clinic invite could not be claimed. A new organization was not created.');
+          return;
         }
 
         // Finish org creation from localStorage OR user_metadata (new-tab Gmail confirm).
