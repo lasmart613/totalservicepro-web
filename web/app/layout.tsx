@@ -12,10 +12,6 @@ import { ThemeScript } from "@/components/ThemeScript";
 import { ThemeSync } from "@/components/ThemeSync";
 import { rootMetadata } from "@/lib/seo";
 
-// Latin unicode-range from the Google Fonts CSS these files were taken from.
-const latinUnicodeRange =
-  "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD";
-
 // Geist sans, latin variable (wght 100–900, includes 400/500/600/700/800).
 const geistSans = localFont({
   src: "./fonts/geist/Geist-latin.woff2",
@@ -24,7 +20,13 @@ const geistSans = localFont({
   style: "normal",
   display: "swap",
   preload: false,
-  declarations: [{ prop: "unicode-range", value: latinUnicodeRange }],
+  declarations: [
+    {
+      prop: "unicode-range",
+      value:
+        "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+    },
+  ],
 });
 
 // Geist Mono, latin variable (wght 100–900).
@@ -35,7 +37,13 @@ const geistMono = localFont({
   style: "normal",
   display: "swap",
   preload: false,
-  declarations: [{ prop: "unicode-range", value: latinUnicodeRange }],
+  declarations: [
+    {
+      prop: "unicode-range",
+      value:
+        "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+    },
+  ],
 });
 
 // DM Sans, latin variable (wght 100–1000, includes 400/500/600/700/800).
@@ -46,7 +54,13 @@ const dmSans = localFont({
   style: "normal",
   display: "swap",
   preload: true,
-  declarations: [{ prop: "unicode-range", value: latinUnicodeRange }],
+  declarations: [
+    {
+      prop: "unicode-range",
+      value:
+        "U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD",
+    },
+  ],
 });
 
 export const metadata: Metadata = rootMetadata;
