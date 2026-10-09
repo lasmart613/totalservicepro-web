@@ -5,6 +5,8 @@ import { ensureTeamMemberProfile } from '@/lib/team-profile';
 import {
   decideClaim,
   inviteMustNotLeaveHome,
+  isInvitableTeamRole,
+  teamRoleForInvite,
 } from '@/lib/org-membership';
 import { teamInviteJoinGate } from '@/lib/team-invite-guard';
 import { authorizeInviteAccept } from '@/lib/tenant-lockdown';
@@ -154,6 +156,19 @@ export async function runTeamClaim(
           emailConfirmedAt,
         });
         if (historical.ok) inv = anyInv;
+      }
+    }
+
+    if (inv) {
+      const claimRole = teamRoleForInvite(inv.role);
+      if (!isInvitableTeamRole(claimRole)) {
+        const error =
+          claimRole === 'owner'
+            ? 'An owner role cannot be accepted from a team invite.'
+            : claimRole === 'admin'
+              ? 'A platform admin role cannot be accepted from a team invite.'
+              : 'This invite role cannot be accepted.';
+        return NextResponse.json({ ok: false, claimed: false, error }, { status: 403 });
       }
     }
 

@@ -9,7 +9,7 @@ import { TestEquipmentRoster } from '@/components/TestEquipmentRoster';
 import { canAssignShopTestEquipment, isAdmin } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { teamInviteEmailError, teamInviteSentMessage } from '@/lib/team-invite';
-import { invitationIsOpen, isPendingTeamInvite } from '@/lib/org-membership';
+import { invitationIsOpen, INVITABLE_TEAM_ROLES, isPendingTeamInvite, teamMemberRoleChoices } from '@/lib/org-membership';
 
 function inviteListStatus(
   inv: {
@@ -29,17 +29,6 @@ function inviteListStatus(
   if (!invitationIsOpen(inv)) return 'Expired';
   return 'Pending';
 }
-
-const ROLES = [
-  'fse',
-  'dispatcher',
-  'company_admin',
-  'service_manager',
-  'admin',
-  'scheduler',
-  'technician',
-  'viewer',
-];
 
 export default function TeamManagement() {
   const t = useT();
@@ -318,7 +307,7 @@ export default function TeamManagement() {
               value={newMember.role}
               onChange={(e) => setNewMember({ ...newMember, role: e.target.value })}
             >
-              {ROLES.map((role) => (
+              {INVITABLE_TEAM_ROLES.map((role) => (
                 <option key={role} value={role}>
                   {roleLabel(role, locale)}
                 </option>
@@ -451,14 +440,14 @@ export default function TeamManagement() {
                     </td>
                     <td className="py-3 px-4 text-sm">{member.email}</td>
                     <td className="py-3 px-4">
-                      {(isAdmin(userRole) || userRole === 'owner') && member.id !== userId ? (
+                      {(isAdmin(userRole) || userRole === 'owner') && member.id !== userId && member.role !== 'owner' && member.role !== 'admin' ? (
                         <select
                           className="select text-xs"
                           aria-label={t('Role for {name}').replace('{name}', member.email || member.first_name || t('Member'))}
                           value={member.role || 'fse'}
                           onChange={(e) => changeMemberRole(String(member.id), e.target.value)}
                         >
-                          {(member.role && !ROLES.includes(member.role) ? [member.role, ...ROLES] : ROLES).map((role) => (
+                          {teamMemberRoleChoices(member.role).map((role) => (
                             <option key={role} value={role}>
                               {roleLabel(role, locale)}
                             </option>

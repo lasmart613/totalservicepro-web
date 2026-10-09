@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { findAuthUserByEmail, type AuthEmailLookup } from '@/lib/team-profile';
-import { DEFAULT_STAFF_ROLE } from '@/lib/org-membership';
+import { DEFAULT_STAFF_ROLE, isInvitableTeamRole, normalizeRole, teamRoleForInvite } from '@/lib/org-membership';
 import { freshTeamInviteFields } from '@/lib/team-invite-guard';
 import { decideMemberRoleChange } from '@/lib/tenant-lockdown';
 import {
@@ -180,7 +180,10 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       return respond({ error: emailError }, 400);
     }
 
-    const requestedRole = (body.role || DEFAULT_STAFF_ROLE).toLowerCase();
+    const requestedRole = teamRoleForInvite(body.role ?? DEFAULT_STAFF_ROLE);
+    if (!isInvitableTeamRole(requestedRole)) {
+      return respond({ error: rejectedInviteRoleMessage(requestedRole) }, 400);
+    }
     const roleGate = decideMemberRoleChange({
       callerRole: role,
       targetRole: requestedRole,
@@ -532,7 +535,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
 
     const priorInvite = await (async () => {
       const columns =
-        'id, first_name, last_name, accepted, expires_at, created_at, created_auth_user_id';
+        'id, role, first_name, last_name, accepted, expires_at, created_at, created_auth_user_id';
       const first = await admin
         .from('engineer_invitations')
         .select(columns)
@@ -541,6 +544,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
         .maybeSingle();
       if (!first.error) {
         return first.data as {
+          role?: string | null;
           accepted?: boolean | null;
           expires_at?: string | null;
           created_at?: string | null;
@@ -550,11 +554,12 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       if (/created_auth_user_id|column/i.test(String(first.error.message || ''))) {
         const fallback = await admin
           .from('engineer_invitations')
-          .select('id, first_name, last_name, accepted, expires_at, created_at')
+          .select('id, role, first_name, last_name, accepted, expires_at, created_at')
           .eq('email', email)
           .eq('organization_id', orgId)
           .maybeSingle();
         return (fallback.data as {
+          role?: string | null;
           accepted?: boolean | null;
           expires_at?: string | null;
           created_at?: string | null;
@@ -563,6 +568,10 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       }
       return null;
     })();
+
+    if (normalizeRole(priorInvite?.role) === 'owner') {
+      return respond({ error: rejectedInviteRoleMessage('owner') }, 400);
+    }
 
     const existingMember = profileLookup.memberHere;
     const acceptedInvite = priorInvite?.accepted === true;
@@ -654,4 +663,11 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
     console.error('team invite error', logged);
     return respond({ error: message || 'Invite failed' }, 500);
   }
+}
+
+function rejectedInviteRoleMessage(role: string): string {
+  const named = normalizeRole(role);
+  if (named === 'owner') return 'Choose a staff role. Owner cannot be invited this way.';
+  if (named === 'admin') return 'Choose a staff role. Platform admin cannot be invited this way.';
+  return 'Choose a staff role. That role cannot be invited this way.';
 }
