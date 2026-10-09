@@ -1,9 +1,9 @@
+import { PRODUCTION_SITE_ORIGIN } from './site-origin.ts';
+import { safeRedirectPath } from './safe-redirect.ts';
+
 /** Safe internal path for post-login redirect. Keeps query string and hash. */
 export function safeNextPath(raw: string | null | undefined, fallback = '/'): string {
-  if (!raw) return fallback;
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith('/') || trimmed.startsWith('//')) return fallback;
-  return trimmed;
+  return safeRedirectPath(raw, PRODUCTION_SITE_ORIGIN, fallback);
 }
 
 /** Encode path+search for /login?next= so query params survive the round-trip. */
@@ -36,5 +36,6 @@ export function nextPathFromSearchParams(
   }
   const extra = extras.toString();
   if (!extra) return next;
-  return next.includes('?') ? `${next}&${extra}` : `${next}?${extra}`;
+  const joined = next.includes('?') ? `${next}&${extra}` : `${next}?${extra}`;
+  return safeRedirectPath(joined, PRODUCTION_SITE_ORIGIN, next);
 }

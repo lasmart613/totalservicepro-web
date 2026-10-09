@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
 import { destAfterInviteClaim, inviteInPlay } from '@/lib/invite-claim';
+import { safeRedirectPath } from '@/lib/safe-redirect';
 
 /**
  * Invited / recovery users land here after the email link establishes a session.
@@ -140,14 +141,8 @@ function SetPasswordInner() {
         dest = '/onboarding';
       }
 
-      const next = searchParams.get('next');
-      if (
-        next &&
-        next.startsWith('/') &&
-        !next.startsWith('//') &&
-        next !== '/auth/set-password' &&
-        next !== '/hub'
-      ) {
+      const next = safeRedirectPath(searchParams.get('next'), window.location.origin, '');
+      if (next && next !== '/auth/set-password' && next !== '/hub') {
         // Invitees must not be sent to founder /onboarding (that creates a new shop).
         if (next.startsWith('/onboarding/member')) dest = next;
         else if (next.startsWith('/onboarding') && !inviteInPlay(claim)) dest = next;

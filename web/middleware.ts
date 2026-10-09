@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import { mapAndroidHtmlPath } from './lib/android-html-routes'
+import { safeRedirectPath } from './lib/safe-redirect'
 
 /**
  * Lightweight middleware for Netlify.
@@ -29,7 +30,8 @@ export function middleware(request: NextRequest) {
   if (mapped) {
     const dest = request.nextUrl.clone()
     const q = mapped.indexOf('?')
-    dest.pathname = q >= 0 ? mapped.slice(0, q) : mapped
+    const pathOnly = q >= 0 ? mapped.slice(0, q) : mapped
+    dest.pathname = safeRedirectPath(pathOnly, request.nextUrl.origin, '/hub')
     dest.search = q >= 0 ? mapped.slice(q) : ''
     return NextResponse.redirect(dest)
   }

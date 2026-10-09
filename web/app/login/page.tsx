@@ -5,6 +5,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { PublicLink, usePublicHref, useT } from '@/lib/fa/locale';
 import { nextPathFromSearchParams } from '@/lib/login-next';
+import { safeRedirectPath } from '@/lib/safe-redirect';
 import { claimCustomerInvite } from '@/lib/customer-invite-client';
 import { clearPendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session';
@@ -34,6 +35,7 @@ function LoginInner() {
   const supabase = getSupabaseClient();
 
   async function finishLogin(dest: string) {
+    dest = safeRedirectPath(dest, clientAuthOrigin(), '/');
     if (claimToken) {
       const { data: sessionData } = await supabase.auth.getSession();
       if (sessionData.session?.access_token) {
@@ -82,7 +84,9 @@ function LoginInner() {
       type: 'signup',
       email: cleanEmail,
       options: {
-        emailRedirectTo: `${origin}/auth/callback?next=/onboarding`,
+        emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
+          safeRedirectPath('/onboarding', origin)
+        )}`,
       },
     });
     if (error) return error.message || 'Could not send confirmation email.';
@@ -128,7 +132,7 @@ function LoginInner() {
             firstName,
             lastName,
             emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
-              nextPath && nextPath !== '/' ? nextPath : '/onboarding'
+              safeRedirectPath(nextPath && nextPath !== '/' ? nextPath : '/onboarding', origin)
             )}`,
           }),
         });
@@ -216,7 +220,9 @@ function LoginInner() {
         email: cleanEmail,
         options: {
           shouldCreateUser: false,
-          emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(nextPath || '/hub')}${
+          emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
+            safeRedirectPath(nextPath || '/hub', origin)
+          )}${
             claimToken ? `&claim=${encodeURIComponent(claimToken)}` : ''
           }`,
         },
@@ -319,7 +325,9 @@ function LoginInner() {
     if (!isValidEmail(cleanEmail)) return setMsg('Enter a valid email address first.');
     const origin = clientAuthOrigin();
     const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-      redirectTo: `${origin}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`,
+      redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
+        safeRedirectPath('/auth/set-password', origin)
+      )}`,
     });
     setMsg(
       error
@@ -334,7 +342,9 @@ function LoginInner() {
     setLoading(true);
     try {
       const origin = clientAuthOrigin();
-      const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(nextPath || '/')}`;
+      const redirectTo = `${origin}/auth/callback?next=${encodeURIComponent(
+        safeRedirectPath(nextPath || '/', origin)
+      )}`;
       const { error } = await supabase.auth.signInWithOAuth({
         provider: 'google',
         options: {

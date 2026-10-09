@@ -3,6 +3,7 @@
 import React, { useState } from 'react';
 import { PublicLink, useT } from '@/lib/fa/locale';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { safeRedirectPath } from '@/lib/safe-redirect';
 import { clientAuthOrigin } from '@/lib/site-origin';
 
 export default function ForgotPasswordPage() {
@@ -32,7 +33,9 @@ export default function ForgotPasswordPage() {
     try {
       const origin = clientAuthOrigin();
       const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-        redirectTo: `${origin}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`,
+        redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
+          safeRedirectPath('/auth/set-password', origin)
+        )}`,
       });
       setOk(!error);
       setMessage(

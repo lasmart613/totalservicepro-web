@@ -9,12 +9,7 @@ import { claimCustomerInvite, clearStaleClaimToken, ownerSignupAfterClaim } from
 import { destAfterInviteClaim, inviteInPlay, type InviteClaimResult } from '@/lib/invite-claim';
 import { isTspAndroidWebView } from '@/lib/android-session';
 import { publicAuthMessage } from '@/lib/auth-errors';
-
-function safeNextPath(raw: string | null): string {
-  if (!raw) return '';
-  if (!raw.startsWith('/') || raw.startsWith('//')) return '';
-  return raw;
-}
+import { safeRedirectPath } from '@/lib/safe-redirect';
 
 function isInviteAuthType(authType: string): boolean {
   return authType === 'invite' || authType === 'recovery' || authType === 'magiclink';
@@ -39,7 +34,11 @@ function AuthCallbackInner() {
         const url = new URL(window.location.href);
         const code = url.searchParams.get('code');
         const err = url.searchParams.get('error_description') || url.searchParams.get('error');
-        let next = safeNextPath(searchParams.get('next') || url.searchParams.get('next'));
+        let next = safeRedirectPath(
+          searchParams.get('next') || url.searchParams.get('next'),
+          url.origin,
+          ''
+        );
         const wantApp =
           url.searchParams.get('app') === '1' || searchParams.get('app') === '1';
 
