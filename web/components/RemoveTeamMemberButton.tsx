@@ -87,11 +87,7 @@ export function RemoveTeamMemberButton({
         }
         return;
       }
-      toast.success(
-        json.profileStillPointsHere
-          ? t('Removed from the team. Their login stays. Their profile still points at this company.')
-          : t('Removed from the team. Their login stays.')
-      );
+      toast.success(t('Removed from the team. Their login stays.'));
       await onRemoved();
     } catch {
       toast.error(t('Could not remove that team member.'));

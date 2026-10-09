@@ -174,28 +174,32 @@ function removeAdmin(state: Store) {
       const wasHome = mem.is_home === true;
       let homeMovedTo: number | null = null;
       let profileCleared = false;
+      const latest = (rows: Membership[]) =>
+        rows.slice().sort((a, b) => {
+          const aMissing = !a.created_at;
+          const bMissing = !b.created_at;
+          if (aMissing !== bMissing) return aMissing ? 1 : -1;
+          if ((a.created_at || '') !== (b.created_at || '')) {
+            return (a.created_at || '') < (b.created_at || '') ? 1 : -1;
+          }
+          return b.organization_id - a.organization_id;
+        })[0];
+      const pointProfile = (org: number) => {
+        if (!profile) return;
+        profile.organization_id = org;
+        profile.active_organization_id = org;
+      };
       if (wasHome) {
-        const next = state.memberships
-          .filter((row) => row.user_id === userId && row.organization_id !== orgId)
-          .sort((a, b) => {
-            const aMissing = !a.created_at;
-            const bMissing = !b.created_at;
-            if (aMissing !== bMissing) return aMissing ? 1 : -1;
-            if ((a.created_at || '') !== (b.created_at || '')) {
-              return (a.created_at || '') < (b.created_at || '') ? 1 : -1;
-            }
-            return b.organization_id - a.organization_id;
-          })[0];
+        const next = latest(
+          state.memberships.filter((row) => row.user_id === userId && row.organization_id !== orgId)
+        );
         state.memberships = state.memberships.filter(
           (row) => !(row.user_id === userId && row.organization_id === orgId)
         );
         if (next) {
           next.is_home = true;
           homeMovedTo = next.organization_id;
-          if (profile) {
-            profile.organization_id = next.organization_id;
-            profile.active_organization_id = next.organization_id;
-          }
+          pointProfile(next.organization_id);
         } else {
           profileCleared = true;
           if (profile) {
@@ -204,9 +208,27 @@ function removeAdmin(state: Store) {
           }
         }
       } else {
+        const pointersHit =
+          profile != null &&
+          (String(profile.organization_id) === String(orgId) ||
+            String(profile.active_organization_id) === String(orgId));
         state.memberships = state.memberships.filter(
           (row) => !(row.user_id === userId && row.organization_id === orgId)
         );
+        if (pointersHit && profile) {
+          const remaining = state.memberships.filter((row) => row.user_id === userId);
+          const home = latest(remaining.filter((row) => row.is_home));
+          const next = home || latest(remaining);
+          if (next) {
+            if (!home) next.is_home = true;
+            homeMovedTo = next.organization_id;
+            pointProfile(next.organization_id);
+          } else {
+            profileCleared = true;
+            profile.organization_id = null;
+            profile.active_organization_id = null;
+          }
+        }
       }
       const email = String(profile?.email || '').toLowerCase();
       let revoked = 0;
@@ -222,11 +244,6 @@ function removeAdmin(state: Store) {
           ok: true,
           home_moved_to: homeMovedTo,
           profile_cleared: profileCleared,
-          profile_still_points_here:
-            !profileCleared &&
-            homeMovedTo == null &&
-            profile?.organization_id != null &&
-            String(profile.organization_id) === String(orgId),
           revoked_invite_count: revoked,
           account_kept: true,
         },
@@ -365,7 +382,6 @@ test('admin remove drops only that membership and revokes pending invites', asyn
   assert.equal(result.body.ok, true);
   assert.equal(result.body.removed, true);
   assert.equal(result.body.accountKept, true);
-  assert.equal(result.body.profileStillPointsHere, false);
   assert.equal(result.body.homeMovedTo, null);
   assert.equal(result.body.profileCleared, false);
   assert.equal(result.body.revokedInviteCount, 1);
@@ -395,18 +411,91 @@ test('admin remove drops only that membership and revokes pending invites', asyn
   assert.equal(JSON.stringify(state.authUsers), authBefore);
 });
 
-test('a profile pointer at the removed org is reported and left in place', async () => {
+test('a profile pointer at the removed org moves to the remaining home', async () => {
   const state = baseStore();
   const profile = state.profiles.find((row) => row.id === MEMBER)!;
   profile.organization_id = ORG;
+  profile.active_organization_id = 99;
   profile.role = 'fse';
   const result = await postRemove({ state });
   assert.equal(result.status, 200, JSON.stringify(result.body));
-  assert.equal(result.body.profileStillPointsHere, true);
-  assert.equal(profile.organization_id, ORG);
+  assert.equal(result.body.homeMovedTo, HOME);
+  assert.equal(result.body.profileCleared, false);
+  assert.equal(profile.organization_id, HOME);
+  assert.equal(profile.active_organization_id, HOME);
   assert.equal(profile.role, 'fse');
   assert.equal(
+    state.memberships.find((row) => row.user_id === MEMBER && row.organization_id === HOME)?.is_home,
+    true
+  );
+  assert.equal(
     state.memberships.some((row) => row.user_id === MEMBER && row.organization_id === ORG),
+    false
+  );
+});
+
+test('an active-org pointer at the removed org moves both pointers to the remaining home', async () => {
+  const state = baseStore();
+  const profile = state.profiles.find((row) => row.id === MEMBER)!;
+  profile.organization_id = HOME;
+  profile.active_organization_id = ORG;
+  const result = await postRemove({ state });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.homeMovedTo, HOME);
+  assert.equal(result.body.profileCleared, false);
+  assert.equal(profile.organization_id, HOME);
+  assert.equal(profile.active_organization_id, HOME);
+});
+
+test('a non-home removal with no home uses the latest other membership', async () => {
+  const state = baseStore();
+  const older = state.memberships.find((row) => row.user_id === MEMBER && row.organization_id === HOME)!;
+  older.is_home = false;
+  older.created_at = '2026-02-01T00:00:00.000Z';
+  state.memberships.push({
+    user_id: MEMBER,
+    organization_id: 12,
+    role: 'dispatcher',
+    is_home: false,
+    created_at: '2026-07-01T00:00:00.000Z',
+  });
+  const profile = state.profiles.find((row) => row.id === MEMBER)!;
+  profile.organization_id = ORG;
+  profile.active_organization_id = HOME;
+  profile.role = 'fse';
+  const result = await postRemove({ state });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.homeMovedTo, 12);
+  assert.equal(result.body.profileCleared, false);
+  assert.equal(profile.organization_id, 12);
+  assert.equal(profile.active_organization_id, 12);
+  assert.equal(profile.role, 'fse');
+  assert.equal(
+    state.memberships.find((row) => row.user_id === MEMBER && row.organization_id === 12)?.is_home,
+    true
+  );
+});
+
+test('a non-home removal with no remaining membership clears both pointers', async () => {
+  const state = baseStore();
+  state.memberships = state.memberships.filter(
+    (row) => !(row.user_id === MEMBER && row.organization_id === HOME)
+  );
+  const row = state.memberships.find((item) => item.user_id === MEMBER && item.organization_id === ORG)!;
+  row.is_home = false;
+  const profile = state.profiles.find((item) => item.id === MEMBER)!;
+  profile.organization_id = ORG;
+  profile.active_organization_id = ORG;
+  profile.role = 'fse';
+  const result = await postRemove({ state });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.homeMovedTo, null);
+  assert.equal(result.body.profileCleared, true);
+  assert.equal(profile.organization_id, null);
+  assert.equal(profile.active_organization_id, null);
+  assert.equal(profile.role, 'fse');
+  assert.equal(
+    state.memberships.some((item) => item.user_id === MEMBER),
     false
   );
 });
@@ -490,6 +579,44 @@ test('403 when the target has a founder flag or created the org', async () => {
   );
 });
 
+test('403 when the caller is founder of a different org', async () => {
+  const state = baseStore();
+  state.orgs.find((row) => row.id === ORG)!.created_by = 'someone-else';
+  state.orgs.find((row) => row.id === HOME)!.created_by = ADMIN;
+  const here = state.memberships.find((row) => row.user_id === ADMIN && row.organization_id === ORG)!;
+  here.role = 'fse';
+  here.is_founder = false;
+  state.memberships.push({
+    user_id: ADMIN,
+    organization_id: HOME,
+    role: 'company_admin',
+    is_home: false,
+    is_founder: true,
+    created_at: '2026-01-02T00:00:00.000Z',
+  });
+  const caller = state.profiles.find((row) => row.id === ADMIN)!;
+  caller.role = 'fse';
+  caller.is_founder = true;
+  caller.organization_id = HOME;
+  const membershipsBefore = JSON.stringify(state.memberships);
+  const result = await postRemove({ state });
+  assert.equal(result.status, 403, JSON.stringify(result.body));
+  assert.equal(result.body.code, 'not_admin');
+  assert.equal(result.rpcCalls.length, 0);
+  assert.equal(JSON.stringify(state.memberships), membershipsBefore);
+});
+
+test('a founder flag on the caller membership in this org can remove', async () => {
+  const state = baseStore();
+  state.orgs.find((row) => row.id === ORG)!.created_by = 'someone-else';
+  const here = state.memberships.find((row) => row.user_id === ADMIN && row.organization_id === ORG)!;
+  here.role = 'fse';
+  here.is_founder = true;
+  state.profiles.find((row) => row.id === ADMIN)!.is_founder = false;
+  const result = await postRemove({ state });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+});
+
 test('403 when the caller profile role is admin and they are not company_admin, owner, or founder', async () => {
   const state = baseStore();
   state.orgs.find((row) => row.id === ORG)!.created_by = 'someone-else';
@@ -526,7 +653,6 @@ test('removing a home employee with no other membership clears both org pointers
   assert.equal(result.body.removed, true);
   assert.equal(result.body.homeMovedTo, null);
   assert.equal(result.body.profileCleared, true);
-  assert.equal(result.body.profileStillPointsHere, false);
   assert.equal(profile.organization_id, null);
   assert.equal(profile.active_organization_id, null);
   assert.equal(profile.role, 'service_manager');
@@ -566,7 +692,6 @@ test('removing a home employee moves home to the latest other membership and poi
   assert.equal(result.status, 200, JSON.stringify(result.body));
   assert.equal(result.body.homeMovedTo, 12);
   assert.equal(result.body.profileCleared, false);
-  assert.equal(result.body.profileStillPointsHere, false);
   assert.equal(
     state.memberships.some((item) => item.user_id === MEMBER && item.organization_id === ORG),
     false
@@ -1020,6 +1145,7 @@ test('remove migration is one transaction and the rollback drops the function', 
   assert.match(migration, /home_moved_to/);
   assert.match(migration, /profile_cleared/);
   assert.match(migration, /GRANT EXECUTE ON FUNCTION public\.remove_organization_member\(uuid, bigint, uuid\) TO service_role/);
+  assert.doesNotMatch(migration, /profile_still_points_here/);
   assert.doesNotMatch(migration, /role = public\.profile_role_from_membership/);
   assert.doesNotMatch(migration, /DELETE FROM auth\.users/);
   assert.doesNotMatch(migration, /A home membership cannot be removed/);
@@ -1033,6 +1159,8 @@ test('remove migration is one transaction and the rollback drops the function', 
   assert.match(route, /REMOVE_MEMBER_RPC/);
   assert.match(route, /homeMovedTo/);
   assert.match(route, /profileCleared/);
+  assert.doesNotMatch(route, /profileStillPointsHere/);
+  assert.doesNotMatch(route, /rowFounderFlag\(callerProfile\)/);
   assert.doesNotMatch(route, /callerProfileHere/);
   assert.match(readFileSync(join(here, './team-remove.ts'), 'utf8'), /remove_organization_member/);
   const homeDash = readFileSync(join(here, '../components/home/HomeDashboard.tsx'), 'utf8');
@@ -1053,5 +1181,9 @@ test('remove migration is one transaction and the rollback drops the function', 
   assert.match(button, /Remove from team/);
   assert.match(button, /window\.confirm/);
   assert.match(button, /teamMemberRemoveBlocked/);
-  assert.match(readFileSync(join(here, './i18n/gap-copy.ts'), 'utf8'), /Remove from team/);
+  assert.doesNotMatch(button, /profileStillPointsHere/);
+  assert.doesNotMatch(button, /still points at this company/);
+  const gap = readFileSync(join(here, './i18n/gap-copy.ts'), 'utf8');
+  assert.match(gap, /Remove from team/);
+  assert.doesNotMatch(gap, /still points at this company/);
 });

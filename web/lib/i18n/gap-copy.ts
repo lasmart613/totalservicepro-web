@@ -3357,16 +3357,6 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'Removido da equipe. O login permanece.',
     'أُزيل من الفريق. بقي تسجيل الدخول.',
   ),
-  'Removed from the team. Their login stays. Their profile still points at this company.': row(
-    'از تیم حذف شد. ورودشان ماند. نمایهٔ کاربر هنوز به این شرکت اشاره می‌کند.',
-    'Quitado del equipo. Su acceso se conserva. Su perfil sigue apuntando a esta empresa.',
-    'Retiré de l’équipe. Sa connexion reste. Son profil pointe encore vers cette entreprise.',
-    'הוסר מהצוות. הכניסה נשארת. הפרופיל עדיין מצביע על החברה הזו.',
-    'Rimosso dal team. L’accesso resta. Il profilo punta ancora a questa azienda.',
-    'Aus dem Team entfernt. Der Login bleibt. Das Profil zeigt noch auf dieses Unternehmen.',
-    'Removido da equipe. O login permanece. O perfil ainda aponta para esta empresa.',
-    'أُزيل من الفريق. بقي تسجيل الدخول. ما زال الملف يشير إلى هذه الشركة.',
-  ),
   'You cannot remove yourself. Use Leave company instead.': row(
     'نمی‌توانید خودتان را حذف کنید. به‌جای آن از ترک شرکت استفاده کنید.',
     'No puede quitarse a sí mismo. Use Salir de la empresa.',

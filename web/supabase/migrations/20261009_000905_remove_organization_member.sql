@@ -9,11 +9,21 @@
 --     is_home and leaves its membership role alone (p_role NULL,
 --     p_sync_profile false). user_profiles.organization_id and
 --     active_organization_id then point at that org.
---   * If none remains, both pointers are set to NULL. Both columns are
---     nullable. organization_id's foreign key is ON DELETE SET NULL.
---     active_organization_id has no foreign key. profile_org_change_allowed
---     treats NULL as allowed, and the identity guard returns immediately
---     when auth.uid() is null (this function runs as service role).
+--   * If none remains, both pointers are set to NULL.
+-- A non-home delete does the same pointer repair when either pointer still
+-- equals the removed org. Live leave_organization retargets both columns
+-- together when user_profiles.organization_id was the org just left, picks
+-- the remaining row with is_home first, and clears both when nothing
+-- remains. This function also retargets when only active_organization_id
+-- still equals the removed org (RLS reads organization_id). The destination
+-- is the remaining is_home membership. If none is home, the same latest
+-- created_at / organization_id DESC pick is marked home with
+-- set_home_membership. If nothing remains, both pointers become NULL.
+-- If neither pointer equals the removed org, the profile is left alone.
+-- Both columns are nullable. organization_id's foreign key is ON DELETE
+-- SET NULL. active_organization_id has no foreign key.
+-- profile_org_change_allowed treats NULL as allowed, and the identity
+-- guard returns immediately when auth.uid() is null (service role).
 -- user_profiles.role is not updated. user_profiles_role_check already
 -- allows the current role with a null organization_id or a different org.
 -- The partial unique index user_profiles_one_owner_per_organization does
@@ -49,6 +59,7 @@ DECLARE
   mem public.organization_memberships%ROWTYPE;
   org_created_by uuid;
   profile_org bigint;
+  profile_active bigint;
   profile_json jsonb;
   member_email text;
   revoked_count integer := 0;
@@ -96,8 +107,8 @@ BEGIN
   FROM public.organizations o
   WHERE o.id = p_organization_id;
 
-  SELECT p.organization_id, to_jsonb(p), lower(btrim(p.email))
-  INTO profile_org, profile_json, member_email
+  SELECT p.organization_id, p.active_organization_id, to_jsonb(p), lower(btrim(p.email))
+  INTO profile_org, profile_active, profile_json, member_email
   FROM public.user_profiles p
   WHERE p.id = p_user_id;
 
@@ -185,8 +196,51 @@ BEGIN
     IF deleted_count <> 1 THEN
       RAISE EXCEPTION 'remove_organization_member deleted % membership rows', deleted_count;
     END IF;
-    home_moved_to := NULL;
-    profile_cleared := false;
+    IF profile_org IS NOT DISTINCT FROM p_organization_id
+       OR profile_active IS NOT DISTINCT FROM p_organization_id THEN
+      SELECT m.organization_id INTO next_org
+      FROM public.organization_memberships m
+      WHERE m.user_id = p_user_id
+        AND m.is_home IS TRUE
+      ORDER BY m.created_at DESC NULLS LAST, m.organization_id DESC
+      LIMIT 1
+      FOR UPDATE;
+
+      IF next_org IS NULL THEN
+        SELECT m.organization_id INTO next_org
+        FROM public.organization_memberships m
+        WHERE m.user_id = p_user_id
+        ORDER BY m.created_at DESC NULLS LAST, m.organization_id DESC
+        LIMIT 1
+        FOR UPDATE;
+        IF next_org IS NOT NULL THEN
+          PERFORM public.set_home_membership(p_user_id, next_org, NULL, false);
+        END IF;
+      END IF;
+
+      IF next_org IS NOT NULL THEN
+        UPDATE public.user_profiles
+        SET
+          organization_id = next_org,
+          active_organization_id = next_org,
+          updated_at = now()
+        WHERE id = p_user_id;
+        home_moved_to := next_org;
+        profile_cleared := false;
+      ELSE
+        UPDATE public.user_profiles
+        SET
+          organization_id = NULL,
+          active_organization_id = NULL,
+          updated_at = now()
+        WHERE id = p_user_id;
+        home_moved_to := NULL;
+        profile_cleared := true;
+      END IF;
+    ELSE
+      home_moved_to := NULL;
+      profile_cleared := false;
+    END IF;
   END IF;
 
   IF member_email IS NOT NULL AND member_email <> '' THEN
@@ -198,10 +252,6 @@ BEGIN
     GET DIAGNOSTICS revoked_count = ROW_COUNT;
   END IF;
 
-  SELECT p.organization_id INTO profile_org
-  FROM public.user_profiles p
-  WHERE p.id = p_user_id;
-
   RETURN jsonb_build_object(
     'ok', true,
     'status', 200,
@@ -209,10 +259,6 @@ BEGIN
     'organization_id', p_organization_id,
     'home_moved_to', home_moved_to,
     'profile_cleared', profile_cleared,
-    'profile_still_points_here',
-      profile_cleared IS NOT TRUE
-      AND home_moved_to IS NULL
-      AND profile_org IS NOT DISTINCT FROM p_organization_id,
     'revoked_invite_count', revoked_count,
     'account_kept', true
   );
@@ -223,4 +269,4 @@ REVOKE ALL ON FUNCTION public.remove_organization_member(uuid, bigint, uuid) FRO
 GRANT EXECUTE ON FUNCTION public.remove_organization_member(uuid, bigint, uuid) TO service_role;
 
 COMMENT ON FUNCTION public.remove_organization_member(uuid, bigint, uuid) IS
-  'Service-role only. Deletes one membership and expires pending invites for that email in that org. A non-owner non-founder home row moves home to the latest remaining membership, or clears user_profiles.organization_id and active_organization_id. Does not change user_profiles.role or delete auth.users.';
+  'Service-role only. Deletes one membership and expires pending invites for that email in that org. Retargets user_profiles.organization_id and active_organization_id when either still names the removed org: remaining home, else the latest other membership via set_home_membership, else NULL. Does not change user_profiles.role or delete auth.users.';

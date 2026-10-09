@@ -2,11 +2,11 @@
  * Org-admin removal of one team membership.
  *
  * Self-leave stays on POST /api/org/leave. This path never deletes an auth
- * user. A home membership of a non-owner, non-founder may be removed: the
- * RPC moves home to the remaining membership with the latest created_at
- * (organization_id DESC on a tie) or clears the profile org pointers when
- * none remain. Profile role is left as-is. A platform profile role of
- * admin does not grant this power.
+ * user. When either profile pointer still names the removed org, both move
+ * to the remaining home membership, or to the latest other membership
+ * (organization_id DESC on a tie) after set_home_membership, or to NULL.
+ * Profile role is left as-is. Caller authority is this org's membership
+ * role, this org's created_by, or a founder flag on that membership.
  */
 
 import { normalizeRole, sameOrg } from '@/lib/org-membership';
@@ -43,10 +43,11 @@ export function rowFounderFlag(row: object | null | undefined): boolean {
 }
 
 /**
- * Caller may remove members of this org only from their membership in that
- * org: company_admin or owner. An explicit founder flag or organizations.created_by
- * also qualifies. Pass the membership role, not user_profiles.role. A profile
- * role of admin is a platform role and must not be passed here.
+ * Caller may remove members of this org from their membership in that org:
+ * company_admin or owner. A founder flag on that same membership, or
+ * organizations.created_by for this org, also qualifies. Do not pass a
+ * profile founder flag or a flag from another org. A profile role of admin
+ * is a platform role and must not be passed here.
  */
 export function callerMayRemoveTeamMembers(input: {
   role?: string | null;
