@@ -11,8 +11,49 @@ import { verifyCustomerInvite } from '@/lib/customer-invite';
  * Links the signed-in user to the invited customer org (owner role).
  * Does not create a second organization. Refuses if another owner already
  * claims the org, or if this user already belongs to a different org.
+ * A member already in this clinic becomes owner only when the owner slot is
+ * empty and their signed-in email matches the invite. An existing owner blocks that.
  */
+const CLINIC_OWNER_SLOT_ROLES = new Set(['owner', 'customer', 'admin', 'company_admin']);
+
+function holdsClinicOwnerSlot(role: unknown): boolean {
+  return CLINIC_OWNER_SLOT_ROLES.has(String(role || '').trim().toLowerCase());
+}
+
+function isOwnerRole(role: unknown): boolean {
+  return String(role || '').trim().toLowerCase() === 'owner';
+}
+
+type ClaimUserClient = {
+  auth: {
+    getUser: (accessToken: string) => Promise<{
+      data: { user: { id: string; email?: string | null; user_metadata?: unknown } | null };
+      error: { message?: string } | null;
+    }>;
+  };
+};
+
 export async function POST(req: NextRequest) {
+  return runCustomerClaim(req);
+}
+
+export async function runCustomerClaim(
+  req: NextRequest,
+  deps: {
+    createUserClient?: (url: string, anonKey: string, accessToken: string) => ClaimUserClient;
+    hasServiceRole?: () => boolean;
+    getWriter?: () => ReturnType<typeof getSupabaseAdmin>;
+  } = {}
+) {
+  const serviceRoleReady = deps.hasServiceRole ?? hasServiceRole;
+  const writerFor = deps.getWriter ?? getSupabaseAdmin;
+  const createUserClient: (url: string, anonKey: string, accessToken: string) => ClaimUserClient =
+    deps.createUserClient ??
+    ((url, anonKey, accessToken) =>
+      createClient(url, anonKey, {
+        global: { headers: { Authorization: `Bearer ${accessToken}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      }) as ClaimUserClient);
   try {
     const auth = req.headers.get('authorization') || '';
     const accessToken = auth.replace(/^Bearer\s+/i, '').trim();
@@ -26,10 +67,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
     }
 
-    const supabase = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${accessToken}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+    const supabase = createUserClient(url, anon, accessToken);
 
     const {
       data: { user },
@@ -53,14 +91,14 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    if (!hasServiceRole()) {
+    if (!serviceRoleReady()) {
       return NextResponse.json(
         { ok: false, claimed: false, error: 'Server cannot link this clinic profile (missing service role).' },
         { status: 503 }
       );
     }
 
-    const writer = getSupabaseAdmin();
+    const writer = writerFor();
 
     const { data: org } = await writer
       .from('organizations')
@@ -83,10 +121,13 @@ export async function POST(req: NextRequest) {
       .eq('id', user.id)
       .maybeSingle();
 
-    if (
+    const alreadyInThisOrg =
       existingProf?.organization_id != null &&
-      String(existingProf.organization_id) === String(org.id)
-    ) {
+      String(existingProf.organization_id) === String(org.id);
+
+    // Re-claim by the person who is already owner stays a success and does not
+    // look for a second owner. Writing role=owner here does not change the role.
+    if (alreadyInThisOrg && isOwnerRole(existingProf?.role)) {
       await writer
         .from('user_profiles')
         .update({ role: 'owner', onboarding_completed: true })
@@ -94,7 +135,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ ok: true, claimed: true, organizationId: org.id, alreadyLinked: true });
     }
 
-    if (existingProf?.organization_id != null && String(existingProf.organization_id) !== String(org.id)) {
+    if (existingProf?.organization_id != null && !alreadyInThisOrg) {
       return NextResponse.json(
         {
           ok: false,
@@ -113,8 +154,7 @@ export async function POST(req: NextRequest) {
 
     const takenByOther = (otherOwners || []).some((row: { id?: string; email?: string | null; role?: string | null }) => {
       if (!row?.id || String(row.id) === String(user.id)) return false;
-      const role = String(row.role || '').toLowerCase();
-      return role === 'owner' || role === 'customer' || role === 'admin' || role === 'company_admin';
+      return holdsClinicOwnerSlot(row.role);
     });
 
     if (takenByOther) {
@@ -126,6 +166,16 @@ export async function POST(req: NextRequest) {
         },
         { status: 409 }
       );
+    }
+
+    // Already linked, and nobody else holds the owner slot. Email was matched
+    // above, same as a first claim. Promote this member; do not skip the check.
+    if (alreadyInThisOrg) {
+      await writer
+        .from('user_profiles')
+        .update({ role: 'owner', onboarding_completed: true })
+        .eq('id', user.id);
+      return NextResponse.json({ ok: true, claimed: true, organizationId: org.id, alreadyLinked: true });
     }
 
     const first = (user.user_metadata as { first_name?: string } | undefined)?.first_name || null;
