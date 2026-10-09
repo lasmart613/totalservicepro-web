@@ -44,21 +44,23 @@ export const INVITABLE_TEAM_ROLES = [
   'billing_manager',
 ] as const;
 
+/** Role stored from a team invite. Empty or whitespace becomes fse. */
+export function teamRoleForInvite(role?: string | null): string {
+  return normalizeRole(role) || DEFAULT_STAFF_ROLE;
+}
+
 export function isInvitableTeamRole(role?: string | null): boolean {
   return (INVITABLE_TEAM_ROLES as readonly string[]).includes(normalizeRole(role));
 }
 
-/** Why claim must stop before any write. Null means the role can be stored. */
-export function blockedTeamClaimRole(
-  role?: string | null
-): 'owner' | 'admin' | 'unstorable' | null {
-  const normalized = normalizeRole(role);
-  if (!normalized) return null;
-  if (normalized === 'owner') return 'owner';
-  if (normalized === 'admin') return 'admin';
-  const stored = membershipRoleForInvite(normalized);
-  if (!(USER_PROFILE_ROLES as readonly string[]).includes(stored)) return 'unstorable';
-  return null;
+/**
+ * Claim refuses any role outside INVITABLE_TEAM_ROLES.
+ * Empty becomes fse, which is on that list, so it returns null.
+ * Otherwise the normalized role, which the caller rejects before any write.
+ */
+export function blockedTeamClaimRole(role?: string | null): string | null {
+  const resolved = teamRoleForInvite(role);
+  return isInvitableTeamRole(resolved) ? null : resolved;
 }
 
 /**
@@ -110,10 +112,9 @@ export function sameOrg(
 
 const INVITE_NULL_EXPIRY_MS = 14 * 24 * 60 * 60 * 1000;
 
-/** Org invite role stored on a membership. Platform admin never comes from an invite. */
+/** Org invite role stored on a membership. Empty becomes fse. Admin is not rewritten. */
 export function membershipRoleForInvite(inviteRole?: string | null): string {
-  const role = normalizeRole(inviteRole) || DEFAULT_STAFF_ROLE;
-  return role === 'admin' ? 'company_admin' : role;
+  return teamRoleForInvite(inviteRole);
 }
 
 /**

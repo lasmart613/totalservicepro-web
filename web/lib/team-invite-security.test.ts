@@ -1505,6 +1505,107 @@ test('a legacy admin-role invite cannot be claimed and writes nothing', async ()
   assert.equal(scheduler.state.memberships.length, 0);
   assert.equal(scheduler.state.profiles[0].organization_id, null);
   assert.equal(scheduler.state.profiles[0].role, 'fse');
-  assert.equal(blockedTeamClaimRole('technician'), 'unstorable');
-  assert.equal(blockedTeamClaimRole('viewer'), 'unstorable');
+  assert.equal(blockedTeamClaimRole('technician'), 'technician');
+  assert.equal(blockedTeamClaimRole('viewer'), 'viewer');
+  assert.equal(blockedTeamClaimRole(''), null);
+  assert.equal(blockedTeamClaimRole(null), null);
+});
+
+test('claim accepts only INVITABLE_TEAM_ROLES, the same list invite uses', async () => {
+  const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const claimRoute = readFileSync(join(here, '../app/api/team/claim/route.ts'), 'utf8');
+  const inviteRoute = readFileSync(join(here, '../app/api/team/invite/route.ts'), 'utf8');
+  assert.match(claimRoute, /isInvitableTeamRole\(claimRole\)/);
+  assert.match(claimRoute, /teamRoleForInvite\(inv\.role\)/);
+  assert.match(inviteRoute, /isInvitableTeamRole\(requestedRole\)/);
+  assert.match(inviteRoute, /teamRoleForInvite\(body\.role/);
+  assert.match(inviteRoute, /DEFAULT_STAFF_ROLE/);
+  assert.doesNotMatch(
+    readFileSync(join(here, './org-membership.ts'), 'utf8'),
+    /role === 'admin' \? 'company_admin'/
+  );
+
+  let id = 20;
+  for (const role of ['engineer', 'crm', 'parts_supplier', 'customer', ' Owner '] as const) {
+    const blocked = await postRejoinClaim({
+      profileOrg: null,
+      memberships: [],
+      invite: {
+        id: id++,
+        email: INVITEE,
+        organization_id: 9,
+        role,
+        accepted: false,
+        accepted_at: null,
+        expires_at: future,
+        created_at: '2026-10-08T00:00:00.000Z',
+        first_name: 'New',
+        last_name: 'Person',
+      },
+    });
+    assert.equal(blocked.status, 403, role);
+    assert.equal(blocked.body.claimed, false, role);
+    assert.equal(blocked.state.invite.accepted, false, role);
+    assert.equal(blocked.state.invite.role, role, role);
+    assert.equal(blocked.state.memberships.length, 0, role);
+    assert.equal(blocked.state.profiles[0].organization_id, null, role);
+    assert.equal(blocked.state.profiles[0].role, 'fse', role);
+  }
+
+  for (const role of [null, ''] as const) {
+    const claimed = await postRejoinClaim({
+      profileOrg: null,
+      memberships: [],
+      invite: {
+        id: id++,
+        email: INVITEE,
+        organization_id: 9,
+        role,
+        accepted: false,
+        accepted_at: null,
+        expires_at: future,
+        created_at: '2026-10-08T00:00:00.000Z',
+        first_name: 'New',
+        last_name: 'Person',
+      },
+    });
+    assert.equal(claimed.status, 200, JSON.stringify(claimed.body));
+    assert.equal(claimed.body.claimed, true);
+    assert.equal(claimed.state.invite.accepted, true);
+    assert.equal(String(claimed.state.profiles[0].organization_id), '9');
+    assert.equal(claimed.state.profiles[0].role, 'fse');
+    assert.equal(
+      claimed.state.memberships.some((row) => row.organization_id === 9 && row.role === 'fse'),
+      true
+    );
+  }
+
+  for (const role of INVITABLE_TEAM_ROLES) {
+    const claimed = await postRejoinClaim({
+      profileOrg: null,
+      memberships: [],
+      invite: {
+        id: id++,
+        email: INVITEE,
+        organization_id: 9,
+        role,
+        accepted: false,
+        accepted_at: null,
+        expires_at: future,
+        created_at: '2026-10-08T00:00:00.000Z',
+        first_name: 'New',
+        last_name: 'Person',
+      },
+    });
+    assert.equal(claimed.status, 200, `${role} ${JSON.stringify(claimed.body)}`);
+    assert.equal(claimed.body.claimed, true, role);
+    assert.equal(claimed.state.invite.accepted, true, role);
+    assert.equal(String(claimed.state.profiles[0].organization_id), '9', role);
+    assert.equal(claimed.state.profiles[0].role, role, role);
+    assert.equal(
+      claimed.state.memberships.some((row) => row.organization_id === 9 && row.role === role),
+      true,
+      role
+    );
+  }
 });

@@ -22,8 +22,11 @@ const LUXOR = 4;
 const COMPANY_A = 10;
 const COMPANY_B = 20;
 
-test('invite role admin becomes company_admin and expired invites are closed', () => {
-  assert.equal(membershipRoleForInvite('admin'), 'company_admin');
+test('empty invite role defaults to fse and expired invites are closed', () => {
+  assert.equal(membershipRoleForInvite('admin'), 'admin');
+  assert.equal(membershipRoleForInvite(''), 'fse');
+  assert.equal(membershipRoleForInvite(null), 'fse');
+  assert.equal(membershipRoleForInvite('  FSE  '), 'fse');
   assert.equal(membershipRoleForInvite('fse'), 'fse');
   const now = Date.parse('2026-10-06T00:00:00.000Z');
   assert.equal(

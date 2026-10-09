@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { findAuthUserByEmail, type AuthEmailLookup } from '@/lib/team-profile';
-import { DEFAULT_STAFF_ROLE, isInvitableTeamRole, normalizeRole } from '@/lib/org-membership';
+import { DEFAULT_STAFF_ROLE, isInvitableTeamRole, normalizeRole, teamRoleForInvite } from '@/lib/org-membership';
 import { freshTeamInviteFields } from '@/lib/team-invite-guard';
 import { decideMemberRoleChange } from '@/lib/tenant-lockdown';
 import {
@@ -180,7 +180,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       return respond({ error: emailError }, 400);
     }
 
-    const requestedRole = (body.role || DEFAULT_STAFF_ROLE).toLowerCase().trim();
+    const requestedRole = teamRoleForInvite(body.role ?? DEFAULT_STAFF_ROLE);
     if (!isInvitableTeamRole(requestedRole)) {
       return respond({ error: rejectedInviteRoleMessage(requestedRole) }, 400);
     }
