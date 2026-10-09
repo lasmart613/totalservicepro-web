@@ -9,7 +9,12 @@ import {
   routeAfterTeamClaim,
   shouldSendToMemberOnboarding,
 } from './invite-claim.ts';
-import { ownerSignupAfterClaim } from './customer-invite-client.ts';
+import {
+  CLAIM_INVITE_UNUSED,
+  claimTokenSeenOnSignIn,
+  clearStaleClaimToken,
+  ownerSignupAfterClaim,
+} from './customer-invite-client.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -162,15 +167,49 @@ test('a failed clinic claim does not create a new organization', () => {
   const owner = readFileSync(join(here, '../app/signup/owner/page.tsx'), 'utf8');
   const claimBranch = owner.slice(owner.indexOf('if (claimToken)'), owner.indexOf('const applied = await applyPendingSignup'));
   assert.match(claimBranch, /ownerSignupAfterClaim/);
-  assert.match(claimBranch, /clearPendingSignup/);
+  assert.match(claimBranch, /clearStaleClaimToken/);
   assert.doesNotMatch(claimBranch, /applyPendingSignup/);
   assert.match(owner, /applyPendingSignup\(supabase, userId, pending\)/);
 
   const callback = readFileSync(join(here, '../app/auth/callback/page.tsx'), 'utf8');
   const callbackClaim = callback.slice(callback.indexOf('if (claimToken)'), callback.indexOf('const pending = inviteInPlay'));
   assert.match(callbackClaim, /ownerSignupAfterClaim/);
-  assert.match(callbackClaim, /clearPendingSignup/);
+  assert.match(callbackClaim, /clearStaleClaimToken/);
   assert.doesNotMatch(callbackClaim, /applyPendingSignup/);
+
+  const helper = readFileSync(join(here, './customer-invite-client.ts'), 'utf8');
+  assert.match(helper, /clearPendingSignup\(\)/);
+  assert.match(helper, /claim_token: null/);
+});
+
+test('a failed claim clears the token so the next sign-in does not show the claim error', async () => {
+  const updates: unknown[] = [];
+  await clearStaleClaimToken({
+    auth: {
+      updateUser: async (attrs) => {
+        updates.push(attrs);
+        return { error: null };
+      },
+    },
+  });
+  assert.deepEqual(updates, [{ data: { claim_token: null } }]);
+  assert.equal(claimTokenSeenOnSignIn({ queryClaim: null, metadataClaim: 'still-set', storedClaim: null }), 'still-set');
+  assert.equal(claimTokenSeenOnSignIn({ queryClaim: null, metadataClaim: null, storedClaim: null }), '');
+});
+
+test('a failed owner claim hides the verified step and shows how to continue', () => {
+  assert.match(CLAIM_INVITE_UNUSED, /couldn't be used/);
+  assert.match(CLAIM_INVITE_UNUSED, /Sign in with the email/i);
+  const owner = readFileSync(join(here, '../app/signup/owner/page.tsx'), 'utf8');
+  assert.match(owner, /CLAIM_INVITE_UNUSED/);
+  assert.match(owner, /awaitingConfirm && !claimFailed/);
+  assert.match(owner, /claimFailed \? 'hidden'/);
+  assert.match(owner, /href="\/login"/);
+  assert.match(owner, /\{t\('Sign in'\)\}/);
+  const otp = readFileSync(join(here, '../components/AuthOtpBox.tsx'), 'utf8');
+  const waited = otp.indexOf('if (onVerified) await onVerified()');
+  const green = otp.indexOf('Verified! Continuing');
+  assert.ok(waited !== -1 && green !== -1 && waited < green);
 });
 
 test('applyPendingSignup claims a team invite by email instead of creating a new shop', () => {

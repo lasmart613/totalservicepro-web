@@ -1,3 +1,5 @@
+import { clearPendingSignup } from '@/lib/pending-signup';
+
 /**
  * Browser helpers for clinic invite / claim. Talks to /api/customers/*.
  */
@@ -12,6 +14,39 @@ export type CustomerInviteSendResult = {
 
 export const CLAIM_SIGNUP_ORG_BLOCKED =
   'This clinic invite could not be claimed. A new organization was not created.';
+
+export const CLAIM_INVITE_UNUSED =
+  "This invite couldn't be used. Ask the shop that invited you to send a new invite, or sign in with the email the invite was sent to.";
+
+/**
+ * Drop a failed clinic claim so the next sign-in does not read it again.
+ * Storage is cleared first. Auth metadata is a merge, so the key is set to null.
+ */
+export async function clearStaleClaimToken(supabase: {
+  auth: {
+    updateUser: (attrs: { data: { claim_token: null } }) => Promise<unknown>;
+  };
+}): Promise<void> {
+  clearPendingSignup();
+  try {
+    await supabase.auth.updateUser({ data: { claim_token: null } });
+  } catch {
+    /* storage is already clear */
+  }
+}
+
+/** Token the next email-link sign-in would try to claim. Empty means no claim error. */
+export function claimTokenSeenOnSignIn(input: {
+  queryClaim?: string | null;
+  metadataClaim?: string | null;
+  storedClaim?: string | null;
+}): string {
+  const query = String(input.queryClaim || '').trim();
+  if (query) return query;
+  const metadata = String(input.metadataClaim || '').trim();
+  if (metadata) return metadata;
+  return String(input.storedClaim || '').trim();
+}
 
 /**
  * Claim-link signup either finishes the claim or shows the claim error.

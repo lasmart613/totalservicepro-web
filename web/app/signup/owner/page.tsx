@@ -1,11 +1,17 @@
 'use client';
 
-import React, { Suspense, useEffect, useState } from 'react';
+import React, { Suspense, useEffect, useRef, useState } from 'react';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { MIN_PASSWORD_LENGTH } from '@/lib/auth-constants';
-import { applyPendingSignup, clearPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
+import { applyPendingSignup, savePendingSignup, type PendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup } from '@/lib/auth-session';
-import { claimCustomerInvite, ownerSignupAfterClaim, previewCustomerInvite } from '@/lib/customer-invite-client';
+import {
+  CLAIM_INVITE_UNUSED,
+  claimCustomerInvite,
+  clearStaleClaimToken,
+  ownerSignupAfterClaim,
+  previewCustomerInvite,
+} from '@/lib/customer-invite-client';
 import { MODELS } from '@/lib/models';
 import {
   OWNER_ORG_TYPE_SIGNUP_OPTIONS,
@@ -85,6 +91,8 @@ function OwnerSignupInner() {
   const [messageOk, setMessageOk] = useState(false);
   const [loading, setLoading] = useState(false);
   const [awaitingConfirm, setAwaitingConfirm] = useState(false);
+  const [claimFailed, setClaimFailed] = useState(false);
+  const claimFailedRef = useRef(false);
   const [pendingUserId, setPendingUserId] = useState<string | null>(null);
   const [claimToken, setClaimToken] = useState<string | null>(null);
   const [claimLocked, setClaimLocked] = useState(false);
@@ -205,8 +213,12 @@ function OwnerSignupInner() {
         router.push('/company?justSetup=1');
         return;
       }
-      clearPendingSignup();
-      throw new Error(next.action === 'show-error' ? next.message : 'This clinic invite could not be claimed. A new organization was not created.');
+      await clearStaleClaimToken(supabase);
+      claimFailedRef.current = true;
+      setClaimFailed(true);
+      setMessage('');
+      setMessageOk(false);
+      throw new Error(CLAIM_INVITE_UNUSED);
     }
 
     const applied = await applyPendingSignup(supabase, userId, pending);
@@ -289,9 +301,11 @@ function OwnerSignupInner() {
 
       await completeOwnerSetup(userId);
     } catch (err: any) {
-      const msg = err.message || 'Owner sign up failed.';
-      setMessage(msg);
-      setMessageOk(false);
+      if (!claimFailedRef.current) {
+        const msg = err.message || 'Owner sign up failed.';
+        setMessage(msg);
+        setMessageOk(false);
+      }
     } finally {
       setLoading(false);
     }
@@ -316,13 +330,20 @@ function OwnerSignupInner() {
         </div>
 
         <div className="card p-6">
-          {message && (
+          {claimFailed ? (
+            <div className="mb-4 p-3 rounded text-sm bg-red-900/30 text-red-400 space-y-2">
+              <p>{t(CLAIM_INVITE_UNUSED)}</p>
+              <PublicLink href="/login" className="inline-block font-semibold text-[var(--gold)] hover:underline">
+                {t('Sign in')}
+              </PublicLink>
+            </div>
+          ) : message ? (
             <div className={`mb-4 p-3 rounded text-sm ${messageOk || message.includes('created') || message.includes('Check') ? 'bg-green-900/30 text-green-400' : 'bg-red-900/30 text-red-400'}`}>
               {message}
             </div>
-          )}
+          ) : null}
 
-          {awaitingConfirm ? (
+          {awaitingConfirm && !claimFailed ? (
             <AuthOtpBox
               email={email}
               password={password}
@@ -339,8 +360,11 @@ function OwnerSignupInner() {
                 try {
                   await completeOwnerSetup(uid);
                 } catch (err: any) {
-                  setMessage(err?.message || 'Verified, but setup failed. Sign in to finish.');
-                  setMessageOk(false);
+                  if (!claimFailedRef.current) {
+                    setMessage(err?.message || 'Verified, but setup failed. Sign in to finish.');
+                    setMessageOk(false);
+                  }
+                  throw err;
                 } finally {
                   setLoading(false);
                 }
@@ -348,7 +372,7 @@ function OwnerSignupInner() {
             />
           ) : null}
 
-          <form onSubmit={handleSubmit} className={`space-y-4 ${awaitingConfirm ? 'opacity-60 pointer-events-none' : ''}`}>
+          <form onSubmit={handleSubmit} className={`space-y-4 ${claimFailed ? 'hidden' : awaitingConfirm ? 'opacity-60 pointer-events-none' : ''}`}>
             <div>
               <label className="label">{t('Organization type *')}</label>
               <div className="space-y-2">
@@ -558,7 +582,7 @@ function OwnerSignupInner() {
 
           <div className="mt-5 text-center text-sm">
             <PublicLink
-              href={claimToken ? `/login?claim=${encodeURIComponent(claimToken)}&next=${encodeURIComponent('/company?justSetup=1')}` : '/login'}
+              href={claimToken && !claimFailed ? `/login?claim=${encodeURIComponent(claimToken)}&next=${encodeURIComponent('/company?justSetup=1')}` : '/login'}
               className="text-[var(--gold)] hover:underline"
             >
               {t('Already have an account? Sign in')}

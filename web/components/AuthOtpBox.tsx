@@ -134,9 +134,9 @@ export default function AuthOtpBox({
         throw new Error(lastErr || 'Invalid or expired code. Request a new one.');
       }
 
+      if (onVerified) await onVerified();
       setMessage('Verified! Continuing…');
       setMessageOk(true);
-      if (onVerified) await onVerified();
     } catch (err: any) {
       setMessage(err?.message || 'Verification failed.');
       setMessageOk(false);

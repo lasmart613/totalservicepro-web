@@ -27,6 +27,31 @@ type ClaimBody = {
  * is a move (staff leave A after joining B). Auth user is never deleted.
  */
 export async function POST(req: NextRequest) {
+  return runTeamClaim(req);
+}
+
+export async function runTeamClaim(
+  req: NextRequest,
+  deps: {
+    createUserClient?: (
+      url: string,
+      anonKey: string,
+      accessToken: string
+    ) => {
+      auth: {
+        getUser: () => Promise<{
+          data: { user: { id: string; email?: string | null; email_confirmed_at?: string | null; user_metadata?: Record<string, unknown> } | null };
+          error: { message?: string } | null;
+        }>;
+      };
+      from: (table: string) => unknown;
+    };
+    hasServiceRole?: () => boolean;
+    getAdmin?: () => ReturnType<typeof getSupabaseAdmin>;
+  } = {}
+) {
+  const serviceRoleReady = deps.hasServiceRole ?? hasServiceRole;
+  const adminFor = deps.getAdmin ?? getSupabaseAdmin;
   try {
     const authHeader = req.headers.get('authorization') || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
@@ -40,10 +65,12 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
     }
 
-    const userClient = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const userClient = deps.createUserClient
+      ? deps.createUserClient(url, anon, token)
+      : createClient(url, anon, {
+          global: { headers: { Authorization: `Bearer ${token}` } },
+          auth: { autoRefreshToken: false, persistSession: false },
+        });
 
     const {
       data: { user },
@@ -68,14 +95,14 @@ export async function POST(req: NextRequest) {
       .eq('id', user.id)
       .maybeSingle();
 
-    if (!hasServiceRole()) {
+    if (!serviceRoleReady()) {
       return NextResponse.json({
         ok: false,
         error: 'Server cannot accept team invites (missing service role).',
       }, { status: 503 });
     }
 
-    const admin = getSupabaseAdmin();
+    const admin = adminFor();
     const memberships = await listMembershipsForUser(admin, user.id);
 
     const emailConfirmedAt = user.email_confirmed_at ?? null;

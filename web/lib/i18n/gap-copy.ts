@@ -9800,6 +9800,16 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'O convite é enviado ao e-mail deles. Eles entram com esse endereço para participar.',
     'تُرسل الدعوة إلى بريدهم. يسجّلون الدخول بذلك العنوان للانضمام.',
   ),
+  "This invite couldn't be used. Ask the shop that invited you to send a new invite, or sign in with the email the invite was sent to.": row(
+    'این دعوت قابل استفاده نبود. از فروشگاهی که شما را دعوت کرده بخواهید دعوت تازه بفرستد، یا با ایمیلی که دعوت به آن فرستاده شده وارد شوید.',
+    'Esta invitación no se pudo usar. Pide al taller que te invitó que envíe una invitación nueva, o inicia sesión con el correo al que se envió la invitación.',
+    'Cette invitation n’a pas pu être utilisée. Demandez à l’atelier qui vous a invité d’en envoyer une nouvelle, ou connectez-vous avec l’e-mail auquel l’invitation a été envoyée.',
+    'לא ניתן להשתמש בהזמנה הזו. בקשו מהחנות שהזמינה אתכם לשלוח הזמנה חדשה, או התחברו עם הדוא״ל שאליו נשלחה ההזמנה.',
+    'Questo invito non può essere usato. Chiedi al negozio che ti ha invitato di inviarne uno nuovo, oppure accedi con l’e-mail a cui è stato inviato l’invito.',
+    'Diese Einladung konnte nicht verwendet werden. Bitten Sie den Betrieb, der Sie eingeladen hat, um eine neue Einladung, oder melden Sie sich mit der E-Mail an, für die die Einladung ausgestellt wurde.',
+    'Este convite não pôde ser usado. Peça à oficina que convidou você para enviar um convite novo, ou entre com o e-mail para o qual o convite foi enviado.',
+    'تعذر استخدام هذه الدعوة. اطلب من الورشة التي دعتك إرسال دعوة جديدة، أو سجّل الدخول بالبريد الذي أُرسلت إليه الدعوة.',
+  ),
   'Sent purchase orders keep their supplier. Save draft updates the other fields.': row(
     'سفارش خرید ارسال‌شده تأمین‌کننده را نگه می‌دارد. ذخیره پیش‌نویس بقیه فیلدها را به‌روز می‌کند.',
     'Las órdenes de compra enviadas conservan su proveedor. Guardar borrador actualiza los demás campos.',

@@ -333,8 +333,8 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       }
     };
 
-    // Set before recordInvitation() runs. An accepted invite or someone already
-    // in this org keeps the row (accepted, accepted_at, status, expires_at).
+    // Set before recordInvitation() runs. A current member's row is restored to
+    // accepted. An accepted invite for someone who left is reopened as pending.
     let preserveInviteRow = false;
 
     const recordInvitation = async (): Promise<string | number | null> => {
@@ -368,19 +368,27 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
           .maybeSingle();
         return (inserted.data as { id?: string | number } | null)?.id ?? null;
       }
-      const alreadyAccepted = (existingInv as { accepted?: boolean | null }).accepted === true;
-      if (preserveInviteRow || alreadyAccepted) {
+      if (!preserveInviteRow) {
+        // Pending resend, or an accepted invite for someone who is no longer in this org.
+        await admin
+          .from('engineer_invitations')
+          .update({
+            role: inviteRole,
+            ...names,
+            accepted: fresh.accepted,
+            accepted_at: fresh.accepted_at,
+            expires_at: fresh.expires_at,
+          })
+          .eq('id', existingInv.id);
         return (existingInv as { id: string | number }).id;
       }
-      // Pending resend only. Extend expiry so the open invite can still be claimed.
+      const keptAcceptedAt =
+        (existingInv as { accepted_at?: string | null }).accepted_at || new Date().toISOString();
       await admin
         .from('engineer_invitations')
         .update({
-          role: inviteRole,
-          ...names,
-          accepted: fresh.accepted,
-          accepted_at: fresh.accepted_at,
-          expires_at: fresh.expires_at,
+          accepted: true,
+          accepted_at: keptAcceptedAt,
         })
         .eq('id', existingInv.id);
       return (existingInv as { id: string | number }).id;
@@ -558,9 +566,10 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
 
     const existingMember = profileLookup.memberHere;
     const acceptedInvite = priorInvite?.accepted === true;
-    preserveInviteRow = existingMember || acceptedInvite;
+    const reopenFormerMember = acceptedInvite && !existingMember;
+    preserveInviteRow = existingMember;
 
-    const setupDecision = preserveInviteRow
+    const setupDecision = preserveInviteRow || reopenFormerMember
       ? 'sign-in'
       : audience === 'existing'
         ? decideInviteSetupResend({
@@ -589,7 +598,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
     // Existing profile: invite row only. Membership is created later by /api/team/claim.
     const inviteId = await recordInvitation();
 
-    if (preserveInviteRow) {
+    if (preserveInviteRow || reopenFormerMember) {
       return deliverForExistingAccount({ greetName, moonlight });
     }
 

@@ -13,8 +13,10 @@ import {
 } from './team-profile.ts';
 import { teamInviteSentMessage } from './team-invite.ts';
 import { isPendingTeamInvite } from './org-membership.ts';
+import { TEAM_INVITE_TTL_MS } from './team-invite-guard.ts';
 import { NextRequest } from 'next/server';
 import { runTeamInvite } from '../app/api/team/invite/route.ts';
+import { runTeamClaim } from '../app/api/team/claim/route.ts';
 import {
   decideInviteSetupResend,
   decideTeamInviteAudience,
@@ -498,6 +500,7 @@ type SentMail = { to: string[]; html: string; text: string; subject: string };
 
 function inviteAdmin(state: {
   invite: Record<string, unknown> | null;
+  profile?: Record<string, unknown> | null;
   linkHandler?: (args: { type?: string }) => {
     data?: { user?: { id?: string }; properties?: { action_link?: string } } | null;
     error?: { message?: string } | null;
@@ -521,7 +524,7 @@ function inviteAdmin(state: {
             return { data: { id: 9, name: 'North Shop', type: 'service_company', services_offered: null }, error: null };
           }
           if (table === 'user_profiles') {
-            return { data: null, error: null };
+            return { data: state.profile ?? null, error: null };
           }
           if (table === 'engineer_invitations') {
             if (state.invite && selected.includes('created_auth_user_id') && state.invite.readError) {
@@ -570,8 +573,12 @@ function inviteAdmin(state: {
 
 async function postExistingInvite(opts: {
   resendKey: string | null;
-  auth: { status: 'found'; id: string; lastSignInAt: string | null } | { status: 'error' };
+  auth:
+    | { status: 'found'; id: string; lastSignInAt: string | null }
+    | { status: 'error' }
+    | { status: 'not_found' };
   invite: Record<string, unknown> | null;
+  profile?: Record<string, unknown> | null;
   linkHandler?: (args: { type?: string }) => {
     data?: { user?: { id?: string }; properties?: { action_link?: string } } | null;
     error?: { message?: string } | null;
@@ -599,7 +606,11 @@ async function postExistingInvite(opts: {
   console.info = capture;
   console.warn = capture;
   console.error = capture;
-  const harness = inviteAdmin({ invite: opts.invite, linkHandler: opts.linkHandler });
+  const harness = inviteAdmin({
+    invite: opts.invite,
+    profile: opts.profile,
+    linkHandler: opts.linkHandler,
+  });
   try {
     const response = await runTeamInvite(
       new NextRequest('http://127.0.0.1/api/team/invite', {
@@ -614,13 +625,14 @@ async function postExistingInvite(opts: {
         hasServiceRole: () => true,
         resendKey: opts.resendKey,
         getAdmin: () => harness.admin as never,
-        findAuthUser: async () =>
-          opts.auth.status === 'error'
-            ? { status: 'error' }
-            : {
-                status: 'found',
-                user: { id: opts.auth.id, email: INVITEE, last_sign_in_at: opts.auth.lastSignInAt },
-              },
+        findAuthUser: async () => {
+          if (opts.auth.status === 'error') return { status: 'error' as const };
+          if (opts.auth.status === 'not_found') return { status: 'not_found' as const };
+          return {
+            status: 'found' as const,
+            user: { id: opts.auth.id, email: INVITEE, last_sign_in_at: opts.auth.lastSignInAt },
+          };
+        },
         createUserClient: () => ({
           auth: {
             getUser: async () => ({
@@ -779,7 +791,16 @@ test('a lookup or proof failure does not mint a setup link', async () => {
   assertNoLink(proof, SETUP_LINK);
 });
 
-test('resend on an accepted invite leaves it accepted and sends a sign-in email', async () => {
+const memberHere = {
+  id: 'auth-1',
+  email: INVITEE,
+  organization_id: 9,
+  role: 'fse',
+  onboarding_completed: true,
+  first_name: 'New',
+};
+
+test('resend to an existing member whose invite is accepted keeps accepted_at and sends a sign-in email', async () => {
   const acceptedAt = '2026-10-01T12:00:00.000Z';
   const expiresAt = '2026-10-08T12:00:00.000Z';
   const invite = {
@@ -792,6 +813,7 @@ test('resend on an accepted invite leaves it accepted and sends a sign-in email'
     resendKey: 'resend-test',
     auth: { status: 'found', id: 'auth-1', lastSignInAt: null },
     invite,
+    profile: memberHere,
   });
   assert.equal(result.status, 200);
   assert.equal(result.body.ok, true);
@@ -804,13 +826,100 @@ test('resend on an accepted invite leaves it accepted and sends a sign-in email'
   assert.equal(invite.accepted, true);
   assert.equal(invite.accepted_at, acceptedAt);
   assert.equal(invite.expires_at, expiresAt);
+  const restore = result.updates.find((patch) => patch.accepted === true);
+  assert.ok(restore);
+  assert.equal(restore?.accepted_at, acceptedAt);
+  assert.equal('expires_at' in (restore || {}), false);
+  assert.equal(isPendingTeamInvite(invite), false);
+  assertNoLink(result, SETUP_LINK);
+});
+
+test('resend to an existing member whose invite is not accepted marks it accepted and sends the sign-in email only', async () => {
+  const expiresAt = '2026-10-16T00:00:00.000Z';
+  const invite = {
+    ...pendingCreated,
+    accepted: false,
+    accepted_at: null,
+    expires_at: expiresAt,
+  };
+  const before = Date.now();
+  const result = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: null },
+    invite,
+    profile: memberHere,
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.emailed, true);
+  assert.equal(result.linkCalls.length, 0);
+  assert.equal(result.sent.length, 1);
+  assert.match(result.sent[0].html, /Sign in/);
+  assert.doesNotMatch(`${result.sent[0].html}\n${result.sent[0].text}`, /\/auth\/v1\/verify/);
+  assert.equal(invite.accepted, true);
+  assert.equal(typeof invite.accepted_at, 'string');
+  assert.ok(Date.parse(String(invite.accepted_at)) >= before);
+  assert.equal(invite.expires_at, expiresAt);
   assert.equal(
-    result.updates.some(
-      (patch) => 'accepted' in patch || 'accepted_at' in patch || 'status' in patch || 'expires_at' in patch
-    ),
+    result.updates.some((patch) => 'expires_at' in patch),
     false
   );
   assert.equal(isPendingTeamInvite(invite), false);
+  assertNoLink(result, SETUP_LINK);
+});
+
+test('resend to a removed member reopens the invite and sends the sign-in email only', async () => {
+  const acceptedAt = '2026-10-01T12:00:00.000Z';
+  const expiresAt = '2026-10-08T12:00:00.000Z';
+  for (const organizationId of [null, 4]) {
+    const invite = {
+      ...pendingCreated,
+      accepted: true,
+      accepted_at: acceptedAt,
+      expires_at: expiresAt,
+    };
+    const result = await postExistingInvite({
+      resendKey: 'resend-test',
+      auth: { status: 'found', id: 'auth-1', lastSignInAt: '2026-10-02T00:00:00.000Z' },
+      invite,
+      profile: {
+        id: 'auth-1',
+        email: INVITEE,
+        organization_id: organizationId,
+        role: 'fse',
+        onboarding_completed: true,
+      },
+    });
+    assert.equal(result.status, 200, `org ${organizationId}`);
+    assert.equal(result.body.emailed, true);
+    assert.equal(result.linkCalls.length, 0);
+    assert.equal(result.sent.length, 1);
+    assert.match(result.sent[0].html, /Sign in/);
+    assert.doesNotMatch(`${result.sent[0].html}\n${result.sent[0].text}`, /\/auth\/v1\/verify/);
+    assert.equal(invite.accepted, false);
+    assert.equal(invite.accepted_at, null);
+    assert.notEqual(invite.expires_at, expiresAt);
+    assert.equal(isPendingTeamInvite(invite), true);
+    assertNoLink(result, SETUP_LINK);
+  }
+});
+
+test('a removed member with no auth account still gets no setup link', async () => {
+  const invite = {
+    ...pendingCreated,
+    accepted: true,
+    accepted_at: '2026-10-01T12:00:00.000Z',
+  };
+  const result = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'not_found' },
+    invite,
+    profile: null,
+  });
+  assert.equal(result.status, 200);
+  assert.equal(result.linkCalls.length, 0);
+  assert.equal(result.sent.length, 1);
+  assert.match(result.sent[0].html, /Sign in/);
+  assert.equal(invite.accepted, false);
   assertNoLink(result, SETUP_LINK);
 });
 
@@ -843,4 +952,307 @@ test('an existing user with email configured still gets 200', async () => {
   assert.equal(result.sent.length, 1);
   assert.deepEqual(result.sent[0].to, [INVITEE]);
   assertNoLink(result, SETUP_LINK);
+});
+
+type MembershipRow = {
+  user_id: string;
+  organization_id: number;
+  role: string;
+  is_home: boolean;
+};
+
+type ProfileRow = {
+  id: string;
+  email: string;
+  organization_id: number | null;
+  role: string | null;
+  onboarding_completed: boolean;
+  first_name?: string | null;
+  last_name?: string | null;
+};
+
+function claimAdmin(state: {
+  invite: Record<string, unknown>;
+  memberships: MembershipRow[];
+  profiles: ProfileRow[];
+}) {
+  return {
+    from(table: string) {
+      const filters: Record<string, unknown> = {};
+      let op: 'select' | 'insert' | 'update' | 'upsert' = 'select';
+      let payload: Record<string, unknown> = {};
+      const finish = (single: boolean) => {
+        if (table === 'organization_memberships') {
+          if (op === 'insert') {
+            state.memberships.push({
+              user_id: String(payload.user_id),
+              organization_id: Number(payload.organization_id),
+              role: String(payload.role || 'fse'),
+              is_home: !!payload.is_home,
+            });
+            return { data: null, error: null };
+          }
+          if (op === 'update') {
+            const row = state.memberships.find(
+              (item) =>
+                item.user_id === filters.user_id &&
+                String(item.organization_id) === String(filters.organization_id)
+            );
+            if (row && payload.role) row.role = String(payload.role);
+            return { data: null, error: null };
+          }
+          const rows = state.memberships.filter((item) => {
+            if (filters.user_id != null && item.user_id !== filters.user_id) return false;
+            if (
+              filters.organization_id != null &&
+              String(item.organization_id) !== String(filters.organization_id)
+            ) {
+              return false;
+            }
+            return true;
+          });
+          return { data: single ? rows[0] || null : rows, error: null };
+        }
+        if (table === 'engineer_invitations') {
+          if (op === 'update') {
+            Object.assign(state.invite, payload);
+            return { data: null, error: null };
+          }
+          const email = String(state.invite.email || '').toLowerCase();
+          const wanted = filters.email != null ? String(filters.email).toLowerCase() : null;
+          if (wanted && wanted !== email) return { data: null, error: null };
+          if (filters.accepted === false && state.invite.accepted !== false) {
+            return { data: null, error: null };
+          }
+          return { data: state.invite, error: null };
+        }
+        if (table === 'user_profiles') {
+          if (op === 'upsert') {
+            const idx = state.profiles.findIndex((item) => item.id === payload.id);
+            if (idx >= 0) state.profiles[idx] = { ...state.profiles[idx], ...payload } as ProfileRow;
+            else state.profiles.push(payload as ProfileRow);
+            return { data: null, error: null };
+          }
+          if (op === 'update') {
+            const row = state.profiles.find((item) => item.id === filters.id);
+            if (row) Object.assign(row, payload);
+            return { data: null, error: null };
+          }
+          const row =
+            state.profiles.find((item) => filters.id == null || item.id === filters.id) || null;
+          return { data: row, error: null };
+        }
+        if (table === 'organizations') {
+          return {
+            data: { id: filters.id, created_at: '2020-01-01T00:00:00.000Z', created_by: 'other-user' },
+            error: null,
+          };
+        }
+        return { data: null, error: null };
+      };
+      const api = {
+        select() {
+          return api;
+        },
+        insert(row: Record<string, unknown>) {
+          op = 'insert';
+          payload = row;
+          return api;
+        },
+        update(row: Record<string, unknown>) {
+          op = 'update';
+          payload = row;
+          return api;
+        },
+        upsert(row: Record<string, unknown>) {
+          op = 'upsert';
+          payload = row;
+          return api;
+        },
+        eq(column: string, value: unknown) {
+          filters[column] = value;
+          return api;
+        },
+        ilike(column: string, value: unknown) {
+          filters[column] = value;
+          return api;
+        },
+        order() {
+          return api;
+        },
+        limit() {
+          return api;
+        },
+        maybeSingle() {
+          return Promise.resolve(finish(true));
+        },
+        then(
+          onFulfilled: (value: unknown) => unknown,
+          onRejected?: (reason: unknown) => unknown
+        ) {
+          return Promise.resolve(finish(false)).then(onFulfilled, onRejected);
+        },
+      };
+      return api;
+    },
+  };
+}
+
+async function postRejoinClaim(opts: {
+  profileOrg: number | null;
+  memberships: MembershipRow[];
+  invite: Record<string, unknown>;
+}) {
+  const previous = {
+    url: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    anon: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
+  };
+  process.env.NEXT_PUBLIC_SUPABASE_URL = 'http://127.0.0.1:54321';
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = 'anon-test-value';
+  const state = {
+    invite: { ...opts.invite },
+    memberships: opts.memberships.map((row) => ({ ...row })),
+    profiles: [
+      {
+        id: 'auth-1',
+        email: INVITEE,
+        organization_id: opts.profileOrg,
+        role: 'fse',
+        onboarding_completed: true,
+        first_name: 'New',
+        last_name: 'Person',
+      },
+    ] as ProfileRow[],
+  };
+  try {
+    const response = await runTeamClaim(
+      new NextRequest('http://127.0.0.1/api/team/claim', {
+        method: 'POST',
+        headers: {
+          authorization: 'Bearer session-token',
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({}),
+      }),
+      {
+        hasServiceRole: () => true,
+        getAdmin: () => claimAdmin(state) as never,
+        createUserClient: () => ({
+          auth: {
+            getUser: async () => ({
+              data: {
+                user: {
+                  id: 'auth-1',
+                  email: INVITEE,
+                  email_confirmed_at: '2026-10-01T00:00:00.000Z',
+                  user_metadata: { first_name: 'New', last_name: 'Person' },
+                },
+              },
+              error: null,
+            }),
+          },
+          from: () => ({
+            select: () => ({
+              eq: () => ({
+                maybeSingle: async () => ({
+                  data: {
+                    organization_id: opts.profileOrg,
+                    role: 'fse',
+                    onboarding_completed: true,
+                  },
+                  error: null,
+                }),
+              }),
+            }),
+          }),
+        }),
+      }
+    );
+    const body = (await response.json()) as Record<string, unknown>;
+    return { status: response.status, body, state };
+  } finally {
+    if (previous.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
+    else process.env.NEXT_PUBLIC_SUPABASE_URL = previous.url;
+    if (previous.anon === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+    else process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY = previous.anon;
+  }
+}
+
+test('a reopened invite lets a removed member rejoin', async () => {
+  const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const baseInvite = {
+    id: 7,
+    email: INVITEE,
+    organization_id: 9,
+    role: 'fse',
+    accepted: false,
+    accepted_at: null,
+    expires_at: future,
+    created_at: '2026-10-08T00:00:00.000Z',
+    first_name: 'New',
+    last_name: 'Person',
+  };
+
+  const home = await postRejoinClaim({
+    profileOrg: null,
+    memberships: [],
+    invite: baseInvite,
+  });
+  assert.equal(home.status, 200, JSON.stringify(home.body));
+  assert.equal(home.body.claimed, true);
+  assert.equal(home.state.invite.accepted, true);
+  assert.equal(String(home.state.profiles[0].organization_id), '9');
+  assert.equal(
+    home.state.memberships.some((row) => row.organization_id === 9 && row.user_id === 'auth-1'),
+    true
+  );
+
+  const elsewhere = await postRejoinClaim({
+    profileOrg: 4,
+    memberships: [{ user_id: 'auth-1', organization_id: 4, role: 'fse', is_home: true }],
+    invite: baseInvite,
+  });
+  assert.equal(elsewhere.status, 200, JSON.stringify(elsewhere.body));
+  assert.equal(elsewhere.body.claimed, true);
+  assert.equal(elsewhere.body.moonlight, true);
+  assert.equal(elsewhere.state.invite.accepted, true);
+  assert.equal(String(elsewhere.state.profiles[0].organization_id), '4');
+  assert.equal(
+    elsewhere.state.memberships.some((row) => row.organization_id === 9),
+    true
+  );
+});
+
+test('reopened-invite repair SQL is a one-off, not a migration', () => {
+  const dir = join(here, '../supabase/oneoff');
+  const find = readFileSync(join(dir, '20261009_repair_reopened_invites_find.sql'), 'utf8');
+  const repair = readFileSync(join(dir, '20261009_repair_reopened_invites.sql'), 'utf8');
+  const rollback = readFileSync(join(dir, '20261009_repair_reopened_invites_rollback.sql'), 'utf8');
+  const firstSql = (sql: string) =>
+    sql
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('--'))
+      .join('\n')
+      .trim()
+      .split(';')[0]
+      .trim();
+  assert.doesNotMatch(find, /\b(UPDATE|INSERT|DELETE|ALTER|DROP)\b/i);
+  assert.match(find, /expires_at >= '2026-10-16 15:40:00\+00'/);
+  assert.match(find, /expires_at <= '2026-10-16 16:25:00\+00'/);
+  assert.match(find, /lower\(u\.email\) = lower\(i\.email\)/);
+  assert.match(find, /p\.organization_id = i\.organization_id/);
+  assert.equal(firstSql(repair), "SET LOCAL lock_timeout = '5s'");
+  assert.match(repair, /accepted = true/);
+  assert.match(repair, /accepted_at = COALESCE\(i\.accepted_at, now\(\)\)/);
+  assert.match(repair, /RETURNING i\.id/);
+  assert.doesNotMatch(repair, /\bWHERE id = 42\b/);
+  assert.doesNotMatch(repair, /\bCONCURRENTLY\b/i);
+  assert.doesNotMatch(repair, /\bCOMMIT\b/i);
+  assert.match(rollback, /SET LOCAL lock_timeout = '5s'/);
+  assert.match(rollback, /WHERE id = 42/);
+  assert.match(rollback, /accepted = false/);
+  assert.match(rollback, /accepted_at = NULL/);
+  assert.match(rollback, /2026-10-16 15:57:26\.206\+00/);
+  assert.equal(TEAM_INVITE_TTL_MS, 7 * 24 * 60 * 60 * 1000);
 });
