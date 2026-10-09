@@ -4,6 +4,8 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NextRequest } from 'next/server';
+import { POST, runEstimateActionPost } from '../../app/api/billing/estimate-action/route.ts';
 import {
   CUSTOMER_ACTION_APPROVED,
   CUSTOMER_ACTION_CHANGES,
@@ -418,4 +420,176 @@ test('approve and reject still work after a modification request; approved stays
   assert.equal(terminal.conflict, true);
   assert.equal(terminal.patch, null);
   assert.equal(terminal.action, 'approved');
+});
+
+const CONFIRM_SECRET = 'estimate-confirm-test';
+
+function confirmForm(fields: Record<string, string>): NextRequest {
+  return new NextRequest('https://repairplanet.net/api/billing/estimate-action', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/x-www-form-urlencoded',
+      host: 'repairplanet.net',
+      'x-forwarded-proto': 'https',
+    },
+    body: new URLSearchParams(fields),
+  });
+}
+
+function estimateAdmin(estimate: Record<string, unknown>) {
+  const query = (table: string) => {
+    const api: Record<string, unknown> = {
+      select() {
+        return api;
+      },
+      insert() {
+        return api;
+      },
+      update() {
+        return api;
+      },
+      eq() {
+        return api;
+      },
+      filter() {
+        return api;
+      },
+      ilike() {
+        return api;
+      },
+      order() {
+        return api;
+      },
+      limit() {
+        return api;
+      },
+      maybeSingle: async () => {
+        if (table === 'service_estimates') return { data: estimate, error: null };
+        if (table === 'organizations') {
+          return {
+            data: { name: 'Shop', currency_code: 'USD', number_format: 'auto' },
+            error: null,
+          };
+        }
+        return { data: null, error: null };
+      },
+      single: async () => {
+        if (table === 'service_tickets') return { data: { id: 5, ticket_number: 'TKT-1' }, error: null };
+        return { data: null, error: { message: 'no row' } };
+      },
+      then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+        return Promise.resolve({ data: [], error: null }).then(onFulfilled, onRejected);
+      },
+    };
+    return api;
+  };
+  return {
+    from: query,
+    auth: { admin: { getUserById: async () => ({ data: { user: null }, error: null }) } },
+  };
+}
+
+test('no-JS form post keeps a validated lang on the confirm and success redirects', async () => {
+  const previous = process.env.ESTIMATE_ACTION_CONFIRM_SECRET;
+  process.env.ESTIMATE_ACTION_CONFIRM_SECRET = CONFIRM_SECRET;
+  try {
+    const token = generateEstimateActionToken();
+    const encoded = encodeURIComponent(token);
+    const confirm = await POST(
+      confirmForm({
+        token,
+        action: 'approve',
+        confirm: 'bad',
+        lang: 'ar',
+      })
+    );
+    assert.equal(confirm.status, 303);
+    assert.equal(
+      confirm.headers.get('location'),
+      `https://repairplanet.net/e/${encoded}?action=approve&notice=confirm&lang=ar`
+    );
+
+    const injected = await POST(
+      confirmForm({
+        token,
+        action: 'approve',
+        confirm: 'bad',
+        lang: 'ar"\r\nhttps://evil.example',
+      })
+    );
+    assert.equal(injected.status, 303);
+    const injectedLocation = injected.headers.get('location') || '';
+    assert.equal(injectedLocation.includes('lang='), false);
+    assert.equal(injectedLocation.includes('evil'), false);
+
+    const approved = await runEstimateActionPost(
+      confirmForm({
+        token,
+        action: 'approve',
+        confirm: signEstimateActionConfirm(token, 'approve', CONFIRM_SECRET),
+        lang: 'ar',
+      }),
+      {
+        hasServiceRole: () => true,
+        getAdmin: () =>
+          estimateAdmin({
+            id: 9,
+            organization_id: 1,
+            customer_name: 'Clinic',
+            estimate_number: 'EST-1',
+            total: 10,
+            status: 'sent',
+            created_at: new Date().toISOString(),
+            estimate_data: {},
+          }) as never,
+      }
+    );
+    assert.equal(approved.status, 303);
+    assert.equal(
+      approved.headers.get('location'),
+      `https://repairplanet.net/e/${encoded}?done=approved&lang=ar`
+    );
+
+    const crashed = await runEstimateActionPost(
+      confirmForm({
+        token,
+        action: 'approve',
+        confirm: signEstimateActionConfirm(token, 'approve', CONFIRM_SECRET),
+        lang: 'ar',
+      }),
+      {
+        hasServiceRole: () => true,
+        getAdmin: () => {
+          throw new Error('db down');
+        },
+      }
+    );
+    assert.equal(crashed.status, 303);
+    assert.equal(
+      crashed.headers.get('location'),
+      `https://repairplanet.net/e/${encoded}?action=approve&notice=failed&lang=ar`
+    );
+
+    const unavailable = await runEstimateActionPost(
+      confirmForm({
+        token,
+        action: 'reject',
+        confirm: signEstimateActionConfirm(token, 'reject', CONFIRM_SECRET),
+        lang: 'de',
+      }),
+      { hasServiceRole: () => false }
+    );
+    assert.equal(unavailable.status, 303);
+    assert.equal(
+      unavailable.headers.get('location'),
+      `https://repairplanet.net/e/${encoded}?action=reject&notice=failed&lang=de`
+    );
+
+    const route = readFileSync(join(here, '../../app/api/billing/estimate-action/route.ts'), 'utf8');
+    assert.match(route, /export async function POST\(req: NextRequest\) \{\s*return runEstimateActionPost\(req\);\s*\}/);
+    assert.equal((route.match(/\bfinish\(/g) || []).length, 2);
+  } finally {
+    if (previous == null) delete process.env.ESTIMATE_ACTION_CONFIRM_SECRET;
+    else process.env.ESTIMATE_ACTION_CONFIRM_SECRET = previous;
+  }
 });

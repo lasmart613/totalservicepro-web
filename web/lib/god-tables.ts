@@ -786,6 +786,7 @@ export function sanitizeWritePayload(
   for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
     const name = String(key || '').trim();
     if (!name || name.startsWith('_')) continue;
+    if (def.table === 'service_invoices' && name === 'stripe_session_id') continue;
     if (isSecretColumn(name)) {
       if (def.virtual && name === 'password' && value != null && String(value) !== '') {
         payload[name] = String(value);

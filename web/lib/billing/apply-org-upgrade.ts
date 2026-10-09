@@ -30,6 +30,14 @@ export type AppliedOrgUpgrade = {
   receipt: ReturnType<typeof buildUpgradeReceipt>;
 };
 
+function checkoutSubscriptionStatus(session: StripeObject): string {
+  const sub = session.subscription;
+  if (sub && typeof sub === 'object' && typeof sub.status === 'string' && sub.status.trim()) {
+    return sub.status;
+  }
+  return 'active';
+}
+
 async function maybeCancelPrior(
   plan: string,
   priorSubscriptionId: string | null,
@@ -79,6 +87,8 @@ export async function applyPaidCheckoutSession(input: {
     sku: parsed.sku,
     customerId,
     subscriptionId,
+    stripeStatus: checkoutSubscriptionStatus(input.session),
+    stripeRecord: input.session,
   });
   await maybeCancelPrior(parsed.plan, priorSubscriptionId, subscriptionId);
 
@@ -148,6 +158,8 @@ export async function applyPaidSubscriptionRecord(input: {
     sku: parsed.sku,
     customerId,
     subscriptionId,
+    stripeStatus: typeof input.subscription.status === 'string' ? input.subscription.status : null,
+    stripeRecord: input.subscription,
   });
   await maybeCancelPrior(parsed.plan, priorSubscriptionId, subscriptionId);
 

@@ -13,8 +13,11 @@ import {
   buildEstimateHtml,
   buildEstimatePlainText,
   buildInvoiceHtml,
+  buildPurchaseOrderHtml,
+  buildPurchaseOrderPlainText,
   type DocCompany,
   type EstimateHtmlInput,
+  type PurchaseOrderHtmlInput,
 } from './doc-html.ts';
 import {
   isEstimateDepositEnabled,
@@ -134,7 +137,7 @@ export function documentAccountLinks(
  * A blank name is left off — nothing is substituted.
  */
 export function ownedDocumentSubject(
-  kind: 'invoice' | 'estimate' | 'report',
+  kind: 'invoice' | 'estimate' | 'report' | 'purchase_order',
   docNumber: unknown,
   shopName: unknown,
   locale?: string | null
@@ -142,8 +145,21 @@ export function ownedDocumentSubject(
   const num = String(docNumber || '').trim();
   const shop = String(shopName ?? '').trim();
   const noun =
-    kind === 'invoice' ? 'Invoice' : kind === 'estimate' ? 'Estimate' : 'Service Report';
-  const bare = kind === 'estimate' ? 'Service estimate' : kind === 'report' ? 'Service report' : 'Invoice';
+    kind === 'invoice'
+      ? 'Invoice'
+      : kind === 'estimate'
+        ? 'Estimate'
+        : kind === 'purchase_order'
+          ? 'Purchase Order'
+          : 'Service Report';
+  const bare =
+    kind === 'estimate'
+      ? 'Service estimate'
+      : kind === 'report'
+        ? 'Service report'
+        : kind === 'purchase_order'
+          ? 'Purchase Order'
+          : 'Invoice';
   if (num && shop) return translateAppFill(locale, `${noun} {num} from {shop}`, { num, shop });
   if (num) return translateAppFill(locale, `${noun} {num}`, { num });
   if (shop) return translateAppFill(locale, `${bare} from {shop}`, { shop });
@@ -284,6 +300,30 @@ export function buildOwnedEstimatePlainText(input: {
   return buildEstimatePlainText(ownedEstimateHtmlInput(input));
 }
 
+/**
+ * text/plain body of a customer estimate email, including the free-account lines.
+ * Labels go through translateApp, the same dictionary as the HTML account footer.
+ */
+export function buildOwnedEstimateEmailText(input: {
+  row: Record<string, unknown>;
+  company: DocCompany;
+  theme: CompanyTheme | null;
+  actionUrl?: string | null;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
+  timeZone?: string | null;
+  signupUrl: string;
+  loginUrl: string;
+}): string {
+  const tr = (text: string) => translateApp(input.locale, text);
+  return [
+    buildOwnedEstimatePlainText(input),
+    '',
+    `${tr('Create a free account')}: ${input.signupUrl}`,
+    `${tr('Sign in')}: ${input.loginUrl}`,
+  ].join('\n');
+}
+
 function ownedEstimateHtmlInput(input: {
   row: Record<string, unknown>;
   company: DocCompany;
@@ -395,7 +435,8 @@ function formatEstimatePartLines(
   );
   if (usable.length) {
     return usable.map((row) => {
-      const label = [row.part_number, row.description].filter(Boolean).join(' ').trim() || 'Part';
+      const label =
+        [row.part_number, row.description].filter(Boolean).join(' ').trim() || translateApp(locale, 'Part');
       const qty = num(row.qty) > 0 ? num(row.qty) : 1;
       const unit = formatOrgMoney(row.unit_price, moneyPrefs, locale);
       const ext = formatOrgMoney(
@@ -425,6 +466,91 @@ function formatBarePartAmount(
   const label = match[1].trim();
   const amount = formatOrgMoney(match[2], moneyPrefs, locale);
   return label ? `${label}: ${amount}` : amount;
+}
+
+export function buildOwnedPurchaseOrderMessage(input: {
+  row: Record<string, unknown>;
+  company: DocCompany;
+  supplierEmail?: string | null;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
+}): string {
+  return buildPurchaseOrderHtml(ownedPurchaseOrderInput(input));
+}
+
+export function buildOwnedPurchaseOrderEmailText(input: {
+  row: Record<string, unknown>;
+  company: DocCompany;
+  supplierEmail?: string | null;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
+  signupUrl: string;
+  loginUrl: string;
+}): string {
+  const tr = (text: string) => translateApp(input.locale, text);
+  return [
+    buildPurchaseOrderPlainText(ownedPurchaseOrderInput(input)),
+    '',
+    `${tr('Create a free account')}: ${input.signupUrl}`,
+    `${tr('Sign in')}: ${input.loginUrl}`,
+  ].join('\n');
+}
+
+function ownedPurchaseOrderInput(input: {
+  row: Record<string, unknown>;
+  company: DocCompany;
+  supplierEmail?: string | null;
+  moneyPrefs?: OrgMoneyPrefs | null;
+  locale?: string | null;
+}): PurchaseOrderHtmlInput {
+  const data = parseJsonField(input.row.po_data);
+  const lines = purchaseOrderLines(data);
+  const lineSum = lines.reduce((sum, line) => sum + num(line.ext), 0);
+  const subtotal = num(input.row.subtotal) || lineSum;
+  const tax = num(input.row.tax);
+  const total = num(input.row.total) || subtotal + tax;
+  return {
+    company: input.company,
+    supplier: {
+      name: String(input.row.supplier_name || data.supplier_name || ''),
+      address: String(data.supAddress || ''),
+      city: String(data.supCity || ''),
+      state: String(data.supState || ''),
+      zip: String(data.supZip || ''),
+      phone: String(data.supPhone || ''),
+      email: String(input.supplierEmail || input.row.supplier_email || ''),
+    },
+    poNumber: String(input.row.po_number || data.po_number || data.poNumber || ''),
+    poDate: input.row.po_date ? String(input.row.po_date).slice(0, 10) : '',
+    neededBy: input.row.needed_by ? String(input.row.needed_by).slice(0, 10) : undefined,
+    shipTo: data.shipTo ? String(data.shipTo) : undefined,
+    description: input.row.description ? String(input.row.description) : undefined,
+    preparedBy: input.company.tech_name,
+    lines,
+    subtotal,
+    tax,
+    total,
+    moneyPrefs: input.moneyPrefs,
+    locale: input.locale,
+  };
+}
+
+function purchaseOrderLines(data: Record<string, unknown>): PurchaseOrderHtmlInput['lines'] {
+  const raw = Array.isArray(data.line_items) ? data.line_items : [];
+  return raw
+    .filter((row): row is Record<string, unknown> => !!row && typeof row === 'object' && !Array.isArray(row))
+    .map((row) => {
+      const qty = num(row.qty);
+      const unit = num(row.unit_price);
+      const ext = row.ext != null && row.ext !== '' ? num(row.ext) : qty * unit;
+      return {
+        part_number: String(row.part_number || ''),
+        description: String(row.description || ''),
+        qty,
+        unit_price: unit,
+        ext,
+      };
+    });
 }
 
 export function buildOwnedReportMessage(

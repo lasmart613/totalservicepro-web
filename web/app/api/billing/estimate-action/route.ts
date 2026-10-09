@@ -4,6 +4,7 @@ import {
   applyEstimateCustomerAction,
   decideEstimateActionHttp,
   estimateActionConfirmSecret,
+  estimateActionRedirectLang,
   estimateActionRedirectLocation,
   findEstimateByActionToken,
   isValidEstimateActionToken,
@@ -40,43 +41,64 @@ export async function GET() {
 
 /**
  * POST /api/billing/estimate-action
- * Body: { token, action: 'approve' | 'reject' | 'modify', note?, confirm }
+ * Body: { token, action: 'approve' | 'reject' | 'modify', note?, confirm, lang? }
  * `confirm` is the nonce rendered on the confirm page. A POST without it does not write.
+ * `lang` is the hidden field on the no-JS confirm form.
  */
 export async function POST(req: NextRequest) {
+  return runEstimateActionPost(req);
+}
+
+export async function runEstimateActionPost(
+  req: NextRequest,
+  deps: {
+    hasServiceRole?: () => boolean;
+    getAdmin?: () => ReturnType<typeof getSupabaseAdmin>;
+  } = {}
+) {
+  const serviceRole = deps.hasServiceRole ?? hasServiceRole;
+  const adminClient = deps.getAdmin ?? getSupabaseAdmin;
   const formPost = isConfirmFormPost(req);
+  let lang: string | null = null;
+  let postedToken = '';
+  let postedAction = '';
+  const end = (status: number, payload: Record<string, unknown>) =>
+    finish(req, formPost, status, { ...payload, lang });
   try {
     const body = await readActionBody(req);
+    lang = estimateActionRedirectLang(body.lang);
+    postedToken = String(body.token || '');
+    postedAction = String(body.action || '');
     const decision = decideEstimateActionHttp({
       method: 'POST',
       body,
       secret: estimateActionConfirmSecret(),
     });
     if (decision.effect !== 'mutate') {
-      return finish(req, formPost, decision.status, {
+      return end(decision.status, {
         error: decision.error,
-        token: String(body.token || ''),
-        action: String(body.action || ''),
+        token: postedToken,
+        action: postedAction,
         notice: decision.status === 400 ? 'confirm' : 'failed',
       });
     }
 
-    if (!hasServiceRole()) {
-      return finish(req, formPost, 503, {
+    if (!serviceRole()) {
+      return end(503, {
         error: 'This page is temporarily unavailable. Please contact the company that sent the estimate.',
         token: decision.token,
-        action: String(body.action || ''),
+        action: postedAction,
         notice: 'failed',
       });
     }
 
-    const admin = getSupabaseAdmin();
+    const admin = adminClient();
     const est = await findEstimateByActionToken(admin, decision.token);
     if (!est) {
-      return finish(req, formPost, 404, {
+      return end(404, {
         error: 'Estimate not found',
         token: decision.token,
-        action: String(body.action || ''),
+        action: postedAction,
         notice: 'failed',
       });
     }
@@ -86,12 +108,12 @@ export async function POST(req: NextRequest) {
     const payload = publicEstimatePayload(est, companyName, moneyPrefs);
 
     if (payload.expired || isEstimateExpired(est)) {
-      return finish(req, formPost, 409, {
+      return end(409, {
         error: 'This estimate has expired and can no longer be updated online.',
         estimate: payload,
         expired: true,
         token: decision.token,
-        action: String(body.action || ''),
+        action: postedAction,
         notice: 'expired',
       });
     }
@@ -113,7 +135,7 @@ export async function POST(req: NextRequest) {
     }
 
     const terminalConflict = result.already && result.conflict;
-    return finish(req, formPost, terminalConflict ? 409 : 200, {
+    return end(terminalConflict ? 409 : 200, {
       ok: !terminalConflict,
       already: result.already,
       conflict: result.conflict,
@@ -129,7 +151,12 @@ export async function POST(req: NextRequest) {
     });
   } catch (e: any) {
     console.error('estimate-action POST', e);
-    return finish(req, formPost, 500, { error: e?.message || 'Server error', notice: 'failed' });
+    return end(500, {
+      error: e?.message || 'Server error',
+      token: postedToken,
+      action: postedAction,
+      notice: 'failed',
+    });
   }
 }
 
@@ -190,6 +217,7 @@ function finish(
   const json = { ...body };
   delete json.token;
   delete json.notice;
+  delete json.lang;
   const headers: Record<string, string> = { 'Cache-Control': 'no-store' };
   if (status === 405) headers.Allow = 'POST';
   return NextResponse.json(json, { status, headers });

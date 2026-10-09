@@ -5,10 +5,35 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
 
 export const STRIPE_WEBHOOK_SECRET_ENV = 'STRIPE_WEBHOOK_SECRET';
+export const STRIPE_CONNECT_WEBHOOK_SECRET_ENV = 'STRIPE_CONNECT_WEBHOOK_SECRET';
 
 export function getStripeWebhookSecret(): string | null {
   const value = String(process.env[STRIPE_WEBHOOK_SECRET_ENV] ?? '').trim();
   return value || null;
+}
+
+/** Signing secret for Connect endpoints ("Events on connected accounts"). */
+export function getStripeConnectWebhookSecret(): string | null {
+  const value = String(process.env[STRIPE_CONNECT_WEBHOOK_SECRET_ENV] ?? '').trim();
+  return value || null;
+}
+
+export function stripeWebhookSecrets(): string[] {
+  const secrets = [getStripeWebhookSecret(), getStripeConnectWebhookSecret()];
+  return secrets.filter((secret): secret is string => Boolean(secret));
+}
+
+/** Accept the event when either the platform or the Connect signing secret matches. */
+export function verifyStripeWebhookAgainstSecrets(
+  rawBody: string,
+  header: string,
+  secrets: string[],
+  toleranceSec = 300,
+  nowSec = Math.floor(Date.now() / 1000)
+): boolean {
+  return secrets.some((secret) =>
+    verifyStripeWebhookSignature(rawBody, header, secret, toleranceSec, nowSec)
+  );
 }
 
 export function parseStripeSignatureHeader(header: string): { timestamp: string; signatures: string[] } | null {
@@ -72,4 +97,14 @@ export function isCheckoutSessionCompleted(type: string | null | undefined): boo
 
 export function isSubscriptionLifecycle(type: string | null | undefined): boolean {
   return type === 'customer.subscription.created' || type === 'customer.subscription.updated';
+}
+
+/** Stripe Dashboard must also send this event or a cancel never reaches us. */
+export function isSubscriptionDeleted(type: string | null | undefined): boolean {
+  return type === 'customer.subscription.deleted';
+}
+
+/** Logged only. A failed renewal does not turn Premium off; Stripe retries first. */
+export function isInvoicePaymentFailed(type: string | null | undefined): boolean {
+  return type === 'invoice.payment_failed';
 }

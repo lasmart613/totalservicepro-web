@@ -19,6 +19,7 @@ import {
   senderCompanyFromOrg,
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
+import { releaseDocumentSendSlot, takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
 
 const REPORT_SELECTS = [
   'id, created_by, organization_id, customer_name, customer_organization_id, customer_email, report_number, status',
@@ -33,6 +34,8 @@ const REPORT_SELECTS = [
  * No customer-invite claim token is minted.
  */
 export async function POST(req: NextRequest) {
+  let heldSlot: { organizationId: string | number | null; documentId: string | number; stamp: number } | null =
+    null;
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
@@ -114,6 +117,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!resendKey) {
+      return respond(
+        {
+          ok: false,
+          emailSent: false,
+          error:
+            'Email delivery is not configured (RESEND_API_KEY). Use the device email app with the address on file.',
+          needsConfig: true,
+        },
+        503
+      );
+    }
+
+    const sendLimit = takeDocumentSendSlot({
+      organizationId: callerOrgId,
+      documentId: reportId,
+      documentType: 'report',
+    });
+    if (!sendLimit.ok) {
+      return respond({ error: sendLimit.message, rateLimited: true }, 429);
+    }
+    heldSlot = { organizationId: callerOrgId, documentId: reportId, stamp: sendLimit.stamp };
+
     const techName = await readTechName(supabase, user.id);
     const company =
       callerOrgId != null
@@ -133,23 +160,10 @@ export async function POST(req: NextRequest) {
       locale: request.locale,
     });
 
-    const resendKey = process.env.RESEND_API_KEY;
     const from =
       process.env.NOTIFY_FROM_EMAIL ||
       process.env.RESEND_FROM ||
       'Total Service Pro <contact@medicalrepairnetwork.com>';
-    if (!resendKey) {
-      return respond(
-        {
-          ok: false,
-          emailSent: false,
-          error:
-            'Email delivery is not configured (RESEND_API_KEY). Use the device email app with the address on file.',
-          needsConfig: true,
-        },
-        503
-      );
-    }
 
     const rr = await fetch('https://api.resend.com/emails', {
       method: 'POST',
@@ -171,6 +185,10 @@ export async function POST(req: NextRequest) {
     const result = await rr.json().catch(() => ({}));
     if (!rr.ok) {
       console.error('Resend service-report send failed', result);
+      if (heldSlot) {
+        releaseDocumentSendSlot({ ...heldSlot, documentType: 'report' });
+        heldSlot = null;
+      }
       const msg = result?.message || `Email provider error (${rr.status})`;
       const friendly =
         /verify a domain|own email address|testing emails|not verified/i.test(msg)
@@ -179,6 +197,7 @@ export async function POST(req: NextRequest) {
       return respond({ ok: false, emailSent: false, error: friendly }, 502, [recipient.email]);
     }
 
+    heldSlot = null;
     return respond(
       {
         ok: true,
@@ -192,6 +211,7 @@ export async function POST(req: NextRequest) {
       [recipient.email]
     );
   } catch (e: any) {
+    if (heldSlot) releaseDocumentSendSlot({ ...heldSlot, documentType: 'report' });
     console.error('send-report', e);
     return respond({ error: e?.message || 'Server error' }, 500);
   }

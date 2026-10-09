@@ -13,8 +13,18 @@ export type SendDocResult = {
   needsConfig?: boolean;
   paymentUrl?: string | null;
   stripeSkippedReason?: string | null;
+  connectRequired?: boolean;
+  stripeConnect?: {
+    title?: string;
+    message?: string;
+    partnerUrl?: string | null;
+    partnerMissingMessage?: string | null;
+    connectPath?: string;
+  } | null;
   emailSource?: string;
   alreadySent?: boolean;
+  sentAt?: string | null;
+  supplierName?: string | null;
 };
 
 export function isValidOnFileEmail(e: string | null | undefined): boolean {
@@ -92,6 +102,9 @@ export async function sendBillingDocEmail(opts: {
         error: json?.error || `Send failed (${res.status})`,
         needsConfig: !!json?.needsConfig,
         paymentUrl: json?.paymentUrl ?? null,
+        stripeSkippedReason: json?.stripeSkippedReason ?? null,
+        connectRequired: !!json?.connectRequired,
+        stripeConnect: json?.stripeConnect ?? null,
         attemptedTo: json?.attemptedTo,
       } as SendDocResult & { attemptedTo?: string };
     }
@@ -102,8 +115,12 @@ export async function sendBillingDocEmail(opts: {
       error: json.error,
       paymentUrl: json.paymentUrl ?? null,
       stripeSkippedReason: json.stripeSkippedReason ?? null,
+      connectRequired: !!json.connectRequired,
+      stripeConnect: json.stripeConnect ?? null,
       emailSource: json.emailSource,
       alreadySent: !!json.alreadySent,
+      sentAt: json.sent_at ?? null,
+      supplierName: json.supplierName ?? null,
     };
   } catch (e: any) {
     return {

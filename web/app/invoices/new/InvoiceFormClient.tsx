@@ -38,6 +38,8 @@ import {
 import { invoiceDataForSave } from '@/lib/billing/invoice-form-data';
 import { REJECTED_ESTIMATE_CONVERT_ERROR } from '@/lib/billing/estimate-display';
 import { lineItemFromStored } from '@/lib/billing/listing-invoice';
+import { StripeConnectCard } from '@/components/StripeConnectCard';
+import type { SendDocResult } from '@/lib/billing/send-doc-email';
 
 type CustomerOpt = LinkedCustomerOpt;
 
@@ -769,11 +771,17 @@ export default function InvoiceFormClient() {
             'Server needs RESEND_API_KEY and a verified From domain (medicalrepairnetwork.com).'
           );
         }
+        noteCardPayout(result);
         return;
       }
 
       // Only now mark sent
       await saveInvoice('sent', { quiet: true });
+      if (result.connectRequired) {
+        toast.error(result.stripeConnect?.message || result.stripeSkippedReason || 'Connect Stripe before taking a card payment.');
+        toast.message(`Invoice emailed to ${result.to} without a card-payment link.`);
+        return;
+      }
       const payNote = result.paymentUrl
         ? ' Stripe pay link included.'
         : result.stripeSkippedReason
@@ -818,6 +826,12 @@ export default function InvoiceFormClient() {
       });
       if (!result.emailSent) {
         toast.error(result.error || 'Resend failed');
+        noteCardPayout(result);
+        return;
+      }
+      if (result.connectRequired) {
+        toast.error(result.stripeConnect?.message || result.stripeSkippedReason || 'Connect Stripe before taking a card payment.');
+        toast.message(`Invoice re-sent to ${result.to} without a card-payment link.`);
         return;
       }
       toast.success(`Invoice re-sent to ${result.to}`);
@@ -850,6 +864,15 @@ export default function InvoiceFormClient() {
         )
       );
     }
+  }
+
+  function noteCardPayout(result: SendDocResult) {
+    if (!result.connectRequired) return;
+    toast.error(
+      result.stripeConnect?.message ||
+        result.stripeSkippedReason ||
+        'Connect Stripe before taking a card payment. The platform account was not charged.'
+    );
   }
 
   function markSentWithoutEmail() {
@@ -1396,6 +1419,10 @@ export default function InvoiceFormClient() {
             {money(total)}
           </div>
         </section>
+
+        <div className="mb-4">
+          <StripeConnectCard returnTo="/invoices/new" />
+        </div>
 
         {voided && (
           <div className="card p-4 mb-4 border border-rose-700 bg-rose-950/40">

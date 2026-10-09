@@ -1,9 +1,12 @@
 import type { Metadata } from 'next';
 import { headers } from 'next/headers';
+import { LocaleHtml } from '@/components/i18n/LocaleHtml';
 import EstimateActionClient, { EstimateLinkFallback } from './EstimateActionClient';
 import { loadPublicEstimateForToken } from '@/lib/billing/estimate-action';
 import { parseCustomerActionKind, parseEstimateEmailAction } from '@/lib/billing/save-helpers';
 import { resolveCustomerPageLocale } from '@/lib/i18n/customer-locale';
+import type { PublicLocale } from '@/lib/i18n/locales';
+import { documentLocaleMeta, estimateDocumentLocaleScript } from '@/lib/i18n/preference';
 
 export const dynamic = 'force-dynamic';
 
@@ -12,6 +15,16 @@ export const metadata: Metadata = {
   description: 'Review this service estimate, then approve, reject, or request a modification.',
   robots: { index: false, follow: false },
 };
+
+function EstimateDocumentLocale({ locale }: { locale: PublicLocale }) {
+  const meta = documentLocaleMeta(locale);
+  return (
+    <>
+      <script dangerouslySetInnerHTML={{ __html: estimateDocumentLocaleScript(locale) }} />
+      <LocaleHtml lang={meta.lang} dir={meta.dir} htmlClass={meta.htmlClass} />
+    </>
+  );
+}
 
 function requestedFromQuery(query: { action?: string; changes?: string }) {
   const explicit = parseEstimateEmailAction(query.action);
@@ -53,18 +66,26 @@ export default async function EstimateActionPage({
   });
 
   if (!loaded.ok) {
-    return <EstimateLinkFallback message={loaded.message} locale={locale} />;
+    return (
+      <>
+        <EstimateDocumentLocale locale={locale} />
+        <EstimateLinkFallback message={loaded.message} locale={locale} />
+      </>
+    );
   }
 
   return (
-    <EstimateActionClient
-      token={token}
-      confirms={loaded.confirms}
-      estimate={loaded.estimate}
-      requested={requested}
-      justCompleted={justCompleted}
-      notice={notice}
-      locale={locale}
-    />
+    <>
+      <EstimateDocumentLocale locale={locale} />
+      <EstimateActionClient
+        token={token}
+        confirms={loaded.confirms}
+        estimate={loaded.estimate}
+        requested={requested}
+        justCompleted={justCompleted}
+        notice={notice}
+        locale={locale}
+      />
+    </>
   );
 }

@@ -10,7 +10,6 @@ import { useOrgMoney } from '@/lib/use-org-money';
 import { getSupabaseClient } from '@/lib/supabase/client';
 import { allocateDocNumber } from '@/lib/billing/doc-numbers';
 import { orgTodayIso } from '@/lib/org-timezone';
-import { buildPurchaseOrderHtml, type DocCompany } from '@/lib/billing/doc-html';
 import { isValidOnFileEmail, sendBillingDocEmail } from '@/lib/billing/send-doc-email';
 import { chunkIds, fetchAllPages } from '@/lib/supabase/paginate';
 import {
@@ -23,6 +22,7 @@ import {
   writeWithColumnRetry,
   type LineItem,
 } from '@/lib/billing/save-helpers';
+import { isSentPurchaseOrder, purchaseOrderSavePayload } from '@/lib/billing/purchase-order-save';
 import { isPartListing } from '@/lib/marketplace/parts';
 import {
   exactPartSuggest,
@@ -59,7 +59,7 @@ export function PurchaseOrderPageFallback() {
 
 export default function PurchaseOrderFormClient() {
   const t = useT();
-  const { money, prefs, locale } = useOrgMoney();
+  const { money } = useOrgMoney();
   const supabase = getSupabaseClient();
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -73,7 +73,8 @@ export default function PurchaseOrderFormClient() {
   const [userId, setUserId] = useState<string | null>(null);
   const [docNumber, setDocNumber] = useState('');
   const [status, setStatus] = useState('draft');
-  const [company, setCompany] = useState<DocCompany>({});
+  const [sentAt, setSentAt] = useState<string | null>(null);
+  const supplierLocked = isSentPurchaseOrder(status, sentAt);
 
   const [suppliers, setSuppliers] = useState<SupplierOpt[]>([]);
   const [supSearch, setSupSearch] = useState('');
@@ -252,6 +253,7 @@ export default function PurchaseOrderFormClient() {
       }
       setSavedId(data.id);
       setStatus(data.status || 'draft');
+      setSentAt(data.sent_at ? String(data.sent_at) : null);
       setSupplierName(data.supplier_name || '');
       setSupSearch(data.supplier_name || '');
       setSupplierOrgId(data.supplier_organization_id || null);
@@ -303,12 +305,11 @@ export default function PurchaseOrderFormClient() {
         setUserId(user.id);
         const { data: profile } = await supabase
           .from('user_profiles')
-          .select('organization_id, first_name, last_name')
+          .select('organization_id')
           .eq('id', user.id)
           .maybeSingle();
         const orgId = coerceOrgId(profile?.organization_id);
         setUserOrgId(orgId);
-        const techName = [profile?.first_name, profile?.last_name].filter(Boolean).join(' ');
         if (orgId) {
           let storedZone: string | null = null;
           const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();
@@ -316,24 +317,11 @@ export default function PurchaseOrderFormClient() {
           else if (zoneRow.data?.timezone) storedZone = String(zoneRow.data.timezone);
           const { data: org } = await supabase
             .from('organizations')
-            .select('name, address, city, state, zip, phone, email, website, logo_url, slogan')
+            .select('name, address, city, state, zip')
             .eq('id', orgId)
             .maybeSingle();
           orgTodayRef.current = orgTodayIso({ stored: storedZone, state: org?.state });
           if (!editIdParam && !poDateTouched.current) setPoDate(orgTodayRef.current);
-          setCompany({
-            company_name: org?.name || '',
-            address: org?.address || '',
-            city: org?.city || '',
-            state: org?.state || '',
-            zip: org?.zip || '',
-            phone: org?.phone || '',
-            email: org?.email || '',
-            website: org?.website || '',
-            logo_url: org?.logo_url || '',
-            slogan: org?.slogan || '',
-            tech_name: techName,
-          });
           const ship = [org?.name, org?.address, org?.city, org?.state, org?.zip]
             .filter(Boolean)
             .join(', ');
@@ -424,12 +412,17 @@ export default function PurchaseOrderFormClient() {
         payload.created_by = userId;
         payload.created_at = new Date().toISOString();
       }
+      const alreadySent = supplierLocked;
+      const writing = purchaseOrderSavePayload(payload, {
+        alreadySent,
+        nextStatus,
+      });
 
-      const result = await writeWithColumnRetry(supabase, 'purchase_orders', payload, savedId);
+      const result = await writeWithColumnRetry(supabase, 'purchase_orders', writing, savedId);
       if (result.error) throw result.error;
       if (result.id) {
         setSavedId(result.id);
-        setStatus(nextStatus);
+        if (!alreadySent || nextStatus === 'sent') setStatus(nextStatus);
         try {
           const url = new URL(window.location.href);
           url.searchParams.set('id', String(result.id));
@@ -439,7 +432,7 @@ export default function PurchaseOrderFormClient() {
         }
       }
       if (!opts?.quiet) {
-        toast.success(nextStatus === 'draft' ? 'PO draft saved' : 'Purchase order saved');
+        toast.success(!alreadySent && nextStatus === 'draft' ? 'PO draft saved' : 'Purchase order saved');
       }
       return result.id || savedId;
     } catch (err: any) {
@@ -448,33 +441,6 @@ export default function PurchaseOrderFormClient() {
     } finally {
       setSaving(false);
     }
-  }
-
-  function buildPoEmailHtml() {
-    return buildPurchaseOrderHtml({
-      company,
-      supplier: {
-        name: supplierName.trim() || supSearch.trim(),
-        address: supAddress,
-        city: supCity,
-        state: supState,
-        zip: supZip,
-        phone: supPhone,
-        email: supEmail,
-      },
-      poNumber: docNumber || 'Draft',
-      poDate: poDate || orgTodayRef.current,
-      neededBy: neededBy || undefined,
-      shipTo: shipTo || undefined,
-      description: description || undefined,
-      preparedBy: company.tech_name,
-      lines: lineItems,
-      subtotal,
-      tax: Number(tax) || 0,
-      total,
-      moneyPrefs: prefs,
-      locale,
-    });
   }
 
   async function finalizeAndEmail() {
@@ -502,20 +468,20 @@ export default function PurchaseOrderFormClient() {
         accessToken: session.access_token,
         payload: {
           purchase_order_id: id,
-          po_number: docNumber,
-          supplier_organization_id: supplierOrgId,
-          supplier_name: supplierName,
-          company_name: company.company_name,
-          reply_to: company.email || undefined,
-          html: buildPoEmailHtml(),
         },
       });
       if (!result.emailSent) {
         toast.error(result.error || 'Email was not sent. PO remains a draft.');
         return;
       }
-      await savePo('sent', { quiet: true });
-      toast.success(`Purchase order emailed to ${result.to}`);
+      if (!result.sentAt) {
+        await savePo('sent', { quiet: true });
+      } else {
+        setStatus('sent');
+        setSentAt(String(result.sentAt));
+      }
+      const mailedName = supplierName.trim();
+      toast.success(mailedName ? `Purchase order emailed to ${mailedName}` : 'Purchase order emailed');
     } finally {
       setEmailing(false);
     }
@@ -550,8 +516,12 @@ export default function PurchaseOrderFormClient() {
             <label className="text-xs text-[var(--text3)]">{t('Choose a parts supplier')}</label>
             <select
               className="input select mt-1"
+              data-field="supplier_organization_id"
               value={supplierOrgId != null ? String(supplierOrgId) : ''}
+              disabled={supplierLocked}
+              aria-readonly={supplierLocked}
               onChange={(e) => {
+                if (supplierLocked) return;
                 const id = e.target.value;
                 if (!id) {
                   clearSupplier();
@@ -577,8 +547,11 @@ export default function PurchaseOrderFormClient() {
             <label className="text-xs text-[var(--text3)] mt-3 block">{t('Type to filter the list')}</label>
             <input
               className="input mt-1"
+              data-field="supplier_name"
               value={supSearch}
+              readOnly={supplierLocked}
               onChange={(e) => {
+                if (supplierLocked) return;
                 const v = e.target.value;
                 setSupSearch(v);
                 const exact = suppliers.find(
@@ -602,13 +575,21 @@ export default function PurchaseOrderFormClient() {
               ))}
             </datalist>
             <p className="text-[11px] text-[var(--text3)] mt-1">
-              {t('Pick from the dropdown or type a name — email fills from their profile.')}
+              {supplierLocked
+                ? t('Sent purchase orders keep their supplier. Save draft updates the other fields.')
+                : t('Pick from the dropdown or type a name — email fills from their profile.')}
             </p>
           </div>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mt-3">
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Email on supplier profile')}</label>
-              <input className="input mt-1 opacity-90" readOnly value={supEmail || '—'} />
+              <input
+                className="input mt-1 opacity-90"
+                data-field="supplier_email"
+                readOnly
+                aria-readonly="true"
+                value={supEmail || '—'}
+              />
             </div>
             <div>
               <label className="text-xs text-[var(--text3)]">{t('Phone')}</label>

@@ -20,7 +20,7 @@ import {
 } from '@/lib/billing/finalize-estimate';
 import {
   buildOwnedEstimateMessage,
-  buildOwnedEstimatePlainText,
+  buildOwnedEstimateEmailText,
   documentAccountLinks,
   documentCustomerOrgId,
   documentOwnedByOrganization,
@@ -35,6 +35,7 @@ import {
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
 import { rejectedEstimateChangeRefusal } from '@/lib/billing/estimate-display';
+import { releaseDocumentSendSlot, takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
 
 const EST_SELECTS = [
   'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action, customer_action_token, services, issues, created_at',
@@ -53,6 +54,8 @@ const EST_SELECTS = [
  * already pending/sent estimate does not send again and does not insert.
  */
 export async function POST(req: NextRequest) {
+  let heldSlot: { organizationId: string | number | null; documentId: string | number; stamp: number } | null =
+    null;
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
@@ -150,6 +153,30 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    const resendKey = process.env.RESEND_API_KEY;
+    if (!resendKey) {
+      return respond(
+        {
+          ok: false,
+          emailSent: false,
+          error:
+            'Email delivery is not configured (RESEND_API_KEY). Save as draft or mark sent without email.',
+          needsConfig: true,
+        },
+        503
+      );
+    }
+
+    const sendLimit = takeDocumentSendSlot({
+      organizationId: callerOrgId,
+      documentId: estimateId,
+      documentType: 'estimate',
+    });
+    if (!sendLimit.ok) {
+      return respond({ error: sendLimit.message, rateLimited: true }, 429);
+    }
+    heldSlot = { organizationId: callerOrgId, documentId: estimateId, stamp: sendLimit.stamp };
+
     const techName = await readTechName(supabase, user.id);
     const company =
       callerOrgId != null
@@ -187,12 +214,11 @@ export async function POST(req: NextRequest) {
     const origin = publicSiteOrigin(req);
     const { signupUrl, loginUrl } = documentAccountLinks(origin, estimateCustomerPath(estimateId));
     const text = stampLangOnEstimateLinks(
-      [
-        buildOwnedEstimatePlainText(mailInput),
-        '',
-        `Create a free account: ${signupUrl}`,
-        `Sign in: ${loginUrl}`,
-      ].join('\n'),
+      buildOwnedEstimateEmailText({
+        ...mailInput,
+        signupUrl,
+        loginUrl,
+      }),
       request.locale
     );
     const mailedHtml = stampLangOnEstimateLinks(
@@ -208,23 +234,10 @@ export async function POST(req: NextRequest) {
       request.locale
     );
 
-    const resendKey = process.env.RESEND_API_KEY;
     const from =
       process.env.NOTIFY_FROM_EMAIL ||
       process.env.RESEND_FROM ||
       'Total Service Pro <contact@medicalrepairnetwork.com>';
-    if (!resendKey) {
-      return respond(
-        {
-          ok: false,
-          emailSent: false,
-          error:
-            'Email delivery is not configured (RESEND_API_KEY). Save as draft or mark sent without email.',
-          needsConfig: true,
-        },
-        503
-      );
-    }
 
     const delivery = await finalizeEstimateDelivery({
       client: writer,
@@ -263,6 +276,10 @@ export async function POST(req: NextRequest) {
     });
 
     if (!delivery.ok) {
+      if (heldSlot) {
+        releaseDocumentSendSlot({ ...heldSlot, documentType: 'estimate' });
+        heldSlot = null;
+      }
       return respond({ ok: false, emailSent: false, error: delivery.error }, 502, [recipient.email]);
     }
 
@@ -274,6 +291,7 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    heldSlot = null;
     return respond(
       {
         ok: true,
@@ -288,6 +306,7 @@ export async function POST(req: NextRequest) {
       [recipient.email]
     );
   } catch (e: any) {
+    if (heldSlot) releaseDocumentSendSlot({ ...heldSlot, documentType: 'estimate' });
     console.error('send-estimate', e);
     return respond({ error: e?.message || 'Server error' }, 500);
   }
