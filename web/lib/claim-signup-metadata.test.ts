@@ -9,7 +9,13 @@ import {
   isClaimSignupWithoutToken,
   refuseClaimOrgAutoCreate,
 } from './claim-signup-metadata.ts';
-import { applyPendingSignup, pendingSignupFromMetadata as pendingFromMeta, resolvePendingSignup as resolvePending } from './pending-signup.ts';
+import {
+  applyPendingSignup,
+  findCreatedOrganization,
+  pendingSignupFromMetadata as pendingFromMeta,
+  resolvePendingSignup as resolvePending,
+} from './pending-signup.ts';
+import { exactTextImatch } from './email-match.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -241,4 +247,68 @@ test('every rebuild path refuses a claim signup that has no token', () => {
   );
   assert.match(find, /claim_token/);
   assert.doesNotMatch(find, /\b(UPDATE|INSERT|DELETE|ALTER|DROP)\b/i);
+});
+
+function orgNameClient(row: { id: number; name: string } | null) {
+  const filters: Array<{ column: string; operator: string; value: unknown }> = [];
+  const supabase = {
+    from() {
+      const api: any = {
+        select() {
+          return api;
+        },
+        eq() {
+          return api;
+        },
+        filter(column: string, operator: string, value: unknown) {
+          filters.push({ column, operator, value });
+          return api;
+        },
+        order() {
+          return api;
+        },
+        limit() {
+          return api;
+        },
+        maybeSingle: async () => ({ data: row, error: null }),
+      };
+      return api;
+    },
+  };
+  return { supabase, filters };
+}
+
+test('created organization name match is exact and case-insensitive', async () => {
+  let called = false;
+  assert.equal(
+    await findCreatedOrganization(
+      {
+        from() {
+          called = true;
+          return {};
+        },
+      } as never,
+      'user-1',
+      '   '
+    ),
+    null
+  );
+  assert.equal(called, false);
+
+  const cases = [
+    ['Acme*Laser', 'AcmeXXLaser'],
+    ['Acme%Laser', 'AcmeXXLaser'],
+    ['Acme_Laser', 'AcmeXLaser'],
+  ];
+  for (const [name, decoy] of cases) {
+    const miss = orgNameClient({ id: 8, name: decoy });
+    assert.equal(await findCreatedOrganization(miss.supabase as never, 'user-1', name), null, name);
+    assert.equal(miss.filters[0]?.column, 'name', name);
+    assert.equal(miss.filters[0]?.operator, 'imatch', name);
+    assert.equal(miss.filters[0]?.value, exactTextImatch(name), name);
+
+    const hit = orgNameClient({ id: 3, name: name.toUpperCase() });
+    assert.equal(await findCreatedOrganization(hit.supabase as never, 'user-1', `  ${name}  `), 3, name);
+    assert.equal(hit.filters[0]?.value, exactTextImatch(name), name);
+  }
 });

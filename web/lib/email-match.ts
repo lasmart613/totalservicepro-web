@@ -3,9 +3,14 @@
  * Trim, then lowercase. Comparisons and queries use this key.
  */
 
-/** Lookup key. Empty stays empty. */
-export function normalizeLookupEmail(value: unknown): string {
+/** Lookup key. Empty stays empty. Trim, then lowercase. */
+export function normalizeLookupText(value: unknown): string {
   return String(value ?? '').trim().toLowerCase();
+}
+
+/** Email lookup key. Same trim and lowercase as other exact text. */
+export function normalizeLookupEmail(value: unknown): string {
+  return normalizeLookupText(value);
 }
 
 /**
@@ -36,16 +41,41 @@ export function exactEmailIlike(value: unknown): string {
  * Exact-email callers do not use `.or()` or `in.()`, where those characters
  * split the grammar. `.` is still escaped because it is a regex wildcard.
  */
-const REGEX_META = /[\\.^$|*+?()[\]{}]/g;
+function escapeRegexLiteral(value: string): string {
+  return value.replace(/[\\.^$|*+?()[\]{}]/g, '\\$&');
+}
+
+/**
+ * Anchored POSIX pattern for an exact, case-insensitive text match.
+ * Trim, then lowercase, then escape regex metacharacters including `*`.
+ * `%` and `_` are not wildcards in `~*`.
+ */
+export function exactTextImatch(value: unknown): string {
+  return `^${escapeRegexLiteral(normalizeLookupText(value))}$`;
+}
+
+/**
+ * Unanchored POSIX pattern for a literal substring (`imatch` / `~*`).
+ * Does not trim or lowercase; `~*` is already case-insensitive.
+ * Use this for contains-search instead of ILIKE when the text is user input,
+ * because PostgREST rewrites `*` to `%` inside `ilike` and has no escape.
+ */
+export function containsTextImatch(value: unknown): string {
+  return escapeRegexLiteral(String(value ?? ''));
+}
+
+/** True when both sides are non-empty and equal after trim + lowercase. */
+export function textsMatchCaseInsensitive(a: unknown, b: unknown): boolean {
+  const left = normalizeLookupText(a);
+  const right = normalizeLookupText(b);
+  return left.length > 0 && left === right;
+}
 
 export function exactEmailImatch(value: unknown): string {
-  const email = normalizeLookupEmail(value);
-  return `^${email.replace(REGEX_META, '\\$&')}$`;
+  return exactTextImatch(value);
 }
 
 /** True when both sides are non-empty and equal after trim + lowercase. */
 export function emailsMatch(a: unknown, b: unknown): boolean {
-  const left = normalizeLookupEmail(a);
-  const right = normalizeLookupEmail(b);
-  return left.length > 0 && left === right;
+  return textsMatchCaseInsensitive(a, b);
 }

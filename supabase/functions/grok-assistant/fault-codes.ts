@@ -109,3 +109,17 @@ export function extractFaultCodes(msg: string): string[] {
 export function extractFaultCode(msg: string): string | null {
   return extractFaultCodes(msg)[0] ?? null
 }
+
+/**
+ * Characters PostgREST rewrites (`*`) or that break an unquoted `.or()` value.
+ * Catalog filename needles still turn punctuation into intentional `%` wildcards
+ * after this strip.
+ */
+export function stripIlikeReserved(value: unknown): string {
+  return String(value ?? '').replace(/[*\\:"]/g, '')
+}
+
+/** POSIX literal for PostgREST `imatch` (`~*`). Unanchored, so it is a contains match. */
+export function literalSubstringPattern(value: unknown): string {
+  return String(value ?? '').replace(/[\\.^$|*+?()[\]{}]/g, '\\$&')
+}

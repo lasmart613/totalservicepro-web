@@ -13,6 +13,7 @@ import {
   stampPdfPages,
   type PdfPageText,
 } from './manual-pdf-text.ts';
+import { containsTextImatch } from './email-match.ts';
 
 export const MANUALS_BUCKET = 'manuals';
 export const MANUAL_REINDEX_BATCH = 4;
@@ -716,6 +717,11 @@ export async function indexManualSearchText(
   return { manualId, ok: true, chars: extracted.text.length, files: extracted.files };
 }
 
+/**
+ * Escapes `%`, `_`, and `\` for a PostgreSQL ILIKE pattern.
+ * This does not stop PostgREST from rewriting `*` to `%`. Contains-search of
+ * user text uses `containsTextImatch` with `imatch` instead.
+ */
 export function escapeIlike(value: string): string {
   return value.replace(/[%_\\]/g, '\\$&');
 }
@@ -750,11 +756,11 @@ export async function findManualIdsByBodyText(
     return { ids: [], available: false, error: viaFts.error.message };
   }
 
-  let ilike = db.from('manual_search_index').select('manual_id');
+  let body = db.from('manual_search_index').select('manual_id');
   for (const token of clean) {
-    ilike = ilike.ilike('search_text', `%${escapeIlike(token)}%`);
+    body = body.filter('search_text', 'imatch', containsTextImatch(token));
   }
-  const viaLike = await ilike;
+  const viaLike = await body;
   if (viaLike.error) {
     if (/schema cache|does not exist|column|relation/i.test(viaLike.error.message || '')) {
       return { ids: [], available: false, error: viaLike.error.message };

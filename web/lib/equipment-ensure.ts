@@ -3,6 +3,7 @@
  * Port of Android assets/equipment-ensure.js
  */
 import { manufacturerNamesEqual } from './equipment-dropdown.ts';
+import { exactTextImatch, textsMatchCaseInsensitive } from './email-match.ts';
 
 export type EnsureEquipmentOpts = {
   customerOrgId: string | number | null | undefined;
@@ -82,13 +83,11 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
       const { data: rows } = await sb
         .from('equipment')
         .select('id, customer_organization_id, manufacturer, model, serial_number')
-        .ilike('serial_number', serial)
+        .filter('serial_number', 'imatch', exactTextImatch(serial))
         .limit(5);
       const list = rows || [];
       existing =
-        list.find(
-          (r: any) => normSerial(r.serial_number).toLowerCase() === serial.toLowerCase()
-        ) || null;
+        list.find((r: any) => textsMatchCaseInsensitive(r.serial_number, serial)) || null;
     }
 
     // A typed serial that misses must not reuse another laser of the same
@@ -153,11 +152,11 @@ export async function ensureEquipment(opts: EnsureEquipmentOpts): Promise<string
       if (/unique|duplicate/i.test(ins.error.message || '')) {
         const { data: race } = await sb
           .from('equipment')
-          .select('id')
-          .ilike('serial_number', serial)
+          .select('id, serial_number')
+          .filter('serial_number', 'imatch', exactTextImatch(serial))
           .limit(1)
           .maybeSingle();
-        if (race?.id) {
+        if (race?.id && textsMatchCaseInsensitive(race.serial_number, serial)) {
           await sb
             .from('equipment')
             .update({ customer_organization_id: orgId })
@@ -233,10 +232,13 @@ export async function loadServiceHistoryForLaser(opts: {
       merge(data);
     }
     if (serial) {
-      let q = sb.from('service_reports').select(select).ilike('serial_number', serial);
+      let q = sb
+        .from('service_reports')
+        .select(select)
+        .filter('serial_number', 'imatch', exactTextImatch(serial));
       if (status) q = q.eq('status', status);
       const { data } = await q.order('created_at', { ascending: false }).limit(limit);
-      merge(data);
+      merge((data || []).filter((r: any) => textsMatchCaseInsensitive(r.serial_number, serial)));
     }
   } catch (e) {
     console.warn('loadServiceHistoryForLaser', e);
@@ -246,6 +248,57 @@ export async function loadServiceHistoryForLaser(opts: {
     (a, b) =>
       new Date(b.date_out || b.created_at || 0).getTime() -
       new Date(a.date_out || a.created_at || 0).getTime()
+  );
+  return all.slice(0, limit);
+}
+
+/** Service requests for a laser by equipment id and/or an exact serial. */
+export async function loadServiceRequestsForLaser(opts: {
+  client: { from: (t: string) => any };
+  equipmentId?: string | number | null;
+  serial?: string | null;
+  limit?: number;
+}): Promise<Array<Record<string, any>>> {
+  const sb = opts.client;
+  const serial = normSerial(opts.serial);
+  const limit = opts.limit || 20;
+  const select =
+    'id, title, status, urgency, created_at, service_type, equipment_id, serial_number';
+  const all: Array<Record<string, any>> = [];
+  const seen: Record<string, boolean> = {};
+  const merge = (rows: any[] | null | undefined) => {
+    (rows || []).forEach((r) => {
+      if (!r?.id || seen[String(r.id)]) return;
+      seen[String(r.id)] = true;
+      all.push(r);
+    });
+  };
+
+  try {
+    if (opts.equipmentId != null && opts.equipmentId !== '') {
+      const { data } = await sb
+        .from('service_requests')
+        .select(select)
+        .eq('equipment_id', opts.equipmentId)
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      merge(data);
+    }
+    if (serial) {
+      const { data } = await sb
+        .from('service_requests')
+        .select(select)
+        .filter('serial_number', 'imatch', exactTextImatch(serial))
+        .order('created_at', { ascending: false })
+        .limit(limit);
+      merge((data || []).filter((r: any) => textsMatchCaseInsensitive(r.serial_number, serial)));
+    }
+  } catch (e) {
+    console.warn('loadServiceRequestsForLaser', e);
+  }
+
+  all.sort(
+    (a, b) => new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime()
   );
   return all.slice(0, limit);
 }

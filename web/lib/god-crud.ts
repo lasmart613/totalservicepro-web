@@ -181,6 +181,17 @@ async function listAllAuthUsers(admin: SupabaseClient): Promise<User[]> {
   return users;
 }
 
+/**
+ * Contains-search term for a God table `.or()` ILIKE.
+ * `%` and `_` are ILIKE wildcards. PostgREST also rewrites `*` to `%` and
+ * treats `\`, `:`, `"`, `,`, `.`, `(`, and `)` specially inside `.or()`.
+ * Those characters become spaces, same as the older `%` `_` strip.
+ * The callers still wrap the result in `%…%`.
+ */
+export function godContainsSearchTerm(q: string): string {
+  return String(q || '').replace(/[%_\\*,.:()"]/g, ' ').trim();
+}
+
 export async function listGodRows(
   admin: SupabaseClient,
   def: GodTableDef,
@@ -210,7 +221,7 @@ export async function listGodRows(
   const to = from + pageSize - 1;
   let query = admin.from(def.table).select('*', { count: 'exact' });
   if (q && def.searchColumns.length) {
-    const safe = q.replace(/[%_,.()]/g, ' ').trim();
+    const safe = godContainsSearchTerm(q);
     if (safe) {
       query = query.or(def.searchColumns.map((col) => `${col}.ilike.%${safe}%`).join(','));
     }

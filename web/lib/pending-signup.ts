@@ -7,6 +7,7 @@ import {
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
 import { postFounderOrganization } from '@/lib/org-founder-client';
 import { applyComplimentarySignupFields } from '@/lib/complimentary-premium';
+import { exactTextImatch, textsMatchCaseInsensitive } from '@/lib/email-match';
 
 const KEY = 'tsp-pending-signup';
 
@@ -247,7 +248,7 @@ function pendingMatchesSession(
   return !!pendingEmail && pendingEmail === sessionEmail;
 }
 
-async function findCreatedOrganization(
+export async function findCreatedOrganization(
   supabase: SupabaseClient,
   userId: string,
   name: string
@@ -256,13 +257,14 @@ async function findCreatedOrganization(
   if (!trimmed) return null;
   const { data } = await supabase
     .from('organizations')
-    .select('id')
+    .select('id, name')
     .eq('created_by', userId)
-    .ilike('name', trimmed)
+    .filter('name', 'imatch', exactTextImatch(trimmed))
     .order('id', { ascending: false })
     .limit(1)
     .maybeSingle();
-  return data?.id ?? null;
+  if (!data || !textsMatchCaseInsensitive(data.name, trimmed)) return null;
+  return data.id ?? null;
 }
 
 async function linkFounderProfile(
