@@ -9810,6 +9810,16 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'Use o botão na página do orçamento. Abrir o link não aprova nem recusa.',
     'استخدم الزر في صفحة عرض السعر. فتح الرابط لا يعتمده ولا يرفضه.\u200f',
   ),
+  'The invite is emailed to them. They sign in with that address to join.': row(
+    'دعوت برایشان ایمیل می‌شود. با همان آدرس وارد می‌شوند تا بپیوندند.',
+    'La invitación se envía a su correo. Entran con esa dirección para unirse.',
+    'L’invitation est envoyée par e-mail. Ils se connectent avec cette adresse pour rejoindre l’équipe.',
+    'ההזמנה נשלחת אליהם בדוא״ל. הם נכנסים עם הכתובת הזו כדי להצטרף.',
+    'L’invito viene inviato alla loro e-mail. Accedono con quell’indirizzo per unirsi.',
+    'Die Einladung geht per E-Mail an sie. Sie melden sich mit dieser Adresse an, um beizutreten.',
+    'O convite é enviado ao e-mail deles. Eles entram com esse endereço para participar.',
+    'تُرسل الدعوة إلى بريدهم. يسجّلون الدخول بذلك العنوان للانضمام.',
+  ),
   'Sent purchase orders keep their supplier. Save draft updates the other fields.': row(
     'سفارش خرید ارسال‌شده تأمین‌کننده را نگه می‌دارد. ذخیره پیش‌نویس بقیه فیلدها را به‌روز می‌کند.',
     'Las órdenes de compra enviadas conservan su proveedor. Guardar borrador actualiza los demás campos.',
