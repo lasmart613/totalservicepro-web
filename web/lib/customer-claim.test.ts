@@ -512,6 +512,22 @@ test('a unique owner conflict during claim is 409 and does not succeed', async (
   );
 });
 
+test('a clinic with no email refuses the claim and writes nothing', async () => {
+  const result = await postClaim({
+    userId: 'new-user',
+    email: 'new@clinic.test',
+    inviteEmail: 'new@clinic.test',
+    clinicEmail: '',
+    profiles: [{ id: 'new-user', organization_id: null, role: null, email: 'new@clinic.test' }],
+  });
+  assert.equal(result.status, 403);
+  assert.equal(result.body.ok, false);
+  assert.equal(result.body.claimed, false);
+  assert.match(result.body.error || '', /no longer on this clinic/i);
+  assert.equal(result.writes.length, 0);
+  assert.equal(result.profiles.find((profile) => profile.id === 'new-user')?.role, null);
+});
+
 test('a token issued for the old clinic email is refused after the email changes', async () => {
   const result = await postClaim({
     userId: 'new-user',

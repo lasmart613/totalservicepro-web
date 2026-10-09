@@ -21,8 +21,9 @@ type InviteRow = {
 };
 
 /**
- * Fields for a new invite, and for resending one that is not already accepted.
- * An accepted invite is left alone so a resend cannot put it back on the pending list.
+ * Fields for a new invite, a pending resend, and reopening an accepted invite
+ * after the person has left the org. A current member is restored to accepted
+ * instead of these fields.
  */
 export function freshTeamInviteFields(now = Date.now()): {
   accepted: false;
