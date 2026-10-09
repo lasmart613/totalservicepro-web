@@ -24,7 +24,7 @@ import {
 } from '@/lib/complimentary-premium';
 import { StripeConnectCard } from '@/components/StripeConnectCard';
 
-type OrgType = 'service' | 'clinic' | 'supplier';
+import { OrgTypeStep, type OrgType } from './org-type-step';
 type TeamMember = {
   id: string;
   email: string;
@@ -213,7 +213,7 @@ export default function Onboarding() {
         const o = orgRow;
         setExistingOrgId(o.id);
         setExistingOrgType(o.type || null);
-        let t: OrgType = 'service';
+        let picked: OrgType = 'service';
         // Owner-side: clinic, legacy laser_clinic, rental, reseller
         if (
           o.type === 'customer' ||
@@ -221,11 +221,11 @@ export default function Onboarding() {
           o.type === 'laser_rental' ||
           o.type === 'laser_reseller'
         ) {
-          t = 'clinic';
+          picked = 'clinic';
         } else if (o.type === 'parts_supplier' || o.type === 'vendor') {
-          t = 'supplier';
+          picked = 'supplier';
         }
-        setOrgType(t);
+        setOrgType(picked);
         setFormData((prev: any) => ({
           ...prev,
           companyName: o.name || prev.companyName || '',
@@ -884,19 +884,7 @@ export default function Onboarding() {
         </div>
 
         {step === 1 && (
-          <div>
-            <h2 className="text-2xl font-semibold text-center mb-6">{t('Confirm your organization type')}</h2>
-            <div className="grid md:grid-cols-3 gap-4">
-              {(['service','clinic','supplier'] as OrgType[]).map(t => (
-                <button key={t} onClick={() => handleTypeSelect(t)} className={`card p-6 text-left hover:border-[var(--gold)] ${orgType===t ? 'border-[var(--gold)]' : ''}`}>
-                  <div className="text-2xl mb-2">{t==='service'?'👷':t==='clinic'?'🏥':'📦'}</div>
-                  <div className="font-bold">{t==='service' ? 'Repair company' : t==='clinic' ? 'Laser Owner (Clinic / Rental / Reseller)' : t('Parts Supplier')}</div>
-                  <div className="text-sm text-[var(--text3)]">{t('Click to select')}</div>
-                </button>
-              ))}
-            </div>
-            <div className="mt-6 text-xs text-[var(--text3)]">{t('Field engineers and service techs are added as roles inside a repair company (you can add them during this flow or later in Company > Team).')}</div>
-          </div>
+          <OrgTypeStep selected={orgType} onSelect={handleTypeSelect} />
         )}
 
         {step === 2 && (

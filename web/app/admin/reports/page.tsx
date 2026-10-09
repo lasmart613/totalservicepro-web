@@ -58,7 +58,7 @@ export default function AdminReports() {
         .select('status')
         .eq('organization_id', orgId);
 
-      const openTickets = tickets?.filter((t) => !isClosedTicketStatus(t.status)).length || 0;
+      const openTickets = tickets?.filter((ticket) => !isClosedTicketStatus(ticket.status)).length || 0;
       const openReports = reports?.filter((r) => isOpenReport(r.status)).length || 0;
       const completed = reports?.filter((r) => isCompleteReport(r.status)).length || 0;
 
