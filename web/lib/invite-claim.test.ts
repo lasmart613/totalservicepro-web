@@ -179,20 +179,22 @@ test('a failed clinic claim does not create a new organization', () => {
 
   const helper = readFileSync(join(here, './customer-invite-client.ts'), 'utf8');
   assert.match(helper, /clearPendingSignup\(\)/);
-  assert.match(helper, /claim_token: null/);
+  assert.match(helper, /refreshSession/);
+  const claimRoute = readFileSync(join(here, '../app/api/customers/claim/route.ts'), 'utf8');
+  assert.match(claimRoute, /updateUserById/);
+  assert.match(claimRoute, /claimSignupMetadataClearPatch/);
 });
 
-test('a failed claim clears the token so the next sign-in does not show the claim error', async () => {
-  const updates: unknown[] = [];
+test('a failed claim clears stored signup so the next sign-in does not rebuild a clinic', async () => {
+  let refreshed = 0;
   await clearStaleClaimToken({
     auth: {
-      updateUser: async (attrs) => {
-        updates.push(attrs);
-        return { error: null };
+      refreshSession: async () => {
+        refreshed += 1;
       },
     },
   });
-  assert.deepEqual(updates, [{ data: { claim_token: null } }]);
+  assert.equal(refreshed, 1);
   assert.equal(claimTokenSeenOnSignIn({ queryClaim: null, metadataClaim: 'still-set', storedClaim: null }), 'still-set');
   assert.equal(claimTokenSeenOnSignIn({ queryClaim: null, metadataClaim: null, storedClaim: null }), '');
 });

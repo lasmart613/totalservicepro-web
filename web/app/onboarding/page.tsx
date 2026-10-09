@@ -163,11 +163,14 @@ export default function Onboarding() {
       const pending = resolvePendingSignup(user);
 
       // Owner/rental first-run: finish facility here if signup verify did not persist the link.
+      // A clinic claim with no token stays on this page so the user picks an org explicitly.
       if (!profile?.organization_id && pending?.kind === 'owner') {
         try {
-          await applyPendingSignup(supabase, user.id, pending);
-          router.replace('/my-lasers?justSetup=1');
-          return;
+          const applied = await applyPendingSignup(supabase, user.id, pending);
+          if (applied.orgId && !applied.blockedClaim) {
+            router.replace('/my-lasers?justSetup=1');
+            return;
+          }
         } catch (e) {
           console.warn('onboarding owner apply', e);
         }

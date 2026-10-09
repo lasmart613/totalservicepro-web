@@ -272,6 +272,7 @@ function OwnerSignupInner() {
             facility_type: facilityType,
             preferred_services: selectedServices.length ? selectedServices.join(' | ') : '',
             claim_token: claimToken || '',
+            ...(claimToken ? { signup_type: 'claim' } : {}),
           },
           emailRedirectTo: `${origin}/auth/callback?next=${encodeURIComponent(
             safeRedirectPath(claimToken ? '/company?justSetup=1' : '/my-lasers', origin)

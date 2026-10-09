@@ -135,9 +135,11 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
         const pending = resolvePendingSignup(u);
         if (pending?.kind === 'owner') {
           try {
-            await applyPendingSignup(supabase, u.id, pending);
-            router.replace('/my-lasers?justSetup=1');
-            return;
+            const applied = await applyPendingSignup(supabase, u.id, pending);
+            if (applied.orgId && !applied.blockedClaim) {
+              router.replace('/my-lasers?justSetup=1');
+              return;
+            }
           } catch (e) {
             console.warn('owner first-run apply', e);
           }

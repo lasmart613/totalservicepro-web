@@ -4,6 +4,7 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { isOwnerOrgType } from '@/lib/org-types';
 import { verifyCustomerInvite } from '@/lib/customer-invite';
 import { fetchDirectoryContactSources, pickCrmReachEmail } from '@/lib/customer-contacts';
+import { asClaimSignupMeta, claimSignupMetadataClearPatch } from '@/lib/claim-signup-metadata';
 
 /**
  * POST /api/customers/claim
@@ -83,10 +84,25 @@ export async function runCustomerClaim(
     createUserClient?: (url: string, anonKey: string, accessToken: string) => ClaimUserClient;
     hasServiceRole?: () => boolean;
     getWriter?: () => ReturnType<typeof getSupabaseAdmin>;
+    clearClaimSignupMetadata?: (userId: string, patch: Record<string, null>) => Promise<void>;
   } = {}
 ) {
   const serviceRoleReady = deps.hasServiceRole ?? hasServiceRole;
   const writerFor = deps.getWriter ?? getSupabaseAdmin;
+  const clearClaimSignupMetadata =
+    deps.clearClaimSignupMetadata ??
+    (async (userId: string, patch: Record<string, null>) => {
+      if (!serviceRoleReady()) return;
+      try {
+        const admin = getSupabaseAdmin();
+        const { error } = await admin.auth.admin.updateUserById(userId, {
+          user_metadata: patch,
+        });
+        if (error) console.error('clear claim signup metadata', error);
+      } catch (err) {
+        console.error('clear claim signup metadata', err);
+      }
+    });
   const createUserClient: (url: string, anonKey: string, accessToken: string) => ClaimUserClient =
     deps.createUserClient ??
     ((url, anonKey, accessToken) =>
@@ -117,17 +133,45 @@ export async function runCustomerClaim(
       return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
     }
 
+    const claimMeta = asClaimSignupMeta(user.user_metadata);
+    const reply = async (body: Record<string, unknown>, status: number) => {
+      if (status >= 400 && status < 500) {
+        const patch = claimSignupMetadataClearPatch(claimMeta);
+        if (patch) {
+          try {
+            await clearClaimSignupMetadata(user.id, patch);
+          } catch (err) {
+            console.error('clear claim signup metadata', err);
+          }
+        }
+      }
+      return NextResponse.json(body, { status });
+    };
+    const replyFrom = async (response: NextResponse) => {
+      if (response.status >= 400 && response.status < 500) {
+        const patch = claimSignupMetadataClearPatch(claimMeta);
+        if (patch) {
+          try {
+            await clearClaimSignupMetadata(user.id, patch);
+          } catch (err) {
+            console.error('clear claim signup metadata', err);
+          }
+        }
+      }
+      return response;
+    };
+
     const body = await req.json().catch(() => ({}));
     const payload = verifyCustomerInvite(String(body.token || ''));
     if (!payload) {
-      return NextResponse.json({ ok: false, claimed: false, error: 'Invite is invalid or expired.' }, { status: 400 });
+      return reply({ ok: false, claimed: false, error: 'Invite is invalid or expired.' }, 400);
     }
 
     const userEmail = String(user.email || '').trim().toLowerCase();
     if (!userEmail || userEmail !== payload.email) {
-      return NextResponse.json(
+      return reply(
         { ok: false, claimed: false, error: 'Sign in with the email this invite was sent to.' },
-        { status: 403 }
+        403
       );
     }
 
@@ -147,12 +191,12 @@ export async function runCustomerClaim(
       .maybeSingle();
 
     if (!org) {
-      return NextResponse.json({ ok: false, claimed: false, error: 'Company profile was not found.' }, { status: 404 });
+      return reply({ ok: false, claimed: false, error: 'Company profile was not found.' }, 404);
     }
 
     const orgType = String(org.type || '').toLowerCase();
     if (orgType && !isOwnerOrgType(orgType) && orgType !== 'customer') {
-      return NextResponse.json({ ok: false, claimed: false, error: 'This invite is not for a clinic profile.' }, { status: 400 });
+      return reply({ ok: false, claimed: false, error: 'This invite is not for a clinic profile.' }, 400);
     }
 
     const sources = await fetchDirectoryContactSources(writer, org.id);
@@ -162,13 +206,13 @@ export async function runCustomerClaim(
       officeEmail: sources.officeEmail ?? (org as { email?: string | null }).email,
     }).email.trim().toLowerCase();
     if (!currentEmail || currentEmail !== payload.email) {
-      return NextResponse.json(
+      return reply(
         {
           ok: false,
           claimed: false,
           error: 'This invite was issued for an email that is no longer on this clinic.',
         },
-        { status: 403 }
+        403
       );
     }
 
@@ -219,20 +263,20 @@ export async function runCustomerClaim(
     // look for a second owner. Writing role=owner here does not change the role.
     if (alreadyInThisOrg && isOwnerRole(existingProf?.role)) {
       const failed = await saveOwnerRole(user.id);
-      if (failed) return failed;
+      if (failed) return replyFrom(failed);
       const homeError = await setClinicHome(writer, user.id, org.id);
       if (homeError) return homeError;
       return NextResponse.json({ ok: true, claimed: true, organizationId: org.id, alreadyLinked: true });
     }
 
     if (existingProf?.organization_id != null && !alreadyInThisOrg) {
-      return NextResponse.json(
+      return reply(
         {
           ok: false,
           claimed: false,
           error: 'This account is already linked to another organization.',
         },
-        { status: 409 }
+        409
       );
     }
 
@@ -261,13 +305,13 @@ export async function runCustomerClaim(
     });
 
     if (takenByOther) {
-      return NextResponse.json(
+      return reply(
         {
           ok: false,
           claimed: false,
           error: 'This company profile already has an owner account.',
         },
-        { status: 409 }
+        409
       );
     }
 
@@ -275,7 +319,7 @@ export async function runCustomerClaim(
     // above, same as a first claim. Promote this member; do not skip the check.
     if (alreadyInThisOrg) {
       const failed = await saveOwnerRole(user.id);
-      if (failed) return failed;
+      if (failed) return replyFrom(failed);
       const homeError = await setClinicHome(writer, user.id, org.id);
       if (homeError) return homeError;
       return NextResponse.json({ ok: true, claimed: true, organizationId: org.id, alreadyLinked: true });
@@ -296,13 +340,13 @@ export async function runCustomerClaim(
 
     let { error: upErr } = await writer.from('user_profiles').upsert(upsert, { onConflict: 'id' });
     if (isUniqueOwnerViolation(upErr)) {
-      return NextResponse.json(
+      return reply(
         {
           ok: false,
           claimed: false,
           error: 'This company profile already has an owner account.',
         },
-        { status: 409 }
+        409
       );
     }
     if (upErr) {
@@ -315,13 +359,13 @@ export async function runCustomerClaim(
       const retry = await writer.from('user_profiles').update(slim).eq('id', user.id);
       upErr = retry.error;
       if (isUniqueOwnerViolation(upErr)) {
-        return NextResponse.json(
+        return reply(
           {
             ok: false,
             claimed: false,
             error: 'This company profile already has an owner account.',
           },
-          { status: 409 }
+          409
         );
       }
     }

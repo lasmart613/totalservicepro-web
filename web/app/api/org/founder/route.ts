@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { applyComplimentarySignupFields } from '@/lib/complimentary-premium';
 import { setActiveOrganization, upsertMembership } from '@/lib/org-membership-server';
+import { refuseClaimOrgAutoCreate } from '@/lib/claim-signup-metadata';
 import {
   organizationInsertFromPending,
   type PendingSignup,
@@ -95,6 +96,17 @@ export async function POST(req: NextRequest) {
 
     if (orgId == null || orgId === '') {
       const pending = body.pending;
+      if (
+        refuseClaimOrgAutoCreate(
+          pending,
+          (user.user_metadata || null) as Record<string, unknown> | null
+        )
+      ) {
+        return NextResponse.json(
+          { error: 'This clinic invite was not claimed. A new organization was not created.' },
+          { status: 409 }
+        );
+      }
       if (!pending?.name || !pending.orgType) {
         return NextResponse.json(
           { error: 'Organization name and type are required.' },

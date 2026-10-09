@@ -6,7 +6,7 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { PublicLink, usePublicHref, useT } from '@/lib/fa/locale';
 import { nextPathFromSearchParams } from '@/lib/login-next';
 import { safeRedirectPath } from '@/lib/safe-redirect';
-import { claimCustomerInvite } from '@/lib/customer-invite-client';
+import { claimCustomerInvite, clearStaleClaimToken } from '@/lib/customer-invite-client';
 import { clearPendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session';
 import { postTeamClaim, routeAfterTeamClaim } from '@/lib/invite-claim';
@@ -39,13 +39,16 @@ function LoginInner() {
     dest = safeRedirectPath(dest, clientAuthOrigin(), '/');
     if (claimToken) {
       const { data: sessionData } = await supabase.auth.getSession();
+      let claimedOk = false;
       if (sessionData.session?.access_token) {
         const claimed = await claimCustomerInvite(sessionData.session.access_token, claimToken);
-        if (claimed.claimed) {
-          router.push('/company?justSetup=1');
-          return;
-        }
+        claimedOk = !!claimed.claimed;
       }
+      if (claimedOk) {
+        router.push('/company?justSetup=1');
+        return;
+      }
+      await clearStaleClaimToken(supabase);
     }
     const { data: sessionData } = await supabase.auth.getSession();
     if (sessionData.session?.access_token) {

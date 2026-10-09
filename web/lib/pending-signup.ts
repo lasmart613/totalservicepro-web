@@ -1,4 +1,9 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import {
+  isClaimSignupWithoutToken,
+  readClaimToken,
+  refuseClaimOrgAutoCreate,
+} from '@/lib/claim-signup-metadata';
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim } from '@/lib/invite-claim';
 import { postFounderOrganization } from '@/lib/org-founder-client';
 import { applyComplimentarySignupFields } from '@/lib/complimentary-premium';
@@ -143,6 +148,8 @@ export function pendingSignupFromMetadata(user: {
 }): PendingSignup | null {
   const meta = user?.user_metadata || {};
   if (meta.invited_member) return null;
+  // Failed claim leftovers and in-progress claim tokens must not become a new clinic.
+  if (isClaimSignupWithoutToken(meta)) return null;
 
   const role = String(meta.role || '').toLowerCase().trim();
   const orgType = String(meta.organization_type || '').toLowerCase().trim();
@@ -175,6 +182,7 @@ export function pendingSignupFromMetadata(user: {
 
   if (!kind) return null;
   if (!name && !role && !orgType) return null;
+  if (kind === 'owner' && readClaimToken(meta.claim_token)) return null;
 
   const resolvedOrgType =
     orgType ||
@@ -213,12 +221,19 @@ export function resolvePendingSignup(user: {
 }): PendingSignup | null {
   const stored = loadPendingSignup();
   const email = (user.email || '').toLowerCase();
-  if (stored) {
-    if (stored.email && stored.email.toLowerCase() === email) return stored;
+  let pending: PendingSignup | null = null;
+  if (stored && stored.email && stored.email.toLowerCase() === email) {
+    pending = stored;
+  } else if (stored) {
     // Leftover payload from another account in this browser — do not apply it.
     clearPendingSignup();
   }
-  return pendingSignupFromMetadata(user);
+  if (!pending) pending = pendingSignupFromMetadata(user);
+  if (refuseClaimOrgAutoCreate(pending, user?.user_metadata)) {
+    clearPendingSignup();
+    return null;
+  }
+  return pending;
 }
 
 function pendingMatchesSession(
@@ -336,7 +351,7 @@ export async function applyPendingSignup(
   supabase: SupabaseClient,
   userId: string,
   pending: PendingSignup
-): Promise<{ orgId: string | number | null; dest: string }> {
+): Promise<{ orgId: string | number | null; dest: string; blockedClaim?: boolean }> {
   const {
     data: { user: sessionUser },
   } = await supabase.auth.getUser();
@@ -360,6 +375,11 @@ export async function applyPendingSignup(
     }
   } catch {
     /* no invite or claim failed — continue founder org create */
+  }
+
+  if (refuseClaimOrgAutoCreate(pending, sessionUser?.user_metadata)) {
+    clearPendingSignup();
+    return { orgId: null, dest: '/onboarding', blockedClaim: true };
   }
 
   const { data: existing } = await supabase

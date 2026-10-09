@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
+import { isClaimSignupWithoutToken } from '@/lib/claim-signup-metadata';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { toast } from 'sonner';
 import { listManufacturers, listModelsForManufacturer, OTHER_MODEL } from '@/lib/laser-catalog';
@@ -58,14 +59,22 @@ export default function MyLasersPage() {
         .eq('id', user.id)
         .maybeSingle();
       if (!prof?.organization_id) {
+        if (isClaimSignupWithoutToken(user.user_metadata)) {
+          router.replace('/onboarding');
+          return;
+        }
         const pending = resolvePendingSignup(user);
         if (pending?.kind === 'owner') {
           try {
             const applied = await applyPendingSignup(supabase, user.id, pending);
-            if (applied.orgId) {
+            if (applied.orgId && !applied.blockedClaim) {
               setOrgId(applied.orgId);
               await load(applied.orgId);
               setLoading(false);
+              return;
+            }
+            if (applied.blockedClaim) {
+              router.replace('/onboarding');
               return;
             }
           } catch (e) {
