@@ -3,9 +3,9 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { ensureTeamMemberProfile } from '@/lib/team-profile';
 import {
+  blockedTeamClaimRole,
   decideClaim,
   inviteMustNotLeaveHome,
-  normalizeRole,
 } from '@/lib/org-membership';
 import { teamInviteJoinGate } from '@/lib/team-invite-guard';
 import { authorizeInviteAccept } from '@/lib/tenant-lockdown';
@@ -158,15 +158,15 @@ export async function runTeamClaim(
       }
     }
 
-    if (normalizeRole(inv?.role) === 'owner') {
-      return NextResponse.json(
-        {
-          ok: false,
-          claimed: false,
-          error: 'An owner role cannot be accepted from a team invite.',
-        },
-        { status: 403 }
-      );
+    const blockedRole = blockedTeamClaimRole(inv?.role);
+    if (blockedRole) {
+      const error =
+        blockedRole === 'owner'
+          ? 'An owner role cannot be accepted from a team invite.'
+          : blockedRole === 'admin'
+            ? 'A platform admin role cannot be accepted from a team invite.'
+            : 'This invite role cannot be accepted.';
+      return NextResponse.json({ ok: false, claimed: false, error }, { status: 403 });
     }
 
     if (inv?.organization_id) {

@@ -12,9 +12,29 @@
 export const DEFAULT_STAFF_ROLE = 'fse';
 
 /**
- * Roles a team invite may assign. Union of the Admin → Team and Company
- * invite pickers, without owner. Platform admin stays in the list because
- * the forms still show it; decideMemberRoleChange refuses that target.
+ * Roles the live user_profiles.role check accepts.
+ * organization_memberships separately rejects role admin.
+ */
+export const USER_PROFILE_ROLES = [
+  'admin',
+  'engineer',
+  'fse',
+  'dispatcher',
+  'service_manager',
+  'company_admin',
+  'billing_manager',
+  'crm',
+  'owner',
+  'parts_supplier',
+  'customer',
+] as const;
+
+/**
+ * Roles a team invite may assign. Each one is valid on user_profiles
+ * (claim copies the invite role onto the profile when this org becomes
+ * the person's only org) and on organization_memberships.
+ * Owner stays on a later ownership-transfer flow. Platform admin is not
+ * an org role. scheduler, technician, and viewer are not in the profile check.
  */
 export const INVITABLE_TEAM_ROLES = [
   'company_admin',
@@ -22,14 +42,34 @@ export const INVITABLE_TEAM_ROLES = [
   'fse',
   'dispatcher',
   'billing_manager',
-  'scheduler',
-  'technician',
-  'viewer',
-  'admin',
 ] as const;
 
 export function isInvitableTeamRole(role?: string | null): boolean {
   return (INVITABLE_TEAM_ROLES as readonly string[]).includes(normalizeRole(role));
+}
+
+/** Why claim must stop before any write. Null means the role can be stored. */
+export function blockedTeamClaimRole(
+  role?: string | null
+): 'owner' | 'admin' | 'unstorable' | null {
+  const normalized = normalizeRole(role);
+  if (!normalized) return null;
+  if (normalized === 'owner') return 'owner';
+  if (normalized === 'admin') return 'admin';
+  const stored = membershipRoleForInvite(normalized);
+  if (!(USER_PROFILE_ROLES as readonly string[]).includes(stored)) return 'unstorable';
+  return null;
+}
+
+/**
+ * Role choices for a member who is already on the team.
+ * Does not offer owner or platform admin, including as the current value.
+ */
+export function teamMemberRoleChoices(currentRole?: string | null): readonly string[] {
+  const list = INVITABLE_TEAM_ROLES as readonly string[];
+  const current = normalizeRole(currentRole);
+  if (!current || current === 'admin' || current === 'owner' || list.includes(current)) return list;
+  return [current, ...list];
 }
 
 export const FOUNDER_LOCKED_ROLES = new Set([

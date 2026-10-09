@@ -12,7 +12,15 @@ import {
   type AuthUserRow,
 } from './team-profile.ts';
 import { teamInviteSentMessage } from './team-invite.ts';
-import { INVITABLE_TEAM_ROLES, isInvitableTeamRole, isPendingTeamInvite } from './org-membership.ts';
+import {
+  INVITABLE_TEAM_ROLES,
+  USER_PROFILE_ROLES,
+  blockedTeamClaimRole,
+  isInvitableTeamRole,
+  isPendingTeamInvite,
+  membershipRoleForInvite,
+  teamMemberRoleChoices,
+} from './org-membership.ts';
 import { TEAM_INVITE_TTL_MS } from './team-invite-guard.ts';
 import { NextRequest } from 'next/server';
 import { runTeamInvite } from '../app/api/team/invite/route.ts';
@@ -1273,18 +1281,21 @@ test('an owner team invite is rejected and writes no row', async () => {
   assert.equal(isInvitableTeamRole('Owner'), false);
   assert.deepEqual(
     [...INVITABLE_TEAM_ROLES],
-    [
-      'company_admin',
-      'service_manager',
-      'fse',
-      'dispatcher',
-      'billing_manager',
-      'scheduler',
-      'technician',
-      'viewer',
-      'admin',
-    ]
+    ['company_admin', 'service_manager', 'fse', 'dispatcher', 'billing_manager']
   );
+  const profileRoles = new Set<string>(USER_PROFILE_ROLES);
+  for (const role of INVITABLE_TEAM_ROLES) {
+    assert.equal(profileRoles.has(role), true, role);
+    assert.equal(membershipRoleForInvite(role), role, role);
+    assert.equal(blockedTeamClaimRole(role), null, role);
+  }
+  for (const dropped of ['admin', 'scheduler', 'technician', 'viewer'] as const) {
+    assert.equal(isInvitableTeamRole(dropped), false, dropped);
+    assert.equal(profileRoles.has(dropped), dropped === 'admin', dropped);
+  }
+  assert.deepEqual(teamMemberRoleChoices('admin'), [...INVITABLE_TEAM_ROLES]);
+  assert.deepEqual(teamMemberRoleChoices('owner'), [...INVITABLE_TEAM_ROLES]);
+  assert.deepEqual(teamMemberRoleChoices('engineer'), ['engineer', ...INVITABLE_TEAM_ROLES]);
   const result = await postExistingInvite({
     resendKey: 'resend-test',
     auth: { status: 'found', id: 'auth-1', lastSignInAt: null },
@@ -1415,4 +1426,85 @@ test('a legacy owner-role invite cannot be claimed and writes nothing', async ()
     staff.state.memberships.some((row) => row.organization_id === 9 && row.role === 'dispatcher'),
     true
   );
+});
+
+test('an admin team invite is rejected and writes no row', async () => {
+  const result = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: null },
+    invite: null,
+    role: 'admin',
+  });
+  assert.equal(result.status, 400);
+  assert.match(String(result.body.error), /admin/i);
+  assert.equal(result.inserts.length, 0);
+  assert.equal(result.updates.length, 0);
+  assert.equal(result.sent.length, 0);
+  assert.equal(result.linkCalls.length, 0);
+
+  for (const dropped of ['scheduler', 'technician', 'viewer'] as const) {
+    const rejected = await postExistingInvite({
+      resendKey: 'resend-test',
+      auth: { status: 'not_found' },
+      invite: null,
+      profile: null,
+      role: dropped,
+    });
+    assert.equal(rejected.status, 400, dropped);
+    assert.equal(rejected.inserts.length, 0, dropped);
+    assert.equal(rejected.sent.length, 0, dropped);
+  }
+});
+
+test('a legacy admin-role invite cannot be claimed and writes nothing', async () => {
+  const future = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
+  const blocked = await postRejoinClaim({
+    profileOrg: null,
+    memberships: [],
+    invite: {
+      id: 11,
+      email: INVITEE,
+      organization_id: 9,
+      role: 'admin',
+      accepted: false,
+      accepted_at: null,
+      expires_at: future,
+      created_at: '2026-10-08T00:00:00.000Z',
+      first_name: 'New',
+      last_name: 'Person',
+    },
+  });
+  assert.equal(blocked.status, 403);
+  assert.equal(blocked.body.claimed, false);
+  assert.match(String(blocked.body.error), /admin/i);
+  assert.equal(blocked.state.invite.accepted, false);
+  assert.equal(blocked.state.invite.role, 'admin');
+  assert.equal(blocked.state.memberships.length, 0);
+  assert.equal(blocked.state.profiles[0].organization_id, null);
+  assert.equal(blocked.state.profiles[0].role, 'fse');
+
+  const scheduler = await postRejoinClaim({
+    profileOrg: null,
+    memberships: [],
+    invite: {
+      id: 12,
+      email: INVITEE,
+      organization_id: 9,
+      role: 'scheduler',
+      accepted: false,
+      accepted_at: null,
+      expires_at: future,
+      created_at: '2026-10-08T00:00:00.000Z',
+      first_name: 'New',
+      last_name: 'Person',
+    },
+  });
+  assert.equal(scheduler.status, 403);
+  assert.equal(scheduler.body.claimed, false);
+  assert.equal(scheduler.state.invite.accepted, false);
+  assert.equal(scheduler.state.memberships.length, 0);
+  assert.equal(scheduler.state.profiles[0].organization_id, null);
+  assert.equal(scheduler.state.profiles[0].role, 'fse');
+  assert.equal(blockedTeamClaimRole('technician'), 'unstorable');
+  assert.equal(blockedTeamClaimRole('viewer'), 'unstorable');
 });

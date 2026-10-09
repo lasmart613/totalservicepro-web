@@ -9,7 +9,7 @@ import { TestEquipmentRoster } from '@/components/TestEquipmentRoster';
 import { canAssignShopTestEquipment, isAdmin } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { teamInviteEmailError, teamInviteSentMessage } from '@/lib/team-invite';
-import { invitationIsOpen, INVITABLE_TEAM_ROLES, isPendingTeamInvite } from '@/lib/org-membership';
+import { invitationIsOpen, INVITABLE_TEAM_ROLES, isPendingTeamInvite, teamMemberRoleChoices } from '@/lib/org-membership';
 
 function inviteListStatus(
   inv: {
@@ -440,14 +440,14 @@ export default function TeamManagement() {
                     </td>
                     <td className="py-3 px-4 text-sm">{member.email}</td>
                     <td className="py-3 px-4">
-                      {(isAdmin(userRole) || userRole === 'owner') && member.id !== userId && member.role !== 'owner' ? (
+                      {(isAdmin(userRole) || userRole === 'owner') && member.id !== userId && member.role !== 'owner' && member.role !== 'admin' ? (
                         <select
                           className="select text-xs"
                           aria-label={t('Role for {name}').replace('{name}', member.email || member.first_name || t('Member'))}
                           value={member.role || 'fse'}
                           onChange={(e) => changeMemberRole(String(member.id), e.target.value)}
                         >
-                          {(member.role && !(INVITABLE_TEAM_ROLES as readonly string[]).includes(member.role) ? [member.role, ...INVITABLE_TEAM_ROLES] : INVITABLE_TEAM_ROLES).map((role) => (
+                          {teamMemberRoleChoices(member.role).map((role) => (
                             <option key={role} value={role}>
                               {roleLabel(role, locale)}
                             </option>

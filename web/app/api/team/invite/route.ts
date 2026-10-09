@@ -182,10 +182,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
 
     const requestedRole = (body.role || DEFAULT_STAFF_ROLE).toLowerCase().trim();
     if (!isInvitableTeamRole(requestedRole)) {
-      return respond(
-        { error: 'Choose a staff role. Owner cannot be invited this way.' },
-        400
-      );
+      return respond({ error: rejectedInviteRoleMessage(requestedRole) }, 400);
     }
     const roleGate = decideMemberRoleChange({
       callerRole: role,
@@ -573,10 +570,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
     })();
 
     if (normalizeRole(priorInvite?.role) === 'owner') {
-      return respond(
-        { error: 'Choose a staff role. Owner cannot be invited this way.' },
-        400
-      );
+      return respond({ error: rejectedInviteRoleMessage('owner') }, 400);
     }
 
     const existingMember = profileLookup.memberHere;
@@ -669,4 +663,11 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
     console.error('team invite error', logged);
     return respond({ error: message || 'Invite failed' }, 500);
   }
+}
+
+function rejectedInviteRoleMessage(role: string): string {
+  const named = normalizeRole(role);
+  if (named === 'owner') return 'Choose a staff role. Owner cannot be invited this way.';
+  if (named === 'admin') return 'Choose a staff role. Platform admin cannot be invited this way.';
+  return 'Choose a staff role. That role cannot be invited this way.';
 }

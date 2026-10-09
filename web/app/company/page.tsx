@@ -14,7 +14,7 @@ import {
   canAccessCompanyProfile,
 } from '@/lib/roles';
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
-import { invitationIsOpen, INVITABLE_TEAM_ROLES, isPendingTeamInvite } from '@/lib/org-membership';
+import { invitationIsOpen, INVITABLE_TEAM_ROLES, isPendingTeamInvite, teamMemberRoleChoices } from '@/lib/org-membership';
 import { teamInviteSentMessage } from '@/lib/team-invite';
 import { useSiteLocale, useT } from '@/lib/fa/locale';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
@@ -1092,14 +1092,14 @@ function CompanyProfile() {
                         <div>
                           <div className="font-medium">
                             {[m.first_name, m.last_name].filter(Boolean).join(' ') || '—'}
-                            {(isAdmin(userRole) || userRole === 'owner') && m.id && m.id !== selfUserId && m.role !== 'owner' ? (
+                            {(isAdmin(userRole) || userRole === 'owner') && m.id && m.id !== selfUserId && m.role !== 'owner' && m.role !== 'admin' ? (
                               <select
                                 className="select text-xs ml-2"
                                 aria-label={t('Role for {name}').replace('{name}', m.email || m.first_name || t('Member'))}
                                 value={m.role || 'fse'}
                                 onChange={(e) => changeMemberRole(String(m.id), e.target.value)}
                               >
-                                {(m.role && !(INVITABLE_TEAM_ROLES as readonly string[]).includes(m.role) ? [m.role, ...INVITABLE_TEAM_ROLES] : INVITABLE_TEAM_ROLES).map((r) => (
+                                {teamMemberRoleChoices(m.role).map((r) => (
                                   <option key={r} value={r}>{roleLabel(r, locale)}</option>
                                 ))}
                               </select>
