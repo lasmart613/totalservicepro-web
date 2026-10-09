@@ -29,15 +29,19 @@ export function listUnsubscribeHeader(token: string): string {
   return `<${UNSUBSCRIBE_MAILTO}>, <${unsubscribeHttpsUrl(token)}>`;
 }
 
+/** Shown when the unsubscribe lookup itself fails. Does not contain "unsubscribed", so blast retry still treats it as a provider error. */
+export const UNSUBSCRIBE_LOOKUP_ERROR = 'Could not check the mailing preference';
+
 /**
- * True when this address has a God send row with unsubscribed_at set.
- * Exact match: `*` `%` and `_` are not wildcards. Query errors fail open
- * (return false) so a lookup outage does not block the send.
+ * Whether this address has a God send row with unsubscribed_at set.
+ * Exact match: `*` `%` and `_` are not wildcards.
+ * `true` means unsubscribed, `false` means clear to send.
+ * `null` means the lookup failed. Callers skip that recipient and keep going.
  */
 export async function recipientUnsubscribed(
   email: string,
   admin?: { from: (table: string) => any }
-): Promise<boolean> {
+): Promise<boolean | null> {
   const needle = String(email ?? '').trim();
   if (!needle) return false;
   try {
@@ -48,12 +52,12 @@ export async function recipientUnsubscribed(
       .filter('recipient_email', 'imatch', exactEmailImatch(needle))
       .not('unsubscribed_at', 'is', null)
       .limit(20);
-    if (error) return false;
+    if (error) return null;
     return (data || []).some((row: { recipient_email?: unknown }) =>
       emailsMatch(row?.recipient_email, needle)
     );
   } catch {
-    return false;
+    return null;
   }
 }
 

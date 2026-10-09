@@ -6,10 +6,12 @@ import { useRouter, useSearchParams } from 'next/navigation';
 import { PublicLink, usePublicHref, useT } from '@/lib/fa/locale';
 import { nextPathFromSearchParams } from '@/lib/login-next';
 import { safeRedirectPath } from '@/lib/safe-redirect';
+import { claimErrorMessage } from '@/lib/claim-error';
 import {
   claimCustomerInvite,
   clearStaleClaimToken,
   clinicClaimSignInRoute,
+  refusedClaimLoginHref,
 } from '@/lib/customer-invite-client';
 import { clearPendingSignup } from '@/lib/pending-signup';
 import { prepareFreshSignup, signOutAndClearIdentity } from '@/lib/auth-session';
@@ -41,9 +43,9 @@ function LoginInner() {
   const supabase = getSupabaseClient();
 
   useEffect(() => {
-    const refused = (searchParams.get('claimError') || '').trim();
-    if (!refused) return;
-    setMessage(refused);
+    const text = claimErrorMessage(searchParams.get('claimError'));
+    if (!text) return;
+    setMessage(text);
     setMessageOk(false);
   }, [searchParams]);
 
@@ -53,17 +55,18 @@ function LoginInner() {
       const { data: sessionData } = await supabase.auth.getSession();
       const claimed = sessionData.session?.access_token
         ? await claimCustomerInvite(sessionData.session.access_token, claimToken)
-        : { claimed: false, error: 'Sign in required to claim this clinic profile.' };
+        : { claimed: false, code: 'claim_refused' };
       const route = clinicClaimSignInRoute({
         claimed: !!claimed.claimed,
         error: claimed.error,
+        code: claimed.code,
       });
       if (route.kind === 'company') {
         router.push(route.dest);
         return;
       }
       await clearStaleClaimToken(supabase);
-      setMsg(route.message, false);
+      router.replace(refusedClaimLoginHref(route.code));
       return;
     }
     const { data: sessionData } = await supabase.auth.getSession();

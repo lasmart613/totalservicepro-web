@@ -12,6 +12,7 @@ import {
   newUnsubscribeToken,
   recipientUnsubscribed,
   shopInviteResendHeaders,
+  UNSUBSCRIBE_LOOKUP_ERROR,
 } from '@/lib/shop-invite-unsubscribe';
 import { fetchAllPages } from '@/lib/supabase/paginate';
 
@@ -179,7 +180,18 @@ export async function POST(req: NextRequest) {
       });
       continue;
     }
-    if (await recipientUnsubscribed(recipient)) {
+    const unsubscribed = await recipientUnsubscribed(recipient);
+    if (unsubscribed === null) {
+      results.push({
+        organizationId: org.id,
+        organizationName: org.name,
+        recipient,
+        ok: false,
+        error: UNSUBSCRIBE_LOOKUP_ERROR,
+      });
+      continue;
+    }
+    if (unsubscribed) {
       results.push({
         organizationId: org.id,
         organizationName: org.name,

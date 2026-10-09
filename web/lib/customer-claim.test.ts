@@ -284,6 +284,7 @@ async function postClaim(opts: {
       alreadyLinked?: boolean;
       organizationId?: string | number;
       error?: string;
+      code?: string;
     };
     return {
       status: response.status,
@@ -807,4 +808,31 @@ test('a failed claim clears claim-signup metadata and a successful claim does no
   assert.equal(claimed.body.claimed, true);
   assert.equal(claimed.metadataClears.length, 0);
   assert.equal(String(claimed.body.organizationId), String(CLINIC_ID));
+});
+
+test('a bad or expired clinic claim token is a code, not the token text', async () => {
+  process.env.CUSTOMER_INVITE_SECRET = 'invite-test-secret';
+  const expiredToken = signCustomerInvite(
+    { orgId: String(CLINIC_ID), email: 'a@b.co', name: 'North Clinic' },
+    -30
+  );
+  const expired = await postClaim({
+    userId: 'new-user',
+    email: 'a@b.co',
+    profiles: [],
+    token: expiredToken,
+  });
+  assert.equal(expired.status, 400);
+  assert.equal(expired.body.code, 'token_expired');
+  assert.equal(JSON.stringify(expired.body).includes(expiredToken), false);
+
+  const invalid = await postClaim({
+    userId: 'new-user',
+    email: 'a@b.co',
+    profiles: [],
+    token: 'not-a-token<script>',
+  });
+  assert.equal(invalid.status, 400);
+  assert.equal(invalid.body.code, 'token_invalid');
+  assert.equal(JSON.stringify(invalid.body).includes('<script>'), false);
 });

@@ -69,35 +69,53 @@ export function publicCustomerInviteBody(body: Record<string, unknown>): Record<
   return out;
 }
 
-export function verifyCustomerInvite(token: string): CustomerInvitePayload | null {
+export type CustomerInviteReject = 'token_invalid' | 'token_expired';
+
+export function openCustomerInvite(
+  token: string
+): { ok: true; payload: CustomerInvitePayload } | { ok: false; reason: CustomerInviteReject } {
   const secret = inviteSecret();
-  if (!secret) return null;
+  if (!secret) return { ok: false, reason: 'token_invalid' };
   const raw = String(token || '').trim();
   const dot = raw.lastIndexOf('.');
-  if (dot < 1) return null;
+  if (dot < 1) return { ok: false, reason: 'token_invalid' };
   const encoded = raw.slice(0, dot);
   const sig = raw.slice(dot + 1);
-  if (!encoded || !sig) return null;
+  if (!encoded || !sig) return { ok: false, reason: 'token_invalid' };
 
   const expected = createHmac('sha256', secret).update(encoded).digest('base64url');
   const a = Buffer.from(sig);
   const b = Buffer.from(expected);
-  if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  if (a.length !== b.length || !timingSafeEqual(a, b)) return { ok: false, reason: 'token_invalid' };
 
   try {
     const parsed = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8')) as CustomerInvitePayload;
-    if (!parsed?.orgId || !parsed?.email || !parsed?.exp) return null;
-    if (parsed.exp < Math.floor(Date.now() / 1000)) return null;
-    if (!isValidCustomerEmail(parsed.email)) return null;
+    if (!parsed?.orgId || !parsed?.email || !parsed?.exp) return { ok: false, reason: 'token_invalid' };
+    if (!isValidCustomerEmail(parsed.email)) return { ok: false, reason: 'token_invalid' };
+    if (parsed.exp < Math.floor(Date.now() / 1000)) return { ok: false, reason: 'token_expired' };
     return {
-      orgId: String(parsed.orgId),
-      email: String(parsed.email).trim().toLowerCase(),
-      name: String(parsed.name || '').trim(),
-      exp: Number(parsed.exp),
+      ok: true,
+      payload: {
+        orgId: String(parsed.orgId),
+        email: String(parsed.email).trim().toLowerCase(),
+        name: String(parsed.name || '').trim(),
+        exp: Number(parsed.exp),
+      },
     };
   } catch {
-    return null;
+    return { ok: false, reason: 'token_invalid' };
   }
+}
+
+export function verifyCustomerInvite(token: string): CustomerInvitePayload | null {
+  const read = openCustomerInvite(token);
+  return read.ok ? read.payload : null;
+}
+
+/** Why a claim token cannot be used. Null means the token is valid. */
+export function customerInviteRejectReason(token: string): CustomerInviteReject | null {
+  const read = openCustomerInvite(token);
+  return read.ok ? null : read.reason;
 }
 
 function esc(s: unknown): string {

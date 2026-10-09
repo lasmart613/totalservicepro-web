@@ -28,6 +28,7 @@ import {
   newUnsubscribeToken,
   recipientUnsubscribed,
   shopInviteResendHeaders,
+  UNSUBSCRIBE_LOOKUP_ERROR,
 } from '@/lib/shop-invite-unsubscribe';
 
 export const dynamic = 'force-dynamic';
@@ -202,7 +203,19 @@ export async function POST(req: NextRequest) {
         });
         continue;
       }
-      if (await recipientUnsubscribed(recipient)) {
+      const unsubscribed = await recipientUnsubscribed(recipient);
+      if (unsubscribed === null) {
+        results.push({
+          organizationId: org.id,
+          organizationName: org.name,
+          recipient,
+          ok: false,
+          error: UNSUBSCRIBE_LOOKUP_ERROR,
+          skip_reason: 'provider_error',
+        });
+        continue;
+      }
+      if (unsubscribed) {
         results.push({
           organizationId: org.id,
           organizationName: org.name,

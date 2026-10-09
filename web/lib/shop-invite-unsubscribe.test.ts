@@ -13,12 +13,14 @@ import {
   newUnsubscribeToken,
   parseUnsubscribePostBody,
   recipientUnsubscribed,
+  UNSUBSCRIBE_LOOKUP_ERROR,
   shopInviteResendHeaders,
   shopInviteUnsubscribePageHtml,
   unsubscribeHttpsUrl,
   unsubscribePageHeaders,
 } from './shop-invite-unsubscribe.ts';
 import { exactEmailImatch } from './email-match.ts';
+import { classifyBlastSkip, isRetryableBlastError } from './god-email-blast.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -179,5 +181,18 @@ test('blast and shop-invite unsubscribe lookup is an exact email match', async (
       return api;
     },
   };
-  assert.equal(await recipientUnsubscribed('pat@example.com', broken), false);
+  assert.equal(await recipientUnsubscribed('pat@example.com', broken), null);
+
+  assert.equal(classifyBlastSkip(UNSUBSCRIBE_LOOKUP_ERROR), 'provider_error');
+  assert.equal(isRetryableBlastError(UNSUBSCRIBE_LOOKUP_ERROR), true);
+  assert.doesNotMatch(UNSUBSCRIBE_LOOKUP_ERROR, /unsubscribed/i);
+
+  for (const source of [blast, invite]) {
+    assert.match(source, /unsubscribed === null/);
+    assert.match(source, /UNSUBSCRIBE_LOOKUP_ERROR/);
+    const failed = source.slice(source.indexOf('unsubscribed === null'), source.indexOf('if (unsubscribed)'));
+    assert.match(failed, /continue;/);
+    assert.doesNotMatch(failed, /sendResend/);
+  }
+  assert.match(blast, /skip_reason: 'provider_error'/);
 });
