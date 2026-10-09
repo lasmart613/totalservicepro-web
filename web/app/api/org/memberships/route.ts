@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { exactEmailIlike, normalizeLookupEmail } from '@/lib/email-match';
+import { emailsMatch, exactEmailImatch, normalizeLookupEmail } from '@/lib/email-match';
 import { invitationIsOpen } from '@/lib/org-membership';
 import { listMembershipsWithOrgs } from '@/lib/org-membership-server';
 
@@ -10,6 +10,23 @@ import { listMembershipsWithOrgs } from '@/lib/org-membership-server';
  * Active org + every shop this login belongs to + pending invites.
  */
 export async function GET(req: NextRequest) {
+  return runOrgMemberships(req);
+}
+
+export async function runOrgMemberships(
+  req: NextRequest,
+  deps: {
+    createUserClient?: (url: string, anonKey: string, accessToken: string) => {
+      auth: {
+        getUser: () => Promise<{ data: { user: { id: string; email?: string | null } | null } }>;
+      };
+      from: (table: string) => any;
+    };
+    hasServiceRole?: () => boolean;
+    getAdmin?: () => { from: (table: string) => any };
+    listMemberships?: (admin: { from: (table: string) => any }, userId: string) => Promise<any[]>;
+  } = {}
+) {
   try {
     const authHeader = req.headers.get('authorization') || '';
     const token = authHeader.startsWith('Bearer ') ? authHeader.slice(7) : '';
@@ -23,10 +40,12 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ error: 'Server misconfigured', memberships: [] }, { status: 500 });
     }
 
-    const userClient = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const userClient = deps.createUserClient
+      ? deps.createUserClient(url, anon, token)
+      : createClient(url, anon, {
+          global: { headers: { Authorization: `Bearer ${token}` } },
+          auth: { autoRefreshToken: false, persistSession: false },
+        });
     const {
       data: { user },
     } = await userClient.auth.getUser();
@@ -44,13 +63,16 @@ export async function GET(req: NextRequest) {
     let memberships: any[] = [];
     let pendingInvites: any[] = [];
 
-    if (hasServiceRole()) {
-      const admin = getSupabaseAdmin();
+    const serviceRoleReady = deps.hasServiceRole ?? hasServiceRole;
+    if (serviceRoleReady()) {
+      const admin = deps.getAdmin ? deps.getAdmin() : getSupabaseAdmin();
       const email = normalizeLookupEmail(user.email);
 
       // Read existing memberships only. Accepted invites and shops this login
       // created must not be turned back into memberships here — leaving stays gone.
-      const rows = await listMembershipsWithOrgs(admin, user.id);
+      const rows = deps.listMemberships
+        ? await deps.listMemberships(admin, user.id)
+        : await listMembershipsWithOrgs(admin, user.id);
       memberships = rows.map((row) => ({
         organizationId: row.organization_id,
         name: row.organizations?.name || `Company ${row.organization_id}`,
@@ -63,14 +85,15 @@ export async function GET(req: NextRequest) {
       if (email) {
         const { data: invites } = await admin
           .from('engineer_invitations')
-          .select('id, organization_id, role, first_name, last_name, created_at, expires_at, accepted')
-          .ilike('email', exactEmailIlike(email))
+          .select('id, email, organization_id, role, first_name, last_name, created_at, expires_at, accepted')
+          .filter('email', 'imatch', exactEmailImatch(email))
           .eq('accepted', false)
           .order('created_at', { ascending: false })
           .limit(20);
         const memberOrgIds = new Set(memberships.map((m) => String(m.organizationId)));
         const pendingRaw = (invites || []).filter(
           (inv: any) =>
+            emailsMatch(inv.email, email) &&
             inv.organization_id &&
             !memberOrgIds.has(String(inv.organization_id)) &&
             invitationIsOpen(inv)

@@ -835,6 +835,9 @@ test('a removed member can be re-invited and the rejoin claim adds the membershi
                 ilike() {
                   return api;
                 },
+                filter() {
+                  return api;
+                },
                 limit() {
                   if (table !== 'user_profiles') return Promise.resolve({ data: [], error: null });
                   const row = state.profiles.find((item) => item.id === MEMBER) || null;
@@ -988,6 +991,9 @@ async function reopenAccepted(invite: Invite, profile: Profile) {
               ilike() {
                 return api;
               },
+              filter() {
+                return api;
+              },
               limit() {
                 if (table !== 'user_profiles') return Promise.resolve({ data: [], error: null });
                 return Promise.resolve({ data: profile ? [profile] : [], error: null });
@@ -1105,6 +1111,9 @@ function claimAdmin(state: { invite: Invite; memberships: Membership[]; profiles
         },
         ilike(column: string, value: unknown) {
           filters[column] = value;
+          return api;
+        },
+        filter() {
           return api;
         },
         order() {

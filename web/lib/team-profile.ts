@@ -1,5 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { exactEmailIlike, normalizeLookupEmail } from '@/lib/email-match';
+import { emailsMatch, exactEmailImatch, normalizeLookupEmail } from '@/lib/email-match';
 import { isFounderLockedRole } from '@/lib/org-membership';
 import { upsertMembership } from '@/lib/org-membership-server';
 
@@ -34,7 +34,7 @@ export type AuthEmailLookupClient = {
   schema?: (schema: string) => {
     from: (table: string) => {
       select: (columns: string) => {
-        ilike: (column: string, value: string) => PromiseLike<AuthTableResult>;
+        filter: (column: string, operator: string, value: string) => PromiseLike<AuthTableResult>;
       };
     };
   };
@@ -74,7 +74,7 @@ function toHit(row: AuthUserRow): AuthEmailHit | null {
 }
 
 function classifyExact(rows: AuthUserRow[], email: string): AuthEmailLookup {
-  const exact = rows.filter((row) => normalizeAuthEmail(row.email || '') === email);
+  const exact = rows.filter((row) => emailsMatch(row.email, email));
   if (exact.some((row) => !String(row.id || '').trim())) return { status: 'error' };
   const hits: AuthEmailHit[] = [];
   for (const row of exact) {
@@ -114,7 +114,7 @@ async function lookupByAdminGetter(
     if (!result || result.error) return { status: 'error' };
     const user = result.data?.user;
     if (!user) return { status: 'not_found' };
-    if (normalizeAuthEmail(user.email || '') !== email) return { status: 'error' };
+    if (!emailsMatch(user.email, email)) return { status: 'error' };
     return classifyExact([user], email);
   } catch {
     return { status: 'error' };
@@ -131,7 +131,7 @@ async function lookupAuthTable(
       .schema('auth')
       .from('users')
       .select('id, email, last_sign_in_at')
-      .ilike('email', exactEmailIlike(email));
+      .filter('email', 'imatch', exactEmailImatch(email));
     if (!result || result.error || !Array.isArray(result.data)) return 'unavailable';
     return classifyExact(result.data, email);
   } catch {
@@ -197,7 +197,7 @@ async function lookupAdminFilter(
 /**
  * Find an auth user by exact email.
  * Uses an admin get-by-email method when the client has one, an exact
- * case-insensitive `auth.users` match, and GoTrue's admin users filter. A paging
+ * case-insensitive `auth.users` match (`imatch`, then `emailsMatch`), and GoTrue's admin users filter. A paging
  * scan of the first 2,000 users is not a lookup. Errors and unfinished
  * scans fail closed (`status: 'error'`), and more than one exact row is
  * `ambiguous`.

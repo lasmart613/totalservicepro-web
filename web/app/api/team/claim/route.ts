@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { exactEmailIlike, normalizeLookupEmail } from '@/lib/email-match';
+import { emailsMatch, exactEmailImatch, normalizeLookupEmail } from '@/lib/email-match';
 import { ensureTeamMemberProfile } from '@/lib/team-profile';
 import {
   decideClaim,
@@ -167,7 +167,7 @@ export async function runTeamClaim(
       const { data: openInv, error: openError } = await admin
         .from('engineer_invitations')
         .select('*')
-        .ilike('email', exactEmailIlike(email))
+        .filter('email', 'imatch', exactEmailImatch(email))
         .eq('accepted', false)
         .order('created_at', { ascending: false })
         .limit(1)
@@ -175,13 +175,13 @@ export async function runTeamClaim(
       if (openError) {
         return NextResponse.json({ ok: false, error: 'Could not look up the team invite.' }, { status: 500 });
       }
-      inv = openInv;
+      if (emailsMatch(openInv?.email, email)) inv = openInv;
     }
     if (!inv && !body.inviteId) {
       const { data: anyInv, error: anyError } = await admin
         .from('engineer_invitations')
         .select('*')
-        .ilike('email', exactEmailIlike(email))
+        .filter('email', 'imatch', exactEmailImatch(email))
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle();
@@ -189,7 +189,7 @@ export async function runTeamClaim(
         return NextResponse.json({ ok: false, error: 'Could not look up the team invite.' }, { status: 500 });
       }
       // Accepted or expired history must not reattach someone who already left.
-      if (anyInv) {
+      if (anyInv && emailsMatch(anyInv.email, email)) {
         const historical = teamInviteJoinGate({
           accepted: anyInv.accepted,
           expires_at: anyInv.expires_at,
