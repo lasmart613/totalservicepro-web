@@ -41,10 +41,10 @@ function orgIdValue(value: unknown): number | string | null {
  * POST or DELETE /api/team/members/remove
  * { userId, organizationId }
  *
- * Caller must be company_admin (admin counts the same), owner, or founder
- * of that organization. Service role performs one RPC so the membership
- * delete and pending-invite revoke commit together or not at all.
- * The auth user, user_profiles pointer, home row, and other orgs stay.
+ * Caller must be company_admin or owner on their membership in that org,
+ * or the org founder. user_profiles.role admin does not qualify.
+ * Service role performs one RPC so the membership delete, home move or
+ * profile-pointer clear, and pending-invite revoke commit together or not at all.
  */
 export async function POST(req: NextRequest) {
   return runRemoveTeamMember(req);
@@ -140,19 +140,12 @@ export async function runRemoveTeamMember(req: NextRequest, deps: RemoveDeps = {
     }
 
     const createdBy = orgRow?.created_by ? String(orgRow.created_by) : null;
-    const callerProfileHere =
-      callerProfile && sameOrg(callerProfile.organization_id, organizationId) ? callerProfile : null;
-    const callerMayRemove =
-      callerMayRemoveTeamMembers({
-        role: callerMembership?.role,
-        founder: rowFounderFlag(callerMembership),
-        isOrgCreator: sameUser(user.id, createdBy),
-      }) ||
-      callerMayRemoveTeamMembers({
-        role: callerProfileHere?.role,
-        founder: rowFounderFlag(callerProfileHere),
-        isOrgCreator: sameUser(user.id, createdBy),
-      });
+    // Membership role only. A platform profile role (admin) does not grant this.
+    const callerMayRemove = callerMayRemoveTeamMembers({
+      role: callerMembership?.role,
+      founder: rowFounderFlag(callerMembership) || rowFounderFlag(callerProfile),
+      isOrgCreator: sameUser(user.id, createdBy),
+    });
 
     const { data: targetMembership, error: targetMembershipError } = await admin
       .from('organization_memberships')
@@ -186,7 +179,6 @@ export async function runRemoveTeamMember(req: NextRequest, deps: RemoveDeps = {
       targetRole: targetMembership?.role,
       targetProfileRole: targetProfile?.role,
       targetProfileInOrg: targetProfileHere,
-      targetIsHome: targetMembership?.is_home === true,
       targetFounder: rowFounderFlag(targetMembership) || rowFounderFlag(targetProfile),
       targetIsOrgCreator: sameUser(targetUserId, createdBy),
     });
@@ -214,12 +206,21 @@ export async function runRemoveTeamMember(req: NextRequest, deps: RemoveDeps = {
     const result = data as {
       profile_still_points_here?: boolean;
       revoked_invite_count?: number;
+      home_moved_to?: number | string | null;
+      profile_cleared?: boolean;
     };
+    const movedRaw = result.home_moved_to;
+    const homeMovedTo =
+      movedRaw == null || movedRaw === ''
+        ? null
+        : Number(movedRaw);
     return NextResponse.json({
       ok: true,
       removed: true,
       userId: targetUserId,
       organizationId,
+      homeMovedTo: homeMovedTo != null && Number.isFinite(homeMovedTo) ? homeMovedTo : null,
+      profileCleared: result.profile_cleared === true,
       profileStillPointsHere: result.profile_still_points_here === true,
       revokedInviteCount: Number(result.revoked_invite_count || 0),
       accountKept: true,

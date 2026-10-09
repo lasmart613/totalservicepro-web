@@ -10,7 +10,6 @@ type Props = {
   memberId: string;
   name: string;
   role?: string | null;
-  isHome?: boolean | null;
   isFounder?: boolean | null;
   callerId?: string | null;
   callerRole?: string | null;
@@ -23,7 +22,6 @@ export function RemoveTeamMemberButton({
   memberId,
   name,
   role,
-  isHome,
   isFounder,
   callerId,
   callerRole,
@@ -46,7 +44,6 @@ export function RemoveTeamMemberButton({
       memberId,
       callerId,
       role,
-      isHome,
       founder: isFounder === true,
       isOrgCreator: memberIsCreator,
     });

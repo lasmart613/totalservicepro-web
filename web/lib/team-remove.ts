@@ -2,8 +2,11 @@
  * Org-admin removal of one team membership.
  *
  * Self-leave stays on POST /api/org/leave. This path never deletes an auth
- * user, never clears user_profiles.organization_id, and never removes a home
- * membership or any other organization's rows.
+ * user. A home membership of a non-owner, non-founder may be removed: the
+ * RPC moves home to the remaining membership with the latest created_at
+ * (organization_id DESC on a tie) or clears the profile org pointers when
+ * none remain. Profile role is left as-is. A platform profile role of
+ * admin does not grant this power.
  */
 
 import { normalizeRole, sameOrg } from '@/lib/org-membership';
@@ -16,13 +19,13 @@ export const REMOVE_MEMBER_ERRORS = {
   not_member: 'That person is not a member of this organization.',
   owner: 'The organization owner cannot be removed.',
   founder: 'The organization founder cannot be removed.',
-  home: 'A home membership cannot be removed.',
   db: 'Could not remove that team member.',
 } as const;
 
 export type RemoveMemberCode = keyof typeof REMOVE_MEMBER_ERRORS;
 
-const ADMIN_REMOVE_ROLES = new Set(['admin', 'company_admin', 'owner']);
+/** Membership roles that may remove people. Platform `admin` is not one of them. */
+const MEMBERSHIP_REMOVE_ROLES = new Set(['company_admin', 'owner']);
 
 /** True when a row carries an explicit founder flag. Role alone is not a flag. */
 export function rowFounderFlag(row: object | null | undefined): boolean {
@@ -40,8 +43,10 @@ export function rowFounderFlag(row: object | null | undefined): boolean {
 }
 
 /**
- * Caller may remove members of this org: company_admin (admin counts as the
- * same shop lead), owner, an explicit founder flag, or the org's created_by.
+ * Caller may remove members of this org only from their membership in that
+ * org: company_admin or owner. An explicit founder flag or organizations.created_by
+ * also qualifies. Pass the membership role, not user_profiles.role. A profile
+ * role of admin is a platform role and must not be passed here.
  */
 export function callerMayRemoveTeamMembers(input: {
   role?: string | null;
@@ -50,15 +55,14 @@ export function callerMayRemoveTeamMembers(input: {
 }): boolean {
   if (input.founder) return true;
   if (input.isOrgCreator) return true;
-  return ADMIN_REMOVE_ROLES.has(normalizeRole(input.role));
+  return MEMBERSHIP_REMOVE_ROLES.has(normalizeRole(input.role));
 }
 
-/** Hide the team-list action for owner, founder, home, and the caller. */
+/** Hide the team-list action for owner, founder, and the caller. Home staff stay visible. */
 export function teamMemberRemoveBlocked(input: {
   memberId?: string | null;
   callerId?: string | null;
   role?: string | null;
-  isHome?: boolean | null;
   founder?: boolean | null;
   isOrgCreator?: boolean | null;
 }): boolean {
@@ -67,7 +71,6 @@ export function teamMemberRemoveBlocked(input: {
   if (memberId && callerId && memberId === callerId) return true;
   if (normalizeRole(input.role) === 'owner') return true;
   if (input.founder || input.isOrgCreator) return true;
-  if (input.isHome === true) return true;
   return false;
 }
 
@@ -79,7 +82,6 @@ export function decideAdminRemoveMember(input: {
   targetRole?: string | null;
   targetProfileRole?: string | null;
   targetProfileInOrg?: boolean;
-  targetIsHome?: boolean | null;
   targetFounder?: boolean | null;
   targetIsOrgCreator?: boolean | null;
 }): { ok: true } | { ok: false; status: 403; code: RemoveMemberCode; error: string } {
@@ -102,9 +104,6 @@ export function decideAdminRemoveMember(input: {
   }
   if (input.targetFounder || input.targetIsOrgCreator) {
     return { ok: false, status: 403, code: 'founder', error: REMOVE_MEMBER_ERRORS.founder };
-  }
-  if (input.targetIsHome === true) {
-    return { ok: false, status: 403, code: 'home', error: REMOVE_MEMBER_ERRORS.home };
   }
   return { ok: true };
 }

@@ -484,10 +484,11 @@ export default function TeamManagement() {
                             memberId={String(member.id)}
                             name={[member.first_name, member.last_name].filter(Boolean).join(' ') || member.email || ''}
                             role={member.role}
-                            isHome={member.is_home === true}
                             isFounder={member.is_founder === true || member.founder === true}
                             callerId={userId}
-                            callerRole={userRole}
+                            callerRole={
+                              teamMembers.find((row) => row.id && String(row.id) === String(userId))?.role ?? null
+                            }
                             organizationId={orgId}
                             orgCreatedBy={orgCreatedBy}
                             onRemoved={fetchTeam}

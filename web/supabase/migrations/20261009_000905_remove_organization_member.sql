@@ -1,11 +1,33 @@
 -- Admin removal of one organization_memberships row, plus pending invites
 -- for that email in that org, in a single transaction.
 --
--- Does not change user_profiles, auth.users, is_home, or any other org.
--- Home, owner, and founder rows are refused
--- before the delete. Pending means invitation_is_open (unaccepted and unexpired).
--- Revoke sets expires_at in the past. There is no revoked column.
--- An accepted invite is left accepted so a later invite can reopen it.
+-- Owner, founder, and self are refused before any write. A home membership
+-- of anyone else is removed:
+--   * If another membership remains, home moves to the one with the latest
+--     created_at. organization_id DESC breaks a tie (including NULL
+--     created_at, which sorts last). set_home_membership marks that row
+--     is_home and leaves its membership role alone (p_role NULL,
+--     p_sync_profile false). user_profiles.organization_id and
+--     active_organization_id then point at that org.
+--   * If none remains, both pointers are set to NULL. Both columns are
+--     nullable. organization_id's foreign key is ON DELETE SET NULL.
+--     active_organization_id has no foreign key. profile_org_change_allowed
+--     treats NULL as allowed, and the identity guard returns immediately
+--     when auth.uid() is null (this function runs as service role).
+-- user_profiles.role is not updated. user_profiles_role_check already
+-- allows the current role with a null organization_id or a different org.
+-- The partial unique index user_profiles_one_owner_per_organization does
+-- not apply because owner targets are refused. p_sync_profile stays false
+-- so profile_role_from_membership cannot rewrite a platform admin into
+-- company_admin.
+-- A signed-in user with no organization_id is sent to /onboarding by the
+-- home dashboard and the auth callback. They are not left on a page that
+-- assumes an org.
+--
+-- Pending means invitation_is_open (unaccepted and unexpired). Revoke sets
+-- expires_at in the past. There is no revoked column. An accepted invite
+-- is left accepted so a later invite can reopen it. auth.users is not
+-- deleted. Other orgs' rows are not deleted.
 --
 -- APPLY ON LIVE SUPABASE after review. This repo does not auto-apply SQL.
 -- The migration runner applies this file as one transaction. Safe to re-run.
@@ -31,6 +53,10 @@ DECLARE
   member_email text;
   revoked_count integer := 0;
   founder_flag boolean;
+  next_org bigint;
+  home_moved_to bigint;
+  profile_cleared boolean := false;
+  deleted_count integer := 0;
 BEGIN
   PERFORM set_config('lock_timeout', '5s', true);
 
@@ -111,27 +137,56 @@ BEGIN
   END IF;
 
   IF mem.is_home THEN
-    RETURN jsonb_build_object(
-      'ok', false,
-      'status', 403,
-      'code', 'home',
-      'error', 'A home membership cannot be removed.'
-    );
-  END IF;
+    -- Lock the destination before deleting home so the choice cannot move.
+    SELECT m.organization_id INTO next_org
+    FROM public.organization_memberships m
+    WHERE m.user_id = p_user_id
+      AND m.organization_id IS DISTINCT FROM p_organization_id
+    ORDER BY m.created_at DESC NULLS LAST, m.organization_id DESC
+    LIMIT 1
+    FOR UPDATE;
 
-  DELETE FROM public.organization_memberships
-  WHERE user_id = p_user_id
-    AND organization_id = p_organization_id
-    AND is_home = false
-    AND lower(btrim(role)) <> 'owner';
+    DELETE FROM public.organization_memberships
+    WHERE user_id = p_user_id
+      AND organization_id = p_organization_id
+      AND lower(btrim(role)) <> 'owner';
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    IF deleted_count <> 1 THEN
+      RAISE EXCEPTION 'remove_organization_member deleted % home rows', deleted_count;
+    END IF;
 
-  IF NOT FOUND THEN
-    RETURN jsonb_build_object(
-      'ok', false,
-      'status', 403,
-      'code', 'not_member',
-      'error', 'That person is not a member of this organization.'
-    );
+    IF next_org IS NOT NULL THEN
+      PERFORM public.set_home_membership(p_user_id, next_org, NULL, false);
+      UPDATE public.user_profiles
+      SET
+        organization_id = next_org,
+        active_organization_id = next_org,
+        updated_at = now()
+      WHERE id = p_user_id;
+      home_moved_to := next_org;
+      profile_cleared := false;
+    ELSE
+      UPDATE public.user_profiles
+      SET
+        organization_id = NULL,
+        active_organization_id = NULL,
+        updated_at = now()
+      WHERE id = p_user_id;
+      home_moved_to := NULL;
+      profile_cleared := true;
+    END IF;
+  ELSE
+    DELETE FROM public.organization_memberships
+    WHERE user_id = p_user_id
+      AND organization_id = p_organization_id
+      AND is_home = false
+      AND lower(btrim(role)) <> 'owner';
+    GET DIAGNOSTICS deleted_count = ROW_COUNT;
+    IF deleted_count <> 1 THEN
+      RAISE EXCEPTION 'remove_organization_member deleted % membership rows', deleted_count;
+    END IF;
+    home_moved_to := NULL;
+    profile_cleared := false;
   END IF;
 
   IF member_email IS NOT NULL AND member_email <> '' THEN
@@ -143,12 +198,21 @@ BEGIN
     GET DIAGNOSTICS revoked_count = ROW_COUNT;
   END IF;
 
+  SELECT p.organization_id INTO profile_org
+  FROM public.user_profiles p
+  WHERE p.id = p_user_id;
+
   RETURN jsonb_build_object(
     'ok', true,
     'status', 200,
     'user_id', p_user_id,
     'organization_id', p_organization_id,
-    'profile_still_points_here', profile_org IS NOT DISTINCT FROM p_organization_id,
+    'home_moved_to', home_moved_to,
+    'profile_cleared', profile_cleared,
+    'profile_still_points_here',
+      profile_cleared IS NOT TRUE
+      AND home_moved_to IS NULL
+      AND profile_org IS NOT DISTINCT FROM p_organization_id,
     'revoked_invite_count', revoked_count,
     'account_kept', true
   );
@@ -159,4 +223,4 @@ REVOKE ALL ON FUNCTION public.remove_organization_member(uuid, bigint, uuid) FRO
 GRANT EXECUTE ON FUNCTION public.remove_organization_member(uuid, bigint, uuid) TO service_role;
 
 COMMENT ON FUNCTION public.remove_organization_member(uuid, bigint, uuid) IS
-  'Service-role only. Deletes one non-home membership and expires pending invites for that email in that org. Does not update user_profiles or delete auth.users.';
+  'Service-role only. Deletes one membership and expires pending invites for that email in that org. A non-owner non-founder home row moves home to the latest remaining membership, or clears user_profiles.organization_id and active_organization_id. Does not change user_profiles.role or delete auth.users.';

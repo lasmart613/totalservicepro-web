@@ -1131,10 +1131,12 @@ function CompanyProfile() {
                               memberId={String(m.id)}
                               name={[m.first_name, m.last_name].filter(Boolean).join(' ') || m.email || ''}
                               role={m.role}
-                              isHome={m.is_home === true}
                               isFounder={m.is_founder === true || m.founder === true}
                               callerId={selfUserId}
-                              callerRole={userRole}
+                              callerRole={
+                                members.find((row: { id?: string }) => row.id && String(row.id) === String(selfUserId))
+                                  ?.role ?? null
+                              }
                               organizationId={org?.id}
                               orgCreatedBy={org?.created_by ? String(org.created_by) : null}
                               onRemoved={() => loadTeamMembers(org.id)}
