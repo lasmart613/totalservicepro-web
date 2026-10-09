@@ -329,7 +329,9 @@ function termAt(hay: string, term: string, from: number): number {
     const before = at > 0 ? hay.charAt(at - 1) : '';
     const after = hay.charAt(at + term.length);
     const edge = (ch: string) => ch === '' || !/[\p{L}\p{N}+]/u.test(ch);
-    if (edge(before) && edge(after)) return at;
+    // "setting" also matches "settings" on the fluence table page.
+    const plural = term.length >= 4 && !term.endsWith('s') && after === 's' && edge(hay.charAt(at + term.length + 1));
+    if (edge(before) && (edge(after) || plural)) return at;
     i = at + 1;
   }
   return -1;
@@ -457,10 +459,51 @@ function errorCodeBoost(
   return { score, at };
 }
 
+/** Drop running-header words that are printed on most pages. */
+function rareExcerptTerms(terms: string[], df: Map<string, number>, pageCount: number): string[] {
+  const rare = terms.filter((term) => {
+    const n = df.get(term) || 0;
+    return !(pageCount > 1 && n > pageCount * 0.25);
+  });
+  return rare.length ? rare : terms;
+}
+
+/**
+ * Consecutive rare terms a few characters apart ("Maximum Fluence").
+ * One hit is enough: it marks the spec table, not a later procedure that
+ * only mentions one of the words.
+ */
+function rarePhraseHit(
+  terms: string[],
+  positions: Map<string, number[]>,
+  df: Map<string, number>,
+  pageCount: number,
+  start: number,
+  end: number
+): { bonus: number; at: number } {
+  const rare = rareExcerptTerms(terms, df, pageCount);
+  const gap = 24;
+  for (let i = 0; i < rare.length - 1; i++) {
+    const left = hitsOnSpan(positions.get(rare[i]) || [], start, end);
+    const right = hitsOnSpan(positions.get(rare[i + 1]) || [], start, end);
+    for (const ha of left) {
+      const limit = ha + rare[i].length + gap;
+      for (const hb of right) {
+        if (hb < ha + rare[i].length) continue;
+        if (hb > limit) break;
+        return { bonus: 18, at: ha };
+      }
+    }
+  }
+  return { bonus: 0, at: -1 };
+}
+
 /**
  * Anchor where the specific query terms cluster.
  * Error codes (#43, a bare 43 beside CW Laser, error 43) and multi-word phrases
  * outrank a brand word. Terms are weighted by how many pages they appear on.
+ * A running header is not a phrase. An adjacent rare pair ("Maximum Fluence")
+ * outranks a later page that only shares one of those words.
  * Equal scores prefer the later hit so a contents line loses to the procedure.
  * Returns -1 when nothing in the query is present.
  */
@@ -505,12 +548,20 @@ function excerptAnchor(raw: string, query: string): number {
       }
     }
     if (score <= 0) continue;
-    const chain = orderedTermChain(terms, positions, span.start, span.end);
+    const chain = orderedTermChain(
+      rareExcerptTerms(terms, df, spans.length),
+      positions,
+      span.start,
+      span.end
+    );
     if (chain.len >= 3) score += chain.len * 8;
     if (chain.len >= 5) score += 24;
+    const phrase = rarePhraseHit(terms, positions, df, spans.length, span.start, span.end);
+    score += phrase.bonus;
     const code = errorCodeBoost(hay, terms, positions, span.start, span.end);
     score += code.score;
     let at = chain.len >= 3 && chain.at >= 0 ? chain.at : rareAt;
+    if (phrase.at >= 0) at = phrase.at;
     if (code.score >= 36 && code.at >= 0) at = code.at;
     const head = hay.slice(span.start, Math.min(span.end, span.start + 48));
     const stamped = /\[\[pdfpage:\d{1,4}\]\]/.exec(head);

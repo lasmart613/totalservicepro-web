@@ -233,6 +233,24 @@ test('single-file manuals attach the storage_path PDF; folders use chapters or a
   }
 });
 
+test('maximum fluence anchors the settings page, not the following calibration chapter', () => {
+  const pages: string[] = [];
+  for (let n = 1; n <= 100; n++) {
+    let text = 'GentleMAX PRO PLUS service manual header.';
+    if (n === 49) text += ' 9 System Settings by Wavelength. System settings vary. Minimum Fluence (J/cm2) Maximum Fluence (J/cm2).';
+    if (n === 53) text += ' The actual values vary depending on the fluence setting and laser head efficiency.';
+    if (n === 86) text += ' See also • Chapter 16, DHP Laser Rail Alignment. • Chapter 18, Calibration.';
+    if (n === 87) {
+      text += ' 18 Calibration (Cal) Port Verification Procedure. Record fluence. Follow the steps.';
+    }
+    pages.push(`[[pdfpage:${n}]] ${text}`);
+  }
+  const indexed = pages.join('\f');
+  const query =
+    'Candela GentleMAX PRO PLUS What is the maximum fluence setting for the GentleMAX Pro Plus? procedure specification steps';
+  assert.equal(indexedExcerptPage(indexed, query), 49);
+});
+
 test('CO2RE pdftotext reference anchors error 43 on physical page 150', (t) => {
   const path = [
     process.env.CO2RE_PDFTOTEXT,

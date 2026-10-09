@@ -20,6 +20,8 @@ export type ManualCitation = {
   pageOutOfRange?: boolean;
   /** Passage belongs to a different catalog row than the manual open in the assistant. */
   crossManual?: boolean;
+  /** PDF page count already known for this manual. Not rendered as its own link. */
+  pdfPageCount?: number;
 };
 
 const CITE_RE = /\[\[cite:([^\]]+)\]\]/gi;
@@ -116,10 +118,10 @@ export function citationViewerHref(c: ManualCitation): string {
   const qs = new URLSearchParams();
   qs.set('id', String(c.manualId));
   if (c.title) qs.set('title', String(c.title).slice(0, 160));
-  if (c.page) qs.set('page', String(c.page));
-  else if (!c.section) qs.set('page', '1');
-  if (c.section) qs.set('section', String(c.section).slice(0, 80));
-  if (c.pageOutOfRange) qs.set('oor', '1');
+  // No indexed page, or a page past this PDF: open the manual, do not invent p.1
+  // and do not deep-link a page the file does not contain.
+  if (c.page && !c.pageOutOfRange) qs.set('page', String(c.page));
+  if (c.section && !c.pageOutOfRange) qs.set('section', String(c.section).slice(0, 80));
   return `${VIEWER_PATH}?${qs.toString()}`;
 }
 
@@ -209,6 +211,7 @@ export function mergeCitations(...lists: Array<ManualCitation[] | undefined | nu
       const title = cleanSection(c.title);
       const pageOutOfRange = c.pageOutOfRange === true;
       const crossManual = c.crossManual === true;
+      const pdfPageCount = asPositivePage(c.pdfPageCount);
       const key = citationListKey(id, page, section);
       if (seen.has(key)) {
         const prev = out.find((item) => citationListKey(item.manualId, item.page, item.section) === key);
@@ -216,6 +219,7 @@ export function mergeCitations(...lists: Array<ManualCitation[] | undefined | nu
           if (pageOutOfRange) prev.pageOutOfRange = true;
           if (crossManual) prev.crossManual = true;
           if (!prev.title && title) prev.title = title;
+          if (pdfPageCount) prev.pdfPageCount = pdfPageCount;
         }
         continue;
       }
@@ -227,10 +231,11 @@ export function mergeCitations(...lists: Array<ManualCitation[] | undefined | nu
         ...(title ? { title } : {}),
         ...(pageOutOfRange ? { pageOutOfRange: true } : {}),
         ...(crossManual ? { crossManual: true } : {}),
+        ...(pdfPageCount ? { pdfPageCount } : {}),
       });
     }
   }
-  // A bare document cite (opens page 1) is redundant once the same manual has a physical page/section.
+  // A bare document cite is redundant once the same manual has a physical page/section.
   const located = new Set(out.filter((c) => c.page || c.section).map((c) => c.manualId));
   return out.filter((c) => c.page || c.section || !located.has(c.manualId));
 }
@@ -238,19 +243,16 @@ export function mergeCitations(...lists: Array<ManualCitation[] | undefined | nu
 export function citationLabel(c: ManualCitation): string {
   const title = (c.title || 'Service manual').trim();
   const bits: string[] = [];
-  if (c.page) bits.push(`p. ${c.page}`);
-  if (c.section) bits.push(`§${c.section}`);
+  if (c.page && c.pageOutOfRange) bits.push(`p. ${c.page} not in this copy`);
+  else if (c.page) bits.push(`p. ${c.page}`);
+  if (c.section && !c.pageOutOfRange) bits.push(`§${c.section}`);
   return bits.length ? `${title}, ${bits.join(', ')}` : title;
 }
 
 /** Chip text. A different catalog row is labeled with that row's title, not the open manual. */
 export function citationChipLabel(c: ManualCitation): string {
-  if (!c.crossManual) return citationLabel(c);
-  const title = (c.title || 'Service manual').trim();
-  const bits: string[] = [];
-  if (c.page) bits.push(`p. ${c.page}`);
-  if (c.section) bits.push(`§${c.section}`);
-  return bits.length ? `From: ${title}, ${bits.join(', ')}` : `From: ${title}`;
+  const label = citationLabel(c);
+  return c.crossManual ? `From: ${label}` : label;
 }
 
 function escapeHtml(s: string): string {
@@ -268,7 +270,7 @@ function viewerAnchor(c: ManualCitation, label: string): string {
   }
   const id = Number(c.manualId);
   const idAttr = Number.isSafeInteger(id) && id >= 1 ? ` data-cite-manual="${id}"` : '';
-  const pageAttr = c.page ? ` data-cite-page="${c.page}"` : '';
+  const pageAttr = c.page && !c.pageOutOfRange ? ` data-cite-page="${c.page}"` : '';
   const oorAttr = c.pageOutOfRange ? ' data-cite-oor="1"' : '';
   const titleAttr = c.title ? ` data-cite-title="${escapeHtml(c.title)}"` : '';
   return `<a class="ai-cite-link" href="${escapeHtml(href)}"${idAttr}${pageAttr}${oorAttr}${titleAttr}>${escapeHtml(label)}</a>`;
@@ -300,20 +302,45 @@ const SOURCE_TITLE_STOP = new Set([
   'for',
 ]);
 
-const SOURCE_LINE = /^\s*[—\-]\s*Source:\s*\S/i;
-const PAGE_IN_SOURCE = /\b(?:p\.?|pages?)\s*\d{1,4}\b/i;
+const SOURCE_LINE = /^\s*(?:[—\-]\s*)?Source:\s*\S/i;
+const PAGE_IN_SOURCE = /\b(?:seite|pages?|pp?\.?|p\.?)\s*\d{1,4}\b/i;
 
-/** One "— Source:" line. Prefer the last line that names a page. */
-export function collapseDuplicateSourceLines(text: string): string {
+function sourceLinePage(line: string): number | undefined {
+  const match = String(line || '').match(PAGE_IN_SOURCE);
+  const digits = match?.[0].match(/\d{1,4}/)?.[0];
+  return digits ? asPositivePage(digits) : undefined;
+}
+
+/**
+ * One Source line. A dashed line and a bare "Source:" line are the same slot.
+ * When a citation owns an in-range page, keep the line that names it.
+ * When no page is known, drop a line that invents one (manual 110's "p. 1").
+ */
+export function collapseDuplicateSourceLines(text: string, citations?: ManualCitation[]): string {
   const lines = String(text || '').split('\n');
   const indexes: number[] = [];
   for (let i = 0; i < lines.length; i++) {
     if (SOURCE_LINE.test(lines[i])) indexes.push(i);
   }
   if (indexes.length < 2) return text;
+  const owned = new Set(
+    (citations || []).filter((c) => c.page && !c.pageOutOfRange).map((c) => c.page as number)
+  );
   let keep = -1;
-  for (const i of indexes) {
-    if (PAGE_IN_SOURCE.test(lines[i])) keep = i;
+  if (owned.size) {
+    for (const i of indexes) {
+      const page = sourceLinePage(lines[i]);
+      if (page && owned.has(page)) keep = i;
+    }
+  } else if (citations) {
+    for (const i of indexes) {
+      if (!sourceLinePage(lines[i])) keep = i;
+    }
+  }
+  if (keep < 0) {
+    for (const i of indexes) {
+      if (PAGE_IN_SOURCE.test(lines[i])) keep = i;
+    }
   }
   if (keep < 0) keep = indexes[indexes.length - 1];
   const drop = new Set(indexes.filter((i) => i !== keep));
@@ -321,6 +348,71 @@ export function collapseDuplicateSourceLines(text: string): string {
     .filter((_, i) => !drop.has(i))
     .join('\n')
     .replace(/\n{3,}/g, '\n\n');
+}
+
+/** Pages the answer names that are past the served PDF. Printed ranges are labels. */
+export function pagesPastKnownCount(text: string, pageCount: number): number[] {
+  const count = asPositivePage(pageCount);
+  if (!count) return [];
+  const raw = String(text || '');
+  const out: number[] = [];
+  const seen = new Set<number>();
+  const re = /\b(?:pages?|pp?\.?|seite)\s*(\d{1,4})\b/gi;
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(raw))) {
+    if (isPrintedPageRange(raw, match.index + match[0].length)) continue;
+    const page = asPositivePage(match[1]);
+    if (!page || page <= count || seen.has(page)) continue;
+    seen.add(page);
+    out.push(page);
+    if (out.length >= 8) break;
+  }
+  return out;
+}
+
+function scopedPdfPageCount(citations: ManualCitation[], scopedId?: number): number | undefined {
+  const own = citations.find(
+    (c) => c.pdfPageCount && (scopedId == null || c.manualId === scopedId)
+  );
+  return asPositivePage(own?.pdfPageCount);
+}
+
+function stripSourcePageLabels(label: string): string {
+  return label
+    .replace(/,?\s*\b(?:seite|pages?|pp?\.?|p\.?)\s*\d{1,4}\b/gi, '')
+    .replace(/\s{2,}/g, ' ')
+    .replace(/\s+,/g, ',')
+    .replace(/,\s*$/g, '')
+    .trim();
+}
+
+/** In-range source text stays one link, including "p.120". An unknown page is not labeled p. 1. */
+function sourceLineLabel(src: string, citation: ManualCitation): string {
+  const raw = src.trim();
+  if (citation.page && !citation.pageOutOfRange) return raw || citationChipLabel(citation);
+  const stripped = stripSourcePageLabels(raw);
+  let label = stripped || citation.title || 'Service manual';
+  if (citation.page && citation.pageOutOfRange && !/not in this copy/i.test(label)) {
+    label = `${label} (p. ${citation.page} not in this copy)`;
+  }
+  return label;
+}
+
+function applyKnownPageCount(
+  citations: ManualCitation[],
+  manualId: number | undefined,
+  pageCount: number | undefined
+): ManualCitation[] {
+  if (!pageCount || !manualId) return citations;
+  return citations.map((c) => {
+    if (c.manualId !== manualId) return c;
+    const pageOutOfRange = c.pageOutOfRange === true || (!!c.page && c.page > pageCount);
+    return {
+      ...c,
+      pdfPageCount: pageCount,
+      ...(pageOutOfRange ? { pageOutOfRange: true } : {}),
+    };
+  });
 }
 
 export function sourceLineMatchesCitation(source: string, citation: ManualCitation | undefined): boolean {
@@ -368,23 +460,43 @@ export function formatAssistantHtml(
   const fromMarkers = parseCitationMarkers(content);
   const citations = attachProsePages(mergeCitations(extra, fromMarkers), stripCitationMarkers(content));
   const scopedId = citations[0]?.manualId;
+  const pdfPages = scopedPdfPageCount(citations, scopedId);
   // Device name on the general-guidance first line only. Never rewrite the reply body.
   let body = humanizeGeneralGuidanceDisplay(stripCitationMarkers(content));
-  body = collapseDuplicateSourceLines(body);
+  body = collapseDuplicateSourceLines(body, citations);
   body = escapeHtml(body);
   body = body.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
   body = body.replace(/\[\[pdfpage:\d+\]\]/g, '');
+
+  // Hold Source lines so "Rev A, p. 166" stays one anchor. Page linking
+  // otherwise closes the link at the comma.
+  const heldSources: string[] = [];
+  if (citations.length) {
+    body = body.replace(
+      /(^|\n)([ \t]*(?:[—\-]\s*)?Source:\s*)([^\n]+)/gi,
+      (all, lead: string, prefix: string, src: string) => {
+        const primary = sourceLineCitation(src, citations);
+        if (!primary) return all;
+        const slot = heldSources.length;
+        heldSources.push(
+          `${lead}${prefix.replace(/\s+$/, ' ')}${viewerAnchor(primary, sourceLineLabel(src, primary))}`
+        );
+        return `\u0000S${slot}\u0000`;
+      }
+    );
+  }
 
   if (scopedId) {
     const fallback: ManualCitation = {
       manualId: scopedId,
       title: citations.find((c) => c.title)?.title,
     };
+    const pastCopy = (page: number | undefined) => !!pdfPages && !!page && page > pdfPages;
     body = body.replace(
       /\b((?:pages?|p\.?)\s*)(\d{1,4})(?!\d)\s*([-–—])\s*(\d{1,4})(?!\d)/gi,
       (all, prefix: string, num: string, dash: string, end: string) => {
         const page = asPositivePage(num);
-        if (!page || !hasPhysicalPageStamp([content, indexText], page)) return all;
+        if (!page || pastCopy(page) || !hasPhysicalPageStamp([content, indexText], page)) return all;
         const hit = citations.find((c) => c.page === page) || { ...fallback, page };
         return viewerAnchor(hit, `${prefix}${num}${dash}${end}`);
       }
@@ -394,9 +506,11 @@ export function formatAssistantHtml(
       (all, prefix: string, num: string) => {
       const page = asPositivePage(num);
       // A printed "page 7" stays plain unless a cite or stamp says that physical page.
-      // Do not retarget it at page 1 of a different open manual.
+      // A page past this PDF is not a deep link.
+      if (pastCopy(page)) return all;
       const physical = !!page && hasPhysicalPageStamp([content, indexText], page);
       const hit = page ? citations.find((c) => c.page === page) : undefined;
+      if (hit?.pageOutOfRange) return all;
       if (hit) return viewerAnchor(hit, `${prefix}${num}`);
       if (physical && page) return viewerAnchor({ ...fallback, page }, `${prefix}${num}`);
       return all;
@@ -410,11 +524,9 @@ export function formatAssistantHtml(
     );
   }
 
-  body = body.replace(/(^|\n|<br\/>)[—\-]\s*Source:\s*([^<\n]+)/gi, (_all, lead: string, src: string) => {
-    const primary = sourceLineCitation(src, citations);
-    if (!primary) return `${lead}— Source: ${src}`;
-    return `${lead}— Source: ${viewerAnchor(primary, src.trim() || citationChipLabel(primary))}`;
-  });
+  if (heldSources.length) {
+    body = body.replace(/\u0000S(\d+)\u0000/g, (_m, n: string) => heldSources[Number(n)] ?? '');
+  }
 
   if (citations.length) {
     const chips = citations
@@ -423,6 +535,16 @@ export function formatAssistantHtml(
       )
       .join(' · ');
     body += `<div class="ai-cite-row">${chips}</div>`;
+  }
+
+  if (pdfPages) {
+    const noted = new Set(
+      citations.filter((c) => c.page && c.pageOutOfRange).map((c) => c.page as number)
+    );
+    const past = pagesPastKnownCount(stripCitationMarkers(content), pdfPages).filter((page) => !noted.has(page));
+    if (past.length) {
+      body += `<div class="ai-cite-oor">${escapeHtml(`${past.map((page) => `p. ${page}`).join(', ')} not in this copy`)}</div>`;
+    }
   }
 
   return body.replace(/\n/g, '<br/>');
@@ -448,9 +570,18 @@ export function citationsForAssistantReply(
   const fromMeta = citationsFromMeta(meta, fallbackManualId ?? null);
   const metaId = Number(obj.manualId);
   const fallbackId = Number(fallbackManualId);
+  const pageCount = asPositivePage(obj.pageCount ?? obj.page_count);
+  const scopedManualId =
+    Number.isSafeInteger(metaId) && metaId > 0
+      ? metaId
+      : Number.isSafeInteger(fallbackId) && fallbackId > 0
+        ? fallbackId
+        : undefined;
   // Keep cites the server attributed to another catalog row (manual 5 while 110 is open).
   // Do not relabel those as the open manual. An empty list still must not invent one.
-  if (fromMeta.length) return attachProsePages(fromMeta, String(content || ''));
+  if (fromMeta.length) {
+    return applyKnownPageCount(attachProsePages(fromMeta, String(content || '')), scopedManualId, pageCount);
+  }
   // The viewer id alone must not invent a page-1 cite. That retargeted
   // Auriga source lines onto the open manual when the server had not scoped it.
   const serverConfirmed =
@@ -460,9 +591,10 @@ export function citationsForAssistantReply(
     (!Number.isSafeInteger(fallbackId) || fallbackId < 1 || fallbackId === metaId);
   if (!serverConfirmed) return [];
   const title = cleanSection(obj.manualLabel);
-  return attachProsePages(
-    [{ manualId: metaId, ...(title ? { title } : {}) }],
-    String(content || '')
+  return applyKnownPageCount(
+    attachProsePages([{ manualId: metaId, ...(title ? { title } : {}) }], String(content || '')),
+    scopedManualId,
+    pageCount
   );
 }
 
