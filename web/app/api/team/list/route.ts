@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { isPendingTeamInvite } from '@/lib/org-membership';
 import { listMemberUserIdsForOrg } from '@/lib/org-membership-server';
+import { rowFounderFlag } from '@/lib/team-remove';
 
 /**
  * GET /api/team/list
@@ -109,13 +110,24 @@ export async function GET(req: NextRequest) {
       .from('organization_memberships')
       .select('user_id, role, is_home')
       .eq('organization_id', orgId);
+    const { data: orgRow } = await admin
+      .from('organizations')
+      .select('created_by')
+      .eq('id', orgId)
+      .maybeSingle();
+    const organizationCreatedBy = orgRow?.created_by ? String(orgRow.created_by) : null;
     const roleByUser = new Map(
-      (orgRoles || []).map((r: any) => [r.user_id, { role: r.role, is_home: r.is_home }])
+      (orgRoles || []).map((r: any) => [r.user_id, { role: r.role, is_home: r.is_home, is_founder: r.is_founder, founder: r.founder }])
     );
     members = (members || []).map((m: any) => {
       const mem = roleByUser.get(m.id);
-      if (!mem) return m;
-      return { ...m, role: mem.role, is_home: mem.is_home };
+      const founder =
+        rowFounderFlag(mem) ||
+        rowFounderFlag(m) ||
+        (organizationCreatedBy != null && String(m.id) === organizationCreatedBy);
+      const next = mem ? { ...m, role: mem.role, is_home: mem.is_home } : { ...m };
+      if (founder) next.is_founder = true;
+      return next;
     });
 
     // All invites for this org (history + pending) — client RLS often hides these
@@ -136,6 +148,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({
       ok: true,
       organization_id: orgId,
+      organizationCreatedBy,
       members: members || [],
       pendingInvites,
       invites,

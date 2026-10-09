@@ -10,6 +10,7 @@ import { canAssignShopTestEquipment, isAdmin } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { teamInviteEmailError, teamInviteSentMessage } from '@/lib/team-invite';
 import { invitationIsOpen, INVITABLE_TEAM_ROLES, isPendingTeamInvite, teamMemberRoleChoices } from '@/lib/org-membership';
+import { RemoveTeamMemberButton } from '@/components/RemoveTeamMemberButton';
 
 function inviteListStatus(
   inv: {
@@ -38,6 +39,7 @@ export default function TeamManagement() {
   const [pendingInvites, setPendingInvites] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [orgId, setOrgId] = useState<number | string | null>(null);
+  const [orgCreatedBy, setOrgCreatedBy] = useState<string | null>(null);
   const [userId, setUserId] = useState<string | null>(null);
   const [userRole, setUserRole] = useState('');
   const [newMember, setNewMember] = useState({
@@ -118,6 +120,7 @@ export default function TeamManagement() {
           if (Array.isArray(json.members)) {
             setTeamMembers(json.members);
           }
+          setOrgCreatedBy(json.organizationCreatedBy ? String(json.organizationCreatedBy) : null);
           if (Array.isArray(json.pendingInvites)) {
             setPendingInvites(json.pendingInvites.filter((inv) => isPendingTeamInvite(inv)));
           }
@@ -468,13 +471,30 @@ export default function TeamManagement() {
                         : '—'}
                     </td>
                     <td className="py-3 px-4 text-right">
-                      {member.onboarding_completed !== true && member.email ? (
-                        <button
-                          type="button"
-                          className="btn btn-secondary text-xs"
-                          onClick={() => resendInvite(member.email, member.role)}
-                        >{t('Resend invite email')}</button>
-                      ) : null}
+                      <div className="flex flex-col items-end gap-1">
+                        {member.onboarding_completed !== true && member.email ? (
+                          <button
+                            type="button"
+                            className="btn btn-secondary text-xs"
+                            onClick={() => resendInvite(member.email, member.role)}
+                          >{t('Resend invite email')}</button>
+                        ) : null}
+                        {member.id ? (
+                          <RemoveTeamMemberButton
+                            memberId={String(member.id)}
+                            name={[member.first_name, member.last_name].filter(Boolean).join(' ') || member.email || ''}
+                            role={member.role}
+                            isFounder={member.is_founder === true || member.founder === true}
+                            callerId={userId}
+                            callerRole={
+                              teamMembers.find((row) => row.id && String(row.id) === String(userId))?.role ?? null
+                            }
+                            organizationId={orgId}
+                            orgCreatedBy={orgCreatedBy}
+                            onRemoved={fetchTeam}
+                          />
+                        ) : null}
+                      </div>
                     </td>
                   </tr>
                 ))}
