@@ -1419,6 +1419,12 @@ function gluedManualNumber(hay: string, term: string, at: number): boolean {
   return false
 }
 
+/** "Page 83 of 178" and "p. 83" are running labels, not the value 83. */
+function isRunningPageNumber(hay: string, at: number): boolean {
+  const before = hay.slice(Math.max(0, at - 20), at)
+  return /(?:^|[^a-z0-9])(?:page|pages|pp)\.?\s+$/.test(before) || /(?:^|[^a-z0-9])p\.\s*$/.test(before)
+}
+
 function collectHits(hay: string, term: string): number[] {
   const hits: number[] = []
   const numeric = /^\d+$/.test(term)
@@ -1427,7 +1433,7 @@ function collectHits(hay: string, term: string): number[] {
     const at = termAt(hay, term, from)
     if (at < 0) break
     from = at + Math.max(1, term.length)
-    if (numeric && gluedManualNumber(hay, term, at)) continue
+    if (numeric && (gluedManualNumber(hay, term, at) || isRunningPageNumber(hay, at))) continue
     hits.push(at)
   }
   return hits
@@ -1518,9 +1524,13 @@ function errorCodeBoost(
       if (errorRe.test(window)) add += 48
       if (hashRe.test(window)) add += 48
       if (/cw\s+laser/.test(window)) add += 36
-      for (const word of words) {
-        const wordHits = positions.get(word) || []
-        if (wordHits.some((where) => where >= winStart && where < winEnd)) add += 8
+      // Title words sit next to "Page 83" on every leaf. Only count them when
+      // the number is already an error, a #code, or CW Laser.
+      if (add > 0) {
+        for (const word of words) {
+          const wordHits = positions.get(word) || []
+          if (wordHits.some((where) => where >= winStart && where < winEnd)) add += 8
+        }
       }
       if (add > score) {
         score = add
@@ -1570,12 +1580,71 @@ function rarePhraseHit(
   return { bonus: 0, at: -1 }
 }
 
+function queryMentionsTransmission(terms: string[]): boolean {
+  return terms.some((term) => term === 'tx' || term.startsWith('transmiss'))
+}
+
+/**
+ * "If TX = <83%" is the threshold. A later cal-port table that only says
+ * "TX 83" or "Average Transmission", and a see-also that names another
+ * chapter, are not. Running footers never get here.
+ */
+function transmissionThresholdBoost(
+  hay: string,
+  terms: string[],
+  positions: Map<string, number[]>,
+  start: number,
+  end: number
+): { bonus: number; at: number } {
+  if (!queryMentionsTransmission(terms)) return { bonus: 0, at: -1 }
+  const wantsThreshold = terms.some((term) =>
+    /^(?:threshold|below|under|above|over|less|greater)$/.test(term)
+  )
+  let bonus = 0
+  let at = -1
+  const consider = (numAt: number, numLen: number, compared: boolean) => {
+    const winStart = Math.max(start, numAt - 90)
+    const winEnd = Math.min(end, numAt + numLen + 48)
+    const window = hay.slice(winStart, winEnd)
+    if (!/\btx\b/.test(window) && !/transmiss/.test(window)) return
+    let add = compared ? 48 : 32
+    if (/\bsee also\b/.test(hay.slice(Math.max(start, numAt - 90), Math.min(end, numAt + 32)))) add -= 48
+    if (add > bonus) {
+      bonus = add
+      at = numAt
+    }
+  }
+  for (const term of terms) {
+    if (!/^\d+$/.test(term)) continue
+    for (const hit of hitsOnSpan(positions.get(term) || [], start, end)) {
+      if (!/^\s*%/.test(hay.slice(hit + term.length, hit + term.length + 4))) continue
+      const before = hay.slice(Math.max(start, hit - 24), hit)
+      const compared = /[<>=]\s*$/.test(before) || /\b(?:below|under|above|over|less|greater)\b/.test(before)
+      consider(hit, term.length, compared)
+    }
+  }
+  // "transmission threshold" names no digits. The body still says "TX = <83%".
+  if (bonus <= 0 && wantsThreshold) {
+    const page = hay.slice(start, end)
+    const re = /[<>=]\s*(\d{1,3})\s*%/g
+    let match: RegExpExecArray | null
+    while ((match = re.exec(page))) {
+      const digits = match[1]
+      const numAt = start + match.index + match[0].lastIndexOf(digits)
+      consider(numAt, digits.length, true)
+    }
+  }
+  return { bonus, at }
+}
+
 /**
  * Anchor where the specific query terms cluster.
  * Error codes (#43, a bare 43 beside CW Laser, error 43) and multi-word phrases
  * outrank a brand word. Terms are weighted by how many pages they appear on.
- * A running header is not a phrase. An adjacent rare pair ("Maximum Fluence")
- * outranks a later page that only shares one of those words.
+ * A running header is not a phrase. "Page 83" is not the value 83.
+ * An adjacent rare pair ("Maximum Fluence") outranks a later page that only
+ * shares one of those words. A transmission percentage threshold ("TX = <83%")
+ * outranks a later weak "TX 83" or see-also.
  * Equal scores prefer the later hit so a contents line loses to the procedure.
  * Returns -1 when nothing in the query is present.
  */
@@ -1625,10 +1694,13 @@ function excerptAnchor(raw: string, query: string): number {
     if (chain.len >= 5) score += 24
     const phrase = rarePhraseHit(terms, positions, df, spans.length, span.start, span.end)
     score += phrase.bonus
+    const threshold = transmissionThresholdBoost(hay, terms, positions, span.start, span.end)
+    score += threshold.bonus
     const code = errorCodeBoost(hay, terms, positions, span.start, span.end)
     score += code.score
     let at = chain.len >= 3 && chain.at >= 0 ? chain.at : rareAt
     if (phrase.at >= 0) at = phrase.at
+    if (threshold.bonus >= 32 && threshold.at >= 0) at = threshold.at
     if (code.score >= 36 && code.at >= 0) at = code.at
     const head = hay.slice(span.start, Math.min(span.end, span.start + 48))
     const stamped = /\[\[pdfpage:\d{1,4}\]\]/.exec(head)
