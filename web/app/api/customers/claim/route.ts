@@ -13,11 +13,23 @@ import { verifyCustomerInvite } from '@/lib/customer-invite';
  * claims the org, or if this user already belongs to a different org.
  * A member already in this clinic becomes owner only when the owner slot is
  * empty and their signed-in email matches the invite. An existing owner blocks that.
+ *
+ * The owner slot is role owner, plus customer. customer is the legacy clinic
+ * holder (isOwnerish, and onboarding promotes it to owner). Claim writes owner.
+ * admin and company_admin are staff roles and can repeat inside one org, so
+ * they do not occupy this slot. A partial unique index on role = owner is the
+ * race backstop; a unique violation is 409.
  */
-const CLINIC_OWNER_SLOT_ROLES = new Set(['owner', 'customer', 'admin', 'company_admin']);
+export const CLINIC_OWNER_SLOT_ROLES = ['owner', 'customer'] as const;
 
 function holdsClinicOwnerSlot(role: unknown): boolean {
-  return CLINIC_OWNER_SLOT_ROLES.has(String(role || '').trim().toLowerCase());
+  return (CLINIC_OWNER_SLOT_ROLES as readonly string[]).includes(String(role || '').trim().toLowerCase());
+}
+
+function isUniqueOwnerViolation(error: { code?: string; message?: string } | null | undefined): boolean {
+  if (!error) return false;
+  if (String(error.code || '') === '23505') return true;
+  return /duplicate key|unique constraint/i.test(String(error.message || ''));
 }
 
 function isOwnerRole(role: unknown): boolean {
@@ -115,6 +127,39 @@ export async function runCustomerClaim(
       return NextResponse.json({ ok: false, claimed: false, error: 'This invite is not for a clinic profile.' }, { status: 400 });
     }
 
+    const saveOwnerRole = async (userId: string) => {
+      const updated = await writer
+        .from('user_profiles')
+        .update({ role: 'owner', onboarding_completed: true })
+        .eq('id', userId)
+        .select('id, role, organization_id')
+        .maybeSingle();
+      if (isUniqueOwnerViolation(updated.error)) {
+        return NextResponse.json(
+          {
+            ok: false,
+            claimed: false,
+            error: 'This company profile already has an owner account.',
+          },
+          { status: 409 }
+        );
+      }
+      if (updated.error) {
+        return NextResponse.json(
+          { ok: false, claimed: false, error: 'Could not update the clinic owner role.' },
+          { status: 503 }
+        );
+      }
+      const row = updated.data as { role?: string | null; organization_id?: string | number | null } | null;
+      if (!row || !isOwnerRole(row.role) || String(row.organization_id) !== String(org.id)) {
+        return NextResponse.json(
+          { ok: false, claimed: false, error: 'Clinic owner role was not saved.' },
+          { status: 500 }
+        );
+      }
+      return null;
+    };
+
     const { data: existingProf } = await writer
       .from('user_profiles')
       .select('id, organization_id, role, email')
@@ -128,10 +173,8 @@ export async function runCustomerClaim(
     // Re-claim by the person who is already owner stays a success and does not
     // look for a second owner. Writing role=owner here does not change the role.
     if (alreadyInThisOrg && isOwnerRole(existingProf?.role)) {
-      await writer
-        .from('user_profiles')
-        .update({ role: 'owner', onboarding_completed: true })
-        .eq('id', user.id);
+      const failed = await saveOwnerRole(user.id);
+      if (failed) return failed;
       return NextResponse.json({ ok: true, claimed: true, organizationId: org.id, alreadyLinked: true });
     }
 
@@ -146,11 +189,24 @@ export async function runCustomerClaim(
       );
     }
 
-    const { data: otherOwners } = await writer
+    const ownerLookup = await writer
       .from('user_profiles')
       .select('id, email, role')
       .eq('organization_id', org.id)
-      .limit(20);
+      .in('role', [...CLINIC_OWNER_SLOT_ROLES]);
+
+    if (ownerLookup.error) {
+      return NextResponse.json(
+        {
+          ok: false,
+          claimed: false,
+          error: 'Could not check who owns this clinic. Nothing was changed.',
+        },
+        { status: 503 }
+      );
+    }
+
+    const otherOwners = ownerLookup.data;
 
     const takenByOther = (otherOwners || []).some((row: { id?: string; email?: string | null; role?: string | null }) => {
       if (!row?.id || String(row.id) === String(user.id)) return false;
@@ -171,10 +227,8 @@ export async function runCustomerClaim(
     // Already linked, and nobody else holds the owner slot. Email was matched
     // above, same as a first claim. Promote this member; do not skip the check.
     if (alreadyInThisOrg) {
-      await writer
-        .from('user_profiles')
-        .update({ role: 'owner', onboarding_completed: true })
-        .eq('id', user.id);
+      const failed = await saveOwnerRole(user.id);
+      if (failed) return failed;
       return NextResponse.json({ ok: true, claimed: true, organizationId: org.id, alreadyLinked: true });
     }
 
@@ -192,6 +246,16 @@ export async function runCustomerClaim(
     };
 
     let { error: upErr } = await writer.from('user_profiles').upsert(upsert, { onConflict: 'id' });
+    if (isUniqueOwnerViolation(upErr)) {
+      return NextResponse.json(
+        {
+          ok: false,
+          claimed: false,
+          error: 'This company profile already has an owner account.',
+        },
+        { status: 409 }
+      );
+    }
     if (upErr) {
       const slim = {
         organization_id: org.id,
@@ -201,6 +265,16 @@ export async function runCustomerClaim(
       };
       const retry = await writer.from('user_profiles').update(slim).eq('id', user.id);
       upErr = retry.error;
+      if (isUniqueOwnerViolation(upErr)) {
+        return NextResponse.json(
+          {
+            ok: false,
+            claimed: false,
+            error: 'This company profile already has an owner account.',
+          },
+          { status: 409 }
+        );
+      }
     }
     if (upErr) {
       return NextResponse.json({ ok: false, claimed: false, error: upErr.message || 'Could not link profile.' }, { status: 500 });

@@ -1,7 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { readFileSync } from 'node:fs';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { NextRequest } from 'next/server';
-import { runCustomerClaim } from '../app/api/customers/claim/route.ts';
+import { CLINIC_OWNER_SLOT_ROLES, runCustomerClaim } from '../app/api/customers/claim/route.ts';
 import { signCustomerInvite } from './customer-invite.ts';
 
 type Profile = {
@@ -18,6 +21,14 @@ type Write = {
   role?: string;
 };
 
+type Lookup = {
+  table: string;
+  inRole: string[] | null;
+  limit: number | null;
+};
+
+type DbError = { message: string; code?: string };
+
 const CLINIC_ID = 42;
 
 function claimRequest(token: string) {
@@ -33,11 +44,20 @@ function claimRequest(token: string) {
 
 function fakeWriter(
   org: { id: number; name: string; email: string; type: string },
-  state: { profiles: Profile[]; writes: Write[] }
+  state: {
+    profiles: Profile[];
+    writes: Write[];
+    lookups: Lookup[];
+    ownerLookupError?: DbError | null;
+    updateError?: DbError | null;
+    uniqueViolation?: boolean;
+  }
 ) {
   return {
     from(table: string) {
       const filters: Record<string, unknown> = {};
+      let inRole: string[] | null = null;
+      let limitN: number | null = null;
       const api: Record<string, unknown> = {
         select() {
           return api;
@@ -46,7 +66,12 @@ function fakeWriter(
           filters[column] = value;
           return api;
         },
-        limit() {
+        in(column: string, values: unknown[]) {
+          if (column === 'role') inRole = values.map((value) => String(value));
+          return api;
+        },
+        limit(count: number) {
+          limitN = count;
           return api;
         },
         maybeSingle: async () => {
@@ -68,22 +93,74 @@ function fakeWriter(
           return { data: row, error: null };
         },
         update(patch: Record<string, unknown>) {
-          return {
+          const localFilters: Record<string, unknown> = {};
+          let applied = false;
+          let result: { data: Profile | null; error: DbError | null } = { data: null, error: null };
+          const run = () => {
+            if (applied) return result;
+            applied = true;
+            if (state.updateError) {
+              result = { data: null, error: state.updateError };
+              return result;
+            }
+            if (table !== 'user_profiles') {
+              result = { data: null, error: null };
+              return result;
+            }
+            const row = state.profiles.find((profile) => String(profile.id) === String(localFilters.id));
+            if (!row) {
+              result = { data: null, error: null };
+              return result;
+            }
+            if (state.uniqueViolation && patch.role === 'owner' && row.role !== 'owner') {
+              result = {
+                data: null,
+                error: {
+                  code: '23505',
+                  message: 'duplicate key value violates unique constraint "user_profiles_one_owner_per_organization"',
+                },
+              };
+              return result;
+            }
+            Object.assign(row, patch);
+            state.writes.push({
+              op: 'update',
+              id: String(localFilters.id),
+              role: typeof patch.role === 'string' ? patch.role : undefined,
+            });
+            result = { data: { ...row }, error: null };
+            return result;
+          };
+          const chain: Record<string, unknown> = {
             eq(column: string, value: unknown) {
-              if (table === 'user_profiles' && column === 'id') {
-                const row = state.profiles.find((profile) => String(profile.id) === String(value));
-                if (row) Object.assign(row, patch);
-                state.writes.push({
-                  op: 'update',
-                  id: String(value),
-                  role: typeof patch.role === 'string' ? patch.role : undefined,
-                });
-              }
-              return Promise.resolve({ error: null });
+              localFilters[column] = value;
+              return chain;
+            },
+            select() {
+              return chain;
+            },
+            maybeSingle: async () => run(),
+            then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
+              return Promise.resolve(run()).then(onFulfilled, onRejected);
             },
           };
+          return chain;
         },
         upsert(row: Profile) {
+          if (state.uniqueViolation && row.role === 'owner') {
+            const existing = state.profiles.find((profile) => profile.id === row.id);
+            const alreadyOwner =
+              existing?.role === 'owner' && String(existing.organization_id) === String(row.organization_id);
+            if (!alreadyOwner) {
+              return Promise.resolve({
+                data: null,
+                error: {
+                  code: '23505',
+                  message: 'duplicate key value violates unique constraint "user_profiles_one_owner_per_organization"',
+                },
+              });
+            }
+          }
           const existing = state.profiles.find((profile) => profile.id === row.id);
           if (existing) Object.assign(existing, row);
           else state.profiles.push({ ...row });
@@ -91,7 +168,11 @@ function fakeWriter(
           return Promise.resolve({ error: null });
         },
         then(onFulfilled: (value: unknown) => unknown, onRejected?: (reason: unknown) => unknown) {
-          const rows = state.profiles.filter((profile) => {
+          state.lookups.push({ table, inRole: inRole ? [...inRole] : null, limit: limitN });
+          if (state.ownerLookupError && table === 'user_profiles' && filters.id == null) {
+            return Promise.resolve({ data: null, error: state.ownerLookupError }).then(onFulfilled, onRejected);
+          }
+          let rows = state.profiles.filter((profile) => {
             if (
               filters.organization_id != null &&
               String(profile.organization_id) !== String(filters.organization_id)
@@ -100,6 +181,11 @@ function fakeWriter(
             }
             return true;
           });
+          if (inRole) {
+            const allowed = new Set(inRole.map((role) => role.toLowerCase()));
+            rows = rows.filter((profile) => allowed.has(String(profile.role || '').toLowerCase()));
+          }
+          if (limitN != null) rows = rows.slice(0, limitN);
           return Promise.resolve({ data: rows, error: null }).then(onFulfilled, onRejected);
         },
       };
@@ -113,6 +199,9 @@ async function postClaim(opts: {
   email: string;
   inviteEmail?: string;
   profiles: Profile[];
+  ownerLookupError?: DbError | null;
+  updateError?: DbError | null;
+  uniqueViolation?: boolean;
 }) {
   const previous = {
     url: process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -125,6 +214,10 @@ async function postClaim(opts: {
   const state = {
     profiles: opts.profiles.map((profile) => ({ ...profile })),
     writes: [] as Write[],
+    lookups: [] as Lookup[],
+    ownerLookupError: opts.ownerLookupError,
+    updateError: opts.updateError,
+    uniqueViolation: opts.uniqueViolation,
   };
   try {
     const token = signCustomerInvite({
@@ -161,7 +254,13 @@ async function postClaim(opts: {
       organizationId?: string | number;
       error?: string;
     };
-    return { status: response.status, body, profiles: state.profiles, writes: state.writes };
+    return {
+      status: response.status,
+      body,
+      profiles: state.profiles,
+      writes: state.writes,
+      lookups: state.lookups,
+    };
   } finally {
     if (previous.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
     else process.env.NEXT_PUBLIC_SUPABASE_URL = previous.url;
@@ -284,4 +383,150 @@ test('re-claim by the existing owner succeeds without adding another owner', asy
     result.writes.every((write) => write.id === 'owner-user' && write.role === 'owner'),
     true
   );
+});
+
+test('an owner lookup error returns 503 and does not write', async () => {
+  const result = await postClaim({
+    userId: 'new-user',
+    email: 'new@clinic.test',
+    profiles: [{ id: 'new-user', organization_id: null, role: null, email: 'new@clinic.test' }],
+    ownerLookupError: { message: 'connection reset' },
+  });
+
+  assert.equal(result.status, 503);
+  assert.notEqual(result.body.ok, true);
+  assert.equal(result.body.claimed, false);
+  assert.match(result.body.error || '', /nothing was changed/i);
+  assert.equal(result.writes.length, 0);
+  const claimer = result.profiles.find((profile) => profile.id === 'new-user');
+  assert.equal(claimer?.role, null);
+  assert.equal(claimer?.organization_id, null);
+});
+
+test('owner lookup filters owner roles, has no row cap, and ignores non-owner roles', async () => {
+  assert.deepEqual([...CLINIC_OWNER_SLOT_ROLES], ['owner', 'customer']);
+
+  const staff = Array.from({ length: 20 }, (_, index) => ({
+    id: `fse-${index}`,
+    organization_id: CLINIC_ID,
+    role: 'fse',
+    email: `fse-${index}@clinic.test`,
+  }));
+  const blocked = await postClaim({
+    userId: 'new-user',
+    email: 'new@clinic.test',
+    profiles: [
+      ...staff,
+      { id: 'late-owner', organization_id: CLINIC_ID, role: 'owner', email: 'late@clinic.test' },
+      { id: 'new-user', organization_id: null, role: null, email: 'new@clinic.test' },
+    ],
+  });
+  assert.equal(blocked.status, 409);
+  assert.equal(blocked.body.claimed, false);
+  assert.equal(
+    blocked.writes.some((write) => write.role === 'owner' && write.id === 'new-user'),
+    false
+  );
+  const ownerLookup = blocked.lookups.find((lookup) => lookup.table === 'user_profiles');
+  assert.ok(ownerLookup);
+  assert.equal(ownerLookup.limit, null);
+  assert.deepEqual(ownerLookup.inRole, ['owner', 'customer']);
+
+  const legacyCustomer = await postClaim({
+    userId: 'new-user',
+    email: 'new@clinic.test',
+    profiles: [
+      ...staff,
+      { id: 'legacy', organization_id: CLINIC_ID, role: 'customer', email: 'legacy@clinic.test' },
+      { id: 'new-user', organization_id: null, role: null, email: 'new@clinic.test' },
+    ],
+  });
+  assert.equal(legacyCustomer.status, 409);
+  assert.equal(legacyCustomer.profiles.find((profile) => profile.id === 'new-user')?.role, null);
+
+  const staffOnly = await postClaim({
+    userId: 'new-user',
+    email: 'new@clinic.test',
+    profiles: [
+      ...staff,
+      { id: 'admin-a', organization_id: CLINIC_ID, role: 'admin', email: 'admin-a@clinic.test' },
+      { id: 'admin-b', organization_id: CLINIC_ID, role: 'admin', email: 'admin-b@clinic.test' },
+      { id: 'lead', organization_id: CLINIC_ID, role: 'company_admin', email: 'lead@clinic.test' },
+      { id: 'new-user', organization_id: null, role: null, email: 'new@clinic.test' },
+    ],
+  });
+  assert.equal(staffOnly.status, 200);
+  assert.equal(staffOnly.body.ok, true);
+  assert.equal(staffOnly.profiles.find((profile) => profile.id === 'new-user')?.role, 'owner');
+  assert.equal(staffOnly.profiles.filter((profile) => profile.role === 'owner').length, 1);
+  const openLookup = staffOnly.lookups.find((lookup) => lookup.table === 'user_profiles');
+  assert.equal(openLookup?.limit, null);
+  assert.deepEqual(openLookup?.inRole, ['owner', 'customer']);
+});
+
+test('a failed role update is not a successful claim', async () => {
+  const result = await postClaim({
+    userId: 'member-user',
+    email: 'member@clinic.test',
+    profiles: [
+      { id: 'member-user', organization_id: CLINIC_ID, role: 'fse', email: 'member@clinic.test' },
+    ],
+    updateError: { message: 'write failed' },
+  });
+
+  assert.notEqual(result.status, 200);
+  assert.equal(result.status, 503);
+  assert.notEqual(result.body.ok, true);
+  assert.equal(result.body.claimed, false);
+  const member = result.profiles.find((profile) => profile.id === 'member-user');
+  assert.equal(member?.role, 'fse');
+});
+
+test('a unique owner conflict during claim is 409 and does not succeed', async () => {
+  const result = await postClaim({
+    userId: 'new-user',
+    email: 'new@clinic.test',
+    profiles: [{ id: 'new-user', organization_id: null, role: null, email: 'new@clinic.test' }],
+    uniqueViolation: true,
+  });
+
+  assert.equal(result.status, 409);
+  assert.notEqual(result.body.ok, true);
+  assert.equal(result.body.claimed, false);
+  assert.match(result.body.error || '', /already has an owner/i);
+  const claimer = result.profiles.find((profile) => profile.id === 'new-user');
+  assert.notEqual(claimer?.role, 'owner');
+  assert.equal(
+    result.writes.some((write) => write.role === 'owner'),
+    false
+  );
+});
+
+test('one-owner migration is unapplied SQL with a matching rollback', () => {
+  const here = dirname(fileURLToPath(import.meta.url));
+  const dir = join(here, '../supabase/migrations');
+  const name = '20261009_000903_one_clinic_owner_and_invite_auth_user.sql';
+  const sql = readFileSync(join(dir, name), 'utf8');
+  const rollback = readFileSync(join(dir, name.replace(/\.sql$/, '_rollback.sql')), 'utf8');
+  const firstSql = sql
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .split('\n')
+    .filter((line) => !line.trim().startsWith('--'))
+    .join('\n')
+    .trim()
+    .split(';')[0]
+    .trim();
+  assert.equal(firstSql, "SET LOCAL lock_timeout = '5s'");
+  assert.doesNotMatch(sql, /\bCONCURRENTLY\b/i);
+  assert.doesNotMatch(sql, /\bCOMMIT\b/i);
+  assert.match(sql, /CREATE UNIQUE INDEX IF NOT EXISTS user_profiles_one_owner_per_organization/);
+  assert.match(sql, /ON public\.user_profiles \(organization_id\)/);
+  assert.match(sql, /WHERE role = 'owner'/);
+  assert.doesNotMatch(sql, /WHERE role IN/);
+  assert.doesNotMatch(sql, /WHERE role = 'admin'/);
+  assert.match(sql, /ADD COLUMN IF NOT EXISTS created_auth_user_id uuid/);
+  assert.match(sql, /REVOKE SELECT \(created_auth_user_id\)/);
+  assert.match(rollback, /DROP INDEX IF EXISTS public\.user_profiles_one_owner_per_organization/);
+  assert.match(rollback, /DROP COLUMN IF EXISTS created_auth_user_id/);
+  assert.match(rollback, /SET LOCAL lock_timeout = '5s'/);
 });

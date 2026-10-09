@@ -14,7 +14,7 @@ import {
   canAccessCompanyProfile,
 } from '@/lib/roles';
 import { ownerDetailsLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
-import { invitationIsOpen } from '@/lib/org-membership';
+import { invitationIsOpen, isPendingTeamInvite } from '@/lib/org-membership';
 import { teamInviteSentMessage } from '@/lib/team-invite';
 import { useSiteLocale, useT } from '@/lib/fa/locale';
 import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalog';
@@ -295,7 +295,9 @@ function CompanyProfile() {
         if (listRes.ok) {
           const json = await listRes.json();
           if (Array.isArray(json.members)) setMembers(json.members);
-          if (Array.isArray(json.pendingInvites)) setPendingInvites(json.pendingInvites);
+          if (Array.isArray(json.pendingInvites)) {
+            setPendingInvites(json.pendingInvites.filter((inv: Parameters<typeof isPendingTeamInvite>[0]) => isPendingTeamInvite(inv)));
+          }
           if (Array.isArray(json.invites)) setInviteHistory(json.invites);
           return;
         } else {
@@ -357,7 +359,7 @@ function CompanyProfile() {
         .eq('organization_id', orgId)
         .eq('accepted', false)
         .order('created_at', { ascending: false });
-      setPendingInvites(invs || []);
+      setPendingInvites((invs || []).filter((inv) => isPendingTeamInvite(inv)));
       setInviteHistory(invs || []);
     } catch {
       /* ignore */
@@ -402,16 +404,12 @@ function CompanyProfile() {
         body: JSON.stringify({ email, role: role || 'fse', resend: true }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || 'Resend failed');
-      if (json.emailed) {
-        toast.success(json.message || teamInviteSentMessage(email), { duration: 15000 });
-      } else {
-        toast.error(
-          json.message ||
-            `Invitation saved for ${email}, but the email could not be sent. No link was issued. Try again.`,
-          { duration: 15000 }
+      if (!res.ok || json.ok === false || !json.emailed) {
+        throw new Error(
+          json.error || json.message || `Could not email the invite to ${email}. No link was created. Try again.`
         );
       }
+      toast.success(json.message || teamInviteSentMessage(email), { duration: 15000 });
       await loadTeamMembers(org.id);
     } catch (e: any) {
       toast.error(e?.message || 'Resend failed', { duration: 15000 });
@@ -607,23 +605,21 @@ function CompanyProfile() {
         }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || 'Invite failed');
-
-      if (json.emailed) {
-        toast.success(json.message || teamInviteSentMessage(em), { duration: 15000 });
-      } else {
-        toast.error(
-          json.message ||
-            `Invitation saved for ${em}, but the email could not be sent. No link was issued. Try again.`,
-          { duration: 15000 }
+      if (!res.ok || json.ok === false || !json.emailed) {
+        throw new Error(
+          json.error || json.message || `Could not email the invite to ${em}. No link was created. Try again.`
         );
       }
+
+      toast.success(json.message || teamInviteSentMessage(em), { duration: 15000 });
       await loadTeamMembers(org.id);
+      setNewTeam({ email: '', fullName: '', role: 'fse', additional: [], title: '', contact: '', timeZone: 'America/New_York', yearsExp: '', territories: '', competencies: '' });
+      setAddMessage('');
     } catch (e: any) {
-      toast.error('Add failed: ' + (e.message || e), { duration: 15000 });
+      const message = e?.message || 'Invite failed';
+      setAddMessage(message);
+      toast.error('Add failed: ' + message, { duration: 15000 });
     }
-    setNewTeam({ email: '', fullName: '', role: 'fse', additional: [], title: '', contact: '', timeZone: 'America/New_York', yearsExp: '', territories: '', competencies: '' });
-    setAddMessage('');
   }
 
   function toggleNewTeamAddl(r: string) {
@@ -1021,11 +1017,14 @@ function CompanyProfile() {
 
             <div id="team-section" className="card p-6">
               <h2 className="font-bold mb-4">{t('Team Members & Roles')}</h2>
-              <p className="text-xs text-[var(--text3)] mb-3">Add or assign people to roles in this RSP org. Creator/admin changeable but always keep &gt;=1 admin. Use invites for new signups (they sign up first using org tiles or login, then get claimed/assigned here).</p>
+              <p className="text-xs text-[var(--text3)] mb-3">Add or assign people to roles in this RSP org. Creator/admin changeable but always keep &gt;=1 admin.</p>
               <div id="team-invite" className="team-invite-panel mb-4">
                 <h3 className="font-semibold mb-1">{t('Invite a teammate')}</h3>
                 <p className="text-xs text-[var(--text3)] mb-3">
                   {t('This invite form is separate from Company Details. It does not change the organization email.')}
+                </p>
+                <p className="text-xs text-[var(--text3)] mb-3">
+                  {t('The invite is emailed to them. They sign in with that address to join.')}
                 </p>
                 <div className="space-y-2 text-sm">
                   <div>
@@ -1069,7 +1068,6 @@ function CompanyProfile() {
                   </div>
                   <button onClick={addTeamMember} className="btn btn-primary text-sm w-full">{t('Add / Link by Email (or create invite)')}</button>
                   {addMessage && <div className="text-xs text-[var(--text3)]">{addMessage}</div>}
-                  <div className="text-[10px] text-[var(--text3)]">{t('Existing account? Assigned immediately. New? Invitation record created (they sign up using 3 org tiles or login, then claim on signin).')}</div>
                 </div>
               </div>
 
@@ -1161,7 +1159,7 @@ function CompanyProfile() {
                           type="button"
                           className="btn btn-secondary text-xs self-start"
                           onClick={() => resendInviteEmail(inv.email, inv.role)}
-                        >{t('Resend / copy link')}</button>
+                        >{t('Resend email')}</button>
                       </li>
                     ))}
                   </ul>

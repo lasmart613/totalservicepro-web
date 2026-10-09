@@ -227,16 +227,6 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'Adicionar ou vincular por e-mail (ou criar convite)',
     'إضافة أو ربط بالبريد (أو إنشاء دعوة)',
   ),
-  'Existing account? Assigned immediately. New? Invitation record created (they sign up using 3 org tiles or login, then claim on signin).': row(
-    'حساب موجود است؟ همان لحظه تخصیص می‌یابد. تازه است؟ یک دعوت ساخته می‌شود (با یکی از سه کاشی سازمان یا ورود ثبت‌نام می‌کنند و هنگام ورود آن را می‌گیرند).',
-    '¿Ya tiene cuenta? Se asigna al momento. ¿Nueva? Se crea una invitación (se registran con las fichas de organización o el acceso y la reclaman al entrar).',
-    'Compte existant ? Affectation immédiate. Nouveau ? Une invitation est créée (inscription via les tuiles d’organisation ou la connexion, puis réclamation à l’entrée).',
-    'יש כבר חשבון? השיוך מיידי. חדש? נוצרת הזמנה (נרשמים דרך אריחי הארגון או הכניסה, ואז תובעים בכניסה).',
-    'Account già presente? Assegnazione immediata. Nuovo? Si crea un invito (si registrano dalle schede organizzazione o dall’accesso e lo reclamano all’ingresso).',
-    'Konto schon da? Sofort zugewiesen. Neu? Eine Einladung wird angelegt (Anmeldung über die Organisationskacheln oder den Login, danach beim Anmelden übernehmen).',
-    'Já tem conta? A atribuição é imediata. Nova? Um convite é criado (cadastram-se pelos cartões da organização ou pelo login e reivindicam ao entrar).',
-    'حساب موجود؟ يُعيَّن فوراً. جديد؟ يُنشأ سجل دعوة (يسجّلون عبر بطاقات المنظمة أو الدخول ثم يطالبون بها عند الدخول).',
-  ),
   'Current Team': row(
     'تیم فعلی',
     'Equipo actual',
@@ -466,16 +456,6 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'Einladung erneut senden',
     'Reenviar e-mail de convite',
     'إعادة إرسال دعوة البريد',
-  ),
-  'Resend / copy link': row(
-    'ارسال دوباره / کپی پیوند',
-    'Reenviar o copiar enlace',
-    'Renvoyer ou copier le lien',
-    'שליחה חוזרת או העתקת קישור',
-    'Reinvia o copia link',
-    'Erneut senden oder Link kopieren',
-    'Reenviar ou copiar link',
-    'إعادة الإرسال أو نسخ الرابط',
   ),
   'Open invites only. After someone joins they appear on Current Team, not here.': row(
     'فقط دعوت‌های باز. پس از پیوستن، در تیم فعلی دیده می‌شوند نه اینجا.',

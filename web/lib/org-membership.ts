@@ -73,6 +73,26 @@ export function invitationIsOpen(
   return Number.isFinite(created) && created > now - INVITE_NULL_EXPIRY_MS;
 }
 
+/**
+ * Still waiting on the invitee. Accepted, expired, and revoked rows are not pending.
+ * There is no revoked column today; a revoked flag or status is excluded when present.
+ */
+export function isPendingTeamInvite(
+  row: {
+    accepted?: boolean | null;
+    expires_at?: string | null;
+    created_at?: string | null;
+    revoked?: boolean | null;
+    status?: string | null;
+  },
+  now = Date.now()
+): boolean {
+  if (row.revoked === true) return false;
+  const status = String(row.status || '').trim().toLowerCase();
+  if (status === 'accepted' || status === 'expired' || status === 'revoked') return false;
+  return invitationIsOpen(row, now);
+}
+
 export type InviteDecision =
   | {
       action: 'already_on_team';

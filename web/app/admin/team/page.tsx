@@ -9,7 +9,7 @@ import { TestEquipmentRoster } from '@/components/TestEquipmentRoster';
 import { canAssignShopTestEquipment, isAdmin } from '@/lib/roles';
 import { roleLabel } from '@/lib/labels';
 import { teamInviteEmailError, teamInviteSentMessage } from '@/lib/team-invite';
-import { invitationIsOpen } from '@/lib/org-membership';
+import { invitationIsOpen, isPendingTeamInvite } from '@/lib/org-membership';
 
 function inviteListStatus(
   inv: {
@@ -130,7 +130,7 @@ export default function TeamManagement() {
             setTeamMembers(json.members);
           }
           if (Array.isArray(json.pendingInvites)) {
-            setPendingInvites(json.pendingInvites);
+            setPendingInvites(json.pendingInvites.filter((inv) => isPendingTeamInvite(inv)));
           }
           if (Array.isArray(json.members) || Array.isArray(json.pendingInvites)) {
             setLoading(false);
@@ -160,7 +160,7 @@ export default function TeamManagement() {
       .eq('accepted', false)
       .order('created_at', { ascending: false });
 
-    setPendingInvites(invites || []);
+    setPendingInvites((invites || []).filter((inv) => isPendingTeamInvite(inv)));
     setLoading(false);
   };
 
@@ -200,20 +200,16 @@ export default function TeamManagement() {
       });
 
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        throw new Error(json.error || 'Failed to invite team member');
-      }
-
       const inviteEmail = newMember.email;
-      if (json.emailed) {
-        toast.success(json.message || teamInviteSentMessage(inviteEmail), { duration: 15000 });
-      } else {
-        toast.error(
-          json.message ||
-            `Invitation saved for ${inviteEmail}, but the email could not be sent. No link was issued. Try again.`,
-          { duration: 15000 }
+      if (!res.ok || json.ok === false || !json.emailed) {
+        throw new Error(
+          json.error ||
+            json.message ||
+            `Could not email the invite to ${inviteEmail}. No link was created. Try again.`
         );
       }
+
+      toast.success(json.message || teamInviteSentMessage(inviteEmail), { duration: 15000 });
 
       setNewMember({
         email: '',
@@ -272,16 +268,12 @@ export default function TeamManagement() {
         body: JSON.stringify({ email, role: role || 'fse', resend: true }),
       });
       const json = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(json.error || 'Resend failed');
-      if (json.emailed) {
-        toast.success(json.message || teamInviteSentMessage(email), { duration: 15000 });
-      } else {
-        toast.error(
-          json.message ||
-            `Invitation saved for ${email}, but the email could not be sent. No link was issued. Try again.`,
-          { duration: 15000 }
+      if (!res.ok || json.ok === false || !json.emailed) {
+        throw new Error(
+          json.error || json.message || `Could not email the invite to ${email}. No link was created. Try again.`
         );
       }
+      toast.success(json.message || teamInviteSentMessage(email), { duration: 15000 });
       await fetchTeam();
     } catch (e: any) {
       toast.error(e.message || 'Resend failed', { duration: 15000 });

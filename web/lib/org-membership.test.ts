@@ -9,6 +9,7 @@ import {
   decideInviteForExistingProfile,
   decideSwitch,
   invitationIsOpen,
+  isPendingTeamInvite,
   inviteMustNotLeaveHome,
   isFounderLockedRole,
   isOnOrgRoster,
@@ -194,6 +195,31 @@ test('invite route no longer 409s just because the email already has an org', ()
     /already belongs to another organization\. Ask them to leave that org first/
   );
   assert.doesNotMatch(source, /status: 409/);
+});
+
+test('pending invites are only open unaccepted rows', () => {
+  const now = Date.parse('2026-10-09T12:00:00.000Z');
+  const open = { accepted: false, expires_at: '2026-10-16T00:00:00.000Z', created_at: '2026-10-08T00:00:00.000Z' };
+  assert.equal(isPendingTeamInvite(open, now), true);
+  assert.equal(isPendingTeamInvite({ ...open, accepted: true }, now), false);
+  assert.equal(isPendingTeamInvite({ ...open, expires_at: '2026-10-01T00:00:00.000Z' }, now), false);
+  assert.equal(isPendingTeamInvite({ ...open, revoked: true }, now), false);
+  assert.equal(isPendingTeamInvite({ ...open, status: 'revoked' }, now), false);
+  assert.equal(isPendingTeamInvite({ ...open, status: 'accepted' }, now), false);
+
+  const here = dirname(fileURLToPath(import.meta.url));
+  const list = readFileSync(join(here, '../app/api/team/list/route.ts'), 'utf8');
+  assert.match(list, /isPendingTeamInvite/);
+  assert.doesNotMatch(list, /onboarding_completed !== true/);
+  const admin = readFileSync(join(here, '../app/admin/team/page.tsx'), 'utf8');
+  const company = readFileSync(join(here, '../app/company/page.tsx'), 'utf8');
+  assert.match(admin, /isPendingTeamInvite/);
+  assert.match(company, /isPendingTeamInvite/);
+  assert.match(company, /The invite is emailed to them\. They sign in with that address to join\./);
+  assert.doesNotMatch(company, /Resend \/ copy link/);
+  assert.doesNotMatch(company, /they sign up first/);
+  assert.doesNotMatch(company, /Existing account\? Assigned immediately/);
+  assert.doesNotMatch(readFileSync(join(here, './i18n/gap-copy.ts'), 'utf8'), /Resend \/ copy link/);
 });
 
 test('GET /api/team/list does not enroll people or mark invites accepted', () => {
