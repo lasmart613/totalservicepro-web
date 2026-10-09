@@ -219,10 +219,12 @@ async function postTeamClaimRequest(
 
 /**
  * POST /api/team/claim.
- * Automatic sign-in calls (no inviteId) share one in-flight promise and then
- * a sessionStorage result keyed by user id plus "auto", so login, home, and
- * onboarding do not each hit the network. A body.inviteId is a fresh invite
- * accept and is not served from that auto cache.
+ * Automatic sign-in calls (no inviteId) share one in-flight promise.
+ * Only an ok:true result is written to sessionStorage as
+ * tsp-team-claim:<userId>:auto, so login, home, and onboarding share that
+ * success. A failure (for example a transient 503) is not stored; the next
+ * call retries. Concurrent callers still share the in-flight promise.
+ * A body.inviteId is a fresh invite accept and is not served from that auto cache.
  */
 export async function postTeamClaim(
   accessToken: string,
@@ -235,7 +237,14 @@ export async function postTeamClaim(
 
   if (!opts?.fresh && !explicitInvite) {
     const stored = readStoredClaim(key);
-    if (stored) return stored;
+    if (stored?.ok === true) return stored;
+    if (stored) {
+      try {
+        claimSession()?.removeItem(CLAIM_STORAGE_PREFIX + key);
+      } catch {
+        /* ignore */
+      }
+    }
   }
 
   const existing = claimInFlight.get(key);
@@ -243,7 +252,7 @@ export async function postTeamClaim(
 
   const promise = postTeamClaimRequest(accessToken, body)
     .then((result) => {
-      if (!explicitInvite) writeStoredClaim(key, result);
+      if (!explicitInvite && result.ok === true) writeStoredClaim(key, result);
       return result;
     })
     .finally(() => {

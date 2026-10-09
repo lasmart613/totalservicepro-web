@@ -5,7 +5,12 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { claimPendingInvitations, getSupabaseClient } from '@/lib/supabase/client';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
-import { claimCustomerInvite, clearStaleClaimToken, ownerSignupAfterClaim } from '@/lib/customer-invite-client';
+import {
+  claimCustomerInvite,
+  clearStaleClaimToken,
+  clinicClaimSignInRoute,
+  refusedClaimLoginHref,
+} from '@/lib/customer-invite-client';
 import { inviteInPlay, resetTeamClaimDedupeForSignIn, type InviteClaimResult } from '@/lib/invite-claim';
 import { callbackDest, profileOrgId } from '@/lib/no-org-route';
 import { isTspAndroidWebView } from '@/lib/android-session';
@@ -151,20 +156,20 @@ function AuthCallbackInner() {
           const claimed = sessionData.session?.access_token
             ? await claimCustomerInvite(sessionData.session.access_token, claimToken)
             : { claimed: false, error: 'Sign in required to claim this clinic profile.' };
-          const next = ownerSignupAfterClaim({
-            fromClaimLink: true,
+          const route = clinicClaimSignInRoute({
             claimed: !!claimed.claimed,
             error: claimed.error,
           });
-          if (next.action === 'claimed') {
+          if (route.kind === 'company') {
             if (cancelled) return;
             setMessage('Clinic profile claimed. Continuing…');
-            router.replace('/company?justSetup=1');
+            router.replace(route.dest);
             return;
           }
           await clearStaleClaimToken(supabase);
           if (cancelled) return;
-          setMessage(next.action === 'show-error' ? next.message : 'This clinic invite could not be claimed. A new organization was not created.');
+          setMessage(route.message);
+          router.replace(refusedClaimLoginHref(route.message));
           return;
         }
 

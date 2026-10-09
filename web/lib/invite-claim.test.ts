@@ -175,9 +175,11 @@ test('a failed clinic claim does not create a new organization', () => {
 
   const callback = readFileSync(join(here, '../app/auth/callback/page.tsx'), 'utf8');
   const callbackClaim = callback.slice(callback.indexOf('if (claimToken)'), callback.indexOf('const pending = inviteInPlay'));
-  assert.match(callbackClaim, /ownerSignupAfterClaim/);
+  assert.match(callbackClaim, /clinicClaimSignInRoute/);
+  assert.match(callbackClaim, /refusedClaimLoginHref/);
   assert.match(callbackClaim, /clearStaleClaimToken/);
   assert.doesNotMatch(callbackClaim, /applyPendingSignup/);
+  assert.doesNotMatch(callbackClaim, /\/company\?justSetup=1/);
 
   const helper = readFileSync(join(here, './customer-invite-client.ts'), 'utf8');
   assert.match(helper, /clearPendingSignup\(\)/);

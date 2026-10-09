@@ -28,6 +28,22 @@ export type FounderResult = {
   status?: number;
 };
 
+/**
+ * POST /api/org/founder links the caller only to an organization they created.
+ * A claimed clinic has a different created_by, so the company page must skip
+ * that call. The founder flow (this page just inserted the org) still posts.
+ */
+export function shouldPostFounderOrganization(input: {
+  callerId?: string | null;
+  createdBy?: string | null;
+  founderFlow?: boolean;
+}): boolean {
+  if (input.founderFlow) return true;
+  const caller = String(input.callerId || '').trim();
+  const createdBy = String(input.createdBy || '').trim();
+  return caller.length > 0 && createdBy === caller;
+}
+
 export async function postFounderOrganization(
   accessToken: string,
   body: FounderRequest
