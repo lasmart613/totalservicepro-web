@@ -25,6 +25,7 @@ import {
   teamInviteSubject,
 } from '@/lib/team-invite';
 import { publicSiteOrigin } from '@/lib/site-origin';
+import { setupLinkRedirect } from '@/lib/auth-link-route';
 
 const ADMIN_ROLES = new Set([
   'admin',
@@ -199,7 +200,6 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
     const jobTitle = (body.jobTitle || '').trim() || null;
     const orgId = profile.organization_id;
     const base = publicSiteOrigin(req);
-    const redirectTo = `${base}/auth/callback?next=${encodeURIComponent('/auth/set-password')}`;
     const roleLabel = teamInviteRoleLabel(inviteRole);
 
     const serviceRoleReady = deps.hasServiceRole ?? hasServiceRole;
@@ -433,7 +433,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
           type: 'invite',
           email,
           options: {
-            redirectTo,
+            redirectTo: setupLinkRedirect(base, 'invite'),
             data: inviteMeta,
           },
         });
@@ -453,7 +453,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
           type: linkType,
           email,
           options: {
-            redirectTo,
+            redirectTo: setupLinkRedirect(base, linkType),
             data: inviteMeta,
           },
         } as never);
