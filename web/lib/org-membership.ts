@@ -294,6 +294,31 @@ export function decideClaim(input: {
   };
 }
 
+/**
+ * Whether accepting a team invite should make that org the only home.
+ * A first membership becomes home. An existing home stays (moonlight), except
+ * when the active org is an empty company this user created at or after the
+ * invite — that shop was founder onboarding by mistake, and the inviting
+ * company becomes home. Empty means no other members, no customers, and no
+ * service tickets. A shop with any of those stays home. Joining a second org
+ * does not move home otherwise. Omitting activeOrgIsEmpty fails closed.
+ */
+export function teamClaimMovesHome(input: {
+  hasMembership: boolean;
+  activeOrgCreatedByCaller: boolean;
+  activeOrgCreatedAt?: string | null;
+  inviteCreatedAt?: string | null;
+  activeOrgIsEmpty?: boolean;
+}): boolean {
+  if (!input.hasMembership) return true;
+  if (!input.activeOrgCreatedByCaller) return false;
+  if (input.activeOrgIsEmpty !== true) return false;
+  const inviteAt = input.inviteCreatedAt ? new Date(input.inviteCreatedAt).getTime() : 0;
+  const orgAt = input.activeOrgCreatedAt ? new Date(input.activeOrgCreatedAt).getTime() : 0;
+  if (!Number.isFinite(inviteAt) || !Number.isFinite(orgAt)) return false;
+  return orgAt >= inviteAt;
+}
+
 export function canLeaveMembership(input: {
   leaving: MembershipSnapshot;
   remainingAfterLeave: MembershipSnapshot[];

@@ -60,9 +60,26 @@ export async function upsertMembership(
     organizationId: number | string;
     role?: string | null;
     isHome?: boolean;
+    /** With isHome, also point user_profiles at this org in the same transaction. */
+    syncProfile?: boolean;
   }
 ): Promise<{ ok: boolean; error?: string }> {
   const role = membershipRoleForInvite(input.role);
+  if (input.isHome) {
+    const organizationId = Number(input.organizationId);
+    if (!Number.isFinite(organizationId)) {
+      return { ok: false, error: 'Organization is required.' };
+    }
+    const { error } = await admin.rpc('set_home_membership', {
+      p_user_id: input.userId,
+      p_organization_id: organizationId,
+      p_role: role,
+      p_sync_profile: input.syncProfile === true,
+    });
+    if (error) return { ok: false, error: error.message };
+    return { ok: true };
+  }
+
   const { data: existing } = await admin
     .from('organization_memberships')
     .select('user_id, organization_id, role, is_home')
@@ -165,11 +182,13 @@ export async function applyInviteToExistingUser(
     return { ok: true, linked: true, moonlight: false, message: decision.message };
   }
 
+  const isHome = decision.action === 'attach_first_org' ? decision.isHome : false;
   const added = await upsertMembership(admin, {
     userId: input.userId,
     organizationId: input.inviteOrgId,
-    role: decision.action === 'attach_first_org' ? decision.role : decision.role,
-    isHome: decision.action === 'attach_first_org' ? decision.isHome : false,
+    role: decision.role,
+    isHome,
+    syncProfile: isHome,
   });
   if (!added.ok) return { ok: false, error: added.error };
 

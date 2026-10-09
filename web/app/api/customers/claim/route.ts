@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { isOwnerOrgType } from '@/lib/org-types';
 import { verifyCustomerInvite } from '@/lib/customer-invite';
@@ -35,6 +35,33 @@ function isUniqueOwnerViolation(error: { code?: string; message?: string } | nul
 
 function isOwnerRole(role: unknown): boolean {
   return String(role || '').trim().toLowerCase() === 'owner';
+}
+
+async function setClinicHome(
+  writer: SupabaseClient,
+  userId: string,
+  orgId: string | number
+): Promise<NextResponse | null> {
+  const organizationId = Number(orgId);
+  if (!Number.isFinite(organizationId)) {
+    return NextResponse.json(
+      { ok: false, claimed: false, error: 'Could not set this clinic as your home organization.' },
+      { status: 500 }
+    );
+  }
+  const { error } = await writer.rpc('set_home_membership', {
+    p_user_id: userId,
+    p_organization_id: organizationId,
+    p_role: 'owner',
+    p_sync_profile: true,
+  });
+  if (error) {
+    return NextResponse.json(
+      { ok: false, claimed: false, error: 'Could not set this clinic as your home organization.' },
+      { status: 503 }
+    );
+  }
+  return null;
 }
 
 type ClaimUserClient = {
@@ -193,6 +220,8 @@ export async function runCustomerClaim(
     if (alreadyInThisOrg && isOwnerRole(existingProf?.role)) {
       const failed = await saveOwnerRole(user.id);
       if (failed) return failed;
+      const homeError = await setClinicHome(writer, user.id, org.id);
+      if (homeError) return homeError;
       return NextResponse.json({ ok: true, claimed: true, organizationId: org.id, alreadyLinked: true });
     }
 
@@ -247,6 +276,8 @@ export async function runCustomerClaim(
     if (alreadyInThisOrg) {
       const failed = await saveOwnerRole(user.id);
       if (failed) return failed;
+      const homeError = await setClinicHome(writer, user.id, org.id);
+      if (homeError) return homeError;
       return NextResponse.json({ ok: true, claimed: true, organizationId: org.id, alreadyLinked: true });
     }
 
@@ -307,6 +338,9 @@ export async function runCustomerClaim(
     if (!check?.organization_id || String(check.organization_id) !== String(org.id)) {
       return NextResponse.json({ ok: false, claimed: false, error: 'Profile did not link to the company.' }, { status: 500 });
     }
+
+    const homeError = await setClinicHome(writer, user.id, org.id);
+    if (homeError) return homeError;
 
     return NextResponse.json({ ok: true, claimed: true, organizationId: org.id });
   } catch (e: any) {
