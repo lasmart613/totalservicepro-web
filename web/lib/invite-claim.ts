@@ -97,7 +97,107 @@ export function routeAfterTeamClaim(
   return destAfterInviteClaim(claim, fallback);
 }
 
-export async function postTeamClaim(
+const CLAIM_STORAGE_PREFIX = 'tsp-team-claim:';
+
+type ClaimCallOptions = {
+  /** Skip the sign-in cache and ask the server again (Finish, before creating an org). */
+  fresh?: boolean;
+  /** Profile id when the access token is not a JWT. */
+  userId?: string;
+};
+
+const claimInFlight = new Map<string, Promise<InviteClaimResult>>();
+
+function claimSession(): Storage | null {
+  try {
+    if (typeof sessionStorage === 'undefined') return null;
+    return sessionStorage;
+  } catch {
+    return null;
+  }
+}
+
+/** Auth user id from the access token, for the sessionStorage key. */
+export function userIdFromAccessToken(token: string): string {
+  const parts = String(token || '').split('.');
+  if (parts.length >= 2) {
+    try {
+      const b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      const padded = b64 + '='.repeat((4 - (b64.length % 4)) % 4);
+      const payload = JSON.parse(atob(padded)) as { sub?: string };
+      if (payload.sub) return String(payload.sub);
+    } catch {
+      /* not a JWT */
+    }
+  }
+  return `tok:${String(token || '').slice(0, 24)}`;
+}
+
+function claimDedupeKey(userId: string, body?: Record<string, unknown>): string {
+  const inviteId = body?.inviteId;
+  const invite = inviteId == null || String(inviteId) === '' ? 'auto' : `invite:${inviteId}`;
+  return `${userId}:${invite}`;
+}
+
+function readStoredClaim(key: string): InviteClaimResult | null {
+  const store = claimSession();
+  if (!store) return null;
+  try {
+    const raw = store.getItem(CLAIM_STORAGE_PREFIX + key);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as InviteClaimResult;
+    if (!parsed || typeof parsed !== 'object') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredClaim(key: string, result: InviteClaimResult): void {
+  const store = claimSession();
+  if (!store) return;
+  try {
+    store.setItem(CLAIM_STORAGE_PREFIX + key, JSON.stringify(result));
+  } catch {
+    /* private mode */
+  }
+}
+
+function deleteStoredPrefix(prefix: string): void {
+  const store = claimSession();
+  if (!store) return;
+  const keys: string[] = [];
+  for (let i = 0; i < store.length; i++) {
+    const storageKey = store.key(i);
+    if (storageKey && storageKey.startsWith(prefix)) keys.push(storageKey);
+  }
+  for (const storageKey of keys) store.removeItem(storageKey);
+}
+
+/** Drop every cached team claim. Call on sign-out so the next sign-in can join a fresh invite. */
+export function clearTeamClaimDedupe(): void {
+  claimInFlight.clear();
+  deleteStoredPrefix(CLAIM_STORAGE_PREFIX);
+}
+
+/**
+ * Forget this sign-in's cached auto-claim before login, the auth callback,
+ * or set-password runs. Home and onboarding then share the one new result.
+ * An explicit inviteId accept is not stored under the auto key.
+ */
+export function resetTeamClaimDedupeForSignIn(accessToken: string, userId?: string): void {
+  const id = userId || userIdFromAccessToken(accessToken);
+  const autoKey = `${id}:auto`;
+  claimInFlight.delete(autoKey);
+  const store = claimSession();
+  try {
+    store?.removeItem(CLAIM_STORAGE_PREFIX + autoKey);
+  } catch {
+    /* ignore */
+  }
+}
+
+async function postTeamClaimRequest(
   accessToken: string,
   body?: Record<string, unknown>
 ): Promise<InviteClaimResult> {
@@ -115,4 +215,41 @@ export async function postTeamClaim(
     ok: res.ok && json.ok !== false,
     status: res.status,
   };
+}
+
+/**
+ * POST /api/team/claim.
+ * Automatic sign-in calls (no inviteId) share one in-flight promise and then
+ * a sessionStorage result keyed by user id plus "auto", so login, home, and
+ * onboarding do not each hit the network. A body.inviteId is a fresh invite
+ * accept and is not served from that auto cache.
+ */
+export async function postTeamClaim(
+  accessToken: string,
+  body?: Record<string, unknown>,
+  opts?: ClaimCallOptions
+): Promise<InviteClaimResult> {
+  const userId = opts?.userId || userIdFromAccessToken(accessToken);
+  const key = claimDedupeKey(userId, body);
+  const explicitInvite = key.endsWith(':auto') === false;
+
+  if (!opts?.fresh && !explicitInvite) {
+    const stored = readStoredClaim(key);
+    if (stored) return stored;
+  }
+
+  const existing = claimInFlight.get(key);
+  if (existing && !opts?.fresh) return existing;
+
+  const promise = postTeamClaimRequest(accessToken, body)
+    .then((result) => {
+      if (!explicitInvite) writeStoredClaim(key, result);
+      return result;
+    })
+    .finally(() => {
+      if (claimInFlight.get(key) === promise) claimInFlight.delete(key);
+    });
+
+  claimInFlight.set(key, promise);
+  return promise;
 }

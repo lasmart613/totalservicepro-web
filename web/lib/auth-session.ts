@@ -6,6 +6,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { clearTeamClaimDedupe } from '@/lib/invite-claim';
 import { clearPendingSignup } from '@/lib/pending-signup';
 import { FINANCIAL_REPORTING_API } from '@/lib/financial-reporting-access';
 import { JOB_COSTING_API } from '@/lib/job-costing-access';
@@ -25,6 +26,7 @@ export function hasBrowserAuthHint(): boolean {
 
 export function clearBrowserIdentityArtifacts() {
   clearPendingSignup();
+  clearTeamClaimDedupe();
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.removeItem(AUTH_STORAGE_KEY);

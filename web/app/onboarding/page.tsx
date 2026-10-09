@@ -17,7 +17,8 @@ import { displayModelName } from '@/lib/model-display';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { applyPendingSignup, ensureOrganizationMembership, resolvePendingSignup } from '@/lib/pending-signup';
 import { postFounderOrganization } from '@/lib/org-founder-client';
-import { destAfterInviteClaim, inviteInPlay, postTeamClaim, shouldSendToMemberOnboarding } from '@/lib/invite-claim';
+import { destAfterInviteClaim, inviteInPlay, postTeamClaim, type InviteClaimResult } from '@/lib/invite-claim';
+import { onboardingLeaveTarget } from '@/lib/no-org-route';
 import {
   missingComplimentaryColumn,
   stripUnbackedComplimentaryPremium,
@@ -116,14 +117,12 @@ export default function Onboarding() {
 
       // Invitees who used Forgot password often land here as "founders".
       // Claim first so they join the inviting org instead of creating a new one.
+      // The sign-in cache makes this a read when login or the callback already claimed.
+      let claimJson: InviteClaimResult | null = null;
       try {
         const { data: { session } } = await supabase.auth.getSession();
         if (session?.access_token) {
-          const claimJson = await postTeamClaim(session.access_token);
-          if (shouldSendToMemberOnboarding(claimJson)) {
-            router.replace(destAfterInviteClaim(claimJson, '/onboarding/member'));
-            return;
-          }
+          claimJson = await postTeamClaim(session.access_token);
         }
       } catch (e) {
         console.warn('onboarding claim invite', e);
@@ -135,28 +134,17 @@ export default function Onboarding() {
         .eq('id', user.id)
         .maybeSingle();
 
-      // Intended: already-onboarded users (org + flag) skip this wizard.
-      // New service orgs keep onboarding_completed=false until Finish (see pending-signup).
-      // Owners/suppliers with a linked org should not be trapped here if the flag did not persist.
-      if (profile?.organization_id) {
-        const orgTypeNow = profile.organizations?.type;
-        const r = String(profile.role || '').toLowerCase();
-        if (isOwnerish(profile.role, orgTypeNow)) {
-          router.replace('/my-lasers');
-          return;
-        }
-        if (isSupplier(profile.role, orgTypeNow)) {
-          router.replace('/');
-          return;
-        }
-        if (profile.onboarding_completed) {
-          if (['fse', 'engineer', 'dispatcher', 'scheduler'].includes(r)) {
-            router.replace('/hub');
-          } else {
-            router.replace('/company');
-          }
-          return;
-        }
+      // No organization_id and no active org: render this wizard.
+      // A claim that did not attach an org must not send the user back to /.
+      // A claim that did attach an org leaves once, to member setup or the usual page.
+      const leave = onboardingLeaveTarget({
+        profile,
+        orgType: profile?.organizations?.type ?? null,
+        claim: claimJson,
+      });
+      if (leave) {
+        router.replace(leave);
+        return;
       }
 
       const meta = user.user_metadata || {};
@@ -499,7 +487,7 @@ export default function Onboarding() {
     try {
       const { data: { session } } = await supabase.auth.getSession();
       if (session?.access_token) {
-        const claimJson = await postTeamClaim(session.access_token);
+        const claimJson = await postTeamClaim(session.access_token, undefined, { fresh: true });
         if (inviteInPlay(claimJson)) {
           router.replace(destAfterInviteClaim(claimJson, '/onboarding/member'));
           return;
@@ -813,7 +801,7 @@ export default function Onboarding() {
       try {
         const { data: { session: afterSession } } = await supabase.auth.getSession();
         if (afterSession?.access_token) {
-          await postTeamClaim(afterSession.access_token);
+          await postTeamClaim(afterSession.access_token, undefined, { fresh: true });
         }
       } catch (e) {
         console.warn('onboarding post-save claim invite', e);
