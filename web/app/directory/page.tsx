@@ -257,11 +257,11 @@ export default function DirectoryPage() {
       source = myClinics.slice();
     } else {
       source = allListed.filter((o) => {
-        const t = String(o.type || '').toLowerCase();
-        if (filter === 'service') return isServiceOrgType(t) || t === 'service';
-        if (filter === 'reseller') return t === 'laser_reseller';
-        if (filter === 'rental') return t === 'laser_rental';
-        if (filter === 'supplier') return t === 'parts_supplier' || t === 'vendor';
+        const orgKind = String(o.type || '').toLowerCase();
+        if (filter === 'service') return isServiceOrgType(orgKind) || orgKind === 'service';
+        if (filter === 'reseller') return orgKind === 'laser_reseller';
+        if (filter === 'rental') return orgKind === 'laser_rental';
+        if (filter === 'supplier') return orgKind === 'parts_supplier' || orgKind === 'vendor';
         return true;
       });
     }

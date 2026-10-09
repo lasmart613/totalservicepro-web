@@ -227,9 +227,9 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
           kpiError = tErr.message;
         } else {
           const list = tickets || [];
-          openTickets = list.filter((t) => !isClosedTicketStatus(t.status)).length;
+          openTickets = list.filter((ticket) => !isClosedTicketStatus(ticket.status)).length;
           todayCalls = list.filter(
-            (t) => ticketDateYmd(t.service_date, zone.timeZone) === today && !isClosedTicketStatus(t.status)
+            (ticket) => ticketDateYmd(ticket.service_date, zone.timeZone) === today && !isClosedTicketStatus(ticket.status)
           ).length;
           setUpcoming(upcomingOpenTickets(list, today, 5, zone.timeZone));
         }
@@ -689,24 +689,24 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
                   </div>
                 ) : (
                   <ul>
-                    {upcoming.map((t) => (
-                      <li key={t.id} className="border-b border-[var(--border)] last:border-0">
+                    {upcoming.map((ticket) => (
+                      <li key={ticket.id} className="border-b border-[var(--border)] last:border-0">
                         <div className="px-5 py-3 hover:bg-[var(--surface3)]">
                           <Link
-                            href={`/service-tickets/${t.id}`}
+                            href={`/service-tickets/${ticket.id}`}
                             className="block"
                             onClick={(ev) => ev.stopPropagation()}
                           >
                             <div className="font-semibold">
-                              {(t.service_type || 'Service') + ' — ' + (t.customer_name || 'Customer')}
+                              {(ticket.service_type || 'Service') + ' — ' + (ticket.customer_name || 'Customer')}
                             </div>
                             <div className="text-xs text-[var(--text3)] mt-0.5">
-                              {ticketDateYmd(t.service_date, docZone)}
-                              {t.scheduled_time ? ` · ${String(t.scheduled_time).slice(0, 5)}` : ''}
+                              {ticketDateYmd(ticket.service_date, docZone)}
+                              {ticket.scheduled_time ? ` · ${String(ticket.scheduled_time).slice(0, 5)}` : ''}
                             </div>
                           </Link>
                           <TicketAddressLink
-                            ticket={t}
+                            ticket={ticket}
                             className="text-xs mt-1 inline-block underline text-[var(--gold)]"
                           />
                         </div>
