@@ -170,14 +170,16 @@ function AuthCallbackInner() {
             setMessage('Creating your organization…');
             const applied = await applyPendingSignup(supabase, user.id, pending);
             if (cancelled) return;
-            const dest = applied.dest || '/onboarding';
-            if (wantApp) {
-              await maybeHandoffToAndroid(supabase, dest, setAppHandoff, setMessage);
-              if (cancelled) return;
+            if (!applied.blockedClaim && applied.orgId) {
+              const dest = applied.dest || '/onboarding';
+              if (wantApp) {
+                await maybeHandoffToAndroid(supabase, dest, setAppHandoff, setMessage);
+                if (cancelled) return;
+              }
+              setMessage('Signed in! Continuing setup…');
+              router.replace(dest);
+              return;
             }
-            setMessage('Signed in! Continuing setup…');
-            router.replace(dest);
-            return;
           } catch (setupErr: any) {
             console.warn('pending signup apply', setupErr);
             setMessage(

@@ -19,19 +19,20 @@ export const CLAIM_INVITE_UNUSED =
   "This invite couldn't be used. Ask the shop that invited you to send a new invite, or sign in with the email the invite was sent to.";
 
 /**
- * Drop a failed clinic claim so the next sign-in does not read it again.
- * Storage is cleared first. Auth metadata is a merge, so the key is set to null.
+ * Drop the browser copy of a failed clinic claim.
+ * Auth metadata is cleared on the server (service role) inside
+ * /api/customers/claim. refreshSession picks that up for this tab.
  */
 export async function clearStaleClaimToken(supabase: {
   auth: {
-    updateUser: (attrs: { data: { claim_token: null } }) => Promise<unknown>;
+    refreshSession?: () => Promise<unknown>;
   };
 }): Promise<void> {
   clearPendingSignup();
   try {
-    await supabase.auth.updateUser({ data: { claim_token: null } });
+    await supabase.auth.refreshSession?.();
   } catch {
-    /* storage is already clear */
+    /* storage is already clear; the next sign-in reads server metadata */
   }
 }
 

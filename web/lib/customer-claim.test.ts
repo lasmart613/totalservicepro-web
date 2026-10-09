@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { NextRequest } from 'next/server';
 import { CLINIC_OWNER_SLOT_ROLES, runCustomerClaim } from '../app/api/customers/claim/route.ts';
+import { CLAIM_SIGNUP_METADATA_KEYS } from './claim-signup-metadata.ts';
 import { runCustomerInvite } from '../app/api/customers/invite/route.ts';
 import { signCustomerInvite } from './customer-invite.ts';
 
@@ -217,6 +218,8 @@ async function postClaim(opts: {
   updateError?: DbError | null;
   uniqueViolation?: boolean;
   homeError?: DbError | null;
+  userMetadata?: Record<string, unknown>;
+  token?: string;
 }) {
   const previous = {
     url: process.env.NEXT_PUBLIC_SUPABASE_URL,
@@ -236,12 +239,15 @@ async function postClaim(opts: {
     updateError: opts.updateError,
     uniqueViolation: opts.uniqueViolation,
   };
+  const metadataClears: Array<{ userId: string; patch: Record<string, null> }> = [];
   try {
-    const token = signCustomerInvite({
-      orgId: String(CLINIC_ID),
-      email: opts.inviteEmail ?? opts.email,
-      name: 'North Clinic',
-    });
+    const token =
+      opts.token ??
+      signCustomerInvite({
+        orgId: String(CLINIC_ID),
+        email: opts.inviteEmail ?? opts.email,
+        name: 'North Clinic',
+      });
     const response = await runCustomerClaim(claimRequest(token), {
       hasServiceRole: () => true,
       getWriter: () =>
@@ -254,6 +260,9 @@ async function postClaim(opts: {
           },
           state
         ) as never,
+      clearClaimSignupMetadata: async (userId, patch) => {
+        metadataClears.push({ userId, patch });
+      },
       createUserClient: () => ({
         auth: {
           getUser: async () => ({
@@ -261,7 +270,7 @@ async function postClaim(opts: {
               user: {
                 id: opts.userId,
                 email: opts.email,
-                user_metadata: { first_name: 'Ada', last_name: 'Clinic' },
+                user_metadata: opts.userMetadata ?? { first_name: 'Ada', last_name: 'Clinic' },
               },
             },
             error: null,
@@ -283,6 +292,7 @@ async function postClaim(opts: {
       writes: state.writes,
       lookups: state.lookups,
       homeCalls: state.homeCalls,
+      metadataClears,
     };
   } finally {
     if (previous.url === undefined) delete process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -710,4 +720,91 @@ test('one-owner migration is unapplied SQL with a matching rollback', () => {
   assert.match(rollback, /DROP INDEX IF EXISTS public\.user_profiles_one_owner_per_organization/);
   assert.match(rollback, /DROP COLUMN IF EXISTS created_auth_user_id/);
   assert.match(rollback, /SET LOCAL lock_timeout = '5s'/);
+});
+
+const CLAIM_SIGNUP_META = {
+  signup_kind: 'owner',
+  signup_type: 'claim',
+  role: 'owner',
+  organization_type: 'customer',
+  company: 'QA TEST 238 Clinic 1026',
+  facility: 'QA TEST 238 Clinic 1026',
+  claim_token: 'live-token',
+  facility_type: 'Clinic',
+  phone: '555',
+  address: '1 Main',
+  city: 'Ventura',
+  state: 'CA',
+  preferred_services: 'PM',
+  job_title: 'Owner',
+  first_name: 'QATEST238',
+  last_name: 'ClinicD',
+};
+
+test('a failed claim clears claim-signup metadata and a successful claim does not', async () => {
+  const refused = await postClaim({
+    userId: 'claimer',
+    email: 'claimer@clinic.test',
+    inviteEmail: 'other@clinic.test',
+    userMetadata: CLAIM_SIGNUP_META,
+    profiles: [{ id: 'claimer', organization_id: null, role: null, email: 'claimer@clinic.test' }],
+  });
+  assert.equal(refused.status, 403);
+  assert.equal(refused.body.claimed, false);
+  assert.equal(refused.metadataClears.length, 1);
+  assert.equal(refused.metadataClears[0].userId, 'claimer');
+  for (const key of CLAIM_SIGNUP_METADATA_KEYS) {
+    assert.equal(refused.metadataClears[0].patch[key], null, key);
+  }
+  assert.equal('first_name' in refused.metadataClears[0].patch, false);
+  assert.equal(refused.writes.length, 0);
+
+  const invalid = await postClaim({
+    userId: 'claimer',
+    email: 'claimer@clinic.test',
+    token: 'not-a-claim-token',
+    userMetadata: CLAIM_SIGNUP_META,
+    profiles: [{ id: 'claimer', organization_id: null, role: null, email: 'claimer@clinic.test' }],
+  });
+  assert.equal(invalid.status, 400);
+  assert.equal(invalid.metadataClears.length, 1);
+
+  const taken = await postClaim({
+    userId: 'claimer',
+    email: 'claimer@clinic.test',
+    userMetadata: CLAIM_SIGNUP_META,
+    profiles: [
+      { id: 'owner-user', organization_id: CLINIC_ID, role: 'owner', email: 'owner@clinic.test' },
+      { id: 'claimer', organization_id: null, role: null, email: 'claimer@clinic.test' },
+    ],
+  });
+  assert.equal(taken.status, 409);
+  assert.equal(taken.metadataClears.length, 1);
+  assert.equal(taken.writes.some((write) => write.id === 'claimer'), false);
+
+  const company = await postClaim({
+    userId: 'founder',
+    email: 'founder@shop.test',
+    inviteEmail: 'other@clinic.test',
+    userMetadata: {
+      signup_kind: 'company',
+      role: 'company_admin',
+      organization_type: 'service_company',
+      company: 'QA TEST 245 Founder 1210',
+    },
+    profiles: [{ id: 'founder', organization_id: null, role: null, email: 'founder@shop.test' }],
+  });
+  assert.equal(company.status, 403);
+  assert.equal(company.metadataClears.length, 0);
+
+  const claimed = await postClaim({
+    userId: 'claimer',
+    email: 'claimer@clinic.test',
+    userMetadata: CLAIM_SIGNUP_META,
+    profiles: [{ id: 'claimer', organization_id: null, role: null, email: 'claimer@clinic.test' }],
+  });
+  assert.equal(claimed.status, 200);
+  assert.equal(claimed.body.claimed, true);
+  assert.equal(claimed.metadataClears.length, 0);
+  assert.equal(String(claimed.body.organizationId), String(CLINIC_ID));
 });
