@@ -29,6 +29,9 @@ import {
   selectedManualContext,
   WHOLE_PDF_ATTACH_MAX_BYTES,
   wholePdfAttachAllowed,
+  excerptFaultCodeAnchor,
+  excerptSpanScoreScale,
+  faultCodeTokens,
   type PdfAttachStat,
 } from './manual-scope.ts'
 import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
@@ -39,6 +42,7 @@ import {
   modelSuffixConflict,
   passageOwnedBySelected,
   reconcilePhysicalPage,
+  resolveQuotedCitationPage,
   storedPageCount,
   type CatalogCiteRow,
   type CitationAttributionScope,
@@ -564,13 +568,35 @@ export function formatCitationLine(citations: ManualCitation[], fallback = ''): 
   return `\n\n— Source: ${labels.join('; ')}\n${markers}`
 }
 
+export type ProsePageScope = {
+  indexText?: string
+  query?: string
+  pageCount?: number
+  manualId?: number
+  /** Letter-prefixed tokens from the manual label (M22). Not fault codes. */
+  ignoreCodes?: string[]
+}
+
+/** Chapter or section on one stamped page. A see-also that names two chapters is not the heading. */
+function sectionForPhysicalPage(raw: string, page: number): string | undefined {
+  const marker = `[[pdfpage:${page}]]`
+  const at = String(raw || '').indexOf(marker)
+  if (at < 0) return undefined
+  return sectionOnCitedPage(raw, at + marker.length)
+}
+
 /**
- * Model prose ("troubleshooting table on page 7-8") names PRINTED page labels.
- * Those may stay in the answer text but never become a citation page= value —
- * citation pages come only from the [[pdfpage:N]] stamp before the matched
- * excerpt (or xAI page_number). Returns the citations unchanged (deduped).
+ * Citation pages come from the stamped index. A page the answer names
+ * ("p. 147", "pp. 88–89") replaces that page only when it is inside pageCount
+ * and that page's text contains the fault code or the matched terms.
+ * An out-of-range quote, or a page that lacks the code and the terms, is ignored.
+ * Printed labels with no index to check stay off the citation.
  */
-export function attachProsePages(citations: ManualCitation[], _text: string): ManualCitation[] {
+export function attachProsePages(
+  citations: ManualCitation[],
+  text: string,
+  scope?: ProsePageScope
+): ManualCitation[] {
   if (!citations.length) return []
   const seen = new Set<string>()
   const out: ManualCitation[] = []
@@ -580,7 +606,29 @@ export function attachProsePages(citations: ManualCitation[], _text: string): Ma
     seen.add(key)
     out.push(c)
   }
-  return out.slice(0, 8)
+  const indexText = String(scope?.indexText || '')
+  const quoted =
+    indexText && scope?.query
+      ? resolveQuotedCitationPage({
+          answer: text,
+          indexText,
+          query: scope.query,
+          pageCount: scope.pageCount,
+          ignoreCodes: scope.ignoreCodes,
+        })
+      : undefined
+  if (quoted == null) return out.slice(0, 8)
+  const section = sectionForPhysicalPage(indexText, quoted)
+  const retargeted = out.map((c) => {
+    if (scope?.manualId != null && c.manualId !== scope.manualId) return c
+    if (c.page === quoted && !c.page_out_of_range) return c
+    const next: ManualCitation = { ...c, page: quoted }
+    delete next.page_out_of_range
+    if (section) next.section = section
+    else delete next.section
+    return next
+  })
+  return retargeted.slice(0, 8)
 }
 
 /** Stamped manual_search_index excerpt leads context and owns the page cites. */
@@ -1647,9 +1695,12 @@ function transmissionThresholdBoost(
  * shares one of those words. A transmission percentage threshold ("TX = <83%")
  * outranks a later weak "TX 83" or see-also.
  * Equal scores prefer the later hit so a contents line loses to the procedure.
+ * A fault code (F14.1, not F14.10) is cited on the page that contains that token.
+ * Spare-parts leaves are down-ranked for fault and troubleshooting questions
+ * unless the question is about parts.
  * Returns -1 when nothing in the query is present.
  */
-function excerptAnchor(raw: string, query: string): number {
+function excerptAnchor(raw: string, query: string, ignoreCodes?: string[]): number {
   const hay = String(raw || '').toLowerCase()
   const terms = excerptQueryTerms(query)
   if (!hay || !terms.length) return -1
@@ -1672,6 +1723,7 @@ function excerptAnchor(raw: string, query: string): number {
 
   let bestScore = -1
   let bestAt = -1
+  const scoreByStart = new Map<number, number>()
   for (const span of spans) {
     let score = 0
     let rareAt = -1
@@ -1709,11 +1761,15 @@ function excerptAnchor(raw: string, query: string): number {
       at = Math.min(span.end - 1, span.start + stamped.index + stamped[0].length)
     }
     if (at < span.start) at = span.start
+    scoreByStart.set(span.start, score)
+    score *= excerptSpanScoreScale(query, hay.slice(span.start, span.end), ignoreCodes)
     if (score > bestScore || (score === bestScore && at > bestAt)) {
       bestScore = score
       bestAt = at
     }
   }
+  const faultAt = excerptFaultCodeAnchor(hay, query, spans, scoreByStart, ignoreCodes)
+  if (faultAt >= 0) return faultAt
   return bestAt < 0 || bestScore <= 0 ? -1 : bestAt
 }
 
@@ -1726,10 +1782,10 @@ function lastPhysicalPageStamp(text: string): number | undefined {
 }
 
 /** Inlined so a raw-GitHub bootstrap still pages index excerpts. Keep in sync with web manual-scope.ts. Physical PDF index only — never a printed "page 7-8" label. */
-function indexedExcerptPage(raw: string, query: string): number | undefined {
+function indexedExcerptPage(raw: string, query: string, ignoreCodes?: string[]): number | undefined {
   const text = String(raw || '')
   if (!text) return undefined
-  const at = excerptAnchor(text, query)
+  const at = excerptAnchor(text, query, ignoreCodes)
   if (at < 0) return undefined
   const before = text.slice(0, at)
   const stamped = lastPhysicalPageStamp(before)
@@ -1760,21 +1816,21 @@ function sectionOnCitedPage(raw: string, at: number): string | undefined {
   return extractSectionRef(kept)
 }
 
-function indexedExcerptSection(raw: string, query: string): string | undefined {
+function indexedExcerptSection(raw: string, query: string, ignoreCodes?: string[]): string | undefined {
   const text = String(raw || '')
   if (!text) return undefined
-  const at = excerptAnchor(text, query)
+  const at = excerptAnchor(text, query, ignoreCodes)
   const window = text.slice(Math.max(0, at - 1500), at + 400)
   const sect = window.match(/\b(?:section|sect\.?|§)\s*([0-9]+(?:\.[0-9]+){0,3})\b/i)
   return sect?.[1] || undefined
 }
 
-function excerptIndexedManualText(text: string, query: string, maxChars = 8000): string {
+function excerptIndexedManualText(text: string, query: string, maxChars = 8000, ignoreCodes?: string[]): string {
   const raw = String(text || '')
   const body = raw.replace(/\[\[pdfpage:\d+\]\]/g, ' ').replace(/\s+/g, ' ').trim()
   if (!body) return ''
   if (body.length <= maxChars) return body
-  const at = excerptAnchor(raw, query)
+  const at = excerptAnchor(raw, query, ignoreCodes)
   if (at < 0) return body.slice(0, maxChars)
   const start = Math.max(0, at - 400)
   return raw
@@ -1789,17 +1845,21 @@ async function searchIndexedManualText(
   db: any,
   manualId: number | null,
   query: string,
-  label: string
+  label: string,
+  ignoreCodes?: string[]
 ): Promise<Retrieved | null> {
   const id = asManualId(manualId)
   if (id == null) return null
   const { data, error } = await db.from('manual_search_index').select('search_text').eq('manual_id', id).maybeSingle()
   if (error || !data?.search_text) return null
   const full = String(data.search_text)
-  const excerpt = excerptIndexedManualText(full, query)
+  // Model names in the manual label (M22) are not fault codes. The question and
+  // extracted fault codes still are: they are in the query, not in this list.
+  const labelCodes = ignoreCodes ?? faultCodeTokens(label)
+  const excerpt = excerptIndexedManualText(full, query, 8000, labelCodes)
   if (!excerpt || excerpt.length < 40) return null
-  const page = indexedExcerptPage(full, query)
-  const section = sectionOnCitedPage(full, excerptAnchor(full, query)) || indexedExcerptSection(full, query)
+  const page = indexedExcerptPage(full, query, labelCodes)
+  const section = sectionOnCitedPage(full, excerptAnchor(full, query, labelCodes)) || indexedExcerptSection(full, query, labelCodes)
   return {
     text: excerpt,
     source: `${label || 'Selected manual'} (indexed PDF text)`,
@@ -2241,9 +2301,12 @@ serve(async (req) => {
         }
       }
 
+      let citationIndexText = ''
+      let citationQuery = userText
       if (userText) {
         try {
           const sq = buildSearchQuery(userText, manualLabel, faultCodes)
+          citationQuery = sq
           const manualScoped = collectionSearchRequiresManualMatch({
             manualId: manualMeta?.id ?? rawId,
             manualLabel,
@@ -2262,7 +2325,7 @@ serve(async (req) => {
           // Cheap DB read; runs beside collection search so a stamped index row
           // always supplies the physical page even when collection chunks exist.
           const indexedP: Promise<Retrieved | null> = manualMeta
-            ? searchIndexedManualText(db, manualMeta.id, sq, manualLabel).catch((e) => {
+            ? searchIndexedManualText(db, manualMeta.id, sq, manualLabel, faultCodeTokens(manualLabel)).catch((e) => {
                 console.warn('indexed manual search failed soft', e)
                 return null
               })
@@ -2344,6 +2407,7 @@ serve(async (req) => {
           }
 
           const indexedHit = await indexedP
+          if (indexedHit?.indexText) citationIndexText = indexedHit.indexText
           if (!selectedPageCount) {
             const counted = effectivePageCount(storedPageCount(manualMeta?.page_count), indexedHit?.indexText)
             if (counted) selectedPageCount = counted
@@ -2453,7 +2517,13 @@ serve(async (req) => {
         const scopedId = asManualId(manualMeta?.id)
         if (scopedId == null || hasFaultDBHit) return
         const base = manualCitations.length ? manualCitations : [{ manualId: scopedId, title: manualLabel }]
-        manualCitations = attachProsePages(base, replyText)
+        manualCitations = attachProsePages(base, replyText, {
+          indexText: citationIndexText,
+          query: citationQuery,
+          pageCount: selectedPageCount,
+          manualId: scopedId,
+          ignoreCodes: faultCodeTokens(manualLabel),
+        })
         citationLine = formatCitationLine(manualCitations, manualLabel)
       }
       const replyMeta = () => ({

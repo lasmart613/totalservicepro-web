@@ -1,3 +1,5 @@
+import { quotedPageSupport } from './manual-scope.ts'
+
 /**
  * Technician-safety scope for grok-assistant retrieval citations.
  *
@@ -214,6 +216,100 @@ export function boundCitationPage(
   const p = Math.floor(page)
   if (pageCount != null && pageCount >= 1 && p > pageCount) return { page: p, page_out_of_range: true }
   return { page: p }
+}
+
+/** Body of physical page N. Stamped indexes win; a stamp-less extract uses form feeds. */
+export function indexPageBody(indexText: string, page: number): string | undefined {
+  const raw = String(indexText || '')
+  if (!raw || page < 1) return undefined
+  const stamp = `[[pdfpage:${page}]]`
+  const at = raw.indexOf(stamp)
+  if (at >= 0) {
+    const next = raw.indexOf('\f', at)
+    return raw.slice(at, next < 0 ? raw.length : next)
+  }
+  if (/\[\[pdfpage:\d+\]\]/.test(raw)) return undefined
+  const parts = raw.split('\f')
+  return parts[page - 1] || undefined
+}
+
+type QuotedPages = { at: number; pages: number[] }
+
+/**
+ * Pages named in an answer: "p. 147", "page 147", "pp. 88–89", "pages 88-89".
+ * A range is the inclusive span (capped) rather than only its first number.
+ */
+export function quotedPagesInAnswer(answer: string): QuotedPages[] {
+  const raw = String(answer || '')
+  const quotes: QuotedPages[] = []
+  const covered: Array<{ start: number; end: number }> = []
+  const rangeRe = /\b(?:p{1,2}\.|pages?)\s*(\d{1,4})\s*[-–—]\s*(\d{1,4})\b/gi
+  for (const match of raw.matchAll(rangeRe)) {
+    const a = Number(match[1])
+    const b = Number(match[2])
+    if (!Number.isFinite(a) || !Number.isFinite(b)) continue
+    const lo = Math.min(Math.floor(a), Math.floor(b))
+    const hi = Math.max(Math.floor(a), Math.floor(b))
+    if (lo < 1 || hi > 9999 || hi - lo > 20) continue
+    const pages: number[] = []
+    for (let p = lo; p <= hi; p++) pages.push(p)
+    const start = match.index ?? 0
+    quotes.push({ at: start, pages })
+    covered.push({ start, end: start + match[0].length })
+  }
+  const singleRe = /\b(?:p{1,2}\.|pages?)\s*(\d{1,4})\b/gi
+  for (const match of raw.matchAll(singleRe)) {
+    const start = match.index ?? 0
+    const end = start + match[0].length
+    if (covered.some((span) => start < span.end && end > span.start)) continue
+    const n = Number(match[1])
+    if (!Number.isFinite(n) || n < 1 || n > 9999) continue
+    quotes.push({ at: start, pages: [Math.floor(n)] })
+  }
+  quotes.sort((a, b) => a.at - b.at)
+  return quotes
+}
+
+/**
+ * Page the answer named, when it is inside pageCount and that page's text
+ * contains the fault code or the matched terms.
+ * A range resolves to the page in the range that does.
+ * An out-of-range quote, or a page that lacks the code and the terms, is ignored.
+ */
+export function resolveQuotedCitationPage(opts: {
+  answer: string
+  indexText: string
+  query: string
+  pageCount?: number
+  /** Letter-prefixed tokens from the manual label (M22). Not fault codes. */
+  ignoreCodes?: string[]
+}): number | undefined {
+  const count = effectivePageCount(opts.pageCount, opts.indexText)
+  if (count == null) return undefined
+  const indexText = String(opts.indexText || '')
+  const query = String(opts.query || '')
+  let chosen: number | undefined
+  let chosenAt = Number.POSITIVE_INFINITY
+  for (const quote of quotedPagesInAnswer(opts.answer)) {
+    if (quote.at >= chosenAt) continue
+    let bestPage: number | undefined
+    let bestSupport = 0
+    for (const page of quote.pages) {
+      if (page > count) continue
+      const body = indexPageBody(indexText, page)
+      if (!body) continue
+      const support = quotedPageSupport(body, query, indexText, opts.ignoreCodes)
+      if (support <= 0) continue
+      if (support > bestSupport || (support === bestSupport && page > (bestPage ?? 0))) {
+        bestSupport = support
+        bestPage = page
+      }
+    }
+    if (bestPage == null) continue
+    chosen = bestPage
+    chosenAt = quote.at
+  }
+  return chosen
 }
 
 export type CatalogCiteRow = {

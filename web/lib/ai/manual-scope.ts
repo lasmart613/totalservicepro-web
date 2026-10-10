@@ -495,6 +495,219 @@ function transmissionThresholdBoost(
 }
 
 /**
+ * Letter-prefixed fault tokens (F14.1). The dot is literal and the tail is a
+ * word boundary, so F14.1 does not match F14.10.
+ * A manual label can look the same (M22). Those tokens are ignoreCodes, not codes.
+ */
+export function faultCodeTokens(query: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const re = /\b[A-Za-z]{1,6}-?\d+(?:\.\d+)?\b/g;
+  for (const match of String(query || '').matchAll(re)) {
+    const code = match[0];
+    const key = code.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(code);
+  }
+  return out;
+}
+
+/** Fault codes in the question. Tokens in ignoreCodes (the manual label) are not codes. */
+function faultCodesForQuery(query: string, ignoreCodes?: string[]): string[] {
+  const codes = faultCodeTokens(query);
+  if (!ignoreCodes?.length) return codes;
+  const skip = new Set(
+    ignoreCodes.map((code) => String(code || '').toLowerCase()).filter(Boolean)
+  );
+  if (!skip.size) return codes;
+  return codes.filter((code) => !skip.has(code.toLowerCase()));
+}
+
+/** Index of an exact fault-code token, or -1. '.' is a boundary; a following digit is not. */
+function pageHasExactFaultCode(hay: string, code: string): number {
+  const needle = String(code || '').toLowerCase();
+  if (!needle) return -1;
+  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`(?<![a-z0-9])${escaped}(?![a-z0-9])`, 'g').exec(String(hay || '').toLowerCase());
+  return match ? match.index : -1;
+}
+
+function queryAboutParts(query: string): boolean {
+  return /\b(?:spare\s+parts?|parts?\s+(?:list|catalog(?:ue)?)|bill\s+of\s+materials|\bbom\b|part\s*(?:no\.?|number|#)s?|replacement\s+parts?)\b/i.test(
+    query
+  );
+}
+
+function queryIsFaultOrTroubleshooting(query: string, ignoreCodes?: string[]): boolean {
+  return (
+    faultCodesForQuery(query, ignoreCodes).length > 0 ||
+    /\b(?:faults?|errors?|alarms?|troubleshoot\w*)\b/i.test(query)
+  );
+}
+
+/**
+ * Spare-parts, parts-list, parts-catalog, and BOM leaves.
+ * A heading ("Spare Parts", "Parts List", "Part No.") or a dense part-number table.
+ */
+function isSparePartsPage(text: string): boolean {
+  const body = String(text || '');
+  if (/\bspare\s+parts?\b/i.test(body)) return true;
+  if (/\bparts?\s+list\b/i.test(body)) return true;
+  if (/\bparts?\s+catalog(?:ue)?\b/i.test(body)) return true;
+  if (/\bbill\s+of\s+materials\b/i.test(body)) return true;
+  if (/\bbom\b/i.test(body) && /\bparts?\b/i.test(body)) return true;
+  if (/\bpart\s+nos?\.?\b/i.test(body)) return true;
+  const partNumbers = body.match(/\b\d{3,5}-\d{2}-\d{3,5}\b/g);
+  if ((partNumbers?.length || 0) >= 4) return true;
+  return /\bpart\s*#\b/i.test(body) && /\bitem\s*#/i.test(body);
+}
+
+/** Down-rank a parts leaf for a fault or troubleshooting question that is not about parts. */
+export function excerptSparePartsDownRank(query: string, pageText: string, ignoreCodes?: string[]): boolean {
+  if (queryAboutParts(query) || !queryIsFaultOrTroubleshooting(query, ignoreCodes)) return false;
+  return isSparePartsPage(pageText);
+}
+
+/** F14.10 contains the characters of F14.1 plus another digit. That is a different code. */
+function pageHasExtendedFaultCode(hay: string, code: string): boolean {
+  const needle = String(code || '').toLowerCase().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (!needle) return false;
+  return new RegExp(`(?<![a-z0-9])${needle}\\d`, 'i').test(String(hay || '').toLowerCase());
+}
+
+/**
+ * Score multiplier for one page.
+ * Parts leaves drop for fault and troubleshooting questions.
+ * A longer code (F14.10) does not collect the score of the shorter code (F14.1).
+ */
+export function excerptSpanScoreScale(query: string, pageText: string, ignoreCodes?: string[]): number {
+  let scale = 1;
+  if (excerptSparePartsDownRank(query, pageText, ignoreCodes)) scale *= 0.25;
+  const codes = faultCodesForQuery(query, ignoreCodes);
+  if (
+    codes.length &&
+    codes.every((code) => pageHasExactFaultCode(pageText, code) < 0) &&
+    codes.some((code) => pageHasExtendedFaultCode(pageText, code))
+  ) {
+    scale *= 0.05;
+  }
+  return scale;
+}
+
+/**
+ * Page that contains the fault code itself (F14.1, not F14.10).
+ * A spare-parts leaf loses to another page that also contains the code,
+ * unless the question is about parts. Returns -1 when no page has the code.
+ */
+export function excerptFaultCodeAnchor(
+  hay: string,
+  query: string,
+  spans: Array<{ start: number; end: number }>,
+  scoreByStart: Map<number, number>,
+  ignoreCodes?: string[]
+): number {
+  const codes = faultCodesForQuery(query, ignoreCodes);
+  if (!codes.length) return -1;
+  const aboutParts = queryAboutParts(query);
+  const hits: Array<{ at: number; score: number; parts: boolean }> = [];
+  for (const span of spans) {
+    const page = hay.slice(span.start, span.end);
+    let at = -1;
+    for (const code of codes) {
+      const hit = pageHasExactFaultCode(page, code);
+      if (hit < 0) continue;
+      at = span.start + hit;
+      break;
+    }
+    if (at < 0) continue;
+    hits.push({ at, score: scoreByStart.get(span.start) ?? 0, parts: isSparePartsPage(page) });
+  }
+  if (!hits.length) return -1;
+  const pool = !aboutParts && hits.some((hit) => !hit.parts) ? hits.filter((hit) => !hit.parts) : hits;
+  pool.sort((a, b) => b.score - a.score || b.at - a.at);
+  return pool[0].at;
+}
+
+function contentTermPresent(hay: string, term: string): boolean {
+  const numeric = /^\d+$/.test(term);
+  let from = 0;
+  while (from <= hay.length) {
+    const at = termAt(hay, term, from);
+    if (at < 0) return false;
+    if (!numeric || !isRunningPageNumber(hay, at)) return true;
+    from = at + Math.max(1, term.length);
+  }
+  return false;
+}
+
+function distinctiveQuoteTerms(
+  query: string,
+  indexText: string,
+  ignoreCodes?: string[]
+): { numbers: string[]; words: string[] } {
+  const terms = excerptQueryTerms(query);
+  const hay = String(indexText || '').toLowerCase();
+  const spans = manualPageSpans(hay);
+  const skip = new Set((ignoreCodes || []).map((code) => String(code || '').toLowerCase()).filter(Boolean));
+  const numbers: string[] = [];
+  const words: string[] = [];
+  for (const term of terms) {
+    if (skip.has(term)) continue;
+    if (/^\d$/.test(term)) continue;
+    const positions = hay ? collectHits(hay, term) : [];
+    let pages = 0;
+    for (const span of spans) {
+      if (positions.some((hit) => hit >= span.start && hit < span.end)) pages += 1;
+    }
+    if (!pages) continue;
+    if (spans.length > 1 && pages > spans.length * 0.25) continue;
+    if (/^\d+$/.test(term)) numbers.push(term);
+    else if (term.length >= 2) words.push(term);
+  }
+  return { numbers, words };
+}
+
+/**
+ * How well this page backs a page the answer named.
+ * A fault-code question only matches a page that contains that exact code.
+ * Otherwise the page must contain the distinctive query terms. A multi-digit
+ * value such as 83 counts only outside a running footer ("Page 83 of 178").
+ * Returns 0 when the page lacks the code and the terms.
+ */
+export function quotedPageSupport(
+  pageText: string,
+  query: string,
+  indexText: string,
+  ignoreCodes?: string[]
+): number {
+  const codes = faultCodesForQuery(query, ignoreCodes);
+  let codeHits = 0;
+  for (const code of codes) {
+    if (pageHasExactFaultCode(pageText, code) >= 0) codeHits += 1;
+  }
+  if (codes.length > 0 && codeHits === 0) return 0;
+  const { numbers, words } = distinctiveQuoteTerms(query, indexText, ignoreCodes);
+  const hay = String(pageText || '')
+    .toLowerCase()
+    .replace(/\[\[pdfpage:\d+\]\]/g, ' ');
+  let numberHits = 0;
+  for (const term of numbers) {
+    if (contentTermPresent(hay, term)) numberHits += 1;
+  }
+  if (numbers.length > 0 && numberHits === 0 && codeHits === 0) return 0;
+  let wordHits = 0;
+  for (const term of words) {
+    if (contentTermPresent(hay, term)) wordHits += 1;
+  }
+  if (codeHits > 0) return 100 + codeHits * 10 + wordHits + numberHits;
+  if (words.length >= 2 && wordHits < 2 && numberHits === 0) return 0;
+  if (words.length > 0 && wordHits === 0) return 0;
+  if (wordHits + numberHits <= 0) return 0;
+  return wordHits + numberHits;
+}
+
+/**
  * Anchor where the specific query terms cluster.
  * Error codes (#43, a bare 43 beside CW Laser, error 43) and multi-word phrases
  * outrank a brand word. Terms are weighted by how many pages they appear on.
@@ -503,9 +716,12 @@ function transmissionThresholdBoost(
  * shares one of those words. A transmission percentage threshold ("TX = <83%")
  * outranks a later weak "TX 83" or see-also.
  * Equal scores prefer the later hit so a contents line loses to the procedure.
+ * A fault code (F14.1, not F14.10) is cited on the page that contains that token.
+ * Spare-parts leaves are down-ranked for fault and troubleshooting questions
+ * unless the question is about parts.
  * Returns -1 when nothing in the query is present.
  */
-function excerptAnchor(raw: string, query: string): number {
+function excerptAnchor(raw: string, query: string, ignoreCodes?: string[]): number {
   const hay = String(raw || '').toLowerCase();
   const terms = excerptQueryTerms(query);
   if (!hay || !terms.length) return -1;
@@ -528,6 +744,7 @@ function excerptAnchor(raw: string, query: string): number {
 
   let bestScore = -1;
   let bestAt = -1;
+  const scoreByStart = new Map<number, number>();
   for (const span of spans) {
     let score = 0;
     let rareAt = -1;
@@ -570,11 +787,15 @@ function excerptAnchor(raw: string, query: string): number {
       at = Math.min(span.end - 1, span.start + stamped.index + stamped[0].length);
     }
     if (at < span.start) at = span.start;
+    scoreByStart.set(span.start, score);
+    score *= excerptSpanScoreScale(query, hay.slice(span.start, span.end), ignoreCodes);
     if (score > bestScore || (score === bestScore && at > bestAt)) {
       bestScore = score;
       bestAt = at;
     }
   }
+  const faultAt = excerptFaultCodeAnchor(hay, query, spans, scoreByStart, ignoreCodes);
+  if (faultAt >= 0) return faultAt;
   return bestAt < 0 || bestScore <= 0 ? -1 : bestAt;
 }
 
@@ -592,10 +813,10 @@ function lastPhysicalPageStamp(text: string): number | undefined {
  * Printed labels such as "page 7-8" or "(p. 7)" are not page numbers.
  * Page 1 is not invented when the excerpt has no physical marker.
  */
-export function indexedExcerptPage(raw: string, query: string): number | undefined {
+export function indexedExcerptPage(raw: string, query: string, ignoreCodes?: string[]): number | undefined {
   const text = String(raw || '');
   if (!text) return undefined;
-  const at = excerptAnchor(text, query);
+  const at = excerptAnchor(text, query, ignoreCodes);
   if (at < 0) return undefined;
   const before = text.slice(0, at);
   const stamped = lastPhysicalPageStamp(before);
@@ -606,17 +827,22 @@ export function indexedExcerptPage(raw: string, query: string): number | undefin
 }
 
 /** Section marker nearest the indexed excerpt, when the chunk has no section field. */
-export function indexedExcerptSection(raw: string, query: string): string | undefined {
+export function indexedExcerptSection(raw: string, query: string, ignoreCodes?: string[]): string | undefined {
   const text = String(raw || '');
   if (!text) return undefined;
-  const at = excerptAnchor(text, query);
+  const at = excerptAnchor(text, query, ignoreCodes);
   const window = text.slice(Math.max(0, at - 1500), at + 400);
   const sect = window.match(/\b(?:section|sect\.?|§)\s*([0-9]+(?:\.[0-9]+){0,3})\b/i);
   return sect?.[1] || undefined;
 }
 
 /** Pull the same clustered hit indexedExcerptPage uses, then strip page stamps. */
-export function excerptManualSearchText(text: string, query: string, maxChars = 8000): string {
+export function excerptManualSearchText(
+  text: string,
+  query: string,
+  maxChars = 8000,
+  ignoreCodes?: string[]
+): string {
   const raw = String(text || '');
   const body = raw
     .replace(/\[\[pdfpage:\d+\]\]/g, ' ')
@@ -624,7 +850,7 @@ export function excerptManualSearchText(text: string, query: string, maxChars = 
     .trim();
   if (!body) return '';
   if (body.length <= maxChars) return body;
-  const at = excerptAnchor(raw, query);
+  const at = excerptAnchor(raw, query, ignoreCodes);
   if (at < 0) return body.slice(0, maxChars);
   const start = Math.max(0, at - 400);
   return raw

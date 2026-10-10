@@ -6,9 +6,12 @@ import {
   catalogCitationTitle,
   effectivePageCount,
   findCatalogRow,
+  indexPageBody,
   modelQualifierIds,
   modelSuffixConflict,
+  quotedPagesInAnswer,
   reconcilePhysicalPage,
+  resolveQuotedCitationPage,
   type CatalogCiteRow,
 } from '../../../supabase/functions/grok-assistant/citation-scope.ts';
 import {
@@ -241,5 +244,89 @@ test('PRO PLUS passage is attributed to manual 5; a real Pro page stays 110', ()
   assert.equal(
     findCatalogRow([PLUS_ROW], { fileId: 'file_pro_plus', fileName: 'renamed-upload.pdf' })?.id,
     5
+  );
+});
+
+test('a quoted page is used only when it is in range and holds the fault code or the terms', () => {
+  const pages: string[] = [];
+  for (let n = 1; n <= 178; n++) {
+    let body = `GentleMAX PRO PLUS header Page ${n} of 178.`;
+    if (n === 89) body += ' If TX = <83%, clean the fiber. Troubleshooting Guide (Chapter 17).';
+    if (n === 147) body += ' F14.1 755 nm Simmer Fault. Calibrate laser system. Replace HVPS, flashlamps.';
+    if (n === 152) {
+      body +=
+        ' 31 Laser Rail Spare Parts Item # Part Description Part # 1. ALEX Head 7122-00-9572 2. YAG Head 7122-00-9578 3. Turning Mirror 8015-00-1220 4. Beam Combiner 8055-00-0304';
+    }
+    if (n === 160) body += ' F14.10 is a different code.';
+    pages.push(`[[pdfpage:${n}]] ${body}`);
+  }
+  const index = pages.join('\f');
+  const query =
+    'Candela GentleMAX PRO PLUS What does fault code F14.1 mean on this laser fault code 14.1 error 14.1';
+  assert.deepEqual(quotedPagesInAnswer('See p. 147.').map((q) => q.pages), [[147]]);
+  assert.deepEqual(quotedPagesInAnswer('See pp. 146–148 and page 152.')[0].pages, [146, 147, 148]);
+  assert.equal(indexPageBody(index, 147)?.includes('F14.1'), true);
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'The table is on page 147.', indexText: index, query, pageCount: 178 }),
+    147
+  );
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'See pp. 146–148.', indexText: index, query, pageCount: 178 }),
+    147
+  );
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'See page 152.', indexText: index, query, pageCount: 178 }),
+    undefined
+  );
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'See page 200.', indexText: index, query, pageCount: 178 }),
+    undefined
+  );
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'See page 147.', indexText: index, query, pageCount: 15 }),
+    undefined
+  );
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'See page 10.', indexText: index, query, pageCount: 178 }),
+    undefined
+  );
+  const tx = 'Candela GentleMAX PRO PLUS transmission below 83%';
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'Repeat until TX is above 83%. See p. 89.', indexText: index, query: tx, pageCount: 178 }),
+    89
+  );
+  assert.equal(
+    resolveQuotedCitationPage({
+      answer: 'The footer says Page 83 of 178.',
+      indexText: index,
+      query: tx,
+      pageCount: 178,
+    }),
+    undefined
+  );
+});
+
+test('a model name in the manual label does not make the cover a quoted fault page', () => {
+  const pages: string[] = [];
+  for (let n = 1; n <= 8; n++) {
+    let body = 'Lumenis service notes.';
+    if (n === 1) body = 'Lumenis M22 Service Manual. Cover.';
+    if (n === 5) body = 'Lumenis. Calibrate the fluence. Follow the procedure steps.';
+    pages.push(`[[pdfpage:${n}]] ${body}`);
+  }
+  const index = pages.join('\f');
+  const query = 'Lumenis M22 how do I calibrate the fluence procedure specification steps';
+  const ignoreCodes = ['M22'];
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'See p. 1.', indexText: index, query, pageCount: 8, ignoreCodes }),
+    undefined
+  );
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'See page 5.', indexText: index, query, pageCount: 8, ignoreCodes }),
+    5
+  );
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'See p. 1.', indexText: index, query, pageCount: 8 }),
+    1
   );
 });
