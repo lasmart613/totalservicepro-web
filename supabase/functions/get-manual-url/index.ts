@@ -20,6 +20,11 @@
 //   supabase functions deploy get-manual-url --project-ref yljztfajyvjzqikxdddf --no-verify-jwt
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import {
+  chaptersFromMetadata,
+  isFolderManual,
+  resolveManualPdfOpen,
+} from "./chapters.ts";
 
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -934,8 +939,11 @@ Deno.serve(async (req) => {
       let chapters: Array<{ order: number; title: string; storage_path: string }> =
         [];
 
-      // 1) DB chapter_metadata
-      if (Array.isArray(man?.chapter_metadata) && man.chapter_metadata.length) {
+      // 1) DB chapter_metadata. Folder rows use the same titles and service-first
+      // order as a normal open. Single-PDF rows keep the stored titles.
+      if (isFolderManual(man?.is_folder) && Array.isArray(man?.chapter_metadata) && man.chapter_metadata.length) {
+        chapters = chaptersFromMetadata(man.chapter_metadata, parentPath, { isFolder: true });
+      } else if (Array.isArray(man?.chapter_metadata) && man.chapter_metadata.length) {
         chapters = man.chapter_metadata.map((ch: any, i: number) => {
           let p = cleanPath(ch.storage_path || ch.path || "");
           if (p && parentPath && !isPdfPath(parentPath) && !p.startsWith(parentPath) && !p.startsWith("shared/")) {
@@ -1007,48 +1015,25 @@ Deno.serve(async (req) => {
         /* keep */
       }
     }
-    // CRITICAL: prefer requested chapter PDF over parent folder storage_path
-    let sp = "";
-    let chaptersForFolder: Array<{ order: number; title: string; storage_path: string }> = [];
-
-    if (storagePath && isPdfPath(storagePath)) {
-      sp = storagePath;
-    } else if (parentPath && isPdfPath(parentPath)) {
-      sp = parentPath;
-    } else if (man?.entry_file_path) {
-      sp = resolveEntryPath(parentPath, man.entry_file_path);
-    } else if (storagePath) {
-      sp = storagePath;
-    } else {
-      sp = parentPath;
-    }
+    // CRITICAL: prefer requested chapter PDF over parent folder storage_path.
+    // Folder rows still get a chapter list when entry_file_path is already a PDF
+    // (that used to skip this block, so the viewer never showed Chapters).
+    const opened = resolveManualPdfOpen({
+      requestedPath: storagePath,
+      parentPath,
+      entryFilePath: man?.entry_file_path,
+      isFolder: man?.is_folder,
+      chapterMetadata: man?.chapter_metadata,
+    });
+    let sp = opened.storagePath;
+    let chaptersForFolder = opened.chapters;
 
     // Folder-style manuals (Candela multi-chapter, Sciton placeholders, etc.):
     // always resolve a concrete PDF so web clients that only check json.url work.
     if (sp && !isPdfPath(sp)) {
       const folderPrefix = sp;
 
-      // 1) chapter_metadata PDFs
-      if (Array.isArray(man?.chapter_metadata) && man.chapter_metadata.length) {
-        chaptersForFolder = man.chapter_metadata.map((ch: any, i: number) => {
-          let p = cleanPath(ch.storage_path || ch.path || "");
-          if (
-            p &&
-            !p.toLowerCase().startsWith("shared/") &&
-            folderPrefix &&
-            !p.toLowerCase().startsWith(folderPrefix.toLowerCase())
-          ) {
-            p = resolveEntryPath(folderPrefix, p);
-          }
-          return {
-            order: ch.order != null ? Number(ch.order) : i + 1,
-            title: String(ch.title || p.split("/").pop() || `Chapter ${i + 1}`),
-            storage_path: p,
-          };
-        }).filter((c: { storage_path: string }) => isPdfPath(c.storage_path));
-      }
-
-      // 2) Storage walk
+      // 2) Storage walk when chapter_metadata has no PDFs
       if (!chaptersForFolder.length) {
         const paths = await listPdfsUnderPrefix(supabaseUrl, serviceKey, folderPrefix);
         chaptersForFolder = chaptersFromPaths(paths);
