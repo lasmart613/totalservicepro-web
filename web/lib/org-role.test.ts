@@ -71,14 +71,14 @@ test('getOrgRole uses the membership in the target org', async () => {
   assert.equal(here.role, 'company_admin');
   assert.equal(here.isFounder, false);
   assert.equal(here.isPlatformAdmin, false);
-  assert.equal(orgRoleAllows(here, TEAM_LEAD_ROLES, { founderCounts: true }), true);
+  assert.equal(orgRoleAllows(here, TEAM_LEAD_ROLES), true);
   assert.equal(teamLeadRole(here), 'company_admin');
 
   const elsewhere = await getOrgRole(client, user, 4);
   assert.equal(elsewhere.ok, true);
   if (!elsewhere.ok) return;
   assert.equal(elsewhere.role, null);
-  assert.equal(orgRoleAllows(elsewhere, TEAM_LEAD_ROLES, { founderCounts: true }), false);
+  assert.equal(orgRoleAllows(elsewhere, TEAM_LEAD_ROLES), false);
 });
 
 test('a company_admin profile with an fse membership is not an org lead', async () => {
@@ -92,7 +92,7 @@ test('a company_admin profile with an fse membership is not an org lead', async 
   if (!org.ok) return;
   assert.equal(org.role, 'fse');
   assert.equal(org.isPlatformAdmin, false);
-  assert.equal(orgRoleAllows(org, TEAM_LEAD_ROLES, { founderCounts: true }), false);
+  assert.equal(orgRoleAllows(org, TEAM_LEAD_ROLES), false);
   assert.equal(orgRoleAllows(org, SHOP_ADMIN_ROLES), false);
   assert.equal(voidInvoiceRole(org), 'fse');
 });
@@ -110,7 +110,7 @@ test('no membership is 403 unless the profile is platform admin', async () => {
   assert.equal(shopAdmin.ok, true);
   if (!shopAdmin.ok) return;
   assert.equal(shopAdmin.role, null);
-  assert.equal(orgRoleAllows(shopAdmin, TEAM_LEAD_ROLES, { founderCounts: true }), false);
+  assert.equal(orgRoleAllows(shopAdmin, TEAM_LEAD_ROLES), false);
   assert.equal(orgRoleAllows(shopAdmin, SHOP_ADMIN_ROLES), false);
 
   const platform = await getOrgRole(
@@ -148,10 +148,10 @@ test('a membership role of admin is company_admin and is not platform admin', as
   assert.equal(orgRoleAllows(org, SHOP_ADMIN_ROLES), true);
 });
 
-test('founder of the org counts for team and void, not for shop-admin reports, and not without a membership', async () => {
+test('a founder with a non-lead membership is not a team or void lead', async () => {
   const member = await getOrgRole(
     db({
-      user_profiles: [{ id: user, role: 'fse' }],
+      user_profiles: [{ id: user, role: 'parts_supplier' }],
       organization_memberships: [{ user_id: user, organization_id: 9, role: 'fse' }],
       organizations: [{ id: 9, created_by: user }],
     }),
@@ -162,10 +162,11 @@ test('founder of the org counts for team and void, not for shop-admin reports, a
   if (!member.ok) return;
   assert.equal(member.isFounder, true);
   assert.equal(member.role, 'fse');
-  assert.equal(orgRoleAllows(member, TEAM_LEAD_ROLES, { founderCounts: true }), true);
-  assert.equal(orgRoleAllows(member, VOID_INVOICE_ROLES, { founderCounts: true }), true);
+  assert.equal(orgRoleAllows(member, TEAM_LEAD_ROLES), false);
+  assert.equal(orgRoleAllows(member, VOID_INVOICE_ROLES), false);
   assert.equal(orgRoleAllows(member, SHOP_ADMIN_ROLES), false);
-  assert.equal(teamLeadRole(member), 'company_admin');
+  assert.equal(teamLeadRole(member), 'fse');
+  assert.equal(voidInvoiceRole(member), 'fse');
 
   const missing = await getOrgRole(
     db({
@@ -180,7 +181,8 @@ test('founder of the org counts for team and void, not for shop-admin reports, a
   if (!missing.ok) return;
   assert.equal(missing.isFounder, true);
   assert.equal(missing.role, null);
-  assert.equal(orgRoleAllows(missing, TEAM_LEAD_ROLES, { founderCounts: true }), false);
+  assert.equal(orgRoleAllows(missing, TEAM_LEAD_ROLES), false);
+  assert.equal(orgRoleAllows(missing, VOID_INVOICE_ROLES), false);
 });
 
 test('an organization role lookup error fails closed', async () => {
@@ -209,6 +211,7 @@ function voidClient(input: {
   membershipRole: string | null;
   invoice?: Row | null;
   fail?: string;
+  createdBy?: string | null;
 }) {
   const orgId = 7;
   return {
@@ -238,7 +241,7 @@ function voidClient(input: {
               error: null,
             };
           }
-          if (table === 'organizations') return { data: { id: orgId, created_by: null }, error: null };
+          if (table === 'organizations') return { data: { id: orgId, created_by: input.createdBy ?? null }, error: null };
           if (table === 'service_invoices') return { data: input.invoice ?? null, error: null };
           return { data: null, error: null };
         },
@@ -281,6 +284,17 @@ test('void uses the membership role and fails closed on a lookup error', async (
     adminClient: null,
   });
   assert.equal(allowedRole.status, 200, await allowedRole.clone().text());
+
+  const founder = await runVoidInvoice(request(), {
+    userClient: voidClient({
+      profileRole: 'parts_supplier',
+      membershipRole: 'fse',
+      createdBy: user,
+      invoice,
+    }) as never,
+    adminClient: null,
+  });
+  assert.equal(founder.status, 403);
 
   const lookup = await runVoidInvoice(request(), {
     userClient: voidClient({

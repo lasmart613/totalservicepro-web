@@ -3,6 +3,8 @@ import test from 'node:test';
 import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { NextRequest } from 'next/server';
+import { runTeamSync } from '../app/api/team/sync/route.ts';
 import {
   freshTeamInviteFields,
   teamInviteJoinGate,
@@ -243,4 +245,56 @@ test('team sync and list mark on-team from auth.users, not user_profiles.email',
   const companyOnTeam = company.slice(company.indexOf('const onTeam = members.some'));
   assert.match(companyOnTeam.slice(0, 400), /m\.auth_email/);
   assert.doesNotMatch(companyOnTeam.slice(0, 400), /m\.email/);
+});
+
+test('a founder with a non-lead membership cannot sync the team', async () => {
+  const sync = readRoute('../app/api/team/sync/route.ts');
+  assert.doesNotMatch(sync, /founderCounts/);
+
+  const response = await runTeamSync(
+    new NextRequest('https://repairplanet.net/api/team/sync', {
+      method: 'POST',
+      headers: { authorization: 'Bearer session-token' },
+    }),
+    {
+      hasServiceRole: () => true,
+      userClient: {
+        auth: {
+          getUser: async () => ({ data: { user: { id: 'supplier-founder' } }, error: null }),
+        },
+        from(table: string) {
+          const filters: Record<string, unknown> = {};
+          const api = {
+            select() {
+              return api;
+            },
+            eq(column: string, value: unknown) {
+              filters[column] = value;
+              return api;
+            },
+            maybeSingle: async () => {
+              if (table === 'user_profiles') {
+                return { data: { organization_id: 2617, role: 'parts_supplier' }, error: null };
+              }
+              if (table === 'organization_memberships') {
+                if (String(filters.organization_id ?? '') !== '2617') return { data: null, error: null };
+                return {
+                  data: { user_id: 'supplier-founder', organization_id: 2617, role: 'parts_supplier' },
+                  error: null,
+                };
+              }
+              if (table === 'organizations') {
+                return { data: { id: 2617, created_by: 'supplier-founder' }, error: null };
+              }
+              return { data: null, error: null };
+            },
+          };
+          return api;
+        },
+      },
+    }
+  );
+  assert.equal(response.status, 403);
+  const body = (await response.json()) as { error?: string };
+  assert.equal(body.error, 'Only org admins can sync team');
 });

@@ -171,7 +171,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
     if (!orgRole.ok) {
       return respond({ error: orgRole.error }, orgRole.status);
     }
-    if (!orgRoleAllows(orgRole, TEAM_LEAD_ROLES, { founderCounts: true })) {
+    if (!orgRoleAllows(orgRole, TEAM_LEAD_ROLES)) {
       return respond({ error: 'Only admins can invite team members' }, 403);
     }
     const role = teamLeadRole(orgRole);

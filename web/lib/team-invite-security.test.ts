@@ -2082,11 +2082,12 @@ test('team invite authority is the membership role in that org', async () => {
 
   const founder = await postExistingInvite({
     ...base,
-    profileRole: 'fse',
+    profileRole: 'parts_supplier',
     membershipRole: 'fse',
     createdBy: 'admin-user',
   });
-  assert.equal(founder.status, 200, JSON.stringify(founder.body));
+  assert.equal(founder.status, 403, JSON.stringify(founder.body));
+  assert.equal(founder.sent.length, 0);
 
   const lookup = await postExistingInvite({
     ...base,

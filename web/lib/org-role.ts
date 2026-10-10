@@ -5,7 +5,8 @@
  * A stored membership role of admin is company_admin (same mapping as
  * profile_role_from_membership). It is not platform admin.
  * isFounder is organizations.created_by for that org, or a founder flag
- * on that same membership row.
+ * on that same membership row. Founder status is reported only.
+ * It does not grant team invite, team sync, or invoice void.
  * isPlatformAdmin is user_profiles.role = 'admin' (what is_admin() reads).
  * A missing membership is no org role. Platform admin is unchanged.
  * A lookup error fails closed.
@@ -72,45 +73,27 @@ function lookupFailed(error: unknown): boolean {
 /**
  * Role string a check can compare to its existing allow-list.
  * Platform admin stays admin when that bypass is in the set.
- * Founder satisfies a lead check only when founderCounts is set and a
- * membership role exists. A missing membership does not become an org role.
+ * The membership role is the org role. Founder status does not raise it.
+ * A missing membership does not become an org role.
  */
-export function authorityRole(
-  org: OrgRole,
-  allowed: readonly string[],
-  options?: { founderCounts?: boolean }
-): string {
+export function authorityRole(org: OrgRole, allowed: readonly string[]): string {
   const allowedSet = new Set(allowed.map((role) => normalizeOrgRole(role)));
   if (org.isPlatformAdmin && allowedSet.has('admin')) return 'admin';
-  const role = normalizeOrgRole(org.role);
-  if (role && allowedSet.has(role)) return role;
-  if (
-    options?.founderCounts === true &&
-    org.isFounder &&
-    role &&
-    (allowedSet.has('company_admin') || allowedSet.has('owner'))
-  ) {
-    return allowedSet.has('company_admin') ? 'company_admin' : 'owner';
-  }
-  return role;
+  return normalizeOrgRole(org.role);
 }
 
-export function orgRoleAllows(
-  org: OrgRole,
-  allowed: readonly string[],
-  options?: { founderCounts?: boolean }
-): boolean {
-  const role = authorityRole(org, allowed, options);
+export function orgRoleAllows(org: OrgRole, allowed: readonly string[]): boolean {
+  const role = authorityRole(org, allowed);
   if (!role) return false;
   return allowed.some((item) => normalizeOrgRole(item) === role);
 }
 
 export function teamLeadRole(org: OrgRole): string {
-  return authorityRole(org, TEAM_LEAD_ROLES, { founderCounts: true });
+  return authorityRole(org, TEAM_LEAD_ROLES);
 }
 
 export function voidInvoiceRole(org: OrgRole): string {
-  return authorityRole(org, VOID_INVOICE_ROLES, { founderCounts: true });
+  return authorityRole(org, VOID_INVOICE_ROLES);
 }
 
 export function shopAdminRole(org: OrgRole): string {

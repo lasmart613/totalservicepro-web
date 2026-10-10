@@ -13,9 +13,22 @@ import { getOrgRole, ORG_ROLE_LOOKUP_ERROR, orgRoleAllows, TEAM_LEAD_ROLES } fro
  * Does not insert or update memberships, profiles, roles, or invites.
  * Joining happens only via POST /api/team/claim or accept_team_invite.
  */
+type TeamSyncDeps = {
+  hasServiceRole?: () => boolean;
+  userClient?: {
+    auth: { getUser: () => Promise<{ data: { user: { id?: string } | null }; error: unknown }> };
+    from: (table: string) => any;
+  };
+};
+
 export async function POST(req: NextRequest) {
+  return runTeamSync(req);
+}
+
+export async function runTeamSync(req: NextRequest, deps: TeamSyncDeps = {}) {
   try {
-    if (!hasServiceRole()) {
+    const serviceReady = deps.hasServiceRole ?? hasServiceRole;
+    if (!serviceReady()) {
       return NextResponse.json(
         { error: 'Server missing SUPABASE_SERVICE_ROLE_KEY' },
         { status: 500 }
@@ -30,10 +43,12 @@ export async function POST(req: NextRequest) {
 
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL!;
     const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-    const userClient = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { autoRefreshToken: false, persistSession: false },
-    });
+    const userClient =
+      deps.userClient ??
+      createClient(url, anon, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { autoRefreshToken: false, persistSession: false },
+      });
 
     const {
       data: { user },
@@ -59,7 +74,7 @@ export async function POST(req: NextRequest) {
     if (!orgRole.ok) {
       return NextResponse.json({ error: orgRole.error }, { status: orgRole.status });
     }
-    if (!orgRoleAllows(orgRole, TEAM_LEAD_ROLES, { founderCounts: true })) {
+    if (!orgRoleAllows(orgRole, TEAM_LEAD_ROLES)) {
       return NextResponse.json({ error: 'Only org admins can sync team' }, { status: 403 });
     }
 
