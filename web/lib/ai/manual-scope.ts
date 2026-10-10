@@ -497,8 +497,9 @@ function transmissionThresholdBoost(
 /**
  * Letter-prefixed fault tokens (F14.1). The dot is literal and the tail is a
  * word boundary, so F14.1 does not match F14.10.
+ * A manual label can look the same (M22). Those tokens are ignoreCodes, not codes.
  */
-function faultCodeTokens(query: string): string[] {
+export function faultCodeTokens(query: string): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   const re = /\b[A-Za-z]{1,6}-?\d+(?:\.\d+)?\b/g;
@@ -510,6 +511,17 @@ function faultCodeTokens(query: string): string[] {
     out.push(code);
   }
   return out;
+}
+
+/** Fault codes in the question. Tokens in ignoreCodes (the manual label) are not codes. */
+function faultCodesForQuery(query: string, ignoreCodes?: string[]): string[] {
+  const codes = faultCodeTokens(query);
+  if (!ignoreCodes?.length) return codes;
+  const skip = new Set(
+    ignoreCodes.map((code) => String(code || '').toLowerCase()).filter(Boolean)
+  );
+  if (!skip.size) return codes;
+  return codes.filter((code) => !skip.has(code.toLowerCase()));
 }
 
 /** Index of an exact fault-code token, or -1. '.' is a boundary; a following digit is not. */
@@ -527,8 +539,11 @@ function queryAboutParts(query: string): boolean {
   );
 }
 
-function queryIsFaultOrTroubleshooting(query: string): boolean {
-  return faultCodeTokens(query).length > 0 || /\b(?:faults?|errors?|alarms?|troubleshoot\w*)\b/i.test(query);
+function queryIsFaultOrTroubleshooting(query: string, ignoreCodes?: string[]): boolean {
+  return (
+    faultCodesForQuery(query, ignoreCodes).length > 0 ||
+    /\b(?:faults?|errors?|alarms?|troubleshoot\w*)\b/i.test(query)
+  );
 }
 
 /**
@@ -549,8 +564,8 @@ function isSparePartsPage(text: string): boolean {
 }
 
 /** Down-rank a parts leaf for a fault or troubleshooting question that is not about parts. */
-export function excerptSparePartsDownRank(query: string, pageText: string): boolean {
-  if (queryAboutParts(query) || !queryIsFaultOrTroubleshooting(query)) return false;
+export function excerptSparePartsDownRank(query: string, pageText: string, ignoreCodes?: string[]): boolean {
+  if (queryAboutParts(query) || !queryIsFaultOrTroubleshooting(query, ignoreCodes)) return false;
   return isSparePartsPage(pageText);
 }
 
@@ -566,10 +581,10 @@ function pageHasExtendedFaultCode(hay: string, code: string): boolean {
  * Parts leaves drop for fault and troubleshooting questions.
  * A longer code (F14.10) does not collect the score of the shorter code (F14.1).
  */
-export function excerptSpanScoreScale(query: string, pageText: string): number {
+export function excerptSpanScoreScale(query: string, pageText: string, ignoreCodes?: string[]): number {
   let scale = 1;
-  if (excerptSparePartsDownRank(query, pageText)) scale *= 0.25;
-  const codes = faultCodeTokens(query);
+  if (excerptSparePartsDownRank(query, pageText, ignoreCodes)) scale *= 0.25;
+  const codes = faultCodesForQuery(query, ignoreCodes);
   if (
     codes.length &&
     codes.every((code) => pageHasExactFaultCode(pageText, code) < 0) &&
@@ -589,9 +604,10 @@ export function excerptFaultCodeAnchor(
   hay: string,
   query: string,
   spans: Array<{ start: number; end: number }>,
-  scoreByStart: Map<number, number>
+  scoreByStart: Map<number, number>,
+  ignoreCodes?: string[]
 ): number {
-  const codes = faultCodeTokens(query);
+  const codes = faultCodesForQuery(query, ignoreCodes);
   if (!codes.length) return -1;
   const aboutParts = queryAboutParts(query);
   const hits: Array<{ at: number; score: number; parts: boolean }> = [];
@@ -625,13 +641,19 @@ function contentTermPresent(hay: string, term: string): boolean {
   return false;
 }
 
-function distinctiveQuoteTerms(query: string, indexText: string): { numbers: string[]; words: string[] } {
+function distinctiveQuoteTerms(
+  query: string,
+  indexText: string,
+  ignoreCodes?: string[]
+): { numbers: string[]; words: string[] } {
   const terms = excerptQueryTerms(query);
   const hay = String(indexText || '').toLowerCase();
   const spans = manualPageSpans(hay);
+  const skip = new Set((ignoreCodes || []).map((code) => String(code || '').toLowerCase()).filter(Boolean));
   const numbers: string[] = [];
   const words: string[] = [];
   for (const term of terms) {
+    if (skip.has(term)) continue;
     if (/^\d$/.test(term)) continue;
     const positions = hay ? collectHits(hay, term) : [];
     let pages = 0;
@@ -653,14 +675,19 @@ function distinctiveQuoteTerms(query: string, indexText: string): { numbers: str
  * value such as 83 counts only outside a running footer ("Page 83 of 178").
  * Returns 0 when the page lacks the code and the terms.
  */
-export function quotedPageSupport(pageText: string, query: string, indexText: string): number {
-  const codes = faultCodeTokens(query);
+export function quotedPageSupport(
+  pageText: string,
+  query: string,
+  indexText: string,
+  ignoreCodes?: string[]
+): number {
+  const codes = faultCodesForQuery(query, ignoreCodes);
   let codeHits = 0;
   for (const code of codes) {
     if (pageHasExactFaultCode(pageText, code) >= 0) codeHits += 1;
   }
   if (codes.length > 0 && codeHits === 0) return 0;
-  const { numbers, words } = distinctiveQuoteTerms(query, indexText);
+  const { numbers, words } = distinctiveQuoteTerms(query, indexText, ignoreCodes);
   const hay = String(pageText || '')
     .toLowerCase()
     .replace(/\[\[pdfpage:\d+\]\]/g, ' ');
@@ -694,7 +721,7 @@ export function quotedPageSupport(pageText: string, query: string, indexText: st
  * unless the question is about parts.
  * Returns -1 when nothing in the query is present.
  */
-function excerptAnchor(raw: string, query: string): number {
+function excerptAnchor(raw: string, query: string, ignoreCodes?: string[]): number {
   const hay = String(raw || '').toLowerCase();
   const terms = excerptQueryTerms(query);
   if (!hay || !terms.length) return -1;
@@ -761,13 +788,13 @@ function excerptAnchor(raw: string, query: string): number {
     }
     if (at < span.start) at = span.start;
     scoreByStart.set(span.start, score);
-    score *= excerptSpanScoreScale(query, hay.slice(span.start, span.end));
+    score *= excerptSpanScoreScale(query, hay.slice(span.start, span.end), ignoreCodes);
     if (score > bestScore || (score === bestScore && at > bestAt)) {
       bestScore = score;
       bestAt = at;
     }
   }
-  const faultAt = excerptFaultCodeAnchor(hay, query, spans, scoreByStart);
+  const faultAt = excerptFaultCodeAnchor(hay, query, spans, scoreByStart, ignoreCodes);
   if (faultAt >= 0) return faultAt;
   return bestAt < 0 || bestScore <= 0 ? -1 : bestAt;
 }
@@ -786,10 +813,10 @@ function lastPhysicalPageStamp(text: string): number | undefined {
  * Printed labels such as "page 7-8" or "(p. 7)" are not page numbers.
  * Page 1 is not invented when the excerpt has no physical marker.
  */
-export function indexedExcerptPage(raw: string, query: string): number | undefined {
+export function indexedExcerptPage(raw: string, query: string, ignoreCodes?: string[]): number | undefined {
   const text = String(raw || '');
   if (!text) return undefined;
-  const at = excerptAnchor(text, query);
+  const at = excerptAnchor(text, query, ignoreCodes);
   if (at < 0) return undefined;
   const before = text.slice(0, at);
   const stamped = lastPhysicalPageStamp(before);
@@ -800,17 +827,22 @@ export function indexedExcerptPage(raw: string, query: string): number | undefin
 }
 
 /** Section marker nearest the indexed excerpt, when the chunk has no section field. */
-export function indexedExcerptSection(raw: string, query: string): string | undefined {
+export function indexedExcerptSection(raw: string, query: string, ignoreCodes?: string[]): string | undefined {
   const text = String(raw || '');
   if (!text) return undefined;
-  const at = excerptAnchor(text, query);
+  const at = excerptAnchor(text, query, ignoreCodes);
   const window = text.slice(Math.max(0, at - 1500), at + 400);
   const sect = window.match(/\b(?:section|sect\.?|§)\s*([0-9]+(?:\.[0-9]+){0,3})\b/i);
   return sect?.[1] || undefined;
 }
 
 /** Pull the same clustered hit indexedExcerptPage uses, then strip page stamps. */
-export function excerptManualSearchText(text: string, query: string, maxChars = 8000): string {
+export function excerptManualSearchText(
+  text: string,
+  query: string,
+  maxChars = 8000,
+  ignoreCodes?: string[]
+): string {
   const raw = String(text || '');
   const body = raw
     .replace(/\[\[pdfpage:\d+\]\]/g, ' ')
@@ -818,7 +850,7 @@ export function excerptManualSearchText(text: string, query: string, maxChars = 
     .trim();
   if (!body) return '';
   if (body.length <= maxChars) return body;
-  const at = excerptAnchor(raw, query);
+  const at = excerptAnchor(raw, query, ignoreCodes);
   if (at < 0) return body.slice(0, maxChars);
   const start = Math.max(0, at - 400);
   return raw

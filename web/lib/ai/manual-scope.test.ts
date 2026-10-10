@@ -12,7 +12,10 @@ import {
   selectedManualContext,
   humanizeDeviceCode,
   humanizeGeneralGuidanceDisplay,
+  excerptFaultCodeAnchor,
   excerptManualSearchText,
+  excerptSpanScoreScale,
+  faultCodeTokens,
   indexedExcerptPage,
   indexedExcerptSection,
   quotedPageSupport,
@@ -42,6 +45,9 @@ import {
   selectedManualContext as edgeSelectedManualContext,
   assistantLanguageDirective,
   normalizeReplyLanguage,
+  excerptFaultCodeAnchor as edgeExcerptFaultCodeAnchor,
+  excerptSpanScoreScale as edgeExcerptSpanScoreScale,
+  faultCodeTokens as edgeFaultCodeTokens,
   indexedExcerptPage as edgeIndexedExcerptPage,
   quotedPageSupport as edgeQuotedPageSupport,
 } from '../../../supabase/functions/grok-assistant/manual-scope.ts';
@@ -330,6 +336,64 @@ test('F14.1 cites the fault table on page 147, not the Laser Rail spare-parts pa
   assert.equal(edgeIndexedExcerptPage(indexed, partsQuestion), 152);
 });
 
+/** Lumenis M22 is a model name, not a fault code. Cover has the name; page 5 has the procedure. */
+function lumenisM22Index(): string {
+  const pages: string[] = [];
+  for (let n = 1; n <= 8; n++) {
+    let text = 'Lumenis service notes.';
+    if (n === 1) text = 'Lumenis M22 Service Manual. Cover.';
+    if (n === 5) text = 'Lumenis. Calibrate the fluence. Follow the procedure steps.';
+    if (n === 7) {
+      text =
+        'Lumenis Spare Parts Item # Part # 1. Handpiece 7122-00-9572 2. Lens 8015-00-1220 3. Filter 1301-00-9395 4. Mirror 8055-00-0304';
+    }
+    pages.push(`[[pdfpage:${n}]] ${text}`);
+  }
+  return pages.join('\f');
+}
+
+function formFeedSpans(hay: string): Array<{ start: number; end: number }> {
+  const spans: Array<{ start: number; end: number }> = [];
+  let start = 0;
+  for (let i = 0; i < hay.length; i++) {
+    if (hay.charCodeAt(i) !== 12) continue;
+    if (i > start) spans.push({ start, end: i });
+    start = i + 1;
+  }
+  if (start < hay.length) spans.push({ start, end: hay.length });
+  return spans;
+}
+
+test('a model name in the manual label is not a fault code', () => {
+  const indexed = lumenisM22Index();
+  const label = 'Lumenis M22';
+  const question = 'how do I calibrate the fluence';
+  const query = `${label} ${question} procedure specification steps`;
+  const ignore = faultCodeTokens(label);
+  const edgeIgnore = edgeFaultCodeTokens(label);
+  assert.deepEqual(ignore.map((code) => code.toLowerCase()), ['m22']);
+  assert.deepEqual(edgeIgnore.map((code) => code.toLowerCase()), ['m22']);
+  const cover = indexed.split('\f')[0];
+  const procedure = indexed.split('\f')[4];
+  const parts = indexed.split('\f')[6];
+  assert.equal(quotedPageSupport(cover, query, indexed), 111);
+  assert.equal(quotedPageSupport(cover, query, indexed, ignore), 0);
+  assert.equal(edgeQuotedPageSupport(cover, query, indexed, edgeIgnore), 0);
+  assert.equal(quotedPageSupport(procedure, query, indexed, ignore) > 0, true);
+  assert.equal(edgeQuotedPageSupport(procedure, query, indexed, edgeIgnore) > 0, true);
+  const hay = indexed.toLowerCase();
+  const spans = formFeedSpans(hay);
+  assert.equal(excerptFaultCodeAnchor(hay, query, spans, new Map(), ignore), -1);
+  assert.equal(edgeExcerptFaultCodeAnchor(hay, query, spans, new Map(), edgeIgnore), -1);
+  assert.ok(excerptFaultCodeAnchor(hay, query, spans, new Map()) >= 0);
+  assert.equal(excerptSpanScoreScale(query, parts, ignore), 1);
+  assert.equal(edgeExcerptSpanScoreScale(query, parts, edgeIgnore), 1);
+  assert.equal(excerptSpanScoreScale(query, parts), 0.25);
+  assert.equal(indexedExcerptPage(indexed, query, ignore), 5);
+  assert.equal(edgeIndexedExcerptPage(indexed, query, edgeIgnore), 5);
+  assert.equal(indexedExcerptPage(indexed, query), 1);
+});
+
 test('maximum fluence anchors the settings page, not the following calibration chapter', () => {
   const pages: string[] = [];
   for (let n = 1; n <= 100; n++) {
@@ -567,7 +631,9 @@ test('large manuals are not attached, and a missing corpus still gets general gu
   );
   assert.match(fn, /function humanizeDeviceCode/);
   assert.match(fn, /function indexedExcerptPage/);
-  assert.match(fn, /indexedExcerptPage\(full, query\)/);
+  assert.match(fn, /indexedExcerptPage\(full, query, labelCodes\)/);
+  assert.match(fn, /searchIndexedManualText\(db, manualMeta\.id, sq, manualLabel, faultCodeTokens\(manualLabel\)\)/);
+  assert.match(fn, /ignoreCodes: faultCodeTokens\(manualLabel\)/);
   const pageFn = fn.slice(fn.indexOf('function lastPhysicalPageStamp'), fn.indexOf('function indexedExcerptSection'));
   assert.match(pageFn, /pdfpage/);
   assert.match(pageFn, /\\f/);

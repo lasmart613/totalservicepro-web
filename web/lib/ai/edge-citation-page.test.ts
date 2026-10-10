@@ -30,13 +30,25 @@ type Part = {
 };
 type Edge = {
   buildSearchQuery: (q: string, label: string, codes: string[]) => string;
-  searchIndexedManualText: (db: unknown, id: number, q: string, label: string) => Promise<Part | null>;
+  searchIndexedManualText: (
+    db: unknown,
+    id: number,
+    q: string,
+    label: string,
+    ignoreCodes?: string[]
+  ) => Promise<Part | null>;
   mergeIndexedParts: (indexed: Part | null, parts: Part[]) => { parts: Part[]; citeParts: Part[] };
   citationsFromParts: (parts: Part[], id: number, title: string, scope?: unknown) => Cite[];
   attachProsePages: (
     cites: Cite[],
     text: string,
-    scope?: { indexText?: string; query?: string; pageCount?: number; manualId?: number }
+    scope?: {
+      indexText?: string;
+      query?: string;
+      pageCount?: number;
+      manualId?: number;
+      ignoreCodes?: string[];
+    }
   ) => Cite[];
   formatCitationLine: (cites: Cite[], fallback?: string) => string;
 };
@@ -411,4 +423,37 @@ test('F14.1 on manual 5 cites page 147, and a bad quoted page is ignored', async
     'Candela GentleMAX PRO PLUS'
   );
   assert.equal(parts?.page, 152);
+});
+
+test('Lumenis M22 is a model name, so fluence calibration does not cite the cover', async () => {
+  const edge = await loadEdge();
+  const pages: string[] = [];
+  for (let n = 1; n <= 8; n++) {
+    let text = 'Lumenis service notes.';
+    if (n === 1) text = 'Lumenis M22 Service Manual. Cover.';
+    if (n === 5) text = 'Lumenis. Calibrate the fluence. Follow the procedure steps.';
+    if (n === 7) {
+      text =
+        'Lumenis Spare Parts Item # Part # 1. Handpiece 7122-00-9572 2. Lens 8015-00-1220 3. Filter 1301-00-9395 4. Mirror 8055-00-0304';
+    }
+    pages.push(`[[pdfpage:${n}]] ${text}`);
+  }
+  const indexedText = pages.join('\f');
+  const label = 'Lumenis M22';
+  const query = edge.buildSearchQuery('how do I calibrate the fluence', label, []);
+  const indexed = await edge.searchIndexedManualText(fakeDb(indexedText), 22, query, label, ['M22']);
+  assert.equal(indexed?.page, 5);
+  const fromLabel = await edge.searchIndexedManualText(fakeDb(indexedText), 22, query, label);
+  assert.equal(fromLabel?.page, 5);
+  const scope = { indexText: indexedText, query, pageCount: 8, manualId: 22, ignoreCodes: ['M22'] };
+  const kept = edge.attachProsePages([{ manualId: 22, title: label, page: 5 }], 'See p. 1.', scope);
+  assert.equal(kept[0].page, 5);
+  const accepted = edge.attachProsePages([{ manualId: 22, title: label, page: 1 }], 'See page 5.', scope);
+  assert.equal(accepted[0].page, 5);
+  const forced = edge.attachProsePages(
+    [{ manualId: 22, title: label, page: 5 }],
+    'See p. 1.',
+    { indexText: indexedText, query, pageCount: 8, manualId: 22 }
+  );
+  assert.equal(forced[0].page, 1);
 });

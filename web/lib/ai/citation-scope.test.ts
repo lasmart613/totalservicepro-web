@@ -305,3 +305,28 @@ test('a quoted page is used only when it is in range and holds the fault code or
     undefined
   );
 });
+
+test('a model name in the manual label does not make the cover a quoted fault page', () => {
+  const pages: string[] = [];
+  for (let n = 1; n <= 8; n++) {
+    let body = 'Lumenis service notes.';
+    if (n === 1) body = 'Lumenis M22 Service Manual. Cover.';
+    if (n === 5) body = 'Lumenis. Calibrate the fluence. Follow the procedure steps.';
+    pages.push(`[[pdfpage:${n}]] ${body}`);
+  }
+  const index = pages.join('\f');
+  const query = 'Lumenis M22 how do I calibrate the fluence procedure specification steps';
+  const ignoreCodes = ['M22'];
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'See p. 1.', indexText: index, query, pageCount: 8, ignoreCodes }),
+    undefined
+  );
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'See page 5.', indexText: index, query, pageCount: 8, ignoreCodes }),
+    5
+  );
+  assert.equal(
+    resolveQuotedCitationPage({ answer: 'See p. 1.', indexText: index, query, pageCount: 8 }),
+    1
+  );
+});

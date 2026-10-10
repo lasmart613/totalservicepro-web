@@ -31,6 +31,7 @@ import {
   wholePdfAttachAllowed,
   excerptFaultCodeAnchor,
   excerptSpanScoreScale,
+  faultCodeTokens,
   type PdfAttachStat,
 } from './manual-scope.ts'
 import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
@@ -572,6 +573,8 @@ export type ProsePageScope = {
   query?: string
   pageCount?: number
   manualId?: number
+  /** Letter-prefixed tokens from the manual label (M22). Not fault codes. */
+  ignoreCodes?: string[]
 }
 
 /** Chapter or section on one stamped page. A see-also that names two chapters is not the heading. */
@@ -611,6 +614,7 @@ export function attachProsePages(
           indexText,
           query: scope.query,
           pageCount: scope.pageCount,
+          ignoreCodes: scope.ignoreCodes,
         })
       : undefined
   if (quoted == null) return out.slice(0, 8)
@@ -1696,7 +1700,7 @@ function transmissionThresholdBoost(
  * unless the question is about parts.
  * Returns -1 when nothing in the query is present.
  */
-function excerptAnchor(raw: string, query: string): number {
+function excerptAnchor(raw: string, query: string, ignoreCodes?: string[]): number {
   const hay = String(raw || '').toLowerCase()
   const terms = excerptQueryTerms(query)
   if (!hay || !terms.length) return -1
@@ -1758,13 +1762,13 @@ function excerptAnchor(raw: string, query: string): number {
     }
     if (at < span.start) at = span.start
     scoreByStart.set(span.start, score)
-    score *= excerptSpanScoreScale(query, hay.slice(span.start, span.end))
+    score *= excerptSpanScoreScale(query, hay.slice(span.start, span.end), ignoreCodes)
     if (score > bestScore || (score === bestScore && at > bestAt)) {
       bestScore = score
       bestAt = at
     }
   }
-  const faultAt = excerptFaultCodeAnchor(hay, query, spans, scoreByStart)
+  const faultAt = excerptFaultCodeAnchor(hay, query, spans, scoreByStart, ignoreCodes)
   if (faultAt >= 0) return faultAt
   return bestAt < 0 || bestScore <= 0 ? -1 : bestAt
 }
@@ -1778,10 +1782,10 @@ function lastPhysicalPageStamp(text: string): number | undefined {
 }
 
 /** Inlined so a raw-GitHub bootstrap still pages index excerpts. Keep in sync with web manual-scope.ts. Physical PDF index only — never a printed "page 7-8" label. */
-function indexedExcerptPage(raw: string, query: string): number | undefined {
+function indexedExcerptPage(raw: string, query: string, ignoreCodes?: string[]): number | undefined {
   const text = String(raw || '')
   if (!text) return undefined
-  const at = excerptAnchor(text, query)
+  const at = excerptAnchor(text, query, ignoreCodes)
   if (at < 0) return undefined
   const before = text.slice(0, at)
   const stamped = lastPhysicalPageStamp(before)
@@ -1812,21 +1816,21 @@ function sectionOnCitedPage(raw: string, at: number): string | undefined {
   return extractSectionRef(kept)
 }
 
-function indexedExcerptSection(raw: string, query: string): string | undefined {
+function indexedExcerptSection(raw: string, query: string, ignoreCodes?: string[]): string | undefined {
   const text = String(raw || '')
   if (!text) return undefined
-  const at = excerptAnchor(text, query)
+  const at = excerptAnchor(text, query, ignoreCodes)
   const window = text.slice(Math.max(0, at - 1500), at + 400)
   const sect = window.match(/\b(?:section|sect\.?|§)\s*([0-9]+(?:\.[0-9]+){0,3})\b/i)
   return sect?.[1] || undefined
 }
 
-function excerptIndexedManualText(text: string, query: string, maxChars = 8000): string {
+function excerptIndexedManualText(text: string, query: string, maxChars = 8000, ignoreCodes?: string[]): string {
   const raw = String(text || '')
   const body = raw.replace(/\[\[pdfpage:\d+\]\]/g, ' ').replace(/\s+/g, ' ').trim()
   if (!body) return ''
   if (body.length <= maxChars) return body
-  const at = excerptAnchor(raw, query)
+  const at = excerptAnchor(raw, query, ignoreCodes)
   if (at < 0) return body.slice(0, maxChars)
   const start = Math.max(0, at - 400)
   return raw
@@ -1841,17 +1845,21 @@ async function searchIndexedManualText(
   db: any,
   manualId: number | null,
   query: string,
-  label: string
+  label: string,
+  ignoreCodes?: string[]
 ): Promise<Retrieved | null> {
   const id = asManualId(manualId)
   if (id == null) return null
   const { data, error } = await db.from('manual_search_index').select('search_text').eq('manual_id', id).maybeSingle()
   if (error || !data?.search_text) return null
   const full = String(data.search_text)
-  const excerpt = excerptIndexedManualText(full, query)
+  // Model names in the manual label (M22) are not fault codes. The question and
+  // extracted fault codes still are: they are in the query, not in this list.
+  const labelCodes = ignoreCodes ?? faultCodeTokens(label)
+  const excerpt = excerptIndexedManualText(full, query, 8000, labelCodes)
   if (!excerpt || excerpt.length < 40) return null
-  const page = indexedExcerptPage(full, query)
-  const section = sectionOnCitedPage(full, excerptAnchor(full, query)) || indexedExcerptSection(full, query)
+  const page = indexedExcerptPage(full, query, labelCodes)
+  const section = sectionOnCitedPage(full, excerptAnchor(full, query, labelCodes)) || indexedExcerptSection(full, query, labelCodes)
   return {
     text: excerpt,
     source: `${label || 'Selected manual'} (indexed PDF text)`,
@@ -2317,7 +2325,7 @@ serve(async (req) => {
           // Cheap DB read; runs beside collection search so a stamped index row
           // always supplies the physical page even when collection chunks exist.
           const indexedP: Promise<Retrieved | null> = manualMeta
-            ? searchIndexedManualText(db, manualMeta.id, sq, manualLabel).catch((e) => {
+            ? searchIndexedManualText(db, manualMeta.id, sq, manualLabel, faultCodeTokens(manualLabel)).catch((e) => {
                 console.warn('indexed manual search failed soft', e)
                 return null
               })
@@ -2514,6 +2522,7 @@ serve(async (req) => {
           query: citationQuery,
           pageCount: selectedPageCount,
           manualId: scopedId,
+          ignoreCodes: faultCodeTokens(manualLabel),
         })
         citationLine = formatCitationLine(manualCitations, manualLabel)
       }

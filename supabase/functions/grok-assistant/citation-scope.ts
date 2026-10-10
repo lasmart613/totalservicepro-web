@@ -281,6 +281,8 @@ export function resolveQuotedCitationPage(opts: {
   indexText: string
   query: string
   pageCount?: number
+  /** Letter-prefixed tokens from the manual label (M22). Not fault codes. */
+  ignoreCodes?: string[]
 }): number | undefined {
   const count = effectivePageCount(opts.pageCount, opts.indexText)
   if (count == null) return undefined
@@ -296,7 +298,7 @@ export function resolveQuotedCitationPage(opts: {
       if (page > count) continue
       const body = indexPageBody(indexText, page)
       if (!body) continue
-      const support = quotedPageSupport(body, query, indexText)
+      const support = quotedPageSupport(body, query, indexText, opts.ignoreCodes)
       if (support <= 0) continue
       if (support > bestSupport || (support === bestSupport && page > (bestPage ?? 0))) {
         bestSupport = support
