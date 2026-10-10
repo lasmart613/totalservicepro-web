@@ -5,7 +5,9 @@
  * user. When either profile pointer still names the removed org, both move
  * to the remaining home membership, or to the latest other membership
  * (organization_id DESC on a tie) after set_home_membership, or to NULL.
- * Profile role is left as-is. Caller authority is this org's membership
+ * A move sets user_profiles.role from that membership. Platform admin
+ * stays admin. No remaining membership sets role fse unless the profile
+ * is platform admin. Caller authority is this org's membership
  * role, this org's created_by, or a founder flag on that membership.
  */
 
