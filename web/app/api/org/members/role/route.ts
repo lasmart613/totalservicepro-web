@@ -45,8 +45,9 @@ type RoleDeps = {
  * Owner, platform admin, and every other role are refused with no writes.
  * The org owner and founder cannot have their role changed.
  * A caller cannot raise their own role.
- * When the target profile points at this org, user_profiles.role is set to
- * the same membership role and is never platform admin.
+ * When user_profiles.organization_id is this org, user_profiles.role is set
+ * to the same membership role and is never platform admin. The other org
+ * pointer does not trigger that copy.
  */
 export async function POST(req: NextRequest) {
   return runChangeMemberRole(req);
@@ -210,7 +211,7 @@ export async function runChangeMemberRole(req: NextRequest, deps: RoleDeps = {})
 
     const { data: targetProfile, error: profileReadError } = await admin
       .from('user_profiles')
-      .select('organization_id, active_organization_id')
+      .select('organization_id')
       .eq('id', targetUserId)
       .maybeSingle();
     if (profileReadError) {
@@ -226,10 +227,8 @@ export async function runChangeMemberRole(req: NextRequest, deps: RoleDeps = {})
       return NextResponse.json({ error: membershipError.message }, { status: 500 });
     }
 
-    const activeHere =
-      sameOrg(targetProfile?.organization_id, body.organizationId) ||
-      sameOrg(targetProfile?.active_organization_id, body.organizationId);
-    if (activeHere) {
+    const profileHomeHere = sameOrg(targetProfile?.organization_id, body.organizationId);
+    if (profileHomeHere) {
       const { error: profileError } = await admin
         .from('user_profiles')
         .update({ role: storedRole, updated_at: new Date().toISOString() })

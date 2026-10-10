@@ -209,6 +209,23 @@ test('a valid team role change is trimmed, lowercased, and copied onto the profi
   );
 });
 
+test('profile role stays when only the active org pointer is this shop', async () => {
+  const state = baseStore();
+  const memberProfile = profile(state, MEMBER);
+  if (!memberProfile) throw new Error('missing member profile');
+  memberProfile.organization_id = 4;
+  memberProfile.active_organization_id = ORG;
+  memberProfile.role = 'company_admin';
+  const result = await postRole({ state, role: 'dispatcher' });
+  assert.equal(result.status, 200);
+  assert.equal(result.body.role, 'dispatcher');
+  assert.equal(membership(state, MEMBER)?.role, 'dispatcher');
+  assert.equal(profile(state, MEMBER)?.role, 'company_admin');
+  assert.equal(profile(state, MEMBER)?.organization_id, 4);
+  assert.equal(profile(state, MEMBER)?.active_organization_id, ORG);
+  assert.deepEqual(result.updates, [{ table: 'organization_memberships', role: 'dispatcher' }]);
+});
+
 test('profile role admin with an fse membership cannot change roles', async () => {
   const state = baseStore();
   const caller = 'platform-1';
@@ -300,4 +317,5 @@ test('role route takes authority from membership and only assigns invitable team
   assert.match(route, /memberRoleTargetIsLocked/);
   assert.doesNotMatch(route, /profile\.role/);
   assert.doesNotMatch(route, /callerRole = profile/);
+  assert.doesNotMatch(route, /active_organization_id/);
 });
