@@ -21,6 +21,14 @@ import {
 } from '@/lib/billing/owned-doc-mail';
 import { releaseDocumentSendSlot, takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
 
+/** Same body for a missing report and a report owned by another shop. */
+const REPORT_NOT_FOUND = 'Service report not found.';
+
+type SendReportDeps = {
+  userClient?: SupabaseClient;
+  adminClient?: SupabaseClient | null;
+};
+
 const REPORT_SELECTS = [
   'id, created_by, organization_id, customer_name, customer_organization_id, customer_email, report_number, status',
   'id, created_by, organization_id, customer_name, customer_email, report_number, status',
@@ -34,6 +42,10 @@ const REPORT_SELECTS = [
  * No customer-invite claim token is minted.
  */
 export async function POST(req: NextRequest) {
+  return runSendReport(req);
+}
+
+export async function runSendReport(req: NextRequest, deps: SendReportDeps = {}) {
   let heldSlot: { organizationId: string | number | null; documentId: string | number; stamp: number } | null =
     null;
   try {
@@ -41,14 +53,19 @@ export async function POST(req: NextRequest) {
     const token = auth.replace(/^Bearer\s+/i, '').trim();
     if (!token) return respond({ error: 'Sign in required' }, 401);
 
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    if (!url || !anon) return respond({ error: 'Server misconfigured' }, 500);
+    let supabase: SupabaseClient;
+    if (deps.userClient) {
+      supabase = deps.userClient;
+    } else {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+      const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+      if (!url || !anon) return respond({ error: 'Server misconfigured' }, 500);
 
-    const supabase = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+      supabase = createClient(url, anon, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    }
 
     const {
       data: { user },
@@ -75,19 +92,18 @@ export async function POST(req: NextRequest) {
 
     const loaded = await loadOwnedDocument({
       userClient: supabase,
-      adminClient: hasServiceRole() ? getSupabaseAdmin() : null,
+      adminClient:
+        deps.adminClient !== undefined ? deps.adminClient : hasServiceRole() ? getSupabaseAdmin() : null,
       table: 'service_reports',
       id: reportId,
       callerOrgId,
       narrowSelects: REPORT_SELECTS,
-      notFoundError: 'Service report not found.',
-      forbiddenError: 'This service report belongs to another organization.',
+      notFoundError: REPORT_NOT_FOUND,
     });
-    if (!loaded.ok) return respond({ error: loaded.error }, loaded.status);
-    const report = loaded.row;
-    if (!documentOwnedByOrganization(report, callerOrgId)) {
-      return respond({ error: 'This service report belongs to another organization.' }, 403);
+    if (!loaded.ok || !documentOwnedByOrganization(loaded.row, callerOrgId)) {
+      return respond({ error: REPORT_NOT_FOUND }, 404);
     }
+    const report = loaded.row;
 
     let crm: { email: string; source: 'crm_org' | 'crm_contact' | 'form' | 'none' } | null = null;
     const custOrgId = documentCustomerOrgId(report);

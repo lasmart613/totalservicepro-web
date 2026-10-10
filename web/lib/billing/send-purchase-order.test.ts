@@ -277,7 +277,7 @@ describe('send purchase order', { concurrency: false }, () => {
     });
   });
 
-  test("another organization's purchase order returns 403, same as a missing one", async () => {
+  test("another organization's purchase order returns 404, same as a missing one", async () => {
     resetDocumentSendRateLimit();
     const foreign = memoryClient({
       user_profiles: [profile],
@@ -305,10 +305,13 @@ describe('send purchase order', { concurrency: false }, () => {
         userClient: missing as never,
         adminClient: null,
       });
+      const foreignHeaders = [...foreignRes.headers.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+      const missingHeaders = [...missingRes.headers.entries()].sort((a, b) => a[0].localeCompare(b[0]));
       const foreignJson = await foreignRes.json();
       const missingJson = await missingRes.json();
-      assert.equal(foreignRes.status, 403);
-      assert.equal(missingRes.status, 403);
+      assert.equal(foreignRes.status, 404);
+      assert.equal(missingRes.status, 404);
+      assert.deepEqual(foreignHeaders, missingHeaders);
       assert.deepEqual(foreignJson, missingJson);
       assert.equal(foreignJson.error, 'Purchase order not found.');
       assert.equal(JSON.stringify(foreignJson).includes('victim@other.test'), false);

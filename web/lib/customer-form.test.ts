@@ -377,6 +377,8 @@ test('send-invoice requires an owned invoice row before service-role writes', ()
   const here = dirname(fileURLToPath(import.meta.url));
   const src = readFileSync(join(here, '../app/api/billing/send-invoice/route.ts'), 'utf8');
   assert.doesNotMatch(src, /row\.organization_id == null/);
-  assert.match(src, /This invoice belongs to another organization/);
+  assert.match(src, /documentOwnedByOrganization/);
+  assert.match(src, /Invoice not found/);
+  assert.doesNotMatch(src, /belongs to another organization/);
   assert.match(src, /if \(invoiceId && inv\)/);
 });

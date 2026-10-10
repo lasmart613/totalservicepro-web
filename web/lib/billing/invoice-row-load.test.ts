@@ -92,6 +92,30 @@ test('column-missing selects fall through and still return invoice_data', async 
   assert.equal(loaded.errorMsg, null);
 });
 
+test('a successful empty read does not try narrower selects', async () => {
+  let selects = 0;
+  const client = {
+    from() {
+      return {
+        select() {
+          selects += 1;
+          return {
+            eq() {
+              return {
+                maybeSingle: async () => ({ data: null, error: null }),
+              };
+            },
+          };
+        },
+      };
+    },
+  };
+  const loaded = await loadInvoiceRow(client, 9);
+  assert.equal(selects, 1);
+  assert.equal(loaded.row, null);
+  assert.equal(loaded.errorMsg, null);
+});
+
 test('a non-schema error stops the fallback reads', async () => {
   let selects = 0;
   const client = {

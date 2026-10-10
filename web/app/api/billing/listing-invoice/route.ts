@@ -137,7 +137,8 @@ async function loadListing(
         organization_id: row.organization_id,
       };
     }
-    if (error && !/column|does not exist|schema cache/i.test(String(error.message || ''))) return null;
+    if (!error) return null;
+    if (!/column|does not exist|schema cache/i.test(String(error.message || ''))) return null;
   }
   return null;
 }
