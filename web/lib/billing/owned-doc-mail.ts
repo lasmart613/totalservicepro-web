@@ -37,7 +37,12 @@ export type QueryClient = {
 
 export type OwnedDocumentResult =
   | { ok: true; row: Record<string, unknown> }
-  | { ok: false; status: 403 | 404; error: string };
+  | { ok: false; status: 404; error: string };
+
+/** Same object for a missing row and a row owned by another shop. */
+function absentDocument(error: string): OwnedDocumentResult {
+  return { ok: false, status: 404, error };
+}
 
 export function isMailbox(value: unknown): boolean {
   return MAILBOX.test(String(value || '').trim());
@@ -622,7 +627,6 @@ export async function loadOwnedDocument(opts: {
   /** When set, used instead of narrowSelects (invoice rows go through loadInvoiceRow). */
   readNarrow?: (client: QueryClient) => Promise<Record<string, unknown> | null>;
   notFoundError: string;
-  forbiddenError: string;
 }): Promise<OwnedDocumentResult> {
   const read = opts.readNarrow
     ? opts.readNarrow
@@ -631,15 +635,16 @@ export async function loadOwnedDocument(opts: {
   if (!row && opts.adminClient) {
     row = await read(opts.adminClient);
   }
-  if (!row) return { ok: false, status: 404, error: opts.notFoundError };
-  if (!documentOwnedByOrganization(row, opts.callerOrgId)) {
-    return { ok: false, status: 403, error: opts.forbiddenError };
+  // Missing and another shop stop here, before select('*') or organizations.
+  // Extra work on only one of those paths would make the responses distinguishable.
+  if (!row || !documentOwnedByOrganization(row, opts.callerOrgId)) {
+    return absentDocument(opts.notFoundError);
   }
   const full =
     (await loadStar(opts.userClient, opts.table, opts.id)) ||
     (opts.adminClient ? await loadStar(opts.adminClient, opts.table, opts.id) : null);
   const merged = mergeOwned(row, full, opts.callerOrgId);
-  if (!merged) return { ok: false, status: 403, error: opts.forbiddenError };
+  if (!merged) return absentDocument(opts.notFoundError);
   return { ok: true, row: merged };
 }
 
@@ -653,7 +658,10 @@ async function loadNarrow(
     try {
       const { data, error } = await client.from(table).select(cols).eq('id', id).maybeSingle();
       if (!error && data) return data as Record<string, unknown>;
-      if (error && !COLUMN_MISSING.test(String(error.message || ''))) return null;
+      // A successful empty read is a missing row. The next select would run
+      // only for that case, so a probe could time it against a row that exists.
+      if (!error) return null;
+      if (!COLUMN_MISSING.test(String(error.message || ''))) return null;
     } catch {
       return null;
     }

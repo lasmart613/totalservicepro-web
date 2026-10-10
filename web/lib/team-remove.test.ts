@@ -119,6 +119,20 @@ function baseStore(overrides: Partial<Store> = {}): Store {
   };
 }
 
+/** Same mapping as public.profile_role_from_membership. Never returns platform admin. */
+function profileRoleFromMembership(role: string | null | undefined): string {
+  const trimmed = String(role ?? '').trim();
+  if (trimmed.toLowerCase() === 'admin') return 'company_admin';
+  if (!trimmed) return 'fse';
+  return trimmed;
+}
+
+function isPlatformAdminRole(role: string | null | undefined): boolean {
+  return String(role ?? '').trim().toLowerCase() === 'admin';
+}
+
+const CLEARED_PROFILE_ROLE = 'fse';
+
 function matches(row: Record<string, unknown>, filters: Record<string, unknown>) {
   return Object.entries(filters).every(([key, value]) => String(row[key]) === String(value));
 }
@@ -184,50 +198,65 @@ function removeAdmin(state: Store) {
           }
           return b.organization_id - a.organization_id;
         })[0];
-      const pointProfile = (org: number) => {
-        if (!profile) return;
-        profile.organization_id = org;
-        profile.active_organization_id = org;
-      };
+      const others = state.memberships.filter(
+        (row) => row.user_id === userId && row.organization_id !== orgId
+      );
+      let next: Membership | undefined;
+      let markHome = false;
+      let pointersFollow = false;
       if (wasHome) {
-        const next = latest(
-          state.memberships.filter((row) => row.user_id === userId && row.organization_id !== orgId)
-        );
-        state.memberships = state.memberships.filter(
-          (row) => !(row.user_id === userId && row.organization_id === orgId)
-        );
-        if (next) {
-          next.is_home = true;
-          homeMovedTo = next.organization_id;
-          pointProfile(next.organization_id);
-        } else {
-          profileCleared = true;
-          if (profile) {
-            profile.organization_id = null;
-            profile.active_organization_id = null;
+        pointersFollow = true;
+        next = latest(others);
+        markHome = !!next;
+      } else if (
+        profile != null &&
+        (String(profile.organization_id) === String(orgId) ||
+          String(profile.active_organization_id) === String(orgId))
+      ) {
+        pointersFollow = true;
+        const home = latest(others.filter((row) => row.is_home));
+        next = home || latest(others);
+        markHome = !!next && !home;
+      }
+      let movedRole: string | null = null;
+      if (pointersFollow && next && profile && !isPlatformAdminRole(profile.role)) {
+        movedRole = profileRoleFromMembership(next.role);
+        if (movedRole.trim().toLowerCase() === 'admin') {
+          return Promise.resolve({
+            data: null,
+            error: { message: 'remove_organization_member refused platform admin' },
+          });
+        }
+        if (movedRole.trim().toLowerCase() === 'owner') {
+          const taken = state.profiles.some(
+            (row) => row.id !== userId && row.organization_id === next!.organization_id && row.role === 'owner'
+          );
+          if (taken) {
+            return Promise.resolve({
+              data: null,
+              error: {
+                message:
+                  'remove_organization_member refused owner role; that organization already has an owner profile',
+              },
+            });
           }
         }
-      } else {
-        const pointersHit =
-          profile != null &&
-          (String(profile.organization_id) === String(orgId) ||
-            String(profile.active_organization_id) === String(orgId));
-        state.memberships = state.memberships.filter(
-          (row) => !(row.user_id === userId && row.organization_id === orgId)
-        );
-        if (pointersHit && profile) {
-          const remaining = state.memberships.filter((row) => row.user_id === userId);
-          const home = latest(remaining.filter((row) => row.is_home));
-          const next = home || latest(remaining);
-          if (next) {
-            if (!home) next.is_home = true;
-            homeMovedTo = next.organization_id;
-            pointProfile(next.organization_id);
-          } else {
-            profileCleared = true;
-            profile.organization_id = null;
-            profile.active_organization_id = null;
-          }
+      }
+      state.memberships = state.memberships.filter(
+        (row) => !(row.user_id === userId && row.organization_id === orgId)
+      );
+      if (pointersFollow && profile) {
+        if (next) {
+          if (markHome) next.is_home = true;
+          homeMovedTo = next.organization_id;
+          profile.organization_id = next.organization_id;
+          profile.active_organization_id = next.organization_id;
+          if (movedRole != null) profile.role = movedRole;
+        } else {
+          profileCleared = true;
+          profile.organization_id = null;
+          profile.active_organization_id = null;
+          if (!isPlatformAdminRole(profile.role)) profile.role = CLEARED_PROFILE_ROLE;
         }
       }
       const email = String(profile?.email || '').toLowerCase();
@@ -469,7 +498,7 @@ test('a non-home removal with no home uses the latest other membership', async (
   assert.equal(result.body.profileCleared, false);
   assert.equal(profile.organization_id, 12);
   assert.equal(profile.active_organization_id, 12);
-  assert.equal(profile.role, 'fse');
+  assert.equal(profile.role, 'dispatcher');
   assert.equal(
     state.memberships.find((row) => row.user_id === MEMBER && row.organization_id === 12)?.is_home,
     true
@@ -636,7 +665,7 @@ test('403 when the caller profile role is admin and they are not company_admin, 
   assert.equal(JSON.stringify(state.profiles), profilesBefore);
 });
 
-test('removing a home employee with no other membership clears both org pointers and leaves the role', async () => {
+test('removing a home employee with no other membership clears both org pointers and sets fse', async () => {
   const state = baseStore();
   state.memberships = state.memberships.filter(
     (row) => !(row.user_id === MEMBER && row.organization_id === HOME)
@@ -655,7 +684,7 @@ test('removing a home employee with no other membership clears both org pointers
   assert.equal(result.body.profileCleared, true);
   assert.equal(profile.organization_id, null);
   assert.equal(profile.active_organization_id, null);
-  assert.equal(profile.role, 'service_manager');
+  assert.equal(profile.role, 'fse');
   assert.equal(
     state.memberships.some((item) => item.user_id === MEMBER),
     false
@@ -703,7 +732,129 @@ test('removing a home employee moves home to the latest other membership and poi
   assert.equal(kept.is_home, false);
   assert.equal(profile.organization_id, 12);
   assert.equal(profile.active_organization_id, 12);
+  assert.equal(profile.role, 'billing_manager');
+});
+
+test('removing a company_admin from org A with an fse membership in org B leaves the profile at org B as fse', async () => {
+  const state = baseStore();
+  const homeRow = state.memberships.find((item) => item.user_id === MEMBER && item.organization_id === ORG)!;
+  homeRow.is_home = true;
+  homeRow.role = 'company_admin';
+  const other = state.memberships.find((item) => item.user_id === MEMBER && item.organization_id === HOME)!;
+  other.is_home = false;
+  other.role = 'fse';
+  const profile = state.profiles.find((item) => item.id === MEMBER)!;
+  profile.organization_id = ORG;
+  profile.active_organization_id = ORG;
+  profile.role = 'company_admin';
+  const result = await postRemove({ state });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.homeMovedTo, HOME);
+  assert.equal(result.body.profileCleared, false);
+  assert.equal(profile.organization_id, HOME);
+  assert.equal(profile.active_organization_id, HOME);
+  assert.equal(profile.role, 'fse');
+  assert.equal(
+    state.memberships.find((item) => item.user_id === MEMBER && item.organization_id === HOME)?.role,
+    'fse'
+  );
+  assert.equal(
+    state.memberships.some((item) => item.user_id === MEMBER && item.organization_id === ORG),
+    false
+  );
+});
+
+test('a destination membership role of admin becomes company_admin on the profile', async () => {
+  const state = baseStore();
+  const homeRow = state.memberships.find((item) => item.user_id === MEMBER && item.organization_id === ORG)!;
+  homeRow.is_home = true;
+  homeRow.role = 'company_admin';
+  const other = state.memberships.find((item) => item.user_id === MEMBER && item.organization_id === HOME)!;
+  other.is_home = false;
+  other.role = 'admin';
+  const profile = state.profiles.find((item) => item.id === MEMBER)!;
+  profile.organization_id = ORG;
+  profile.active_organization_id = ORG;
+  profile.role = 'company_admin';
+  const result = await postRemove({ state });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(profile.organization_id, HOME);
   assert.equal(profile.role, 'company_admin');
+  assert.notEqual(profile.role, 'admin');
+});
+
+test('a platform admin profile role is kept when home moves to an fse membership', async () => {
+  const state = baseStore();
+  const homeRow = state.memberships.find((item) => item.user_id === MEMBER && item.organization_id === ORG)!;
+  homeRow.is_home = true;
+  homeRow.role = 'company_admin';
+  const other = state.memberships.find((item) => item.user_id === MEMBER && item.organization_id === HOME)!;
+  other.is_home = false;
+  other.role = 'fse';
+  const profile = state.profiles.find((item) => item.id === MEMBER)!;
+  profile.organization_id = ORG;
+  profile.active_organization_id = ORG;
+  profile.role = 'admin';
+  const result = await postRemove({ state });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.homeMovedTo, HOME);
+  assert.equal(profile.organization_id, HOME);
+  assert.equal(profile.active_organization_id, HOME);
+  assert.equal(profile.role, 'admin');
+  assert.equal(
+    state.memberships.find((item) => item.user_id === MEMBER && item.organization_id === HOME)?.role,
+    'fse'
+  );
+});
+
+test('a platform admin profile role is kept when no membership remains', async () => {
+  const state = baseStore();
+  state.memberships = state.memberships.filter(
+    (row) => !(row.user_id === MEMBER && row.organization_id === HOME)
+  );
+  const row = state.memberships.find((item) => item.user_id === MEMBER && item.organization_id === ORG)!;
+  row.is_home = true;
+  row.role = 'company_admin';
+  const profile = state.profiles.find((item) => item.id === MEMBER)!;
+  profile.organization_id = ORG;
+  profile.active_organization_id = ORG;
+  profile.role = 'admin';
+  const result = await postRemove({ state });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.profileCleared, true);
+  assert.equal(profile.organization_id, null);
+  assert.equal(profile.active_organization_id, null);
+  assert.equal(profile.role, 'admin');
+});
+
+test('moving onto an org that already has an owner profile fails closed and writes nothing', async () => {
+  const state = baseStore();
+  const homeRow = state.memberships.find((item) => item.user_id === MEMBER && item.organization_id === ORG)!;
+  homeRow.is_home = true;
+  homeRow.role = 'company_admin';
+  const other = state.memberships.find((item) => item.user_id === MEMBER && item.organization_id === HOME)!;
+  other.is_home = false;
+  other.role = 'owner';
+  const profile = state.profiles.find((item) => item.id === MEMBER)!;
+  profile.organization_id = ORG;
+  profile.active_organization_id = ORG;
+  profile.role = 'company_admin';
+  state.profiles.push({
+    id: 'owner-home',
+    email: 'owner@home.test',
+    organization_id: HOME,
+    active_organization_id: HOME,
+    role: 'owner',
+  });
+  const membershipsBefore = JSON.stringify(state.memberships);
+  const profilesBefore = JSON.stringify(state.profiles);
+  const invitesBefore = JSON.stringify(state.invites);
+  const result = await postRemove({ state });
+  assert.equal(result.status, 503, JSON.stringify(result.body));
+  assert.equal(result.body.error, REMOVE_MEMBER_ERRORS.db);
+  assert.equal(JSON.stringify(state.memberships), membershipsBefore);
+  assert.equal(JSON.stringify(state.profiles), profilesBefore);
+  assert.equal(JSON.stringify(state.invites), invitesBefore);
 });
 
 test('a tie on created_at moves home to the higher organization id', async () => {
@@ -1210,4 +1361,42 @@ test('remove migration is one transaction and the rollback drops the function', 
   const gap = readFileSync(join(here, './i18n/gap-copy.ts'), 'utf8');
   assert.match(gap, /Remove from team/);
   assert.doesNotMatch(gap, /still points at this company/);
+});
+
+test('profile-role migration syncs the destination membership and the rollback restores the live function', () => {
+  const migration = readFileSync(
+    join(here, '../supabase/migrations/20261010_000907_remove_organization_member_profile_role.sql'),
+    'utf8'
+  );
+  const rollback = readFileSync(
+    join(here, '../supabase/migrations/20261010_000907_remove_organization_member_profile_role_rollback.sql'),
+    'utf8'
+  );
+  const firstSql = (sql: string) =>
+    sql
+      .replace(/\/\*[\s\S]*?\*\//g, '')
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('--'))
+      .join('\n')
+      .trim()
+      .split(';')[0]
+      .trim();
+  assert.equal(firstSql(migration), "SET LOCAL lock_timeout = '5s'");
+  assert.equal(firstSql(rollback), "SET LOCAL lock_timeout = '5s'");
+  assert.match(migration, /profile_role_from_membership\(next_membership_role\)/);
+  assert.match(migration, /WHEN platform_admin THEN role/);
+  assert.match(migration, /ELSE 'fse'/);
+  assert.match(migration, /already has an owner profile/);
+  assert.match(migration, /RAISE EXCEPTION 'remove_organization_member refused platform admin'/);
+  assert.match(migration, /PERFORM public\.set_home_membership\(p_user_id, next_org, NULL, false\)/);
+  assert.doesNotMatch(migration, /ELSE 'admin'/);
+  assert.doesNotMatch(migration, /\bCONCURRENTLY\b/i);
+  assert.doesNotMatch(migration, /\bCOMMIT\b/i);
+  assert.match(rollback, /SET search_path TO 'public', 'pg_temp'/);
+  assert.match(rollback, /AS \$function\$/);
+  assert.match(rollback, /PERFORM public\.set_home_membership\(p_user_id, next_org, NULL, false\)/);
+  assert.match(rollback, /Does not change user_profiles\.role/);
+  assert.doesNotMatch(rollback, /profile_role_from_membership/);
+  assert.doesNotMatch(rollback, /\bCONCURRENTLY\b/i);
+  assert.doesNotMatch(rollback, /\bCOMMIT\b/i);
 });

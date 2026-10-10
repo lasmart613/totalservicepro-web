@@ -464,11 +464,11 @@ test('a document from another organization is refused without its email', async 
     callerOrgId: 1,
     narrowSelects: ['id, organization_id, customer_email, invoice_data'],
     notFoundError: 'Invoice not found.',
-    forbiddenError: 'This invoice belongs to another organization.',
   });
   assert.equal(result.ok, false);
   if (result.ok) return;
-  assert.equal(result.status, 403);
+  assert.equal(result.status, 404);
+  assert.equal(result.error, 'Invoice not found.');
   assert.equal('row' in result, false);
   assert.doesNotMatch(JSON.stringify(result), /victim@other\.org|@/);
   assert.equal(admin.calls.some((call) => call.cols === '*'), false);
@@ -493,10 +493,12 @@ test('a user-client row from another organization is refused before a wider read
     callerOrgId: 1,
     narrowSelects: ['id, organization_id, customer_email'],
     notFoundError: 'Estimate not found.',
-    forbiddenError: 'This estimate belongs to another organization.',
   });
   assert.equal(result.ok, false);
-  if (!result.ok) assert.equal(result.status, 403);
+  if (!result.ok) {
+    assert.equal(result.status, 404);
+    assert.equal(result.error, 'Estimate not found.');
+  }
   assert.doesNotMatch(JSON.stringify(result), /victim@other\.org/);
   assert.equal(user.calls.some((call) => call.cols === '*'), false);
   assert.equal(admin.calls.length, 0);
@@ -526,7 +528,6 @@ test('an owned document loads and a mismatched full row is not returned', async 
     callerOrgId: 1,
     narrowSelects: ['id, organization_id, invoice_data'],
     notFoundError: 'Invoice not found.',
-    forbiddenError: 'This invoice belongs to another organization.',
   });
   assert.equal(owned.ok, true);
   if (owned.ok) {
@@ -551,10 +552,65 @@ test('an owned document loads and a mismatched full row is not returned', async 
     callerOrgId: 1,
     narrowSelects: ['id, organization_id'],
     notFoundError: 'Invoice not found.',
-    forbiddenError: 'This invoice belongs to another organization.',
   });
   assert.equal(rejected.ok, false);
+  if (!rejected.ok) {
+    assert.equal(rejected.status, 404);
+    assert.equal(rejected.error, 'Invoice not found.');
+  }
   assert.doesNotMatch(JSON.stringify(rejected), /victim@other\.org/);
+});
+
+test('another shop and a missing id are the same 404, with the same reads', async () => {
+  const narrow = 'id, organization_id, customer_email';
+  function client(row: Record<string, unknown> | null) {
+    return fakeClient((_table, cols) => {
+      if (cols === '*') {
+        return { data: { id: 9, organization_id: 2, customer_email: 'victim@other.org' }, error: null };
+      }
+      return { data: row, error: null };
+    });
+  }
+  const foreignUser = client(null);
+  const foreignAdmin = client({
+    id: 9,
+    organization_id: 2,
+    customer_email: 'victim@other.org',
+  });
+  const missingUser = client(null);
+  const missingAdmin = client(null);
+  const opts = {
+    table: 'service_invoices',
+    id: 9,
+    callerOrgId: 1,
+    narrowSelects: [narrow, 'id, organization_id'],
+    notFoundError: 'Invoice not found.',
+  };
+  const foreign = await loadOwnedDocument({
+    ...opts,
+    userClient: foreignUser,
+    adminClient: foreignAdmin,
+  });
+  const missing = await loadOwnedDocument({
+    ...opts,
+    id: 77,
+    userClient: missingUser,
+    adminClient: missingAdmin,
+  });
+  assert.deepEqual(foreign, missing);
+  assert.deepEqual(foreign, { ok: false, status: 404, error: 'Invoice not found.' });
+  assert.deepEqual(
+    foreignUser.calls.map((call) => call.cols),
+    missingUser.calls.map((call) => call.cols)
+  );
+  assert.deepEqual(
+    foreignAdmin.calls.map((call) => call.cols),
+    missingAdmin.calls.map((call) => call.cols)
+  );
+  assert.equal(foreignUser.calls.length, 1);
+  assert.equal(foreignAdmin.calls.length, 1);
+  assert.equal(foreignAdmin.calls.some((call) => call.cols === '*'), false);
+  assert.doesNotMatch(JSON.stringify(foreign), /victim@other\.org|another organization/);
 });
 
 test('sender company is read from the caller organization id', async () => {
@@ -614,6 +670,8 @@ test('send routes stay locked to owned-document mail', () => {
     assert.ok(ownAt >= 0 && crmAt >= 0 && ownAt < crmAt, rel);
     assert.equal((src.match(/NextResponse\.json/g) || []).length, 1, rel);
     assert.match(src, /NextResponse\.json\(sanitizeMailResponse\(/, rel);
+    assert.doesNotMatch(src, /belongs to another organization/, rel);
+    assert.match(src, /\}, 404\)/, rel);
   }
 });
 
@@ -623,7 +681,8 @@ test('invoice send still merges payment fields only after an owned invoice row',
   assert.match(src, /mergePaymentFieldsIntoInvoiceData/);
   assert.match(src, /if \(invoiceId && inv\)/);
   assert.match(src, /if \(merged\)/);
-  assert.match(src, /This invoice belongs to another organization/);
+  assert.match(src, /Invoice not found/);
+  assert.doesNotMatch(src, /belongs to another organization/);
   assert.doesNotMatch(src, /row\.organization_id == null/);
   assert.doesNotMatch(src, /id, created_by, organization_id, total'/);
   assert.doesNotMatch(src, /invoice_data:\s*\{[^}]*payment_url/);

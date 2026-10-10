@@ -39,6 +39,9 @@ import {
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
 
+/** Same body for a missing invoice and an invoice owned by another shop. */
+const INVOICE_NOT_FOUND = 'Invoice not found.';
+
 /**
  * POST /api/billing/send-invoice
  * Body: { invoice_id, include_payment_link? }
@@ -112,14 +115,12 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
       id: invoiceId,
       callerOrgId,
       readNarrow: async (client) => (await loadInvoiceRow(client, invoiceId)).row,
-      notFoundError: 'Invoice not found.',
-      forbiddenError: 'This invoice belongs to another organization.',
+      notFoundError: INVOICE_NOT_FOUND,
     });
-    if (!loaded.ok) return respond({ error: loaded.error }, loaded.status);
-    const inv = loaded.row;
-    if (!documentOwnedByOrganization(inv, callerOrgId)) {
-      return respond({ error: 'This invoice belongs to another organization.' }, 403);
+    if (!loaded.ok || !documentOwnedByOrganization(loaded.row, callerOrgId)) {
+      return respond({ error: INVOICE_NOT_FOUND }, 404);
     }
+    const inv = loaded.row;
 
     let crm: { email: string; source: 'crm_org' | 'crm_contact' | 'form' | 'none' } | null = null;
     const custOrgId = documentCustomerOrgId(inv, 'invoice_data');
