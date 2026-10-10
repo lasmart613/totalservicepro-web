@@ -32,16 +32,23 @@ function walkSources(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-/** Assignments of the org pointers inside a user_profiles update/upsert window. */
+/** Assignments of the org pointers passed to a user_profiles update or upsert. */
 function pointerWrites(source: string): string[] {
   const hits: string[] = [];
-  const re = /from\(['"]user_profiles['"]\)/g;
+  const re = /from\(['"]user_profiles['"]\)[\s\S]{0,180}?\.(?:update|upsert)\(/g;
   let match: RegExpExecArray | null;
   while ((match = re.exec(source))) {
-    const window = source.slice(Math.max(0, match.index - 700), match.index + 280);
-    if (!/\.(update|upsert)\(/.test(window)) continue;
-    if (!/organization_id:|active_organization_id:/.test(window)) continue;
-    hits.push(window);
+    const callAt = match.index + match[0].length;
+    const arg = source.slice(callAt, callAt + 220);
+    let blob = arg;
+    const ident = arg.match(/^\s*([A-Za-z_][A-Za-z0-9_]*)/);
+    if (ident) {
+      const name = ident[1];
+      const before = source.slice(Math.max(0, match.index - 900), match.index);
+      const decl = before.match(new RegExp(`(?:const|let|var)\\s+${name}\\b[^=\\n]{0,160}=`));
+      if (decl && decl.index != null) blob += before.slice(decl.index);
+    }
+    if (/organization_id:|active_organization_id:/.test(blob)) hits.push(blob);
   }
   return hits;
 }

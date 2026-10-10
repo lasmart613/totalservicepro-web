@@ -1098,6 +1098,7 @@ test('a profile email edit does not change who the invite route treats as a memb
   const acceptedAt = '2026-10-01T12:00:00.000Z';
   const dodgeInvite = {
     ...pendingCreated,
+    email: 'person@example.com',
     accepted: true,
     accepted_at: acceptedAt,
     expires_at: '2026-10-08T12:00:00.000Z',
@@ -1126,6 +1127,7 @@ test('a profile email edit does not change who the invite route treats as a memb
 
   const hijackInvite = {
     ...pendingCreated,
+    email: 'person@example.com',
     accepted: true,
     accepted_at: acceptedAt,
     expires_at: '2026-10-08T12:00:00.000Z',
