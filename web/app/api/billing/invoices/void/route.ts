@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { loadInvoiceRow } from '@/lib/billing/invoice-row-load';
 import { expireCheckoutSession } from '@/lib/billing/stripe-pay';
@@ -15,6 +15,14 @@ import {
 
 export const dynamic = 'force-dynamic';
 
+/** Same body for a missing invoice and an invoice owned by another shop. */
+const INVOICE_NOT_FOUND = 'Invoice not found.';
+
+type VoidInvoiceDeps = {
+  userClient?: SupabaseClient;
+  adminClient?: SupabaseClient | null;
+};
+
 /**
  * POST /api/billing/invoices/void
  * Body: { invoice_id, reason? }
@@ -22,19 +30,28 @@ export const dynamic = 'force-dynamic';
  * Expires an open Stripe Checkout Session. Does not charge or refund.
  */
 export async function POST(req: NextRequest) {
+  return runVoidInvoice(req);
+}
+
+export async function runVoidInvoice(req: NextRequest, deps: VoidInvoiceDeps = {}) {
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
     if (!token) return NextResponse.json({ error: 'Sign in required' }, { status: 401 });
 
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    if (!url || !anon) return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
+    let supabase: SupabaseClient;
+    if (deps.userClient) {
+      supabase = deps.userClient;
+    } else {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+      const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+      if (!url || !anon) return NextResponse.json({ error: 'Server misconfigured' }, { status: 500 });
 
-    const supabase = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+      supabase = createClient(url, anon, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    }
 
     const {
       data: { user },
@@ -55,21 +72,22 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invoice id is required.' }, { status: 400 });
     }
 
+    const admin =
+      deps.adminClient !== undefined ? deps.adminClient : hasServiceRole() ? getSupabaseAdmin() : null;
+
     const loaded = await loadOwnedDocument({
       userClient: supabase,
-      adminClient: hasServiceRole() ? getSupabaseAdmin() : null,
+      adminClient: admin,
       table: 'service_invoices',
-      id: invoiceId,
+      id: invoiceId as string | number,
       callerOrgId,
-      readNarrow: async (client) => (await loadInvoiceRow(client, invoiceId)).row,
-      notFoundError: 'Invoice not found.',
-      forbiddenError: 'This invoice belongs to another organization.',
+      readNarrow: async (client) => (await loadInvoiceRow(client, invoiceId as string | number)).row,
+      notFoundError: INVOICE_NOT_FOUND,
     });
-    if (!loaded.ok) return NextResponse.json({ error: loaded.error }, { status: loaded.status });
-    const inv = loaded.row;
-    if (!documentOwnedByOrganization(inv, callerOrgId)) {
-      return NextResponse.json({ error: 'This invoice belongs to another organization.' }, { status: 403 });
+    if (!loaded.ok || !documentOwnedByOrganization(loaded.row, callerOrgId)) {
+      return NextResponse.json({ error: INVOICE_NOT_FOUND }, { status: 404 });
     }
+    const inv = loaded.row;
 
     const decision = canVoidInvoice({
       status: inv.status == null ? null : String(inv.status),
@@ -104,7 +122,7 @@ export async function POST(req: NextRequest) {
       expiredSessionIds: expired,
     });
 
-    const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
+    const writer = admin ?? supabase;
     let payload: Record<string, unknown> = { ...patch };
     let lastError: { message?: string } | null = null;
     for (let attempt = 0; attempt < 6; attempt++) {

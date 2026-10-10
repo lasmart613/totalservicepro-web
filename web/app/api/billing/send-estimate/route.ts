@@ -37,6 +37,14 @@ import {
 import { rejectedEstimateChangeRefusal } from '@/lib/billing/estimate-display';
 import { releaseDocumentSendSlot, takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
 
+/** Same body for a missing estimate and an estimate owned by another shop. */
+const ESTIMATE_NOT_FOUND = 'Estimate not found.';
+
+type SendEstimateDeps = {
+  userClient?: SupabaseClient;
+  adminClient?: SupabaseClient | null;
+};
+
 const EST_SELECTS = [
   'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action, customer_action_token, services, issues, created_at',
   'id, created_by, organization_id, customer_name, customer_organization_id, total, estimate_data, estimate_number, status, customer_action_token',
@@ -54,6 +62,10 @@ const EST_SELECTS = [
  * already pending/sent estimate does not send again and does not insert.
  */
 export async function POST(req: NextRequest) {
+  return runSendEstimate(req);
+}
+
+export async function runSendEstimate(req: NextRequest, deps: SendEstimateDeps = {}) {
   let heldSlot: { organizationId: string | number | null; documentId: string | number; stamp: number } | null =
     null;
   try {
@@ -61,14 +73,19 @@ export async function POST(req: NextRequest) {
     const token = auth.replace(/^Bearer\s+/i, '').trim();
     if (!token) return respond({ error: 'Sign in required' }, 401);
 
-    const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
-    const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
-    if (!url || !anon) return respond({ error: 'Server misconfigured' }, 500);
+    let supabase: SupabaseClient;
+    if (deps.userClient) {
+      supabase = deps.userClient;
+    } else {
+      const url = process.env.NEXT_PUBLIC_SUPABASE_URL || process.env.SUPABASE_URL;
+      const anon = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || process.env.SUPABASE_ANON_KEY;
+      if (!url || !anon) return respond({ error: 'Server misconfigured' }, 500);
 
-    const supabase = createClient(url, anon, {
-      global: { headers: { Authorization: `Bearer ${token}` } },
-      auth: { persistSession: false, autoRefreshToken: false },
-    });
+      supabase = createClient(url, anon, {
+        global: { headers: { Authorization: `Bearer ${token}` } },
+        auth: { persistSession: false, autoRefreshToken: false },
+      });
+    }
 
     const {
       data: { user },
@@ -93,21 +110,22 @@ export async function POST(req: NextRequest) {
     const estimateId = request.documentId;
     if (estimateId == null) return respond({ error: 'Estimate id is required.' }, 400);
 
+    const admin =
+      deps.adminClient !== undefined ? deps.adminClient : hasServiceRole() ? getSupabaseAdmin() : null;
+
     const loaded = await loadOwnedDocument({
       userClient: supabase,
-      adminClient: hasServiceRole() ? getSupabaseAdmin() : null,
+      adminClient: admin,
       table: 'service_estimates',
       id: estimateId,
       callerOrgId,
       narrowSelects: EST_SELECTS,
-      notFoundError: 'Estimate not found.',
-      forbiddenError: 'This estimate belongs to another organization.',
+      notFoundError: ESTIMATE_NOT_FOUND,
     });
-    if (!loaded.ok) return respond({ error: loaded.error }, loaded.status);
-    const est = loaded.row;
-    if (!documentOwnedByOrganization(est, callerOrgId)) {
-      return respond({ error: 'This estimate belongs to another organization.' }, 403);
+    if (!loaded.ok || !documentOwnedByOrganization(loaded.row, callerOrgId)) {
+      return respond({ error: ESTIMATE_NOT_FOUND }, 404);
     }
+    const est = loaded.row;
     const rejected = rejectedEstimateChangeRefusal(est);
     if (rejected) {
       return respond({ ok: false, emailSent: false, error: rejected.error }, rejected.status);
@@ -186,7 +204,7 @@ export async function POST(req: NextRequest) {
 
     let actionToken = readExistingActionToken(est);
     if (!actionToken) actionToken = generateEstimateActionToken();
-    const writer = hasServiceRole() ? getSupabaseAdmin() : supabase;
+    const writer = admin ?? supabase;
     try {
       await persistEstimateActionToken(writer, estimateId, actionToken, est.estimate_data);
     } catch (e) {

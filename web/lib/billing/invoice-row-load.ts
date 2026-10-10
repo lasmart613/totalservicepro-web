@@ -32,7 +32,10 @@ export async function loadInvoiceRow(
       .eq('id', invoiceId)
       .maybeSingle();
     if (!error && data) return { row: data, errorMsg: null };
-    if (error && !COLUMN_MISSING.test(error.message || '')) {
+    // The query ran. An empty result will not appear on a narrower select,
+    // and trying the rest would make a missing id slower than another shop's id.
+    if (!error) return { row: null, errorMsg: null };
+    if (!COLUMN_MISSING.test(error.message || '')) {
       return { row: null, errorMsg: error.message };
     }
   }
