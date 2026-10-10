@@ -17,11 +17,18 @@ import {
   ChevronDown,
   ArrowUpCircle,
 } from 'lucide-react';
-import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
+import { isOwnerish, isSupplier } from '@/lib/roles';
 import { financialReportingNavLink } from '@/lib/financial-reporting-access';
 import { jobCostingNavLink } from '@/lib/job-costing-access';
-import { getOrgRole, reportingOrganizationId, shopAdminRole } from '@/lib/org-role';
-import { loadOwnNavProfile } from '@/lib/profile-nav';
+import { getOrgRole, reportingOrganizationId } from '@/lib/org-role';
+import {
+  adminPortalNavVisible,
+  businessManagementNavVisible,
+  loadOwnNavProfile,
+  ORG_NAV_PENDING,
+  orgNavFromLookup,
+  type OrgNavState,
+} from '@/lib/profile-nav';
 import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
@@ -119,7 +126,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const locale = useSiteLocale();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<any>(null);
-  const [orgPowerRole, setOrgPowerRole] = useState('');
+  const [orgNav, setOrgNav] = useState<OrgNavState>(ORG_NAV_PENDING);
   const [loading, setLoading] = useState(true);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -176,7 +183,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       if (activeUserId !== uid) return;
       const looked = await getOrgRole(supabase, uid, reportingOrganizationId(prof));
       if (activeUserId !== uid) return;
-      setOrgPowerRole(looked.ok ? shopAdminRole(looked) : '');
+      setOrgNav(orgNavFromLookup(looked));
     };
 
     const loadUser = async () => {
@@ -187,14 +194,14 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       setUser(u);
       if (!u) {
         setProfile(null);
-        setOrgPowerRole('');
+        setOrgNav(ORG_NAV_PENDING);
         setUnread(0);
         setIsGod(false);
         setLoading(false);
         return;
       }
       setProfile(null);
-      setOrgPowerRole('');
+      setOrgNav(ORG_NAV_PENDING);
       await loadProfileFor(u.id);
       if (activeUserId === u.id) {
         await refreshUnread(u.id);
@@ -212,7 +219,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         activeUserId = null;
         setUser(null);
         setProfile(null);
-        setOrgPowerRole('');
+        setOrgNav(ORG_NAV_PENDING);
         setUnread(0);
         setIsGod(false);
         return;
@@ -224,7 +231,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       if (switched) {
         // Drop the previous account's org chip immediately — do not wait for fetch.
         setProfile(null);
-        setOrgPowerRole('');
+        setOrgNav(ORG_NAV_PENDING);
         setUnread(0);
       }
       loadProfileFor(uid);
@@ -280,7 +287,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
     setMobileMenuOpen(false);
     setUser(null);
     setProfile(null);
-    setOrgPowerRole('');
+    setOrgNav(ORG_NAV_PENDING);
     setUnread(0);
     await signOutAndClearIdentity(supabase);
     window.location.replace('/login');
@@ -321,13 +328,10 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       ? 'Supplier Profile'
       : 'Company Profile';
   const showServiceNav = !ownerMode && !supplierMode;
+  const orgPowerRole = orgNav.orgPowerRole;
   const canBusinessNav =
-    showServiceNav &&
-    (isAdmin(profile?.role) ||
-      ['service_manager', 'dispatcher', 'scheduler', 'billing_manager'].includes(
-        (profile?.role || '').toLowerCase()
-      ));
-  const canAdminPortal = isAdmin(profile?.role);
+    businessManagementNavVisible(orgNav) && (showServiceNav || orgNav.platformAdmin);
+  const canAdminPortal = adminPortalNavVisible(orgNav);
   const financialNav = financialReportingNavLink({ role: orgPowerRole, god: isGod });
   const jobCostingNav = jobCostingNavLink({ role: orgPowerRole, god: isGod });
 

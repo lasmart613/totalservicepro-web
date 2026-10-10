@@ -13,7 +13,14 @@ import {
 } from '@/lib/roles';
 import { canAccessFinancialReporting } from '@/lib/financial-reporting-access';
 import { canAccessJobCosting } from '@/lib/job-costing-access';
-import { getOrgRole, reportingOrganizationId, shopAdminRole } from '@/lib/org-role';
+import { getOrgRole, reportingOrganizationId } from '@/lib/org-role';
+import {
+  adminPortalNavVisible,
+  businessManagementNavVisible,
+  ORG_NAV_PENDING,
+  orgNavFromLookup,
+  type OrgNavState,
+} from '@/lib/profile-nav';
 import { fetchGodMe } from '@/lib/god-client';
 import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
@@ -67,7 +74,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
   const [fseStats, setFseStats] = useState<any[]>([]);
   const [upcoming, setUpcoming] = useState<any[]>([]);
   const [god, setGod] = useState(false);
-  const [orgPowerRole, setOrgPowerRole] = useState('');
+  const [orgNav, setOrgNav] = useState<OrgNavState>(ORG_NAV_PENDING);
 
   const supabase = getSupabaseClient();
   const upgrade = useUpgradeEntry();
@@ -100,7 +107,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
       setUser(u);
 
       if (!u) {
-        setOrgPowerRole('');
+        setOrgNav(ORG_NAV_PENDING);
         setLoading(false);
         return;
       }
@@ -143,7 +150,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
       }
 
       const looked = await getOrgRole(supabase, u.id, reportingOrganizationId(prof));
-      if (!cancelled) setOrgPowerRole(looked.ok ? shopAdminRole(looked) : '');
+      if (!cancelled) setOrgNav(orgNavFromLookup(looked));
 
       if (!profileOrgId(prof)) {
         const pending = resolvePendingSignup(u);
@@ -489,6 +496,9 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
   }
 
   const role = profile?.role;
+  const orgPowerRole = orgNav.orgPowerRole;
+  const showAdminPortal = adminPortalNavVisible(orgNav);
+  const showBusinessManagement = businessManagementNavVisible(orgNav);
   const greetName = profile?.first_name || (persona === 'owner' || persona === 'supplier' ? 'there' : 'Tech');
   const labelKind = ownerLabelKind(orgType, facilityType, user?.user_metadata?.organization_type);
   const displayOrgType =
@@ -767,7 +777,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
                   <div className="font-bold">{t('Reports')}</div>
                 </Link>
 
-                {isAdmin(role) && (
+                {showAdminPortal && (
                   <Link
                     href="/admin"
                     className="card p-6 text-center hover:border-[var(--gold)] border-2 border-[var(--gold)]/50"
@@ -780,11 +790,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
               </div>
             </div>
 
-            {(isAdmin(role) ||
-              isAdmin(orgPowerRole) ||
-              ['service_manager', 'dispatcher', 'scheduler', 'billing_manager'].includes(
-                (role || '').toLowerCase()
-              )) && (
+            {showBusinessManagement && (
               <div className="mt-12">
                 <h3 className="font-bold text-lg mb-4">💼 {t('Business Management')}</h3>
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4">

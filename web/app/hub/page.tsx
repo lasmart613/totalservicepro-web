@@ -5,10 +5,16 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Header } from '@/components/Header';
 import { getSupabaseClient } from '@/lib/supabase/client';
-import { isAdmin, isOwnerish, isSupplier } from '@/lib/roles';
+import { isOwnerish, isSupplier } from '@/lib/roles';
 import { canAccessFinancialReporting } from '@/lib/financial-reporting-access';
 import { canAccessJobCosting } from '@/lib/job-costing-access';
-import { getOrgRole, reportingOrganizationId, shopAdminRole } from '@/lib/org-role';
+import { getOrgRole, reportingOrganizationId } from '@/lib/org-role';
+import {
+  businessManagementNavVisible,
+  ORG_NAV_PENDING,
+  orgNavFromLookup,
+  type OrgNavState,
+} from '@/lib/profile-nav';
 import { fetchGodMe } from '@/lib/god-client';
 import { ownerLabelKind } from '@/lib/labels';
 import { hubDest } from '@/lib/no-org-route';
@@ -24,10 +30,11 @@ export default function TechHub() {
   const [orgType, setOrgType] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [god, setGod] = useState(false);
-  const [orgPowerRole, setOrgPowerRole] = useState('');
+  const [orgNav, setOrgNav] = useState<OrgNavState>(ORG_NAV_PENDING);
 
   useEffect(() => {
     (async () => {
+      let lookedUp = false;
       try {
         const { data: { user } } = await supabase.auth.getUser();
         if (!user) {
@@ -55,7 +62,8 @@ export default function TechHub() {
         const meta = user.user_metadata || {};
         setRole(prof?.role || meta.role || '');
         const looked = await getOrgRole(supabase, user.id, reportingOrganizationId(prof));
-        setOrgPowerRole(looked.ok ? shopAdminRole(looked) : '');
+        setOrgNav(orgNavFromLookup(looked));
+        lookedUp = true;
         const ot =
           (prof?.organizations as any)?.type ||
           (prof?.organizations as any)?.facility_type ||
@@ -64,7 +72,7 @@ export default function TechHub() {
         setOrgType(ot);
         setGod(await fetchGodMe());
       } catch {
-        /* ignore */
+        if (!lookedUp) setOrgNav({ lookup: 'error', platformAdmin: false, orgPowerRole: '' });
       }
       setLoaded(true);
     })();
@@ -74,13 +82,9 @@ export default function TechHub() {
   const supplier = isSupplier(role, orgType);
   const service = !owner && !supplier;
   const rentalOwner = owner && ownerLabelKind(orgType) === 'rental';
+  const orgPowerRole = orgNav.orgPowerRole;
   const canBusiness =
-    service &&
-    (isAdmin(role) ||
-      role === 'service_manager' ||
-      role === 'dispatcher' ||
-      role === 'scheduler' ||
-      role === 'billing_manager');
+    businessManagementNavVisible(orgNav) && (service || orgNav.platformAdmin);
 
   // Tech Hub = field / technical tools only (no CRM customers)
   const techCards: HubCard[] = owner
