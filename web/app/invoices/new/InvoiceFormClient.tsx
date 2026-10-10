@@ -28,6 +28,7 @@ import { listManufacturers, listModelsForManufacturer } from '@/lib/laser-catalo
 import { displayModelName, displayModelText } from '@/lib/model-display';
 import { orgTodayIso, resolveOrgTimeZone } from '@/lib/org-timezone';
 import { canVoidInvoice, isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
+import { getOrgRole, voidInvoiceRole } from '@/lib/org-role';
 import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { filterLinkedCustomers, loadLinkedCustomerOrgs, type LinkedCustomerOpt } from '@/lib/customer-form';
 import {
@@ -429,7 +430,8 @@ export default function InvoiceFormClient() {
           .maybeSingle();
         const orgId = coerceOrgId(profile?.organization_id);
         setUserOrgId(orgId);
-        setCallerRole(String((profile as { role?: string } | null)?.role || ''));
+        const looked = await getOrgRole(supabase, user.id, orgId);
+        setCallerRole(looked.ok ? voidInvoiceRole(looked) : '');
         let storedZone: string | null = null;
         if (orgId) {
           const zoneRow = await supabase.from('organizations').select('timezone').eq('id', orgId).maybeSingle();

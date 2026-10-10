@@ -13,6 +13,7 @@ import {
 } from '@/lib/roles';
 import { canAccessFinancialReporting } from '@/lib/financial-reporting-access';
 import { canAccessJobCosting } from '@/lib/job-costing-access';
+import { getOrgRole, reportingOrganizationId, shopAdminRole } from '@/lib/org-role';
 import { fetchGodMe } from '@/lib/god-client';
 import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
@@ -66,6 +67,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
   const [fseStats, setFseStats] = useState<any[]>([]);
   const [upcoming, setUpcoming] = useState<any[]>([]);
   const [god, setGod] = useState(false);
+  const [orgPowerRole, setOrgPowerRole] = useState('');
 
   const supabase = getSupabaseClient();
   const upgrade = useUpgradeEntry();
@@ -98,6 +100,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
       setUser(u);
 
       if (!u) {
+        setOrgPowerRole('');
         setLoading(false);
         return;
       }
@@ -126,6 +129,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
       const claim = u.email
         ? await claimPendingInvitations(supabase, u.id, u.email)
         : { ok: false };
+
       if (inviteInPlay(claim) && !profileOrgId(prof) && claim.organization_id) {
         const { data: again } = await supabase
           .from('user_profiles')
@@ -137,6 +141,9 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
           setProfile(again);
         }
       }
+
+      const looked = await getOrgRole(supabase, u.id, reportingOrganizationId(prof));
+      if (!cancelled) setOrgPowerRole(looked.ok ? shopAdminRole(looked) : '');
 
       if (!profileOrgId(prof)) {
         const pending = resolvePendingSignup(u);
@@ -774,6 +781,7 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
             </div>
 
             {(isAdmin(role) ||
+              isAdmin(orgPowerRole) ||
               ['service_manager', 'dispatcher', 'scheduler', 'billing_manager'].includes(
                 (role || '').toLowerCase()
               )) && (
@@ -805,14 +813,14 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
                     <div className="font-bold">{t('Company Profile')}</div>
                     <div className="text-xs text-[var(--text3)] mt-1">{t('Org, team & branding')}</div>
                   </Link>
-                  {canAccessFinancialReporting({ role, god }) && (
+                  {canAccessFinancialReporting({ role: orgPowerRole, god }) && (
                     <Link href="/business/financial-reporting" className="card p-6 text-center hover:border-[var(--gold)]">
                       <div className="text-3xl mb-2">📊</div>
                       <div className="font-bold">{t('Financial Reporting')}</div>
                       <div className="text-xs text-[var(--text3)] mt-1">{t('Income, collections, and unpaid invoices')}</div>
                     </Link>
                   )}
-                  {canAccessJobCosting({ role, god }) && (
+                  {canAccessJobCosting({ role: orgPowerRole, god }) && (
                     <Link href="/business/job-costing" className="card p-6 text-center hover:border-[var(--gold)]">
                       <div className="text-3xl mb-2">🧮</div>
                       <div className="font-bold">{t('Job Costing')}</div>

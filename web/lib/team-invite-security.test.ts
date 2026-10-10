@@ -748,6 +748,12 @@ async function postExistingInvite(opts: {
   memberships?: Array<{ user_id: string; organization_id: number }> | null;
   email?: string;
   role?: string;
+  /** Caller profile role. Defaults to company_admin. Not org authority. */
+  profileRole?: string;
+  /** Membership role in org 9. Null means no membership row. */
+  membershipRole?: string | null;
+  createdBy?: string | null;
+  lookupError?: boolean;
   linkHandler?: (args: { type?: string }) => {
     data?: { user?: { id?: string }; properties?: { action_link?: string } } | null;
     error?: { message?: string } | null;
@@ -822,16 +828,41 @@ async function postExistingInvite(opts: {
               error: null,
             }),
           },
-          from: () => ({
-            select: () => ({
-              eq: () => ({
-                maybeSingle: async () => ({
-                  data: { organization_id: 9, role: 'company_admin' },
+          from: (table: string) => {
+            const filters: Record<string, unknown> = {};
+            const api = {
+              select() {
+                return api;
+              },
+              eq(column: string, value: unknown) {
+                filters[column] = value;
+                return api;
+              },
+              maybeSingle: async () => {
+                if (opts.lookupError) return { data: null, error: { message: 'lookup failed' } };
+                if (table === 'organization_memberships') {
+                  if (opts.membershipRole === null) return { data: null, error: null };
+                  if (String(filters.organization_id ?? '') !== '9') return { data: null, error: null };
+                  return {
+                    data: {
+                      user_id: 'admin-user',
+                      organization_id: 9,
+                      role: opts.membershipRole ?? 'company_admin',
+                    },
+                    error: null,
+                  };
+                }
+                if (table === 'organizations') {
+                  return { data: { id: 9, created_by: opts.createdBy ?? null }, error: null };
+                }
+                return {
+                  data: { organization_id: 9, role: opts.profileRole ?? 'company_admin' },
                   error: null,
-                }),
-              }),
-            }),
-          }),
+                };
+              },
+            };
+            return api;
+          },
         }),
         sendEmail: async (input) => {
           sent.push({ to: input.to, html: input.html, text: input.text, subject: input.subject });
@@ -2012,4 +2043,56 @@ test('claim accepts only INVITABLE_TEAM_ROLES, the same list invite uses', async
       role
     );
   }
+});
+
+test('team invite authority is the membership role in that org', async () => {
+  const base = {
+    resendKey: 'resend-test' as string | null,
+    auth: { status: 'found' as const, id: 'auth-1', lastSignInAt: null },
+    invite: { ...pendingCreated },
+  };
+
+  const allowed = await postExistingInvite({
+    ...base,
+    profileRole: 'fse',
+    membershipRole: 'company_admin',
+  });
+  assert.equal(allowed.status, 200, JSON.stringify(allowed.body));
+
+  const profileOnly = await postExistingInvite({
+    ...base,
+    profileRole: 'company_admin',
+    membershipRole: 'fse',
+  });
+  assert.equal(profileOnly.status, 403);
+
+  const noMembership = await postExistingInvite({
+    ...base,
+    profileRole: 'company_admin',
+    membershipRole: null,
+  });
+  assert.equal(noMembership.status, 403);
+
+  const platformAdmin = await postExistingInvite({
+    ...base,
+    profileRole: 'admin',
+    membershipRole: null,
+  });
+  assert.equal(platformAdmin.status, 200, JSON.stringify(platformAdmin.body));
+
+  const founder = await postExistingInvite({
+    ...base,
+    profileRole: 'parts_supplier',
+    membershipRole: 'fse',
+    createdBy: 'admin-user',
+  });
+  assert.equal(founder.status, 403, JSON.stringify(founder.body));
+  assert.equal(founder.sent.length, 0);
+
+  const lookup = await postExistingInvite({
+    ...base,
+    lookupError: true,
+  });
+  assert.equal(lookup.status, 503);
+  assert.equal(lookup.sent.length, 0);
 });

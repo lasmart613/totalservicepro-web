@@ -5,8 +5,8 @@
  */
 
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { membershipRoleForActiveOrg } from './job-costing-access.ts';
 import { decideJobCostingAccess } from './job-costing-auth.ts';
+import { getOrgRole, ORG_ROLE_LOOKUP_ERROR, reportingOrganizationId } from './org-role.ts';
 import { assembleJobCostReport, type JobCostReport } from './job-costing.ts';
 import { loadJobCostSources, type JobCostClient } from './job-costing-load.ts';
 import { loadOrganizationFinanceSettings } from './org-money.ts';
@@ -50,25 +50,24 @@ export async function loadAuthorizedJobCostReport(token: string): Promise<Author
     return { ok: false, status: 401, error: 'Sign in required' };
   }
 
-  const { data: profile } = await client
+  const { data: profile, error: profileError } = await client
     .from('user_profiles')
-    .select('role, organization_id, active_organization_id')
+    .select('organization_id, active_organization_id')
     .eq('id', user.id)
     .maybeSingle();
+  if (profileError) {
+    return { ok: false, status: 503, error: ORG_ROLE_LOOKUP_ERROR };
+  }
 
-  const activeOrganizationId = profile?.active_organization_id ?? profile?.organization_id ?? null;
+  const activeOrganizationId = reportingOrganizationId(profile);
+  const orgRole = await getOrgRole(client, user.id, activeOrganizationId);
+  if (!orgRole.ok) return { ok: false, status: orgRole.status, error: orgRole.error };
 
-  const { data: membershipRows } = await client
-    .from('organization_memberships')
-    .select('role, organization_id')
-    .eq('user_id', user.id);
-
-  const membershipRole = membershipRoleForActiveOrg(membershipRows || [], activeOrganizationId);
   const access = decideJobCostingAccess({
     user: { id: user.id, email: user.email },
-    profileRole: profile?.role,
+    membershipRole: orgRole.role,
+    isPlatformAdmin: orgRole.isPlatformAdmin,
     activeOrganizationId,
-    membershipRole,
   });
   if (!access.ok) return access;
 

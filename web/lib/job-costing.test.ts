@@ -61,22 +61,40 @@ test('admin and God can open job costing; other roles cannot', () => {
   for (const role of ['admin', 'company_admin']) {
     assert.equal(canAccessJobCosting({ role }), true);
     assert.equal(jobCostingNavLink({ role })?.href, '/business/job-costing');
-    const access = decideJobCostingAccess({
-      user: { id: 'u1', email: 'admin@shop.test' },
-      profileRole: role,
-      activeOrganizationId: 7,
-      env: {},
-    });
-    assert.equal(access.ok, true);
-    if (access.ok) assert.equal(access.organizationId, 7);
   }
+
+  const membershipAdmin = decideJobCostingAccess({
+    user: { id: 'u1', email: 'tech@shop.test' },
+    membershipRole: 'company_admin',
+    activeOrganizationId: 7,
+    env: {},
+  });
+  assert.equal(membershipAdmin.ok, true);
+  if (membershipAdmin.ok) assert.equal(membershipAdmin.organizationId, 7);
+
+  const profileOnly = decideJobCostingAccess({
+    user: { id: 'u1', email: 'admin@shop.test' },
+    activeOrganizationId: 7,
+    env: {},
+  });
+  assert.equal(profileOnly.ok, false);
+  if (!profileOnly.ok) assert.equal(profileOnly.status, 403);
+
+  const platformAdmin = decideJobCostingAccess({
+    user: { id: 'u1', email: 'admin@shop.test' },
+    membershipRole: 'fse',
+    isPlatformAdmin: true,
+    activeOrganizationId: 7,
+    env: {},
+  });
+  assert.equal(platformAdmin.ok, true);
 
   for (const role of ['fse', 'billing_manager', 'service_manager', 'dispatcher', 'scheduler', 'owner', 'customer']) {
     assert.equal(canAccessJobCosting({ role }), false);
     assert.equal(jobCostingNavLink({ role }), null);
     const access = decideJobCostingAccess({
       user: { id: 'u1', email: 'tech@shop.test' },
-      profileRole: role,
+      membershipRole: role,
       env: {},
     });
     assert.equal(access.ok, false);
@@ -86,7 +104,7 @@ test('admin and God can open job costing; other roles cannot', () => {
   assert.equal(canAccessJobCosting({ role: 'fse', god: true }), true);
   const god = decideJobCostingAccess({
     user: { id: 'larry', email: 'larrysmart@gmail.com' },
-    profileRole: 'fse',
+    membershipRole: 'fse',
     activeOrganizationId: 3,
     env: {},
   });
@@ -104,7 +122,6 @@ test('admin membership is the active organization only', () => {
 
   const allowed = decideJobCostingAccess({
     user: { id: 'u1', email: 'tech@shop.test' },
-    profileRole: 'fse',
     activeOrganizationId: 9,
     membershipRole: 'admin',
     env: {},
@@ -113,7 +130,6 @@ test('admin membership is the active organization only', () => {
 
   const otherOrg = decideJobCostingAccess({
     user: { id: 'u1', email: 'tech@shop.test' },
-    profileRole: 'fse',
     activeOrganizationId: 9,
     membershipRole: membershipRoleForActiveOrg([{ role: 'admin', organization_id: 8 }], 9),
     env: {},

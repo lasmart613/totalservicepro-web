@@ -20,6 +20,7 @@ import {
 import { isOwnerish, isSupplier, isAdmin } from '@/lib/roles';
 import { financialReportingNavLink } from '@/lib/financial-reporting-access';
 import { jobCostingNavLink } from '@/lib/job-costing-access';
+import { getOrgRole, reportingOrganizationId, shopAdminRole } from '@/lib/org-role';
 import { loadOwnNavProfile } from '@/lib/profile-nav';
 import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
@@ -118,6 +119,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const locale = useSiteLocale();
   const [user, setUser] = useState<User | null>(null);
   const [profile, setProfile] = useState<any>(null);
+  const [orgPowerRole, setOrgPowerRole] = useState('');
   const [loading, setLoading] = useState(true);
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -171,6 +173,10 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
     const loadProfileFor = async (uid: string) => {
       const prof = await loadOwnNavProfile(supabase, uid);
       applyProfile(uid, prof);
+      if (activeUserId !== uid) return;
+      const looked = await getOrgRole(supabase, uid, reportingOrganizationId(prof));
+      if (activeUserId !== uid) return;
+      setOrgPowerRole(looked.ok ? shopAdminRole(looked) : '');
     };
 
     const loadUser = async () => {
@@ -181,12 +187,14 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       setUser(u);
       if (!u) {
         setProfile(null);
+        setOrgPowerRole('');
         setUnread(0);
         setIsGod(false);
         setLoading(false);
         return;
       }
       setProfile(null);
+      setOrgPowerRole('');
       await loadProfileFor(u.id);
       if (activeUserId === u.id) {
         await refreshUnread(u.id);
@@ -204,6 +212,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         activeUserId = null;
         setUser(null);
         setProfile(null);
+        setOrgPowerRole('');
         setUnread(0);
         setIsGod(false);
         return;
@@ -215,6 +224,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
       if (switched) {
         // Drop the previous account's org chip immediately — do not wait for fetch.
         setProfile(null);
+        setOrgPowerRole('');
         setUnread(0);
       }
       loadProfileFor(uid);
@@ -270,6 +280,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
     setMobileMenuOpen(false);
     setUser(null);
     setProfile(null);
+    setOrgPowerRole('');
     setUnread(0);
     await signOutAndClearIdentity(supabase);
     window.location.replace('/login');
@@ -317,8 +328,8 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
         (profile?.role || '').toLowerCase()
       ));
   const canAdminPortal = isAdmin(profile?.role);
-  const financialNav = financialReportingNavLink({ role: profile?.role, god: isGod });
-  const jobCostingNav = jobCostingNavLink({ role: profile?.role, god: isGod });
+  const financialNav = financialReportingNavLink({ role: orgPowerRole, god: isGod });
+  const jobCostingNav = jobCostingNavLink({ role: orgPowerRole, god: isGod });
 
   /** Primary hub dropdown — role-aware */
   const hubGroup: NavGroup = ownerMode

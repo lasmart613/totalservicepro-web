@@ -22,6 +22,34 @@ const INVITEE = 'new.person@example.com';
 const ORG = 9;
 const HOME = 4;
 
+function inviteCallerClient(userId: string) {
+  return {
+    auth: {
+      getUser: async () => ({ data: { user: { id: userId, email: 'admin@shop.test' } }, error: null }),
+    },
+    from(table: string) {
+      const api = {
+        select() {
+          return api;
+        },
+        eq() {
+          return api;
+        },
+        maybeSingle: async () => {
+          if (table === 'organization_memberships') {
+            return { data: { user_id: userId, organization_id: ORG, role: 'company_admin' }, error: null };
+          }
+          if (table === 'organizations') {
+            return { data: { id: ORG, created_by: null }, error: null };
+          }
+          return { data: { organization_id: ORG, role: 'company_admin' }, error: null };
+        },
+      };
+      return api;
+    },
+  };
+}
+
 type Membership = {
   user_id: string;
   organization_id: number;
@@ -1064,18 +1092,7 @@ test('a removed member can be re-invited and the rejoin claim adds the membershi
           status: 'found' as const,
           user: { id: MEMBER, email: INVITEE, last_sign_in_at: '2026-10-02T00:00:00.000Z' },
         }),
-        createUserClient: () => ({
-          auth: {
-            getUser: async () => ({ data: { user: { id: ADMIN, email: 'admin@shop.test' } }, error: null }),
-          },
-          from: () => ({
-            select: () => ({
-              eq: () => ({
-                maybeSingle: async () => ({ data: { organization_id: ORG, role: 'company_admin' }, error: null }),
-              }),
-            }),
-          }),
-        }),
+        createUserClient: () => inviteCallerClient(ADMIN),
         sendEmail: async () => ({ ok: true, status: 200 }),
       }
     );
@@ -1217,18 +1234,7 @@ async function reopenAccepted(invite: Invite, profile: Profile) {
         status: 'found' as const,
         user: { id: MEMBER, email: INVITEE, last_sign_in_at: '2026-10-02T00:00:00.000Z' },
       }),
-      createUserClient: () => ({
-        auth: {
-          getUser: async () => ({ data: { user: { id: ADMIN, email: 'admin@shop.test' } }, error: null }),
-        },
-        from: () => ({
-          select: () => ({
-            eq: () => ({
-              maybeSingle: async () => ({ data: { organization_id: ORG, role: 'company_admin' }, error: null }),
-            }),
-          }),
-        }),
-      }),
+      createUserClient: () => inviteCallerClient(ADMIN),
       sendEmail: async () => ({ ok: true, status: 200 }),
     }
   );
