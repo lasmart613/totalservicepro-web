@@ -29,6 +29,8 @@ import {
   selectedManualContext,
   WHOLE_PDF_ATTACH_MAX_BYTES,
   wholePdfAttachAllowed,
+  excerptFaultCodeAnchor,
+  excerptSpanScoreScale,
   type PdfAttachStat,
 } from './manual-scope.ts'
 import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
@@ -39,6 +41,7 @@ import {
   modelSuffixConflict,
   passageOwnedBySelected,
   reconcilePhysicalPage,
+  resolveQuotedCitationPage,
   storedPageCount,
   type CatalogCiteRow,
   type CitationAttributionScope,
@@ -564,13 +567,33 @@ export function formatCitationLine(citations: ManualCitation[], fallback = ''): 
   return `\n\n— Source: ${labels.join('; ')}\n${markers}`
 }
 
+export type ProsePageScope = {
+  indexText?: string
+  query?: string
+  pageCount?: number
+  manualId?: number
+}
+
+/** Chapter or section on one stamped page. A see-also that names two chapters is not the heading. */
+function sectionForPhysicalPage(raw: string, page: number): string | undefined {
+  const marker = `[[pdfpage:${page}]]`
+  const at = String(raw || '').indexOf(marker)
+  if (at < 0) return undefined
+  return sectionOnCitedPage(raw, at + marker.length)
+}
+
 /**
- * Model prose ("troubleshooting table on page 7-8") names PRINTED page labels.
- * Those may stay in the answer text but never become a citation page= value —
- * citation pages come only from the [[pdfpage:N]] stamp before the matched
- * excerpt (or xAI page_number). Returns the citations unchanged (deduped).
+ * Citation pages come from the stamped index. A page the answer names
+ * ("p. 147", "pp. 88–89") replaces that page only when it is inside pageCount
+ * and that page's text contains the fault code or the matched terms.
+ * An out-of-range quote, or a page that lacks the code and the terms, is ignored.
+ * Printed labels with no index to check stay off the citation.
  */
-export function attachProsePages(citations: ManualCitation[], _text: string): ManualCitation[] {
+export function attachProsePages(
+  citations: ManualCitation[],
+  text: string,
+  scope?: ProsePageScope
+): ManualCitation[] {
   if (!citations.length) return []
   const seen = new Set<string>()
   const out: ManualCitation[] = []
@@ -580,7 +603,28 @@ export function attachProsePages(citations: ManualCitation[], _text: string): Ma
     seen.add(key)
     out.push(c)
   }
-  return out.slice(0, 8)
+  const indexText = String(scope?.indexText || '')
+  const quoted =
+    indexText && scope?.query
+      ? resolveQuotedCitationPage({
+          answer: text,
+          indexText,
+          query: scope.query,
+          pageCount: scope.pageCount,
+        })
+      : undefined
+  if (quoted == null) return out.slice(0, 8)
+  const section = sectionForPhysicalPage(indexText, quoted)
+  const retargeted = out.map((c) => {
+    if (scope?.manualId != null && c.manualId !== scope.manualId) return c
+    if (c.page === quoted && !c.page_out_of_range) return c
+    const next: ManualCitation = { ...c, page: quoted }
+    delete next.page_out_of_range
+    if (section) next.section = section
+    else delete next.section
+    return next
+  })
+  return retargeted.slice(0, 8)
 }
 
 /** Stamped manual_search_index excerpt leads context and owns the page cites. */
@@ -1647,6 +1691,9 @@ function transmissionThresholdBoost(
  * shares one of those words. A transmission percentage threshold ("TX = <83%")
  * outranks a later weak "TX 83" or see-also.
  * Equal scores prefer the later hit so a contents line loses to the procedure.
+ * A fault code (F14.1, not F14.10) is cited on the page that contains that token.
+ * Spare-parts leaves are down-ranked for fault and troubleshooting questions
+ * unless the question is about parts.
  * Returns -1 when nothing in the query is present.
  */
 function excerptAnchor(raw: string, query: string): number {
@@ -1672,6 +1719,7 @@ function excerptAnchor(raw: string, query: string): number {
 
   let bestScore = -1
   let bestAt = -1
+  const scoreByStart = new Map<number, number>()
   for (const span of spans) {
     let score = 0
     let rareAt = -1
@@ -1709,11 +1757,15 @@ function excerptAnchor(raw: string, query: string): number {
       at = Math.min(span.end - 1, span.start + stamped.index + stamped[0].length)
     }
     if (at < span.start) at = span.start
+    scoreByStart.set(span.start, score)
+    score *= excerptSpanScoreScale(query, hay.slice(span.start, span.end))
     if (score > bestScore || (score === bestScore && at > bestAt)) {
       bestScore = score
       bestAt = at
     }
   }
+  const faultAt = excerptFaultCodeAnchor(hay, query, spans, scoreByStart)
+  if (faultAt >= 0) return faultAt
   return bestAt < 0 || bestScore <= 0 ? -1 : bestAt
 }
 
@@ -2241,9 +2293,12 @@ serve(async (req) => {
         }
       }
 
+      let citationIndexText = ''
+      let citationQuery = userText
       if (userText) {
         try {
           const sq = buildSearchQuery(userText, manualLabel, faultCodes)
+          citationQuery = sq
           const manualScoped = collectionSearchRequiresManualMatch({
             manualId: manualMeta?.id ?? rawId,
             manualLabel,
@@ -2344,6 +2399,7 @@ serve(async (req) => {
           }
 
           const indexedHit = await indexedP
+          if (indexedHit?.indexText) citationIndexText = indexedHit.indexText
           if (!selectedPageCount) {
             const counted = effectivePageCount(storedPageCount(manualMeta?.page_count), indexedHit?.indexText)
             if (counted) selectedPageCount = counted
@@ -2453,7 +2509,12 @@ serve(async (req) => {
         const scopedId = asManualId(manualMeta?.id)
         if (scopedId == null || hasFaultDBHit) return
         const base = manualCitations.length ? manualCitations : [{ manualId: scopedId, title: manualLabel }]
-        manualCitations = attachProsePages(base, replyText)
+        manualCitations = attachProsePages(base, replyText, {
+          indexText: citationIndexText,
+          query: citationQuery,
+          pageCount: selectedPageCount,
+          manualId: scopedId,
+        })
         citationLine = formatCitationLine(manualCitations, manualLabel)
       }
       const replyMeta = () => ({

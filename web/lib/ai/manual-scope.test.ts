@@ -15,6 +15,7 @@ import {
   excerptManualSearchText,
   indexedExcerptPage,
   indexedExcerptSection,
+  quotedPageSupport,
   generalGuidancePrefix,
   generalGuidanceSystemHint,
   prefixGeneralGuidance,
@@ -41,6 +42,8 @@ import {
   selectedManualContext as edgeSelectedManualContext,
   assistantLanguageDirective,
   normalizeReplyLanguage,
+  indexedExcerptPage as edgeIndexedExcerptPage,
+  quotedPageSupport as edgeQuotedPageSupport,
 } from '../../../supabase/functions/grok-assistant/manual-scope.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -277,12 +280,54 @@ test('transmission below 83% anchors the threshold pages, not the footer or the 
   ]) {
     const page = indexedExcerptPage(indexed, `${label} ${question}`);
     assert.ok(page === 88 || page === 89, `${question} -> ${page}`);
+    if (question === 'transmission below 83%') assert.equal(page, 89);
   }
   const fluence = indexedExcerptPage(
     indexed,
     `${label} What is the maximum fluence setting for the GentleMAX Pro Plus? procedure specification steps`
   );
   assert.equal(fluence, 49);
+});
+
+/** Live GentleMAX PRO PLUS leaves: fault table on 147, Laser Rail Spare Parts on 152. */
+function gentleMaxFaultIndex(): string {
+  const page147 =
+    'GentleMax Pro Plus Service Manual 8501-00-2410 Revision A Candela Corporation, PROPRIETARY Page 147 of 178 Fault Code Symptom or Problem Probable Cause Action If problem persists, contact Candela Service. F12.3 Max Energy Exceeded fault Alex or YAG head energy of last treatment pulse is greater than the maximum allowed. Re-calibrate laser. F13.4 Footswitch fault Footswitch is stuck On. F14.1 755 nm Simmer Fault Alex Simmer circuit fault. Calibrate laser system. If problem persists, contact Candela Service. Replace HVPS, flashlamps. F14.2 1064 nm Simmer Fault YAG Simmer circuit fault. Calibrate laser system. Replace HVPS, flashlamps. F15.1 Delivery System Transmission Low fault.';
+  const page152 =
+    'GentleMax Pro Plus Service Manual 8501-00-2410 Revision A Candela Corporation, PROPRIETARY Page 152 of 178 31 Laser Rail Spare Parts Figure 95 Laser Rail Components Lower Level Spare Parts Item # Part Description Part # 1. ALEX Head 7122-00-9572 2. YAG Head 7122-00-9578 3. Turning Mirror 8015-00-1220 4. Beam Combiner 8055-00-0304 5. Intermediate Lens 8050-00-9008 6. Shutter 7122-00-9529 7. Head Detector Filter 1301-00-9395 8. Spectrum Head Detector Beamsplitter 8055-00-0309 9. Aiming Beam 7122-00-3477 10. Fiber Receptacle Lens (2) 8050-00-9003 11. Fiber Switch 7122-00-3536 7 16 14 11 12 17 4 3 9 10 6 5 8 2 13 1 15 12';
+  const pages: string[] = [];
+  for (let n = 1; n <= 178; n++) {
+    let text = `GentleMax Pro Plus Service Manual 8501-00-2410 Revision A Candela Corporation, PROPRIETARY Page ${n} of 178.`;
+    if (n === 49) {
+      text += ' 9 System Settings by Wavelength. Minimum Fluence (J/cm2) Maximum Fluence (J/cm2).';
+    }
+    if (n === 89) {
+      text +=
+        ' If TX = <83%, clean or replace the fiber and repeat until transmission is >83%. Perform the steps in the Troubleshooting Guide (Chapter 17).';
+    }
+    if (n === 147) text = page147;
+    if (n === 152) text = page152;
+    if (n === 160) text += ' F14.10 Extended rail code. Not the 755 nm simmer fault.';
+    pages.push(`[[pdfpage:${n}]] ${text}`);
+  }
+  return pages.join('\f');
+}
+
+const F14_QUERY =
+  'Candela GentleMAX PRO PLUS What does fault code F14.1 mean on this laser, and what should I do about it? Cite the manual page. fault code 14.1 error 14.1';
+
+test('F14.1 cites the fault table on page 147, not the Laser Rail spare-parts page', () => {
+  const indexed = gentleMaxFaultIndex();
+  assert.equal(indexedExcerptPage(indexed, F14_QUERY), 147);
+  assert.equal(edgeIndexedExcerptPage(indexed, F14_QUERY), 147);
+  assert.equal(quotedPageSupport(indexed.split('\f')[146], F14_QUERY, indexed) > 0, true);
+  assert.equal(quotedPageSupport(indexed.split('\f')[151], F14_QUERY, indexed), 0);
+  assert.equal(quotedPageSupport(indexed.split('\f')[159], F14_QUERY, indexed), 0);
+  assert.equal(edgeQuotedPageSupport(indexed.split('\f')[151], F14_QUERY, indexed), 0);
+  const partsQuestion =
+    'Candela GentleMAX PRO PLUS What spare parts are listed for the laser rail?';
+  assert.equal(indexedExcerptPage(indexed, partsQuestion), 152);
+  assert.equal(edgeIndexedExcerptPage(indexed, partsQuestion), 152);
 });
 
 test('maximum fluence anchors the settings page, not the following calibration chapter', () => {

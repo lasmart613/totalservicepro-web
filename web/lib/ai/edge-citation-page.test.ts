@@ -33,7 +33,11 @@ type Edge = {
   searchIndexedManualText: (db: unknown, id: number, q: string, label: string) => Promise<Part | null>;
   mergeIndexedParts: (indexed: Part | null, parts: Part[]) => { parts: Part[]; citeParts: Part[] };
   citationsFromParts: (parts: Part[], id: number, title: string, scope?: unknown) => Cite[];
-  attachProsePages: (cites: Cite[], text: string) => Cite[];
+  attachProsePages: (
+    cites: Cite[],
+    text: string,
+    scope?: { indexText?: string; query?: string; pageCount?: number; manualId?: number }
+  ) => Cite[];
   formatCitationLine: (cites: Cite[], fallback?: string) => string;
 };
 
@@ -292,6 +296,7 @@ test('GentleMAX transmission below 83% cites pages 88-89 and Chapter 17, not the
     assert.ok(indexed.page === 88 || indexed.page === 89, `${question} -> ${indexed.page}`);
     const body = bodies.get(indexed.page!) || '';
     if (/chapter\s*17/i.test(body)) assert.match(indexed.section || '', /17/, `${question} section ${indexed.section}`);
+    if (question === 'transmission below 83%') assert.equal(indexed.page, 89);
   }
   const fluenceQuery = edge.buildSearchQuery(
     'What is the maximum fluence setting for the GentleMAX Pro Plus?',
@@ -339,4 +344,71 @@ test('GentleMAX fluence search uses the PDF page of the settings table, not the 
   assert.equal(indexed!.page, 49);
   assert.notEqual(indexed!.section, 'Ch.16');
   assert.doesNotMatch(indexed!.section || '', /16/);
+});
+
+/** Live GentleMAX leaves: F14.1 on 147, Laser Rail Spare Parts on 152. */
+function gentleMaxFaultIndex(): string {
+  const page147 =
+    'GentleMax Pro Plus Service Manual 8501-00-2410 Revision A Candela Corporation, PROPRIETARY Page 147 of 178 Fault Code Symptom or Problem Probable Cause Action If problem persists, contact Candela Service. F12.3 Max Energy Exceeded fault. F14.1 755 nm Simmer Fault Alex Simmer circuit fault. Calibrate laser system. If problem persists, contact Candela Service. Replace HVPS, flashlamps. F14.2 1064 nm Simmer Fault YAG Simmer circuit fault.';
+  const page152 =
+    'GentleMax Pro Plus Service Manual 8501-00-2410 Revision A Candela Corporation, PROPRIETARY Page 152 of 178 31 Laser Rail Spare Parts Figure 95 Laser Rail Components Lower Level Spare Parts Item # Part Description Part # 1. ALEX Head 7122-00-9572 2. YAG Head 7122-00-9578 3. Turning Mirror 8015-00-1220 4. Beam Combiner 8055-00-0304 5. Intermediate Lens 8050-00-9008 6. Shutter 7122-00-9529 7. Head Detector Filter 1301-00-9395 8. Spectrum Head Detector Beamsplitter 8055-00-0309 9. Aiming Beam 7122-00-3477 10. Fiber Receptacle Lens (2) 8050-00-9003 11. Fiber Switch 7122-00-3536 7 16 14 11 12 17 4 3 9 10 6 5 8 2 13 1 15 12';
+  const pages: string[] = [];
+  for (let n = 1; n <= 178; n++) {
+    let text = `GentleMax Pro Plus Service Manual 8501-00-2410 Revision A Candela Corporation, PROPRIETARY Page ${n} of 178.`;
+    if (n === 147) text = page147;
+    if (n === 152) text = page152;
+    if (n === 160) text += ' F14.10 Extended rail code only.';
+    pages.push(`[[pdfpage:${n}]] ${text}`);
+  }
+  return pages.join('\f');
+}
+
+test('F14.1 on manual 5 cites page 147, and a bad quoted page is ignored', async () => {
+  const edge = await loadEdge();
+  const indexedText = gentleMaxFaultIndex();
+  const question = 'What does fault code F14.1 mean on this laser, and what should I do about it? Cite the manual page.';
+  const query = edge.buildSearchQuery(question, 'Candela GentleMAX PRO PLUS', ['14.1']);
+  const indexed = await edge.searchIndexedManualText(fakeDb(indexedText), 5, query, 'Candela GentleMAX PRO PLUS');
+  assert.ok(indexed, 'indexed hit');
+  assert.equal(indexed!.page, 147);
+  assert.match(indexed!.text, /F14\.1/);
+  assert.match(indexed!.text, /755 nm Simmer Fault/);
+
+  const scope = { indexText: indexedText, query, pageCount: 178, manualId: 5 };
+  const base = edge.citationsFromParts([indexed!], 5, 'Candela GentleMAX PRO PLUS');
+  assert.equal(base[0].page, 147);
+
+  const wrong = [{ manualId: 5, title: 'Candela GentleMAX PRO PLUS', page: 152 }];
+  const quoted = edge.attachProsePages(
+    wrong,
+    'F14.1 means 755 nm Simmer Fault. Calibrate the laser system. See page 147.',
+    scope
+  );
+  assert.equal(quoted[0].page, 147);
+  assert.equal(quoted[0].pageOutOfRange, undefined);
+
+  const range = edge.attachProsePages(wrong, 'The fault table is on pp. 146–148.', scope);
+  assert.equal(range[0].page, 147);
+
+  const partsQuote = edge.attachProsePages(wrong, 'See page 152 for the spare parts figure.', scope);
+  assert.equal(partsQuote[0].page, 152);
+
+  const bare = edge.attachProsePages(wrong, 'See page 10 of the front matter.', scope);
+  assert.equal(bare[0].page, 152);
+
+  const oor = edge.attachProsePages(wrong, 'See page 200.', scope);
+  assert.equal(oor[0].page, 152);
+  assert.equal(oor[0].pageOutOfRange, undefined);
+
+  const shortBook = edge.attachProsePages(wrong, 'See page 147.', { ...scope, pageCount: 15 });
+  assert.equal(shortBook[0].page, 152);
+  assert.equal(shortBook[0].pageOutOfRange, undefined);
+
+  const parts = await edge.searchIndexedManualText(
+    fakeDb(indexedText),
+    5,
+    edge.buildSearchQuery('What spare parts are listed for the laser rail?', 'Candela GentleMAX PRO PLUS', []),
+    'Candela GentleMAX PRO PLUS'
+  );
+  assert.equal(parts?.page, 152);
 });
