@@ -81,6 +81,34 @@ test('client identity guard rejects a diverging org write and allows an equal on
   );
   assert.match(guard, /RAISE EXCEPTION 'user_profiles\.email must match the auth login email'/);
   assert.match(guard, /GRANT EXECUTE ON FUNCTION public\.user_profiles_client_identity_guard\(\) TO authenticated, service_role/);
+  assert.match(sql, /CREATE SCHEMA IF NOT EXISTS private/);
+  assert.match(sql, /CREATE OR REPLACE FUNCTION private\.profile_email_is_auth_email\(p_email text\)/);
+  assert.match(sql, /LANGUAGE sql/);
+  assert.match(sql, /STABLE/);
+  assert.match(sql, /SECURITY DEFINER/);
+  assert.match(sql, /SET search_path = ''/);
+  assert.match(
+    sql,
+    /SELECT EXISTS \(\s*SELECT 1\s+FROM auth\.users u\s+WHERE u\.id = auth\.uid\(\)\s+AND btrim\(coalesce\(p_email, ''\)\) <> ''\s+AND lower\(btrim\(u\.email\)\) = lower\(btrim\(p_email\)\)\s*\)/
+  );
+  assert.match(sql, /REVOKE ALL ON FUNCTION private\.profile_email_is_auth_email\(text\) FROM PUBLIC, anon/);
+  assert.match(sql, /GRANT USAGE ON SCHEMA private TO authenticated/);
+  assert.match(sql, /GRANT EXECUTE ON FUNCTION private\.profile_email_is_auth_email\(text\) TO authenticated/);
+  const helperStart = sql.indexOf('CREATE OR REPLACE FUNCTION private.profile_email_is_auth_email');
+  const helperEnd = sql.indexOf('$$;', helperStart);
+  assert.ok(helperStart >= 0 && helperEnd > helperStart);
+  assert.doesNotMatch(sql.slice(helperStart, helperEnd), /auth\.jwt\(\)/);
+  assert.doesNotMatch(guard, /auth\.jwt\(\)/);
+  const emailBranch = guard.slice(guard.indexOf('IF email_changed THEN'), guard.indexOf("IF TG_OP = 'INSERT' THEN"));
+  assert.match(emailBranch, /current_user IN \('authenticated', 'anon'\)/);
+  assert.match(emailBranch, /NEW\.id IS DISTINCT FROM auth\.uid\(\)/);
+  assert.match(emailBranch, /private\.profile_email_is_auth_email\(NEW\.email\)/);
+  assert.match(emailBranch, /FROM auth\.users u\s+WHERE u\.id = NEW\.id/);
+  assert.ok(
+    emailBranch.indexOf("current_user IN ('authenticated', 'anon')") <
+      emailBranch.indexOf('FROM auth.users u')
+  );
+  assert.equal(guard.indexOf('FROM auth.users'), guard.indexOf('FROM auth.users', guard.indexOf('IF email_changed THEN')));
 
   const remove = functionBody(sql, 'remove_organization_member');
   assert.match(remove, /SELECT lower\(btrim\(u\.email\)\) INTO member_email\s+FROM auth\.users u\s+WHERE u\.id = p_user_id/);
@@ -98,6 +126,9 @@ test('rollback drops the client guard and restores the 000907 invite email sourc
   assert.match(sql, /DROP FUNCTION IF EXISTS public\.user_profiles_client_identity_guard\(\)/);
   assert.match(sql, /DROP TRIGGER IF EXISTS sync_user_profile_email ON auth\.users/);
   assert.match(sql, /DROP FUNCTION IF EXISTS public\.sync_user_profile_email_from_auth\(\)/);
+  assert.match(sql, /DROP FUNCTION IF EXISTS private\.profile_email_is_auth_email\(text\)/);
+  assert.match(sql, /IF leftover = 0 THEN\s+EXECUTE 'DROP SCHEMA private'/);
+  assert.doesNotMatch(sql, /DROP SCHEMA private;/);
   assert.doesNotMatch(sql, /CREATE TRIGGER user_profiles_client_identity_guard/);
   assert.doesNotMatch(sql, /CREATE OR REPLACE FUNCTION public\.user_profiles_client_identity_guard/);
   const remove = functionBody(sql, 'remove_organization_member');

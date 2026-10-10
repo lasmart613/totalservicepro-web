@@ -1,8 +1,11 @@
 -- Rollback for 20261010_000908_profile_email_auth_identity.sql.
--- Drops the client identity guard and the auth.users email sync trigger,
--- then restores public.remove_organization_member from 000907 verbatim
--- (invite expiry keyed off user_profiles.email, with auth.users only as a
--- fallback when that email is blank). Does not rewrite profile or invite rows.
+-- Drops the client identity guard, the auth.users email sync trigger, and
+-- private.profile_email_is_auth_email. private did not exist on live
+-- (2026-10-10). This drops that schema only when nothing else remains in
+-- it; any later object in private keeps the schema. Then restores
+-- public.remove_organization_member from 000907 verbatim (invite expiry
+-- keyed off user_profiles.email, with auth.users only as a fallback when
+-- that email is blank). Does not rewrite profile or invite rows.
 -- APPLY ON LIVE SUPABASE after review. This repo does not auto-apply SQL.
 --
 -- This matches live leave_organization (pg_get_functiondef on
@@ -38,6 +41,34 @@ DROP FUNCTION IF EXISTS public.user_profiles_client_identity_guard();
 
 DROP TRIGGER IF EXISTS sync_user_profile_email ON auth.users;
 DROP FUNCTION IF EXISTS public.sync_user_profile_email_from_auth();
+
+DROP FUNCTION IF EXISTS private.profile_email_is_auth_email(text);
+
+-- Drop private only when the helper was the last object. Leave it if
+-- another relation, routine, or composite type still uses the schema.
+DO $$
+DECLARE
+  nsp oid;
+  leftover integer;
+BEGIN
+  SELECT oid INTO nsp FROM pg_namespace WHERE nspname = 'private';
+  IF nsp IS NULL THEN
+    RETURN;
+  END IF;
+  SELECT count(*) INTO leftover
+  FROM (
+    SELECT c.oid FROM pg_class c WHERE c.relnamespace = nsp
+    UNION ALL
+    SELECT p.oid FROM pg_proc p WHERE p.pronamespace = nsp
+    UNION ALL
+    SELECT t.oid FROM pg_type t
+    WHERE t.typnamespace = nsp
+      AND t.typtype IN ('c', 'e', 'd')
+  ) objs;
+  IF leftover = 0 THEN
+    EXECUTE 'DROP SCHEMA private';
+  END IF;
+END $$;
 
 CREATE OR REPLACE FUNCTION public.remove_organization_member(
   p_user_id uuid,

@@ -12,15 +12,26 @@
 -- INVOKER, so current_user is the caller. service_role returns immediately
 -- and may set any email and any org pointers.
 --
--- Authenticated/anon (and any other role, including postgres when a
--- SECURITY DEFINER function writes the row):
---   * An email change must equal auth.users.email for that id
---     (lower(btrim)). An unchanged email is left alone. INSERT may omit
---     email. Column UPDATE on email stays granted because set-password,
---     auth callback, and onboarding upsert user.email; a column REVOKE
---     would fail those writes even when the value matches. Live grants
---     (2026-10-10): authenticated has column UPDATE/INSERT on email and
---     no table-level UPDATE. RLS user_profiles_update_own is id = auth.uid().
+-- Authenticated has no SELECT on auth.users. The guard is SECURITY INVOKER,
+-- so a direct auth.users lookup on an authenticated upsert (BEFORE INSERT
+-- fires even for ON CONFLICT DO UPDATE) would fail with permission denied
+-- before the email is compared. authenticated and anon therefore call
+-- private.profile_email_is_auth_email, a SECURITY DEFINER function that
+-- compares the argument only to auth.users.email of auth.uid(). It does
+-- not use auth.jwt()->>'email' (that claim goes stale after an email
+-- change). postgres and other SECURITY DEFINER writers still read
+-- auth.users directly, keyed by NEW.id. service_role returns first.
+-- An UPDATE that does not change email does not call either lookup.
+-- INSERT may omit email. Column UPDATE on email stays granted because
+-- set-password, auth callback, and onboarding upsert user.email; a column
+-- REVOKE would fail those writes even when the value matches. Live grants
+-- (2026-10-10): authenticated has column UPDATE/INSERT on email and no
+-- table-level UPDATE. RLS user_profiles_update_own is id = auth.uid().
+--
+-- private is not a PostgREST schema. Live Data API (2026-10-10) exposes
+-- only public and graphql_public (PGRST106). authenticator has no
+-- pgrst.db_schemas override. This file does not add private to that list.
+-- The repo has no supabase/config.toml [api] schemas entry.
 --   * A change to active_organization_id must land on the same value as
 --     organization_id in the new row (both columns may change together
 --     when the new values are equal).
@@ -333,6 +344,34 @@ GRANT EXECUTE ON FUNCTION public.remove_organization_member(uuid, bigint, uuid) 
 COMMENT ON FUNCTION public.remove_organization_member(uuid, bigint, uuid) IS
   'Service-role only. Deletes one membership and expires pending invites for the auth.users email of that user in that org (lower(btrim) equality, not user_profiles.email). When profile pointers move, user_profiles.role becomes the destination membership role via profile_role_from_membership (membership admin becomes company_admin; platform admin is never granted). A profile role of admin is left unchanged. No remaining membership sets role fse unless the profile is platform admin. Raises, writing nothing, when the destination role is owner and that org already has an owner profile. Does not delete auth.users.';
 
+-- Caller-only email check. SECURITY DEFINER so authenticated can compare
+-- its own login email without a SELECT grant on auth.users. search_path is
+-- empty; auth.uid() and auth.users stay schema-qualified.
+CREATE SCHEMA IF NOT EXISTS private;
+
+CREATE OR REPLACE FUNCTION private.profile_email_is_auth_email(p_email text)
+RETURNS boolean
+LANGUAGE sql
+STABLE
+SECURITY DEFINER
+SET search_path = ''
+AS $$
+  SELECT EXISTS (
+    SELECT 1
+    FROM auth.users u
+    WHERE u.id = auth.uid()
+      AND btrim(coalesce(p_email, '')) <> ''
+      AND lower(btrim(u.email)) = lower(btrim(p_email))
+  );
+$$;
+
+REVOKE ALL ON FUNCTION private.profile_email_is_auth_email(text) FROM PUBLIC, anon;
+GRANT USAGE ON SCHEMA private TO authenticated;
+GRANT EXECUTE ON FUNCTION private.profile_email_is_auth_email(text) TO authenticated;
+
+COMMENT ON FUNCTION private.profile_email_is_auth_email(text) IS
+  'True when p_email equals auth.users.email for auth.uid(). Does not look up any other user. Not exposed by PostgREST.';
+
 -- Client writes. service_role is unrestricted. Runs before
 -- user_profiles_guard_identity and user_profiles_sync_membership (name order)
 -- so those triggers cannot hide a diverging active org or a forged email.
@@ -360,14 +399,22 @@ BEGIN
   END IF;
 
   IF email_changed THEN
-    SELECT NULLIF(lower(btrim(u.email)), '') INTO auth_email
-    FROM auth.users u
-    WHERE u.id = NEW.id;
+    IF current_user IN ('authenticated', 'anon') THEN
+      IF NEW.id IS DISTINCT FROM auth.uid()
+         OR NOT private.profile_email_is_auth_email(NEW.email) THEN
+        RAISE EXCEPTION 'user_profiles.email must match the auth login email'
+          USING ERRCODE = '42501';
+      END IF;
+    ELSE
+      SELECT NULLIF(lower(btrim(u.email)), '') INTO auth_email
+      FROM auth.users u
+      WHERE u.id = NEW.id;
 
-    IF auth_email IS NULL
-       OR lower(btrim(COALESCE(NEW.email, ''))) IS DISTINCT FROM auth_email THEN
-      RAISE EXCEPTION 'user_profiles.email must match the auth login email'
-        USING ERRCODE = '42501';
+      IF auth_email IS NULL
+         OR lower(btrim(COALESCE(NEW.email, ''))) IS DISTINCT FROM auth_email THEN
+        RAISE EXCEPTION 'user_profiles.email must match the auth login email'
+          USING ERRCODE = '42501';
+      END IF;
     END IF;
   END IF;
 
@@ -404,7 +451,7 @@ REVOKE ALL ON FUNCTION public.user_profiles_client_identity_guard() FROM PUBLIC,
 GRANT EXECUTE ON FUNCTION public.user_profiles_client_identity_guard() TO authenticated, service_role;
 
 COMMENT ON FUNCTION public.user_profiles_client_identity_guard() IS
-  'BEFORE INSERT OR UPDATE, SECURITY INVOKER. service_role may set any email and any org pointers. Other callers may change user_profiles.email only to auth.users.email, and may not leave active_organization_id different from organization_id. active NULL is allowed when organization_id changes. An unchanged email is kept.';
+  'BEFORE INSERT OR UPDATE, SECURITY INVOKER. service_role may set any email and any org pointers. authenticated and anon may change user_profiles.email only to their own auth.users email, via private.profile_email_is_auth_email. Other callers read auth.users for NEW.id. An unchanged email skips both lookups. active_organization_id may not differ from organization_id. active NULL is allowed when organization_id changes.';
 
 DROP TRIGGER IF EXISTS user_profiles_client_identity_guard ON public.user_profiles;
 CREATE TRIGGER user_profiles_client_identity_guard
