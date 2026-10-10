@@ -223,6 +223,69 @@ export async function findAuthUserByEmail(
   return mergeLookups([byGetter, byTable, byFilter]);
 }
 
+/**
+ * Auth login emails for these user ids. Never user_profiles.email.
+ * Null when the lookup itself failed (caller must not fall back to the profile).
+ */
+type AuthEmailByIdClient = {
+  schema?: (schema: string) => {
+    from: (table: string) => {
+      select: (columns: string) => {
+        in: (column: string, values: string[]) => PromiseLike<AuthTableResult>;
+      };
+    };
+  };
+  auth?: {
+    admin?: {
+      getUserById?: (id: string) => Promise<{
+        data?: { user?: AuthUserRow | null } | null;
+        error?: { message?: string } | null;
+      }>;
+    };
+  };
+};
+
+export async function loadAuthEmailsByUserId(
+  admin: SupabaseClient | AuthEmailByIdClient,
+  userIds: string[],
+): Promise<Map<string, string> | null> {
+  const ids = Array.from(new Set(userIds.map((id) => String(id || '').trim()).filter(Boolean)));
+  const emails = new Map<string, string>();
+  if (!ids.length) return emails;
+
+  const client = admin as AuthEmailByIdClient;
+
+  if (typeof client.schema === 'function') {
+    try {
+      const result = await client.schema('auth').from('users').select('id, email').in('id', ids);
+      if (result && !result.error && Array.isArray(result.data)) {
+        for (const row of result.data) {
+          const id = String(row?.id || '').trim();
+          const email = normalizeLookupEmail(row?.email);
+          if (id && email) emails.set(id, email);
+        }
+        return emails;
+      }
+    } catch {
+      /* getUserById below */
+    }
+  }
+
+  const getter = client.auth?.admin?.getUserById;
+  if (typeof getter !== 'function') return null;
+  try {
+    for (const id of ids) {
+      const result = await getter.call(client.auth?.admin, id);
+      if (!result || result.error) return null;
+      const email = normalizeLookupEmail(result.data?.user?.email);
+      if (email) emails.set(id, email);
+    }
+    return emails;
+  } catch {
+    return null;
+  }
+}
+
 export type EnsureProfileInput = {
   userId: string;
   email: string;

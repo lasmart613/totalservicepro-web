@@ -499,34 +499,51 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       onboardingCompleted: null,
     });
 
-    const lookupProfile = async (): Promise<InviteProfileLookup> => {
+    // Membership follows auth.users plus organization_memberships.
+    // user_profiles.email is client-writable and is not an identity.
+    const lookupProfile = async (knownAuth: AuthEmailLookup): Promise<InviteProfileLookup> => {
       try {
-        const { data, error } = await admin
-          .from('user_profiles')
-          .select('id, email, organization_id, role, first_name, last_name, onboarding_completed')
-          .filter('email', 'imatch', exactEmailImatch(email))
-          .limit(2);
-        if (error || !Array.isArray(data)) return profileClosed();
-        const rows = data.filter(
-          (row: { id?: string | null; email?: string | null }) => row?.id && emailsMatch(row.email, email)
+        if (knownAuth.status === 'error' || knownAuth.status === 'ambiguous') return profileClosed();
+        if (knownAuth.status !== 'found') return profileMiss();
+        const userId = knownAuth.user.id;
+
+        const membership = await admin
+          .from('organization_memberships')
+          .select('user_id, organization_id')
+          .eq('user_id', userId)
+          .eq('organization_id', orgId)
+          .maybeSingle();
+        if (membership.error) return profileClosed();
+        const mem = membership.data as { user_id?: string | null; organization_id?: unknown } | null;
+        const memberHere = !!(
+          mem &&
+          String(mem.user_id) === String(userId) &&
+          String(mem.organization_id) === String(orgId)
         );
-        if (rows.length > 1) return profileClosed();
-        if (rows.length !== 1) return profileMiss();
-        const found = rows[0] as {
+
+        const profile = await admin
+          .from('user_profiles')
+          .select('id, organization_id, first_name, onboarding_completed')
+          .eq('id', userId)
+          .maybeSingle();
+        if (profile.error) return profileClosed();
+        const found = profile.data as {
           id?: string | null;
           organization_id?: unknown;
           first_name?: string | null;
           onboarding_completed?: boolean | null;
-        };
+        } | null;
+        if (found && String(found.id) !== String(userId)) return profileClosed();
+        if (!found && !memberHere) return profileMiss();
+
         const otherOrg =
-          found.organization_id != null && String(found.organization_id) !== String(orgId);
-        const memberHere = found.organization_id != null && String(found.organization_id) === String(orgId);
+          found?.organization_id != null && String(found.organization_id) !== String(orgId);
         return {
           status: 'found',
-          moonlight: otherOrg,
+          moonlight: otherOrg && !memberHere,
           memberHere,
-          firstName: found.first_name || null,
-          onboardingCompleted: found.onboarding_completed ?? null,
+          firstName: found?.first_name || null,
+          onboardingCompleted: found?.onboarding_completed ?? null,
         };
       } catch {
         return profileClosed();
@@ -539,7 +556,7 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
     } catch {
       authLookup = { status: 'error' };
     }
-    const profileLookup = await lookupProfile();
+    const profileLookup = await lookupProfile(authLookup);
     if (profileLookup.status === 'error') {
       const closed = teamInviteClosedBody();
       return respond(closed.body, closed.status);

@@ -91,7 +91,7 @@ type Store = {
   profiles: Profile[];
   invites: Invite[];
   orgs: Org[];
-  authUsers: Array<{ id: string }>;
+  authUsers: Array<{ id: string; email?: string }>;
   failTable?: string;
   rpcError?: boolean;
 };
@@ -142,7 +142,10 @@ function baseStore(overrides: Partial<Store> = {}): Store {
       },
     ],
     orgs: [{ id: ORG, created_by: ADMIN, name: 'North Shop', type: 'service_company' }, { id: HOME, created_by: 'someone-else', name: 'Home Shop', type: 'service_company' }],
-    authUsers: [{ id: ADMIN }, { id: MEMBER }],
+    authUsers: [
+      { id: ADMIN, email: 'admin@shop.test' },
+      { id: MEMBER, email: INVITEE },
+    ],
     ...overrides,
   };
 }
@@ -287,7 +290,8 @@ function removeAdmin(state: Store) {
           if (!isPlatformAdminRole(profile.role)) profile.role = CLEARED_PROFILE_ROLE;
         }
       }
-      const email = String(profile?.email || '').toLowerCase();
+      const authUser = state.authUsers.find((row) => row.id === userId);
+      const email = String(authUser?.email || '').trim().toLowerCase();
       let revoked = 0;
       for (const invite of state.invites) {
         if (invite.organization_id !== orgId) continue;
@@ -466,6 +470,42 @@ test('admin remove drops only that membership and revokes pending invites', asyn
   assert.equal(accepted?.accepted, true);
   assert.equal(JSON.stringify(state.profiles), profilesBefore);
   assert.equal(JSON.stringify(state.authUsers), authBefore);
+});
+
+test('removal expires invites for the auth email when the profile email was edited', async () => {
+  const state = baseStore();
+  const profile = state.profiles.find((row) => row.id === MEMBER)!;
+  profile.email = 'spoof@elsewhere.test';
+  const auth = state.authUsers.find((row) => row.id === MEMBER)!;
+  auth.email = 'New.Person@Example.com';
+  state.invites = [
+    {
+      id: 7,
+      email: 'new.person@example.com',
+      organization_id: ORG,
+      role: 'fse',
+      accepted: false,
+      accepted_at: null,
+      expires_at: futureIso(),
+      created_at: '2026-10-08T00:00:00.000Z',
+    },
+    {
+      id: 12,
+      email: 'spoof@elsewhere.test',
+      organization_id: ORG,
+      role: 'fse',
+      accepted: false,
+      accepted_at: null,
+      expires_at: futureIso(),
+      created_at: '2026-10-08T00:00:00.000Z',
+    },
+  ];
+  const result = await postRemove({ state });
+  assert.equal(result.status, 200, JSON.stringify(result.body));
+  assert.equal(result.body.revokedInviteCount, 1);
+  assert.equal(isPendingTeamInvite(state.invites.find((row) => row.id === 7)!), false);
+  assert.equal(isPendingTeamInvite(state.invites.find((row) => row.id === 12)!), true);
+  assert.equal(profile.email, 'spoof@elsewhere.test');
 });
 
 test('a profile pointer at the removed org moves to the remaining home', async () => {

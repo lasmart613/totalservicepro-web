@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { isPendingTeamInvite } from '@/lib/org-membership';
 import { listMemberUserIdsForOrg } from '@/lib/org-membership-server';
+import { loadAuthEmailsByUserId } from '@/lib/team-profile';
 import { rowFounderFlag } from '@/lib/team-remove';
 
 /**
@@ -119,13 +120,26 @@ export async function GET(req: NextRequest) {
     const roleByUser = new Map(
       (orgRoles || []).map((r: any) => [r.user_id, { role: r.role, is_home: r.is_home, is_founder: r.is_founder, founder: r.founder }])
     );
+    const authEmails = await loadAuthEmailsByUserId(
+      admin,
+      (members || []).map((m: { id?: string | null }) => String(m.id || ''))
+    );
+    if (!authEmails) {
+      return NextResponse.json(
+        { error: 'Could not verify team member emails.', members: [] },
+        { status: 503 }
+      );
+    }
     members = (members || []).map((m: any) => {
       const mem = roleByUser.get(m.id);
       const founder =
         rowFounderFlag(mem) ||
         rowFounderFlag(m) ||
         (organizationCreatedBy != null && String(m.id) === organizationCreatedBy);
+      const authEmail = authEmails.get(String(m.id || '')) || null;
       const next = mem ? { ...m, role: mem.role, is_home: mem.is_home } : { ...m };
+      next.email = authEmail;
+      next.auth_email = authEmail;
       if (founder) next.is_founder = true;
       return next;
     });

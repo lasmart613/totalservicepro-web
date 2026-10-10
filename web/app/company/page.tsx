@@ -1210,10 +1210,10 @@ function CompanyProfile() {
                   </p>
                   <ul className="text-xs text-[var(--text2)] max-h-48 overflow-y-auto">
                     {inviteHistory.map((inv: any) => {
-                      const onTeam = members.some(
-                        (m: any) =>
-                          (m.email || '').toLowerCase() === (inv.email || '').toLowerCase()
-                      );
+                      const onTeam = members.some((m: any) => {
+                        const identity = String(m.auth_email || '').trim().toLowerCase();
+                        return !!identity && identity === String(inv.email || '').trim().toLowerCase();
+                      });
                       return (
                         <li
                           key={inv.id}

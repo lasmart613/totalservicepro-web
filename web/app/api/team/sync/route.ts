@@ -3,6 +3,7 @@ import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { normalizeLookupEmail } from '@/lib/email-match';
 import { listMemberUserIdsForOrg } from '@/lib/org-membership-server';
+import { loadAuthEmailsByUserId } from '@/lib/team-profile';
 import { teamSyncInviteStatus } from '@/lib/team-invite-guard';
 import { getOrgRole, ORG_ROLE_LOOKUP_ERROR, orgRoleAllows, TEAM_LEAD_ROLES } from '@/lib/org-role';
 
@@ -109,11 +110,22 @@ export async function POST(req: NextRequest) {
       }
     }
 
+    const authEmails = await loadAuthEmailsByUserId(
+      admin,
+      (members || []).map((m: { id?: string | null }) => String(m.id || ''))
+    );
+    if (!authEmails) {
+      return NextResponse.json({ error: 'Could not verify team member emails.' }, { status: 503 });
+    }
     const onTeamEmails = new Set(
-      (members || [])
-        .map((m: { email?: string | null }) => normalizeLookupEmail(m.email))
+      Array.from(authEmails.values())
+        .map((value) => normalizeLookupEmail(value))
         .filter(Boolean)
     );
+    members = (members || []).map((m: { id?: string; email?: string | null }) => {
+      const authEmail = authEmails.get(String(m.id || ''));
+      return authEmail ? { ...m, email: authEmail, auth_email: authEmail } : { ...m, email: null, auth_email: null };
+    });
 
     const report = (invites || []).map((inv) => {
       const email = normalizeLookupEmail(inv.email);
