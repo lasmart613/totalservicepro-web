@@ -136,34 +136,51 @@ test('admin and God may open financial reporting; other roles may not', () => {
   assert.equal(financialReportingNavLink({ role: 'fse', god: true })?.label, 'Financial Reporting');
 });
 
-test('server gate uses isAdmin plus God identity, scoped to the active org membership', () => {
+test('server gate uses the active org membership role plus God, not the profile role', () => {
   const env = {};
   assert.equal(decideFinancialAccess({ user: null, env }).status, 401);
   assert.equal(
-    decideFinancialAccess({ user: { id: 'u1', email: 'tech@shop.test' }, profileRole: 'billing_manager', env }).status,
+    decideFinancialAccess({ user: { id: 'u1', email: 'tech@shop.test' }, membershipRole: 'billing_manager', env }).status,
     403
   );
   assert.equal(
-    decideFinancialAccess({ user: { id: 'u1', email: 'tech@shop.test' }, profileRole: 'fse', env }).status,
+    decideFinancialAccess({ user: { id: 'u1', email: 'tech@shop.test' }, membershipRole: 'fse', env }).status,
     403
   );
   assert.equal(
-    decideFinancialAccess({ user: { id: 'u1', email: 'owner@clinic.test' }, profileRole: 'owner', env }).ok,
+    decideFinancialAccess({ user: { id: 'u1', email: 'owner@clinic.test' }, membershipRole: 'owner', env }).ok,
     false
   );
 
-  const admin = decideFinancialAccess({
+  const profileOnly = decideFinancialAccess({
     user: { id: 'u1', email: 'admin@shop.test' },
-    profileRole: 'company_admin',
+    activeOrganizationId: 9,
+    env,
+  });
+  assert.equal(profileOnly.ok, false);
+  if (!profileOnly.ok) assert.equal(profileOnly.status, 403);
+
+  const admin = decideFinancialAccess({
+    user: { id: 'u1', email: 'tech@shop.test' },
+    membershipRole: 'company_admin',
     activeOrganizationId: 9,
     env,
   });
   assert.equal(admin.ok, true);
   if (admin.ok) assert.equal(admin.organizationId, 9);
 
+  const platformAdmin = decideFinancialAccess({
+    user: { id: 'u1', email: 'admin@shop.test' },
+    membershipRole: 'fse',
+    isPlatformAdmin: true,
+    activeOrganizationId: 9,
+    env,
+  });
+  assert.equal(platformAdmin.ok, true);
+
   const god = decideFinancialAccess({
     user: { id: 'larry', email: 'larrysmart@gmail.com' },
-    profileRole: 'fse',
+    membershipRole: 'fse',
     activeOrganizationId: 3,
     env,
   });
@@ -182,15 +199,13 @@ test('server gate uses isAdmin plus God identity, scoped to the active org membe
   );
   const moonlight = decideFinancialAccess({
     user: { id: 'u2', email: 'moon@shop.test' },
-    profileRole: 'fse',
     activeOrganizationId: 1,
-    membershipRole: 'admin',
+    membershipRole: 'company_admin',
     env,
   });
   assert.equal(moonlight.ok, true);
   const otherShop = decideFinancialAccess({
     user: { id: 'u2', email: 'moon@shop.test' },
-    profileRole: 'fse',
     activeOrganizationId: 2,
     membershipRole: membershipRoleForActiveOrg(
       [
@@ -389,11 +404,11 @@ test('nav and page keep financial reporting in Business Management and enforce i
   const adminReports = readFileSync(join(webDir, 'app/admin/reports/page.tsx'), 'utf8');
 
   assert.match(header, /label: 'Business Management'/);
-  assert.match(header, /financialReportingNavLink\(\{ role: profile\?\.role, god: isGod \}\)/);
+  assert.match(header, /financialReportingNavLink\(\{ role: orgPowerRole, god: isGod \}\)/);
   assert.match(header, /\.\.\.\(financialNav \? \[financialNav\] : \[\]\)/);
-  assert.match(hub, /canAccessFinancialReporting\(\{ role, god \}\)/);
+  assert.match(hub, /canAccessFinancialReporting\(\{ role: orgPowerRole, god \}\)/);
   assert.match(hub, /\/business\/financial-reporting/);
-  assert.match(home, /canAccessFinancialReporting\(\{ role, god \}\)/);
+  assert.match(home, /canAccessFinancialReporting\(\{ role: orgPowerRole, god \}\)/);
   assert.doesNotMatch(reports, /financial-reporting/);
   assert.doesNotMatch(adminReports, /financial-reporting/);
 

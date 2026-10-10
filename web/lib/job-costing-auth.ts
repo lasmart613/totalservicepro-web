@@ -12,13 +12,17 @@ export type JobCostingAccess =
 
 /**
  * God uses the Auth user (id / email), same as /api/god.
- * Admin uses user_profiles.role or the active organization's membership role.
+ * Shop admin is the membership role in the active org (admin or company_admin).
+ * Platform admin (user_profiles.role = 'admin') stays allowed with no membership.
+ * A company_admin profile role is not an org role.
  */
 export function decideJobCostingAccess(input: {
   user: GodIdentity | null;
-  profileRole?: RoleLike;
-  activeOrganizationId?: string | number | null;
+  /** Membership role in the active organization. Not user_profiles.role. */
   membershipRole?: RoleLike;
+  /** user_profiles.role = 'admin'. */
+  isPlatformAdmin?: boolean;
+  activeOrganizationId?: string | number | null;
   env?: NodeJS.ProcessEnv;
 }): JobCostingAccess {
   const userId = String(input.user?.id || '').trim();
@@ -27,7 +31,7 @@ export function decideJobCostingAccess(input: {
   }
 
   const god = isGodIdentity({ id: userId, email: input.user.email }, input.env);
-  const allowed = god || isAdmin(input.profileRole) || isAdmin(input.membershipRole);
+  const allowed = god || input.isPlatformAdmin === true || isAdmin(input.membershipRole);
   if (!allowed) {
     return { ok: false, status: 403, error: 'Admin access required' };
   }

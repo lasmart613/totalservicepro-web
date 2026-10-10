@@ -30,7 +30,12 @@ export function normalizeVoidReason(value: unknown): string | null {
 
 export type VoidInvoiceDecision = { ok: true } | { ok: false; reason: string };
 
-/** Draft or sent, no recorded payment, admin or owner. */
+/**
+ * Draft or sent, no recorded payment, and an org role that may void.
+ * Pass the target org's membership authority role (voidInvoiceRole).
+ * Platform admin still passes because isAdmin treats admin as allowed.
+ * A company_admin value here is a membership role, not user_profiles.role.
+ */
 export function canVoidInvoice(input: {
   status?: string | null;
   amount_paid?: number | string | null;

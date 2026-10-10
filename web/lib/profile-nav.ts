@@ -8,6 +8,7 @@ export type NavProfile = {
   last_name?: string | null;
   role?: string | null;
   organization_id?: number | string | null;
+  active_organization_id?: number | string | null;
   organizations?: {
     name?: string | null;
     type?: string | null;
@@ -24,11 +25,20 @@ export async function loadOwnNavProfile(
   supabase: SupabaseClient,
   userId: string
 ): Promise<NavProfile | null> {
-  const { data: prof, error } = await supabase
+  let { data: prof, error } = await supabase
     .from('user_profiles')
-    .select('id, first_name, last_name, role, organization_id')
+    .select('id, first_name, last_name, role, organization_id, active_organization_id')
     .eq('id', userId)
     .maybeSingle();
+  if (error && /active_organization_id|column/i.test(error.message || '')) {
+    const retry = await supabase
+      .from('user_profiles')
+      .select('id, first_name, last_name, role, organization_id')
+      .eq('id', userId)
+      .maybeSingle();
+    prof = retry.data;
+    error = retry.error;
+  }
   if (error) console.warn('loadOwnNavProfile', error.message);
   if (!prof) return null;
 

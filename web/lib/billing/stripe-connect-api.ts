@@ -5,6 +5,7 @@
  */
 
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { getOrgRole, shopAdminRole } from '@/lib/org-role';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { getStripeSecret, stripeSecretProblem } from '@/lib/billing/stripe-pay';
 import { publicSiteOrigin } from '@/lib/site-origin';
@@ -291,18 +292,11 @@ export async function loadConnectCaller(input: {
     return { error: 'Service role is required to check Stripe Connect.', status: 503, code: 'stripe_unavailable' };
   }
   const admin = getSupabaseAdmin();
-  let role = String(input.profile?.role || '');
-  try {
-    const { data: membership } = await admin
-      .from('organization_memberships')
-      .select('role')
-      .eq('user_id', input.userId)
-      .eq('organization_id', orgId)
-      .maybeSingle();
-    if (membership?.role) role = String(membership.role);
-  } catch {
-    /* profile role is enough when memberships are unavailable */
+  const looked = await getOrgRole(admin, input.userId, orgId);
+  if (!looked.ok) {
+    return { error: looked.error, status: 503, code: 'org_role_lookup' };
   }
+  const role = shopAdminRole(looked);
   const { data: org, error } = await admin.from('organizations').select(ORG_STRIPE_SELECT).eq('id', orgId).maybeSingle();
   if (error && isMissingStripeColumn(error)) {
     const { data: basic } = await admin.from('organizations').select('id, type, name, email').eq('id', orgId).maybeSingle();

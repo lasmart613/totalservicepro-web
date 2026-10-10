@@ -12,6 +12,7 @@ import {
   canVoidInvoice,
   checkoutSessionIds,
 } from '@/lib/billing/void-invoice';
+import { getOrgRole, ORG_ROLE_LOOKUP_ERROR, voidInvoiceRole } from '@/lib/org-role';
 
 export const dynamic = 'force-dynamic';
 
@@ -59,12 +60,20 @@ export async function runVoidInvoice(req: NextRequest, deps: VoidInvoiceDeps = {
     } = await supabase.auth.getUser(token);
     if (userErr || !user) return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
 
-    const { data: prof } = await supabase
+    const { data: prof, error: profileError } = await supabase
       .from('user_profiles')
-      .select('organization_id, role')
+      .select('organization_id')
       .eq('id', user.id)
       .maybeSingle();
+    if (profileError) {
+      return NextResponse.json({ error: ORG_ROLE_LOOKUP_ERROR }, { status: 503 });
+    }
     const callerOrgId = prof?.organization_id ?? null;
+    const orgRole = await getOrgRole(supabase, user.id, callerOrgId);
+    if (!orgRole.ok) {
+      return NextResponse.json({ error: orgRole.error }, { status: orgRole.status });
+    }
+    const callerRole = voidInvoiceRole(orgRole);
 
     const body = (await req.json().catch(() => ({}))) as { invoice_id?: unknown; reason?: unknown };
     const invoiceId = body.invoice_id;
@@ -93,7 +102,7 @@ export async function runVoidInvoice(req: NextRequest, deps: VoidInvoiceDeps = {
       status: inv.status == null ? null : String(inv.status),
       amount_paid: inv.amount_paid as number | string | null,
       invoice_data: inv.invoice_data,
-      role: prof?.role,
+      role: callerRole,
     });
     if (!decision.ok) return NextResponse.json({ error: decision.reason }, { status: 403 });
 

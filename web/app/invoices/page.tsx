@@ -16,6 +16,7 @@ import {
 } from '@/lib/billing/save-helpers';
 import { buildInvoicePaymentPatch, existingPaidAmount } from '@/lib/billing/apply-invoice-payment';
 import { canVoidInvoice, isVoidInvoiceStatus } from '@/lib/billing/void-invoice';
+import { getOrgRole, voidInvoiceRole } from '@/lib/org-role';
 import {
   releaseDeferredBalance,
   resolveInvoiceCollectable,
@@ -118,7 +119,8 @@ export default function InvoicesListPage() {
         .eq('id', user.id)
         .maybeSingle();
       const orgId = coerceOrgId(profile?.organization_id);
-      setCallerRole(String((profile as { role?: string } | null)?.role || ''));
+      const looked = await getOrgRole(supabase, user.id, isValidOrgId(orgId) ? orgId : null);
+      setCallerRole(looked.ok ? voidInvoiceRole(looked) : '');
       const zone = await resolveNumberingTimeZone(supabase, isValidOrgId(orgId) ? orgId : null, {
         allowBrowser: false,
       });

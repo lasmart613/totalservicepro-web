@@ -4,13 +4,7 @@ import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { normalizeLookupEmail } from '@/lib/email-match';
 import { listMemberUserIdsForOrg } from '@/lib/org-membership-server';
 import { teamSyncInviteStatus } from '@/lib/team-invite-guard';
-
-const ADMIN_ROLES = new Set([
-  'admin',
-  'company_admin',
-  'service_manager',
-  'owner',
-]);
+import { getOrgRole, ORG_ROLE_LOOKUP_ERROR, orgRoleAllows, TEAM_LEAD_ROLES } from '@/lib/org-role';
 
 /**
  * POST /api/team/sync
@@ -47,14 +41,24 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Invalid session' }, { status: 401 });
     }
 
-    const { data: profile } = await userClient
+    const { data: profile, error: profileError } = await userClient
       .from('user_profiles')
-      .select('organization_id, role')
+      .select('organization_id')
       .eq('id', user.id)
       .maybeSingle();
+    if (profileError) {
+      return NextResponse.json({ error: ORG_ROLE_LOOKUP_ERROR }, { status: 503 });
+    }
 
-    const role = (profile?.role || '').toLowerCase();
-    if (!profile?.organization_id || !ADMIN_ROLES.has(role)) {
+    if (!profile?.organization_id) {
+      return NextResponse.json({ error: 'Only org admins can sync team' }, { status: 403 });
+    }
+
+    const orgRole = await getOrgRole(userClient, user.id, profile.organization_id as string | number);
+    if (!orgRole.ok) {
+      return NextResponse.json({ error: orgRole.error }, { status: orgRole.status });
+    }
+    if (!orgRoleAllows(orgRole, TEAM_LEAD_ROLES, { founderCounts: true })) {
       return NextResponse.json({ error: 'Only org admins can sync team' }, { status: 403 });
     }
 

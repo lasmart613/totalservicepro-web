@@ -8,6 +8,7 @@ import { getSupabaseClient } from '@/lib/supabase/client';
 import { isAdmin, isOwnerish, isSupplier } from '@/lib/roles';
 import { canAccessFinancialReporting } from '@/lib/financial-reporting-access';
 import { canAccessJobCosting } from '@/lib/job-costing-access';
+import { getOrgRole, reportingOrganizationId, shopAdminRole } from '@/lib/org-role';
 import { fetchGodMe } from '@/lib/god-client';
 import { ownerLabelKind } from '@/lib/labels';
 import { hubDest } from '@/lib/no-org-route';
@@ -23,6 +24,7 @@ export default function TechHub() {
   const [orgType, setOrgType] = useState<string | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [god, setGod] = useState(false);
+  const [orgPowerRole, setOrgPowerRole] = useState('');
 
   useEffect(() => {
     (async () => {
@@ -52,6 +54,8 @@ export default function TechHub() {
         }
         const meta = user.user_metadata || {};
         setRole(prof?.role || meta.role || '');
+        const looked = await getOrgRole(supabase, user.id, reportingOrganizationId(prof));
+        setOrgPowerRole(looked.ok ? shopAdminRole(looked) : '');
         const ot =
           (prof?.organizations as any)?.type ||
           (prof?.organizations as any)?.facility_type ||
@@ -114,12 +118,17 @@ export default function TechHub() {
 
   // Business Management — CRM / money (permissioned roles only)
   // Android order: Customers, Estimates, Invoices (+ Company on web)
+  // Financial reporting and job costing follow the membership role in the active org.
   const businessCards: HubCard[] = [
-    { href: '/customers', icon: '👥', label: 'Customers', desc: 'Directory & customer profiles' },
-    { href: '/estimates', icon: '📝', label: 'Estimates', desc: 'Quotes & service estimates' },
-    { href: '/invoices', icon: '🧾', label: 'Invoices', desc: 'Billing & collections' },
-    { href: '/company', icon: '🏢', label: 'Company Profile', desc: 'Org settings, team & branding' },
-    ...(canAccessFinancialReporting({ role, god })
+    ...(canBusiness
+      ? [
+          { href: '/customers', icon: '👥', label: 'Customers', desc: 'Directory & customer profiles' },
+          { href: '/estimates', icon: '📝', label: 'Estimates', desc: 'Quotes & service estimates' },
+          { href: '/invoices', icon: '🧾', label: 'Invoices', desc: 'Billing & collections' },
+          { href: '/company', icon: '🏢', label: 'Company Profile', desc: 'Org settings, team & branding' },
+        ]
+      : []),
+    ...(canAccessFinancialReporting({ role: orgPowerRole, god })
       ? [
           {
             href: '/business/financial-reporting',
@@ -129,7 +138,7 @@ export default function TechHub() {
           },
         ]
       : []),
-    ...(canAccessJobCosting({ role, god })
+    ...(canAccessJobCosting({ role: orgPowerRole, god })
       ? [
           {
             href: '/business/job-costing',
@@ -177,7 +186,7 @@ export default function TechHub() {
           ))}
         </div>
 
-        {canBusiness && (
+        {businessCards.length > 0 && (
           <div className="mt-10">
             <h2 className="text-lg font-extrabold mb-1">💼 {t('Business Management')}</h2>
             <p className="text-xs text-[var(--text3)] mb-4">

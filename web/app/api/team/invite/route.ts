@@ -6,6 +6,7 @@ import { findAuthUserByEmail, type AuthEmailLookup } from '@/lib/team-profile';
 import { DEFAULT_STAFF_ROLE, isInvitableTeamRole, normalizeRole, teamRoleForInvite } from '@/lib/org-membership';
 import { freshTeamInviteFields } from '@/lib/team-invite-guard';
 import { decideMemberRoleChange } from '@/lib/tenant-lockdown';
+import { getOrgRole, ORG_ROLE_LOOKUP_ERROR, orgRoleAllows, TEAM_LEAD_ROLES, teamLeadRole } from '@/lib/org-role';
 import {
   decideInviteSetupResend,
   decideTeamInviteAudience,
@@ -27,13 +28,6 @@ import {
 } from '@/lib/team-invite';
 import { publicSiteOrigin } from '@/lib/site-origin';
 import { setupLinkRedirect } from '@/lib/auth-link-route';
-
-const ADMIN_ROLES = new Set([
-  'admin',
-  'company_admin',
-  'service_manager',
-  'owner',
-]);
 
 type InviteBody = {
   email?: string;
@@ -160,20 +154,27 @@ export async function runTeamInvite(req: NextRequest, deps: InviteDeps = {}) {
       return respond({ error: 'Invalid session' }, 401);
     }
 
-    const { data: profile } = await userClient
+    const { data: profile, error: profileError } = await userClient
       .from('user_profiles')
       .select('organization_id, role')
       .eq('id', user.id)
       .maybeSingle();
+    if (profileError) {
+      return respond({ error: ORG_ROLE_LOOKUP_ERROR }, 503);
+    }
 
     if (!profile?.organization_id) {
       return respond({ error: 'You are not linked to an organization' }, 403);
     }
 
-    const role = (profile.role || '').toLowerCase();
-    if (!ADMIN_ROLES.has(role)) {
+    const orgRole = await getOrgRole(userClient, user.id, profile.organization_id as string | number);
+    if (!orgRole.ok) {
+      return respond({ error: orgRole.error }, orgRole.status);
+    }
+    if (!orgRoleAllows(orgRole, TEAM_LEAD_ROLES, { founderCounts: true })) {
       return respond({ error: 'Only admins can invite team members' }, 403);
     }
+    const role = teamLeadRole(orgRole);
 
     const body = (await req.json()) as InviteBody;
     const email = normalizeLookupEmail(body.email);
