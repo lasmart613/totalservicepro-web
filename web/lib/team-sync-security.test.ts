@@ -223,3 +223,24 @@ test('an existing-profile invite does not create a membership until claim', () =
   assert.match(page, /Resend invite email/);
   assert.doesNotMatch(page, /json\.linked > 0/);
 });
+
+test('team sync and list mark on-team from auth.users, not user_profiles.email', () => {
+  const sync = readRoute('../app/api/team/sync/route.ts');
+  const list = readRoute('../app/api/team/list/route.ts');
+  const company = readRoute('../app/company/page.tsx');
+  for (const source of [sync, list]) {
+    assert.match(source, /loadAuthEmailsByUserId/);
+    assert.match(source, /Could not verify team member emails/);
+    assert.match(source, /auth_email/);
+    const lookupAt = source.indexOf('loadAuthEmailsByUserId');
+    const statusAt = source.indexOf('status: 503');
+    assert.ok(lookupAt > 0 && statusAt > lookupAt, 'a failed auth lookup fails closed');
+  }
+  const onTeamAt = sync.indexOf('onTeamEmails');
+  assert.ok(onTeamAt > sync.indexOf('loadAuthEmailsByUserId'));
+  assert.match(sync.slice(onTeamAt, onTeamAt + 280), /authEmails\.values\(\)/);
+  assert.doesNotMatch(sync.slice(onTeamAt, onTeamAt + 500), /m\.email/);
+  const companyOnTeam = company.slice(company.indexOf('const onTeam = members.some'));
+  assert.match(companyOnTeam.slice(0, 400), /m\.auth_email/);
+  assert.doesNotMatch(companyOnTeam.slice(0, 400), /m\.email/);
+});

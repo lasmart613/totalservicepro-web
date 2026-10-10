@@ -605,6 +605,7 @@ function inviteAdmin(state: {
   invite: Record<string, unknown> | null;
   profile?: Record<string, unknown> | null;
   profiles?: Array<Record<string, unknown> | null>;
+  memberships?: Array<{ user_id: string; organization_id: number }>;
   linkHandler?: (args: { type?: string }) => {
     data?: { user?: { id?: string }; properties?: { action_link?: string } } | null;
     error?: { message?: string } | null;
@@ -629,6 +630,14 @@ function inviteAdmin(state: {
         if (emailFilter.op === 'imatch') return new RegExp(String(emailFilter.value ?? ''), 'i').test(stored.trim());
         if (emailFilter.op === 'ilike') return likeMatches(stored, String(emailFilter.value ?? ''));
         return stored.trim().toLowerCase() === String(emailFilter.value ?? '').trim().toLowerCase();
+      };
+      const matchesEq = (row: Record<string, unknown> | null) => {
+        if (!row) return false;
+        return filters.every((filter) => {
+          if (filter.column === 'email') return true;
+          if (filter.op !== 'eq') return true;
+          return String(row[filter.column] ?? '') === String(filter.value ?? '');
+        });
       };
       const orgOk = (row: { organization_id?: unknown } | null) => {
         const orgFilter = filters.find((filter) => filter.column === 'organization_id');
@@ -657,7 +666,10 @@ function inviteAdmin(state: {
         },
         limit() {
           if (table === 'user_profiles') {
-            return Promise.resolve({ data: profileRows.filter((row) => matchesEmail(row)), error: null });
+            return Promise.resolve({
+              data: profileRows.filter((row) => matchesEmail(row) && matchesEq(row)),
+              error: null,
+            });
           }
           return api;
         },
@@ -665,8 +677,13 @@ function inviteAdmin(state: {
           if (table === 'organizations') {
             return { data: { id: 9, name: 'North Shop', type: 'service_company', services_offered: null }, error: null };
           }
+          if (table === 'organization_memberships') {
+            const rows = (state.memberships || []).filter((row) => matchesEq(row));
+            if (rows.length > 1) return { data: null, error: { code: 'PGRST116', message: 'multiple rows' } };
+            return { data: rows[0] ?? null, error: null };
+          }
           if (table === 'user_profiles') {
-            const rows = profileRows.filter((row) => matchesEmail(row));
+            const rows = profileRows.filter((row) => matchesEmail(row) && matchesEq(row));
             if (rows.length > 1) return { data: null, error: { code: 'PGRST116', message: 'multiple rows' } };
             return { data: rows[0] ?? null, error: null };
           }
@@ -728,6 +745,7 @@ async function postExistingInvite(opts: {
   invite: Record<string, unknown> | null;
   profile?: Record<string, unknown> | null;
   profiles?: Array<Record<string, unknown> | null>;
+  memberships?: Array<{ user_id: string; organization_id: number }> | null;
   email?: string;
   role?: string;
   linkHandler?: (args: { type?: string }) => {
@@ -757,10 +775,21 @@ async function postExistingInvite(opts: {
   console.info = capture;
   console.warn = capture;
   console.error = capture;
+  const profileRows = (opts.profiles ?? (opts.profile ? [opts.profile] : [])).filter(
+    (row): row is Record<string, unknown> => !!row
+  );
+  const memberships =
+    opts.memberships === null
+      ? []
+      : opts.memberships ??
+        profileRows
+          .filter((row) => row.id && String(row.organization_id) === '9')
+          .map((row) => ({ user_id: String(row.id), organization_id: 9 }));
   const harness = inviteAdmin({
     invite: opts.invite,
     profile: opts.profile,
     profiles: opts.profiles,
+    memberships,
     linkHandler: opts.linkHandler,
   });
   const requestEmail = opts.email || INVITEE;
@@ -1065,37 +1094,66 @@ test('a mixed-case profile email is an existing member: moonlight, and resend ke
   assertNoLink(resend, SETUP_LINK);
 });
 
-test('a case-insensitive duplicate profile fails closed', async () => {
-  const result = await postExistingInvite({
+test('a profile email edit does not change who the invite route treats as a member', async () => {
+  const acceptedAt = '2026-10-01T12:00:00.000Z';
+  const dodgeInvite = {
+    ...pendingCreated,
+    accepted: true,
+    accepted_at: acceptedAt,
+    expires_at: '2026-10-08T12:00:00.000Z',
+  };
+  const dodge = await postExistingInvite({
     resendKey: 'resend-test',
     auth: { status: 'found', id: 'auth-1', lastSignInAt: '2026-10-02T00:00:00.000Z' },
     email: 'person@example.com',
-    invite: { ...pendingCreated, accepted: true, accepted_at: '2026-10-01T12:00:00.000Z' },
-    profiles: [
-      {
-        id: 'auth-1',
-        email: 'Person@Example.com',
-        organization_id: 9,
-        role: 'fse',
-        onboarding_completed: true,
-      },
-      {
-        id: 'auth-2',
-        email: 'person@example.com',
-        organization_id: 4,
-        role: 'fse',
-        onboarding_completed: true,
-      },
-    ],
+    invite: dodgeInvite,
+    profile: {
+      id: 'auth-1',
+      email: 'attacker@example.com',
+      organization_id: 4,
+      role: 'fse',
+      onboarding_completed: true,
+    },
+    memberships: [{ user_id: 'auth-1', organization_id: 9 }],
   });
-  assert.equal(result.status, 503);
-  assert.equal(result.body.ok, false);
-  assert.match(String(result.body.error), /No invite link was created/);
-  assert.equal(result.sent.length, 0);
-  assert.equal(result.linkCalls.length, 0);
-  assert.equal(result.updates.length, 0);
-  assert.equal(result.inserts.length, 0);
-  assertNoLink(result, SETUP_LINK);
+  assert.equal(dodge.status, 200, JSON.stringify(dodge.body));
+  assert.equal(dodge.body.emailed, true);
+  assert.equal(dodge.body.moonlight, false);
+  assert.equal(dodge.linkCalls.length, 0);
+  assert.equal(dodgeInvite.accepted, true);
+  assert.equal(dodgeInvite.accepted_at, acceptedAt);
+  assertNoLink(dodge, SETUP_LINK);
+
+  const hijackInvite = {
+    ...pendingCreated,
+    accepted: true,
+    accepted_at: acceptedAt,
+    expires_at: '2026-10-08T12:00:00.000Z',
+  };
+  const hijack = await postExistingInvite({
+    resendKey: 'resend-test',
+    auth: { status: 'found', id: 'auth-1', lastSignInAt: '2026-10-02T00:00:00.000Z' },
+    email: 'person@example.com',
+    invite: hijackInvite,
+    profile: {
+      id: 'attacker',
+      email: 'person@example.com',
+      organization_id: 9,
+      role: 'fse',
+      onboarding_completed: true,
+    },
+    memberships: [],
+  });
+  assert.equal(hijack.status, 200, JSON.stringify(hijack.body));
+  assert.equal(hijack.body.moonlight, false);
+  assert.equal(hijack.linkCalls.length, 0);
+  assert.equal(hijackInvite.accepted, false);
+  assert.equal(isPendingTeamInvite(hijackInvite), true);
+  assertNoLink(hijack, SETUP_LINK);
+
+  const route = readFileSync(join(here, '../app/api/team/invite/route.ts'), 'utf8');
+  assert.match(route, /from\('organization_memberships'\)/);
+  assert.doesNotMatch(route, /from\('user_profiles'\)[\s\S]{0,240}filter\('email'/);
 });
 
 test('percent and underscore in an invite email are not wildcards', async () => {
@@ -1125,7 +1183,7 @@ test('percent and underscore in an invite email are not wildcards', async () => 
     invite: null,
     profiles: [
       { id: 'decoy', email: 'axxb@example.com', organization_id: 4, role: 'fse', onboarding_completed: true },
-      { id: 'exact', email: 'A%B@example.com', organization_id: 4, role: 'owner', onboarding_completed: true },
+      { id: 'auth-9', email: 'A%B@example.com', organization_id: 4, role: 'owner', onboarding_completed: true },
     ],
   });
   assert.equal(percent.status, 200, JSON.stringify(percent.body));
