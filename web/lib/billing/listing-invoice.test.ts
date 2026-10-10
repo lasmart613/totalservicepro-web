@@ -9,7 +9,6 @@ import {
   canAddListingToInvoice,
   canShowAddListingToInvoice,
   draftInvoiceOptionLabel,
-  FOREIGN_LISTING_INVOICE_ERROR,
   invoiceEditPath,
   isDraftInvoiceStatus,
   isPlaceholderInvoiceLine,
@@ -17,6 +16,7 @@ import {
   listingOrgIdVisibleToViewer,
   listingToInvoiceLine,
   mergeListingOntoDraft,
+  listingInvoiceBlockReason,
   parseInvoiceQty,
   runAddListingToInvoice,
   type ListingInvoiceIo,
@@ -333,8 +333,8 @@ test('another organization listing is hidden from the action and the server reje
   );
   assert.equal(result.ok, false);
   if (result.ok) return;
-  assert.equal(result.status, 403);
-  assert.equal(result.error, FOREIGN_LISTING_INVOICE_ERROR);
+  assert.equal(result.status, 404);
+  assert.equal(result.error, 'Listing not found');
   assert.equal(writes, 0);
   assert.equal(drafts, 0);
 });
@@ -359,8 +359,45 @@ test('updating a draft also rejects a foreign listing before the invoice is touc
   );
   assert.equal(result.ok, false);
   if (result.ok) return;
-  assert.equal(result.status, 403);
+  assert.equal(result.status, 404);
+  assert.equal(result.error, 'Listing not found');
   assert.equal(writes, 0);
+});
+
+test('a missing listing and another organization listing are the same not-found', () => {
+  const actor = { activeOrgId: 7, orgType: 'service_company' };
+  const missing = listingInvoiceBlockReason(actor, null);
+  const blank = listingInvoiceBlockReason(actor, { id: '  ', organization_id: 7 });
+  const foreign = listingInvoiceBlockReason(actor, foreignListing);
+  assert.deepEqual(missing, foreign);
+  assert.deepEqual(blank, foreign);
+  assert.deepEqual(foreign, { ok: false, status: 404, error: 'Listing not found' });
+});
+
+test('a missing draft and another organization draft are the same not-found', async () => {
+  const actor = { userId: 'user-1', activeOrgId: 7, orgType: 'service_company' };
+  const request = { listingId: 'lst_flash', qty: 1, mode: 'existing', invoiceId: 4 };
+  const io = (draft: { id: number; organization_id: number; status: string } | null): ListingInvoiceIo => ({
+    loadListing: async () => ownListing,
+    loadDraft: async () => draft,
+    loadCustomer: async () => {
+      throw new Error('customer should not load');
+    },
+    allocateInvoiceNumber: async () => {
+      throw new Error('number should not allocate');
+    },
+    writeInvoice: async () => {
+      throw new Error('invoice should not be written');
+    },
+  });
+  const missing = await runAddListingToInvoice(actor, request, io(null));
+  const foreign = await runAddListingToInvoice(
+    actor,
+    request,
+    io({ id: 4, organization_id: 99, status: 'draft' })
+  );
+  assert.deepEqual(missing, foreign);
+  assert.deepEqual(missing, { ok: false, status: 404, error: 'Invoice not found' });
 });
 
 test('own listing can be appended to an existing draft and keeps the deposit split', async () => {

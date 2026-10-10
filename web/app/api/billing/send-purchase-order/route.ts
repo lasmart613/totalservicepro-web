@@ -32,7 +32,7 @@ const PO_SELECTS = [
   'id, organization_id, supplier_email, po_number',
 ];
 
-/** Same wording for a missing row and a row owned by another shop. */
+/** Same status, body, and headers for a missing row and a row owned by another shop. */
 const PO_NOT_FOUND = 'Purchase order not found.';
 
 type SendPurchaseOrderDeps = {
@@ -111,10 +111,9 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
       callerOrgId,
       narrowSelects: PO_SELECTS,
       notFoundError: PO_NOT_FOUND,
-      forbiddenError: PO_NOT_FOUND,
     });
     if (!loaded.ok || !documentOwnedByOrganization(loaded.row, callerOrgId)) {
-      return respond({ error: PO_NOT_FOUND }, 403);
+      return respond({ error: PO_NOT_FOUND }, 404);
     }
     const po = loaded.row;
 

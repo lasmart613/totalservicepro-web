@@ -7,8 +7,11 @@ import { decideSwitch } from './org-membership.ts';
 import {
   authorizeInviteAccept,
   authorizeSelfOrgAttach,
+  callerMayChangeMemberRole,
   decideFounderLink,
   decideMemberRoleChange,
+  memberRoleSelfRaiseRefused,
+  memberRoleTargetIsLocked,
   signupAssignsTenant,
 } from './tenant-lockdown.ts';
 
@@ -152,6 +155,80 @@ test('role change refuses escalation and platform admin; same-org equal rank is 
   assert.equal(platform.ok, false);
   if (platform.ok) return;
   assert.match(platform.error, /memberships cannot use the platform admin role/i);
+
+  for (const blocked of ['owner', 'Owner', 'customer', 'engineer', 'crm', 'parts_supplier', 'scheduler'] as const) {
+    const refused = decideMemberRoleChange({
+      callerRole: 'company_admin',
+      targetRole: blocked,
+      sameOrganization: true,
+    });
+    assert.equal(refused.ok, false, blocked);
+    if (refused.ok) return;
+    assert.equal(refused.status, 403, blocked);
+  }
+
+  const trimmed = decideMemberRoleChange({
+    callerRole: 'company_admin',
+    targetRole: '  DISPATCHER ',
+    sameOrganization: true,
+  });
+  assert.equal(trimmed.ok, true);
+  if (!trimmed.ok) return;
+  assert.equal(trimmed.role, 'dispatcher');
+});
+
+test('member role authority is membership company_admin, owner, or founder — not platform admin', () => {
+  assert.equal(callerMayChangeMemberRole({ membershipRole: 'company_admin' }), true);
+  assert.equal(callerMayChangeMemberRole({ membershipRole: 'owner' }), true);
+  assert.equal(callerMayChangeMemberRole({ membershipRole: ' Owner ' }), true);
+  assert.equal(callerMayChangeMemberRole({ membershipRole: 'admin' }), false);
+  assert.equal(callerMayChangeMemberRole({ membershipRole: 'fse' }), false);
+  assert.equal(callerMayChangeMemberRole({ membershipRole: 'service_manager' }), false);
+  assert.equal(callerMayChangeMemberRole({ membershipRole: 'fse', founder: true }), true);
+  assert.equal(callerMayChangeMemberRole({ membershipRole: 'fse', isOrgCreator: true }), true);
+
+  assert.equal(memberRoleTargetIsLocked({ membershipRole: 'owner' }), true);
+  assert.equal(memberRoleTargetIsLocked({ membershipRole: 'fse', founder: true }), true);
+  assert.equal(memberRoleTargetIsLocked({ membershipRole: 'company_admin', isOrgCreator: true }), true);
+  assert.equal(memberRoleTargetIsLocked({ membershipRole: 'fse' }), false);
+  assert.equal(memberRoleTargetIsLocked({ membershipRole: 'company_admin' }), false);
+
+  assert.equal(
+    memberRoleSelfRaiseRefused({
+      callerId: 'admin-1',
+      targetUserId: 'admin-1',
+      membershipRole: 'company_admin',
+      nextRole: 'owner',
+    }),
+    true
+  );
+  assert.equal(
+    memberRoleSelfRaiseRefused({
+      callerId: 'admin-1',
+      targetUserId: 'member-1',
+      membershipRole: 'company_admin',
+      nextRole: 'owner',
+    }),
+    false
+  );
+  assert.equal(
+    memberRoleSelfRaiseRefused({
+      callerId: 'owner-1',
+      targetUserId: 'owner-1',
+      membershipRole: 'owner',
+      nextRole: 'company_admin',
+    }),
+    true
+  );
+  assert.equal(
+    memberRoleSelfRaiseRefused({
+      callerId: 'admin-1',
+      targetUserId: 'admin-1',
+      membershipRole: 'company_admin',
+      nextRole: 'service_manager',
+    }),
+    false
+  );
 });
 
 test('email signup rejects an organization or role in the body', () => {

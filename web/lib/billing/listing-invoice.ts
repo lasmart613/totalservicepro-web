@@ -60,9 +60,6 @@ export function canAddListingToInvoice(orgType?: string | null): boolean {
   return isServiceOrgType(orgType);
 }
 
-export const FOREIGN_LISTING_INVOICE_ERROR =
-  'You can only add listings posted by your organization';
-
 /**
  * The listing's seller organization is marketplace_listings.organization_id.
  * The viewer's active organization is user_profiles.organization_id.
@@ -106,11 +103,13 @@ export function listingInvoiceBlockReason(
   if (!canAddListingToInvoice(actor.orgType)) {
     return { ok: false, status: 403, error: 'Only a service company can add a listing to an invoice' };
   }
-  if (!listing || listing.id == null || !String(listing.id).trim()) {
+  if (
+    !listing ||
+    listing.id == null ||
+    !String(listing.id).trim() ||
+    !listingOwnedByActiveOrg(listing, actor.activeOrgId)
+  ) {
     return { ok: false, status: 404, error: 'Listing not found' };
-  }
-  if (!listingOwnedByActiveOrg(listing, actor.activeOrgId)) {
-    return { ok: false, status: 403, error: FOREIGN_LISTING_INVOICE_ERROR };
   }
   return null;
 }
@@ -441,9 +440,8 @@ export async function runAddListingToInvoice(
       return { ok: false, status: 400, error: 'Choose a draft invoice' };
     }
     const draft = await io.loadDraft(request.invoiceId, actor.activeOrgId as string | number);
-    if (!draft || draft.id == null) return { ok: false, status: 404, error: 'Invoice not found' };
-    if (!sameOrg(draft.organization_id, actor.activeOrgId)) {
-      return { ok: false, status: 403, error: 'That invoice belongs to another organization' };
+    if (!draft || draft.id == null || !sameOrg(draft.organization_id, actor.activeOrgId)) {
+      return { ok: false, status: 404, error: 'Invoice not found' };
     }
     if (!isDraftInvoiceStatus(draft.status)) {
       return {
