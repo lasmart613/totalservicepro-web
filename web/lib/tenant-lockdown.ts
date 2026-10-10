@@ -7,6 +7,7 @@
  */
 
 import { normalizeLookupEmail } from '@/lib/email-match';
+import { isInvitableTeamRole, teamRoleForInvite } from '@/lib/org-membership';
 
 export const PLATFORM_ADMIN_ROLE = 'admin';
 
@@ -143,6 +144,68 @@ export function authorizeInviteAccept(input: {
   return { ok: true, organizationId: input.inviteOrgId, role };
 }
 
+/**
+ * Who may call POST /api/org/members/role.
+ * Membership role in that org, or founder of that org. Never user_profiles.role.
+ * Platform admin is not a membership authority.
+ */
+export function callerMayChangeMemberRole(input: {
+  membershipRole?: string | null;
+  founder?: boolean | null;
+  isOrgCreator?: boolean | null;
+}): boolean {
+  if (input.founder === true || input.isOrgCreator === true) return true;
+  const role = normalizeRole(input.membershipRole);
+  return role === 'company_admin' || role === 'owner';
+}
+
+/** The org owner and the org founder cannot have their role changed. */
+export function memberRoleTargetIsLocked(input: {
+  membershipRole?: string | null;
+  founder?: boolean | null;
+  isOrgCreator?: boolean | null;
+}): boolean {
+  if (normalizeRole(input.membershipRole) === 'owner') return true;
+  if (input.founder === true || input.isOrgCreator === true) return true;
+  return false;
+}
+
+/**
+ * A caller cannot raise their own role.
+ * Owner and platform admin are never a self-assignment, even when rank
+ * treats owner as below company_admin.
+ */
+export function memberRoleSelfRaiseRefused(input: {
+  callerId?: string | null;
+  targetUserId?: string | null;
+  membershipRole?: string | null;
+  nextRole?: string | null;
+}): boolean {
+  const caller = String(input.callerId || '').trim();
+  const target = String(input.targetUserId || '').trim();
+  if (!caller || caller !== target) return false;
+  const next = normalizeRole(input.nextRole);
+  if (!next) return false;
+  if (next === 'owner' || next === PLATFORM_ADMIN_ROLE) return true;
+  return roleRank(next) > roleRank(input.membershipRole);
+}
+
+/**
+ * Role stored by a team-member change. Empty becomes fse.
+ * Anything outside INVITABLE_TEAM_ROLES, including owner and platform admin, is refused.
+ */
+export function refusedAssignableTeamRole(role?: string | null): string | null {
+  const next = teamRoleForInvite(role);
+  if (next === PLATFORM_ADMIN_ROLE || normalizeRole(role) === PLATFORM_ADMIN_ROLE) {
+    return 'Organization memberships cannot use the platform admin role.';
+  }
+  if (isInvitableTeamRole(next)) return null;
+  if (next === 'owner' || normalizeRole(role) === 'owner') {
+    return 'Owner cannot be assigned this way.';
+  }
+  return 'That role cannot be assigned.';
+}
+
 export function decideMemberRoleChange(input: {
   callerRole?: string | null;
   targetRole?: string | null;
@@ -158,7 +221,7 @@ export function decideMemberRoleChange(input: {
     };
   }
   const caller = normalizeRole(input.callerRole);
-  const target = normalizeRole(input.targetRole) || 'fse';
+  const target = teamRoleForInvite(input.targetRole);
   const lead =
     caller === 'admin' ||
     caller === 'company_admin' ||
@@ -171,12 +234,9 @@ export function decideMemberRoleChange(input: {
       error: 'Only an admin of this organization can change roles.',
     };
   }
-  if (target === PLATFORM_ADMIN_ROLE) {
-    return {
-      ok: false,
-      status: 403,
-      error: 'Organization memberships cannot use the platform admin role.',
-    };
+  const refused = refusedAssignableTeamRole(target);
+  if (refused) {
+    return { ok: false, status: 403, error: refused };
   }
   if (roleRank(target) > roleRank(caller)) {
     return { ok: false, status: 403, error: 'Cannot assign a role above your own.' };
