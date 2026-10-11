@@ -87,6 +87,11 @@ async function queryManual(
   return first;
 }
 
+/** The lookup by id succeeded and found no row. A lookup error is not "missing". */
+function manualRowMissing(q: { data: unknown; error: unknown }): boolean {
+  return !q.error && (q.data == null || (Array.isArray(q.data) && q.data.length === 0));
+}
+
 function json(status: number, body: Record<string, unknown>) {
   return new Response(JSON.stringify(body), {
     status,
@@ -788,6 +793,8 @@ Deno.serve(async (req) => {
           }
         }
         man = q.data;
+        // Deleted or never-existing id: 404 before any library check.
+        if (manualRowMissing(q)) return json(404, { error: "not_found" });
       }
 
       const hidden = unpublishedManualResponse(man);
@@ -962,6 +969,10 @@ Deno.serve(async (req) => {
         }
       }
       man = q.data;
+      // Deleted or never-existing id: 404 before the company-library
+      // (requires_add) and add-to-library checks. Unpublished rows still exist
+      // and keep their own response below.
+      if (manualRowMissing(q)) return json(404, { error: "not_found" });
       if (man?.storage_path && !storagePath) storagePath = cleanPath(man.storage_path);
     } else if (storagePath) {
       // Match by storage path (exact, then folder prefix)
