@@ -28,6 +28,7 @@ import {
   manualsForbiddenMessage,
   SERVICE_MANUALS_FORBIDDEN,
 } from '@/lib/manuals-access';
+import { manualOpenErrorMessage } from '@/lib/manual-file';
 import {
   DEFAULT_EQUIPMENT_TYPE,
   EQUIPMENT_TYPE_VALUES,
@@ -522,6 +523,12 @@ export default function ManualsLibrary() {
         });
         if (openPayloadUrl({ ...chRes.json, chapters: json.chapters }, m, shownTitle) === true) return;
         toast.error(chRes.json.error || 'Could not open first chapter');
+        return;
+      }
+
+      const openError = manualOpenErrorMessage(json.error);
+      if (openError) {
+        toast.error(t(openError));
         return;
       }
 

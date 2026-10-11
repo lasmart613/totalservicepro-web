@@ -4,7 +4,19 @@
  * Existence is decided by the caller (one metadata probe per open).
  */
 
-export const MANUAL_FILE_MISSING = "This manual's file is missing. We've been notified.";
+export const MANUAL_FILE_MISSING = "This manual's file is missing.";
+export const MANUAL_NOT_AVAILABLE = "This manual isn't available.";
+
+/**
+ * get-manual-url and /api/manuals/file use distinct 404 codes.
+ * A bare 404 is not a missing file: unpublished manuals return not_found.
+ */
+export function manualOpenErrorMessage(code: unknown): string | null {
+  const error = String(code ?? "").trim();
+  if (error === "file_missing") return MANUAL_FILE_MISSING;
+  if (error === "not_found" || error === "unpublished") return MANUAL_NOT_AVAILABLE;
+  return null;
+}
 
 export type ManualFileKind =
   | "pdf"

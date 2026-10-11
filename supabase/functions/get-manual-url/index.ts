@@ -61,6 +61,13 @@ function unpublishedManualResponse(row: { published?: unknown } | null | undefin
   return json(denied.status, { error: denied.error });
 }
 
+/** Function logs only. The id is enough; the storage path stays out of the line. */
+function fileMissingResponse(manualId: unknown, body: Record<string, unknown>) {
+  const id = typeof manualId === "string" || typeof manualId === "number" ? manualId : "";
+  console.warn(`file_missing manual_id=${id}`);
+  return json(404, body);
+}
+
 function reportedMissingColumn(
   error: { code?: string | null; message?: string | null } | null | undefined,
   columns: string[],
@@ -799,7 +806,7 @@ Deno.serve(async (req) => {
       if (sp) {
         const streamed = await streamPdfFromStorage(supabaseUrl, serviceKey, sp, req.headers);
         if (streamed === "missing") {
-          return json(404, { error: "file_missing" });
+          return fileMissingResponse(manualId, { error: "file_missing" });
         }
         if (streamed) return streamed;
       }
@@ -1262,7 +1269,7 @@ Deno.serve(async (req) => {
       }
 
       if (!isPdfPath(sp)) {
-        return json(404, {
+        return fileMissingResponse(manualId, {
           error: "file_missing",
           manual_id: manualId,
           chapters: [],
@@ -1323,7 +1330,7 @@ Deno.serve(async (req) => {
         });
       }
       if (choice.action !== "serve") {
-        return json(404, {
+        return fileMissingResponse(manualId, {
           error: "file_missing",
           manual_id: manualId,
           title: man?.title || null,
