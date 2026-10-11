@@ -168,7 +168,8 @@ test('unread poll loop backs off after 5xx and resets after success', async () =
 });
 
 test('Header unread poll uses visibility + backoff helpers (soft beta / no Ads)', () => {
-  const header = readFileSync(join(here, '../components/Header.tsx'), 'utf8');
+  // The poll moved from Header into NavIdentityProvider (one poll per tab, not per mount).
+  const header = readFileSync(join(here, '../components/NavIdentityProvider.tsx'), 'utf8');
   assert.match(header, /startDocumentUnreadPoll/);
   assert.match(header, /isUnreadPollBackoffError/);
   assert.match(header, /from '@\/lib\/unread-poll'/);
