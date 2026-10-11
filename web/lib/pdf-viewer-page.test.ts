@@ -4,8 +4,11 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  chapterPageRangeLabel,
+  chapterTileNumber,
   fittedPageBoxHeight,
   viewerCitedPageNotice,
+  viewerFolderOutOfRangeNotice,
   viewerPageOutOfRangeNotice,
   viewerPhysicalPage,
 } from './pdf-viewer-page.ts';
@@ -46,4 +49,32 @@ test('viewer deep link uses the physical page and does not clamp early', () => {
   assert.match(viewPage, /params\.get\('page'\)/);
   assert.match(viewPage, /initialPage=\{page\}/);
   assert.match(viewPage, /params\.get\('oor'\) === '1'/);
+});
+
+test('chapter tiles number by page order and a one-page file is p. N', () => {
+  const chapters = [
+    { pageStart: 919, pageCount: 6 },
+    { pageStart: 1, pageCount: 40 },
+    { pageStart: 107, pageCount: 1 },
+  ];
+  assert.equal(chapterTileNumber(chapters, 0), 3);
+  assert.equal(chapterTileNumber(chapters, 1), 1);
+  assert.equal(chapterTileNumber(chapters, 2), 2);
+  assert.equal(chapterPageRangeLabel(919, 6), 'pp. 919–924');
+  assert.equal(chapterPageRangeLabel(107, 1), 'p. 107');
+  assert.equal(chapterPageRangeLabel(107, 2), 'pp. 107–108');
+  assert.equal(viewerFolderOutOfRangeNotice(305), "Page 305 isn't in this manual");
+  assert.equal(viewerPageOutOfRangeNotice(305, 40), "Page 305 isn't in this PDF");
+  assert.equal(viewerCitedPageNotice(88, 15, true), "Page 88 isn't in this PDF");
+
+  const viewer = readFileSync(join(here, '../components/ManualPdfViewer.tsx'), 'utf8');
+  assert.match(viewer, /aria-current=\{current \? 'true' : undefined\}/);
+  assert.match(viewer, /scrollIntoView\(\{ block: 'nearest' \}\)/);
+  assert.match(viewer, /chapterTileNumber\(chapters, i\)/);
+  assert.match(viewer, /chapterPageRangeLabel/);
+  assert.match(viewer, /viewerFolderOutOfRangeNotice/);
+  assert.match(viewer, /Page \{page\} isn't in this manual/);
+  assert.match(viewer, /viewerCitedPageNotice/);
+  assert.doesNotMatch(viewer, /Chapter \{i \+ 1\}/);
+  assert.doesNotMatch(viewer, /pp\. \{ch\.pageStart\}/);
 });

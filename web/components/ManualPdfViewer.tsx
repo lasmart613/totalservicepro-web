@@ -17,7 +17,14 @@ import {
 } from '@/lib/manuals';
 import { asPositivePage } from '@/lib/ai/citations';
 import { viewerTargetForJoinedPage } from '@/lib/manual-page-map';
-import { fittedPageBoxHeight, viewerCitedPageNotice, viewerPhysicalPage } from '@/lib/pdf-viewer-page';
+import {
+  chapterPageRangeLabel,
+  chapterTileNumber,
+  fittedPageBoxHeight,
+  viewerCitedPageNotice,
+  viewerFolderOutOfRangeNotice,
+  viewerPhysicalPage,
+} from '@/lib/pdf-viewer-page';
 import { ViewerAiPanel } from '@/components/ViewerAiPanel';
 import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
 import { isMissingColumn, isPublishedColumnMissing, isUnpublishedManual } from '@/lib/manual-published';
@@ -367,6 +374,7 @@ export function ManualPdfViewer({
   const jumpLockUntil = useRef(0);
   /** Chapter grid click. Suppress the citation deep-link jump for that open. */
   const chapterPick = useRef(false);
+  const currentChapterRef = useRef<HTMLButtonElement | null>(null);
 
   const [title, setTitle] = useState(titleFromQuery || 'Service Manual');
   const [catalogPath, setCatalogPath] = useState(storagePathFromQuery || '');
@@ -386,6 +394,7 @@ export function ManualPdfViewer({
   const [joinedPageLabel, setJoinedPageLabel] = useState<number | null>(null);
   /** User picked a chapter. The citation page belongs to a different file. */
   const [chapterBrowse, setChapterBrowse] = useState(false);
+  const [openStoragePath, setOpenStoragePath] = useState<string | null>(storagePathFromQuery || null);
   const [page, setPage] = useState(1);
   const [pageCount, setPageCount] = useState(0);
   const [pageBoxHeight, setPageBoxHeight] = useState(0);
@@ -467,6 +476,7 @@ export function ManualPdfViewer({
       if (showManualChaptersButton(nextChapters)) setChapters(nextChapters);
       if (Array.isArray(json.downloads)) setDownloads(json.downloads as ManualDownload[]);
       const openedPath = String(json.storage_path || storagePath || payload.storagePath || '') || null;
+      if (openedPath) setOpenStoragePath(openedPath);
       if (opts?.metadataOnly) {
         return { chapters: nextChapters, openedPath };
       }
@@ -881,12 +891,23 @@ export function ManualPdfViewer({
   const languageBadge = manualLanguageBadge(languageCode);
   const requestedPage = asPositivePage(initialPage);
   const deepLinkPage = folderLocalPage === undefined ? requestedPage : folderLocalPage;
+  const folderPastEnd = folderLocalPage === null;
   const pageNotice =
     joinedPageLabel != null || chapterBrowse
       ? null
-      : pageOutOfRange || (!loading && pageCount > 0)
-        ? viewerCitedPageNotice(requestedPage, pageCount, pageOutOfRange)
-        : null;
+      : folderPastEnd
+        ? viewerFolderOutOfRangeNotice(requestedPage)
+        : pageOutOfRange || (!loading && pageCount > 0)
+          ? viewerCitedPageNotice(requestedPage, pageCount, pageOutOfRange)
+          : null;
+  const pageNoticeKey = folderPastEnd
+    ? "Page {page} isn't in this manual"
+    : "Page {page} isn't in this PDF";
+
+  useEffect(() => {
+    if (!showChapters) return;
+    currentChapterRef.current?.scrollIntoView({ block: 'nearest' });
+  }, [showChapters, openStoragePath, chapters]);
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-[#0d1117] text-[#E5E7EB]">
@@ -1007,7 +1028,7 @@ export function ManualPdfViewer({
           data-testid="pdf-page-notice"
           className="shrink-0 px-3 py-2 text-sm font-semibold bg-amber-950 text-amber-100 border-b border-amber-500/50"
         >
-          {t("Page {page} isn't in this PDF").replace('{page}', String(requestedPage ?? ''))}
+          {t(pageNoticeKey).replace('{page}', String(requestedPage ?? ''))}
         </div>
       )}
 
@@ -1163,22 +1184,32 @@ export function ManualPdfViewer({
               <div className="max-w-4xl mx-auto">
                 <h2 className="text-xl font-bold text-[var(--gold,#FBBF24)] mb-4">📚 Chapters</h2>
                 <div className="grid gap-2" style={{ gridTemplateColumns: 'repeat(auto-fill,minmax(168px,1fr))' }}>
-                  {chapters.map((ch, i) => (
-                    <button
-                      key={`${ch.storage_path || i}`}
-                      type="button"
-                      onClick={() => openChapter(ch)}
-                      className="text-left rounded-lg border border-[#374151] bg-[#1F2937] px-3 py-3 hover:border-[var(--gold,#FBBF24)]"
-                    >
-                      <div className="text-[10px] font-bold text-[var(--gold,#FBBF24)] mb-1">Chapter {i + 1}</div>
-                      <div className="text-sm">{ch.title || ch.label || ch.storage_path || `Chapter ${i + 1}`}</div>
-                      {ch.pageStart && ch.pageCount ? (
-                        <div className="text-[10px] text-[#9CA3AF] mt-1">
-                          pp. {ch.pageStart}–{ch.pageStart + ch.pageCount - 1}
-                        </div>
-                      ) : null}
-                    </button>
-                  ))}
+                  {chapters.map((ch, i) => {
+                    const current = sameStoragePath(ch.storage_path, openStoragePath);
+                    const tileNumber = chapterTileNumber(chapters, i);
+                    const range =
+                      ch.pageStart && ch.pageCount ? chapterPageRangeLabel(ch.pageStart, ch.pageCount) : null;
+                    return (
+                      <button
+                        key={`${ch.storage_path || i}`}
+                        ref={current ? currentChapterRef : undefined}
+                        type="button"
+                        aria-current={current ? 'true' : undefined}
+                        onClick={() => openChapter(ch)}
+                        className={`text-left rounded-lg border bg-[#1F2937] px-3 py-3 hover:border-[var(--gold,#FBBF24)] ${
+                          current ? 'border-[var(--gold,#FBBF24)]' : 'border-[#374151]'
+                        }`}
+                      >
+                        {tileNumber != null ? (
+                          <div className="text-[10px] font-bold text-[var(--gold,#FBBF24)] mb-1">
+                            Chapter {tileNumber}
+                          </div>
+                        ) : null}
+                        <div className="text-sm">{ch.title || ch.label || ch.storage_path}</div>
+                        {range ? <div className="text-[10px] text-[#9CA3AF] mt-1">{range}</div> : null}
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>

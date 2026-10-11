@@ -8308,6 +8308,16 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'A página {page} não está neste PDF',
     'الصفحة {page} ليست في ملف PDF هذا',
   ),
+  "Page {page} isn't in this manual": row(
+    'صفحه {page} در این راهنما نیست',
+    'La página {page} no está en este manual',
+    'La page {page} n’est pas dans ce manuel',
+    'עמוד {page} אינו במדריך זה',
+    'La pagina {page} non è in questo manuale',
+    'Seite {page} ist nicht in diesem Handbuch',
+    'A página {page} não está neste manual',
+    'الصفحة {page} ليست في هذا الدليل',
+  ),
   "This manual's file is missing. We've been notified.": row(
     'فایل این راهنما موجود نیست. به ما اطلاع داده شده.',
     'Falta el archivo de este manual. Ya se nos avisó.',
