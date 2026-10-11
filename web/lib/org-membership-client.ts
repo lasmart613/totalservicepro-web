@@ -50,6 +50,32 @@ export async function fetchMemberships(): Promise<MembershipPayload> {
   };
 }
 
+let shared: { key: string; promise: Promise<MembershipPayload> } | null = null;
+
+/**
+ * One /api/org/memberships read shared by both org switchers and the admin
+ * portal gate. The nav identity provider drops it on every navigation and
+ * auth change, so a removed membership is gone on the next page, same as
+ * before. Actions (switch, leave, accept) still call fetchMemberships().
+ */
+export async function loadMembershipsShared(): Promise<MembershipPayload> {
+  const { getSupabaseClient } = await import('@/lib/supabase/client');
+  const { data } = await getSupabaseClient().auth.getSession();
+  const key = String(data.session?.user?.id || '');
+  if (!key) throw new Error('Not signed in');
+  if (shared && shared.key === key) return shared.promise;
+  const promise = fetchMemberships();
+  shared = { key, promise };
+  promise.catch(() => {
+    if (shared?.promise === promise) shared = null;
+  });
+  return promise;
+}
+
+export function invalidateSharedMemberships(): void {
+  shared = null;
+}
+
 export async function switchOrganization(organizationId: number | string): Promise<void> {
   const headers = await authHeader();
   const res = await fetch('/api/org/switch', {

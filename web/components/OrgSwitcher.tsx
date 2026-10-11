@@ -7,8 +7,8 @@ import { roleLabel } from '@/lib/labels';
 import { useSiteLocale, useT } from '@/lib/fa/locale';
 import {
   acceptTeamInvite,
-  fetchMemberships,
   leaveOrganization,
+  loadMembershipsShared,
   switchOrganization,
   type OrgMembership,
   type PendingOrgInvite,
@@ -30,7 +30,9 @@ export function OrgSwitcher({
 
   const load = async () => {
     try {
-      const data = await fetchMemberships();
+      // One read shared with the other switcher and the admin gate. Actions
+      // below reload the page, which starts fresh.
+      const data = await loadMembershipsShared();
       setMemberships(data.memberships);
       setPending(data.pendingInvites);
     } catch {
@@ -177,7 +179,9 @@ export function MembershipsSettings() {
 
   const load = async () => {
     try {
-      const data = await fetchMemberships();
+      // One read shared with the other switcher and the admin gate. Actions
+      // below reload the page, which starts fresh.
+      const data = await loadMembershipsShared();
       setMemberships(data.memberships);
       setPending(data.pendingInvites);
     } catch {

@@ -67,7 +67,10 @@ test('God chrome is API-gated and the allowlist stays server-side', () => {
   const layout = readFileSync(join(here, '../app/admin/layout.tsx'), 'utf8');
   const god = readFileSync(join(here, './god.ts'), 'utf8');
   const home = readFileSync(join(here, '../app/admin/god/page.tsx'), 'utf8');
-  assert.match(header, /fetchGodMe/);
+  // Header reads isGod from NavIdentityProvider, which calls /api/god/me once per user.
+  const provider = readFileSync(join(here, '../components/NavIdentityProvider.tsx'), 'utf8');
+  assert.match(provider, /fetchGodMe\(\)/);
+  assert.match(header, /const \{ user, orgNav, unread, isGod \} = nav;/);
   assert.match(header, /GOD_DASHBOARD_PATH/);
   assert.match(header, /\{isGod &&/);
   assert.doesNotMatch(header, /larrysmart@gmail\.com/);

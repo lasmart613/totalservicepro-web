@@ -177,7 +177,12 @@ test('CRM lead memberships see Business Management but not Admin Portal', async 
 });
 
 test('header, home, and hub gate both entries on the org lookup and fail closed', () => {
-  const header = readFileSync(join(here, '../components/Header.tsx'), 'utf8');
+  // The header's org lookup lives in NavIdentityProvider + loadNavIdentity now.
+  const header = [
+    readFileSync(join(here, '../components/Header.tsx'), 'utf8'),
+    readFileSync(join(here, '../components/NavIdentityProvider.tsx'), 'utf8'),
+    readFileSync(join(here, './nav-identity.ts'), 'utf8'),
+  ].join('\n');
   const home = readFileSync(join(here, '../components/home/HomeDashboard.tsx'), 'utf8');
   const hub = readFileSync(join(here, '../app/hub/page.tsx'), 'utf8');
 
@@ -193,7 +198,7 @@ test('header, home, and hub gate both entries on the org lookup and fail closed'
 
   assert.match(header, /adminPortalNavVisible\(orgNav\)/);
   assert.match(header, /businessManagementNavVisible\(orgNav\)/);
-  assert.match(header, /setOrgNav\(ORG_NAV_PENDING\)/);
+  assert.match(header, /orgNav: ORG_NAV_PENDING/);
   assert.match(home, /adminPortalNavVisible\(orgNav\)/);
   assert.match(home, /businessManagementNavVisible\(orgNav\)/);
   assert.match(hub, /businessManagementNavVisible\(orgNav\)/);

@@ -54,20 +54,22 @@ test('unread poll reads the local session, not /auth/v1/user', async () => {
   );
 });
 
-test('Header uses the decision; poll, upgrade hook and ad banner use getSession', () => {
-  const header = readFileSync(join(here, '../components/Header.tsx'), 'utf8');
-  assert.match(header, /headerAuthDecision\(event, session\?\.user\?\.id, activeUserId, initialLoadPending\)/);
-  assert.match(header, /if \(decision === 'ignore'\)/);
-  assert.match(header, /decision === 'clear' \|\| !session\?\.user/);
-  const poll = header.slice(header.indexOf('startDocumentUnreadPoll('));
+test('NavIdentityProvider uses the decision; the poll reads the session; consumers make no reads', () => {
+  const provider = readFileSync(join(here, '../components/NavIdentityProvider.tsx'), 'utf8');
+  assert.match(provider, /headerAuthDecision\(event, session\?\.user\?\.id, activeUserId\.current, initialLoadPending\.current\)/);
+  assert.match(provider, /if \(decision === 'ignore'\)/);
+  assert.match(provider, /decision === 'clear' \|\| !session\?\.user/);
+  const poll = provider.slice(provider.indexOf('startDocumentUnreadPoll('));
   assert.match(poll.slice(0, 300), /unreadPollUserId\(supabase\.auth\)/);
   assert.doesNotMatch(poll.slice(0, 300), /getUser/);
-  // The mount still verifies the session once with getUser().
-  assert.equal((header.match(/auth\.getUser\(\)/g) || []).length, 1);
+  // One getUser() per app session (verifies the stored session).
+  assert.equal((provider.match(/auth\.getUser\(\)/g) || []).length, 1);
 
+  const header = readFileSync(join(here, '../components/Header.tsx'), 'utf8');
+  assert.doesNotMatch(header, /onAuthStateChange|auth\.getUser|auth\.getSession|\.from\(/);
   for (const file of ['../lib/use-show-upgrade.ts', '../components/AdBanner.tsx']) {
     const src = readFileSync(join(here, file), 'utf8');
-    assert.doesNotMatch(src, /auth\.getUser\(/, file);
-    assert.match(src, /auth\.getSession\(\)/, file);
+    assert.doesNotMatch(src, /auth\.getUser\(|\.from\('/, file);
+    assert.match(src, /useNavIdentity\(\)/, file);
   }
 });
