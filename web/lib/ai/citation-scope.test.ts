@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  alignReplyToCitationPage,
+  answerDeclinesManualCitation,
+  printedPageLabel,
   attributeCitations,
   boundCitationPage,
   catalogCitationTitle,
@@ -328,5 +331,99 @@ test('a model name in the manual label does not make the cover a quoted fault pa
   assert.equal(
     resolveQuotedCitationPage({ answer: 'See p. 1.', indexText: index, query, pageCount: 8 }),
     1
+  );
+});
+
+test('a refusal is not a citation, and a printed footer is not the PDF page', () => {
+  assert.equal(
+    answerDeclinesManualCitation('The retrieved passages do not contain the speaker volume adjustment.'),
+    true
+  );
+  assert.equal(answerDeclinesManualCitation('This detail is not in the selected manual.'), true);
+  assert.equal(answerDeclinesManualCitation('No information about that procedure was found.'), true);
+  assert.equal(answerDeclinesManualCitation("The passages don't describe a fan-speed adjustment."), true);
+  assert.equal(answerDeclinesManualCitation('Do not use single-wavelength eyewear for this wavelength.'), false);
+  assert.equal(answerDeclinesManualCitation('Use OD 4.9 eyewear at 591 to 597 nm.'), false);
+  assert.equal(
+    answerDeclinesManualCitation('Fault 2.1 is not described as a user-serviceable fault; call service.'),
+    false
+  );
+
+  const pages: string[] = [];
+  for (let n = 1; n <= 80; n++) {
+    let body = `body ${n}`;
+    if (n === 66) body = 'Calibration reminder after cleaning the window. Page 54 of 178.';
+    if (n === 71) body = 'OPTICAL DENSITY OF AT LEAST 4.9 AT 591 - 597 NM. Page 2 of 5.';
+    if (n === 74) body = 'Page 5 of 5. Alignment steps. No optical density on this sheet.';
+    pages.push(`[[pdfpage:${n}]] ${body}`);
+  }
+  const index = pages.join('\f');
+  assert.equal(
+    alignReplyToCitationPage('The reminder is on page 54 of 178.', 66, index),
+    'The reminder is on page 66.'
+  );
+  assert.equal(
+    alignReplyToCitationPage('See page 2 of 5 for the optical density.', 71, index),
+    'See page 71 for the optical density.'
+  );
+  assert.equal(
+    alignReplyToCitationPage('The value is on page 74.', 71, index),
+    'The value is on page 74.'
+  );
+  assert.equal(boundCitationPage(156, 80).page_out_of_range, true);
+  assert.equal(effectivePageCount(undefined, index), 80);
+});
+
+test('a printed footer is rewritten only when the mapping is unambiguous', () => {
+  const pad = 'service notes '.repeat(40);
+  const twoFooters = `${pad}see Page 2 of 5. ${pad}Page 55 of 178`;
+  assert.equal(printedPageLabel(twoFooters), undefined);
+  const earlyOnly = `Page 54 of 178 ${'x'.repeat(250)}`;
+  assert.equal(printedPageLabel(earlyOnly), undefined);
+  const repeated = `Page 54 of 178 ${'x'.repeat(250)} Page 54 of 178`;
+  assert.equal(printedPageLabel(repeated), 54);
+
+  const pages: string[] = [];
+  for (let n = 1; n <= 80; n++) {
+    let body = `${pad}body ${n}.`;
+    if (n === 54) body = `${pad}The DI cartridge is installed in the bay. Page 40 of 178.`;
+    if (n === 63) body = `${pad}Window cleaning reminder. Page 54 of 178.`;
+    if (n === 64) body = `see Page 2 of 5 before the drawing. ${pad}Page 55 of 178`;
+    if (n === 70) body = `${pad}Another leaf. Page 54 of 178.`;
+    pages.push(`[[pdfpage:${n}]] ${body}`);
+  }
+  const index = pages.join('\f');
+  const query = 'Where is the DI cartridge installed';
+  assert.equal(
+    alignReplyToCitationPage('The DI cartridge is on page 54.', 63, index, { query, pageCount: 178 }),
+    'The DI cartridge is on page 54.'
+  );
+  assert.equal(
+    alignReplyToCitationPage('The DI cartridge is on page 54 of 178.', 63, index, { query, pageCount: 178 }),
+    'The DI cartridge is on page 54 of 178.'
+  );
+  assert.equal(
+    alignReplyToCitationPage('See pp. 54-55 for the range.', 63, index),
+    'See pp. 54-55 for the range.'
+  );
+  assert.equal(
+    alignReplyToCitationPage('See page 54.2 for the decimal.', 63, index),
+    'See page 54.2 for the decimal.'
+  );
+  assert.equal(
+    alignReplyToCitationPage('see page 2 for the sheet.', 64, index),
+    'see page 2 for the sheet.'
+  );
+  assert.equal(printedPageLabel(indexPageBody(index, 64) || ''), undefined);
+  // Page 70 carries the same footer, so a bare "page 54" is not rewritten.
+  // "page 54 of 178" still names the footer on the cited page.
+  const noCartridge = 'Where is the window cleaning reminder';
+  assert.equal(
+    alignReplyToCitationPage('The reminder is on page 54.', 63, index, { query: noCartridge, pageCount: 178 }),
+    'The reminder is on page 54.'
+  );
+  assert.equal(
+    alignReplyToCitationPage('The reminder is on page 54 of 178.', 63, index, { query: noCartridge, pageCount: 178 }),
+    'The reminder is on page 63.'
   );
 });

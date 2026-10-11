@@ -29,9 +29,14 @@ import {
   selectedManualContext,
   WHOLE_PDF_ATTACH_MAX_BYTES,
   wholePdfAttachAllowed,
+  chapterLanguageHints,
   excerptFaultCodeAnchor,
   excerptSpanScoreScale,
   faultCodeTokens,
+  preferredExcerptLanguage,
+  sectionHeadingOnPage,
+  type ExcerptLanguageBias,
+  type ExcerptRankScope,
   type PdfAttachStat,
 } from './manual-scope.ts'
 import { TSP_XAI_COLLECTION_ID, uploadPdfToTspCollection } from './xai-collection.ts'
@@ -41,9 +46,10 @@ import {
   effectivePageCount,
   modelSuffixConflict,
   passageOwnedBySelected,
+  alignReplyToCitationPage,
+  answerDeclinesManualCitation,
   reconcilePhysicalPage,
   resolveQuotedCitationPage,
-  storedPageCount,
   type CatalogCiteRow,
   type CitationAttributionScope,
 } from './citation-scope.ts'
@@ -505,7 +511,7 @@ export type ManualCitation = {
   page?: number
   section?: string
   /**
-   * True when `page` is past the cited PDF (manuals.page_count, else max [[pdfpage:N]]).
+   * True when `page` is past the cited PDF (max [[pdfpage:N]] in the index).
    * Web viewer: read `_meta.citations[].page_out_of_range` and show
    * "Page N isn't in this PDF" instead of scrolling. `page` stays 1-based.
    */
@@ -532,7 +538,9 @@ export function citationsFromParts(
   if (scope) {
     const prepared = parts.map((p) => ({
       ...p,
-      section: p.section || extractSectionRef(p.text),
+      // Indexed pages already ran the heading check. A loose scan of the
+      // excerpt would turn "see Chapter 26" or "2 Hz" back into a label.
+      section: p.section || (p.fromSelectedIndex ? undefined : extractSectionRef(p.text)),
     }))
     return attributeCitations(prepared, manualId, fallbackTitle, scope).slice(0, 8)
   }
@@ -541,7 +549,7 @@ export function citationsFromParts(
   for (const p of parts) {
     // Physical page only (stamp / xAI page_number). Never regex a printed "7-8" label out of passage text.
     const page = p.page && p.page > 0 ? p.page : undefined
-    const section = p.section || extractSectionRef(p.text)
+    const section = p.section || (p.fromSelectedIndex ? undefined : extractSectionRef(p.text))
     const key = page ? `p:${page}` : `s:${section || ''}|${p.source}`
     if (seen.has(key)) continue
     seen.add(key)
@@ -808,7 +816,7 @@ const FSE_SYSTEM_PROMPT = `You are Zapp, an AI assistant for Total Service Pro (
 - If the passages/PDFs do not contain enough information: say what is missing and what section to open in the selected manual — do NOT invent PM steps, calibrations, parts lists, or specs.
 - When a SELECTED MANUAL is set, answers must be about that device unless the user clearly names a different one.
 - Prefer depth for service work: numbered steps, torque/spec values, prerequisites, expected readings, common pitfalls — but only when supported by sources.
-- When you name a page or section of the selected manual, write it as "page N" or "section X.Y" (the app deep-links those into the in-app viewer).
+- When you name a page or section of the selected manual, write it as "page N" or "section X.Y" (the app deep-links those into the in-app viewer). N is the physical PDF page from the passage header, not a printed footer such as "Page 14 of 178" or "Page 2 of 5".
 - End every answer with: — Source: [source name]`
 
 const ZAPP_VOICE_PROMPT = `You are Zapp, the AI inside Total Service Pro — with brief Zapp Brannigan flair, still technically accurate.
@@ -1421,25 +1429,39 @@ const EXCERPT_STOPWORDS = new Set([
   'is', 'it', 'or', 'as', 'at', 'by', 'be', 'an', 'if',
 ])
 
-function excerptQueryTerms(query: string): string[] {
-  const tokens = String(query || '')
+function splitExcerptTokens(value: string): string[] {
+  return String(value || '')
     .toLowerCase()
     .split(/[^\p{L}\p{N}+]+/u)
     .filter(Boolean)
-  const terms: string[] = []
-  const seen = new Set<string>()
-  for (const token of tokens) {
-    if (seen.has(token)) continue
-    if (/^\d+$/.test(token)) {
-      seen.add(token)
-      terms.push(token)
-    } else if (token.length >= 2 && !EXCERPT_STOPWORDS.has(token)) {
-      seen.add(token)
-      terms.push(token)
+}
+
+/** Question words first. A long catalog title must not fill the term budget. */
+function excerptQueryTerms(query: string, label?: string): string[] {
+  const labelTerms = new Set<string>()
+  if (label) {
+    for (const token of splitExcerptTokens(label)) {
+      if (/^\d+$/.test(token) || (token.length >= 2 && !EXCERPT_STOPWORDS.has(token))) labelTerms.add(token)
     }
-    if (terms.length >= 12) break
   }
-  return terms
+  const question: string[] = []
+  const fromLabel: string[] = []
+  const seen = new Set<string>()
+  for (const token of splitExcerptTokens(query)) {
+    if (seen.has(token)) continue
+    const keep = /^\d+$/.test(token) || (token.length >= 2 && !EXCERPT_STOPWORDS.has(token))
+    if (!keep) continue
+    seen.add(token)
+    if (labelTerms.has(token)) fromLabel.push(token)
+    else question.push(token)
+    if (question.length >= 12) break
+  }
+  const out = question.slice(0, 12)
+  for (const term of fromLabel) {
+    if (out.length >= 12) break
+    out.push(term)
+  }
+  return out
 }
 
 function termAt(hay: string, term: string, from: number): number {
@@ -1695,14 +1717,15 @@ function transmissionThresholdBoost(
  * shares one of those words. A transmission percentage threshold ("TX = <83%")
  * outranks a later weak "TX 83" or see-also.
  * Equal scores prefer the later hit so a contents line loses to the procedure.
- * A fault code (F14.1, not F14.10) is cited on the page that contains that token.
- * Spare-parts leaves are down-ranked for fault and troubleshooting questions
- * unless the question is about parts.
+ * A fault code (F14.1, not F14.10; Fault 2.1) is cited on the page that contains that token.
+ * Spare-parts leaves and diagram sheets are down-ranked for fault questions
+ * unless the question is about parts or diagrams.
+ * A catalog title passed in scope does not outrank the question.
  * Returns -1 when nothing in the query is present.
  */
-function excerptAnchor(raw: string, query: string, ignoreCodes?: string[]): number {
+function excerptAnchor(raw: string, query: string, ignoreCodes?: string[], scope?: ExcerptRankScope): number {
   const hay = String(raw || '').toLowerCase()
-  const terms = excerptQueryTerms(query)
+  const terms = excerptQueryTerms(query, scope?.label)
   if (!hay || !terms.length) return -1
   const positions = new Map<string, number[]>()
   for (const term of terms) {
@@ -1761,8 +1784,10 @@ function excerptAnchor(raw: string, query: string, ignoreCodes?: string[]): numb
       at = Math.min(span.end - 1, span.start + stamped.index + stamped[0].length)
     }
     if (at < span.start) at = span.start
+    // Scale before the fault-code pick. A later translation of the same code
+    // must not beat the preferred language on an equal raw score.
+    score *= excerptSpanScoreScale(query, hay.slice(span.start, span.end), ignoreCodes, scope?.language)
     scoreByStart.set(span.start, score)
-    score *= excerptSpanScoreScale(query, hay.slice(span.start, span.end), ignoreCodes)
     if (score > bestScore || (score === bestScore && at > bestAt)) {
       bestScore = score
       bestAt = at
@@ -1782,10 +1807,15 @@ function lastPhysicalPageStamp(text: string): number | undefined {
 }
 
 /** Inlined so a raw-GitHub bootstrap still pages index excerpts. Keep in sync with web manual-scope.ts. Physical PDF index only — never a printed "page 7-8" label. */
-function indexedExcerptPage(raw: string, query: string, ignoreCodes?: string[]): number | undefined {
+function indexedExcerptPage(
+  raw: string,
+  query: string,
+  ignoreCodes?: string[],
+  scope?: ExcerptRankScope
+): number | undefined {
   const text = String(raw || '')
   if (!text) return undefined
-  const at = excerptAnchor(text, query, ignoreCodes)
+  const at = excerptAnchor(text, query, ignoreCodes, scope)
   if (at < 0) return undefined
   const before = text.slice(0, at)
   const stamped = lastPhysicalPageStamp(before)
@@ -1795,44 +1825,42 @@ function indexedExcerptPage(raw: string, query: string, ignoreCodes?: string[]):
   return undefined
 }
 
-/**
- * Chapter or section on the stamped page that owns the anchor.
- * A see-also line that names two chapters ("Chapter 16 … Chapter 18") is not
- * the heading of this page.
- */
+/** Heading on the stamped page. A see-also, a list item, or "2 Hz" is not a section. */
 function sectionOnCitedPage(raw: string, at: number): string | undefined {
-  const text = String(raw || '')
-  if (at < 0) return undefined
-  const start = text.lastIndexOf('\f', Math.max(0, at - 1))
-  const end = text.indexOf('\f', at)
-  const page = text.slice(start < 0 ? 0 : start + 1, end < 0 ? text.length : end)
-  const kept = page
-    .split(/(?<=\.)\s+/)
-    .filter((sentence) => {
-      const hits = sentence.match(/\b(?:chapters?|ch\.?)\s*\d+/gi) || []
-      return hits.length < 2
-    })
-    .join(' ')
-  return extractSectionRef(kept)
+  return sectionHeadingOnPage(raw, at)
 }
 
-function indexedExcerptSection(raw: string, query: string, ignoreCodes?: string[]): string | undefined {
+function indexedExcerptSection(
+  raw: string,
+  query: string,
+  ignoreCodes?: string[],
+  scope?: ExcerptRankScope
+): string | undefined {
   const text = String(raw || '')
   if (!text) return undefined
-  const at = excerptAnchor(text, query, ignoreCodes)
-  const window = text.slice(Math.max(0, at - 1500), at + 400)
-  const sect = window.match(/\b(?:section|sect\.?|§)\s*([0-9]+(?:\.[0-9]+){0,3})\b/i)
-  return sect?.[1] || undefined
+  const at = excerptAnchor(text, query, ignoreCodes, scope)
+  if (at < 0) return undefined
+  return sectionHeadingOnPage(text, at)
 }
 
-function excerptIndexedManualText(text: string, query: string, maxChars = 8000, ignoreCodes?: string[]): string {
+function excerptIndexedManualText(
+  text: string,
+  query: string,
+  maxChars = 8000,
+  ignoreCodes?: string[],
+  scope?: ExcerptRankScope
+): string {
   const raw = String(text || '')
   const body = raw.replace(/\[\[pdfpage:\d+\]\]/g, ' ').replace(/\s+/g, ' ').trim()
   if (!body) return ''
   if (body.length <= maxChars) return body
-  const at = excerptAnchor(raw, query, ignoreCodes)
+  const at = excerptAnchor(raw, query, ignoreCodes, scope)
   if (at < 0) return body.slice(0, maxChars)
-  const start = Math.max(0, at - 400)
+  const startBound = raw.lastIndexOf('\f', Math.max(0, at - 1))
+  const pageStart = startBound < 0 ? 0 : startBound + 1
+  const endBound = raw.indexOf('\f', at)
+  const pageEnd = endBound < 0 ? raw.length : endBound
+  const start = pageEnd - pageStart > maxChars ? Math.max(pageStart, at - 400) : pageStart
   return raw
     .slice(start, start + maxChars)
     .replace(/\[\[pdfpage:\d+\]\]/g, ' ')
@@ -1846,7 +1874,8 @@ async function searchIndexedManualText(
   manualId: number | null,
   query: string,
   label: string,
-  ignoreCodes?: string[]
+  ignoreCodes?: string[],
+  language?: ExcerptLanguageBias
 ): Promise<Retrieved | null> {
   const id = asManualId(manualId)
   if (id == null) return null
@@ -1856,10 +1885,11 @@ async function searchIndexedManualText(
   // Model names in the manual label (M22) are not fault codes. The question and
   // extracted fault codes still are: they are in the query, not in this list.
   const labelCodes = ignoreCodes ?? faultCodeTokens(label)
-  const excerpt = excerptIndexedManualText(full, query, 8000, labelCodes)
+  const scope: ExcerptRankScope = { label, ...(language ? { language } : {}) }
+  const excerpt = excerptIndexedManualText(full, query, 8000, labelCodes, scope)
   if (!excerpt || excerpt.length < 40) return null
-  const page = indexedExcerptPage(full, query, labelCodes)
-  const section = sectionOnCitedPage(full, excerptAnchor(full, query, labelCodes)) || indexedExcerptSection(full, query, labelCodes)
+  const page = indexedExcerptPage(full, query, labelCodes, scope)
+  const section = indexedExcerptSection(full, query, labelCodes, scope)
   return {
     text: excerpt,
     source: `${label || 'Selected manual'} (indexed PDF text)`,
@@ -1985,7 +2015,7 @@ function catalogLikeNeedle(fileName: string): string {
 
 /**
  * Read-only catalog match for a passage that is not the open manual.
- * page_count and xai_file_id are optional columns — a missing column retries without them.
+ * manuals has no page_count and no xai_file_id. Match the storage path.
  * No writes.
  */
 async function loadSiblingCatalog(
@@ -1994,32 +2024,16 @@ async function loadSiblingCatalog(
 ): Promise<{ rows: CatalogCiteRow[]; indexes: Record<number, string> }> {
   const empty = { rows: [] as CatalogCiteRow[], indexes: {} as Record<number, string> }
   const needles: string[] = []
-  const fileIds: string[] = []
   for (const part of parts) {
     const needle = catalogLikeNeedle(part.fileName || '')
     if (needle.length >= 8 && !needles.includes(needle)) needles.push(needle)
-    const fileId = String(part.fileId || '').replace(/[^A-Za-z0-9_-]/g, '')
-    if (fileId && !fileIds.includes(fileId)) fileIds.push(fileId)
   }
   const nameFilters = needles.slice(0, 4).map((needle) => `storage_path.ilike.%${needle}%`)
-  if (!nameFilters.length && !fileIds.length) return empty
+  if (!nameFilters.length) return empty
 
   let rows: CatalogCiteRow[] = []
-  const richFilters = [
-    ...nameFilters,
-    ...fileIds.slice(0, 4).map((id) => `xai_file_id.eq.${id}`),
-  ]
-  const rich = await db
-    .from('manuals')
-    .select(`${CATALOG_CITE_COLUMNS},page_count,xai_file_id`)
-    .or(richFilters.join(','))
-    .limit(20)
-  if (!rich?.error && Array.isArray(rich.data)) {
-    rows = rich.data
-  } else if (nameFilters.length) {
-    const basic = await db.from('manuals').select(CATALOG_CITE_COLUMNS).or(nameFilters.join(',')).limit(20)
-    if (!basic?.error && Array.isArray(basic.data)) rows = basic.data
-  }
+  const basic = await db.from('manuals').select(CATALOG_CITE_COLUMNS).or(nameFilters.join(',')).limit(20)
+  if (!basic?.error && Array.isArray(basic.data)) rows = basic.data
 
   const indexes: Record<number, string> = {}
   const ids = [...new Set(rows.map((row) => Number(row.id)).filter((id) => id > 0))]
@@ -2056,10 +2070,7 @@ async function citationScopeForChat(
     indexTextByManualId: {},
   }
   try {
-    if (!scope.pageCount) {
-      const q = await db.from('manuals').select('page_count').eq('id', opts.selectedId).maybeSingle()
-      if (!q?.error) scope.pageCount = storedPageCount(q?.data?.page_count)
-    }
+    if (!scope.pageCount) scope.pageCount = effectivePageCount(undefined, opts.indexText)
     const foreign = opts.parts.filter(
       (part) =>
         !passageOwnedBySelected({
@@ -2325,7 +2336,10 @@ serve(async (req) => {
           // Cheap DB read; runs beside collection search so a stamped index row
           // always supplies the physical page even when collection chunks exist.
           const indexedP: Promise<Retrieved | null> = manualMeta
-            ? searchIndexedManualText(db, manualMeta.id, sq, manualLabel, faultCodeTokens(manualLabel)).catch((e) => {
+            ? searchIndexedManualText(db, manualMeta.id, sq, manualLabel, faultCodeTokens(manualLabel), {
+                prefer: preferredExcerptLanguage({ replyLanguage, question: userText }),
+                hints: chapterLanguageHints(manualMeta.chapter_metadata),
+              }).catch((e) => {
                 console.warn('indexed manual search failed soft', e)
                 return null
               })
@@ -2409,7 +2423,7 @@ serve(async (req) => {
           const indexedHit = await indexedP
           if (indexedHit?.indexText) citationIndexText = indexedHit.indexText
           if (!selectedPageCount) {
-            const counted = effectivePageCount(storedPageCount(manualMeta?.page_count), indexedHit?.indexText)
+            const counted = effectivePageCount(undefined, indexedHit?.indexText)
             if (counted) selectedPageCount = counted
           }
           const merged = mergeIndexedParts(indexedHit, parts)
@@ -2429,7 +2443,7 @@ serve(async (req) => {
                 expectedFilenames,
                 parts: citeParts,
                 indexText: indexedHit?.indexText,
-                pageCount: storedPageCount(manualMeta?.page_count),
+                pageCount: selectedPageCount,
               })
               manualCitations = citationsFromParts(citeParts, scopedId, manualLabel || manCite, citeScope)
               citationLine = formatCitationLine(manualCitations, manCite)
@@ -2526,6 +2540,26 @@ serve(async (req) => {
         })
         citationLine = formatCitationLine(manualCitations, manualLabel)
       }
+      const settleReply = (replyText: string): { text: string; declined: boolean } => {
+        if (answerDeclinesManualCitation(replyText)) {
+          manualCitations = []
+          citationLine = ''
+          return { text: replyText, declined: true }
+        }
+        const scopedId = asManualId(manualMeta?.id)
+        const chip = manualCitations.find((c) => c.page && (scopedId == null || c.manualId === scopedId))
+        const aligned = alignReplyToCitationPage(replyText, chip?.page, citationIndexText, {
+          query: citationQuery,
+          pageCount: selectedPageCount,
+        })
+        applyReplyPages(aligned)
+        if (answerDeclinesManualCitation(aligned)) {
+          manualCitations = []
+          citationLine = ''
+          return { text: aligned, declined: true }
+        }
+        return { text: aligned, declined: false }
+      }
       const replyMeta = () => ({
         manualLabel,
         manualId: manualMeta?.id ?? null,
@@ -2579,8 +2613,10 @@ serve(async (req) => {
               const txt = textFromResponses(rd)
               if (txt) {
                 await logUsage(db, uid, 'grok_chat', rd.usage?.total_tokens || 0)
-                applyReplyPages(txt)
-                const content = (txt.trim() + (citationLine || fileCite)).trim()
+                const settled = settleReply(txt)
+                const content = settled.declined
+                  ? settled.text.trim()
+                  : (settled.text.trim() + (citationLine || fileCite)).trim()
                 return new Response(
                   JSON.stringify({
                     choices: [{ message: { role: 'assistant', content } }],
@@ -2659,8 +2695,10 @@ serve(async (req) => {
                 const txt = textFromResponses(rd)
                 if (txt) {
                   await logUsage(db, uid, 'grok_chat', rd.usage?.total_tokens || 0)
-                  applyReplyPages(txt)
-                  const content = (txt.trim() + (citationLine || fileCite)).trim()
+                  const settled = settleReply(txt)
+                  const content = settled.declined
+                    ? settled.text.trim()
+                    : (settled.text.trim() + (citationLine || fileCite)).trim()
                   return new Response(
                     JSON.stringify({
                       choices: [{ message: { role: 'assistant', content } }],
@@ -2738,12 +2776,14 @@ serve(async (req) => {
         }
       } else {
         if (!citationLine && !hasFaultDBHit) ensureDocCite()
-        if (xd.choices?.[0]?.message?.content) {
-          applyReplyPages(String(xd.choices[0].message.content))
-        }
-        if (citationLine) {
-          const ch = xd.choices?.[0]
-          if (ch?.message?.content) ch.message.content = ch.message.content.trim() + citationLine
+        const ch = xd.choices?.[0]
+        if (ch?.message?.content) {
+          const settled = settleReply(String(ch.message.content))
+          ch.message.content = settled.declined
+            ? settled.text.trim()
+            : citationLine
+              ? settled.text.trim() + citationLine
+              : settled.text
         }
       }
       await logUsage(db, uid, 'grok_chat', xd.usage?.total_tokens || 0)

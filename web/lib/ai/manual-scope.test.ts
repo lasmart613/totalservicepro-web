@@ -12,12 +12,15 @@ import {
   selectedManualContext,
   humanizeDeviceCode,
   humanizeGeneralGuidanceDisplay,
+  chapterLanguageHints,
   excerptFaultCodeAnchor,
   excerptManualSearchText,
   excerptSpanScoreScale,
   faultCodeTokens,
   indexedExcerptPage,
   indexedExcerptSection,
+  preferredExcerptLanguage,
+  sectionHeadingOnPage,
   quotedPageSupport,
   generalGuidancePrefix,
   generalGuidanceSystemHint,
@@ -48,8 +51,13 @@ import {
   excerptFaultCodeAnchor as edgeExcerptFaultCodeAnchor,
   excerptSpanScoreScale as edgeExcerptSpanScoreScale,
   faultCodeTokens as edgeFaultCodeTokens,
+  chapterLanguageHints as edgeChapterLanguageHints,
+  excerptManualSearchText as edgeExcerptManualSearchText,
   indexedExcerptPage as edgeIndexedExcerptPage,
+  indexedExcerptSection as edgeIndexedExcerptSection,
+  preferredExcerptLanguage as edgePreferredExcerptLanguage,
   quotedPageSupport as edgeQuotedPageSupport,
+  sectionHeadingOnPage as edgeSectionHeadingOnPage,
 } from '../../../supabase/functions/grok-assistant/manual-scope.ts';
 
 const here = dirname(fileURLToPath(import.meta.url));
@@ -631,8 +639,17 @@ test('large manuals are not attached, and a missing corpus still gets general gu
   );
   assert.match(fn, /function humanizeDeviceCode/);
   assert.match(fn, /function indexedExcerptPage/);
-  assert.match(fn, /indexedExcerptPage\(full, query, labelCodes\)/);
-  assert.match(fn, /searchIndexedManualText\(db, manualMeta\.id, sq, manualLabel, faultCodeTokens\(manualLabel\)\)/);
+  assert.match(fn, /indexedExcerptPage\(full, query, labelCodes, scope\)/);
+  assert.match(
+    fn,
+    /searchIndexedManualText\(db, manualMeta\.id, sq, manualLabel, faultCodeTokens\(manualLabel\), \{/
+  );
+  assert.doesNotMatch(fn, /\.select\([^\n]*page_count/);
+  assert.doesNotMatch(fn, /\.select\([^\n]*xai_file_id/);
+  assert.match(fn, /effectivePageCount\(undefined/);
+  assert.match(fn, /answerDeclinesManualCitation/);
+  assert.match(fn, /alignReplyToCitationPage/);
+  assert.match(fn, /settled\.declined/);
   assert.match(fn, /ignoreCodes: faultCodeTokens\(manualLabel\)/);
   const pageFn = fn.slice(fn.indexOf('function lastPhysicalPageStamp'), fn.indexOf('function indexedExcerptSection'));
   assert.match(pageFn, /pdfpage/);
@@ -679,4 +696,180 @@ test('AI assistant thread scrolls long replies instead of clipping them', () => 
   assert.match(android, /\.chat-messages\s*\{[^}]*overflow-y:\s*auto/s);
   assert.match(android, /\.chat-panel\s*\{[^}]*min-height:\s*0/s);
   assert.match(android, /\.chat-outer\s*\{[^}]*overflow:\s*hidden/s);
+});
+
+function stampedPages(count: number, fill: (n: number) => string): string {
+  const pages: string[] = [];
+  for (let n = 1; n <= count; n++) pages.push(`[[pdfpage:${n}]] ${fill(n)}`);
+  return pages.join('\f');
+}
+
+/** GentleMax Pro operator: title page carries the catalog date; the spec table is p.115. */
+function gentleMaxOperatorSpecIndex(): string {
+  return stampedPages(120, (n) => {
+    let text = 'GentleMax Pro Operator Manual header.';
+    if (n === 1) {
+      text +=
+        ' Candela GentleMAX Pro Operator Manual 8501-00-2200 Rev B June 2012. Table of Contents. Chapter 6 Troubleshooting begins later.';
+    }
+    if (n === 109) text += ' Chapter 6 Troubleshooting. No delivered-energy specification on this page.';
+    if (n === 115) {
+      text +=
+        ' Maximum Delivered Energy 53 joules (J) Alexandrite; 80 J Nd:YAG. Ambient Temperature Operating: 65 F to 85 F. Relative Humidity 20% to 80%.';
+    }
+    return text;
+  });
+}
+
+test('a long catalog title does not hide the spec table behind the title page', () => {
+  const indexed = gentleMaxOperatorSpecIndex();
+  const label = 'Candela GentleMax Pro Operator Manual (8501-00-2200 Rev B, June 2012)';
+  const question = 'What is the maximum delivered energy for the Alexandrite and the Nd:YAG?';
+  const query = `${label} ${question} procedure specification steps`;
+  const scope = { label };
+  assert.equal(indexedExcerptPage(indexed, query, undefined, scope), 115);
+  assert.equal(edgeIndexedExcerptPage(indexed, query, undefined, scope), 115);
+  const excerpt = excerptManualSearchText(indexed, query, 8000, undefined, scope);
+  assert.match(excerpt, /53 joules/);
+  assert.match(excerpt, /80 J Nd:YAG/);
+  assert.match(edgeExcerptManualSearchText(indexed, query, 8000, undefined, scope), /53 joules/);
+  const tempQuery = `${label} What is the ambient operating temperature and humidity? procedure specification steps`;
+  assert.equal(indexedExcerptPage(indexed, tempQuery, undefined, scope), 115);
+  assert.equal(edgeIndexedExcerptPage(indexed, tempQuery, undefined, scope), 115);
+  // The date tokens that exist only on the title page win when the label fills the term budget.
+  assert.equal(indexedExcerptPage(indexed, query), 1);
+});
+
+test('eyewear optical density is not lost to a long model label or the optical rail', () => {
+  const indexed = stampedPages(80, (n) => {
+    let text = 'Candela VBeam header.';
+    if (n === 1) {
+      text += ' Candela VBeam2 Perfecta Aesthetica Platinum Operator Manual 8502-00-0810 Rev C March 2011.';
+    }
+    if (n === 71) text += ' OPTICAL DENSITY OF AT LEAST 4.9 AT 591 - 597 NM. Single-wavelength eyewear is not enough. Page 2 of 5.';
+    if (n === 74) text += ' Optical Rail alignment steps. Page 5 of 5.';
+    return text;
+  });
+  const label = 'Candela VBeam2 (Perfecta, Aesthetica, or Platinum) Operator Manual (8502-00-0810 Rev C, March 2011)';
+  const question = 'What optical density eyewear is required at 591 to 597 nm?';
+  const query = `${label} ${question}`;
+  const scope = { label };
+  const ignore = faultCodeTokens(label);
+  assert.equal(indexedExcerptPage(indexed, query, ignore, scope), 71);
+  assert.equal(edgeIndexedExcerptPage(indexed, query, ignore, scope), 71);
+  assert.match(excerptManualSearchText(indexed, query, 8000, ignore, scope), /OPTICAL DENSITY OF AT LEAST 4\.9/);
+  // VBeam2 is a model token on the title page. Without the label ignore-list it anchors there.
+  assert.equal(indexedExcerptPage(indexed, query, undefined, scope), 1);
+});
+
+test('an excerpt of a short cited page keeps the answer that sits before the anchor', () => {
+  const early = 'Electrical Adjustments, Topic 3.2, verifies the Fan Speed Controller PCB and the speaker volume. ';
+  const filler = 'calibration notes '.repeat(120);
+  const late = 'topic verifies the speaker volume final adjustment.';
+  const indexed = stampedPages(8, (n) => {
+    if (n === 1) return early + filler + late;
+    if (n === 8) return 'ZZLATEPAGE is past the excerpt window.';
+    return `UltraPulse Encore filler page ${n}. ${'body '.repeat(200)}`;
+  });
+  const query = 'speaker volume topic verifies';
+  const excerpt = excerptManualSearchText(indexed, query);
+  assert.match(excerpt, /Fan Speed Controller PCB/);
+  assert.match(edgeExcerptManualSearchText(indexed, query), /Fan Speed Controller PCB/);
+  assert.ok(excerpt.indexOf('Fan Speed Controller') < excerpt.indexOf('final adjustment'));
+  assert.doesNotMatch(excerpt, /ZZLATEPAGE/);
+});
+
+test('numeric fault codes cite the fault table, not a later block diagram', () => {
+  const indexed = stampedPages(900, (n) => {
+    if (n === 1) {
+      return 'Fault 2 2.1 System H/W Test - ROM checksum failure. Turn system off for 5 seconds and retry.';
+    }
+    if (n === 53) return 'Fault 2 Beam Shutter Malfunction. The shutter did not open. Replace the shutter.';
+    if (n === 243) return 'Platform 1 Functional Block Diagram. LASER CONTROL SECTION BLOCK DIAGRAM. 7122-00-3948.';
+    if (n === 879) return 'GentleLASE Functional Block Diagram. CONTROL SYSTEM BLOCK DIAGRAM. Fault 2 see the drawing.';
+    return `service manual header page ${n}.`;
+  });
+  const gmax = 'GentleMAX what does fault 2.1 mean';
+  assert.equal(indexedExcerptPage(indexed, gmax), 1);
+  assert.equal(edgeIndexedExcerptPage(indexed, gmax), 1);
+  assert.equal(indexedExcerptSection(indexed, gmax), undefined);
+  const glase = 'GentleLASE what does Fault 2 mean';
+  assert.equal(indexedExcerptPage(indexed, glase), 53);
+  assert.equal(edgeIndexedExcerptPage(indexed, glase), 53);
+  const diagram = 'GentleLASE show the block diagram for fault 2';
+  assert.equal(indexedExcerptPage(indexed, diagram), 879);
+  assert.equal(edgeIndexedExcerptPage(indexed, diagram), 879);
+});
+
+test('fault retrieval prefers the chapter language that matches the question', () => {
+  const chapters = [
+    { storage_path: 'shared/candela/smoothbeam/8501-00-1620-en.pdf', title: 'SmoothBeam English', language: 'English' },
+    { storage_path: 'shared/candela/smoothbeam/8501-00-1626-pt.pdf', title: 'SmoothBeam Portuguese', language: 'Portuguese' },
+  ];
+  const hints = chapterLanguageHints(chapters);
+  assert.deepEqual(hints, edgeChapterLanguageHints(chapters));
+  assert.ok(hints.some((hint) => hint.language === 'en' && hint.markers.includes('8501-00-1620')));
+  assert.ok(hints.some((hint) => hint.language === 'pt' && hint.markers.includes('8501-00-1626')));
+  const indexed = stampedPages(880, (n) => {
+    if (n === 69) {
+      return 'SmoothBeam 8501-00-1620 Rev D Fault 7 TEC Temperature Fault. Check the rear cooling fans.';
+    }
+    if (n === 871) {
+      return 'SmoothBeam 8501-00-1626 Rev D Fault 7 TEC Temperature Fault. Check the rear cooling fans. Falha 7. Qual deve verificar os ventiladores. A falha não deve continuar.';
+    }
+    return `SmoothBeam header ${n}.`;
+  });
+  const question = 'SmoothBeam Fault 7 TEC temperature rear cooling fans';
+  const english = { label: 'Candela SmoothBeam', language: { prefer: preferredExcerptLanguage({ question, replyLanguage: 'en' }), hints } };
+  assert.equal(preferredExcerptLanguage({ question, replyLanguage: 'en' }), 'en');
+  assert.equal(edgePreferredExcerptLanguage({ question, replyLanguage: 'en' }), 'en');
+  assert.equal(indexedExcerptPage(indexed, question, undefined, english), 69);
+  assert.equal(edgeIndexedExcerptPage(indexed, question, undefined, english), 69);
+  const portugueseQuestion = 'Qual é a falha 7 TEC e o que deve verificar';
+  assert.equal(preferredExcerptLanguage({ question: portugueseQuestion }), 'pt');
+  const portuguese = {
+    language: { prefer: preferredExcerptLanguage({ question: portugueseQuestion, replyLanguage: 'en' }), hints },
+  };
+  assert.equal(indexedExcerptPage(indexed, portugueseQuestion, undefined, portuguese), 871);
+  assert.equal(edgeIndexedExcerptPage(indexed, portugueseQuestion, undefined, portuguese), 871);
+  const locale = {
+    language: { prefer: preferredExcerptLanguage({ question, replyLanguage: 'pt-BR' }), hints },
+  };
+  assert.equal(preferredExcerptLanguage({ question, replyLanguage: 'pt-BR' }), 'pt');
+  assert.equal(indexedExcerptPage(indexed, question, undefined, locale), 871);
+});
+
+test('section labels are real headings on the cited page', () => {
+  const preventative =
+    '[[pdfpage:63]] 13 Preventative Maintenance Procedure. Clean the DI water path. ' +
+    '• Chapter 26, DI Water Temperature Calibration Procedure. • Chapter 25, Rail Check. See Chapter 21.';
+  const anchor63 = preventative.indexOf('DI water');
+  assert.equal(sectionHeadingOnPage(preventative, anchor63), '13');
+  assert.equal(edgeSectionHeadingOnPage(preventative, anchor63), '13');
+
+  const errors = '[[pdfpage:75]] 5.5.4 Error Codes and Descriptions. Error 221 water temperature greater than 65c.';
+  const anchor75 = errors.indexOf('221');
+  assert.equal(sectionHeadingOnPage(errors, anchor75), '5.5.4');
+  assert.equal(indexedExcerptSection(errors, 'error 221 water temperature'), '5.5.4');
+  assert.equal(edgeIndexedExcerptSection(errors, 'error 221 water temperature'), '5.5.4');
+
+  const specs =
+    '[[pdfpage:24]] 2.3 CUSTOMER DEMONSTRATION walk the controls. ' +
+    '2.4 PRODUCT SPECIFICATIONS. Electrical 100-120 or 208-240 VAC, 15-20 A.';
+  const anchor24 = specs.indexOf('Electrical');
+  assert.equal(sectionHeadingOnPage(specs, anchor24), '2.4');
+  assert.equal(edgeSectionHeadingOnPage(specs, anchor24), '2.4');
+
+  const hz = '[[pdfpage:22]] Table 1-1 Specifications. Up to 10 Hz. (Up to 2 Hz for LE systems). Page 22.';
+  assert.equal(sectionHeadingOnPage(hz, hz.indexOf('Hz for')), undefined);
+  assert.equal(indexedExcerptSection(hz, '2 Hz for LE systems'), undefined);
+
+  const list = '[[pdfpage:66]] 6) Specific faults occur only after cleaning the window or replacing the delivery system.';
+  assert.equal(sectionHeadingOnPage(list, list.indexOf('cleaning')), undefined);
+
+  const part = '[[pdfpage:243]] LASER CONTROL SECTION BLOCK DIAGRAM sheet 7122-00-3948.';
+  assert.equal(sectionHeadingOnPage(part, part.indexOf('7122')), undefined);
+
+  const alignment = '[[pdfpage:40]] RF deck calibration for the handpiece. Section 8.4 alignment.';
+  assert.equal(indexedExcerptSection(alignment, 'RF deck calibration'), '8.4');
 });
