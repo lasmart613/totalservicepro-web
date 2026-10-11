@@ -21,9 +21,17 @@
 -- pass the checks. release_document_send_slot takes the same lock so a
 -- release cannot land between the count and the insert.
 --
--- Both functions are SECURITY DEFINER with an empty search_path. Every
--- reference is schema-qualified. EXECUTE is service_role only. The send
--- routes call them with the service-role client, not the user JWT.
+-- Both functions are SECURITY DEFINER with an empty search_path. Table
+-- and function calls are schema-qualified. EXTRACT and COALESCE are SQL
+-- syntax, not pg_catalog functions: pg_catalog.extract is a 42601 at
+-- CREATE time, and pg_catalog.coalesce would be a 42883 at the first
+-- call. Unqualified extract() and coalesce() are safe with an empty
+-- search_path. EXECUTE is service_role only. The send routes call them
+-- with the service-role client, not the user JWT.
+--
+-- The first apply of this file failed with 42601 (syntax error at or
+-- near FROM) and created nothing, so it was never recorded. The
+-- corrected body stays 000910.
 --
 -- RLS is on and there are no policies. anon and authenticated therefore
 -- see no rows. Table privileges are revoked from PUBLIC, anon,
@@ -38,8 +46,8 @@
 -- failing every send. Any other database error fails closed (HTTP 503)
 -- and does not send. Apply this file before expecting the shared cap.
 --
--- 000910 was free on main (latest migration there is 000908). 000909 was
--- also unused on main; this file keeps 000910 as requested.
+-- 000910 stays this filename. The failed apply was never recorded, so a
+-- new number would leave the broken file as the one Supabase tries next.
 --
 -- APPLY ON LIVE SUPABASE after review. This repo does not auto-apply SQL.
 -- The migration runner applies this file as one transaction. Safe to re-run.
@@ -104,9 +112,9 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-  v_org text := pg_catalog.btrim(pg_catalog.coalesce(p_organization_id, ''));
-  v_type text := pg_catalog.btrim(pg_catalog.coalesce(p_document_type, ''));
-  v_doc text := pg_catalog.btrim(pg_catalog.coalesce(p_document_id, ''));
+  v_org text := pg_catalog.btrim(coalesce(p_organization_id, ''));
+  v_type text := pg_catalog.btrim(coalesce(p_document_type, ''));
+  v_doc text := pg_catalog.btrim(coalesce(p_document_id, ''));
   v_now timestamptz;
   v_org_count integer;
   v_doc_count integer;
@@ -181,7 +189,7 @@ BEGIN
   RETURN pg_catalog.jsonb_build_object(
     'ok', true,
     'id', v_id,
-    'stamp', (pg_catalog.extract(epoch FROM v_taken) * 1000)::bigint
+    'stamp', (extract(epoch FROM v_taken) * 1000)::bigint
   );
 END;
 $$;
@@ -201,9 +209,9 @@ SECURITY DEFINER
 SET search_path = ''
 AS $$
 DECLARE
-  v_org text := pg_catalog.btrim(pg_catalog.coalesce(p_organization_id, ''));
-  v_type text := pg_catalog.btrim(pg_catalog.coalesce(p_document_type, ''));
-  v_doc text := pg_catalog.btrim(pg_catalog.coalesce(p_document_id, ''));
+  v_org text := pg_catalog.btrim(coalesce(p_organization_id, ''));
+  v_type text := pg_catalog.btrim(coalesce(p_document_type, ''));
+  v_doc text := pg_catalog.btrim(coalesce(p_document_id, ''));
 BEGIN
   PERFORM pg_catalog.set_config('lock_timeout', '5s', true);
 

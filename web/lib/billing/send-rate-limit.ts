@@ -10,10 +10,13 @@
  * release_document_send_slot are SECURITY DEFINER and executable by
  * service_role only. Callers pass the service-role client (not the user JWT).
  *
- * Deploy order: the migration may land after this code. When the function is
- * not in the schema yet (42883 or PostgREST PGRST202), this falls back to the
- * in-memory window so sends keep working under the old per-instance cap.
- * Any other database error fails closed: takeDocumentSendSlot returns
+ * Deploy order: the migration may land after this code. When the limiter
+ * function itself is not in the schema yet, this falls back to the in-memory
+ * window so sends keep working under the old per-instance cap. That fallback
+ * is only for 42883 or PostgREST PGRST202 whose text names
+ * take_document_send_slot or release_document_send_slot. A 42883 from inside
+ * a broken function body (any other missing function) fails closed.
+ * Any other database error fails closed too: takeDocumentSendSlot returns
  * scope 'unavailable' and the route answers 503 without sending. A missing
  * service-role client also uses the in-memory window (there is no database
  * call to fail).
@@ -115,13 +118,14 @@ function limitClient(client: unknown): DocumentSendLimitClient | null {
 }
 
 function isMissingLimiterFunction(error: RpcError): boolean {
+  const text = `${error.message || ''}\n${error.details || ''}\n${error.hint || ''}`;
+  // A 42883 raised from inside the function (for example a bad pg_catalog.coalesce
+  // call) must not look like "the limiter was not migrated yet". Only an error
+  // that names the limiter function itself is the pre-migration fallback.
+  if (!/take_document_send_slot|release_document_send_slot/i.test(text)) return false;
   const code = String(error.code || '');
   if (code === 'PGRST202' || code === '42883') return true;
-  const text = `${error.message || ''}\n${error.details || ''}\n${error.hint || ''}`;
-  return (
-    (/could not find the function/i.test(text) && /document_send_slot/i.test(text)) ||
-    /function .*document_send_slot.* does not exist/i.test(text)
-  );
+  return /could not find the function/i.test(text) || /function .* does not exist/i.test(text);
 }
 
 function requiredSlotMessage(): DocumentSendSlotRefusal {

@@ -394,6 +394,80 @@ test('a missing limiter function falls back to the in-memory window', async () =
   if (!blocked.ok) assert.equal(blocked.scope, 'document');
 });
 
+test('42883 falls back only when the missing function is a limiter', async () => {
+  resetDocumentSendRateLimit();
+  for (const message of [
+    'function public.take_document_send_slot(text, text, text) does not exist',
+    'function public.release_document_send_slot(text, text, text, bigint) does not exist',
+  ]) {
+    resetDocumentSendRateLimit();
+    const slot = await takeDocumentSendSlot({
+      organizationId: 21,
+      documentId: 1,
+      documentType: 'invoice',
+      now: NOW,
+      client: {
+        async rpc(): Promise<RpcResult> {
+          return { data: null, error: { code: '42883', message } };
+        },
+      },
+    });
+    assert.equal(slot.ok, true, message);
+    if (slot.ok) assert.equal(slot.backend, 'memory', message);
+  }
+
+  resetDocumentSendRateLimit();
+  const broken = await takeDocumentSendSlot({
+    organizationId: 21,
+    documentId: 1,
+    documentType: 'invoice',
+    now: NOW,
+    client: {
+      async rpc(): Promise<RpcResult> {
+        return {
+          data: null,
+          error: {
+            code: '42883',
+            message: 'function pg_catalog.coalesce(text, unknown) does not exist',
+          },
+        };
+      },
+    },
+  });
+  assert.equal(broken.ok, false);
+  if (!broken.ok) {
+    assert.equal(broken.scope, 'unavailable');
+    assert.equal(broken.message, documentSendUnavailableMessage());
+  }
+  const unnamed = await takeDocumentSendSlot({
+    organizationId: 21,
+    documentId: 1,
+    documentType: 'invoice',
+    now: NOW,
+    client: {
+      async rpc(): Promise<RpcResult> {
+        return {
+          data: null,
+          error: {
+            code: 'PGRST202',
+            message: 'Could not find the function public.some_other_fn in the schema cache',
+          },
+        };
+      },
+    },
+  });
+  assert.equal(unnamed.ok, false);
+  if (!unnamed.ok) assert.equal(unnamed.scope, 'unavailable');
+  const memory = await takeDocumentSendSlot({
+    organizationId: 21,
+    documentId: 1,
+    documentType: 'invoice',
+    now: NOW,
+  });
+  assert.equal(memory.ok, true);
+  if (memory.ok) assert.equal(memory.backend, 'memory');
+});
+
 test('a database error fails closed and does not consume a memory slot', async () => {
   resetDocumentSendRateLimit();
   const errors = [
@@ -510,6 +584,22 @@ test('document send slot migration is one locked transaction with service-role f
   assert.doesNotMatch(sql, /CONCURRENTLY/i);
   assert.doesNotMatch(rollback, /CONCURRENTLY/i);
   assert.equal((sql.match(/SET search_path = ''/g) || []).length, 2);
+  const executable = firstStatement(sql);
+  assert.doesNotMatch(executable, /pg_catalog\.extract/i);
+  assert.doesNotMatch(executable, /pg_catalog\.coalesce/i);
+  assert.match(executable, /extract\(epoch FROM v_taken\)/);
+  assert.equal((executable.match(/\bcoalesce\(/g) || []).length, 6);
+  assert.doesNotMatch(executable, /pg_catalog\.(nullif|greatest|least|cast|extract|coalesce)\b/i);
+  const behavior = readFileSync(
+    join(here, '../../supabase/tests/document_send_rate_limit.sql'),
+    'utf8'
+  );
+  assert.match(behavior, /public\.take_document_send_slot\(/);
+  assert.match(behavior, /public\.release_document_send_slot\(/);
+  assert.match(behavior, /document cap/);
+  assert.match(behavior, /organization cap/);
+  assert.match(behavior, /RAISE EXCEPTION 'document_send_rate_limit_ok'/);
+  assert.doesNotMatch(behavior, /\bCOMMIT\b/);
   assert.match(sql, /SECURITY DEFINER/);
   assert.match(sql, /ENABLE ROW LEVEL SECURITY/);
   assert.doesNotMatch(sql, /CREATE POLICY/i);
