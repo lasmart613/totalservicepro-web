@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { storageResponseIsMissing } from '@/lib/manual-file';
 import { pdfInlineHeaders } from '@/lib/manuals';
 import { mayOpenManual, mayViewAiScopedManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
 import { MANUAL_LIBRARY_SELECT_MINIMAL, MANUAL_LIBRARY_SELECT_WITH_KIND } from '@/lib/manual-library-filter';
@@ -258,6 +259,9 @@ export async function POST(req: NextRequest) {
       storagePath,
     });
     if (!resolved.url) {
+      if (resolved.json?.error === 'file_missing') {
+        return NextResponse.json({ error: 'file_missing' }, { status: 404 });
+      }
       const catalogStream = await streamAiCatalogPdf({
         role: profile?.role,
         orgType,
@@ -272,8 +276,26 @@ export async function POST(req: NextRequest) {
       );
     }
 
+    if (
+      resolved.json?.render === 'download' ||
+      (resolved.json?.file_kind && resolved.json.file_kind !== 'pdf')
+    ) {
+      return NextResponse.json(
+        {
+          error: 'not_a_pdf',
+          file_kind: resolved.json.file_kind || null,
+          file_type: resolved.json.file_type || null,
+        },
+        { status: 415 }
+      );
+    }
+
     const pdfRes = await fetch(resolved.url);
     if (!pdfRes.ok || !pdfRes.body) {
+      const errText = pdfRes.ok ? '' : await pdfRes.text().catch(() => '');
+      if (storageResponseIsMissing(pdfRes.status, errText) || /file_missing/i.test(errText)) {
+        return NextResponse.json({ error: 'file_missing' }, { status: 404 });
+      }
       return NextResponse.json({ error: 'Manual file is unavailable' }, { status: 502 });
     }
 

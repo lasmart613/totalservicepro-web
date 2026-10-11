@@ -22,10 +22,21 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
   chaptersFromMetadata,
+  dedupeChapterList,
   indexOrderPdfParts,
   isFolderManual,
+  isStoredFilePath,
   resolveManualPdfOpen,
+  type ManualDownloadRef,
 } from "./chapters.ts";
+import {
+  chooseManualObject,
+  fileExtension,
+  manualContentType,
+  manualFileKind,
+  storageResponseIsMissing,
+  type StorageProbe,
+} from "./files.ts";
 import { annotateChaptersWithPageMap } from "./page-map.ts";
 
 const cors: Record<string, string> = {
@@ -385,6 +396,77 @@ async function listStorageLevel(
   return Array.isArray(data) ? data : [];
 }
 
+/**
+ * One metadata check for the exact object. Info first (no bytes). A clear
+ * "Object not found" is missing. Anything else falls back to one parent-folder
+ * list filtered to that filename — still not a download.
+ */
+async function probeStorageObject(
+  supabaseUrl: string,
+  serviceKey: string,
+  objectPath: string,
+): Promise<StorageProbe> {
+  const path = cleanPath(objectPath);
+  if (!path || !isStoredFilePath(path)) return "no";
+  const encoded = path.split("/").map(encodeURIComponent).join("/");
+  const infoUrl =
+    `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/info/manuals/${encoded}`;
+  try {
+    const res = await fetch(infoUrl, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: serviceKey,
+      },
+    });
+    const body = await res.text();
+    if (res.ok) return "yes";
+    if (/object not found/i.test(body)) return "no";
+    if (!storageResponseIsMissing(res.status, body)) {
+      console.warn("storage info unexpected", res.status, path, body.slice(0, 180));
+    }
+  } catch (err) {
+    console.warn("storage info threw", err);
+    return "unknown";
+  }
+  const slash = path.lastIndexOf("/");
+  const dir = slash >= 0 ? path.slice(0, slash) : "";
+  const name = slash >= 0 ? path.slice(slash + 1) : path;
+  const listUrl = `${supabaseUrl.replace(/\/$/, "")}/storage/v1/object/list/manuals`;
+  try {
+    const res = await fetch(listUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${serviceKey}`,
+        apikey: serviceKey,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        prefix: dir ? (dir.endsWith("/") ? dir : `${dir}/`) : "",
+        limit: 20,
+        offset: 0,
+        search: name,
+        sortBy: { column: "name", order: "asc" },
+      }),
+    });
+    const body = await res.text();
+    if (!res.ok) {
+      console.warn("storage list probe failed", res.status, path, body.slice(0, 180));
+      return "unknown";
+    }
+    const data = JSON.parse(body) as unknown;
+    if (!Array.isArray(data)) return "unknown";
+    const hit = data.find((item) => {
+      if (!item || typeof item !== "object") return false;
+      return (item as { name?: string }).name === name && (item as { id?: string | null }).id != null;
+    });
+    return hit ? "yes" : "no";
+  } catch (err) {
+    console.warn("storage list probe threw", err);
+    return "unknown";
+  }
+}
+
 /** Recursively list PDF object keys under a folder prefix (Candela multi-chapter). */
 async function listPdfsUnderPrefix(
   supabaseUrl: string,
@@ -498,7 +580,7 @@ async function streamPdfFromStorage(
   serviceKey: string,
   sp: string,
   reqHeaders?: Headers,
-): Promise<Response | null> {
+): Promise<Response | "missing" | null> {
   const path = cleanPath(sp);
   if (!path || !isPdfPath(path)) return null;
   const encoded = path.split("/").map(encodeURIComponent).join("/");
@@ -512,7 +594,9 @@ async function streamPdfFromStorage(
   if (range) fetchHeaders["Range"] = range;
   const res = await fetch(endpoint, { headers: fetchHeaders });
   if (!res.ok || !res.body) {
-    console.warn("stream storage fail", res.status, path, await res.text().catch(() => ""));
+    const text = await res.text().catch(() => "");
+    console.warn("stream storage fail", res.status, path, text.slice(0, 180));
+    if (storageResponseIsMissing(res.status, text)) return "missing";
     return null;
   }
   const outHeaders = new Headers(cors);
@@ -648,6 +732,9 @@ Deno.serve(async (req) => {
 
       if (sp) {
         const streamed = await streamPdfFromStorage(supabaseUrl, serviceKey, sp, req.headers);
+        if (streamed === "missing") {
+          return json(404, { error: "file_missing", storage_path: sp });
+        }
         if (streamed) return streamed;
       }
 
@@ -973,6 +1060,7 @@ Deno.serve(async (req) => {
             storage_path: p,
           };
         }).filter((c: { storage_path: string }) => isPdfPath(c.storage_path));
+        chapters = dedupeChapterList(chapters);
       }
 
       // 2) Sibling manuals rows under prefix
@@ -1000,9 +1088,10 @@ Deno.serve(async (req) => {
           serviceKey,
           parentPath,
         );
-        chapters = chaptersFromPaths(paths);
+        chapters = dedupeChapterList(chaptersFromPaths(paths));
       }
 
+      chapters = dedupeChapterList(chapters);
       const mapped = annotateFolderChapters(
         chapters,
         man?.chapter_metadata,
@@ -1051,17 +1140,22 @@ Deno.serve(async (req) => {
       chapterMetadata: man?.chapter_metadata,
     });
     let sp = opened.storagePath;
-    let chaptersForFolder = opened.chapters;
+    let chaptersForFolder = dedupeChapterList(opened.chapters);
+    const downloadsForFolder: ManualDownloadRef[] = opened.downloads || [];
+    const downloadFields = downloadsForFolder.length ? { downloads: downloadsForFolder } : {};
 
-    // Folder-style manuals (Candela multi-chapter, Sciton placeholders, etc.):
-    // always resolve a concrete PDF so web clients that only check json.url work.
-    if (sp && !isPdfPath(sp)) {
+    // Folder prefixes only. A docx/xlsx/image is a file and is signed below.
+    // A list that finds the PDF is the existence check for that object.
+    let openedFromList = false;
+    if (sp && !isStoredFilePath(sp)) {
       const folderPrefix = sp;
+      let chaptersFromStorage = false;
 
       // 2) Storage walk when chapter_metadata has no PDFs
       if (!chaptersForFolder.length) {
         const paths = await listPdfsUnderPrefix(supabaseUrl, serviceKey, folderPrefix);
-        chaptersForFolder = chaptersFromPaths(paths);
+        chaptersForFolder = dedupeChapterList(chaptersFromPaths(paths));
+        chaptersFromStorage = chaptersForFolder.length > 0;
       }
 
       // 3) Prefer entry PDF, else first chapter
@@ -1083,20 +1177,18 @@ Deno.serve(async (req) => {
           (a, b) => scoreLang(b) - scoreLang(a) || a.order - b.order,
         );
         sp = ranked[0].storage_path;
+        if (chaptersFromStorage) openedFromList = true;
       }
 
       if (!isPdfPath(sp)) {
         return json(404, {
-          error:
-            "No PDF files found in storage for this manual yet. The library entry exists, but the PDF(s) have not been uploaded under that path.",
+          error: "file_missing",
           manual_id: manualId,
           prefix: folderPrefix,
           storage_path: folderPrefix,
           chapters: [],
           count: 0,
           title: man?.title || null,
-          hint:
-            "Upload PDFs to the manuals bucket under this folder, or set entry_file_path / chapter_metadata to a real PDF path.",
         });
       }
 
@@ -1108,6 +1200,102 @@ Deno.serve(async (req) => {
 
     if (publicUrl && /^https?:\/\//i.test(publicUrl) && !storagePath) {
       return json(200, { ...readMeta, url: publicUrl, source: "public_url", manual_id: manualId });
+    }
+
+    // One existence check for the file we are about to sign. A missing folder
+    // entry may list once and open the first chapter that list contains.
+    // Chapter rows in the response are not probed.
+    if (isStoredFilePath(sp)) {
+      const requestedRaw = cleanPath(body.storage_path ?? body.path);
+      const entryResolved = man?.entry_file_path
+        ? resolveEntryPath(parentPath, man.entry_file_path)
+        : "";
+      const requestedFile =
+        isStoredFilePath(requestedRaw) &&
+        requestedRaw !== cleanPath(entryResolved) &&
+        requestedRaw !== parentPath;
+      const exists: StorageProbe = openedFromList
+        ? "yes"
+        : await probeStorageObject(supabaseUrl, serviceKey, sp);
+      let choice = chooseManualObject({
+        storagePath: sp,
+        exists,
+        isFolder: isFolderManual(man?.is_folder),
+        requestedFile,
+        chapters: chaptersForFolder,
+        listedPdfs: null,
+      });
+      if (choice.action === "needs_list") {
+        const listed = await listPdfsUnderPrefix(
+          supabaseUrl,
+          serviceKey,
+          parentPath || sp,
+        );
+        choice = chooseManualObject({
+          storagePath: sp,
+          exists: "no",
+          isFolder: true,
+          requestedFile,
+          chapters: chaptersForFolder,
+          listedPdfs: listed,
+        });
+      }
+      if (choice.action !== "serve") {
+        return json(404, {
+          error: "file_missing",
+          manual_id: manualId,
+          storage_path: sp || parentPath,
+          title: man?.title || null,
+        });
+      }
+      sp = choice.storagePath;
+    }
+
+    if (sp && isStoredFilePath(sp) && !isPdfPath(sp)) {
+      const ext = fileExtension(sp);
+      const kind = manualFileKind(sp);
+      const mappedChapters = annotateFolderChapters(
+        chaptersForFolder,
+        man?.chapter_metadata,
+        parentPath,
+      );
+      const chaptersOut = mappedChapters.chapters.length ? mappedChapters.chapters : undefined;
+      try {
+        const { data: signed, error: signErr } = await admin.storage
+          .from("manuals")
+          .createSignedUrl(sp, 60 * 60);
+        if (!signErr && signed?.signedUrl) {
+          return json(200, {
+            ...readMeta,
+            ...downloadFields,
+            url: signed.signedUrl,
+            source: "storage_signed",
+            render: "download",
+            file_type: ext,
+            file_kind: kind,
+            content_type: manualContentType(ext),
+            manual_id: manualId,
+            storage_path: sp,
+            entry_file_path: man?.entry_file_path || null,
+            title: man?.title || null,
+            chapters: chaptersOut,
+            count: mappedChapters.chapters.length || undefined,
+            ...(mappedChapters.joinedPageCount
+              ? { joined_page_count: mappedChapters.joinedPageCount }
+              : {}),
+          });
+        }
+        console.warn("createSignedUrl non-pdf failed", signErr?.message || signErr);
+      } catch (e) {
+        console.warn("createSignedUrl non-pdf threw", e);
+      }
+      return json(500, {
+        error: "Could not sign download",
+        manual_id: manualId,
+        storage_path: sp,
+        file_type: ext,
+        file_kind: kind,
+      });
     }
 
     // Prefer Storage signed URL (Range-capable) for reliable multi-page PDF.js loads.
@@ -1130,6 +1318,7 @@ Deno.serve(async (req) => {
         if (!signErr && signed?.signedUrl) {
           return json(200, {
             ...readMeta,
+            ...downloadFields,
             url: signed.signedUrl,
             source: "storage_signed",
             manual_id: manualId,
@@ -1162,6 +1351,7 @@ Deno.serve(async (req) => {
       proxy.searchParams.set("t", ticket);
       return json(200, {
         ...readMeta,
+        ...downloadFields,
         url: proxy.toString(),
         source: "edge_stream",
         manual_id: manualId,

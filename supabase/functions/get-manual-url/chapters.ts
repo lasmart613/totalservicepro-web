@@ -6,6 +6,8 @@
 // schematics. The stored chapter_metadata order is left on each item's
 // `order` field — this does not renumber pages or rewrite the database.
 
+import { fileExtension, isStoredFilePath } from "../../../web/lib/manual-file.ts";
+
 export type ManualChapterRef = {
   order: number;
   title: string;
@@ -15,6 +17,15 @@ export type ManualChapterRef = {
   /** pdf.js page count for this file. Omitted when the map cannot be built. */
   pageCount?: number;
 };
+
+/** Non-PDF file stored beside the chapter PDFs. Signed on click, not rendered. */
+export type ManualDownloadRef = {
+  title: string;
+  storage_path: string;
+  file_type: string;
+};
+
+export { isStoredFilePath };
 
 export function isFolderManual(value: unknown): boolean {
   return (
@@ -276,6 +287,19 @@ function joinChapterPath(parentPath: string, raw: unknown): string {
   return p;
 }
 
+/** Drop later copies of the same storage key. The index and page map do this too. */
+export function dedupeChapterList<T extends { storage_path: string }>(chapters: readonly T[]): T[] {
+  const seen = new Set<string>();
+  const out: T[] = [];
+  for (const chapter of chapters) {
+    const key = cleanPath(chapter.storage_path);
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    out.push({ ...chapter, storage_path: key });
+  }
+  return out;
+}
+
 export function chaptersFromMetadata(
   metadata: unknown,
   parentPath: string,
@@ -283,10 +307,12 @@ export function chaptersFromMetadata(
 ): ManualChapterRef[] {
   if (!Array.isArray(metadata) || !metadata.length) return [];
   const chapters: ManualChapterRef[] = [];
+  const seen = new Set<string>();
   metadata.forEach((ch: any, i: number) => {
     if (!ch || typeof ch !== "object") return;
     const storagePath = joinChapterPath(parentPath, ch.storage_path || ch.path || "");
-    if (!isPdfPath(storagePath)) return;
+    if (!isPdfPath(storagePath) || seen.has(storagePath)) return;
+    seen.add(storagePath);
     const order = ch.order != null && ch.order !== "" ? Number(ch.order) : i + 1;
     const rawTitle = String(ch.title || storagePath.split("/").pop() || `Chapter ${i + 1}`);
     chapters.push({
@@ -306,11 +332,31 @@ export function chaptersFromMetadata(
     .map((row) => row.chapter);
 }
 
+/** Non-PDF files already named in chapter_metadata. No storage walk. */
+export function downloadsFromMetadata(metadata: unknown, parentPath: string): ManualDownloadRef[] {
+  if (!Array.isArray(metadata) || !metadata.length) return [];
+  const out: ManualDownloadRef[] = [];
+  const seen = new Set<string>();
+  metadata.forEach((ch: any, i: number) => {
+    if (!ch || typeof ch !== "object") return;
+    const storagePath = joinChapterPath(parentPath, ch.storage_path || ch.path || "");
+    if (!isStoredFilePath(storagePath) || isPdfPath(storagePath) || seen.has(storagePath)) return;
+    seen.add(storagePath);
+    out.push({
+      title: String(ch.title || storagePath.split("/").pop() || `File ${i + 1}`),
+      storage_path: storagePath,
+      file_type: fileExtension(storagePath),
+    });
+  });
+  return out;
+}
+
 /**
- * Resolve the PDF to open, and the chapter list to return with it.
+ * Resolve the file to open, and the chapter list to return with it.
  * A folder row opens `entryFilePath` when the request is the folder itself,
- * and still returns every chapter. A single PDF (not is_folder) returns no chapters.
- * Storage listing is left to the caller when this path is still a folder prefix.
+ * and still returns every PDF chapter. A single file (not is_folder) returns
+ * no chapters. Non-PDF files are opened as themselves. Storage listing is
+ * left to the caller when this path is still a folder prefix.
  */
 export function resolveManualPdfOpen(input: {
   requestedPath?: unknown;
@@ -318,23 +364,28 @@ export function resolveManualPdfOpen(input: {
   entryFilePath?: unknown;
   isFolder?: unknown;
   chapterMetadata?: unknown;
-}): { storagePath: string; chapters: ManualChapterRef[] } {
+}): { storagePath: string; chapters: ManualChapterRef[]; downloads: ManualDownloadRef[] } {
   const requested = cleanPath(input.requestedPath);
   const parent = cleanPath(input.parentPath);
   let storagePath = "";
-  if (requested && isPdfPath(requested)) storagePath = requested;
-  else if (parent && isPdfPath(parent)) storagePath = parent;
+  if (requested && isStoredFilePath(requested)) storagePath = requested;
+  else if (parent && isStoredFilePath(parent)) storagePath = parent;
   else if (input.entryFilePath) storagePath = resolveEntryPath(parent, input.entryFilePath);
   else if (requested) storagePath = requested;
   else storagePath = parent;
 
-  const folderPrefix = parent && !isPdfPath(parent)
+  const folderPrefix = parent && !isStoredFilePath(parent)
     ? parent
-    : (storagePath && !isPdfPath(storagePath) ? storagePath : "");
+    : (storagePath && !isStoredFilePath(storagePath) ? storagePath : "");
   const folder = isFolderManual(input.isFolder);
-  const folderLike = folder || (!!storagePath && !isPdfPath(storagePath));
+  const folderLike = folder || (!!storagePath && !isStoredFilePath(storagePath));
   const chapters = folderLike
     ? chaptersFromMetadata(input.chapterMetadata, folderPrefix, { isFolder: folder })
     : [];
-  return { storagePath, chapters };
+  const downloads = folder
+    ? downloadsFromMetadata(input.chapterMetadata, folderPrefix).filter(
+        (item) => item.storage_path !== storagePath,
+      )
+    : [];
+  return { storagePath, chapters, downloads };
 }

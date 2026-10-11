@@ -85,7 +85,7 @@ test('bookshelf opens the in-app viewer and does not window.open the PDF', () =>
   assert.match(page, /filterManualLibrary/);
   assert.doesNotMatch(page, /window\.open/);
   assert.match(viewer, /pdf\.js|pdfjs/);
-  assert.doesNotMatch(viewer, /Download|Save as|Open in (Acrobat|Adobe)|window\.open/i);
+  assert.doesNotMatch(viewer, /window\.open|Open in (Acrobat|Adobe)|Save as/i);
   assert.match(fileRoute, /pdfInlineHeaders/);
   assert.match(fileRoute, /Content-Disposition/);
   assert.match(fileRoute, /mayViewAiScopedManual|streamAiCatalogPdf/);
