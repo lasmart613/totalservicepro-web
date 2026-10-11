@@ -1,4 +1,4 @@
--- Local proof for 20261011_000911_manual_search_index_clip.sql.
+-- Local proof for 20261011_000912_manual_search_index_clip.sql.
 -- Empty Postgres only. Refuses to run when public.manuals already exists.
 -- The body is one transaction and ends in ROLLBACK. It does not write a
 -- database that outlives this session.
@@ -47,7 +47,7 @@ SELECT 27, '[[pdfpage:1]] cover' || E'\f[[pdfpage:273]] end'
 UNION ALL
 SELECT 99, 'no stamps here';
 
-\i web/supabase/migrations/20261011_000911_manual_search_index_clip.sql
+\i web/supabase/migrations/20261011_000912_manual_search_index_clip.sql
 
 DO $$
 DECLARE
@@ -96,7 +96,7 @@ UPDATE public.manual_search_index
 SET search_text = '[[pdfpage:5]] replaced'
 WHERE manual_id = 27;
 
-\i web/supabase/migrations/20261011_000911_manual_search_index_clip.sql
+\i web/supabase/migrations/20261011_000912_manual_search_index_clip.sql
 
 DO $$
 DECLARE
@@ -118,7 +118,7 @@ BEGIN
   END;
 END $$;
 
-\i web/supabase/migrations/20261011_000911_manual_search_index_clip_rollback.sql
+\i web/supabase/migrations/20261011_000912_manual_search_index_clip_rollback.sql
 
 DO $$
 BEGIN

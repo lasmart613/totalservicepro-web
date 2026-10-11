@@ -293,11 +293,11 @@ test('a folder citation chip keeps the joined page and the viewer resolves it', 
   assert.equal(indexRowClipped('x'.repeat(1_500_000), false), false);
 
   const migration = readFileSync(
-    join(here, '../supabase/migrations/20261011_000911_manual_search_index_clip.sql'),
+    join(here, '../supabase/migrations/20261011_000912_manual_search_index_clip.sql'),
     'utf8',
   );
   const rollback = readFileSync(
-    join(here, '../supabase/migrations/20261011_000911_manual_search_index_clip_rollback.sql'),
+    join(here, '../supabase/migrations/20261011_000912_manual_search_index_clip_rollback.sql'),
     'utf8',
   );
   assert.match(migration, /SET LOCAL lock_timeout = '5s'/);

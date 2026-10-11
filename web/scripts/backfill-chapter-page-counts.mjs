@@ -38,7 +38,7 @@ import { readFileSync } from 'node:fs';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import * as pdfjsWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs';
 
-/** Same threshold as 20261011_000911_manual_search_index_clip.sql. */
+/** Same threshold as 20261011_000912_manual_search_index_clip.sql. */
 export const INDEX_CLIPPED_CHAR_LENGTH = 1_499_000;
 
 globalThis.pdfjsWorker ??= pdfjsWorker;

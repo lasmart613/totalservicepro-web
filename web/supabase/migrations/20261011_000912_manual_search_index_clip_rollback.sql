@@ -1,4 +1,4 @@
--- Rollback for 20261011_000911_manual_search_index_clip.sql.
+-- Rollback for 20261011_000912_manual_search_index_clip.sql.
 -- Drops the clip marker. get-manual-url then treats the index max as
 -- unknown and keeps a stored page map.
 --
