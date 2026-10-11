@@ -98,6 +98,8 @@ From the source manifest, plus permissions the Play Billing library merges:
 | `android.permission.INTERNET` | No | Load repairplanet.net, Supabase, and billing verification |
 | `android.permission.ACCESS_NETWORK_STATE` | No | Choose the live site vs the offline pages |
 | `android.permission.RECORD_AUDIO` | Yes | Voice mode. Requested at runtime when the user starts the mic |
+| `android.permission.USE_BIOMETRIC` | Yes | Merged from AndroidX Biometric. Unlocks a session already stored on the device. Fingerprint data is not collected |
+| `android.permission.USE_FINGERPRINT` | Yes | Older alias of biometric, merged by the same library |
 | `com.android.vending.BILLING` | Yes (financial) | Merged from the Billing library. Subscriptions |
 | `com.photometrytools.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` | No | AndroidX library signature permission |
 
