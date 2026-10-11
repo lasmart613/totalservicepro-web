@@ -1320,6 +1320,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void replyToPage(JavaScriptReplyProxy replyProxy, String body) {
         if (replyProxy == null || body == null) return;
+        if (!WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) return;
         try {
             replyProxy.postMessage(body);
         } catch (RuntimeException e) {
