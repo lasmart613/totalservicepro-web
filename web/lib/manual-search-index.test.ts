@@ -312,6 +312,7 @@ function folderStorage(pdfs: Record<string, Buffer>, opts?: { existingError?: st
   let upserts = 0;
   let saved = '';
   let downloaded = 0;
+  let chapterMetadata: unknown = null;
   const client = {
     storage: {
       from() {
@@ -344,6 +345,10 @@ function folderStorage(pdfs: Record<string, Buffer>, opts?: { existingError?: st
           if (opts?.existingError) return { data: null, error: { message: opts.existingError } };
           return { data: null, error: null };
         },
+        update(payload: { chapter_metadata?: unknown }) {
+          chapterMetadata = payload?.chapter_metadata ?? null;
+          return this;
+        },
         upsert(payload: { search_text?: string }) {
           upserts += 1;
           saved = String(payload?.search_text || '');
@@ -362,6 +367,9 @@ function folderStorage(pdfs: Record<string, Buffer>, opts?: { existingError?: st
     },
     get downloaded() {
       return downloaded;
+    },
+    get chapterMetadata() {
+      return chapterMetadata;
     },
   };
 }
@@ -440,6 +448,12 @@ test('chapter_metadata order is kept and page stamps continue across files', asy
   assert.equal(indexed.files, 2);
   assert.match(harness.saved, /\[\[pdfpage:1\]\] beta collimator/);
   assert.match(harness.saved, /\[\[pdfpage:2\]\] alpha reservoir/);
+  const stored = harness.chapterMetadata as Array<{ storage_path: string; page_count: number; page_start: number }>;
+  assert.equal(stored[0].storage_path, 'shared/demo/b.pdf');
+  assert.equal(stored[0].page_count, 1);
+  assert.equal(stored[0].page_start, 1);
+  assert.equal(stored[1].page_count, 1);
+  assert.equal(stored[1].page_start, 2);
 });
 
 test('oversized PDFs fail with a limit message and are not truncated or written', async () => {

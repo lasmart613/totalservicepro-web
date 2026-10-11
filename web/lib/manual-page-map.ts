@@ -29,6 +29,43 @@ export function indexPathKey(value: unknown): string {
     .replace(/[?#].*$/, '');
 }
 
+/**
+ * Write pdf.js page counts onto existing chapter_metadata entries.
+ * Order and dedupe match the joined index: the first copy of a path owns
+ * the offset. page_start is the joined page. A 0-page file is stored as 0
+ * and does not move later files. Entries the indexer did not count are left
+ * unchanged, so a missing count still omits the viewer map.
+ */
+export function chapterMetadataWithPageCounts(
+  metadata: unknown,
+  counts: readonly { storagePath: string; pageCount: number }[],
+): unknown[] | null {
+  if (!Array.isArray(metadata) || !metadata.length) return null;
+  const known = new Map<string, number>();
+  for (const part of counts) {
+    const key = indexPathKey(part.storagePath);
+    if (!key || known.has(key)) continue;
+    if (!Number.isFinite(part.pageCount) || part.pageCount < 0 || part.pageCount > 9999) continue;
+    known.set(key, Math.floor(part.pageCount));
+  }
+  if (!known.size) return null;
+  const spans = buildJoinedPageMap(
+    [...known.entries()].map(([storagePath, pageCount]) => ({ storagePath, pageCount })),
+  );
+  const byPath = new Map(spans.map((span) => [span.storagePath, span]));
+  return metadata.map((item) => {
+    if (!item || typeof item !== 'object') return item;
+    const key = indexPathKey((item as { storage_path?: unknown }).storage_path);
+    if (!known.has(key)) return item;
+    const pageCount = known.get(key) as number;
+    const span = byPath.get(key);
+    const copy: Record<string, unknown> = { ...(item as Record<string, unknown>), page_count: pageCount };
+    if (span) copy.page_start = span.pageStart;
+    else delete copy.page_start;
+    return copy;
+  });
+}
+
 export function buildJoinedPageMap(parts: readonly JoinedPagePart[]): JoinedPageSpan[] {
   const spans: JoinedPageSpan[] = [];
   const seen = new Set<string>();

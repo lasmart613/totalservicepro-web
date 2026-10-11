@@ -4,18 +4,17 @@ import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { citationViewerHref } from './ai/citations.ts';
-import { buildOcrXObjectPdf, buildTextPdf, buildToUnicodePdf } from './manual-pdf-fixtures.ts';
-import { extractPdfPageSlice } from './manual-pdf-text.ts';
 import { chapterPathsFromMetadata, pdfPathsForManual } from './manual-search-index.ts';
 import {
   annotateChaptersWithPageMap,
   buildJoinedPageMap,
+  chapterMetadataWithPageCounts,
   resolveJoinedPage,
   viewerTargetForJoinedPage,
   type JoinedPagePart,
 } from './manual-page-map.ts';
-import { indexOrderPdfPaths } from '../../supabase/functions/get-manual-url/chapters.ts';
-import { countPdfPages } from '../../supabase/functions/get-manual-url/pdf-page-count.ts';
+import { indexOrderPdfParts, indexOrderPdfPaths } from '../../supabase/functions/get-manual-url/chapters.ts';
+import { backfillStatus } from '../scripts/backfill-chapter-page-counts.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FOLDER = 'shared/candela/VBeam2 (Perfecta, Aesthetica, or Platinum)';
@@ -172,26 +171,67 @@ test('index order matches the search indexer for absolute chapter paths', () => 
   assert.equal(indexOrderPdfPaths(duped, parent).length, meta.length);
 });
 
-test('countPdfPages matches pdf.js and ignores a content-stream decoy', async () => {
-  const three = buildTextPdf(['intro reservoir', 'error forty three', 'optical collimator']);
-  assert.equal(countPdfPages(three), 3);
-  assert.equal(countPdfPages(three), (await extractPdfPageSlice(three)).total);
-  assert.equal(countPdfPages(buildOcrXObjectPdf()), 1);
-  assert.equal(countPdfPages(buildToUnicodePdf()), (await extractPdfPageSlice(buildToUnicodePdf())).total);
-
-  const sample = readFileSync(join(here, '../public/fixtures/sample-service-manual.pdf'));
-  assert.equal(countPdfPages(sample), 3);
-  assert.equal(countPdfPages(sample), (await extractPdfPageSlice(sample)).total);
-
-  const decoy = buildTextPdf(['/Count 99 /Type /Pages still one page']);
-  assert.equal(countPdfPages(decoy), 1);
-  assert.equal((await extractPdfPageSlice(decoy)).total, 1);
-
-  const indirect = new TextEncoder().encode(
-    '%PDF-1.4\n1 0 obj\n<< /Type /Catalog /Pages 2 0 R >>\nendobj\n2 0 obj\n<< /Type /Pages /Count 8 0 R /Kids [3 0 R] >>\nendobj\n%%EOF\n',
+test('a stored page count wins, and a missing count omits the map', () => {
+  const parent = FOLDER;
+  const metadata = [
+    { storage_path: `${parent}/8501-01-1795_01.pdf`, page_count: 10, title: 'entry' },
+    { storage_path: `${parent}/Sect 1/8501-00-1794_04.pdf`, page_count: 39, title: 'service' },
+  ];
+  const parts = indexOrderPdfParts(metadata, parent);
+  assert.deepEqual(
+    parts.map((part) => part.pageCount),
+    [10, 39],
   );
-  assert.equal(countPdfPages(indirect), null);
-  assert.equal(countPdfPages(new Uint8Array([1, 2, 3, 4])), null);
+  const annotated = annotateChaptersWithPageMap(
+    metadata.map((chapter) => ({ storage_path: chapter.storage_path })),
+    parts,
+  );
+  assert.equal(annotated.joinedPageCount, 49);
+  const page11 = viewerTargetForJoinedPage(annotated.chapters, 11);
+  assert.equal(page11.kind, 'hit');
+  if (page11.kind !== 'hit') return;
+  assert.equal(page11.localPage, 1);
+  assert.match(page11.storagePath, /8501-00-1794_04\.pdf$/);
+
+  const missing = metadata.map((chapter, index) =>
+    index === 1 ? { storage_path: chapter.storage_path, title: chapter.title } : chapter,
+  );
+  const missingParts = indexOrderPdfParts(missing, parent);
+  assert.equal(missingParts[1].pageCount, null);
+  const omitted = annotateChaptersWithPageMap(
+    missing.map((chapter) => ({ storage_path: chapter.storage_path })),
+    missingParts,
+  );
+  assert.equal(omitted.joinedPageCount, null);
+  assert.equal(omitted.chapters.some((chapter) => chapter.pageStart != null), false);
+});
+
+test('manual 27 stored counts join to 273 pages', () => {
+  const metadata = vbeam2Parts().map((part) => ({
+    storage_path: part.storagePath,
+    page_count: part.pageCount,
+  }));
+  const parts = indexOrderPdfParts(metadata, FOLDER);
+  assert.equal(parts.length, 52);
+  assert.equal(parts.every((part) => part.pageCount != null && part.pageCount > 0), true);
+  const annotated = annotateChaptersWithPageMap(
+    metadata.map((chapter) => ({ storage_path: chapter.storage_path })),
+    parts,
+  );
+  assert.equal(annotated.joinedPageCount, 273);
+  const di = viewerTargetForJoinedPage(annotated.chapters, 23);
+  assert.equal(di.kind, 'hit');
+  if (di.kind !== 'hit') return;
+  assert.equal(di.localPage, 9);
+  assert.match(di.storagePath, /8501-00-1794_04\.pdf$/);
+
+  const written = chapterMetadataWithPageCounts(
+    metadata.map(({ page_count: _pageCount, ...chapter }) => chapter),
+    parts.map((part) => ({ storagePath: part.storagePath, pageCount: part.pageCount || 0 })),
+  );
+  assert.ok(Array.isArray(written));
+  assert.equal((written as Array<{ page_count?: number }>)[0].page_count, 14);
+  assert.equal((written as Array<{ page_start?: number }>)[1].page_start, 15);
 });
 
 test('a folder citation chip keeps the joined page and the viewer resolves it', () => {
@@ -224,4 +264,15 @@ test('a folder citation chip keeps the joined page and the viewer resolves it', 
   assert.match(viewer, /if \(pageOutOfRange\) return/);
   assert.match(edge, /joined_page_count/);
   assert.match(edge, /pageStart/);
+  assert.match(edge, /indexOrderPdfParts/);
+  assert.doesNotMatch(edge, /pdf-page-count|countPdfPages|method:\s*"HEAD"/);
+  const indexer = readFileSync(join(here, 'manual-search-index.ts'), 'utf8');
+  assert.match(indexer, /chapterMetadataWithPageCounts/);
+  assert.match(indexer, /page_count/);
+  const script = readFileSync(join(here, '../scripts/backfill-chapter-page-counts.mjs'), 'utf8');
+  assert.match(script, /--apply/);
+  assert.match(script, /dry-run/);
+  assert.equal(backfillStatus({ pageSum: 273, maxPage: 273, countedFiles: 52, expectedFiles: 52 }), 'match');
+  assert.equal(backfillStatus({ pageSum: 1157, maxPage: 1018, countedFiles: 46, expectedFiles: 46 }), 'mismatch');
+  assert.equal(backfillStatus({ pageSum: null, maxPage: 6, countedFiles: 0, expectedFiles: 3 }), 'skipped');
 });

@@ -14,6 +14,7 @@ import {
   type PdfPageText,
 } from './manual-pdf-text.ts';
 import { containsTextImatch } from './email-match.ts';
+import { chapterMetadataWithPageCounts } from './manual-page-map.ts';
 
 export const MANUALS_BUCKET = 'manuals';
 export const MANUAL_REINDEX_BATCH = 4;
@@ -181,24 +182,28 @@ async function resolveManualPdfPaths(storage: StorageClient, manual: ManualIndex
   return [];
 }
 
+export type IndexedPdfPart = { path: string; pageCount: number };
+
 export async function extractManualBodyText(
   storage: StorageClient,
   manual: ManualIndexRow
-): Promise<{ text: string; files: number; skipped?: string; fatal?: string }> {
+): Promise<{ text: string; files: number; fileCounts: IndexedPdfPart[]; skipped?: string; fatal?: string }> {
   const paths = await resolveManualPdfPaths(storage, manual);
   if (!paths.length) {
-    return { text: '', files: 0, skipped: 'no_pdf_path' };
+    return { text: '', files: 0, fileCounts: [], skipped: 'no_pdf_path' };
   }
 
   const chunks: string[] = [];
+  const fileCounts: IndexedPdfPart[] = [];
   let files = 0;
   let pageOffset = 0;
   for (const path of paths) {
     const got = await downloadPdfBytes(storage, path);
-    if (got.error) return { text: '', files, fatal: got.error };
+    if (got.error) return { text: '', files, fileCounts, fatal: got.error };
     if (!got.bytes) continue;
     try {
       const sliced = await extractPdfPageSlice(got.bytes);
+      fileCounts.push({ path, pageCount: sliced.total });
       if (!sliced.total) continue;
       const shifted = sliced.pages.map((page) => ({ page: page.page + pageOffset, text: page.text }));
       pageOffset += sliced.total;
@@ -209,11 +214,31 @@ export async function extractManualBodyText(
       }
     } catch (err) {
       const message = err instanceof Error ? err.message : 'Could not extract PDF text.';
-      return { text: '', files, fatal: message };
+      return { text: '', files, fileCounts, fatal: message };
     }
   }
-  if (!files) return { text: '', files: 0, skipped: 'no_extractable_text' };
-  return { text: clipManualSearchText(chunks.join('\f'), PDF_INDEX_TEXT_MAX), files };
+  if (!files) return { text: '', files: 0, fileCounts, skipped: 'no_extractable_text' };
+  return { text: clipManualSearchText(chunks.join('\f'), PDF_INDEX_TEXT_MAX), files, fileCounts };
+}
+
+/** Store pdf.js page_count and page_start on the folder's chapter_metadata. */
+async function persistChapterPageCounts(
+  client: TableClient,
+  manual: ManualIndexRow,
+  fileCounts: readonly IndexedPdfPart[],
+): Promise<void> {
+  const next = chapterMetadataWithPageCounts(
+    manual.chapter_metadata,
+    fileCounts.map((part) => ({ storagePath: part.path, pageCount: part.pageCount })),
+  );
+  const id = asManualCatalogId(manual.id);
+  if (!next || id == null) return;
+  const table = client.from('manuals');
+  if (!table || typeof table.update !== 'function') return;
+  const updated = await table.update({ chapter_metadata: next }).eq('id', id);
+  if (updated?.error) {
+    console.warn('chapter page counts not stored', updated.error.message || updated.error);
+  }
 }
 
 /** Replace one physical-page slice inside a stamped index. Unstamped text is dropped. */
@@ -613,6 +638,11 @@ export async function reindexManualPageRange(
   if (refusal) return { ...empty(refusal), path, totalPages: sliced.total, chars: merged.length };
   const saved = await upsertManualSearchIndex(client, catalogId, merged);
   if (!saved.ok) return { ...empty(saved.error || 'upsert failed'), path, totalPages: sliced.total };
+  await persistChapterPageCounts(
+    client,
+    manual,
+    sliced.parts.map((part) => ({ path: part.path, pageCount: part.pages })),
+  );
   const bucket = client.storage.from(MANUALS_BUCKET);
   if (typeof bucket.remove === 'function') {
     await bucket.remove([manualReindexStagePath(catalogId)]).catch(() => undefined);
@@ -714,6 +744,7 @@ export async function indexManualSearchText(
   if (!saved.ok) {
     return { manualId, ok: false, chars: extracted.text.length, files: extracted.files, skipped: saved.error };
   }
+  await persistChapterPageCounts(client, manual, extracted.fileCounts);
   return { manualId, ok: true, chars: extracted.text.length, files: extracted.files };
 }
 
