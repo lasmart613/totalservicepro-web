@@ -8278,6 +8278,16 @@ export const GAP_STRINGS: Record<string, Record<Loc, string>> = {
     'pág. {page}',
     'ص. {page}',
   ),
+  'Manual p. {page}': row(
+    'راهنما ص. {page}',
+    'Manual pág. {page}',
+    'Manuel p. {page}',
+    'מדריך עמ׳ {page}',
+    'Manuale pag. {page}',
+    'Handbuch S. {page}',
+    'Manual pág. {page}',
+    'الدليل ص. {page}',
+  ),
   'Opened {title}, page {page}.': row(
     '{title} باز شد، صفحه {page}.',
     'Abierto: {title}, página {page}.',
