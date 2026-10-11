@@ -418,13 +418,45 @@ let logoUrl        = null;
 
 // Standard roles for a service business (non-redundant)
 const ROLES = {
-  'engineer':        'Service Engineer',
+  'fse':             'Service Engineer',
   'dispatcher':      'Dispatcher / Scheduler',
   'service_manager': 'Service Manager',
   'billing_manager': 'Billing Manager',
-  'crm':             'CRM / Marketing',
-  'admin':           'Business Owner / Admin'
+  'company_admin':   'Business Admin'
 };
+
+function tspApiOrigin() {
+    try {
+        if (location.protocol === 'https:' || location.protocol === 'http:') return location.origin;
+    } catch (e) {}
+    return 'https://repairplanet.net';
+}
+
+async function tspPost(path, body) {
+    const { data: { session } } = await supabaseClient.auth.getSession();
+    const token = session && session.access_token;
+    if (!token) throw new Error('Not signed in');
+    const res = await fetch(tspApiOrigin() + path, {
+        method: 'POST',
+        headers: {
+            Authorization: 'Bearer ' + token,
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(body || {})
+    });
+    const json = await res.json().catch(function () { return {}; });
+    if (!res.ok || json.ok === false) {
+        throw new Error(json.error || json.message || ('Request failed (' + res.status + ')'));
+    }
+    return json;
+}
+
+function inviteRoleForApi(role) {
+    const r = String(role || '').toLowerCase();
+    if (r === 'engineer' || r === 'technician') return 'fse';
+    if (r === 'admin') return 'company_admin';
+    return r;
+}
 
 async function init() {
     const { data: { user } } = await supabaseClient.auth.getUser();
@@ -522,7 +554,7 @@ async function handleLogoUpload(event) {
         if (error) throw error;
         const { data: urlData } = supabaseClient.storage.from('company-assets').getPublicUrl(path);
         logoUrl = urlData.publicUrl + '?t=' + Date.now();
-        await supabaseClient.from('organizations').update({ logo_url: logoUrl }).eq('id', orgData.id);
+        await tspPost('/api/org/profile', { logo_url: logoUrl });
         renderLogo(document.getElementById('companyName').value);
         showToast('Logo updated!', 'success');
     } catch(e) { showToast('Upload failed: ' + e.message, 'error'); }
@@ -532,7 +564,7 @@ async function removeLogo() {
     if (!confirm('Remove company logo?')) return;
     try {
         logoUrl = null;
-        await supabaseClient.from('organizations').update({ logo_url: null }).eq('id', orgData.id);
+        await tspPost('/api/org/profile', { logo_url: null });
         // Optional: also delete from storage, but for simplicity we just clear the URL
         renderLogo(document.getElementById('companyName').value);
         showToast('Logo removed', 'success');
@@ -542,7 +574,7 @@ async function removeLogo() {
 }
 
 function showInviteModal() {
-    if (currentProfile?.role !== 'admin') {
+    if (!isCurrentUserAdmin()) {
         showToast('Only admins can invite new team members', 'error');
         return;
     }
@@ -570,7 +602,7 @@ function showInviteModal() {
                     <button onclick="sendInvite(this)" style="flex:1;padding:10px;background:var(--gold);color:#111;border:none;border-radius:8px;font-weight:600;">Send Invite</button>
                 </div>
                 <div style="font-size:11px;color:var(--text3);margin-top:12px;">
-                    Note: Full invite flow (email + acceptance) requires backend/edge functions.
+                    Sends the same email invite as the website Team page.
                 </div>
             </div>
         </div>
@@ -584,17 +616,15 @@ async function sendInvite(btn) {
     if (!email) { alert('Email required'); return; }
 
     try {
-        // This is a simplified version. In production you'd use Supabase Edge Functions or Auth invites.
-        const { error } = await supabaseClient.from('engineer_invitations').insert([{
-            organization_id: currentProfile.organization_id,
+        const json = await tspPost('/api/team/invite', {
             email: email,
-            role: role,
-            invited_by: currentUser.id,
-            accepted: false
-        }]);
-        if (error) throw error;
+            role: inviteRoleForApi(role)
+        });
+        if (!json.emailed) {
+            throw new Error(json.message || json.error || ('Could not email the invite to ' + email + '.'));
+        }
         btn.closest('[style*="position:fixed"]').remove();
-        showToast('Invitation created (pending acceptance)', 'success');
+        showToast(json.message || 'Invitation emailed', 'success');
         loadRoster();
     } catch(e) {
         alert('Invite failed: ' + e.message);
@@ -603,7 +633,8 @@ async function sendInvite(btn) {
 
 // Quick helper to verify current user's permissions
 function isCurrentUserAdmin() {
-    return currentProfile?.role === 'admin';
+    const r = String(currentProfile?.role || '').toLowerCase();
+    return r === 'admin' || r === 'company_admin' || r === 'owner';
 }
 
 // ── Prefix ──
@@ -699,7 +730,7 @@ function capitalize(str) {
 
 async function changeUserRole(userId, newRole) {
     // Double-check on client (real security must come from RLS)
-    if (currentProfile?.role !== 'admin') {
+    if (!isCurrentUserAdmin()) {
         showToast('Only admins can change roles', 'error');
         loadRoster();
         return;
@@ -711,12 +742,11 @@ async function changeUserRole(userId, newRole) {
         }
     }
     try {
-        const { error } = await supabaseClient
-            .from('user_profiles')
-            .update({ role: newRole })
-            .eq('id', userId)
-            .eq('organization_id', currentProfile.organization_id);
-        if (error) throw error;
+        await tspPost('/api/org/members/role', {
+            userId: userId,
+            organizationId: currentProfile.organization_id,
+            role: inviteRoleForApi(newRole)
+        });
         showToast('Role updated', 'success');
         loadRoster();
     } catch(e) {
@@ -726,7 +756,7 @@ async function changeUserRole(userId, newRole) {
 }
 
 async function toggleUserActive(userId, makeActive) {
-    if (currentProfile?.role !== 'admin') {
+    if (!isCurrentUserAdmin()) {
         showToast('Only admins can change user status', 'error');
         return;
     }
@@ -739,14 +769,17 @@ async function toggleUserActive(userId, makeActive) {
         loadRoster();
         return;
     }
+    if (makeActive) {
+        showToast('Turning a removed member back on is done on the website.', 'error');
+        loadRoster();
+        return;
+    }
     try {
-        const { error } = await supabaseClient
-            .from('user_profiles')
-            .update({ is_active: makeActive })
-            .eq('id', userId)
-            .eq('organization_id', currentProfile.organization_id);
-        if (error) throw error;
-        showToast(`User ${makeActive ? 'reactivated' : 'terminated'}`, 'success');
+        await tspPost('/api/team/members/remove', {
+            userId: userId,
+            organizationId: currentProfile.organization_id
+        });
+        showToast('User removed from this company', 'success');
         loadRoster();
     } catch(e) {
         showToast('Failed to update status: ' + e.message, 'error');
@@ -772,7 +805,7 @@ async function loadRoster() {
         const list = document.getElementById('rosterList');
         list.innerHTML = '';
 
-        const isAdmin = currentProfile?.role === 'admin';
+        const isAdmin = isCurrentUserAdmin();
 
         (members || []).forEach(m => {
             const initials = ((m.first_name||'')[0]||'') + ((m.last_name||'')[0]||'');
@@ -790,7 +823,7 @@ async function loadRoster() {
                     <div class="roster-role">
                         <select onchange="changeUserRole('${m.id}', this.value)" style="font-size:11px; padding:2px 6px; border-radius:4px; border:1px solid var(--border); background:var(--surface2); color:var(--text);">
                             ${Object.entries(ROLES).map(([key, label]) => 
-                                `<option value="${key}" ${key === currentRole ? 'selected' : ''}>${label}</option>`
+                                `<option value="${key}" ${key === inviteRoleForApi(currentRole) ? 'selected' : ''}>${label}</option>`
                             ).join('')}
                         </select>
                     </div>
@@ -894,33 +927,25 @@ async function saveCompany() {
 
         const updates = {
             name:               document.getElementById('companyName').value.trim(),
-            type:               document.getElementById('companyType').value,
             website:            document.getElementById('companyWebsite').value.trim(),
-            description:        document.getElementById('companyDescription').value.trim(),
             phone:              document.getElementById('companyPhone').value.trim(),
             email:              document.getElementById('companyEmail').value.trim(),
             address:            document.getElementById('companyAddress').value.trim(),
             city:               document.getElementById('companyCity').value.trim(),
             state:              document.getElementById('companyState').value.trim(),
             zip:                document.getElementById('companyZip').value.trim(),
-            ticket_prefix:      newPrefix || orgData.ticket_prefix,
-            supported_brands:   selectedBrands,
-            service_territories:territories,
-            customer_rating:    rating,
-            years_in_business:  parseInt(document.getElementById('yearsInBusiness').value) || null,
-            updated_at:         new Date().toISOString()
+            supported_brands:   selectedBrands
         };
+        if (newPrefix && newPrefix !== (orgData.ticket_prefix || '')) {
+            showToast('Ticket prefix is assigned on the website. Other company details will save.', '');
+        }
 
-        const { error } = await supabaseClient
-            .from('organizations')
-            .update(updates)
-            .eq('id', orgData.id);
-        if (error) throw error;
+        await tspPost('/api/org/profile', updates);
 
         Object.assign(orgData, updates);
         document.getElementById('heroName').textContent   = updates.name;
-        document.getElementById('heroPrefix').textContent = 'Ticket prefix: ' + updates.ticket_prefix;
-        showToast('Company profile saved!', 'success');
+        document.getElementById('heroPrefix').textContent = 'Ticket prefix: ' + (orgData.ticket_prefix || newPrefix || '');
+        showToast('Company profile saved. Description, territories, rating, and years stay on the website.', 'success');
     } catch(e) {
         showToast('Save failed: ' + e.message, 'error');
     } finally {

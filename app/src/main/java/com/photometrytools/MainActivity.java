@@ -46,8 +46,14 @@ import androidx.biometric.BiometricManager;
 import androidx.biometric.BiometricPrompt;
 import androidx.constraintlayout.widget.ConstraintLayout;
 import androidx.constraintlayout.widget.ConstraintSet;
+import androidx.browser.customtabs.CustomTabsIntent;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
+import androidx.core.view.WindowInsetsControllerCompat;
 
 import com.google.android.material.bottomnavigation.BottomNavigationView;
 
@@ -145,7 +151,18 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
         setContentView(R.layout.activity_main);
+        View root = findViewById(R.id.main);
+        ViewCompat.setOnApplyWindowInsetsListener(root, (v, windowInsets) -> {
+            Insets bars = windowInsets.getInsets(WindowInsetsCompat.Type.systemBars());
+            v.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            return WindowInsetsCompat.CONSUMED;
+        });
+        WindowInsetsControllerCompat insetsController =
+                WindowCompat.getInsetsController(getWindow(), root);
+        insetsController.setAppearanceLightStatusBars(false);
+        insetsController.setAppearanceLightNavigationBars(false);
 
         captureLaunchIntent(getIntent());
 
@@ -499,7 +516,7 @@ public class MainActivity extends AppCompatActivity {
         settings.setBuiltInZoomControls(true);
         settings.setDisplayZoomControls(false);
         settings.setMixedContentMode(WebSettings.MIXED_CONTENT_NEVER_ALLOW);
-        settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/0.5.1-beta");
+        settings.setUserAgentString(settings.getUserAgentString() + " TSPAndroid/0.5.2-beta");
         webView.setLayerType(View.LAYER_TYPE_HARDWARE, null);
 
         CookieManager cookies = CookieManager.getInstance();
@@ -548,6 +565,12 @@ public class MainActivity extends AppCompatActivity {
                     || (name != null && name.toLowerCase(Locale.US).endsWith(".pdf"))
                     || (url != null && url.toLowerCase(Locale.US).contains(".pdf"));
             if (pdf) {
+                String current = webView.getUrl();
+                boolean alreadyViewing = current != null && (current.contains("/manuals")
+                        || current.contains("pdf_viewer"));
+                if (alreadyViewing) {
+                    return;
+                }
                 if (url != null && isManualHost(url)) {
                     Toast.makeText(MainActivity.this,
                             "Manuals stay in the in-app viewer — download is disabled.",
@@ -568,11 +591,16 @@ public class MainActivity extends AppCompatActivity {
             @Override
             public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
                 Uri uri = request.getUrl();
-                if (uri != null && isGeoUrl(uri.toString())) {
-                    openGeoOrMaps(uri.toString());
+                if (uri == null) return false;
+                String url = uri.toString();
+                if (isGeoUrl(url)) {
+                    openGeoOrMaps(url);
                     return true;
                 }
-                return uri != null && !navigateInWebView(uri.toString());
+                // Chapter PDFs load in the viewer frame. Do not replace that
+                // navigation with /manuals/view, whether get-manual-url is live or not.
+                if (!request.isForMainFrame()) return false;
+                return !navigateInWebView(url);
             }
 
             @Override
@@ -657,6 +685,10 @@ public class MainActivity extends AppCompatActivity {
             captureLaunchIntent(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
             applyPendingLaunch();
             return true;
+        }
+        if (isExternalAuthUrl(url)) {
+            openCustomTab(url);
+            return false;
         }
         if (lower.startsWith("intent:") || lower.startsWith("market:")) return false;
         if (lower.contains("play.google.com/store") || lower.contains("apps.apple.com")) {
@@ -772,6 +804,43 @@ public class MainActivity extends AppCompatActivity {
             return PRODUCTION_ORIGIN + dest;
         } catch (Exception e) {
             return PRODUCTION_ORIGIN + "/";
+        }
+    }
+
+    /**
+     * Google rejects OAuth inside an embedded WebView (disallowed_useragent).
+     * Supabase authorize and accounts.google.com open in a Custom Tab so the
+     * system browser can return through the https App Link or totalservicepro://.
+     */
+    static boolean isExternalAuthUrl(String url) {
+        if (url == null) return false;
+        try {
+            Uri uri = Uri.parse(url);
+            String host = uri.getHost();
+            if (host == null) return false;
+            host = host.toLowerCase(Locale.US);
+            String path = uri.getPath() == null ? "" : uri.getPath().toLowerCase(Locale.US);
+            if ("accounts.google.com".equals(host) || "accounts.youtube.com".equals(host)) return true;
+            if ((host.equals("google.com") || host.endsWith(".google.com")) && path.contains("/o/oauth")) {
+                return true;
+            }
+            return host.endsWith(".supabase.co") && path.contains("/auth/v1/authorize");
+        } catch (RuntimeException e) {
+            return false;
+        }
+    }
+
+    private void openCustomTab(String url) {
+        try {
+            CustomTabsIntent tabs = new CustomTabsIntent.Builder().setShowTitle(true).build();
+            tabs.intent.addFlags(Intent.FLAG_ACTIVITY_NO_HISTORY);
+            tabs.launchUrl(this, Uri.parse(url));
+        } catch (RuntimeException e) {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (RuntimeException ignored) {
+                showToast("Could not open Google sign-in");
+            }
         }
     }
 
