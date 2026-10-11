@@ -144,6 +144,7 @@ function PublicPlans() {
 }
 
 function SignedInPlans() {
+  const t = useT();
   const searchParams = useSearchParams();
   const router = useRouter();
   const [audience, setAudience] = usePlanAudienceFromUrl();
