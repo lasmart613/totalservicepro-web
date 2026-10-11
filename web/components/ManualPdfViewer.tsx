@@ -30,8 +30,10 @@ import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-languag
 import { isMissingColumn, isPublishedColumnMissing, isUnpublishedManual } from '@/lib/manual-published';
 import {
   MANUAL_FILE_MISSING,
+  MANUAL_NOT_AVAILABLE,
   manualDownloadSentence,
   manualFileKind,
+  manualOpenErrorMessage,
 } from '@/lib/manual-file';
 import { useT } from '@/lib/fa/locale';
 
@@ -192,7 +194,8 @@ async function fetchPdfBytes(opts: {
   });
   if (res.ok) return await res.arrayBuffer();
   const json = (await res.json().catch(() => ({}))) as { error?: string };
-  if (json.error === 'file_missing' || res.status === 404) throw new Error(MANUAL_FILE_MISSING);
+  const openError = manualOpenErrorMessage(json.error);
+  if (openError) throw new Error(openError);
   throw new Error(json.error || 'Could not load the manual in the app viewer');
 }
 
@@ -463,13 +466,14 @@ export function ManualPdfViewer({
       setError(null);
       setFileOffer(null);
       setProgress(10);
-      const { ok, status, json, token } = await fetchManualUrl({
+      const { ok, json, token } = await fetchManualUrl({
         manual_id: payload.manualId,
         storage_path: storagePath || payload.storagePath,
       });
       setProgress(35);
       if (!ok) {
-        if (json?.error === 'file_missing' || status === 404) throw new Error(MANUAL_FILE_MISSING);
+        const openError = manualOpenErrorMessage(json?.error);
+        if (openError) throw new Error(openError);
         throw new Error(String(json?.error || 'Could not open manual'));
       }
       const nextChapters = Array.isArray(json.chapters) ? (json.chapters as ManualChapter[]) : payload.chapters || [];
@@ -601,7 +605,7 @@ export function ManualPdfViewer({
             }
             if (isUnpublishedManual(row.data as { published?: unknown } | null)) {
               if (!cancelled) {
-                setError('This manual is not available.');
+                setError(MANUAL_NOT_AVAILABLE);
                 setLoading(false);
               }
               return;
@@ -840,12 +844,13 @@ export function ManualPdfViewer({
       setLoading(true);
       setError(null);
       setFileOffer(null);
-      const { ok, status, json } = await fetchManualUrl({
+      const { ok, json } = await fetchManualUrl({
         manual_id: manualId,
         storage_path: storagePath,
       });
       if (!ok || !json.url) {
-        if (json?.error === 'file_missing' || status === 404) throw new Error(MANUAL_FILE_MISSING);
+        const openError = manualOpenErrorMessage(json?.error);
+        if (openError) throw new Error(openError);
         throw new Error(String(json?.error || 'Could not open manual'));
       }
       const fileKind = String(json.file_kind || manualFileKind(String(json.file_type || storagePath)));
@@ -1112,7 +1117,21 @@ export function ManualPdfViewer({
               )}
             </div>
           )}
-          {error && error !== MANUAL_FILE_MISSING && !loading && (
+          {error === MANUAL_NOT_AVAILABLE && !loading && (
+            <div
+              role="alert"
+              data-testid="manual-not-available"
+              className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center z-10"
+            >
+              <div className="text-lg font-bold text-[#E5E7EB] max-w-md">{t(MANUAL_NOT_AVAILABLE)}</div>
+              {!embedded && (
+                <Link href={sourceUrl ? '/' : '/manuals'} className="btn btn-primary text-sm px-4 py-2">
+                  {sourceUrl ? 'Back home' : 'Back to library'}
+                </Link>
+              )}
+            </div>
+          )}
+          {error && error !== MANUAL_FILE_MISSING && error !== MANUAL_NOT_AVAILABLE && !loading && (
             <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center z-10">
               <div className="text-lg font-bold text-red-400">Could not open manual</div>
               <div className="text-sm text-[#9CA3AF] max-w-md">{error}</div>

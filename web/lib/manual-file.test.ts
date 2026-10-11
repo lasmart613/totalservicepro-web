@@ -9,11 +9,13 @@ import {
 } from './manual-page-map.ts';
 import {
   MANUAL_FILE_MISSING,
+  MANUAL_NOT_AVAILABLE,
   MANUAL_PATH_NOT_COVERED,
   chooseManualObject,
   manualContentType,
   manualDownloadSentence,
   manualFileKind,
+  manualOpenErrorMessage,
   manualPathCovered,
   normalizeStoragePath,
   storageResponseIsMissing,
@@ -139,7 +141,13 @@ test('storage not-found is 404 file_missing and a generic failure is not', () =>
   );
   assert.equal(storageResponseIsMissing(500, 'Could not stream manual bytes'), false);
   assert.equal(storageResponseIsMissing(502, 'Manual file is unavailable'), false);
-  assert.equal(MANUAL_FILE_MISSING, "This manual's file is missing. We've been notified.");
+  assert.equal(MANUAL_FILE_MISSING, "This manual's file is missing.");
+  assert.equal(manualOpenErrorMessage('file_missing'), MANUAL_FILE_MISSING);
+  assert.equal(manualOpenErrorMessage('not_found'), MANUAL_NOT_AVAILABLE);
+  assert.equal(manualOpenErrorMessage('unpublished'), MANUAL_NOT_AVAILABLE);
+  assert.equal(manualOpenErrorMessage('Access denied'), null);
+  assert.equal(MANUAL_NOT_AVAILABLE, "This manual isn't available.");
+  assert.doesNotMatch(MANUAL_FILE_MISSING, /notified/i);
 });
 
 test('non-PDF manuals keep their type and are not rendered as PDFs', () => {
@@ -265,6 +273,41 @@ test('get-manual-url probes metadata before signing and the viewer does not rend
   const paintAt = openPath.indexOf('openSrc(');
   assert.ok(downloadAt > 0 && paintAt > downloadAt);
   assert.doesNotMatch(viewer, /window\.open/);
+});
+
+test('not_found is unavailable, and a missing file no longer says we were notified', () => {
+  assert.equal(manualOpenErrorMessage('file_missing'), MANUAL_FILE_MISSING);
+  assert.equal(manualOpenErrorMessage('not_found'), MANUAL_NOT_AVAILABLE);
+  assert.equal(manualOpenErrorMessage('unpublished'), MANUAL_NOT_AVAILABLE);
+  assert.equal(manualOpenErrorMessage(undefined), null);
+  assert.doesNotMatch(MANUAL_FILE_MISSING, /notified/i);
+  assert.doesNotMatch(MANUAL_NOT_AVAILABLE, /missing|notified/i);
+
+  const viewer = readFileSync(join(here, '../components/ManualPdfViewer.tsx'), 'utf8');
+  assert.match(viewer, /manualOpenErrorMessage\(json/);
+  assert.match(viewer, /manualOpenErrorMessage\(json\?\.error\)/);
+  assert.doesNotMatch(viewer, /file_missing' \|\| (?:res\.)?status === 404/);
+  assert.match(viewer, /data-testid="manual-file-missing"/);
+  assert.match(viewer, /data-testid="manual-not-available"/);
+  assert.match(viewer, /setError\(MANUAL_NOT_AVAILABLE\)/);
+
+  const library = readFileSync(join(here, '../app/manuals/page.tsx'), 'utf8');
+  assert.match(library, /manualOpenErrorMessage\(json\.error\)/);
+  assert.match(library, /toast\.error\(t\(openError\)\)/);
+
+  const cited = readFileSync(join(here, '../components/AssistantCitedManual.tsx'), 'utf8');
+  assert.match(cited, /<ManualPdfViewer/);
+
+  const copy = readFileSync(join(here, 'i18n/gap-copy.ts'), 'utf8');
+  assert.match(copy, /This manual's file is missing\./);
+  assert.match(copy, /This manual isn't available\./);
+  assert.doesNotMatch(copy, /We've been notified|Ya se nos avisó|Nous avons été prévenus|Já fomos avisados|تم إبلاغنا/);
+
+  const edge = readFileSync(join(here, '../../supabase/functions/get-manual-url/index.ts'), 'utf8');
+  const warnFn = edge.slice(edge.indexOf('function fileMissingResponse'), edge.indexOf('function reportedMissingColumn'));
+  assert.match(warnFn, /console\.warn\(`file_missing manual_id=\$\{id\}`\)/);
+  assert.doesNotMatch(warnFn, /storage_path|prefix/);
+  assert.equal((edge.match(/fileMissingResponse\(/g) || []).length, 4);
 });
 
 const FOLDER = 'shared/candela/VBeam2 (Perfecta, Aesthetica, or Platinum)';
