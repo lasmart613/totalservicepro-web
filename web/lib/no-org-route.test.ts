@@ -157,6 +157,130 @@ test('login and callback keep safeRedirectPath on next', () => {
   assert.match(setPassword, /safeRedirectPath/);
 });
 
+test('an unfinished admin with a set-up org stays on the dashboard and leaves the wizard', () => {
+  for (const role of ['company_admin', 'admin', 'service_manager', 'billing_manager']) {
+    const profile = { organization_id: 12, role, onboarding_completed: false };
+    assert.equal(homeDest({ profile, claim: noInvite, orgSetUp: true }), null, role);
+    assert.equal(
+      onboardingLeaveTarget({ profile, claim: noInvite, orgSetUp: true, orgType: 'service_company' }),
+      '/company',
+      role
+    );
+    assert.deepEqual(
+      signInRedirects({
+        start: '/',
+        profile,
+        claim: noInvite,
+        orgSetUp: true,
+        orgType: 'service_company',
+        origin: ORIGIN,
+      }),
+      [],
+      role
+    );
+    assert.deepEqual(
+      signInRedirects({
+        start: '/onboarding',
+        profile,
+        claim: noInvite,
+        orgSetUp: true,
+        orgType: 'service_company',
+        origin: ORIGIN,
+      }),
+      ['/company'],
+      role
+    );
+  }
+});
+
+test('an unfinished admin with an empty org still goes to /onboarding', () => {
+  const profile = { organization_id: 12, role: 'company_admin', onboarding_completed: false };
+  assert.equal(homeDest({ profile, claim: noInvite, orgSetUp: false }), '/onboarding');
+  assert.equal(onboardingLeaveTarget({ profile, claim: noInvite, orgSetUp: false, orgType: 'service_company' }), null);
+  assert.deepEqual(
+    signInRedirects({
+      start: '/',
+      profile,
+      claim: noInvite,
+      orgSetUp: false,
+      orgType: 'service_company',
+      origin: ORIGIN,
+    }),
+    ['/onboarding']
+  );
+  assert.deepEqual(
+    signInRedirects({
+      start: '/onboarding',
+      profile,
+      claim: noInvite,
+      orgSetUp: false,
+      orgType: 'service_company',
+      origin: ORIGIN,
+    }),
+    []
+  );
+});
+
+test('a set-up lookup error keeps the current onboarding path', () => {
+  const profile = { organization_id: 12, role: 'company_admin', onboarding_completed: false };
+  assert.equal(homeDest({ profile, claim: noInvite, orgSetUp: null }), '/onboarding');
+  assert.equal(homeDest({ profile, claim: noInvite }), '/onboarding');
+  assert.equal(onboardingLeaveTarget({ profile, claim: noInvite, orgSetUp: null }), null);
+  assert.equal(onboardingLeaveTarget({ profile, claim: noInvite }), null);
+  assert.deepEqual(
+    signInRedirects({ start: '/', profile, claim: noInvite, orgSetUp: null, origin: ORIGIN }),
+    ['/onboarding']
+  );
+});
+
+test('invited roles and owners are unchanged when the org is set up', () => {
+  const invited = { organization_id: 4, role: 'fse', onboarding_completed: false };
+  assert.equal(homeDest({ profile: invited, claim: noInvite, orgSetUp: true }), '/onboarding/member');
+  assert.equal(
+    onboardingLeaveTarget({ profile: invited, claim: noInvite, orgSetUp: true, orgType: 'service_company' }),
+    null
+  );
+  for (const role of ['engineer', 'dispatcher', 'scheduler', 'technician']) {
+    assert.equal(
+      homeDest({ profile: { organization_id: 4, role, onboarding_completed: false }, claim: noInvite, orgSetUp: true }),
+      '/onboarding/member',
+      role
+    );
+  }
+
+  const owner = { organization_id: 9, role: 'owner', onboarding_completed: false };
+  assert.equal(homeDest({ profile: owner, claim: noInvite, orgSetUp: true }), null);
+  assert.equal(homeDest({ profile: owner, claim: noInvite, orgSetUp: false }), null);
+  assert.equal(
+    onboardingLeaveTarget({ profile: owner, claim: noInvite, orgSetUp: true, orgType: 'laser_clinic' }),
+    '/my-lasers'
+  );
+  assert.equal(
+    onboardingLeaveTarget({ profile: owner, claim: noInvite, orgSetUp: false, orgType: 'laser_clinic' }),
+    '/my-lasers'
+  );
+
+  const customer = { organization_id: 9, role: 'customer', onboarding_completed: false };
+  assert.equal(homeDest({ profile: customer, claim: noInvite, orgSetUp: true }), null);
+  assert.equal(
+    onboardingLeaveTarget({ profile: customer, claim: noInvite, orgSetUp: true, orgType: 'customer' }),
+    '/my-lasers'
+  );
+
+  for (const role of ['supplier', 'parts_supplier']) {
+    const supplier = { organization_id: 3, role, onboarding_completed: false };
+    assert.equal(homeDest({ profile: supplier, claim: noInvite, orgSetUp: true }), null, role);
+    assert.equal(
+      onboardingLeaveTarget({ profile: supplier, claim: noInvite, orgSetUp: true, orgType: 'parts_supplier' }),
+      '/',
+      role
+    );
+  }
+
+  const finished = { organization_id: 12, role: 'company_admin', onboarding_completed: true };
+  assert.equal(homeDest({ profile: finished, claim: noInvite, orgSetUp: false }), null);
+});
+
 test('an active org is not treated as no organization', () => {
   const activeOnly = { organization_id: null, active_organization_id: 9, role: 'fse', onboarding_completed: true };
   assert.equal(homeDest({ profile: activeOnly, claim: noInvite }), null);

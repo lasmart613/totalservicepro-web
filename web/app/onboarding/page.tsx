@@ -18,7 +18,8 @@ import { useEquipmentCatalog } from '@/lib/use-equipment-catalog';
 import { applyPendingSignup, ensureOrganizationMembership, resolvePendingSignup } from '@/lib/pending-signup';
 import { postFounderOrganization } from '@/lib/org-founder-client';
 import { destAfterInviteClaim, inviteInPlay, postTeamClaim, type InviteClaimResult } from '@/lib/invite-claim';
-import { onboardingLeaveTarget } from '@/lib/no-org-route';
+import { onboardingLeaveTarget, profileOrgId } from '@/lib/no-org-route';
+import { adminRoutingNeedsOrgSetupLookup, lookupOrgSetUp } from '@/lib/org-setup';
 import {
   missingComplimentaryColumn,
   stripUnbackedComplimentaryPremium,
@@ -137,10 +138,14 @@ export default function Onboarding() {
       // No organization_id and no active org: render this wizard.
       // A claim that did not attach an org must not send the user back to /.
       // A claim that did attach an org leaves once, to member setup or the usual page.
+      const orgSetUp = adminRoutingNeedsOrgSetupLookup(profile)
+        ? await lookupOrgSetUp(supabase, profileOrgId(profile))
+        : null;
       const leave = onboardingLeaveTarget({
         profile,
         orgType: profile?.organizations?.type ?? null,
         claim: claimJson,
+        orgSetUp,
       });
       if (leave) {
         router.replace(leave);
