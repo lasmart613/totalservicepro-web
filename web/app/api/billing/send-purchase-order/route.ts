@@ -10,7 +10,11 @@ import {
 import { parseMailLocale } from '@/lib/i18n/translate-app';
 import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import { isSupplierOrgType } from '@/lib/org-types';
-import { releaseDocumentSendSlot, takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
+import {
+  releaseDocumentSendSlot,
+  takeDocumentSendSlot,
+  type HeldDocumentSendSlot,
+} from '@/lib/billing/send-rate-limit';
 import {
   buildOwnedPurchaseOrderEmailText,
   buildOwnedPurchaseOrderMessage,
@@ -53,8 +57,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseOrderDeps = {}) {
-  let heldSlot: { organizationId: string | number | null; documentId: string | number; stamp: number } | null =
-    null;
+  let heldSlot: HeldDocumentSendSlot | null = null;
+  let limitClient: SupabaseClient | null = null;
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
@@ -102,6 +106,7 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
 
     const admin: SupabaseClient | null =
       deps.adminClient !== undefined ? deps.adminClient : hasServiceRole() ? getSupabaseAdmin() : null;
+    limitClient = admin;
 
     const loaded = await loadOwnedDocument({
       userClient: supabase,
@@ -184,15 +189,25 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
       );
     }
 
-    const sendLimit = takeDocumentSendSlot({
+    const sendLimit = await takeDocumentSendSlot({
       organizationId: callerOrgId,
       documentId: poId,
       documentType: 'purchase_order',
+      client: limitClient,
     });
     if (!sendLimit.ok) {
+      if (sendLimit.scope === 'unavailable') {
+        return respond({ error: sendLimit.message, emailSent: false }, 503);
+      }
       return respond({ error: sendLimit.message, rateLimited: true }, 429);
     }
-    heldSlot = { organizationId: callerOrgId, documentId: poId, stamp: sendLimit.stamp };
+    heldSlot = {
+      organizationId: callerOrgId,
+      documentId: poId,
+      stamp: sendLimit.stamp,
+      slotId: sendLimit.slotId,
+      backend: sendLimit.backend,
+    };
 
     const message = resendMessage({
       from,
@@ -214,7 +229,7 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
     if (!rr.ok) {
       console.error('Resend purchase order send failed', result);
       if (heldSlot) {
-        releaseDocumentSendSlot({ ...heldSlot, documentType: 'purchase_order' });
+        await releaseDocumentSendSlot({ ...heldSlot, documentType: 'purchase_order', client: limitClient });
         heldSlot = null;
       }
       const msg = result?.message || `Email provider error (${rr.status})`;
@@ -262,7 +277,9 @@ export async function runSendPurchaseOrder(req: NextRequest, deps: SendPurchaseO
       200
     );
   } catch (e: any) {
-    if (heldSlot) releaseDocumentSendSlot({ ...heldSlot, documentType: 'purchase_order' });
+    if (heldSlot) {
+      await releaseDocumentSendSlot({ ...heldSlot, documentType: 'purchase_order', client: limitClient });
+    }
     console.error('send-purchase-order', e);
     return respond({ error: e?.message || 'Send failed' }, 500);
   }

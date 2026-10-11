@@ -19,7 +19,11 @@ import {
   senderCompanyFromOrg,
   storedCustomerEmail,
 } from '@/lib/billing/owned-doc-mail';
-import { releaseDocumentSendSlot, takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
+import {
+  releaseDocumentSendSlot,
+  takeDocumentSendSlot,
+  type HeldDocumentSendSlot,
+} from '@/lib/billing/send-rate-limit';
 
 /** Same body for a missing report and a report owned by another shop. */
 const REPORT_NOT_FOUND = 'Service report not found.';
@@ -46,8 +50,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function runSendReport(req: NextRequest, deps: SendReportDeps = {}) {
-  let heldSlot: { organizationId: string | number | null; documentId: string | number; stamp: number } | null =
-    null;
+  let heldSlot: HeldDocumentSendSlot | null = null;
+  let limitClient: SupabaseClient | null = null;
   try {
     const auth = req.headers.get('authorization') || '';
     const token = auth.replace(/^Bearer\s+/i, '').trim();
@@ -90,10 +94,13 @@ export async function runSendReport(req: NextRequest, deps: SendReportDeps = {})
     const reportId = request.documentId;
     if (reportId == null) return respond({ error: 'Service report id is required.' }, 400);
 
+    const admin: SupabaseClient | null =
+      deps.adminClient !== undefined ? deps.adminClient : hasServiceRole() ? getSupabaseAdmin() : null;
+    limitClient = admin;
+
     const loaded = await loadOwnedDocument({
       userClient: supabase,
-      adminClient:
-        deps.adminClient !== undefined ? deps.adminClient : hasServiceRole() ? getSupabaseAdmin() : null,
+      adminClient: admin,
       table: 'service_reports',
       id: reportId,
       callerOrgId,
@@ -147,15 +154,25 @@ export async function runSendReport(req: NextRequest, deps: SendReportDeps = {})
       );
     }
 
-    const sendLimit = takeDocumentSendSlot({
+    const sendLimit = await takeDocumentSendSlot({
       organizationId: callerOrgId,
       documentId: reportId,
       documentType: 'report',
+      client: limitClient,
     });
     if (!sendLimit.ok) {
+      if (sendLimit.scope === 'unavailable') {
+        return respond({ error: sendLimit.message, emailSent: false }, 503);
+      }
       return respond({ error: sendLimit.message, rateLimited: true }, 429);
     }
-    heldSlot = { organizationId: callerOrgId, documentId: reportId, stamp: sendLimit.stamp };
+    heldSlot = {
+      organizationId: callerOrgId,
+      documentId: reportId,
+      stamp: sendLimit.stamp,
+      slotId: sendLimit.slotId,
+      backend: sendLimit.backend,
+    };
 
     const techName = await readTechName(supabase, user.id);
     const company =
@@ -202,7 +219,7 @@ export async function runSendReport(req: NextRequest, deps: SendReportDeps = {})
     if (!rr.ok) {
       console.error('Resend service-report send failed', result);
       if (heldSlot) {
-        releaseDocumentSendSlot({ ...heldSlot, documentType: 'report' });
+        await releaseDocumentSendSlot({ ...heldSlot, documentType: 'report', client: limitClient });
         heldSlot = null;
       }
       const msg = result?.message || `Email provider error (${rr.status})`;
@@ -227,7 +244,9 @@ export async function runSendReport(req: NextRequest, deps: SendReportDeps = {})
       [recipient.email]
     );
   } catch (e: any) {
-    if (heldSlot) releaseDocumentSendSlot({ ...heldSlot, documentType: 'report' });
+    if (heldSlot) {
+      await releaseDocumentSendSlot({ ...heldSlot, documentType: 'report', client: limitClient });
+    }
     console.error('send-report', e);
     return respond({ error: e?.message || 'Server error' }, 500);
   }

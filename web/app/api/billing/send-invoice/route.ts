@@ -20,7 +20,11 @@ import { loadOrgMoneyPrefs } from '@/lib/org-money';
 import { resolveNumberingTimeZone } from '@/lib/org-timezone';
 import { readEstimateDocumentLocale } from '@/lib/billing/estimate-action';
 import { isVoidInvoiceStatus, VOIDED_INVOICE_MESSAGE } from '@/lib/billing/void-invoice';
-import { releaseDocumentSendSlot, takeDocumentSendSlot } from '@/lib/billing/send-rate-limit';
+import {
+  releaseDocumentSendSlot,
+  takeDocumentSendSlot,
+  type HeldDocumentSendSlot,
+} from '@/lib/billing/send-rate-limit';
 import { stampLangOnEstimateLinks } from '@/lib/share';
 import { loadInvoiceRow, mergePaymentFieldsIntoInvoiceData } from '@/lib/billing/invoice-row-load';
 import {
@@ -60,8 +64,8 @@ export async function POST(req: NextRequest) {
 }
 
 export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {}) {
-  let heldSlot: { organizationId: string | number | null; documentId: string | number; stamp: number } | null =
-    null;
+  let heldSlot: HeldDocumentSendSlot | null = null;
+  let limitClient: SupabaseClient | null = null;
   let checkoutSessionCreated = false;
   const createInvoiceCheckoutSession = deps.createCheckout ?? defaultCreateInvoiceCheckoutSession;
   try {
@@ -84,6 +88,7 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
 
     const admin: SupabaseClient | null =
       deps.adminClient !== undefined ? deps.adminClient : hasServiceRole() ? getSupabaseAdmin() : null;
+    limitClient = admin;
 
     const {
       data: { user },
@@ -180,15 +185,25 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
       );
     }
 
-    const sendLimit = takeDocumentSendSlot({
+    const sendLimit = await takeDocumentSendSlot({
       organizationId: callerOrgId,
       documentId: invoiceId,
       documentType: 'invoice',
+      client: limitClient,
     });
     if (!sendLimit.ok) {
+      if (sendLimit.scope === 'unavailable') {
+        return respond({ error: sendLimit.message, emailSent: false }, 503);
+      }
       return respond({ error: sendLimit.message, rateLimited: true }, 429);
     }
-    heldSlot = { organizationId: callerOrgId, documentId: invoiceId, stamp: sendLimit.stamp };
+    heldSlot = {
+      organizationId: callerOrgId,
+      documentId: invoiceId,
+      stamp: sendLimit.stamp,
+      slotId: sendLimit.slotId,
+      backend: sendLimit.backend,
+    };
 
     let paymentUrl: string | null = null;
     let stripeSessionId: string | null = null;
@@ -351,7 +366,7 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
     if (!rr.ok) {
       console.error('Resend invoice send failed', result);
       if (heldSlot && !checkoutSessionCreated) {
-        releaseDocumentSendSlot({ ...heldSlot, documentType: 'invoice' });
+        await releaseDocumentSendSlot({ ...heldSlot, documentType: 'invoice', client: limitClient });
         heldSlot = null;
       }
       const msg = result?.message || `Email provider error (${rr.status})`;
@@ -387,7 +402,7 @@ export async function runSendInvoice(req: NextRequest, deps: SendInvoiceDeps = {
     );
   } catch (e: any) {
     if (heldSlot && !checkoutSessionCreated) {
-      releaseDocumentSendSlot({ ...heldSlot, documentType: 'invoice' });
+      await releaseDocumentSendSlot({ ...heldSlot, documentType: 'invoice', client: limitClient });
     }
     console.error('send-invoice', e);
     return respond({ error: e?.message || 'Server error' }, 500);
