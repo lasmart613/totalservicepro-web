@@ -142,9 +142,54 @@ export function effectivePageCount(pageCount: unknown, indexText?: string): numb
   return storedPageCount(pageCount) ?? (indexText ? maxStampPage(indexText) : undefined)
 }
 
+const CLEAR_MANUAL_REFUSAL =
+  /\b(?:do not|does not|don't|doesn't|cannot|can't|could not|couldn't)\s+(?:contain|include|list|provide|mention|show)\b/i
+const SUBJECT_MANUAL_REFUSAL =
+  /\b(?:passages|sections|manuals?)\b[^.]{0,80}\b(?:do not|does not|don't|doesn't|cannot|can't)\s+(?:contain|include|list|provide|mention|describe|define|show)\b/i
+const NO_MANUAL_INFO = /\b(?:no|not any)\s+(?:information|reference|mention|description|details)\b/i
+const NOT_IN_MANUAL =
+  /\bnot (?:in the (?:retrieved |provided |selected )?passages|in the (?:selected |provided |operator |service )?manual)\b/i
+/** "not described" / "not listed" only count when the reply never gives a value or a step. */
+const LOOSE_NOT_STATED = /\bnot (?:included|found|present|listed|described|defined)\b/i
+
+function replySentences(text: string): string[] {
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((part) => part.trim())
+    .filter(Boolean)
+}
+
+/** A fault code, a measurement, or a service action. A bare page number is not one. */
+function hasSpecificValueOrStep(text: string): boolean {
+  if (/\b(?:faults?|errors?|alarms?)\s*(?:codes?\s*)?#?\s*\d+(?:\.\d+)?\b/i.test(text)) return true
+  if (/\b[A-Za-z]{1,6}-?\d+\.\d+\b/.test(text)) return true
+  if (
+    /\b\d+(?:\.\d+)?\s*(?:%|nm|mm|cm|j|joules?|hz|khz|vac|vdc|°c|°f|degrees?|psi|bar|amps?|watts?|msec|ms|sec)\b/i.test(
+      text
+    )
+  ) {
+    return true
+  }
+  if (/\b(?:call|replace|turn|clean|calibrat\w*|install|remove|reset|tighten|loosen|contact|disconnect|reconnect)\b/i.test(text)) {
+    return true
+  }
+  return false
+}
+
+function clearManualRefusal(sentence: string): boolean {
+  return (
+    CLEAR_MANUAL_REFUSAL.test(sentence) ||
+    SUBJECT_MANUAL_REFUSAL.test(sentence) ||
+    NO_MANUAL_INFO.test(sentence) ||
+    NOT_IN_MANUAL.test(sentence)
+  )
+}
+
 /**
  * The model said this fact is not in the manual. A refusal must not carry a citation chip.
- * A real answer that says "do not use" or "do not expose" is not a refusal.
+ * The main point has to be the refusal: the first sentence says the manual lacks it, or the
+ * reply never gives a value or a step. "Fault 2.1 is not described as user-serviceable; call
+ * service." is an answer. "Do not use" is an instruction, not a refusal.
  */
 export function answerDeclinesManualCitation(text: string): boolean {
   const raw = String(text || '')
@@ -152,45 +197,81 @@ export function answerDeclinesManualCitation(text: string): boolean {
     .replace(/\s+/g, ' ')
     .trim()
   if (!raw) return false
-  if (
-    /\b(?:do not|does not|don't|doesn't|cannot|can't|could not|couldn't)\s+(?:contain|include|list|provide|mention|describe|define|show)\b/i.test(
-      raw
-    )
-  ) {
-    return true
-  }
-  if (/\b(?:no|not any)\s+(?:information|reference|mention|description|details)\b/i.test(raw)) return true
-  if (
-    /\bnot (?:included|found|present|listed|described|defined|in the (?:retrieved |provided |selected )?passages|in the (?:selected |provided |operator )?manual)\b/i.test(
-      raw
-    )
-  ) {
-    return true
-  }
-  if (/\b(?:passages|sections|manual)\b[^.]{0,80}\b(?:do not|does not|don't|doesn't)\b/i.test(raw)) return true
+  const first = replySentences(raw)[0] || raw
+  if (clearManualRefusal(first)) return true
+  if (!hasSpecificValueOrStep(raw) && (clearManualRefusal(raw) || LOOSE_NOT_STATED.test(raw))) return true
   return false
 }
 
-/** Printed footer such as "Page 54 of 178" or "Page 2 of 5". Not a physical PDF index. */
+/**
+ * Printed footer such as "Page 54 of 178". A cross-reference ("see Page 2 of 5")
+ * is not the footer: there must be exactly one distinct number, and it must sit
+ * in the last ~200 characters of the page.
+ */
 export function printedPageLabel(pageText: string): number | undefined {
-  const match = String(pageText || '').match(/\b(?:page|p[áa]gina|seite)\s+(\d{1,4})\s+of\s+\d{1,4}\b/i)
-  if (!match) return undefined
-  const n = Number(match[1])
-  if (!Number.isFinite(n) || n < 1 || n > 9999) return undefined
-  return Math.floor(n)
+  const text = String(pageText || '')
+  const found: Array<{ x: number; at: number }> = []
+  const footerRe = /\b(?:page|p[áa]gina|seite)\s+(\d{1,4})\s+of\s+\d{1,4}\b/gi
+  for (const match of text.matchAll(footerRe)) {
+    const n = Number(match[1])
+    if (!Number.isFinite(n) || n < 1 || n > 9999) continue
+    found.push({ x: Math.floor(n), at: match.index ?? 0 })
+  }
+  if (!found.length) return undefined
+  const distinct = new Set(found.map((hit) => hit.x))
+  if (distinct.size !== 1) return undefined
+  const last = found[found.length - 1]
+  if (last.at < text.length - 200) return undefined
+  return last.x
 }
+
+/** Other physical pages whose own footer is this printed number. */
+function pagesWithPrintedFooter(indexText: string, printed: number): number[] {
+  const max = maxStampPage(indexText)
+  if (!max) return []
+  const hits: number[] = []
+  for (let n = 1; n <= max; n++) {
+    const body = indexPageBody(indexText, n)
+    if (body && printedPageLabel(body) === printed) hits.push(n)
+  }
+  return hits
+}
+
+export type AlignReplyOptions = { query?: string; pageCount?: number }
 
 /**
  * When the reply names the printed footer on the cited PDF page, rewrite that
  * mention to the physical page the chip uses.
+ * Skip the rewrite when the printed number is itself a physical page that
+ * backs the answer. Never touch a range ("pp. 54-55") or a decimal ("page 54.2").
+ * "page X of Y" is rewritten. A bare "page X" is rewritten only when no other
+ * page carries that same footer.
  */
-export function alignReplyToCitationPage(answer: string, pdfPage: number | undefined, indexText: string): string {
-  if (pdfPage == null || pdfPage < 1) return String(answer || '')
+export function alignReplyToCitationPage(
+  answer: string,
+  pdfPage: number | undefined,
+  indexText: string,
+  opts?: AlignReplyOptions
+): string {
+  const text = String(answer || '')
+  if (pdfPage == null || pdfPage < 1) return text
   const body = indexPageBody(indexText, pdfPage) || ''
   const printed = printedPageLabel(body)
-  if (printed == null || printed === pdfPage) return String(answer || '')
-  const re = new RegExp(`\\b(pages?|pp?\\.)\\s+${printed}(?!\\d)(?:\\s+of\\s+\\d{1,4})?`, 'gi')
-  return String(answer || '').replace(re, (_all, word: string) => `${word} ${pdfPage}`)
+  if (printed == null || printed === pdfPage) return text
+  const pageCount = opts?.pageCount
+  const within = pageCount == null || pageCount < 1 || printed <= pageCount
+  const query = String(opts?.query || '').trim()
+  if (within && query) {
+    const physical = indexPageBody(indexText, printed) || ''
+    if (physical && quotedPageSupport(physical, query, indexText) > 0) return text
+  }
+  const ofRe = new RegExp(`\\b(page)\\s+${printed}(?![\\d.,–—-]\\s*\\d)\\s+of\\s+\\d{1,4}\\b`, 'gi')
+  let next = text.replace(ofRe, (_all, word: string) => `${word} ${pdfPage}`)
+  const others = pagesWithPrintedFooter(indexText, printed).filter((n) => n !== pdfPage)
+  if (others.length) return next
+  const bareRe = new RegExp(`\\b(page)\\s+${printed}(?![\\d.,–—-]\\s*\\d)(?!\\s+of\\s+\\d)`, 'gi')
+  next = next.replace(bareRe, (_all, word: string) => `${word} ${pdfPage}`)
+  return next
 }
 
 function asReportedPage(value: unknown): number | undefined {

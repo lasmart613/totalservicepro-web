@@ -2548,7 +2548,10 @@ serve(async (req) => {
         }
         const scopedId = asManualId(manualMeta?.id)
         const chip = manualCitations.find((c) => c.page && (scopedId == null || c.manualId === scopedId))
-        const aligned = alignReplyToCitationPage(replyText, chip?.page, citationIndexText)
+        const aligned = alignReplyToCitationPage(replyText, chip?.page, citationIndexText, {
+          query: citationQuery,
+          pageCount: selectedPageCount,
+        })
         applyReplyPages(aligned)
         if (answerDeclinesManualCitation(aligned)) {
           manualCitations = []
