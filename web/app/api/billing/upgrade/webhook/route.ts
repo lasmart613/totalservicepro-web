@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
 import { applyBillingSubscriptionEvent } from '@/lib/billing/apply-org-downgrade';
-import { applyPaidCheckoutSession } from '@/lib/billing/apply-org-upgrade';
+import { applyPaidCheckoutSession, isCheckoutStatusRefusal } from '@/lib/billing/apply-org-upgrade';
 import {
   isCheckoutSessionCompleted,
   isInvoicePaymentFailed,
@@ -29,7 +29,10 @@ export const dynamic = 'force-dynamic';
  * Stripe → org upgrade when success_url is missed, and back to Free when
  * the subscription is deleted or updated to canceled, unpaid, or
  * incomplete_expired. past_due stays Premium. invoice.payment_failed is
- * logged and does not change the plan.
+ * logged and does not change the plan. checkout.session.completed applies
+ * only while the subscription is active or trialing. A later cancel, or a
+ * completed event that arrives after customer.subscription.deleted, does
+ * not put Premium back.
  * Verifies the webhook signature. Idempotent. Never creates a user or org.
  *
  * Stripe Dashboard endpoint events:
@@ -120,6 +123,13 @@ export async function POST(req: NextRequest) {
         allowMissingUser: true,
       });
       if (!result.ok) {
+        if (isCheckoutStatusRefusal(result.reason)) {
+          console.warn(
+            '[billing/upgrade/webhook] checkout.session.completed ignored; subscription is not active or trialing',
+            { sessionId, reason: result.reason }
+          );
+          return NextResponse.json({ ok: true, applied: false, ignored: result.reason });
+        }
         return NextResponse.json({ ok: true, ignored: result.reason });
       }
       return NextResponse.json({

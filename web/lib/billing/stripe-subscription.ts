@@ -219,10 +219,19 @@ export async function retrieveCheckoutSession(sessionId: string): Promise<Stripe
   if (!id || !/^cs_(test|live)_/.test(id)) {
     throw new StripeSubscriptionError('Invalid Checkout session id', 400);
   }
-  return stripeRequest(
-    `checkout/sessions/${encodeURIComponent(id)}?expand[]=invoice&expand[]=line_items`,
+  // expand[]=subscription is Stripe's expand: ['subscription']. A Checkout
+  // session stays complete after cancel, so the id alone is not a live plan.
+  const session = await stripeRequest(
+    `checkout/sessions/${encodeURIComponent(id)}?expand[]=subscription&expand[]=invoice&expand[]=line_items`,
     'GET'
   );
+  if (!subscriptionStatusFromSession(session)) {
+    const subscriptionId = stripeSubscriptionIdFromSession(session);
+    if (subscriptionId) {
+      session.subscription = await retrieveStripeSubscription(subscriptionId);
+    }
+  }
+  return session;
 }
 
 function stripeSearchQuote(value: string): string {
@@ -347,4 +356,13 @@ export function stripeSubscriptionIdFromSession(session: StripeObject): string |
   if (typeof sub === 'string' && sub.startsWith('sub_')) return sub;
   if (sub && typeof sub === 'object' && typeof sub.id === 'string') return sub.id;
   return null;
+}
+
+/** Live Stripe status from an expanded Checkout subscription. Missing is null, never "active". */
+export function subscriptionStatusFromSession(session: StripeObject): string | null {
+  const sub = session.subscription;
+  if (!sub || typeof sub !== 'object') return null;
+  if (typeof sub.status !== 'string') return null;
+  const status = sub.status.trim();
+  return status || null;
 }

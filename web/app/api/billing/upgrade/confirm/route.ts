@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { applyPaidCheckoutSession } from '@/lib/billing/apply-org-upgrade';
+import {
+  applyPaidCheckoutSession,
+  checkoutStatusRefusalMessage,
+  isCheckoutStatusRefusal,
+} from '@/lib/billing/apply-org-upgrade';
 import { loadBillingCaller } from '@/lib/billing/billing-caller';
 import { normalizeOrgId } from '@/lib/billing/upgrade-session';
 import {
@@ -13,7 +17,8 @@ export const dynamic = 'force-dynamic';
 
 /**
  * After Stripe success_url, verify the paid session and upgrade THIS org.
- * Unpaid / canceled sessions are rejected. No invite email is sent.
+ * Unpaid checkout, a canceled subscription, or a missing subscription
+ * status is rejected. No invite email is sent.
  * Idempotent — a second confirm of the same session does not create an account.
  */
 export async function POST(req: NextRequest) {
@@ -66,8 +71,14 @@ export async function POST(req: NextRequest) {
       userEmail: user.email || null,
     });
     if (!result.ok) {
+      const refused = isCheckoutStatusRefusal(result.reason);
       return NextResponse.json(
-        { error: 'Checkout was not completed. You were not charged.', reason: result.reason },
+        {
+          error: refused
+            ? checkoutStatusRefusalMessage(result.reason)
+            : 'Checkout was not completed. You were not charged.',
+          reason: result.reason,
+        },
         { status: 409 }
       );
     }
