@@ -99,6 +99,38 @@ export function decideFounderLink(input: {
   return { ok: true, role: founderRoleForOrgType(input.orgType) };
 }
 
+/** How long a creator may claim an org nobody belongs to and no shop serves. */
+export const UNCLAIMED_ORG_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Founder link to an existing org (mirrors org_unclaimed_new in
+ * 20261011_000916). created_by alone is not enough: a tech who added a customer
+ * clinic is its created_by, and after removal from the shop must not be able to
+ * make themselves the clinic's owner. Allowed when the caller is already a
+ * member (re-link), or the org is brand new and unclaimed: under 24h old, no
+ * members, and no organization_customers link. Unknown state fails closed.
+ */
+export function founderClaimAllowed(input: {
+  callerIsMember: boolean | null;
+  orgHasMembers: boolean | null;
+  orgHasServiceLink: boolean | null;
+  orgCreatedAt?: string | null;
+  now?: Date;
+}): { ok: true } | AuthzFailure {
+  if (input.callerIsMember === true) return { ok: true };
+  const created = input.orgCreatedAt ? Date.parse(input.orgCreatedAt) : NaN;
+  const now = (input.now ?? new Date()).getTime();
+  const fresh = Number.isFinite(created) && now - created < UNCLAIMED_ORG_WINDOW_MS;
+  if (input.callerIsMember === false && input.orgHasMembers === false && input.orgHasServiceLink === false && fresh) {
+    return { ok: true };
+  }
+  return {
+    ok: false,
+    status: 403,
+    error: 'This organization already has members or is served by a company. Ask its admin for an invite.',
+  };
+}
+
 /**
  * Self-service attach of a profile to an org. Mirrors the trigger:
  * creator, existing member, or an unaccepted invite. Anything else is refused.
