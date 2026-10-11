@@ -11,6 +11,7 @@ import {
   evaluateUpgradeSession,
   parsePaidSubscriptionRecord,
   parsePaidUpgradeSession,
+  subscriptionGrantsPremium,
   type StripeCheckoutLike,
   type StripeSubscriptionLike,
   type UpgradeSessionOwner,
@@ -19,6 +20,7 @@ import {
   cancelStripeSubscription,
   stripeCustomerIdFromSession,
   stripeSubscriptionIdFromSession,
+  subscriptionStatusFromSession,
   type StripeObject,
 } from './stripe-subscription.ts';
 
@@ -30,12 +32,25 @@ export type AppliedOrgUpgrade = {
   receipt: ReturnType<typeof buildUpgradeReceipt>;
 };
 
-function checkoutSubscriptionStatus(session: StripeObject): string {
-  const sub = session.subscription;
-  if (sub && typeof sub === 'object' && typeof sub.status === 'string' && sub.status.trim()) {
-    return sub.status;
+export function isCheckoutStatusRefusal(reason: string | null | undefined): boolean {
+  return reason === 'missing_subscription_status' || reason === 'subscription_not_live';
+}
+
+export function checkoutStatusRefusalMessage(reason: string): string {
+  if (reason === 'missing_subscription_status') {
+    return 'Subscription status is missing. The organization was not upgraded.';
   }
-  return 'active';
+  return 'Subscription is not active. The organization was not upgraded.';
+}
+
+/** Null when this status may be written. Missing and unknown statuses are refused. */
+export function checkoutStatusRefusal(
+  status: string | null | undefined
+): { ok: false; reason: 'missing_subscription_status' | 'subscription_not_live' } | null {
+  const value = typeof status === 'string' ? status.trim() : '';
+  if (!value) return { ok: false, reason: 'missing_subscription_status' };
+  if (!subscriptionGrantsPremium(value)) return { ok: false, reason: 'subscription_not_live' };
+  return null;
 }
 
 async function maybeCancelPrior(
@@ -76,6 +91,10 @@ export async function applyPaidCheckoutSession(input: {
     ('userId' in parsed && parsed.userId) || input.expectedOwner?.userId || null;
   if (!organizationId) return { ok: false, reason: 'missing_org' };
 
+  const stripeStatus = subscriptionStatusFromSession(input.session);
+  const refused = checkoutStatusRefusal(stripeStatus);
+  if (!stripeStatus || refused) return refused ?? { ok: false, reason: 'missing_subscription_status' };
+
   const customerId = stripeCustomerIdFromSession(input.session);
   const subscriptionId = stripeSubscriptionIdFromSession(input.session);
   const { org, priorSubscriptionId } = await persistPaidOrgUpgrade({
@@ -87,7 +106,7 @@ export async function applyPaidCheckoutSession(input: {
     sku: parsed.sku,
     customerId,
     subscriptionId,
-    stripeStatus: checkoutSubscriptionStatus(input.session),
+    stripeStatus,
     stripeRecord: input.session,
   });
   await maybeCancelPrior(parsed.plan, priorSubscriptionId, subscriptionId);

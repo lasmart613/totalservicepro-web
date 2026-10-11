@@ -5,7 +5,7 @@
 
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { getPlanOffer } from './plan-catalog.ts';
-import { orgUpgradeFields } from './upgrade-session.ts';
+import { orgUpgradeFields, subscriptionGrantsPremium } from './upgrade-session.ts';
 
 /** subscriptions.status CHECK: active, expired, cancelled, grace_period. */
 export type LedgerSubscriptionStatus = 'active' | 'expired' | 'cancelled' | 'grace_period';
@@ -162,6 +162,10 @@ export async function persistPaidOrgUpgrade(input: {
 }): Promise<{ org: Record<string, unknown>; priorSubscriptionId: string | null }> {
   const orgId = String(input.organizationId || '').trim();
   if (!orgId) throw new Error('organization_id is required');
+  // A missing or unknown Stripe status is not a paid plan. Do not write Premium.
+  if (!subscriptionGrantsPremium(input.stripeStatus)) {
+    throw new Error('Refusing paid upgrade without an active or trialing subscription');
+  }
 
   let priorSubscriptionId: string | null = null;
   const userId = String(input.userId || '').trim() || null;
@@ -245,7 +249,7 @@ async function writeStripeSubscriptionLedger(input: {
     throw new Error('subscription price interval is required');
   }
 
-  const ledgerStatus = ledgerStatusForStripe(input.stripeStatus || 'active');
+  const ledgerStatus = ledgerStatusForStripe(input.stripeStatus);
   if (!ledgerStatus) {
     logSupabaseWriteError(
       'subscription ledger skipped; Stripe status is not mapped',

@@ -1,6 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { applyPaidCheckoutSession, applyPaidSubscriptionRecord } from '@/lib/billing/apply-org-upgrade';
+import {
+  applyPaidCheckoutSession,
+  applyPaidSubscriptionRecord,
+  checkoutStatusRefusalMessage,
+  isCheckoutStatusRefusal,
+} from '@/lib/billing/apply-org-upgrade';
 import { loadBillingCaller } from '@/lib/billing/billing-caller';
 import { currentOrgPlan, currentOrgPlanLabel, orgIsPaid } from '@/lib/org-plan';
 import { loadOrgPlanRow } from '@/lib/org-plan-load';
@@ -26,7 +31,8 @@ export const dynamic = 'force-dynamic';
 /**
  * Signed-in recovery: look up this user/org's latest complete Stripe
  * subscription Checkout (or active subscription) and apply it if the org
- * is still free. Does not create Checkout or invent a charge.
+ * is still free. A complete session whose subscription is not active or
+ * trialing is refused. Does not create Checkout or invent a charge.
  */
 export async function POST(req: NextRequest) {
   try {
@@ -111,6 +117,7 @@ export async function POST(req: NextRequest) {
 
     const uniqueSessions = uniqueStripeObjects(sessions);
     const picked = pickLatestPaidUpgradeSession(uniqueSessions, owner);
+    let statusRefusal: string | null = null;
     if (picked?.id) {
       const session = await retrieveCheckoutSession(String(picked.id));
       const result = await applyPaidCheckoutSession({
@@ -121,6 +128,9 @@ export async function POST(req: NextRequest) {
         allowMissingOrg: true,
         userEmail: user.email || null,
       });
+      if (!result.ok && isCheckoutStatusRefusal(result.reason)) {
+        statusRefusal = result.reason;
+      }
       if (result.ok) {
         const { data: orgRow } = await writer
           .from('organizations')
@@ -173,6 +183,18 @@ export async function POST(req: NextRequest) {
           ...result.applied.receipt,
         });
       }
+    }
+
+    if (statusRefusal) {
+      return NextResponse.json(
+        {
+          ok: false,
+          applied: false,
+          error: checkoutStatusRefusalMessage(statusRefusal),
+          reason: statusRefusal,
+        },
+        { status: 409 }
+      );
     }
 
     return NextResponse.json({
