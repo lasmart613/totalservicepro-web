@@ -1,9 +1,9 @@
 'use client';
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect } from 'react';
 import Script from 'next/script';
 import { usePathname } from 'next/navigation';
-import { getSupabaseClient } from '../lib/supabase/client';
+import { useNavIdentity } from '@/components/NavIdentityProvider';
 import {
   ADSENSE_CLIENT,
   ADSENSE_SLOT,
@@ -40,74 +40,21 @@ function pushAdSlot() {
  */
 export default function AdBanner() {
   const pathname = usePathname() || '';
-  const [showAd, setShowAd] = useState(false);
-  const supabase = getSupabaseClient();
-
-  useEffect(() => {
-    let cancelled = false;
-
-    if (pathHidesAds(pathname) || !adsenseAllowedOnHost(window.location.hostname)) {
-      setShowAd(false);
-      return;
-    }
-
-    (async () => {
-      try {
-        // Local session only: no /auth/v1/user call. RLS still checks the token.
-        const {
-          data: { session },
-        } = await supabase.auth.getSession();
-        const user = session?.user ?? null;
-        if (cancelled) return;
-        if (!user) {
-          setShowAd(false);
-          return;
-        }
-
-        let { data: profile, error: profileErr } = await supabase
-          .from('user_profiles')
-          .select('organization_id, onboarding_completed, onboarding_completed_at')
-          .eq('id', user.id)
-          .maybeSingle();
-        if (profileErr && /onboarding_completed_at|column/i.test(profileErr.message || '')) {
-          ({ data: profile, error: profileErr } = await supabase
-            .from('user_profiles')
-            .select('organization_id, onboarding_completed')
-            .eq('id', user.id)
-            .maybeSingle());
-        }
-        if (cancelled) return;
-
-        // Company-admin (and any) onboarding — never show ads until setup is done.
-        if (!profile?.organization_id || !onboardingFlagsDone(profile)) {
-          setShowAd(false);
-          return;
-        }
-
-        let { data: org, error: orgErr } = await supabase
-          .from('organizations')
-          .select('is_premium, subscription_tier, premium_until')
-          .eq('id', profile.organization_id)
-          .maybeSingle();
-        if (orgErr && /subscription_tier|premium_until|column/i.test(orgErr.message || '')) {
-          ({ data: org } = await supabase
-            .from('organizations')
-            .select('is_premium')
-            .eq('id', profile.organization_id)
-            .maybeSingle());
-        }
-        if (cancelled) return;
-
-        setShowAd(!orgIsPaid(org));
-      } catch {
-        if (!cancelled) setShowAd(false);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-    };
-  }, [pathname, supabase]);
+  // Profile and home org come from NavIdentityProvider, which reloads them on
+  // every navigation; this banner makes no reads of its own.
+  const nav = useNavIdentity();
+  const hidden = typeof window === 'undefined' || pathHidesAds(pathname) || !adsenseAllowedOnHost(window.location.hostname);
+  const profile = nav.profile;
+  const org = nav.homeOrg;
+  const showAd =
+    !hidden &&
+    nav.ready &&
+    !!nav.user &&
+    !!profile?.organization_id &&
+    // Company-admin (and any) onboarding: never show ads until setup is done.
+    onboardingFlagsDone(profile) &&
+    // A missing org row showed the ad before too.
+    !orgIsPaid(org && String(org.id) === String(profile.organization_id) ? org : null);
 
   useEffect(() => {
     if (!showAd) return;

@@ -5,7 +5,6 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { getSupabaseClient } from '../lib/supabase/client';
 import { signOutAndClearIdentity } from '@/lib/auth-session';
-import { User } from '@supabase/supabase-js';
 import {
   LogOut,
   User as UserIcon,
@@ -20,23 +19,17 @@ import {
 import { isOwnerish, isSupplier } from '@/lib/roles';
 import { financialReportingNavLink } from '@/lib/financial-reporting-access';
 import { jobCostingNavLink } from '@/lib/job-costing-access';
-import { getOrgRole, reportingOrganizationId } from '@/lib/org-role';
 import {
   adminPortalNavVisible,
   businessManagementNavVisible,
-  loadOwnNavProfile,
-  ORG_NAV_PENDING,
-  orgNavFromLookup,
-  type OrgNavState,
 } from '@/lib/profile-nav';
 import { ownerHubNavLabel, ownerProfileLabel, roleLabel } from '@/lib/labels';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
+import { useNavIdentity } from '@/components/NavIdentityProvider';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import { OrgSwitcher } from '@/components/OrgSwitcher';
 import { ReportIssueControl } from '@/components/ReportIssueControl';
-import { fetchGodMe, GOD_DASHBOARD_PATH } from '@/lib/god-client';
-import { isUnreadPollBackoffError, startDocumentUnreadPoll, unreadPollUserId } from '@/lib/unread-poll';
-import { headerAuthDecision } from '@/lib/header-auth-events';
+import { GOD_DASHBOARD_PATH } from '@/lib/god-client';
 import { useLocalizedPublic, useSiteLocale, useT } from '@/lib/fa/locale';
 import { FaPublicHeader } from '@/components/fa/FaPublicHeader';
 import { LanguageSelector } from '@/components/i18n/LanguageSelector';
@@ -125,144 +118,18 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const localizedPublic = useLocalizedPublic();
   const t = useT();
   const locale = useSiteLocale();
-  const [user, setUser] = useState<User | null>(null);
-  const [profile, setProfile] = useState<any>(null);
-  const [orgNav, setOrgNav] = useState<OrgNavState>(ORG_NAV_PENDING);
-  const [loading, setLoading] = useState(true);
+  // Shared identity: loaded once by NavIdentityProvider, not per Header mount.
+  const nav = useNavIdentity({ header: true });
+  const { user, orgNav, unread, isGod } = nav;
+  const profile: any = nav.profile;
+  const loading = !nav.ready;
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [navOpenId, setNavOpenId] = useState<string | null>(null);
   const [mobileOpenGroup, setMobileOpenGroup] = useState<string | null>(null);
-  const [unread, setUnread] = useState(0);
-  const [isGod, setIsGod] = useState(false);
   const upgrade = useUpgradeEntry();
   const supabase = getSupabaseClient();
   const pathname = usePathname();
-
-  /** @returns true when the poll should back off (504 / timeout / 5xx). */
-  async function refreshUnread(uid: string): Promise<boolean> {
-    try {
-      const { count, error } = await supabase
-        .from('notifications')
-        .select('id', { count: 'exact', head: true })
-        .eq('user_id', uid)
-        .eq('is_read', false);
-      if (error) {
-        if (isUnreadPollBackoffError(error)) return true;
-        setUnread(0);
-        return false;
-      }
-      setUnread(count || 0);
-      if (typeof navigator !== 'undefined' && 'setAppBadge' in navigator) {
-        try {
-          if (count && count > 0) (navigator as any).setAppBadge(count);
-          else (navigator as any).clearAppBadge?.();
-        } catch {
-          /* ignore */
-        }
-      }
-      return false;
-    } catch (err) {
-      if (isUnreadPollBackoffError(err)) return true;
-      setUnread(0);
-      return false;
-    }
-  }
-
-  useEffect(() => {
-    let activeUserId: string | null = null;
-
-    const applyProfile = (uid: string, prof: any) => {
-      if (activeUserId !== uid) return;
-      if (prof && prof.id && prof.id !== uid) return;
-      setProfile(prof);
-    };
-
-    const loadProfileFor = async (uid: string) => {
-      const prof = await loadOwnNavProfile(supabase, uid);
-      applyProfile(uid, prof);
-      if (activeUserId !== uid) return;
-      const looked = await getOrgRole(supabase, uid, reportingOrganizationId(prof));
-      if (activeUserId !== uid) return;
-      setOrgNav(orgNavFromLookup(looked));
-    };
-
-    // True while this mount's getUser() load runs; INITIAL_SESSION during it is a duplicate.
-    let initialLoadPending = true;
-
-    const loadUser = async () => {
-      const {
-        data: { user: u },
-      } = await supabase.auth.getUser();
-      initialLoadPending = false;
-      activeUserId = u?.id ?? null;
-      setUser(u);
-      if (!u) {
-        setProfile(null);
-        setOrgNav(ORG_NAV_PENDING);
-        setUnread(0);
-        setIsGod(false);
-        setLoading(false);
-        return;
-      }
-      setProfile(null);
-      setOrgNav(ORG_NAV_PENDING);
-      await loadProfileFor(u.id);
-      if (activeUserId === u.id) {
-        await refreshUnread(u.id);
-        setIsGod(await fetchGodMe());
-      }
-      setLoading(false);
-    };
-
-    loadUser();
-
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange((event, session) => {
-      const decision = headerAuthDecision(event, session?.user?.id, activeUserId, initialLoadPending);
-      if (decision === 'ignore') {
-        // Same user: keep the loaded profile and org role. Token refreshes and
-        // focus-time SIGNED_IN no longer refetch; the next navigation does
-        // (each page mounts Header, which loads fresh).
-        if (session?.user) setUser(session.user);
-        return;
-      }
-      if (decision === 'clear' || !session?.user) {
-        activeUserId = null;
-        setUser(null);
-        setProfile(null);
-        setOrgNav(ORG_NAV_PENDING);
-        setUnread(0);
-        setIsGod(false);
-        return;
-      }
-      const uid = session.user.id;
-      const switched = activeUserId !== uid;
-      activeUserId = uid;
-      setUser(session.user);
-      if (switched) {
-        // Drop the previous account's org chip immediately — do not wait for fetch.
-        setProfile(null);
-        setOrgNav(ORG_NAV_PENDING);
-        setUnread(0);
-      }
-      loadProfileFor(uid);
-      refreshUnread(uid);
-      fetchGodMe().then(setIsGod);
-    });
-
-    const stopUnreadPoll = startDocumentUnreadPoll(async () => {
-      const uid = await unreadPollUserId(supabase.auth);
-      if (!uid) return false;
-      return refreshUnread(uid);
-    });
-
-    return () => {
-      subscription.unsubscribe();
-      stopUnreadPoll();
-    };
-  }, [supabase]);
 
   // Close nav dropdown on outside click / Escape
   useEffect(() => {
@@ -296,10 +163,7 @@ export function Header({ authPending = false }: { authPending?: boolean }) {
   const handleLogout = async () => {
     setDropdownOpen(false);
     setMobileMenuOpen(false);
-    setUser(null);
-    setProfile(null);
-    setOrgNav(ORG_NAV_PENDING);
-    setUnread(0);
+    nav.clear();
     await signOutAndClearIdentity(supabase);
     window.location.replace('/login');
   };

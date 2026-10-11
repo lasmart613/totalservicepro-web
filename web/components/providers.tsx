@@ -6,6 +6,7 @@ import { Toaster } from 'sonner';
 import { AndroidSessionBridge } from '@/components/AndroidSessionBridge';
 import { StripeConnectResume } from '@/components/StripeConnectResume';
 import { SiteLocaleProvider } from '@/lib/fa/locale';
+import { NavIdentityProvider } from '@/components/NavIdentityProvider';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -20,10 +21,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
   return (
     <QueryClientProvider client={queryClient}>
       <SiteLocaleProvider>
-        <AndroidSessionBridge />
-        <StripeConnectResume />
-        {children}
-        <Toaster position="top-center" richColors closeButton />
+        <NavIdentityProvider>
+          <AndroidSessionBridge />
+          <StripeConnectResume />
+          {children}
+          <Toaster position="top-center" richColors closeButton />
+        </NavIdentityProvider>
       </SiteLocaleProvider>
     </QueryClientProvider>
   );
