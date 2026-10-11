@@ -1,7 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { shopAdminRole, type OrgRoleResult } from '@/lib/org-role';
 import { isAdmin, normalizeRole } from '@/lib/roles';
-import { fetchMemberships } from '@/lib/org-membership-client';
+import { loadMembershipsShared } from '@/lib/org-membership-client';
 
 export type NavLookup = 'pending' | 'error' | 'ready';
 
@@ -129,7 +129,7 @@ export async function loadOwnNavProfile(
 export async function roleAllowsAdminPortal(role?: string | null): Promise<boolean> {
   if (isAdmin(role)) return true;
   try {
-    const payload = await fetchMemberships();
+    const payload = await loadMembershipsShared();
     const active =
       payload.memberships.find((m) => m.isActive) || payload.memberships[0];
     return isAdmin(active?.role) || isAdmin(payload.role);
