@@ -39,7 +39,7 @@ const nextConfig = {
     unoptimized: true,
   },
   async redirects() {
-    // Belt-and-suspenders with middleware: old Android asset URLs
+    // Belt-and-suspenders with middleware: old Android asset URLs.
     return [
       { source: '/accepted_bids.html', destination: '/accepted-bids', permanent: false },
       { source: '/service_requests.html', destination: '/accepted-bids', permanent: false },
@@ -47,6 +47,14 @@ const nextConfig = {
       { source: '/service_schedule.html', destination: '/service-schedule', permanent: false },
       { source: '/marketplace.html', destination: '/marketplace', permanent: false },
       { source: '/index.html', destination: '/', permanent: false },
+    ];
+  },
+  async headers() {
+    return [
+      {
+        source: '/.well-known/assetlinks.json',
+        headers: [{ key: 'Content-Type', value: 'application/json' }],
+      },
     ];
   },
 };

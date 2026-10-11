@@ -29,6 +29,13 @@ export async function resolve(specifier, context, nextResolve) {
     const file = resolveAlias(specifier);
     if (file) return nextResolve(pathToFileURL(file).href, context);
   }
+  if (specifier.startsWith('.') && context.parentURL?.startsWith('file:')) {
+    const parent = fileURLToPath(context.parentURL);
+    const rewritten = withExtension(parent, specifier);
+    if (rewritten !== specifier) {
+      return nextResolve(pathToFileURL(join(dirname(parent), rewritten)).href, context);
+    }
+  }
   return nextResolve(specifier, context);
 }
 
