@@ -457,3 +457,86 @@ test('Lumenis M22 is a model name, so fluence calibration does not cite the cove
   );
   assert.equal(forced[0].page, 1);
 });
+
+test('chunked index rows keep a later [[pdfpage:N]] cite', async () => {
+  const edge = await loadEdge();
+  const early = `[[pdfpage:1018]] intro reservoir ${'word '.repeat(20)}`;
+  const later = `[[pdfpage:1403]] unique tailpage marker ${'calibration procedure '.repeat(12)}`;
+  const db = {
+    from: () => ({
+      select: () => ({
+        eq: () => ({
+          order: async () => ({
+            data: [
+              { search_text: early, chunk_index: 0 },
+              { search_text: later, chunk_index: 1 },
+            ],
+            error: null,
+          }),
+          maybeSingle: async () => ({ data: { search_text: early }, error: null }),
+        }),
+      }),
+    }),
+  };
+  const indexed = await edge.searchIndexedManualText(db, 9, 'unique tailpage marker', 'Long Manual');
+  assert.ok(indexed);
+  assert.equal(indexed.page, 1403);
+  assert.match(indexed.indexText || '', /\[\[pdfpage:1018\]\]/);
+  assert.match(indexed.indexText || '', /\[\[pdfpage:1403\]\] unique tailpage marker/);
+  assert.ok((indexed.indexText || '').indexOf('[[pdfpage:1018]]') < (indexed.indexText || '').indexOf('[[pdfpage:1403]]'));
+});
+
+test('an unpublished manual stays hidden when chunk rows exist', async () => {
+  const edge = await loadEdge();
+  const text = `[[pdfpage:1403]] unique tailpage marker ${'calibration procedure '.repeat(12)}`;
+  const db = {
+    from: (table: string) => ({
+      select: () => ({
+        eq: () => ({
+          order: async () => ({ data: [{ search_text: text, chunk_index: 0 }], error: null }),
+          maybeSingle: async () =>
+            table === 'manuals'
+              ? { data: { id: 9, published: false }, error: null }
+              : { data: { search_text: text }, error: null },
+        }),
+      }),
+    }),
+  };
+  const indexed = await edge.searchIndexedManualText(db, 9, 'unique tailpage marker', 'Long Manual');
+  assert.equal(indexed, null);
+});
+
+test('chunk join falls back only when chunk_index is undefined_column', async () => {
+  const edge = await loadEdge();
+  const text = `[[pdfpage:1403]] unique tailpage marker ${'calibration procedure '.repeat(12)}`;
+  function db(code: string, message: string) {
+    let indexSingles = 0;
+    return {
+      indexSingles: () => indexSingles,
+      from: (table: string) => ({
+        select: () => ({
+          eq: () => ({
+            order: async () => ({ data: null, error: { code, message } }),
+            maybeSingle: async () => {
+              if (table === 'manual_search_index') indexSingles += 1;
+              if (table === 'manuals') return { data: { id: 9, published: true }, error: null };
+              return { data: { search_text: text }, error: null };
+            },
+          }),
+        }),
+      }),
+    };
+  }
+  const denied = db('42501', 'permission denied for column chunk_index');
+  assert.equal(await edge.searchIndexedManualText(denied, 9, 'unique tailpage marker', 'Long Manual'), null);
+  assert.equal(denied.indexSingles(), 0);
+
+  const ambiguous = db('42702', 'column reference "chunk_index" is ambiguous');
+  assert.equal(await edge.searchIndexedManualText(ambiguous, 9, 'unique tailpage marker', 'Long Manual'), null);
+  assert.equal(ambiguous.indexSingles(), 0);
+
+  const missing = db('42703', 'column "chunk_index" of relation "manual_search_index" does not exist');
+  const found = await edge.searchIndexedManualText(missing, 9, 'unique tailpage marker', 'Long Manual');
+  assert.equal(found?.page, 1403);
+  assert.equal(missing.indexSingles(), 1);
+});

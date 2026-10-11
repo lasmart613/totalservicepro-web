@@ -562,9 +562,28 @@ function asIndexManualId(value: unknown): number | null {
   return Math.floor(n);
 }
 
+function boundFromIndexRows(
+  rows: Array<{ index_clipped?: unknown; indexed_page_max?: unknown }>,
+): { clipped: boolean; indexedPageMax: number | null } {
+  let clipped = false;
+  let indexedPageMax: number | null = null;
+  for (const row of rows) {
+    if (row?.index_clipped === true) clipped = true;
+    const raw = row?.indexed_page_max;
+    const max = typeof raw === "number" ? raw : Number(raw);
+    if (Number.isFinite(max) && max >= 1 && max <= 9999) {
+      const page = Math.floor(max);
+      indexedPageMax = indexedPageMax == null ? page : Math.max(indexedPageMax, page);
+    }
+  }
+  return { clipped, indexedPageMax };
+}
+
 /**
- * index_clipped / indexed_page_max from the search row. A missing column or a
- * missing row leaves the max unknown so a stored map is not dropped.
+ * index_clipped / indexed_page_max across every chunk of the search index.
+ * Clipped when any chunk was sliced. The page max is the highest stamp.
+ * A missing column or a missing row leaves the max unknown so a stored map
+ * is not dropped.
  */
 async function loadIndexPageBound(
   admin: { from: (table: string) => any },
@@ -574,18 +593,28 @@ async function loadIndexPageBound(
   const id = asIndexManualId(manualId);
   if (id == null) return unknown;
   try {
+    let query = admin
+      .from("manual_search_index")
+      .select("index_clipped,indexed_page_max,chunk_index")
+      .eq("manual_id", id);
+    if (query && typeof query.order === "function") query = query.order("chunk_index");
+    const listed = await query;
+    if (!listed?.error && Array.isArray(listed.data)) {
+      if (!listed.data.length) return unknown;
+      return boundFromIndexRows(listed.data);
+    }
+    if (!isMissingColumn(listed?.error, "chunk_index")) return unknown;
+  } catch {
+    // Fall through to the single-row read.
+  }
+  try {
     const q = await admin
       .from("manual_search_index")
       .select("index_clipped,indexed_page_max")
       .eq("manual_id", id)
       .maybeSingle();
     if (q?.error || !q?.data) return unknown;
-    const raw = q.data.indexed_page_max;
-    const max = typeof raw === "number" ? raw : Number(raw);
-    return {
-      clipped: q.data.index_clipped === true,
-      indexedPageMax: Number.isFinite(max) && max >= 1 && max <= 9999 ? Math.floor(max) : null,
-    };
+    return boundFromIndexRows([q.data]);
   } catch {
     return unknown;
   }

@@ -13,9 +13,9 @@ import { join, sep } from 'node:path';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 // @ts-ignore -- pdfjs-dist ships no type declarations for the worker entry
 import * as pdfjsWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs';
-import { clipManualSearchText, clipManualSearchTextResult } from './manual-search-text.ts';
+import { clipManualSearchText, clipManualSearchTextResult, prepareManualSearchText } from './manual-search-text.ts';
 
-export { clipManualSearchText, clipManualSearchTextResult, normalizeManualSearchText, MANUAL_SEARCH_TEXT_MAX } from './manual-search-text.ts';
+export { clipManualSearchText, clipManualSearchTextResult, normalizeManualSearchText, prepareManualSearchText, MANUAL_SEARCH_TEXT_MAX } from './manual-search-text.ts';
 
 /**
  * Largest PDF the manual indexer will load.
@@ -31,7 +31,14 @@ export { clipManualSearchText, clipManualSearchTextResult, normalizeManualSearch
  */
 export const MANUAL_SEARCH_PDF_MAX_BYTES = 200 * 1024 * 1024;
 
-/** Keep late physical pages. A 161-page manual does not fit in the old 200k clip. */
+/**
+ * Keep late physical pages. A 161-page manual does not fit in the old 200k clip.
+ * One row stays at this cap. A generated tsvector cannot exceed 1,048,575 bytes,
+ * and the densest live row (manual 24) is already 680,306 bytes at 1,335,422
+ * characters. Raising this cap on a single row can fail that column. Longer
+ * manuals are stored as several rows, each at most this long, split on a
+ * [[pdfpage:N]] boundary.
+ */
 export const PDF_INDEX_TEXT_MAX = 1_500_000;
 
 /**
@@ -243,7 +250,7 @@ export type StoredIndexText = {
   indexedPageMax: number | null;
 };
 
-/** Cap used when a search row is saved. `clipped` is the explicit index marker. */
+/** Cap used when one search row is saved. `clipped` is the explicit index marker. */
 export function storeIndexText(value: unknown, max = PDF_INDEX_TEXT_MAX): StoredIndexText {
   const clipped = clipManualSearchTextResult(value, max);
   return {
@@ -251,6 +258,72 @@ export function storeIndexText(value: unknown, max = PDF_INDEX_TEXT_MAX): Stored
     clipped: clipped.clipped,
     indexedPageMax: maxPdfPageStamp(clipped.text),
   };
+}
+
+export type IndexChunk = {
+  chunkIndex: number;
+  text: string;
+  /** True only when this chunk's own page was sliced at `max`. */
+  clipped: boolean;
+  indexedPageMax: number | null;
+};
+
+/**
+ * Split prepared index text on form feeds so each chunk's length is <= max.
+ * [[pdfpage:N]] stamps are not renumbered. A single page longer than max is
+ * sliced and only that chunk is marked clipped.
+ */
+export function chunkIndexText(value: unknown, max = PDF_INDEX_TEXT_MAX): IndexChunk[] {
+  const prepared = prepareManualSearchText(value);
+  if (!prepared) return [];
+  const limit = Math.max(1, Math.floor(max));
+  const pages = prepared.split('\f');
+  const groups: Array<{ parts: string[]; clipped: boolean }> = [];
+  let parts: string[] = [];
+  let size = 0;
+  const flush = () => {
+    if (!parts.length) return;
+    groups.push({ parts, clipped: false });
+    parts = [];
+    size = 0;
+  };
+  for (const page of pages) {
+    if (page.length > limit) {
+      flush();
+      groups.push({ parts: [page.slice(0, limit)], clipped: true });
+      continue;
+    }
+    const next = parts.length ? size + 1 + page.length : page.length;
+    if (parts.length && next > limit) flush();
+    parts.push(page);
+    size = parts.length === 1 ? page.length : size + 1 + page.length;
+  }
+  flush();
+  return groups.map((group, chunkIndex) => {
+    const text = group.parts.join('\f');
+    return {
+      chunkIndex,
+      text,
+      clipped: group.clipped,
+      indexedPageMax: maxPdfPageStamp(text),
+    };
+  });
+}
+
+export function joinIndexChunks(chunks: readonly { text: string }[]): string {
+  return chunks.map((chunk) => chunk.text).join('\f');
+}
+
+export function summarizeIndexChunks(chunks: readonly IndexChunk[]): StoredIndexText {
+  let clipped = false;
+  let indexedPageMax: number | null = null;
+  for (const chunk of chunks) {
+    if (chunk.clipped) clipped = true;
+    if (chunk.indexedPageMax != null) {
+      indexedPageMax = indexedPageMax == null ? chunk.indexedPageMax : Math.max(indexedPageMax, chunk.indexedPageMax);
+    }
+  }
+  return { text: joinIndexChunks(chunks), clipped, indexedPageMax };
 }
 
 /**

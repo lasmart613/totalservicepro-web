@@ -25,6 +25,10 @@ export const maxDuration = 60;
  * Manual 17 (Candela CO2RE, 161 pages) — do not use Index this manual; that
  * route times out on a large PDF and can keep the old unstamped text.
  *
+ * Manuals 1, 9, and 73 are past this route's 60 second limit. Reindex those
+ * locally with web/scripts/reindex-long-manuals.mjs so the full text is
+ * stored as chunk rows. Do not run that script from this route.
+ *
  * Repeat until done is true (pageCount max 40). The first chunks do not
  * replace the search row:
  *   curl -X POST "$ORIGIN/api/god/manuals/reindex-one" \
