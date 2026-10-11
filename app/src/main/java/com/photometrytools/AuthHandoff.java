@@ -102,6 +102,7 @@ public final class AuthHandoff {
         }
         int q = redirect.indexOf('?');
         String base = q >= 0 ? redirect.substring(0, q) : redirect;
+        base = apexHost(base);
         String query = q >= 0 ? redirect.substring(q + 1) : "";
         StringBuilder rest = new StringBuilder();
         String[] parts = query.isEmpty() ? new String[0] : query.split("&", -1);
@@ -119,6 +120,20 @@ public final class AuthHandoff {
         if (rest.length() > 0) out.append('&').append(rest);
         out.append(hash);
         return out.toString();
+    }
+
+    /** www 301s to the apex, and only the apex is in the autoVerify filter. */
+    static String apexHost(String url) {
+        if (url == null) return url;
+        String prefix = "https://www.repairplanet.net";
+        if (url.regionMatches(true, 0, prefix, 0, prefix.length())) {
+            return "https://repairplanet.net" + url.substring(prefix.length());
+        }
+        prefix = "http://www.repairplanet.net";
+        if (url.regionMatches(true, 0, prefix, 0, prefix.length())) {
+            return "https://repairplanet.net" + url.substring(prefix.length());
+        }
+        return url;
     }
 
     private static String encode(String raw) {

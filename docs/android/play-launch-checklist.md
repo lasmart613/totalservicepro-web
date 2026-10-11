@@ -142,7 +142,7 @@ The upload certificate SHA-256 is `51:F4:F1:B9:A7:7D:7E:CD:AB:6B:34:B0:4D:1A:06:
 
 ## App Links statement for Web Dev
 
-`https://repairplanet.net/.well-known/assetlinks.json` returned **404** on 11 Oct 2026, so the https auth return does not verify as an App Link yet. Publish this file at that URL (and the same file on `https://www.repairplanet.net/.well-known/assetlinks.json` if www is a separate host). The source copy is `docs/android/assetlinks.json`:
+`https://repairplanet.net/.well-known/assetlinks.json` returned **404** on 11 Oct 2026, so the https auth return does not verify as an App Link yet. Publish this file at that apex URL only. `https://www.repairplanet.net/.well-known/assetlinks.json` 301s to the apex and cannot be exempted. The app's `autoVerify` filter is apex-only for that reason. www links use a separate filter without `autoVerify`. The source copy is `docs/android/assetlinks.json`:
 
 ```json
 [

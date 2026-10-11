@@ -86,8 +86,16 @@ export function googleOAuthRedirectTo(
   const nonce = pageParams.get('tsp_nonce') || '';
   if (TSP_APP_NONCE_RE.test(nonce)) params.set('tsp_nonce', nonce);
   params.set('next', safeRedirectPath(nextPath || '/', origin));
-  const base = String(origin || PRODUCTION_SITE_ORIGIN).replace(/\/$/, '');
+  const base = apexAuthOrigin(String(origin || PRODUCTION_SITE_ORIGIN).replace(/\/$/, ''), androidWebView);
   return `${base}/auth/callback?${params.toString()}`;
+}
+
+/** Auth handoff and the Android OAuth return stay on the apex. www 301s. */
+function apexAuthOrigin(origin: string, androidWebView: boolean): string {
+  if (androidWebView && /^https?:\/\/www\.repairplanet\.net$/i.test(origin)) {
+    return PRODUCTION_SITE_ORIGIN;
+  }
+  return origin;
 }
 
 export type AndroidHandoff = {

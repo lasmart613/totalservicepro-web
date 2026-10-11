@@ -33,6 +33,13 @@ public class AuthHandoffTest {
     }
 
     @Test
+    public void wwwReturnUrlIsRewrittenToTheApex() {
+        assertEquals(
+                "https://repairplanet.net/auth/callback?app=1&tsp_nonce=n-9&next=/",
+                AuthHandoff.stampAppReturn("https://www.repairplanet.net/auth/callback?next=/", "n-9"));
+    }
+
+    @Test
     public void appNonceIsThirtyTwoLowerHexChars() {
         String nonce = AuthHandoff.newNonce(new java.security.SecureRandom());
         assertTrue(AuthHandoff.isAppNonce(nonce));

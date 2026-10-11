@@ -33,6 +33,10 @@ test('Android gradle version is 0.5.2-beta / 44 and loads production', () => {
   assert.match(manifest, /usesCleartextTraffic="false"/);
   assert.match(manifest, /android:scheme="totalservicepro"/);
   assert.match(manifest, /android:host="repairplanet\.net"/);
+  const autoVerify = manifest.split('android:autoVerify="true"')[1]?.split('</intent-filter>')[0] || '';
+  assert.match(autoVerify, /android:host="repairplanet\.net"/);
+  assert.doesNotMatch(autoVerify, /www\.repairplanet\.net/);
+  assert.match(manifest, /android:host="www\.repairplanet\.net"/);
   const assets = readFileSync(join(here, '../../app/src/main/assets/app-version.js'), 'utf8');
   assert.match(assets, /TSP_ANDROID_VERSION_NAME = '0\.5\.2-beta'/);
   assert.match(assets, /TSP_ANDROID_VERSION_CODE = 44/);

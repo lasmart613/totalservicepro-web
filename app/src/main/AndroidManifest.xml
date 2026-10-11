@@ -64,6 +64,8 @@
                     android:host="auth-callback"
                     android:scheme="totalservicepro" />
             </intent-filter>
+            <!-- Apex only. www 301s to repairplanet.net, and on Android 11 and
+                 below one failing host fails autoVerify for every host in the filter. -->
             <intent-filter android:autoVerify="true">
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
@@ -71,6 +73,11 @@
                 <data
                     android:host="repairplanet.net"
                     android:scheme="https" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
                 <data
                     android:host="www.repairplanet.net"
                     android:scheme="https" />

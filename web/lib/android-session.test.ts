@@ -84,6 +84,14 @@ test('Google return URL carries app=1 and a 32-hex tsp_nonce', () => {
   );
   assert.doesNotMatch(dropped, /tsp_nonce/);
   assert.doesNotMatch(dropped, /app=1/);
+  const fromWww = googleOAuthRedirectTo(
+    'https://www.repairplanet.net',
+    '/',
+    new URLSearchParams(),
+    true
+  );
+  assert.match(fromWww, /^https:\/\/repairplanet\.net\/auth\/callback\?/);
+  assert.doesNotMatch(fromWww, /www\.repairplanet\.net/);
   const login = readFileSync(join(here, '../app/login/page.tsx'), 'utf8');
   assert.match(login, /googleOAuthRedirectTo/);
 });
