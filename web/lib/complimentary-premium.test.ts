@@ -164,7 +164,8 @@ test('shop-invite promise is wired on company signup', () => {
   const dashboard = readFileSync(join(here, '../app/admin/god/page.tsx'), 'utf8');
   assert.match(signup, /two months of Premium on us/i);
   assert.match(pending, /applyComplimentarySignupFields/);
-  assert.match(founder, /applyComplimentarySignupFields/);
+  assert.match(founder, /markTrialOnInsert\(organizationInsertFromPending/);
+  assert.match(founder, /grantSignupTrialIfEligible/);
   assert.match(onboard, /postFounderOrganization/);
   assert.match(dashboard, /GodComplimentaryPremium/);
   assert.equal(clampComplimentaryDays(120), 90);

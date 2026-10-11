@@ -111,8 +111,8 @@ test('company profile skips the founder link when the user did not create the or
 
   const company = readFileSync(join(here, '../app/company/page.tsx'), 'utf8');
   const load = company.slice(company.indexOf('if (prof?.organization_id)'), company.indexOf('async function loadTeamMembers'));
-  assert.match(load, /shouldPostFounderOrganization/);
-  assert.match(load, /createdBy:\s*orgData\.created_by/);
+  // /company no longer posts the founder link on load (it re-granted the trial).
+  assert.doesNotMatch(load, /ensureServiceCreatorLinked|postFounderOrganization|shouldPostFounderOrganization/);
   const created = company.slice(company.indexOf('if (newOrgData?.id)'), company.indexOf('const saveId'));
   assert.match(created, /ensureServiceCreatorLinked/);
 });

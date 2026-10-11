@@ -37,7 +37,6 @@ import { StripeConnectCard } from '@/components/StripeConnectCard';
 import { ORG_TIME_ZONE_CHOICES } from '@/lib/org-timezone';
 import { RemoveTeamMemberButton } from '@/components/RemoveTeamMemberButton';
 import { showCompanyJustSetupBanner } from '@/lib/customer-invite-client';
-import { shouldPostFounderOrganization } from '@/lib/org-founder-client';
 
 const FACILITY_TYPES = [
   'Hospital',
@@ -258,16 +257,10 @@ function CompanyProfile() {
           .single();
         if (orgData) {
           setOrg(orgData);
-          // Claimed clinics are owned by this user but created by the shop.
-          // POST /api/org/founder 403s unless created_by is the caller.
-          if (
-            shouldPostFounderOrganization({
-              callerId: user.id,
-              createdBy: orgData.created_by,
-            })
-          ) {
-            await ensureServiceCreatorLinked(supabase, prof.organization_id, orgData.type);
-          }
+          // No POST /api/org/founder on load. Setup (onboarding, pending signup,
+          // and the create-on-save below) already links the founder. On every
+          // visit it re-granted the signup trial after expiry and reset the
+          // active org to home.
           // Team + CRM only for service company admins
           if (isServiceCompany(prof.role, orgData.type) && (isAdmin(prof.role) || prof.role === 'service_manager')) {
             await loadTeamMembers(prof.organization_id);

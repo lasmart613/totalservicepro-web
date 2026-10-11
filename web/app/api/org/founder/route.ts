@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 import { getSupabaseAdmin, hasServiceRole } from '@/lib/supabase/admin';
-import { applyComplimentarySignupFields } from '@/lib/complimentary-premium';
 import { setActiveOrganization, upsertMembership } from '@/lib/org-membership-server';
 import { refuseClaimOrgAutoCreate } from '@/lib/claim-signup-metadata';
 import {
@@ -9,6 +8,13 @@ import {
   type PendingSignup,
 } from '@/lib/pending-signup';
 import { decideFounderLink } from '@/lib/tenant-lockdown';
+import {
+  grantSignupTrialIfEligible,
+  isTrialGrantedAtMissing,
+  loadFounderOrg,
+  markTrialOnInsert,
+  type FounderOrgRow,
+} from '@/lib/signup-trial';
 
 /**
  * POST /api/org/founder
@@ -87,12 +93,8 @@ export async function POST(req: NextRequest) {
     let orgId = body.organizationId ?? null;
     let orgType = '';
     let createdBy: string | null = null;
-    let existingForGrant: {
-      id: number | string;
-      is_premium?: boolean | null;
-      premium_until?: string | null;
-      premium_grant?: string | null;
-    } | null = null;
+    let existingForGrant: FounderOrgRow | null = null;
+    let trialColumnRead = false;
 
     if (orgId == null || orgId === '') {
       const pending = body.pending;
@@ -113,14 +115,25 @@ export async function POST(req: NextRequest) {
           { status: 400 }
         );
       }
-      const row = organizationInsertFromPending(pending, user.id);
+      // Created in this request: the one place a trial is granted outright.
+      // trial_granted_at rides on the same insert as the grant.
+      const row = markTrialOnInsert(organizationInsertFromPending(pending, user.id));
       row.created_by = user.id;
       delete row.num_lasers;
-      const { data, error } = await admin
+      let { data, error } = await admin
         .from('organizations')
         .insert(row)
         .select('id, type, created_by')
         .maybeSingle();
+      if (error && isTrialGrantedAtMissing(error.message) && 'trial_granted_at' in row) {
+        // 000915 not applied yet. A new org gets its trial once by construction.
+        delete row.trial_granted_at;
+        ({ data, error } = await admin
+          .from('organizations')
+          .insert(row)
+          .select('id, type, created_by')
+          .maybeSingle());
+      }
       if (error || data?.id == null) {
         return NextResponse.json(
           { error: error?.message || 'Could not create your organization.' },
@@ -131,17 +144,15 @@ export async function POST(req: NextRequest) {
       orgType = String(data.type || pending.orgType);
       createdBy = String(data.created_by || user.id);
     } else {
-      const { data: org, error } = await admin
-        .from('organizations')
-        .select('id, type, created_by, is_premium, premium_until, premium_grant')
-        .eq('id', orgId)
-        .maybeSingle();
-      if (error || !org) {
+      const loaded = await loadFounderOrg(admin, orgId);
+      const org = loaded.org;
+      if (loaded.error || !org) {
         return NextResponse.json({ error: 'Organization not found.' }, { status: 404 });
       }
       orgType = String(org.type || '');
       createdBy = org.created_by ? String(org.created_by) : null;
       existingForGrant = org;
+      trialColumnRead = loaded.trialColumnRead;
     }
 
     const decision = decideFounderLink({
@@ -153,21 +164,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: decision.error }, { status: decision.status });
     }
 
-    const priorPremium =
-      existingForGrant?.is_premium === true ||
-      !!existingForGrant?.premium_until ||
-      !!existingForGrant?.premium_grant;
-    if (
-      existingForGrant &&
-      createdBy === user.id &&
-      orgType === 'service_company' &&
-      !priorPremium
-    ) {
-      const patch: Record<string, unknown> = {};
-      applyComplimentarySignupFields(patch, orgType);
-      if (patch.is_premium === true) {
-        await admin.from('organizations').update(patch).eq('id', existingForGrant.id);
-      }
+    // Existing org: one trial ever (trial_granted_at), and only while the org
+    // is new (24h). Expiry/removal clear the premium fields but never
+    // trial_granted_at, so a visit can't re-grant. Unreadable column: no grant.
+    if (existingForGrant) {
+      await grantSignupTrialIfEligible(admin, {
+        org: existingForGrant,
+        callerId: user.id,
+        trialColumnRead,
+      });
     }
 
     const profile = body.profile || {};
