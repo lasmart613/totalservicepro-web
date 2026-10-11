@@ -10,6 +10,10 @@ export type ManualChapterRef = {
   order: number;
   title: string;
   storage_path: string;
+  /** First joined index page in this file. Omitted when the map cannot be built. */
+  pageStart?: number;
+  /** pdf.js page count for this file. Omitted when the map cannot be built. */
+  pageCount?: number;
 };
 
 export function isFolderManual(value: unknown): boolean {
@@ -213,6 +217,48 @@ export function chapterDisplayRank(chapter: { title: string; storage_path: strin
   // A code that is not a known service-manual family (HA9P5320-5Z) sits with the drawings.
   if (partNumberCore(stripPdf(fileName)) && documentKind(fileName, parent) === "Drawing") return 2;
   return 0;
+}
+
+export type IndexOrderPart = {
+  storagePath: string;
+  /** Stored pdf.js page count. null when the entry has no usable page_count. */
+  pageCount: number | null;
+};
+
+function storedPageCount(value: unknown): number | null {
+  if (value == null || value === "") return null;
+  const n = typeof value === "number" ? value : Number(String(value).trim());
+  if (!Number.isFinite(n) || n < 0 || n > 9999) return null;
+  return Math.floor(n);
+}
+
+/**
+ * PDF paths in chapter_metadata array order, the order the search index
+ * concatenates files. Display rank and the stored `order` field are ignored.
+ * Exact-path duplicates are dropped. pageCount is the stored pdf.js count.
+ */
+export function indexOrderPdfParts(metadata: unknown, parentPath: string): IndexOrderPart[] {
+  if (!Array.isArray(metadata) || !metadata.length) return [];
+  const out: IndexOrderPart[] = [];
+  const seen = new Set<string>();
+  for (const item of metadata) {
+    if (!item || typeof item !== "object") continue;
+    const raw = (item as { storage_path?: unknown; path?: unknown }).storage_path
+      ?? (item as { path?: unknown }).path
+      ?? "";
+    const storagePath = joinChapterPath(parentPath, raw);
+    if (!isPdfPath(storagePath) || seen.has(storagePath)) continue;
+    seen.add(storagePath);
+    out.push({
+      storagePath,
+      pageCount: storedPageCount((item as { page_count?: unknown }).page_count),
+    });
+  }
+  return out;
+}
+
+export function indexOrderPdfPaths(metadata: unknown, parentPath: string): string[] {
+  return indexOrderPdfParts(metadata, parentPath).map((part) => part.storagePath);
 }
 
 function joinChapterPath(parentPath: string, raw: unknown): string {

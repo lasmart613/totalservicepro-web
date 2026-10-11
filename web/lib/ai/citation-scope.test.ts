@@ -3,7 +3,9 @@ import test from 'node:test';
 import {
   alignReplyToCitationPage,
   answerDeclinesManualCitation,
+  footerPagesForIndex,
   printedPageLabel,
+  rememberManualIndex,
   attributeCitations,
   boundCitationPage,
   catalogCitationTitle,
@@ -426,4 +428,35 @@ test('a printed footer is rewritten only when the mapping is unambiguous', () =>
     alignReplyToCitationPage('The reminder is on page 54 of 178.', 63, index, { query: noCartridge, pageCount: 178 }),
     'The reminder is on page 63.'
   );
+});
+
+test('footer-to-pages map is cached once per index load', () => {
+  const pad = 'service notes '.repeat(40);
+  const pages: string[] = [];
+  for (let n = 1; n <= 80; n++) {
+    let body = `${pad}body ${n}.`;
+    if (n === 63) body = `${pad}Window cleaning reminder. Page 54 of 178.`;
+    if (n === 70) body = `${pad}Another leaf. Page 54 of 178.`;
+    pages.push(`[[pdfpage:${n}]] ${body}`);
+  }
+  const index = pages.join('\f');
+  const first = rememberManualIndex(9, index);
+  const second = rememberManualIndex(9, index);
+  assert.equal(first, second);
+  assert.equal(footerPagesForIndex(index), first);
+  assert.deepEqual(first.get(54), [63, 70]);
+  assert.equal(
+    alignReplyToCitationPage('The reminder is on page 54.', 63, index),
+    'The reminder is on page 54.',
+  );
+  assert.equal(
+    alignReplyToCitationPage('The reminder is on page 54 of 178.', 63, index),
+    'The reminder is on page 63.',
+  );
+  const changedText = `${index}\f[[pdfpage:81]] ${pad}Page 54 of 178.`;
+  const changed = rememberManualIndex(9, changedText);
+  assert.notEqual(changed, first);
+  assert.deepEqual(changed.get(54), [63, 70, 81]);
+  assert.equal(footerPagesForIndex(changedText), changed);
+  assert.deepEqual(footerPagesForIndex(index).get(54), [63, 70]);
 });

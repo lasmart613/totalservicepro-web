@@ -225,16 +225,93 @@ export function printedPageLabel(pageText: string): number | undefined {
   return last.x
 }
 
+/** Printed footer → physical pages that carry it. Built once per index string. */
+export type FooterPageMap = Map<number, number[]>
+
+const FOOTER_INDEX_CAP = 8
+
+type FooterIndexSlot = { text: string; map: FooterPageMap }
+
+const footerByManual = new Map<number, FooterIndexSlot>()
+let footerFingerprint: FooterIndexSlot | null = null
+
+function rememberFooterSlot(slot: FooterIndexSlot, manualId?: number): FooterPageMap {
+  footerFingerprint = slot
+  if (manualId == null || !Number.isFinite(manualId) || manualId < 1) return slot.map
+  const id = Math.floor(manualId)
+  footerByManual.delete(id)
+  footerByManual.set(id, slot)
+  while (footerByManual.size > FOOTER_INDEX_CAP) {
+    const oldest = footerByManual.keys().next().value
+    if (oldest == null) break
+    footerByManual.delete(oldest)
+  }
+  return slot.map
+}
+
+/**
+ * One pass over the index. Stamped text uses each [[pdfpage:N]] body
+ * (stamp through the next form feed). A stamp-less extract uses form feeds.
+ */
+export function buildFooterPageMap(indexText: string): FooterPageMap {
+  const raw = String(indexText || '')
+  const map: FooterPageMap = new Map()
+  if (!raw) return map
+  const add = (printed: number, page: number) => {
+    const list = map.get(printed)
+    if (!list) {
+      map.set(printed, [page])
+      return
+    }
+    if (!list.includes(page)) list.push(page)
+  }
+  if (/\[\[pdfpage:\d+\]\]/.test(raw)) {
+    for (const part of raw.split('\f')) {
+      const match = /\[\[pdfpage:(\d{1,4})\]\]/.exec(part)
+      if (!match) continue
+      const page = Number(match[1])
+      if (!Number.isFinite(page) || page < 1) continue
+      const at = part.indexOf(match[0])
+      const body = at >= 0 ? part.slice(at) : part
+      const printed = printedPageLabel(body)
+      if (printed == null) continue
+      add(printed, Math.floor(page))
+    }
+  } else {
+    raw.split('\f').forEach((body, index) => {
+      const printed = printedPageLabel(body)
+      if (printed == null) return
+      add(printed, index + 1)
+    })
+  }
+  for (const list of map.values()) list.sort((a, b) => a - b)
+  return map
+}
+
+/** Same Map object when this string was already loaded. */
+export function footerPagesForIndex(indexText: string): FooterPageMap {
+  const text = String(indexText || '')
+  if (footerFingerprint && footerFingerprint.text === text) return footerFingerprint.map
+  for (const slot of footerByManual.values()) {
+    if (slot.text === text) return rememberFooterSlot(slot)
+  }
+  return rememberFooterSlot({ text, map: buildFooterPageMap(text) })
+}
+
+/** Cache the footer map next to a manual index. Same text keeps the same Map. */
+export function rememberManualIndex(manualId: number, indexText: string): FooterPageMap {
+  const text = String(indexText || '')
+  const id = Math.floor(Number(manualId))
+  if (Number.isFinite(id) && id > 0) {
+    const existing = footerByManual.get(id)
+    if (existing && existing.text === text) return rememberFooterSlot(existing, id)
+  }
+  return rememberFooterSlot({ text, map: buildFooterPageMap(text) }, id)
+}
+
 /** Other physical pages whose own footer is this printed number. */
 function pagesWithPrintedFooter(indexText: string, printed: number): number[] {
-  const max = maxStampPage(indexText)
-  if (!max) return []
-  const hits: number[] = []
-  for (let n = 1; n <= max; n++) {
-    const body = indexPageBody(indexText, n)
-    if (body && printedPageLabel(body) === printed) hits.push(n)
-  }
-  return hits
+  return footerPagesForIndex(indexText).get(printed) || []
 }
 
 export type AlignReplyOptions = { query?: string; pageCount?: number }

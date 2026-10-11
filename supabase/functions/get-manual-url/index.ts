@@ -22,9 +22,11 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
 import {
   chaptersFromMetadata,
+  indexOrderPdfParts,
   isFolderManual,
   resolveManualPdfOpen,
 } from "./chapters.ts";
+import { annotateChaptersWithPageMap } from "./page-map.ts";
 
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -442,6 +444,22 @@ function chaptersFromPaths(paths: string[]): Array<{
         : (parent ? `${parent}: ${base}` : base);
       return { order: i + 1, title, storage_path: p };
     });
+}
+
+/**
+ * Attach pageStart/pageCount from stored chapter_metadata.page_count.
+ * The count is the pdf.js numPages the indexer wrote. A missing count omits
+ * the whole map. This does not download PDFs.
+ */
+function annotateFolderChapters<T extends { storage_path: string }>(
+  chapters: readonly T[],
+  metadata: unknown,
+  parentPath: string,
+): { chapters: T[]; joinedPageCount: number | null } {
+  if (chapters.length < 2) return { chapters: chapters.slice(), joinedPageCount: null };
+  const parts = indexOrderPdfParts(metadata, parentPath);
+  if (parts.length < 2) return { chapters: chapters.slice(), joinedPageCount: null };
+  return annotateChaptersWithPageMap(chapters, parts);
 }
 
 async function downloadStorageObject(
@@ -985,13 +1003,20 @@ Deno.serve(async (req) => {
         chapters = chaptersFromPaths(paths);
       }
 
+      const mapped = annotateFolderChapters(
+        chapters,
+        man?.chapter_metadata,
+        parentPath,
+      );
+
       return json(200, {
         ...readMeta,
         source: "list_chapters",
         manual_id: manualId,
         prefix: parentPath,
-        chapters,
-        count: chapters.length,
+        chapters: mapped.chapters,
+        count: mapped.chapters.length,
+        ...(mapped.joinedPageCount ? { joined_page_count: mapped.joinedPageCount } : {}),
         entry_file_path: man?.entry_file_path || null,
         title: man?.title || null,
       });
@@ -1089,6 +1114,13 @@ Deno.serve(async (req) => {
     // Edge stream proxy is kept as fallback — it historically advertised Accept-Ranges
     // without honoring client Range requests, which broke large manuals into "1 page".
     if (!preferBase64 && manualId && sp && isPdfPath(sp)) {
+      const mappedChapters = annotateFolderChapters(
+        chaptersForFolder,
+        man?.chapter_metadata,
+        parentPath,
+      );
+      chaptersForFolder = mappedChapters.chapters;
+      const joinedPageCount = mappedChapters.joinedPageCount;
       const chaptersOut = chaptersForFolder.length ? chaptersForFolder : undefined;
       const prefixOut = parentPath && !isPdfPath(parentPath) ? parentPath : undefined;
       try {
@@ -1106,6 +1138,7 @@ Deno.serve(async (req) => {
             note: "Signed storage URL (Range requests enabled)",
             chapters: chaptersOut,
             count: chaptersForFolder.length || undefined,
+            ...(joinedPageCount ? { joined_page_count: joinedPageCount } : {}),
             prefix: prefixOut,
             title: man?.title || null,
           });
@@ -1137,6 +1170,7 @@ Deno.serve(async (req) => {
         note: "Streaming chapter via short ticket",
         chapters: chaptersOut,
         count: chaptersForFolder.length || undefined,
+        ...(joinedPageCount ? { joined_page_count: joinedPageCount } : {}),
         prefix: prefixOut,
         title: man?.title || null,
       });

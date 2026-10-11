@@ -17,6 +17,10 @@ export type ManualChapter = {
   title?: string;
   storage_path?: string;
   label?: string;
+  /** First joined index page in this chapter file. */
+  pageStart?: number;
+  /** Pages in this chapter file. */
+  pageCount?: number;
 };
 
 /** Chapters button is for a real multi-file manual, not a single PDF. */
