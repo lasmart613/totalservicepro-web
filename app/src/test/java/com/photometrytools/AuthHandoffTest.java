@@ -28,7 +28,16 @@ public class AuthHandoffTest {
         int start = rewritten.indexOf("redirect_to=") + "redirect_to=".length();
         int end = rewritten.indexOf("&state=");
         String redirect = URLDecoder.decode(rewritten.substring(start, end), "UTF-8");
-        assertEquals("https://repairplanet.net/auth/callback?next=/&tsp_nonce=n-9", redirect);
+        assertEquals("https://repairplanet.net/auth/callback?app=1&tsp_nonce=n-9&next=/", redirect);
         assertTrue(rewritten.contains("state=abc"));
+    }
+
+    @Test
+    public void appNonceIsThirtyTwoLowerHexChars() {
+        String nonce = AuthHandoff.newNonce(new java.security.SecureRandom());
+        assertTrue(AuthHandoff.isAppNonce(nonce));
+        assertFalse(AuthHandoff.isAppNonce("n-9"));
+        assertFalse(AuthHandoff.isAppNonce("0123456789ABCDEF0123456789ABCDEF"));
+        assertFalse(AuthHandoff.isAppNonce(null));
     }
 }

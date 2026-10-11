@@ -13,7 +13,7 @@ import {
 } from '@/lib/customer-invite-client';
 import { inviteInPlay, resetTeamClaimDedupeForSignIn, type InviteClaimResult } from '@/lib/invite-claim';
 import { callbackDest, profileOrgId } from '@/lib/no-org-route';
-import { isTspAndroidWebView } from '@/lib/android-session';
+import { buildAndroidHandoff, isTspAndroidWebView } from '@/lib/android-session';
 import { publicAuthMessage } from '@/lib/auth-errors';
 import { decideAuthCallback, setPasswordHref } from '@/lib/auth-link-route';
 import { safeRedirectPath } from '@/lib/safe-redirect';
@@ -69,24 +69,26 @@ function AuthCallbackInner() {
           return;
         }
 
+        // Handoff only after a sign-in that happened on this load. A session
+        // already in the browser is not one.
+        let completedSignIn = false;
         if (code) {
           const { error } = await supabase.auth.exchangeCodeForSession(code);
           if (error) throw error;
+          completedSignIn = true;
         } else {
+          const hashAccess = hashParams?.get('access_token') || '';
           const { data, error } = await supabase.auth.getSession();
           if (error) throw error;
-          if (!data.session) {
-            if (hashParams) {
-              const access_token = hashParams.get('access_token');
-              const refresh_token = hashParams.get('refresh_token') || '';
-              if (access_token) {
-                const { error: sErr } = await supabase.auth.setSession({
-                  access_token,
-                  refresh_token,
-                });
-                if (sErr) throw sErr;
-              }
+          if (hashAccess) {
+            if (data.session?.access_token !== hashAccess) {
+              const { error: sErr } = await supabase.auth.setSession({
+                access_token: hashAccess,
+                refresh_token: hashParams?.get('refresh_token') || '',
+              });
+              if (sErr) throw sErr;
             }
+            completedSignIn = true;
           }
         }
 
@@ -184,7 +186,14 @@ function AuthCallbackInner() {
             if (!applied.blockedClaim && applied.orgId) {
               const dest = applied.dest || '/onboarding';
               if (wantApp) {
-                await maybeHandoffToAndroid(supabase, dest, setAppHandoff, setMessage);
+                await maybeHandoffToAndroid(
+                  supabase,
+                  dest,
+                  setAppHandoff,
+                  setMessage,
+                  completedSignIn,
+                  () => cancelled
+                );
                 if (cancelled) return;
               }
               setMessage('Signed in! Continuing setup…');
@@ -251,7 +260,14 @@ function AuthCallbackInner() {
         dest = safeRedirectPath(dest, url.origin, '/onboarding');
 
         if (wantApp) {
-          await maybeHandoffToAndroid(supabase, dest, setAppHandoff, setMessage);
+          await maybeHandoffToAndroid(
+            supabase,
+            dest,
+            setAppHandoff,
+            setMessage,
+            completedSignIn,
+            () => cancelled
+          );
           if (cancelled) return;
         }
 
@@ -294,29 +310,39 @@ async function maybeHandoffToAndroid(
   supabase: ReturnType<typeof getSupabaseClient>,
   dest: string,
   setAppHandoff: (v: string) => void,
-  setMessage: (v: string) => void
+  setMessage: (v: string) => void,
+  completedSignIn: boolean,
+  isCancelled: () => boolean
 ) {
   try {
-    // Already inside the TSP WebView — stay on the live site, do not bounce
-    // out through the custom scheme (that is for Chrome → app handoff).
-    if (isTspAndroidWebView()) return;
-    const { data } = await supabase.auth.getSession();
-    const access = data.session?.access_token;
-    const refresh = data.session?.refresh_token || '';
-    if (!access) return;
+    // Already inside the TSP WebView — stay on the live site. The custom
+    // scheme and the https App Link are for the browser → app handoff.
+    if (!completedSignIn || isTspAndroidWebView()) return;
     const page = new URL(window.location.href);
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ''));
     const nonce = page.searchParams.get('tsp_nonce') || hashParams.get('tsp_nonce') || '';
     const state = page.searchParams.get('state') || hashParams.get('state') || '';
-    const deep =
-      `totalservicepro://auth-callback#access_token=${encodeURIComponent(access)}` +
-      `&refresh_token=${encodeURIComponent(refresh)}&next=${encodeURIComponent(dest)}&type=signup` +
-      (nonce ? `&tsp_nonce=${encodeURIComponent(nonce)}` : '') +
-      (state ? `&state=${encodeURIComponent(state)}` : '');
-    setAppHandoff(deep);
+    const { data } = await supabase.auth.getSession();
+    const handoff = buildAndroidHandoff({
+      completedSignIn: true,
+      appRequested: true,
+      nonce,
+      state,
+      accessToken: data.session?.access_token,
+      refreshToken: data.session?.refresh_token || '',
+      dest,
+      inWebView: false,
+    });
+    if (!handoff || isCancelled()) return;
+    setAppHandoff(handoff.customSchemeUrl);
     setMessage('Opening the Total Service Pro app… If nothing happens, tap the button below.');
-    window.location.href = deep;
-    await new Promise((r) => setTimeout(r, 900));
+    if (!hashParams.get('access_token')) {
+      window.location.assign(handoff.httpsUrl);
+      await new Promise((r) => setTimeout(r, 900));
+      if (isCancelled()) return;
+    }
+    if (!handoff.customSchemeUrl.startsWith('totalservicepro://auth-callback')) return;
+    window.location.assign(handoff.customSchemeUrl);
   } catch {
     /* stay on web */
   }

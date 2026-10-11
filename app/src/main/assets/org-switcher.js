@@ -84,6 +84,20 @@
     const { data: sessionData } = await sb.auth.getSession();
     const token = sessionData && sessionData.session && sessionData.session.access_token;
     if (!token) throw new Error('Not signed in');
+    let filePage = false;
+    try { filePage = location.protocol === 'file:'; } catch (e) {}
+    if (filePage && typeof Android !== 'undefined' && Android.postOrgApi) {
+      let json = {};
+      try {
+        json = JSON.parse(Android.postOrgApi(path, String(organizationId), token) || '{}');
+      } catch (e) {
+        throw new Error('Could not update this company');
+      }
+      if (!json || json.ok === false) {
+        throw new Error((json && json.error) || 'Could not update this company');
+      }
+      return json;
+    }
     const res = await fetch(apiOrigin() + path, {
       method: 'POST',
       headers: {

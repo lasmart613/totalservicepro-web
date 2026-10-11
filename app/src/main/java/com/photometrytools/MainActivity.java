@@ -171,6 +171,7 @@ public class MainActivity extends AppCompatActivity {
     private Uri pendingCameraUri;
     private String pendingLaunchUrl = null;
     private String acceptedAuthNavigation;
+    private boolean closedForExternalAuth;
     private volatile String mainFrameUrl;
     private boolean recoveringRenderer;
     private boolean backCallbackInstalled;
@@ -193,6 +194,10 @@ public class MainActivity extends AppCompatActivity {
         insetsController.setAppearanceLightNavigationBars(false);
 
         captureLaunchIntent(getIntent());
+        if (closedForExternalAuth) {
+            finish();
+            return;
+        }
 
         android.content.SharedPreferences prefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         storedSession = prefs.getString(PREFS_SESSION_KEY, null);
@@ -345,6 +350,53 @@ public class MainActivity extends AppCompatActivity {
         public void launchBillingFlow(String sku) {
             if (!originAllowsBridge()) return;
             runOnUiThread(() -> loadProductionOrAsset("/plans", "paywall.html"));
+        }
+
+        /**
+         * Offline file pages cannot POST to repairplanet.net (no CORS, and file
+         * URL access stays locked). Switch and leave go through this instead.
+         */
+        @JavascriptInterface
+        public String postOrgApi(String path, String organizationId, String bearer) {
+            if (!originAllowsBridge()) return orgApiError("Not allowed");
+            if (!"/api/org/switch".equals(path) && !"/api/org/leave".equals(path)) {
+                return orgApiError("Not allowed");
+            }
+            if (organizationId == null || organizationId.trim().isEmpty() || organizationId.length() > 64) {
+                return orgApiError("organizationId is required");
+            }
+            if (bearer == null || bearer.isEmpty() || bearer.indexOf('\r') >= 0 || bearer.indexOf('\n') >= 0
+                    || bearer.length() > 8192) {
+                return orgApiError("Not signed in");
+            }
+            HttpURLConnection conn = null;
+            try {
+                org.json.JSONObject payload = new org.json.JSONObject();
+                payload.put("organizationId", organizationId.trim());
+                byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+                conn = (HttpURLConnection) new URL(PRODUCTION_ORIGIN + path).openConnection();
+                conn.setConnectTimeout(15000);
+                conn.setReadTimeout(20000);
+                conn.setInstanceFollowRedirects(false);
+                conn.setRequestMethod("POST");
+                conn.setDoOutput(true);
+                conn.setRequestProperty("Authorization", "Bearer " + bearer);
+                conn.setRequestProperty("Content-Type", "application/json");
+                conn.setRequestProperty("Accept", "application/json");
+                conn.getOutputStream().write(body);
+                int status = conn.getResponseCode();
+                if (status >= 300 && status < 400) return orgApiError("Could not update this company");
+                InputStream stream = status >= 400 ? conn.getErrorStream() : conn.getInputStream();
+                String text = readLimited(stream);
+                if (text == null || text.isEmpty() || text.charAt(0) != '{') {
+                    return orgApiError("Could not update this company");
+                }
+                return text;
+            } catch (Exception e) {
+                return orgApiError("Could not update this company");
+            } finally {
+                if (conn != null) conn.disconnect();
+            }
         }
 
         @JavascriptInterface
@@ -710,6 +762,10 @@ public class MainActivity extends AppCompatActivity {
                     return;
                 }
                 mainFrameUrl = url;
+                if (handEmailLinkToBrowser(url)) {
+                    view.stopLoading();
+                    return;
+                }
                 if (TrustedOrigins.isSessionPage(url) || isInlineDocumentUrl(url)) return;
                 if (url.equals(acceptedAuthNavigation)) return;
                 view.stopLoading();
@@ -807,6 +863,7 @@ public class MainActivity extends AppCompatActivity {
             openOutside(url);
             return true;
         }
+        if (handEmailLinkToBrowser(url)) return true;
         if (lower.startsWith("totalservicepro://")) {
             Uri uri = Uri.parse(url);
             if (!allowCredentialCallback(uri)) {
@@ -976,6 +1033,87 @@ public class MainActivity extends AppCompatActivity {
         return localAssetUrl("index.html");
     }
 
+    /**
+     * Email, magic-link, and password-reset URLs that do not match the login
+     * this app started. The default browser is chosen with an http probe so
+     * the verified https App Link does not open this app again.
+     */
+    private boolean handEmailLinkToBrowser(String url) {
+        if (!AuthLinks.shouldOpenInBrowser(url, loadPendingAuth(), System.currentTimeMillis())) return false;
+        openInExternalBrowser(url);
+        if (webView == null) closedForExternalAuth = true;
+        return true;
+    }
+
+    private void openInExternalBrowser(String url) {
+        showToast("Opening in your browser");
+        String browser = defaultBrowserPackage();
+        if (browser == null) {
+            showToast("Could not open link");
+            return;
+        }
+        try {
+            Intent view = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+            view.addCategory(Intent.CATEGORY_BROWSABLE);
+            view.setPackage(browser);
+            view.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            startActivity(view);
+        } catch (RuntimeException e) {
+            showToast("Could not open link");
+        }
+    }
+
+    private String defaultBrowserPackage() {
+        try {
+            Intent probe = new Intent(Intent.ACTION_VIEW, Uri.parse("http://example.com/"));
+            probe.addCategory(Intent.CATEGORY_BROWSABLE);
+            android.content.pm.ResolveInfo preferred = getPackageManager().resolveActivity(
+                    probe, PackageManager.MATCH_DEFAULT_ONLY);
+            String chosen = browserPackage(preferred);
+            if (chosen != null) return chosen;
+            java.util.List<android.content.pm.ResolveInfo> all = getPackageManager().queryIntentActivities(probe, 0);
+            for (int i = 0; i < all.size(); i++) {
+                chosen = browserPackage(all.get(i));
+                if (chosen != null) return chosen;
+            }
+            return null;
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    private String browserPackage(android.content.pm.ResolveInfo info) {
+        if (info == null || info.activityInfo == null) return null;
+        String pkg = info.activityInfo.packageName;
+        if (pkg == null || pkg.equals(getPackageName()) || "android".equals(pkg)) return null;
+        return pkg;
+    }
+
+    private static String orgApiError(String message) {
+        try {
+            org.json.JSONObject obj = new org.json.JSONObject();
+            obj.put("ok", false);
+            obj.put("error", message);
+            return obj.toString();
+        } catch (org.json.JSONException e) {
+            return "{\"ok\":false,\"error\":\"Could not update this company\"}";
+        }
+    }
+
+    private static String readLimited(InputStream in) throws java.io.IOException {
+        if (in == null) return "";
+        ByteArrayOutputStream buf = new ByteArrayOutputStream();
+        byte[] tmp = new byte[4096];
+        int total = 0;
+        int n;
+        while ((n = in.read(tmp)) >= 0 && total < 65536) {
+            int take = Math.min(n, 65536 - total);
+            buf.write(tmp, 0, take);
+            total += take;
+        }
+        return new String(buf.toByteArray(), StandardCharsets.UTF_8);
+    }
+
     private void openOutside(String url) {
         if (url == null || url.isEmpty()) return;
         Uri uri = Uri.parse(url);
@@ -1009,11 +1147,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private String newNonce() {
-        byte[] bytes = new byte[16];
-        new SecureRandom().nextBytes(bytes);
-        StringBuilder sb = new StringBuilder(bytes.length * 2);
-        for (byte b : bytes) sb.append(String.format(Locale.US, "%02x", b & 0xff));
-        return sb.toString();
+        return AuthHandoff.newNonce(new SecureRandom());
     }
 
     private AuthHandoff.Pending loadPendingAuth() {
@@ -1167,6 +1301,7 @@ public class MainActivity extends AppCompatActivity {
                         + "setPremiumStatus:function(){},"
                         + "launchBillingFlow:function(s){post({m:'launchBillingFlow',sku:s});},"
                         + "openUrl:function(u){post({m:'openUrl',url:u});},"
+                        + "postOrgApi:function(p,id,t){try{return host&&host.postOrgApi?host.postOrgApi(p,id,t):'{\\\"ok\\\":false}';}catch(e){return '{\\\"ok\\\":false}';}},"
                         + "printReport:function(h,n){post({m:'printReport',html:h,jobName:n});},"
                         + "speak:function(t){post({m:'speak',text:t});},"
                         + "speakAnswer:function(t,v,e,a){post({m:'speakAnswer',text:t,voiceId:v,engine:e,token:a});},"
@@ -1287,6 +1422,7 @@ public class MainActivity extends AppCompatActivity {
         if (uri == null) return;
         String scheme = uri.getScheme();
         if (scheme == null) return;
+        if (handEmailLinkToBrowser(uri.toString())) return;
         if (TrustedOrigins.isAuthCallback(uri.toString()) && callbackCarriesCredential(uri)) {
             if (!allowCredentialCallback(uri)) return;
             if ("totalservicepro".equalsIgnoreCase(scheme)) {

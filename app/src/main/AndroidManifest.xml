@@ -21,6 +21,12 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="https" />
         </intent>
+        <!-- http probe finds the default browser without matching our https App Link. -->
+        <intent>
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="http" />
+        </intent>
         <!-- System camera app. The app does not request CAMERA itself. -->
         <intent>
             <action android:name="android.media.action.IMAGE_CAPTURE" />

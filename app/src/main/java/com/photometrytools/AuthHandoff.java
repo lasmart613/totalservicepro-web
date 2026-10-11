@@ -4,6 +4,8 @@ import java.io.UnsupportedEncodingException;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
 import java.nio.charset.StandardCharsets;
+import java.security.SecureRandom;
+import java.util.Locale;
 
 /**
  * A custom-scheme or https auth callback is accepted only when it carries the
@@ -33,10 +35,24 @@ public final class AuthHandoff {
         return pending.state != null && pending.state.equals(state);
     }
 
+    /** 16 random bytes, lowercase hex. The web handoff accepts only this shape. */
+    public static boolean isAppNonce(String nonce) {
+        return nonce != null && nonce.matches("^[0-9a-f]{32}$");
+    }
+
+    public static String newNonce(SecureRandom random) {
+        SecureRandom source = random == null ? new SecureRandom() : random;
+        byte[] bytes = new byte[16];
+        source.nextBytes(bytes);
+        StringBuilder sb = new StringBuilder(bytes.length * 2);
+        for (byte b : bytes) sb.append(String.format(Locale.US, "%02x", b & 0xff));
+        return sb.toString();
+    }
+
     /**
-     * Puts {@code tsp_nonce} on the authorize URL's {@code redirect_to} so the
-     * site can hand it back. When there is no redirect_to, the nonce is its own
-     * query parameter.
+     * Puts {@code app=1} and {@code tsp_nonce} on the authorize URL's
+     * {@code redirect_to} so the site can hand the login back to this app.
+     * When there is no redirect_to, those two parameters are added directly.
      */
     public static String withNonceOnRedirect(String authorizeUrl, String nonce) {
         if (authorizeUrl == null || nonce == null || nonce.isEmpty()) return authorizeUrl;
@@ -57,7 +73,7 @@ public final class AuthHandoff {
             String key = decode(eq >= 0 ? part.substring(0, eq) : part);
             if ("redirect_to".equals(key)) {
                 String value = eq >= 0 ? decode(part.substring(eq + 1)) : "";
-                rebuilt.append("redirect_to=").append(encode(appendQuery(value, "tsp_nonce", nonce)));
+                rebuilt.append("redirect_to=").append(encode(stampAppReturn(value, nonce)));
                 found = true;
             } else {
                 rebuilt.append(part);
@@ -65,21 +81,44 @@ public final class AuthHandoff {
         }
         if (!found) {
             if (rebuilt.length() > 0) rebuilt.append('&');
-            rebuilt.append("tsp_nonce=").append(encode(nonce));
+            rebuilt.append("app=1&tsp_nonce=").append(encode(nonce));
         }
         return base + "?" + rebuilt + fragment;
     }
 
-    static String appendQuery(String url, String key, String value) {
-        if (url == null || url.isEmpty()) return key + "=" + encode(value);
-        String hash = "";
-        int h = url.indexOf('#');
-        if (h >= 0) {
-            hash = url.substring(h);
-            url = url.substring(0, h);
+    /**
+     * Return URL shape: {@code app=1}, then {@code tsp_nonce}, then the rest
+     * ({@code next} and anything else already on the callback URL).
+     */
+    static String stampAppReturn(String redirect, String nonce) {
+        if (redirect == null || redirect.isEmpty()) {
+            return "?app=1&tsp_nonce=" + encode(nonce);
         }
-        String sep = url.indexOf('?') >= 0 ? "&" : "?";
-        return url + sep + encode(key) + "=" + encode(value) + hash;
+        String hash = "";
+        int h = redirect.indexOf('#');
+        if (h >= 0) {
+            hash = redirect.substring(h);
+            redirect = redirect.substring(0, h);
+        }
+        int q = redirect.indexOf('?');
+        String base = q >= 0 ? redirect.substring(0, q) : redirect;
+        String query = q >= 0 ? redirect.substring(q + 1) : "";
+        StringBuilder rest = new StringBuilder();
+        String[] parts = query.isEmpty() ? new String[0] : query.split("&", -1);
+        for (int i = 0; i < parts.length; i++) {
+            String part = parts[i];
+            if (part.isEmpty()) continue;
+            int eq = part.indexOf('=');
+            String key = decode(eq >= 0 ? part.substring(0, eq) : part);
+            if ("app".equals(key) || "tsp_nonce".equals(key)) continue;
+            if (rest.length() > 0) rest.append('&');
+            rest.append(part);
+        }
+        StringBuilder out = new StringBuilder();
+        out.append(base).append("?app=1&tsp_nonce=").append(encode(nonce));
+        if (rest.length() > 0) out.append('&').append(rest);
+        out.append(hash);
+        return out.toString();
     }
 
     private static String encode(String raw) {
