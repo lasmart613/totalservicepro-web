@@ -10,6 +10,7 @@ import {
   sanitizeManualSearchQuery,
 } from '@/lib/manual-library-filter';
 import { findManualIdsByBodyText } from '@/lib/manual-search-index';
+import { isPublishedColumnMissing, wherePublished } from '@/lib/manual-published';
 
 export const dynamic = 'force-dynamic';
 
@@ -94,11 +95,22 @@ export async function POST(req: NextRequest) {
 
     if (ids.length && !access.service && !canAccessServiceManuals(profile?.role, orgType)) {
       let rows: Array<{ id?: unknown; title?: string | null; brand?: string | null; model?: string | null; storage_path?: string | null; doc_kind?: string | null }> = [];
-      const full = await supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_WITH_KIND).in('id', ids);
+      const full = await wherePublished(
+        supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_WITH_KIND).in('id', ids),
+      );
       if (!full.error) rows = full.data || [];
-      else {
-        const slim = await supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).in('id', ids);
-        rows = slim.data || [];
+      else if (isPublishedColumnMissing(full.error)) {
+        const again = await supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_WITH_KIND).in('id', ids);
+        rows = again.data || [];
+      } else {
+        const slim = await wherePublished(
+          supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).in('id', ids),
+        );
+        if (!slim.error) rows = slim.data || [];
+        else if (isPublishedColumnMissing(slim.error)) {
+          const plain = await supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).in('id', ids);
+          rows = plain.data || [];
+        }
       }
       ids = filterManualsForCaller(profile?.role, orgType, rows).map((row) => String(row.id ?? '').trim()).filter(Boolean);
     }

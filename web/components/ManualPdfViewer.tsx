@@ -20,6 +20,7 @@ import { viewerTargetForJoinedPage } from '@/lib/manual-page-map';
 import { fittedPageBoxHeight, viewerCitedPageNotice, viewerPhysicalPage } from '@/lib/pdf-viewer-page';
 import { ViewerAiPanel } from '@/components/ViewerAiPanel';
 import { manualLanguageBadge, resolveManualLanguage } from '@/lib/manual-language';
+import { isMissingColumn, isPublishedColumnMissing, isUnpublishedManual } from '@/lib/manual-published';
 import {
   MANUAL_FILE_MISSING,
   manualDownloadSentence,
@@ -572,17 +573,37 @@ export function ManualPdfViewer({
             const supabase = getSupabaseClient();
             let row = await supabase
               .from('manuals')
-              .select('is_incomplete,storage_path,brand,title,model,language')
+              .select('is_incomplete,storage_path,brand,title,model,language,published')
               .eq('id', payload.manualId)
               .maybeSingle();
-            if (row.error && /language|schema cache|column/i.test(row.error.message || '')) {
+            if (row.error && isPublishedColumnMissing(row.error)) {
+              row = await supabase
+                .from('manuals')
+                .select('is_incomplete,storage_path,brand,title,model,language')
+                .eq('id', payload.manualId)
+                .maybeSingle();
+            } else if (row.error && isMissingColumn(row.error, 'language')) {
+              row = await supabase
+                .from('manuals')
+                .select('is_incomplete,storage_path,brand,title,model,published')
+                .eq('id', payload.manualId)
+                .maybeSingle();
+            }
+            if (isUnpublishedManual(row.data as { published?: unknown } | null)) {
+              if (!cancelled) {
+                setError('This manual is not available.');
+                setLoading(false);
+              }
+              return;
+            }
+            if (row.error && isMissingColumn(row.error, 'language')) {
               row = await supabase
                 .from('manuals')
                 .select('is_incomplete,storage_path,brand,title,model')
                 .eq('id', payload.manualId)
                 .maybeSingle();
             }
-            if (row.error && /is_incomplete|schema cache|column/i.test(row.error.message || '')) {
+            if (row.error && isMissingColumn(row.error, 'is_incomplete')) {
               incomplete = payload.isIncomplete === true;
               row = await supabase
                 .from('manuals')

@@ -101,14 +101,21 @@
         let manuals = [];
 
         if (userManuals && userManuals.length > 0) {
-            manuals = userManuals.map(row => row.manuals);
+            manuals = userManuals
+                .map(row => row.manuals)
+                .filter((row) => row && row.published !== false);
         } else {
-            const { data: allManuals } = await supabaseClient
+            let { data: allManuals, error: allErr } = await supabaseClient
                 .from('manuals')
                 .select('*')
+                .eq('published', true)
                 .order('brand')
                 .order('title');
-            manuals = allManuals || [];
+            if (allErr && /published/i.test(allErr.message || '') && /column|schema cache|does not exist/i.test(allErr.message || '')) {
+                const retry = await supabaseClient.from('manuals').select('*').order('brand').order('title');
+                allManuals = retry.data;
+            }
+            manuals = (allManuals || []).filter((row) => row && row.published !== false);
         }
 
         if (manuals.length === 0) {

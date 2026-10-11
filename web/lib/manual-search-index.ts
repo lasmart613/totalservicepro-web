@@ -15,6 +15,7 @@ import {
 } from './manual-pdf-text.ts';
 import { containsTextImatch } from './email-match.ts';
 import { chapterMetadataWithPageCounts } from './manual-page-map.ts';
+import { isPublishedColumnMissing } from './manual-published.ts';
 
 export const MANUALS_BUCKET = 'manuals';
 export const MANUAL_REINDEX_BATCH = 4;
@@ -779,7 +780,7 @@ export async function findManualIdsByBodyText(
       const id = String((row as { manual_id?: unknown })?.manual_id || '').trim();
       if (id) ids.push(id);
     }
-    return { ids: [...new Set(ids)], available: true };
+    return { ids: await keepPublishedManualIds(db, [...new Set(ids)]), available: true };
   }
 
   // Column / table missing (migration not applied) or textSearch unavailable.
@@ -803,5 +804,27 @@ export async function findManualIdsByBodyText(
     const id = String((row as { manual_id?: unknown })?.manual_id || '').trim();
     if (id) ids.push(id);
   }
-  return { ids: [...new Set(ids)], available: true };
+  return { ids: await keepPublishedManualIds(db, [...new Set(ids)]), available: true };
+}
+
+/** Drop ids whose manuals.published is false. A missing column keeps the ids. */
+async function keepPublishedManualIds(db: TableClient, ids: string[]): Promise<string[]> {
+  if (!ids.length) return [];
+  const allowed = new Set<string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const chunk = ids.slice(i, i + 200);
+    const numeric = chunk.map((id) => Number(id)).filter((n) => Number.isFinite(n));
+    const { data, error } = await db.from('manuals').select('id,published').in('id', numeric.length ? numeric : chunk);
+    if (error) {
+      if (isPublishedColumnMissing(error)) return ids;
+      return [];
+    }
+    for (const row of data || []) {
+      const rec = row as { id?: unknown; published?: unknown };
+      if (rec.published === false) continue;
+      const id = String(rec.id ?? '').trim();
+      if (id) allowed.add(id);
+    }
+  }
+  return ids.filter((id) => allowed.has(id));
 }

@@ -702,9 +702,20 @@
             try {
                 let { data: manual, error } = await supabaseClient
                     .from('manuals')
-                    .select('id, title, is_folder, entry_file_path, chapter_metadata, storage_path, is_incomplete')
+                    .select('id, title, is_folder, entry_file_path, chapter_metadata, storage_path, is_incomplete, published')
                     .eq('id', currentManualId)
+                    .eq('published', true)
                     .single();
+                if (error && /published/i.test(error.message || '') && /column|schema cache|does not exist/i.test(error.message || '')) {
+                    const retryPub = await supabaseClient
+                        .from('manuals')
+                        .select('id, title, is_folder, entry_file_path, chapter_metadata, storage_path, is_incomplete')
+                        .eq('id', currentManualId)
+                        .single();
+                    manual = retryPub.data;
+                    error = retryPub.error;
+                }
+                if (manual && manual.published === false) return false;
                 if (error && /is_incomplete|schema cache|column/i.test(error.message || '')) {
                     const retry = await supabaseClient
                         .from('manuals')

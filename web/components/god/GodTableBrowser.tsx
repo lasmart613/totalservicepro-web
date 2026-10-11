@@ -378,7 +378,13 @@ export function GodTableBrowser({
               <tr key={String(row.id)} className="border-b border-[var(--border)] hover:bg-[var(--surface3)]">
                 {visibleColumns.map((col) => (
                   <td key={col.name} className="p-3 max-w-[220px] truncate" title={formatCell(row[col.name])}>
-                    {formatCell(row[col.name])}
+                    {col.name === 'published' && row[col.name] === false ? (
+                      <span className="font-semibold text-amber-300">Unpublished</span>
+                    ) : col.name === 'published' && row[col.name] === true ? (
+                      <span>Published</span>
+                    ) : (
+                      formatCell(row[col.name])
+                    )}
                   </td>
                 ))}
                 <td className="p-3 whitespace-nowrap">

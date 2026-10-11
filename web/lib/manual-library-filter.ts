@@ -418,8 +418,12 @@ export const MANUAL_LIBRARY_SELECT =
 /** Prefer doc_kind when the live column exists; fall back if PostgREST 400s. */
 export const MANUAL_LIBRARY_SELECT_WITH_KIND = `${MANUAL_LIBRARY_SELECT}, doc_kind`;
 
-/** Prefer language when the live column exists; fall back to doc_kind if it is missing. */
-export const MANUAL_LIBRARY_SELECT_WITH_LANGUAGE = `${MANUAL_LIBRARY_SELECT_WITH_KIND}, language`;
+/**
+ * Prefer language and published when those columns exist.
+ * published is filtered by callers (and by RLS). A missing column falls
+ * through to MANUAL_LIBRARY_SELECT_WITH_KIND, which omits it.
+ */
+export const MANUAL_LIBRARY_SELECT_WITH_LANGUAGE = `${MANUAL_LIBRARY_SELECT_WITH_KIND}, language, published`;
 
 /** Folder-era catalogs before equipment rooms / wavelengths. */
 export const MANUAL_LIBRARY_SELECT_LEGACY = 'id, brand, title, model, storage_path, is_folder';

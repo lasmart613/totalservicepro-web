@@ -14,6 +14,12 @@ import {
 import { asManualId, assistantManualPicker, buildGrokChatPayload } from '@/lib/ai/manual-scope';
 import { fetchAllPages } from '@/lib/supabase/paginate';
 import {
+  filterPublishedManuals,
+  isMissingColumn,
+  isPublishedColumnMissing,
+  wherePublished,
+} from '@/lib/manual-published';
+import {
   LEGACY_STORAGE_KEY,
   messagesForManual,
   readAiState,
@@ -45,9 +51,12 @@ type ManualRow = {
   brand: string | null;
   model?: string | null;
   language?: string | null;
+  published?: boolean | null;
 };
 
-const AI_MANUAL_SELECT = 'id,title,storage_path,brand,model,language';
+const AI_MANUAL_SELECT = 'id,title,storage_path,brand,model,language,published';
+const AI_MANUAL_SELECT_LANGUAGE = 'id,title,storage_path,brand,model,language';
+const AI_MANUAL_SELECT_PUBLISHED = 'id,title,storage_path,brand,model,published';
 const AI_MANUAL_SELECT_LEGACY = 'id,title,storage_path,brand,model';
 
 function assistantManualOptionLabel(row: ManualRow): string {
@@ -256,26 +265,45 @@ export default function AIAssistantClient() {
 
       // Manuals catalog. Default PostgREST page is 1000 rows; Zeiss (manual 76)
       // sorts after that, so page through and still fetch the URL id directly.
-      let loaded = await fetchAllPages<ManualRow>(async (from, to) =>
-        supabase.from('manuals').select(AI_MANUAL_SELECT).order('brand').order('title').range(from, to)
-      );
-      if (loaded.error && /language|schema cache|column/i.test(loaded.error.message || '')) {
-        loaded = await fetchAllPages<ManualRow>(async (from, to) =>
-          supabase.from('manuals').select(AI_MANUAL_SELECT_LEGACY).order('brand').order('title').range(from, to)
+      const loadAssistantManuals = (select: string, publishedOnly: boolean) =>
+        fetchAllPages<ManualRow>(async (from, to) =>
+          wherePublished(
+            supabase.from('manuals').select(select).order('brand').order('title'),
+            publishedOnly,
+          ).range(from, to)
         );
+      let loaded = await loadAssistantManuals(AI_MANUAL_SELECT, true);
+      if (loaded.error && isPublishedColumnMissing(loaded.error)) {
+        loaded = await loadAssistantManuals(AI_MANUAL_SELECT_LANGUAGE, false);
+      } else if (loaded.error && isMissingColumn(loaded.error, 'language')) {
+        loaded = await loadAssistantManuals(AI_MANUAL_SELECT_PUBLISHED, true);
+      }
+      if (loaded.error && isMissingColumn(loaded.error, 'language')) {
+        loaded = await loadAssistantManuals(AI_MANUAL_SELECT_LEGACY, false);
+      } else if (loaded.error && isPublishedColumnMissing(loaded.error)) {
+        loaded = await loadAssistantManuals(AI_MANUAL_SELECT_LEGACY, false);
       }
       if (loaded.error) {
         console.warn('manuals load', loaded.error);
         toast.error('Could not load manuals list');
       }
-      let rows = (loaded.data || []).filter((m) => m.storage_path && m.title && m.id != null);
+      let rows = filterPublishedManuals(loaded.data || []).filter((m) => m.storage_path && m.title && m.id != null);
       if (urlManualId != null && !rows.some((r) => asManualId(r.id) === urlManualId)) {
-        let oneRes = await supabase
-          .from('manuals')
-          .select(AI_MANUAL_SELECT)
-          .eq('id', urlManualId)
-          .maybeSingle();
-        if (oneRes.error && /language|schema cache|column/i.test(oneRes.error.message || '')) {
+        let oneRes = await wherePublished(
+          supabase.from('manuals').select(AI_MANUAL_SELECT).eq('id', urlManualId),
+        ).maybeSingle();
+        if (oneRes.error && isPublishedColumnMissing(oneRes.error)) {
+          oneRes = await supabase
+            .from('manuals')
+            .select(AI_MANUAL_SELECT_LANGUAGE)
+            .eq('id', urlManualId)
+            .maybeSingle();
+        } else if (oneRes.error && isMissingColumn(oneRes.error, 'language')) {
+          oneRes = await wherePublished(
+            supabase.from('manuals').select(AI_MANUAL_SELECT_PUBLISHED).eq('id', urlManualId),
+          ).maybeSingle();
+        }
+        if (oneRes.error && (isMissingColumn(oneRes.error, 'language') || isPublishedColumnMissing(oneRes.error))) {
           oneRes = await supabase
             .from('manuals')
             .select(AI_MANUAL_SELECT_LEGACY)
@@ -284,7 +312,9 @@ export default function AIAssistantClient() {
         }
         const { data: one, error: oneErr } = oneRes;
         if (oneErr) console.warn('manual by id', oneErr);
-        if (one?.storage_path && one?.title && one?.id != null) rows = [...rows, one as ManualRow];
+        if (one?.storage_path && one?.title && one?.id != null && (one as ManualRow).published !== false) {
+          rows = [...rows, one as ManualRow];
+        }
       }
       if (!cancelled) {
         setManuals(rows);

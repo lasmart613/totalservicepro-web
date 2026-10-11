@@ -664,7 +664,7 @@ test('large manuals are not attached, and a missing corpus still gets general gu
   assert.match(client, /eq\('id', urlManualId\)/);
   assert.match(client, /manualTitle/);
   assert.match(client, /manualModel/);
-  const chatLookup = chat.slice(chat.indexOf('const rawId'), chat.indexOf('const nonSys'));
+  const chatLookup = chat.slice(chat.indexOf('let rawId'), chat.indexOf('const nonSys'));
   assert.match(chatLookup, /\.eq\('id', rawId\)/);
   assert.doesNotMatch(chatLookup, /resolveManualFromCatalog\(manuals/);
   assert.match(chat, /selectedManualContext\(/);

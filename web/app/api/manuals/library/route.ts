@@ -6,6 +6,7 @@ import { normalizeOrgId } from '@/lib/billing/upgrade-session';
 import { canAccessServiceManuals } from '@/lib/roles';
 import { mayOpenManual, manualsAccess, manualsForbiddenMessage } from '@/lib/manuals-access';
 import { MANUAL_LIBRARY_SELECT_MINIMAL, MANUAL_LIBRARY_SELECT_WITH_KIND } from '@/lib/manual-library-filter';
+import { isPublishedColumnMissing, wherePublished } from '@/lib/manual-published';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,10 +46,27 @@ async function lookupManual(
   storage_path?: string | null;
   doc_kind?: string | null;
 } | null> {
-  const full = await client.from('manuals').select(MANUAL_LIBRARY_SELECT_WITH_KIND).eq('id', manualId).maybeSingle();
+  const full = await wherePublished(
+    client.from('manuals').select(MANUAL_LIBRARY_SELECT_WITH_KIND).eq('id', manualId),
+  ).maybeSingle();
   if (!full.error) return full.data || null;
-  const slim = await client.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).eq('id', manualId).maybeSingle();
-  return slim.data || null;
+  if (isPublishedColumnMissing(full.error)) {
+    const again = await client
+      .from('manuals')
+      .select(MANUAL_LIBRARY_SELECT_WITH_KIND)
+      .eq('id', manualId)
+      .maybeSingle();
+    if (!again.error) return again.data || null;
+  }
+  const slim = await wherePublished(
+    client.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).eq('id', manualId),
+  ).maybeSingle();
+  if (!slim.error) return slim.data || null;
+  if (isPublishedColumnMissing(slim.error)) {
+    const plain = await client.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).eq('id', manualId).maybeSingle();
+    return plain.data || null;
+  }
+  return null;
 }
 
 async function ownedManualIds(
@@ -104,6 +122,9 @@ export async function POST(req: NextRequest) {
       );
     }
     const catalog = await lookupManual(supabase, manualId);
+    if (!catalog) {
+      return NextResponse.json({ error: 'not_found' }, { status: 404 });
+    }
     if (!mayOpenManual(profile?.role, orgType, catalog) || (!access.service && !canAccessServiceManuals(profile?.role, orgType) && !catalog)) {
       return NextResponse.json(
         { error: manualsForbiddenMessage(profile?.role, orgType) },
