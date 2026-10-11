@@ -73,11 +73,44 @@ export function callbackDest(input: {
   return '/';
 }
 
+/**
+ * Shop roles that founder onboarding traps while onboarding_completed is false.
+ * Invited field roles, owners, customers, and suppliers are not in this set.
+ */
+const ORG_SETUP_ROUTING_ROLES = new Set([
+  'admin',
+  'company_admin',
+  'service_manager',
+  'billing_manager',
+]);
+
+export function isOrgSetupRoutingRole(role?: string | null): boolean {
+  return ORG_SETUP_ROUTING_ROLES.has(String(role || '').toLowerCase());
+}
+
+/**
+ * An unfinished admin whose org is already running is complete for routing only.
+ * `orgSetUp` must be the explicit result of the set-up lookup. false, null,
+ * and undefined keep today's path (including a lookup error). This does not
+ * read or write user_profiles.onboarding_completed.
+ */
+export function adminOrgCountsAsOnboarded(
+  profile: OrgRouteProfile,
+  orgSetUp: boolean | null | undefined
+): boolean {
+  if (orgSetUp !== true) return false;
+  if (!profile || profile.onboarding_completed !== false) return false;
+  if (!profileOrgId(profile)) return false;
+  return isOrgSetupRoutingRole(profile.role);
+}
+
 /** Home dashboard. null means stay on /. */
 export function homeDest(input: {
   profile?: OrgRouteProfile;
   claim?: InviteClaimResult | null;
   metaRole?: string | null;
+  /** Explicit set-up lookup. Only `true` can keep an unfinished admin on /. */
+  orgSetUp?: boolean | null;
 }): string | null {
   if (claimAttachedOrganization(input.claim)) {
     return destAfterInviteClaim(input.claim, '/onboarding/member');
@@ -95,7 +128,10 @@ export function homeDest(input: {
       metaRole === 'owner' ||
       metaRole === 'parts_supplier';
     if (invited && !ownerOrSupplier) return '/onboarding/member';
-    if (!ownerOrSupplier) return '/onboarding';
+    if (!ownerOrSupplier) {
+      if (adminOrgCountsAsOnboarded(input.profile, input.orgSetUp)) return null;
+      return '/onboarding';
+    }
   }
   return null;
 }
@@ -115,6 +151,8 @@ export function onboardingLeaveTarget(input: {
   profile?: OrgRouteProfile;
   orgType?: string | null;
   claim?: InviteClaimResult | null;
+  /** Explicit set-up lookup. Only `true` lets an unfinished admin leave the wizard. */
+  orgSetUp?: boolean | null;
 }): string | null {
   if (claimAttachedOrganization(input.claim)) {
     const dest = destAfterInviteClaim(input.claim, '/onboarding/member');
@@ -126,7 +164,9 @@ export function onboardingLeaveTarget(input: {
   const role = input.profile?.role;
   if (isOwnerish(role, input.orgType)) return '/my-lasers';
   if (isSupplier(role, input.orgType)) return '/';
-  if (input.profile?.onboarding_completed) {
+  const finished =
+    !!input.profile?.onboarding_completed || adminOrgCountsAsOnboarded(input.profile, input.orgSetUp);
+  if (finished) {
     const normalized = String(role || '').toLowerCase();
     if (['fse', 'engineer', 'dispatcher', 'scheduler'].includes(normalized)) return '/hub';
     return '/company';
@@ -147,6 +187,7 @@ export function signInRedirects(input: {
   origin?: string;
   isFounder?: boolean;
   metaRole?: string | null;
+  orgSetUp?: boolean | null;
 }): string[] {
   const hops: string[] = [];
   let path = (input.start || '/').split('?')[0] || '/';
@@ -171,6 +212,7 @@ function hopFrom(
     origin?: string;
     isFounder?: boolean;
     metaRole?: string | null;
+    orgSetUp?: boolean | null;
   }
 ): string | null {
   if (path === '/onboarding') return onboardingLeaveTarget(input);

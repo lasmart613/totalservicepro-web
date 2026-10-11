@@ -26,6 +26,7 @@ import { orgTypeLabel, ownerDashboardHeading, ownerLabelKind, ownerProfileLabel,
 import { applyPendingSignup, resolvePendingSignup } from '@/lib/pending-signup';
 import { inviteInPlay } from '@/lib/invite-claim';
 import { homeDest, profileOrgId } from '@/lib/no-org-route';
+import { adminRoutingNeedsOrgSetupLookup, lookupOrgSetUp } from '@/lib/org-setup';
 import { useUpgradeEntry } from '@/lib/use-show-upgrade';
 import { UpgradePlanLink } from '@/components/UpgradePlanLink';
 import {
@@ -167,10 +168,14 @@ export function HomeDashboard({ onNoUser }: { onNoUser?: () => void }) {
         }
       }
 
+      const orgSetUp = adminRoutingNeedsOrgSetupLookup(prof)
+        ? await lookupOrgSetUp(supabase, profileOrgId(prof))
+        : null;
       const dest = homeDest({
         profile: prof,
         claim,
         metaRole: (u.user_metadata as { role?: string } | null)?.role || null,
+        orgSetUp,
       });
       if (!prof?.organization_id && dest === '/onboarding') {
         if (!cancelled) router.replace('/onboarding');
