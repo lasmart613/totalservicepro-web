@@ -2,7 +2,10 @@
  * Public-site languages. English has no prefix. Farsi, Spanish, French,
  * Hebrew, Italian, German, Brazilian Portuguese, and Arabic mirror the
  * logged-out pages. Signed-in app paths are not in this set.
+ * Legal pages stay on the English URL (see legal-routes.ts).
  */
+
+import { isPublicLegalPath } from '../legal-routes.ts';
 
 export type PublicLocale = 'en' | 'fa' | 'es' | 'fr' | 'he' | 'it' | 'de' | 'pt' | 'ar';
 
@@ -97,6 +100,8 @@ export function prefixLocaleHref(locale: PublicLocale, href: string): string {
   if (!href.startsWith('/')) return href;
 
   const { path, query, hash } = splitHref(href);
+  // Privacy, terms, and account deletion stay on the English URL in every language.
+  if (isPublicLegalPath(path)) return `${path}${query}${hash}`;
   if (!PUBLIC_PATHS.has(path)) return `/${locale}/login`;
   if (path === '/') return `/${locale}${query}${hash}`;
   return `/${locale}${path}${query}${hash}`;
@@ -111,6 +116,7 @@ export function hrefForLocale(pathname: string, target: PublicLocale, extra = ''
   const bare = stripLocalePrefix(pathname.split('?')[0].split('#')[0] || '/');
   const path = bare || '/';
   const suffix = extra || '';
+  if (isPublicLegalPath(path)) return `${path}${suffix}`;
   if (!PUBLIC_PATHS.has(path)) {
     return target === 'en' ? `/${suffix}` : `/${target}${suffix}`;
   }

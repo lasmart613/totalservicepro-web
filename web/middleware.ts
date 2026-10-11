@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server'
-import { mapAndroidHtmlPath } from './lib/android-html-routes'
-import { safeRedirectPath } from './lib/safe-redirect'
+import { mapAndroidHtmlPath } from './lib/android-html-routes.ts'
+import { legalRedirectDestination } from './lib/legal-routes.ts'
+import { safeRedirectPath } from './lib/safe-redirect.ts'
 
 /**
  * Lightweight middleware for Netlify.
@@ -10,9 +11,20 @@ import { safeRedirectPath } from './lib/safe-redirect'
  * Session refresh still happens in browser via the Supabase client.
  *
  * Also remaps leftover Android *.html notification links so Open never 404s.
+ *
+ * Legal pages (/privacy, /delete-account, /terms) are public. This handler
+ * does not read a session and does not send those paths to /login or /onboarding.
+ * /privacy-policy and /legal/privacy redirect to /privacy.
  */
 export function middleware(request: NextRequest) {
   const { pathname, search } = request.nextUrl
+
+  const legalDest = legalRedirectDestination(pathname)
+  if (legalDest) {
+    const dest = request.nextUrl.clone()
+    dest.pathname = legalDest
+    return NextResponse.redirect(dest, 308)
+  }
 
   // Dead sibling of /service-requests (marketplace hub card uses the live path)
   if (pathname === '/marketplace/service-requests') {
