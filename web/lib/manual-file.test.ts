@@ -246,6 +246,15 @@ test('get-manual-url probes metadata before signing and the viewer does not rend
   assert.match(probe, /\/object\/list\/manuals/);
   assert.match(probe, /search: name/);
   assert.doesNotMatch(probe, /\/storage\/v1\/object\/manuals\//);
+  // A missing file must not log a storage 400: list (200 + empty) runs first,
+  // and object/info is only the fallback when that list call fails.
+  assert.ok(probe.indexOf('/object/list/manuals') < probe.indexOf('/object/info/manuals/'));
+  const listOk = probe.indexOf('if (res.ok)');
+  const infoAt = probe.indexOf('/object/info/manuals/');
+  assert.ok(listOk > 0 && listOk < infoAt);
+  assert.match(probe.slice(listOk, infoAt), /return hit \? "yes" : "no"/);
+  // Function logs keep the storage path out.
+  assert.doesNotMatch(probe, /console\.warn\([^)]*\bpath\b[^)]*\)/);
   assert.match(edge, /error: "file_missing"/);
   assert.match(edge, /render: "download"/);
   assert.match(edge, /file_kind: kind/);
