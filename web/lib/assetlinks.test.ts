@@ -78,8 +78,12 @@ test('middleware does not touch /.well-known/assetlinks.json', () => {
     assert.match(toml, /for = "\/\.well-known\/assetlinks\.json"/);
     assert.match(toml, /Content-Type = "application\/json"/);
     assert.match(toml, /SECRETS_SCAN_SMART_DETECTION_OMIT_VALUES = "[^"]*51:F4:F1:B9:/);
-    assert.doesNotMatch(toml, /\[\[redirects\]\]/);
-    assert.doesNotMatch(toml, /from\s*=\s*"https?:\/\/www\.repairplanet\.net/);
+    const rules = toml
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('#'))
+      .join('\n');
+    assert.doesNotMatch(rules, /\[\[redirects\]\]/);
+    assert.doesNotMatch(rules, /from\s*=\s*"https?:\/\/www\.repairplanet\.net/);
   }
 
   for (const missing of [

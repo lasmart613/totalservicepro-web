@@ -46,8 +46,8 @@
 # www.repairplanet.net → apex is Netlify's primary-domain redirect (Domain
 # management), not a rule in this file. That redirect runs before site
 # redirects, so this file cannot exempt /.well-known/assetlinks.json on www
-# while repairplanet.net is the primary domain. There is no [[redirects]]
-# entry and no _redirects file.
+# while repairplanet.net is the primary domain. This file has no redirects
+# table and the repo has no _redirects file.
 [[headers]]
   for = "/.well-known/assetlinks.json"
   [headers.values]
