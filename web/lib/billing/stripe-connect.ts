@@ -12,7 +12,7 @@
  */
 
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { isOwnerOrgType } from '../org-types.ts';
+import { isOwnerOrgType, isSupplierOrgType } from '../org-types.ts';
 import { PRODUCTION_SITE_ORIGIN } from '../site-origin.ts';
 import { safeRedirectPath } from '../safe-redirect.ts';
 import { checkoutLooksLikeInvoicePay } from './apply-invoice-payment.ts';
@@ -159,16 +159,65 @@ export function buyerConnectBlockedMessage(): string {
   return 'This seller has not connected Stripe for card payments. Your card was not charged.';
 }
 
-/** Only an admin or company_admin of the org may start Connect onboarding. */
+/**
+ * Who may start or manage Connect for one organization.
+ *
+ * admin and company_admin of a non-owner org are unchanged.
+ * A parts_supplier membership may do so only when organizations.type is a
+ * supplier type (parts_supplier or vendor). organizations.biz_type is a
+ * free-text specialty and is not an org type. Owner-type orgs stay blocked.
+ * The supplier role alias is not a grant.
+ * The role argument is the membership role in that org, not user_profiles.role.
+ */
 export function canStartStripeConnect(role: string | null | undefined, orgType: string | null | undefined): boolean {
   if (isOwnerOrgType(orgType)) return false;
   const r = String(role || '').toLowerCase().trim();
-  return r === 'admin' || r === 'company_admin';
+  if (r === 'admin' || r === 'company_admin') return true;
+  return r === 'parts_supplier' && isSupplierOrgType(orgType);
 }
 
-/** Card visibility matches who may start Connect: admin and company_admin only. */
+/** Card visibility matches who may start Connect. */
 export function orgTakesCardPayments(role: string | null | undefined, orgType: string | null | undefined): boolean {
   return canStartStripeConnect(role, orgType);
+}
+
+/** Body org id, when the client names one. Blank means the caller's own org. */
+export function requestedConnectOrgId(body: unknown): string | null {
+  if (!body || typeof body !== 'object' || Array.isArray(body)) return null;
+  const row = body as Record<string, unknown>;
+  const raw = row.organizationId ?? row.organization_id ?? row.orgId;
+  if (raw == null) return null;
+  const id = String(raw).trim();
+  return id || null;
+}
+
+export type ConnectOrgAccess =
+  | { ok: true }
+  | { ok: false; status: 403; code: 'forbidden'; reason: 'other_org' | 'not_allowed' };
+
+/**
+ * Connect onboarding for the caller's own org.
+ * The role is the membership role in that org, not user_profiles.role.
+ * A parts_supplier who names a different org is 403. The named id is never
+ * the account that gets connected. admin and company_admin ignore a named
+ * org and keep the previous allow/deny rule for their own org.
+ */
+export function authorizeConnectOrg(input: {
+  membershipRole: string | null | undefined;
+  orgType: string | null | undefined;
+  ownOrgId: string | number | null | undefined;
+  targetOrgId?: string | number | null;
+}): ConnectOrgAccess {
+  const own = input.ownOrgId == null ? '' : String(input.ownOrgId).trim();
+  const named = input.targetOrgId == null ? '' : String(input.targetOrgId).trim();
+  const role = String(input.membershipRole || '').toLowerCase().trim();
+  if (role === 'parts_supplier' && named && named !== own) {
+    return { ok: false, status: 403, code: 'forbidden', reason: 'other_org' };
+  }
+  if (!canStartStripeConnect(input.membershipRole, input.orgType)) {
+    return { ok: false, status: 403, code: 'forbidden', reason: 'not_allowed' };
+  }
+  return { ok: true };
 }
 
 export function destinationChargeFields(input: {
@@ -489,9 +538,11 @@ export type ConnectCallbackActor = {
 };
 
 /**
- * Return and refresh may save flags or mint an Account Link only for a
- * signed-in admin or company_admin of the org named in the state. When the
- * state names the user who started Connect, that same user is required.
+ * Return and refresh may save flags or mint an Account Link only for someone
+ * who may start Connect for the org named in the state. That is an admin or
+ * company_admin of a non-owner org, or a parts_supplier of their own
+ * supplier org. When the state names the user who started Connect, that
+ * same user is required. Another org is refused.
  */
 export function authorizeConnectCallback(
   state: { orgId: string; userId?: string | null },

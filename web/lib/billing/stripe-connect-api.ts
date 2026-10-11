@@ -279,6 +279,8 @@ export async function loadConnectCaller(input: {
     organization_id?: string | number | null;
     active_organization_id?: string | number | null;
   } | null;
+  adminClient?: { from: (table: string) => any } | null;
+  serviceRoleReady?: boolean;
 }): Promise<ConnectCaller | { error: string; status: number; code: string }> {
   const orgId = input.profile?.organization_id ?? input.profile?.active_organization_id ?? null;
   if (orgId == null) {
@@ -288,10 +290,12 @@ export async function loadConnectCaller(input: {
       code: 'missing_org',
     };
   }
-  if (!hasServiceRole()) {
+  const serviceReady = input.serviceRoleReady ?? (input.adminClient ? true : hasServiceRole());
+  if (!serviceReady) {
     return { error: 'Service role is required to check Stripe Connect.', status: 503, code: 'stripe_unavailable' };
   }
-  const admin = getSupabaseAdmin();
+  const admin = input.adminClient ?? getSupabaseAdmin();
+  // Membership role in this org. user_profiles.role is not the Connect grant.
   const looked = await getOrgRole(admin, input.userId, orgId);
   if (!looked.ok) {
     return { error: looked.error, status: 503, code: 'org_role_lookup' };
