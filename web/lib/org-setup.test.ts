@@ -13,7 +13,11 @@ import {
 
 const here = dirname(fileURLToPath(import.meta.url));
 const migration = readFileSync(
-  join(here, '../supabase/migrations/20261011_000911_org_set_up_for_routing.sql'),
+  join(here, '../supabase/migrations/20261011_000914_org_set_up_for_routing.sql'),
+  'utf8'
+);
+const rollback = readFileSync(
+  join(here, '../supabase/migrations/20261011_000914_org_set_up_for_routing_rollback.sql'),
   'utf8'
 );
 
@@ -103,6 +107,13 @@ test('only an unfinished admin with an org asks for the set-up lookup', () => {
 test('the set-up migration is one read and does not flip onboarding_completed', () => {
   assert.match(migration, /CREATE OR REPLACE FUNCTION public\.organization_is_set_up_for_routing\(p_organization_id bigint\)/);
   assert.match(migration, /SECURITY INVOKER/);
+  assert.match(migration, /SET search_path = ''/);
+  assert.doesNotMatch(migration, /search_path = public/);
+  assert.doesNotMatch(migration, /pg_catalog\.(extract|coalesce)\b/i);
+  assert.match(rollback, /20261011_000914_org_set_up_for_routing\.sql/);
+  assert.match(rollback, /DROP FUNCTION IF EXISTS public\.organization_is_set_up_for_routing\(bigint\)/);
+  assert.match(rollback, /DROP INDEX IF EXISTS public\.service_tickets_organization_id_idx/);
+  assert.match(rollback, /DROP INDEX IF EXISTS public\.idx_service_reports_organization_id/);
   assert.match(migration, /public\.organization_customers/);
   assert.match(migration, /c\.service_organization_id = o\.id/);
   assert.match(migration, /public\.service_tickets/);

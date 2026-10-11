@@ -31,7 +31,7 @@ RETURNS boolean
 LANGUAGE sql
 STABLE
 SECURITY INVOKER
-SET search_path = public, pg_temp
+SET search_path = ''
 AS $$
   SELECT EXISTS (
     SELECT 1
