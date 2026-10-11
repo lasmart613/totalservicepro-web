@@ -20,6 +20,7 @@
 //   supabase functions deploy get-manual-url --project-ref yljztfajyvjzqikxdddf --no-verify-jwt
 
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.49.1";
+import { verifyAccessTokenLocally } from "./jwt.ts";
 import {
   chaptersFromMetadata,
   dedupeChapterList,
@@ -296,6 +297,17 @@ async function authUser(
   const token = extractUserToken(req, body);
   if (!token) return { user: null as null, token: "", err: "missing token" };
 
+  // Local check against the project's signing keys: no /auth/v1/user call.
+  // Only user.id is used below; access is still read per request.
+  const local = await verifyAccessTokenLocally(token, supabaseUrl);
+  if (local.kind === "ok") {
+    return { user: { id: local.userId }, token, err: null as string | null };
+  }
+  if (local.kind === "reject") {
+    return { user: null as null, token, err: local.reason };
+  }
+
+  // Legacy HS256 token or keys unreachable: the network check, as before.
   const client = createClient(supabaseUrl, anonKey || serviceKey, {
     global: { headers: { Authorization: `Bearer ${token}` } },
     auth: { persistSession: false, autoRefreshToken: false },
