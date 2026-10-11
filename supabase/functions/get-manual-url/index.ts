@@ -41,7 +41,12 @@ import {
   type StorageProbe,
 } from "./files.ts";
 import { annotateChaptersWithPageMap } from "./page-map.ts";
-import { isUnpublishedManual, unpublishedManualDenial } from "./published.ts";
+import {
+  isMissingColumn,
+  isPublishedColumnMissing,
+  isUnpublishedManual,
+  unpublishedManualDenial,
+} from "./published.ts";
 
 const cors: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -56,18 +61,20 @@ function unpublishedManualResponse(row: { published?: unknown } | null | undefin
   return json(denied.status, { error: denied.error });
 }
 
+function reportedMissingColumn(
+  error: { code?: string | null; message?: string | null } | null | undefined,
+  columns: string[],
+): boolean {
+  return columns.some((column) => isMissingColumn(error, column));
+}
+
 async function queryManual(
   admin: { from: (table: string) => any },
   columns: string,
-  finish: (query: any) => Promise<{ data: any; error: { message?: string } | null }>,
-): Promise<{ data: any; error: { message?: string } | null }> {
+  finish: (query: any) => Promise<{ data: any; error: { code?: string; message?: string } | null }>,
+): Promise<{ data: any; error: { code?: string; message?: string } | null }> {
   const first = await finish(admin.from("manuals").select(`${columns},published`));
-  const message = String(first?.error?.message || "");
-  if (
-    first?.error &&
-    /published/i.test(message) &&
-    /column|schema cache|does not exist|PGRST204/i.test(message)
-  ) {
+  if (isPublishedColumnMissing(first?.error)) {
     return finish(admin.from("manuals").select(columns));
   }
   return first;
@@ -686,18 +693,14 @@ Deno.serve(async (req) => {
           "id, storage_path, title, is_folder, entry_file_path, chapter_metadata",
           (query) => query.eq("id", manualId).maybeSingle(),
         );
-        if (q.error && /is_folder|entry_file_path|chapter_metadata|column/i.test(q.error.message || "")) {
-          q = await admin
-            .from("manuals")
-            .select("id, storage_path, title, entry_file_path")
-            .eq("id", manualId)
-            .maybeSingle();
-          if (q.error && /entry_file_path|column/i.test(q.error.message || "")) {
-            q = await admin
-              .from("manuals")
-              .select("id, storage_path, title")
-              .eq("id", manualId)
-              .maybeSingle();
+        if (reportedMissingColumn(q.error, ["is_folder", "entry_file_path", "chapter_metadata"])) {
+          q = await queryManual(admin, "id, storage_path, title, entry_file_path", (query) =>
+            query.eq("id", manualId).maybeSingle(),
+          );
+          if (reportedMissingColumn(q.error, ["entry_file_path"])) {
+            q = await queryManual(admin, "id, storage_path, title", (query) =>
+              query.eq("id", manualId).maybeSingle(),
+            );
           }
         }
         man = q.data;
@@ -864,18 +867,14 @@ Deno.serve(async (req) => {
         "id, storage_path, title, is_folder, entry_file_path, chapter_metadata",
         (query) => query.eq("id", manualId).maybeSingle(),
       );
-      if (q.error && /is_folder|entry_file_path|chapter_metadata|column/i.test(q.error.message || "")) {
-        q = await admin
-          .from("manuals")
-          .select("id, storage_path, title, entry_file_path")
-          .eq("id", manualId)
-          .maybeSingle();
-        if (q.error && /entry_file_path|column/i.test(q.error.message || "")) {
-          q = await admin
-            .from("manuals")
-            .select("id, storage_path, title")
-            .eq("id", manualId)
-            .maybeSingle();
+      if (reportedMissingColumn(q.error, ["is_folder", "entry_file_path", "chapter_metadata"])) {
+        q = await queryManual(admin, "id, storage_path, title, entry_file_path", (query) =>
+          query.eq("id", manualId).maybeSingle(),
+        );
+        if (reportedMissingColumn(q.error, ["entry_file_path"])) {
+          q = await queryManual(admin, "id, storage_path, title", (query) =>
+            query.eq("id", manualId).maybeSingle(),
+          );
         }
       }
       man = q.data;
@@ -887,18 +886,14 @@ Deno.serve(async (req) => {
         "id, storage_path, title, is_folder, entry_file_path, chapter_metadata",
         (query) => query.eq("storage_path", storagePath).maybeSingle(),
       );
-      if (q.error && /is_folder|entry_file_path|chapter_metadata|column/i.test(q.error.message || "")) {
-        q = await admin
-          .from("manuals")
-          .select("id, storage_path, title, entry_file_path")
-          .eq("storage_path", storagePath)
-          .maybeSingle();
-        if (q.error && /entry_file_path|column/i.test(q.error.message || "")) {
-          q = await admin
-            .from("manuals")
-            .select("id, storage_path, title")
-            .eq("storage_path", storagePath)
-            .maybeSingle();
+      if (reportedMissingColumn(q.error, ["is_folder", "entry_file_path", "chapter_metadata"])) {
+        q = await queryManual(admin, "id, storage_path, title, entry_file_path", (query) =>
+          query.eq("storage_path", storagePath).maybeSingle(),
+        );
+        if (reportedMissingColumn(q.error, ["entry_file_path"])) {
+          q = await queryManual(admin, "id, storage_path, title", (query) =>
+            query.eq("storage_path", storagePath).maybeSingle(),
+          );
         }
       }
       man = q.data;
@@ -913,7 +908,7 @@ Deno.serve(async (req) => {
             "id, storage_path, title, is_folder, entry_file_path, chapter_metadata",
             (query) => query.eq("storage_path", prefix).maybeSingle(),
           );
-          if (q2.error && /is_folder|entry_file_path|chapter_metadata|column/i.test(q2.error.message || "")) {
+          if (reportedMissingColumn(q2.error, ["is_folder", "entry_file_path", "chapter_metadata"])) {
             q2 = await queryManual(admin, "id, storage_path, title", (query) =>
               query.eq("storage_path", prefix).maybeSingle(),
             );

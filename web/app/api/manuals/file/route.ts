@@ -106,18 +106,14 @@ async function readCatalogQuery(
 ): Promise<{ row: any; unpublished: boolean; schemaMiss: boolean }> {
   const selected = includePublished ? `${columns}, published` : columns;
   const result = await apply(client.from('manuals').select(selected)).maybeSingle();
-  if (result.error && includePublished && isPublishedColumnMissing(result.error.message)) {
+  if (result.error && includePublished && isPublishedColumnMissing(result.error)) {
     return { row: null, unpublished: false, schemaMiss: true };
   }
   if (!result.error && isUnpublishedManual(result.data)) {
     return { row: null, unpublished: true, schemaMiss: false };
   }
   if (result.error) {
-    return {
-      row: null,
-      unpublished: false,
-      schemaMiss: /schema cache|column|does not exist|PGRST204/i.test(result.error.message || ''),
-    };
+    return { row: null, unpublished: false, schemaMiss: false };
   }
   return { row: result.data || null, unpublished: false, schemaMiss: false };
 }

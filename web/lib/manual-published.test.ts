@@ -8,6 +8,7 @@ import { MANUAL_LIBRARY_SELECT_WITH_KIND, MANUAL_LIBRARY_SELECT_WITH_LANGUAGE } 
 import { findManualIdsByBodyText } from './manual-search-index.ts';
 import {
   filterPublishedManuals,
+  isMissingColumn,
   isPublishedColumnMissing,
   parseManualPublishedToggle,
   wherePublished,
@@ -39,10 +40,36 @@ test('unpublished rows are not found and a missing flag stays visible', () => {
     [1, 3],
   );
   assert.equal(
-    isPublishedColumnMissing("Could not find the 'published' column of 'manuals' in the schema cache"),
+    isPublishedColumnMissing({
+      code: '42703',
+      message: 'column "published" of relation "manuals" does not exist',
+    }),
     true,
   );
-  assert.equal(isPublishedColumnMissing('JWT expired'), false);
+  assert.equal(
+    isPublishedColumnMissing({
+      code: '42702',
+      message: 'column reference "published" is ambiguous',
+    }),
+    false,
+  );
+  assert.equal(
+    isPublishedColumnMissing({
+      code: '42501',
+      message: 'permission denied for column published',
+    }),
+    false,
+  );
+  assert.equal(
+    isPublishedColumnMissing({
+      code: '42703',
+      message: 'column "title" of relation "manuals" does not exist',
+    }),
+    false,
+  );
+  assert.equal(isPublishedColumnMissing({ message: 'fetch failed' }), false);
+  assert.equal(isPublishedColumnMissing({ code: '42703', message: 'column "unpublished" does not exist' }), false);
+  assert.equal(isMissingColumn({ code: '42703', message: 'column "language" does not exist' }, 'language'), true);
   const query = {
     eq(column: string, value: boolean) {
       return { column, value };
@@ -67,8 +94,8 @@ test('published toggle body is a positive id and a boolean', () => {
   assert.equal(parseManualPublishedToggle(null).ok, false);
 });
 
-test('body search drops unpublished catalog ids and keeps them if the column is missing', async () => {
-  function client(manuals: { data: unknown; error: { message?: string } | null }) {
+test('body search drops unpublished catalog ids and keeps them only when published is undefined_column', async () => {
+  function client(manuals: { data: unknown; error: { code?: string; message?: string } | null }) {
     return {
       from() {
         const builder = {
@@ -100,11 +127,22 @@ test('body search drops unpublished catalog ids and keeps them if the column is 
   const missing = await findManualIdsByBodyText(
     client({
       data: null,
-      error: { message: "Could not find the 'published' column of 'manuals' in the schema cache" },
+      error: { code: '42703', message: 'column "published" of relation "manuals" does not exist' },
     }),
     ['laser'],
   );
   assert.deepEqual(missing.ids, ['1', '2']);
+
+  const noFallback = [
+    { code: '42702', message: 'column reference "published" is ambiguous' },
+    { code: '42501', message: 'permission denied for column published' },
+    { code: '42703', message: 'column "title" of relation "manuals" does not exist' },
+    { message: 'network error' },
+  ];
+  for (const error of noFallback) {
+    const kept = await findManualIdsByBodyText(client({ data: null, error }), ['laser']);
+    assert.deepEqual(kept.ids, [], error.code || error.message);
+  }
 });
 
 test('migration 000911 adds published without a rewrite lock and blocks client writes', () => {
@@ -116,8 +154,13 @@ test('migration 000911 adds published without a rewrite lock and blocks client w
   assert.match(sql, /ADD COLUMN IF NOT EXISTS published boolean NOT NULL DEFAULT true/i);
   assert.match(sql, /USING \(published = true\)/);
   assert.match(sql, /REVOKE UPDATE \(published\)/);
+  assert.match(sql, /no-op while/);
+  assert.match(sql, /table-level UPDATE/);
+  assert.match(sql, /is the real guard/);
   assert.match(sql, /manuals_guard_published/);
-  assert.match(sql, /current_user NOT IN \('authenticated', 'anon'\)/);
+  assert.match(sql, /r\.rolname = 'service_role'/);
+  assert.match(sql, /r\.rolsuper/);
+  assert.doesNotMatch(sql, /current_user NOT IN \('authenticated', 'anon'\)/);
   assert.match(sql, /published cannot be changed/);
   assert.match(sql, /SECURITY INVOKER/);
   assert.match(sql, /JOIN public\.manuals m ON m\.id = i\.manual_id/);
@@ -153,10 +196,16 @@ test('readers skip unpublished manuals and get-manual-url returns not_found', ()
   assert.match(index, /keepPublishedManualIds/);
   assert.match(grok, /dropUnpublishedManualRows/);
   assert.match(grok, /catalogManualIsPublished/);
+  assert.match(grok, /error\.code !== '42703'/);
+  assert.match(grok, /reportedMissingColumn\(error, 'published'\)/);
+  assert.match(grok, /reportedMissingColumn\(basic\.error, 'published'\)/);
+  assert.doesNotMatch(grok, /schema cache\|column\|does not exist\|PGRST204/);
   assert.match(grok, /hideUnpublished/);
   assert.match(grok, /manual_search_index/);
   assert.match(edge, /unpublishedManualResponse/);
   assert.match(edge, /queryManual/);
+  assert.match(edge, /isPublishedColumnMissing\(first\?\.error\)/);
+  assert.doesNotMatch(edge, /schema cache\|column\|does not exist\|PGRST204/);
   assert.match(edge, /error: denied\.error/);
   const android = [
     read('../../app/src/main/assets/manual_library.html'),
@@ -235,11 +284,33 @@ INSERT INTO public.manual_search_index (manual_id, search_text, search_tsv) VALU
   (1, 'visible laser cavity', to_tsvector('simple', 'visible laser cavity')),
   (2, 'hidden laser cavity', to_tsvector('simple', 'hidden laser cavity'));
 GRANT SELECT, INSERT, UPDATE ON public.manuals TO anon, authenticated, service_role;
+DO $$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'manuals_editor') THEN
+    CREATE ROLE manuals_editor NOLOGIN;
+  END IF;
+END $$;
+GRANT SELECT, UPDATE ON public.manuals TO manuals_editor;
 GRANT SELECT ON public.manual_search_index TO anon, authenticated, service_role;
 \\i ${join(here, '../supabase/migrations/20261011_000911_manuals_published.sql').replace(/\\/g, '/')}
--- If a later policy lets authenticated update rows, the guard still refuses published.
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_trigger
+    WHERE tgname = 'manuals_guard_published'
+      AND tgrelid = 'public.manuals'::regclass
+      AND NOT tgisinternal
+  ) THEN
+    RAISE EXCEPTION 'manuals_guard_published trigger is missing';
+  END IF;
+END $$;
+-- Table-level UPDATE plus a column grant still cannot change published.
+-- REVOKE UPDATE (published) is a no-op beside the table grant; the trigger blocks it.
 CREATE POLICY manuals_proof_update ON public.manuals FOR UPDATE TO authenticated USING (true) WITH CHECK (true);
-GRANT UPDATE (published) ON public.manuals TO authenticated;
+CREATE POLICY manuals_proof_anon ON public.manuals FOR UPDATE TO anon USING (true) WITH CHECK (true);
+CREATE POLICY manuals_proof_editor ON public.manuals FOR UPDATE TO manuals_editor USING (true) WITH CHECK (true);
+GRANT UPDATE (published) ON public.manuals TO authenticated, anon, manuals_editor;
+GRANT EXECUTE ON FUNCTION public.manuals_guard_published() TO manuals_editor;
 SET ROLE authenticated;
 DO $$
 BEGIN
@@ -250,6 +321,36 @@ EXCEPTION
     NULL;
 END $$;
 RESET ROLE;
+SET ROLE anon;
+DO $$
+BEGIN
+  UPDATE public.manuals SET published = false WHERE id = 1;
+  RAISE EXCEPTION 'anon update of published should have failed';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END $$;
+RESET ROLE;
+SET ROLE manuals_editor;
+UPDATE public.manuals SET title = 'still visible' WHERE id = 1;
+DO $$
+BEGIN
+  UPDATE public.manuals SET published = false WHERE id = 1;
+  RAISE EXCEPTION 'manuals_editor update of published should have failed';
+EXCEPTION
+  WHEN insufficient_privilege THEN
+    NULL;
+END $$;
+RESET ROLE;
+DO $$
+BEGIN
+  IF (SELECT title FROM public.manuals WHERE id = 1) <> 'still visible' THEN
+    RAISE EXCEPTION 'non-published update was rolled back with the published change';
+  END IF;
+  IF (SELECT published FROM public.manuals WHERE id = 1) IS NOT TRUE THEN
+    RAISE EXCEPTION 'manuals_editor changed published';
+  END IF;
+END $$;
 UPDATE public.manuals SET published = false WHERE id = 2;
 SET ROLE service_role;
 UPDATE public.manuals SET published = true WHERE id = 2;

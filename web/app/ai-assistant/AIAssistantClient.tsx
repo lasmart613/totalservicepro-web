@@ -15,6 +15,7 @@ import { asManualId, assistantManualPicker, buildGrokChatPayload } from '@/lib/a
 import { fetchAllPages } from '@/lib/supabase/paginate';
 import {
   filterPublishedManuals,
+  isMissingColumn,
   isPublishedColumnMissing,
   wherePublished,
 } from '@/lib/manual-published';
@@ -55,6 +56,7 @@ type ManualRow = {
 
 const AI_MANUAL_SELECT = 'id,title,storage_path,brand,model,language,published';
 const AI_MANUAL_SELECT_LANGUAGE = 'id,title,storage_path,brand,model,language';
+const AI_MANUAL_SELECT_PUBLISHED = 'id,title,storage_path,brand,model,published';
 const AI_MANUAL_SELECT_LEGACY = 'id,title,storage_path,brand,model';
 
 function assistantManualOptionLabel(row: ManualRow): string {
@@ -271,10 +273,14 @@ export default function AIAssistantClient() {
           ).range(from, to)
         );
       let loaded = await loadAssistantManuals(AI_MANUAL_SELECT, true);
-      if (loaded.error && isPublishedColumnMissing(loaded.error.message)) {
+      if (loaded.error && isPublishedColumnMissing(loaded.error)) {
         loaded = await loadAssistantManuals(AI_MANUAL_SELECT_LANGUAGE, false);
+      } else if (loaded.error && isMissingColumn(loaded.error, 'language')) {
+        loaded = await loadAssistantManuals(AI_MANUAL_SELECT_PUBLISHED, true);
       }
-      if (loaded.error && /language|schema cache|column/i.test(loaded.error.message || '')) {
+      if (loaded.error && isMissingColumn(loaded.error, 'language')) {
+        loaded = await loadAssistantManuals(AI_MANUAL_SELECT_LEGACY, false);
+      } else if (loaded.error && isPublishedColumnMissing(loaded.error)) {
         loaded = await loadAssistantManuals(AI_MANUAL_SELECT_LEGACY, false);
       }
       if (loaded.error) {
@@ -286,14 +292,18 @@ export default function AIAssistantClient() {
         let oneRes = await wherePublished(
           supabase.from('manuals').select(AI_MANUAL_SELECT).eq('id', urlManualId),
         ).maybeSingle();
-        if (oneRes.error && isPublishedColumnMissing(oneRes.error.message)) {
+        if (oneRes.error && isPublishedColumnMissing(oneRes.error)) {
           oneRes = await supabase
             .from('manuals')
             .select(AI_MANUAL_SELECT_LANGUAGE)
             .eq('id', urlManualId)
             .maybeSingle();
+        } else if (oneRes.error && isMissingColumn(oneRes.error, 'language')) {
+          oneRes = await wherePublished(
+            supabase.from('manuals').select(AI_MANUAL_SELECT_PUBLISHED).eq('id', urlManualId),
+          ).maybeSingle();
         }
-        if (oneRes.error && /language|schema cache|column/i.test(oneRes.error.message || '')) {
+        if (oneRes.error && (isMissingColumn(oneRes.error, 'language') || isPublishedColumnMissing(oneRes.error))) {
           oneRes = await supabase
             .from('manuals')
             .select(AI_MANUAL_SELECT_LEGACY)

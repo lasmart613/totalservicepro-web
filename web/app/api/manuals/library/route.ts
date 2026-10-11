@@ -50,7 +50,7 @@ async function lookupManual(
     client.from('manuals').select(MANUAL_LIBRARY_SELECT_WITH_KIND).eq('id', manualId),
   ).maybeSingle();
   if (!full.error) return full.data || null;
-  if (isPublishedColumnMissing(full.error.message)) {
+  if (isPublishedColumnMissing(full.error)) {
     const again = await client
       .from('manuals')
       .select(MANUAL_LIBRARY_SELECT_WITH_KIND)
@@ -62,7 +62,7 @@ async function lookupManual(
     client.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).eq('id', manualId),
   ).maybeSingle();
   if (!slim.error) return slim.data || null;
-  if (isPublishedColumnMissing(slim.error.message)) {
+  if (isPublishedColumnMissing(slim.error)) {
     const plain = await client.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).eq('id', manualId).maybeSingle();
     return plain.data || null;
   }

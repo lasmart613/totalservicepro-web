@@ -14,23 +14,23 @@
 -- update a row today even though authenticated has table UPDATE. This file
 -- still blocks the column:
 --   * SELECT policies require published = true (user JWT / anon).
---   * UPDATE (published) is revoked from anon and authenticated.
---   * manuals_guard_published rejects a change from those roles if a later
---     policy or grant lets a client write the table.
--- service_role and the table owner (postgres, SQL editor, migration role)
--- bypass the guard. God is not a database role. The God toggle checks the
--- allowlist in the app, then updates with the service role.
+--   * REVOKE UPDATE (published) is recorded below, but it is a no-op while
+--     anon or authenticated holds table-level UPDATE. A table grant covers
+--     every column, so revoking the column privilege does not take it away.
+--   * manuals_guard_published is the real guard. It rejects a published
+--     change from every role except service_role, a superuser, and the
+--     table owner. God is not a database role. The God toggle checks the
+--     allowlist in the app, then updates with the service role.
 -- service_role has BYPASSRLS, so edge functions and the search API filter
 -- published in code. search_manual_catalog is SECURITY DEFINER and filters
 -- here, because it would otherwise ignore the new SELECT policies.
 --
--- Deploy order: this migration can land before the app code. User-JWT reads
--- hide unpublished as soon as it commits. The app tolerates a missing
--- column (retries without the filter, treats a missing flag as published),
--- so a web deploy that arrives first keeps the library up. Apply this file
--- before expecting unpublished rows to disappear. Redeploy get-manual-url
--- and grok-assistant after it, or those service-role readers still see
--- unpublished rows.
+-- Deploy order: user-JWT reads hide unpublished as soon as this file commits.
+-- Readers retry without the filter only when Postgres reports undefined_column
+-- (42703) for published. 42702, 42501, and any other error are not a missing
+-- column and do not drop the filter. Apply this file before expecting
+-- unpublished rows to disappear. Redeploy get-manual-url and grok-assistant
+-- after it, or those service-role readers still see unpublished rows.
 --
 -- APPLY ON LIVE SUPABASE after review. This repo does not auto-apply SQL.
 -- The migration runner applies this file as one transaction. Safe to re-run.
@@ -92,16 +92,31 @@ BEGIN
   END IF;
 END $$;
 
--- Same shape as user_profiles_guard_identity: only anon/authenticated are
--- policed. service_role, postgres, and SECURITY DEFINER owners return NEW.
+-- REVOKE UPDATE (published) does not stick while table-level UPDATE remains,
+-- so this trigger is the guard. service_role, superusers, and the table
+-- owner may change the column. Everyone else (authenticated, anon, and any
+-- other non-God role) may insert the default true and may update other
+-- columns, but cannot change published.
 CREATE OR REPLACE FUNCTION public.manuals_guard_published()
 RETURNS trigger
 LANGUAGE plpgsql
 SECURITY INVOKER
 SET search_path = public, pg_temp
 AS $$
+DECLARE
+  privileged boolean;
 BEGIN
-  IF current_user NOT IN ('authenticated', 'anon') THEN
+  SELECT
+    r.rolsuper
+    OR r.rolname = 'service_role'
+    OR r.oid = c.relowner
+  INTO privileged
+  FROM pg_roles AS r
+  JOIN pg_class AS c ON c.relname = 'manuals'
+  JOIN pg_namespace AS n ON n.oid = c.relnamespace AND n.nspname = 'public'
+  WHERE r.rolname = current_user;
+
+  IF COALESCE(privileged, false) THEN
     RETURN NEW;
   END IF;
 
@@ -137,7 +152,7 @@ BEGIN
 END $$;
 
 COMMENT ON FUNCTION public.manuals_guard_published() IS
-  'BEFORE INSERT OR UPDATE, SECURITY INVOKER. anon and authenticated cannot set or change manuals.published. service_role and the table owner can.';
+  'BEFORE INSERT OR UPDATE, SECURITY INVOKER. The real guard for manuals.published: REVOKE UPDATE (published) is a no-op while a role holds table-level UPDATE. service_role, superusers, and the table owner can change the column. Every other role cannot.';
 
 DROP TRIGGER IF EXISTS manuals_guard_published ON public.manuals;
 CREATE TRIGGER manuals_guard_published

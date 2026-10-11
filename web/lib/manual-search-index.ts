@@ -816,7 +816,7 @@ async function keepPublishedManualIds(db: TableClient, ids: string[]): Promise<s
     const numeric = chunk.map((id) => Number(id)).filter((n) => Number.isFinite(n));
     const { data, error } = await db.from('manuals').select('id,published').in('id', numeric.length ? numeric : chunk);
     if (error) {
-      if (isPublishedColumnMissing(error.message)) return ids;
+      if (isPublishedColumnMissing(error)) return ids;
       return [];
     }
     for (const row of data || []) {

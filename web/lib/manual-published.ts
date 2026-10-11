@@ -5,14 +5,11 @@
  */
 
 export {
+  isMissingColumn,
+  isPublishedColumnMissing,
   isUnpublishedManual,
   unpublishedManualDenial,
 } from '../../supabase/functions/get-manual-url/published.ts';
-
-export function isPublishedColumnMissing(message?: string | null): boolean {
-  const msg = String(message || '');
-  return /published/i.test(msg) && /schema cache|column|does not exist|PGRST204/i.test(msg);
-}
 
 export function filterPublishedManuals<T extends { published?: unknown }>(
   rows: readonly T[] | null | undefined,

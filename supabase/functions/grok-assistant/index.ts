@@ -1870,14 +1870,24 @@ function excerptIndexedManualText(
     .slice(0, maxChars)
 }
 
-/** True unless the catalog row is explicitly unpublished. A missing column stays visible. */
+/**
+ * Same rule as web isPublishedColumnMissing: only Postgres undefined_column
+ * (42703) whose message names the column as a word. 42702 and 42501 do not
+ * qualify, even when the message says "published".
+ */
+function reportedMissingColumn(
+  error: { code?: string | null; message?: string | null } | null | undefined,
+  column: string
+): boolean {
+  if (!error || error.code !== '42703') return false
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(column)) return false
+  return new RegExp(`\\b${column}\\b`).test(String(error.message || ''))
+}
+
+/** True when the row is published, or the published column is not on the table yet. Any other error hides the row. */
 async function catalogManualIsPublished(db: any, id: number): Promise<boolean> {
   const { data, error } = await db.from('manuals').select('id,published').eq('id', id).maybeSingle()
-  if (error) {
-    const msg = String(error.message || '')
-    if (/published/i.test(msg) && /schema cache|column|does not exist|PGRST204/i.test(msg)) return true
-    return true
-  }
+  if (error) return reportedMissingColumn(error, 'published')
   if (!data) return true
   return data.published !== false
 }
@@ -2022,25 +2032,26 @@ function dropUnpublishedManualRows(result: {
 
 /**
  * language and published are optional until their migrations are applied.
- * A missing column must not drop the row. Language does not exclude a manual.
- * published = false does.
+ * Step down only when this attempt's own optional column is undefined_column
+ * (42703). Any other error, including one that names a different column, is
+ * returned as-is. Language does not exclude a manual. published = false does.
  */
 async function selectManualRows(
   db: any,
-  apply: (query: any) => Promise<{ data: any; error: { message?: string } | null }>
-): Promise<{ data: any; error: { message?: string } | null; unpublished?: boolean }> {
-  const attempts = [
-    `${MANUAL_ROW_COLUMNS},language,published`,
-    `${MANUAL_ROW_COLUMNS},published`,
-    `${MANUAL_ROW_COLUMNS},language`,
-    MANUAL_ROW_COLUMNS,
+  apply: (query: any) => Promise<{ data: any; error: { code?: string; message?: string } | null }>
+): Promise<{ data: any; error: { code?: string; message?: string } | null; unpublished?: boolean }> {
+  const attempts: { columns: string; optional: string[] }[] = [
+    { columns: `${MANUAL_ROW_COLUMNS},language,published`, optional: ['language', 'published'] },
+    { columns: `${MANUAL_ROW_COLUMNS},published`, optional: ['published'] },
+    { columns: `${MANUAL_ROW_COLUMNS},language`, optional: ['language'] },
+    { columns: MANUAL_ROW_COLUMNS, optional: [] },
   ]
-  let last: { data: any; error: { message?: string } | null } = { data: null, error: null }
-  for (const columns of attempts) {
-    last = await apply(db.from('manuals').select(columns))
+  let last: { data: any; error: { code?: string; message?: string } | null } = { data: null, error: null }
+  for (const attempt of attempts) {
+    last = await apply(db.from('manuals').select(attempt.columns))
     if (!last?.error) return dropUnpublishedManualRows(last)
-    const msg = String(last.error.message || '')
-    if (!/schema cache|column|does not exist|PGRST204/i.test(msg)) return last
+    const missingOptional = attempt.optional.some((column) => reportedMissingColumn(last.error, column))
+    if (!missingOptional) return last
   }
   return last
 }
@@ -2082,11 +2093,7 @@ async function loadSiblingCatalog(
     .select(`${CATALOG_CITE_COLUMNS},published`)
     .or(nameFilters.join(','))
     .limit(20)
-  if (
-    basic?.error &&
-    /published/i.test(String(basic.error.message || '')) &&
-    /schema cache|column|does not exist|PGRST204/i.test(String(basic.error.message || ''))
-  ) {
+  if (basic?.error && reportedMissingColumn(basic.error, 'published')) {
     basic = await db.from('manuals').select(CATALOG_CITE_COLUMNS).or(nameFilters.join(',')).limit(20)
   }
   if (!basic?.error && Array.isArray(basic.data)) {

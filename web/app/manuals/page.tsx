@@ -178,7 +178,7 @@ export default function ManualsLibrary() {
           )
         );
       let manRes = await loadCatalog(true);
-      if (manRes.error && isPublishedColumnMissing(manRes.error.message)) {
+      if (manRes.error && isPublishedColumnMissing(manRes.error)) {
         manRes = await loadCatalog(false);
       }
       const catalogRows = filterPublishedManuals(manRes.data || []);

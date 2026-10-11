@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
         supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_WITH_KIND).in('id', ids),
       );
       if (!full.error) rows = full.data || [];
-      else if (isPublishedColumnMissing(full.error.message)) {
+      else if (isPublishedColumnMissing(full.error)) {
         const again = await supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_WITH_KIND).in('id', ids);
         rows = again.data || [];
       } else {
@@ -107,7 +107,7 @@ export async function POST(req: NextRequest) {
           supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).in('id', ids),
         );
         if (!slim.error) rows = slim.data || [];
-        else if (isPublishedColumnMissing(slim.error.message)) {
+        else if (isPublishedColumnMissing(slim.error)) {
           const plain = await supabase.from('manuals').select(MANUAL_LIBRARY_SELECT_MINIMAL).in('id', ids);
           rows = plain.data || [];
         }

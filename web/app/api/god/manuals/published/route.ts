@@ -41,7 +41,7 @@ export async function GET(req: NextRequest) {
       .range(from, from + PAGE - 1);
     let batch = full.data as ShelfRow[] | null;
     let error = full.error;
-    if (error && isPublishedColumnMissing(error.message)) {
+    if (error && isPublishedColumnMissing(error)) {
       publishedColumn = false;
       const plain = await admin
         .from('manuals')
@@ -84,7 +84,7 @@ export async function PATCH(req: NextRequest) {
     .eq('id', parsed.id)
     .select('id,published')
     .maybeSingle();
-  if (error && isPublishedColumnMissing(error.message)) {
+  if (error && isPublishedColumnMissing(error)) {
     return NextResponse.json(
       { error: 'published column is not on this database yet' },
       { status: 503 },
