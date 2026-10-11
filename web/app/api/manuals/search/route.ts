@@ -73,7 +73,7 @@ export async function POST(req: NextRequest) {
     let bodySearch = true;
 
     if (hasServiceRole()) {
-      const found = await findManualIdsByBodyText(getSupabaseAdmin(), tokens);
+      const found = await findManualIdsByBodyText(getSupabaseAdmin(), tokens, q);
       ids = found.ids;
       bodySearch = found.available;
     } else {

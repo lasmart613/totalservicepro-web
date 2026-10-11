@@ -909,15 +909,108 @@ export function escapeIlike(value: string): string {
 }
 
 /**
+ * Part-number-like words from the raw query: a digit plus at least one inner
+ * hyphen, e.g. `7111-00-2709`, `8501-00-1800`, `DP35-0643-906`.
+ * The `simple` parser stores these as `7111`, `-00`, `-2709` (signed ints),
+ * so splitting them at the hyphens can never match the index.
+ */
+export function manualPartNumberTokens(raw: unknown): string[] {
+  const out: string[] = [];
+  for (const word of String(raw ?? '').split(/\s+/)) {
+    const token = word.replace(/^[^\p{L}\p{N}]+|[^\p{L}\p{N}]+$/gu, '');
+    if (token.length < 5 || token.length > 64) continue;
+    if (!/\d/.test(token)) continue;
+    if (!/^[\p{L}\p{N}]+(?:[-][\p{L}\p{N}]+)+$/u.test(token)) continue;
+    if (!out.includes(token)) out.push(token);
+  }
+  return out.slice(0, 4);
+}
+
+/**
+ * to_tsquery text for the trailing all-digit groups of each part number:
+ * `7111-00-2709` → `'-00' & '-2709'`. Empty when no trailing group is all
+ * digits (letter codes keep the token path).
+ */
+export function partNumberNarrowQuery(partNumbers: string[]): string {
+  const lexemes: string[] = [];
+  for (const token of partNumbers) {
+    const groups = token.split('-').slice(1);
+    for (const group of groups) {
+      if (!/^\d{1,12}$/.test(group)) continue;
+      const lexeme = `'-${group}'`;
+      if (!lexemes.includes(lexeme)) lexemes.push(lexeme);
+    }
+  }
+  return lexemes.join(' & ');
+}
+
+function idsFromRows(rows: unknown): string[] {
+  const ids: string[] = [];
+  for (const row of (Array.isArray(rows) ? rows : []) as Array<{ manual_id?: unknown }>) {
+    const id = String(row?.manual_id || '').trim();
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
+/**
  * Find catalog ids whose indexed PDF body contains every token.
  * Selects only manual_id — never returns search_text to the client.
+ *
+ * rawQuery is the sanitized user text before tokenizing. When it holds a
+ * part number, the raw text goes to plainto_tsquery('simple', ...) — the same
+ * parser that built search_tsv — so `7111-00-2709` becomes
+ * `'7111' & '-00' & '-2709'` and matches. (websearch_to_tsquery would make
+ * that a phrase `<->` query, which misses rows where pdftotext split the
+ * number.) If FTS still finds nothing, each part number is matched literally
+ * in search_text (case-insensitive, regex-escaped). Plain word queries keep
+ * the existing token path. Every path drops unpublished manuals and reads all
+ * chunk rows (000913), since each chunk is its own row.
  */
 export async function findManualIdsByBodyText(
   db: TableClient,
-  tokens: string[]
+  tokens: string[],
+  rawQuery?: string
 ): Promise<{ ids: string[]; available: boolean; error?: string }> {
   const clean = tokens.map((t) => t.trim()).filter((t) => t.length >= 2);
   if (!clean.length) return { ids: [], available: true };
+
+  const raw = String(rawQuery ?? '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  const partNumbers = raw ? manualPartNumberTokens(raw) : [];
+  if (partNumbers.length) {
+    const viaRaw = await db
+      .from('manual_search_index')
+      .select('manual_id')
+      .textSearch('search_tsv', raw, { type: 'plain', config: 'simple' });
+    if (!viaRaw.error) {
+      const ids = idsFromRows(viaRaw.data);
+      if (ids.length) return { ids: await keepPublishedManualIds(db, ids), available: true };
+
+      // Literal fallback, narrowed by the GIN index first. A seq-scan regex
+      // over every chunk takes ~7–9 s on live; with the tsquery in front it
+      // is ~0.1 s. The trailing all-digit groups are always stored as signed
+      // lexemes ('-00', '-2709') even when the first group is glued to a
+      // prefix (`PN7111-00-2709` → 'pn7111').
+      const narrow = partNumberNarrowQuery(partNumbers);
+      if (narrow) {
+        let literal = db
+          .from('manual_search_index')
+          .select('manual_id')
+          .textSearch('search_tsv', narrow, { config: 'simple' });
+        for (const token of partNumbers) {
+          literal = literal.filter('search_text', 'imatch', containsTextImatch(token));
+        }
+        const viaLiteral = await literal;
+        if (!viaLiteral.error) {
+          const literalIds = idsFromRows(viaLiteral.data);
+          if (literalIds.length) return { ids: await keepPublishedManualIds(db, literalIds), available: true };
+        }
+      }
+    } else if (/schema cache|does not exist|column|relation/i.test(viaRaw.error.message || '')) {
+      return { ids: [], available: false, error: viaRaw.error.message };
+    }
+    // Nothing for the part number: fall through to the token search below.
+  }
 
   const fts = clean.join(' ');
   const viaFts = await db
@@ -925,12 +1018,7 @@ export async function findManualIdsByBodyText(
     .select('manual_id')
     .textSearch('search_tsv', fts, { type: 'plain', config: 'simple' });
   if (!viaFts.error) {
-    const ids: string[] = [];
-    for (const row of viaFts.data || []) {
-      const id = String((row as { manual_id?: unknown })?.manual_id || '').trim();
-      if (id) ids.push(id);
-    }
-    return { ids: await keepPublishedManualIds(db, [...new Set(ids)]), available: true };
+    return { ids: await keepPublishedManualIds(db, idsFromRows(viaFts.data)), available: true };
   }
 
   // Column / table missing (migration not applied) or textSearch unavailable.
@@ -944,17 +1032,9 @@ export async function findManualIdsByBodyText(
   }
   const viaLike = await body;
   if (viaLike.error) {
-    if (/schema cache|does not exist|column|relation/i.test(viaLike.error.message || '')) {
-      return { ids: [], available: false, error: viaLike.error.message };
-    }
     return { ids: [], available: false, error: viaLike.error.message };
   }
-  const ids: string[] = [];
-  for (const row of viaLike.data || []) {
-    const id = String((row as { manual_id?: unknown })?.manual_id || '').trim();
-    if (id) ids.push(id);
-  }
-  return { ids: await keepPublishedManualIds(db, [...new Set(ids)]), available: true };
+  return { ids: await keepPublishedManualIds(db, idsFromRows(viaLike.data)), available: true };
 }
 
 /** Drop ids whose manuals.published is false. A missing column keeps the ids. */
